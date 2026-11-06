@@ -75,6 +75,30 @@ public class AutosaverTests : IDisposable
     }
 
     [Fact]
+    public void Autosaver_SaveNow_WritesUnlessOff()
+    {
+        var saved = new List<string>();
+        var a = new Autosaver(() => "abc", p => { File.WriteAllText(p, "x"); saved.Add(p); }, _tmp);
+
+        Assert.Null(a.SaveNow(T0, 0));                                       // autosave off
+        Assert.Empty(saved);
+
+        var path = a.SaveNow(T0.AddMinutes(1), 5);                           // immediately, not dirty/elapsed gated
+        Assert.Equal(Path.Combine(_tmp, "autosave", "abc", "autosave-20261106-120100.qsave"), path);
+        Assert.True(File.Exists(path));
+
+        Assert.Null(a.Tick(T0.AddMinutes(3), 5, dirty: true));               // clock was reset by SaveNow
+        Assert.NotNull(a.Tick(T0.AddMinutes(7), 5, dirty: true));
+
+        for (var i = 0; i < 12; i++) a.SaveNow(T0.AddMinutes(10).AddSeconds(i), 5);
+        Assert.Equal(10, Directory.GetFiles(Path.Combine(_tmp, "autosave", "abc")).Length);   // pruned
+
+        var bad = new Autosaver(() => "m", _ => throw new IOException("disk full"), _tmp, _ => { });
+        Assert.Null(bad.SaveNow(T0, 5));                                     // never throws
+        Assert.Null(new Autosaver(() => null, _ => { }, _tmp).SaveNow(T0, 5));
+    }
+
+    [Fact]
     public void Autosaver_Prune_KeepsNewest10()
     {
         var dir = Path.Combine(_tmp, "d");
