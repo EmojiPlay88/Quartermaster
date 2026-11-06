@@ -285,22 +285,23 @@ sealed class MapWindow : Form
             if (input == null) return;
         }
         var batches = new List<GameCommand[]>();
+        var deleting = new List<string>();
         foreach (var p in targets)
         {
             var mine = p.Id == clicked.Id
                 ? action
                 : PieceActions.For(p, _s.Model, game.State, NewId).FirstOrDefault(a => a.Label == action.Label && a.Group == action.Group && a.Enabled);
             if (mine == null) continue;
+            if (mine.IsDelete) deleting.Add(p.Id);
             batches.Add((input != null && mine.BuildWithInput != null ? mine.BuildWithInput(game.State, input) : mine.Build(game.State)).ToArray());
         }
-        if (!ConfirmDeletes(game.State, batches, clicked)) return;
+        if (!ConfirmDeletes(game.State, deleting, clicked)) return;
         foreach (var b in batches) Execute(b);
     }
 
-    /// <summary>Settings "ask before deleting": one Yes/No for the pieces the commands would remove. Always true when the setting is off or in smoke mode.</summary>
-    bool ConfirmDeletes(GameState st, IEnumerable<GameCommand[]> batches, PieceInstance clicked)
+    /// <summary>Settings "ask before deleting": one Yes/No for the pieces a trait Delete action would remove. Always true when the setting is off or in smoke mode.</summary>
+    bool ConfirmDeletes(GameState st, List<string> ids, PieceInstance clicked)
     {
-        var ids = batches.SelectMany(b => b).OfType<RemovePiece>().Select(r => r.PieceId).Distinct().ToList();
         if (ids.Count == 0 || Program.Smoke || Host?.CurrentSettings.ConfirmDelete == false) return true;
         var what = ids.Count == 1
             ? (st.Pieces.TryGetValue(ids[0], out var p) ? PieceInfo.Name(p) : clicked.Id) is { Length: > 0 } n ? n : "this piece"

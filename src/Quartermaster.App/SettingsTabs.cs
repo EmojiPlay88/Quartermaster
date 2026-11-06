@@ -295,8 +295,17 @@ sealed class FoldersTab(SettingsContext ctx) : SettingsTab
         var sync = SynchronizationContext.Current;
         _ = Task.Run(work).ContinueWith(r =>
         {
-            if (r.IsFaulted) return;
-            void Back(object? _) { if (!_sizes.IsDisposed) done(r.Result); }
+            void Back(object? _)
+            {
+                if (_sizes.IsDisposed) return;
+                if (r.IsFaulted)
+                {
+                    _tiles.Enabled = _docs.Enabled = true;
+                    _sizes.Text = "The folder could not be read: " + r.Exception?.GetBaseException().Message;
+                    return;
+                }
+                done(r.Result);
+            }
             if (sync != null) sync.Post(Back, null); else Back(null);
         });
     }

@@ -11,7 +11,7 @@ public class CacheFoldersTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tmp, true); } catch (IOException) { }
+        try { Directory.Delete(_tmp, true); } catch (Exception) { }
     }
 
     void Put(string rel, int n)
@@ -43,6 +43,35 @@ public class CacheFoldersTests : IDisposable
         CacheFolders.Clear(_tmp, "docs", null);
         Assert.False(Directory.Exists(Path.Combine(_tmp, ShaA, "docs")));
         Assert.Equal((0L, 0L), CacheFolders.Sizes(Path.Combine(_tmp, "missing")));
+    }
+
+    static bool TryLink(string link, string target)
+    {
+        try { Directory.CreateSymbolicLink(link, target); return true; }
+        catch (Exception) { /* no privilege: try a junction */ }
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"") { CreateNoWindow = true, UseShellExecute = false });
+            p!.WaitForExit();
+            return Directory.Exists(link) && (File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception) { return false; }
+    }
+
+    [Fact]
+    public void Clear_DoesNotFollowLinkedTilesFolder()
+    {
+        var outside = Path.Combine(_tmp, "outside");
+        Directory.CreateDirectory(outside);
+        File.WriteAllBytes(Path.Combine(outside, "precious.txt"), new byte[50]);
+        Directory.CreateDirectory(Path.Combine(_tmp, ShaA));
+        if (!TryLink(Path.Combine(_tmp, ShaA, "tiles"), outside)) return; // links not permitted here: nothing to check
+
+        Assert.Equal(0L, CacheFolders.Sizes(_tmp).Tiles);
+        var r = CacheFolders.Clear(_tmp, "tiles", null);
+
+        Assert.Equal(0, r.Freed);
+        Assert.True(File.Exists(Path.Combine(outside, "precious.txt")));
     }
 
     [Fact]

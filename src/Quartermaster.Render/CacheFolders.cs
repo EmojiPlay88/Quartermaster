@@ -24,20 +24,24 @@ public static class CacheFolders
         {
             foreach (var m in ModuleDirs(root))
             {
-                tiles += Size(Path.Combine(m, "tiles"));
-                docs += Size(Path.Combine(m, "docs"));
+                tiles += LinkSafeSize(Path.Combine(m, "tiles"));
+                docs += LinkSafeSize(Path.Combine(m, "docs"));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         return (tiles, docs);
     }
 
+    static long LinkSafeSize(string dir) =>
+        Directory.Exists(dir) && (File.GetAttributes(dir) & FileAttributes.ReparsePoint) == 0 ? Size(dir) : 0;
+
     static long Size(string dir)
     {
         long n = 0;
         try
         {
-            foreach (var f in new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories))
+            var opts = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+            foreach (var f in new DirectoryInfo(dir).EnumerateFiles("*", opts))
             {
                 try { n += f.Length; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             }
@@ -60,6 +64,7 @@ public static class CacheFolders
             {
                 var sub = Path.Combine(m, kind);
                 if (!Directory.Exists(sub)) continue;
+                if ((File.GetAttributes(sub) & FileAttributes.ReparsePoint) != 0) continue; // a link: never delete through it
                 if (openModuleDir != null && string.Equals(Norm(m), Norm(openModuleDir), StringComparison.OrdinalIgnoreCase))
                 {
                     skipped = true;

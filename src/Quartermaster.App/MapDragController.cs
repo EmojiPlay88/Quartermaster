@@ -76,14 +76,14 @@ sealed class MapDragController : IDisposable
         if (wasActive) Aborted?.Invoke();
     }
 
+    /// <summary>Settings: snap dropped pieces to the grid.</summary>
+    public bool Snap { get; set; } = true;
+
     /// <summary>
     /// Enters captured drag mode: snapshots the scene minus the dragged pieces and pre-renders them.
     /// <paramref name="renderBase"/> draws the scene with the given pieces hidden. Returns false when there is nothing to drag
     /// or something failed (logged); fields are only assigned once everything succeeded.
     /// </summary>
-    /// <summary>Settings: snap dropped pieces to the grid.</summary>
-    public bool Snap { get; set; } = true;
-
     public bool Begin(GameState st, string grabbed, IEnumerable<string> selected, PointD grabPoint, Viewport vp, SKSize size,
         Func<IReadOnlySet<string>, SKImage?> renderBase)
     {
