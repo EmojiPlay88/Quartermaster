@@ -105,17 +105,17 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (!HasPhases) return null;
         if (s.Game!.State.Position == null) { Start(); return null; }
         var pack = s.Rules!;
-        Reconcile();
+        var relocated = Reconcile();
         if (Resolved(out _) is not { } cur) return null;
         var next = Sequencer.Next(pack, cur);
         if (next == null) return null;
         var from = pack.Phases[cur.PhaseIndex];
         var to = pack.Phases[next.PhaseIndex];
-        _notice = null;
+        _notice = relocated;
         Exec(new AdvancePhase(cur, next, from.Name, to.Name));
         var toSide = Sequencer.ActingSide(pack, to);
         var pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
-        _notice = pass;
+        _notice = pass == null ? relocated : relocated == null ? pass : relocated + ". " + pass;
         OnEnter(to);
         PhaseBoundary?.Invoke();
         return pass;
@@ -159,9 +159,19 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     public void ApplyFormula(string? runId, string? pieceId, FormulaTrace trace, bool calculated)
     {
         if (s.Game == null || s.Runner == null) return;
+        if (trace.Error != null || trace.Result == null) return;   // a failed trace changes nothing and keeps the run pending
         var unit = UnitName(pieceId) ?? trace.Formula.Name;
-        foreach (var c in s.Runner.Commands(trace, null, calculated ? "auto-calculated" : null, unit)) Exec(c);
+        var tag = calculated ? "auto-calculated" : null;
+        foreach (var c in s.Runner.Commands(trace, null, tag, unit)) Exec(c);
+        LogWorking(trace, unit, tag);
         if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }));
+    }
+
+    /// <summary>A run with no ledger outputs has no ledger line carrying its working; log it so every calculation is visible (spec 9).</summary>
+    private void LogWorking(FormulaTrace trace, string unit, string? tag)
+    {
+        if (trace.Outputs.Count > 0 || string.IsNullOrWhiteSpace(trace.Working)) return;
+        Calc($"{unit}: {trace.Working}" + (tag == null ? "" : $" ({tag})"));
     }
 
     private string? UnitName(string? pieceId) =>
@@ -270,6 +280,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}"); continue; }
             if (trace.Result == null) { needInput.Add(u); continue; }
             foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label)) Exec(c);
+            LogWorking(trace, u.Label, "auto");
             applied++;
         }
         if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied");

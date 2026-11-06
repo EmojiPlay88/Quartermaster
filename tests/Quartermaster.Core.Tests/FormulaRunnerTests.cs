@@ -115,6 +115,21 @@ public class FormulaRunnerTests
     }
 
     [Fact]
+    public void Run_UnboundedInputWithoutChoices_AcceptsText_BoundedStillRejects()
+    {
+        var textPack = RunnerFx.Pack(f => f with { Text = "if(startsWith(Kind, \"Cl\"), MP, 0)" });
+        var t = RunnerFx.Runner(textPack).Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "12"), ("Kind", "Clear"))));
+        Assert.Equal(12, t.Result!.Value.Number);
+        var kind = t.Variables.Single(v => v.Variable == "Kind");
+        Assert.Null(kind.MissingReason);
+        Assert.Equal("Clear", kind.Value!.Value.Display());
+        var num = RunnerFx.Runner(RunnerFx.Pack()).Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "12"), ("Kind", "4.0"))));
+        Assert.Equal(ValueKind.Number, num.Variables.Single(v => v.Variable == "Kind").Value!.Value.Kind);
+        var bounded = RunnerFx.Runner(RunnerFx.Pack()).Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "Clear"), ("Kind", "4"))));
+        Assert.Equal("Not a number", bounded.Variables.Single(v => v.Variable == "MP").MissingReason);
+    }
+
+    [Fact]
     public void Run_InputOutOfRange_IsMissingWithReason()
     {
         var t = RunnerFx.Runner(RunnerFx.Pack()).Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "21"), ("Kind", "4"))));
