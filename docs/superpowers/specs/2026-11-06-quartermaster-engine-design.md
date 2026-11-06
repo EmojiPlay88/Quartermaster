@@ -236,6 +236,38 @@ The rules pack defines sides (seeded from the module's `PlayerRoster`) and **rol
 - The receiver opens it, and the engine verifies the chain and applies it. The player continues until control passes to the other side, then exports.
 - Dice in async mode: rolled locally by the acting player and recorded. A seeded, committed roll scheme to deter cheating is optional and can come later.
 
+### 11.5 Social: chat and game log (requested by the user)
+One docked **Chat & Log** panel. Chat and game events appear in one time-ordered feed, and all of it is stored permanently in the save.
+
+**Feed contents**
+- **Chat** messages, colored by side.
+- **Dice rolls**: who rolled, what for (step / formula / unit), dice and result, and the table outcome, e.g. "🎲 Anna (Axis Air) rolled 2d6 = 9 for Weather → Clear".
+- **Formula results**: the working line.
+- **Ledger changes**: unit, property, before → after.
+- **Step and phase changes**, handovers, and out-of-step actions (flagged).
+- **System messages**: joins and leaves, reconnects, rules-pack warnings.
+
+**Interaction**
+- **Filters**: toggle chat, dice, calculations, ledger, steps, system. Text search.
+- **Clickable entries**:
+  - a unit name centers the map on it;
+  - a calculation entry reopens the layout-C dialog read-only, showing exactly what was entered;
+  - a rule ref opens the PDF page.
+- **Channels**:
+  - *All*;
+  - *Side* (team chat, visible only to that side's players, and enforced by the host like other hidden information, §14a.5);
+  - *Whisper* to one player.
+
+  Game events follow the same per-side redaction as the rest of the state.
+- **Presence list**: who's connected, their side and roles, whose step it is, a typing indicator, and an idle/away marker.
+- **Map pings**: Alt+click drops a short-lived ping visible to your channel's audience, with a feed entry ("Ben pinged 2914").
+- **Map annotations**: arrows and notes drawn on the map, visible to side or all. They persist until deleted and are logged.
+- **Chat in hot-seat** works as a shared notebook. **In async turn files**, chat travels with the command log, so messages sent while it was your turn arrive with the turn.
+
+**Storage and export**
+- Chat and events are commands in the log (§5), so they're saved, replayed, and survive rejoin.
+- Export the log to text or HTML, the whole game or a filtered range, e.g. for an after-action report.
+
 ## 12. Build order
 
 Each piece gets its own implementation plan and is usable on its own.
@@ -243,7 +275,7 @@ Each piece gets its own implementation plan and is usable on its own.
 2. Ledgers, tables, formulas, layout-C dialog, and the workbench basics (§7, §8.1–8.2).
 3. Turn sequencer, batch grids, undo, and the accessibility layer (§9, §10). OCR (§8.3) can come here or later.
 4. Hot-seat (§11.1–11.2).
-5. Online live, then async turn files (§11.3–11.4).
+5. Online live (including Chat & Log, §11.5), then async turn files (§11.4). A local Chat & Log feed (no channels) already exists from piece 3, because the log is the command log.
 
 ## 13. Testing
 
