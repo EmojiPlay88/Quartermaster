@@ -25,7 +25,7 @@ public static partial class DiceExpr
         if (m.Groups[3].Success)
         {
             var raw = m.Groups[3].Value.Replace(" ", "").Replace("\t", "");
-            if (!TryInt(raw, out mod) || Math.Abs(mod) > 1000) return (null, "Modifier must be between -1000 and 1000");
+            if (!TryInt(raw, out mod) || mod is < -1000 or > 1000) return (null, "Modifier must be between -1000 and 1000");
         }
         return (new DiceSpec(count, sides, mod), null);
     }

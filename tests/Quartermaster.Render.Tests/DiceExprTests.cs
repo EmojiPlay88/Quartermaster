@@ -35,6 +35,9 @@ public class DiceExprTests
     {
         Assert.NotNull(DiceExpr.Parse("99999999999999999999d6").Error);
         Assert.NotNull(DiceExpr.Parse("2d6+5000").Error);
+        var (spec, error) = DiceExpr.Parse("2d6-2147483648");
+        Assert.Null(spec);
+        Assert.Equal("Modifier must be between -1000 and 1000", error);
     }
 
     [Fact]

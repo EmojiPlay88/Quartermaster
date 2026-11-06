@@ -6,8 +6,9 @@ using Quartermaster.Vassal;
 namespace Quartermaster.App;
 
 /// <summary>Dice toolbar buttons and dropdown, Tools → Dice / Turn menu items and the status-bar turn label.</summary>
-sealed class DiceTools
+sealed class DiceTools : IDisposable
 {
+    bool _disposed;
     readonly Form _owner;
     readonly Func<ModuleSession?> _session;
     readonly Action<Action> _guard;
@@ -28,7 +29,12 @@ sealed class DiceTools
         ToolStripMenuItem toolsMenu, ToolStripStatusLabel message, List<ToolStripItem> needsGame)
     {
         _owner = owner; _session = session; _guard = guard; _message = message;
-        _clear.Tick += (_, _) => { _clear.Stop(); if (_message.Text == _shown) _message.Text = ""; };
+        _clear.Tick += (_, _) =>
+        {
+            _clear.Stop();
+            if (_disposed || _message.IsDisposed || owner.IsDisposed) return;
+            if (_message.Text == _shown) _message.Text = "";
+        };
 
         toolbar.Items.Add(new ToolStripSeparator());
         AddButton(toolbar, "1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll"), needsGame);
@@ -53,7 +59,7 @@ sealed class DiceTools
         var set = new ToolStripMenuItem("&Set...");
         set.Click += (_, _) => _guard(SetTurnDialog);
         turn.DropDownItems.AddRange(new ToolStripItem[] { next, _prev, set });
-        turn.DropDownOpening += (_, _) => _prev.Enabled = CurrentTurn.Turn > 1;
+        turn.DropDownOpening += (_, _) => _guard(() => _prev.Enabled = CurrentTurn.Turn > 1);
         toolsMenu.DropDownItems.Add(turn);
         needsGame.Add(turn);
     }
@@ -69,8 +75,18 @@ sealed class DiceTools
     TurnState CurrentTurn => _session()?.Game?.State.Turn ?? new TurnState(1, null);
 
     /// <summary>Updates the turn label from the current game.</summary>
-    public void Refresh()
+    public void Dispose()
     {
+        _disposed = true;
+        _clear.Stop();
+        _clear.Dispose();
+    }
+
+    public void Refresh() => _guard(RefreshCore);
+
+    void RefreshCore()
+    {
+        if (_disposed) return;
         var game = _session()?.Game;
         TurnLabel.Visible = game != null;
         if (game == null) return;
@@ -177,6 +193,7 @@ sealed class DiceTools
     void ShowResult(string? text)
     {
         if (string.IsNullOrEmpty(text)) return;
+        if (_disposed) return;
         _shown = text;
         _message.Text = text;
         _clear.Stop();
@@ -237,9 +254,17 @@ sealed class DiceDialog : Form
 
     void Check()
     {
-        var (spec, err) = DiceExpr.Parse(_expr.Text);
-        _error.Text = err ?? "";
-        _ok.Enabled = spec != null;
+        try
+        {
+            var (spec, err) = DiceExpr.Parse(_expr.Text);
+            _error.Text = err ?? "";
+            _ok.Enabled = spec != null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _error.Text = DiceExpr.FormatError;
+            _ok.Enabled = false;
+        }
     }
 
     public static (DiceSpec Spec, int Times)? Ask(IWin32Window owner, string title, bool multi)

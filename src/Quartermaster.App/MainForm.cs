@@ -758,6 +758,7 @@ sealed partial class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _smokeTimer?.Dispose();
+        _dice?.Dispose();
         _wm.SaveMain(new SavedWindow(false, WindowState == FormWindowState.Normal ? Bounds : RestoreBounds, WindowState == FormWindowState.Maximized, DeviceDpi));
         CloseSession();
         base.OnFormClosed(e);

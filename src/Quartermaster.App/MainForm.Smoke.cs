@@ -164,7 +164,15 @@ sealed partial class MainForm
         if (_dice != null)
         {
             var rolled = _dice.RollSpec(new DiceSpec(2, 6, 0), "Roll");
-            if (_session.Model.Dice.FirstOrDefault(d => d.Faces.Count >= 2) is { } die) rolled &= _dice.RollSpecial(die);
+            if (_session.Model.Dice.FirstOrDefault(d => d.Faces.Count >= 2) is { } die)
+            {
+                var before = game.State.Log.Count;
+                var ok = _dice.RollSpecial(die) && game.State.Log.Count == before + 1 && game.State.Log[^1].Kind == LogKind.Dice
+                    && game.State.Log[^1].Text.StartsWith(die.Name + ": ", StringComparison.Ordinal) && die.Faces.Any(f => game.State.Log[^1].Text.EndsWith(" = " + f, StringComparison.Ordinal));
+                Program.AppLog($"smoke: special die '{die.Name}' {(ok ? "ok: " + game.State.Log[^1].Text : "FAILED")}");
+                rolled &= ok;
+            }
+            else Program.AppLog("smoke: no special dice in module");
             _dice.StepTurn(1);
             Program.AppLog($"smoke: dice and turn {(rolled && game.State.Turn.Turn == 2 ? "ok" : "FAILED")}; turn label '{_dice.TurnLabel.Text}'");
             if (!rolled || game.State.Turn.Turn != 2) Program.ExitCode = 1;
