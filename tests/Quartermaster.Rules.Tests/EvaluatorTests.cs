@@ -179,4 +179,21 @@ public class EvaluatorTests
         Assert.Equal("Rates[12]", Work("lookup(Rates, MP)"));
         Assert.Equal("Rates[12, 3]", Work("lookup(Rates, MP, Rate)"));
     }
+
+    [Fact]
+    public void StartsWith_Contains_CaseInsensitive()
+    {
+        Assert.True(Eval("startsWith(\"Red 1\", \"red\")").Bool);
+        Assert.False(Eval("startsWith(\"Red 1\", \"1\")").Bool);
+        Assert.True(Eval("contains(\"Blue Inf\", \"INF\")").Bool);
+        Assert.False(Eval("contains(\"Blue Inf\", \"cav\")").Bool);
+    }
+
+    [Fact]
+    public void StartsWith_NonText_EvalError()
+    {
+        var e = Assert.Throws<EvalError>(() => Eval("startsWith(5, \"a\")"));
+        Assert.Equal("'startsWith' needs text, got a number", e.Message);
+        Assert.Throws<EvalError>(() => Eval("contains(\"a\", 5)"));
+    }
 }
