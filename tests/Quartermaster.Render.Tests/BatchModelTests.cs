@@ -155,6 +155,23 @@ public class BatchModelTests : IDisposable
     }
 
     [Fact]
+    public void ApplyRow_RunClearedAfterCalculate_AppliesNothing()
+    {
+        var (s, c) = Make(Difficulty.Hardcore);
+        var (b, _) = MoveBatch(s, c);
+        b.CalculateAll();
+        var fuel = Fuel(s, "r1");
+        c.Advance();   // clears the run while the batch grid is still open
+        var log = s.Game!.State.Log.Count;
+
+        Assert.False(b.ApplyRow(0));
+        Assert.Equal(0, b.ApplyAll());
+
+        Assert.Equal(fuel, Fuel(s, "r1"));
+        Assert.Equal(log, s.Game.State.Log.Count);
+    }
+
+    [Fact]
     public void ApplyAll_1200Units_FastAndExact()
     {
         var (s, c) = Make(Difficulty.SemiAuto);
