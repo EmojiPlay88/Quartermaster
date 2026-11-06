@@ -181,9 +181,7 @@ public static class PieceDetails
                 case MarkerDef m:
                 {
                     // VASSAL Marker: the type holds the keys; the values live in the trait state (comma-encoded, myGetState).
-                    var values = SequenceEncoder.Decode(PieceGeometry.StateAt(p, i), ',');
-                    for (var k = 0; k < m.Keys.Count; k++)
-                        props.Add((m.Keys[k], k < values.Count ? values[k] : ""));
+                    props.AddRange(PieceInfo.MarkerValues(m, PieceGeometry.StateAt(p, i)));
                     break;
                 }
                 case DynamicPropertyDef d:
@@ -194,7 +192,7 @@ public static class PieceDetails
                     break;
             }
         }
-        var name = type.Basic.Name;
+        var name = type.Basic.Name; // same value as PieceInfo.Name(p) without reparsing
         return new PieceDetail(p.Id, name.Length > 0 ? name : "piece", props);
     }
 }
