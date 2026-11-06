@@ -116,4 +116,21 @@ public class GameStateTests
         Assert.Equal(JsonSerializer.Serialize(a, QuartermasterJson.Options), JsonSerializer.Serialize(b, QuartermasterJson.Options));
         Assert.Equal(JsonSerializer.Serialize(a, QuartermasterJson.Options), JsonSerializer.Serialize(a.DeepClone(), QuartermasterJson.Options));
     }
+
+    public static (string Type, string State, string[] Expected) NestedPiece()
+    {
+        var type = SequenceEncoder.Encode(["mark;k1", SequenceEncoder.Encode(["mark;k2", "piece;;;a.png;n"], '	')], '	');
+        var inner = SequenceEncoder.Encode(["s2", "s3 with	tab\\"], '	');
+        var state = SequenceEncoder.Encode(["s1", inner], '	');
+        return (type, state, ["s1", "s2", "s3 with	tab\\"]);
+    }
+
+    [Fact]
+    public void AddPiece_DecodesNestedTraitStateChain()
+    {
+        var (type, state, expected) = NestedPiece();
+        var s = Make();
+        s.Apply(new AddPiece("a", type, state, "m1", new PointD(0, 0), null));
+        Assert.Equal(expected, s.Pieces["a"].TraitStates);
+    }
 }

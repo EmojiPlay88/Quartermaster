@@ -52,4 +52,20 @@ public class NativeSaveTests
         }
         finally { File.Delete(path); }
     }
+
+    [Fact]
+    public void NativeSave_RoundTrip_NestedTraitStates()
+    {
+        var (type, state, expected) = GameStateTests.NestedPiece();
+        var st = new GameState(); st.MapOrder.Add("m1");
+        var sess = new GameSession(st, "h");
+        sess.Execute(new AddPiece("a", type, state, "m1", new PointD(0, 0), null));
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
+        try
+        {
+            NativeSave.Write(path, sess);
+            Assert.Equal(expected, NativeSave.Read(path).State.Pieces["a"].TraitStates);
+        }
+        finally { File.Delete(path); }
+    }
 }

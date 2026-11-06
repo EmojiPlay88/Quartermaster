@@ -85,10 +85,24 @@ public sealed class GameState
         var p = new PieceInstance
         {
             Id = a.PieceId, TypeString = a.TypeString, MapId = a.MapId, Pos = a.Pos,
-            TraitStates = string.IsNullOrEmpty(a.StateString) ? new() : a.StateString.Split('\t').ToList(),
+            TraitStates = DecodeState(a.TypeString, a.StateString),
         };
         Pieces[a.PieceId] = p;
         Place(new[] { p }, a.MapId, a.Pos, a.StackOnto);
+    }
+
+    static List<string> DecodeState(string typeString, string stateString)
+    {
+        if (string.IsNullOrEmpty(stateString)) return new();
+        try
+        {
+            var count = PieceTypeParser.Parse(typeString, new DiagnosticLog(), null).Traits.Count;
+            return PieceTypeParser.SplitState(stateString, count).ToList();
+        }
+        catch (Exception)
+        {
+            return new() { stateString };
+        }
     }
 
     void DoMove(MovePieces m)
