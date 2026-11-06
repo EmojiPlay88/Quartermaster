@@ -2,9 +2,9 @@ using System.Globalization;
 
 namespace Quartermaster.App;
 
-/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;].</summary>
+/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;].</summary>
 sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null, bool FloatMainMap = false, string? ScreenshotFloat = null,
-    string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null)
+    string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null, string? ScreenshotWorkbench = null)
 {
     public bool Smoke => SmokeSeconds != null;
 
@@ -13,7 +13,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
         string? path = null;
         int? setup = null, smoke = null;
         var newGame = false;
-        string? shot = null, shotFloat = null, rules = null, newRules = null, shotFormula = null, shotLedger = null;
+        string? shot = null, shotFloat = null, rules = null, newRules = null, shotFormula = null, shotLedger = null, shotBench = null;
         var floatMain = false;
         for (var i = 0; i < args.Length; i++)
         {
@@ -54,6 +54,10 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     if (i + 1 < args.Length) shotLedger = args[++i];
                     else warn("--screenshot-ledger needs a file path; ignored.");
                     break;
+                case "--screenshot-workbench":
+                    if (i + 1 < args.Length) shotBench = args[++i];
+                    else warn("--screenshot-workbench needs a file path; ignored.");
+                    break;
                 default:
                     if (a.StartsWith("--", StringComparison.Ordinal)) warn($"Unknown option '{a}'; ignored.");
                     else if (path == null) path = a;
@@ -61,7 +65,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     break;
             }
         }
-        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat, rules, newRules, shotFormula, shotLedger);
+        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat, rules, newRules, shotFormula, shotLedger, shotBench);
     }
 }
 

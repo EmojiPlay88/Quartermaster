@@ -29,6 +29,7 @@ sealed class MainForm : Form
     readonly Dictionary<string, Form> _charts = new();
     readonly Dictionary<string, Form> _docs = new();
     readonly Dictionary<string, Form> _ledgers = new();
+    readonly Dictionary<string, Form> _benches = new();
 
     readonly WindowManager _wm;
     readonly ToolStripMenuItem _floatingMenu = new("&Floating windows") { Visible = false };
@@ -139,6 +140,9 @@ sealed class MainForm : Form
         view.DropDownItems.Add(_showGrid);
         _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, Keys.Control | Keys.L));
 
+        var tools = new ToolStripMenuItem("&Tools");
+        Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, Keys.Control | Keys.Shift | Keys.W, needsModule: true);
+
         var window = new ToolStripMenuItem("&Window");
         Item(window.DropDownItems, "&Cascade", () => Arrange(MdiLayout.Cascade));
         Item(window.DropDownItems, "Tile &Horizontally", () => Arrange(MdiLayout.TileHorizontal));
@@ -154,7 +158,7 @@ sealed class MainForm : Form
         var help = new ToolStripMenuItem("&Help");
         Item(help.DropDownItems, "&About", () => Info("Quartermaster\nA VASSAL module reader and engine.", "About Quartermaster"));
 
-        _menu.Items.AddRange(new ToolStripItem[] { file, view, window, help });
+        _menu.Items.AddRange(new ToolStripItem[] { file, view, tools, window, help });
         _menu.MdiWindowListItem = window;
     }
 
@@ -585,6 +589,31 @@ sealed class MainForm : Form
         OpenChild(_ledgers, "ledger", () => new LedgerWindow(s));
     }
 
+    /// <summary>Opens (or activates) the single rules workbench of this session.</summary>
+    void ShowWorkbench()
+    {
+        if (_session == null) return;
+        var s = _session;
+        OpenChild(_benches, "workbench", () => new WorkbenchWindow(s, NewRulesPack, OpenRulesDialog));
+    }
+
+    /// <summary>Smoke: opens the workbench (Tables tab, first table selected) and saves a screenshot when asked.</summary>
+    void SmokeWorkbench()
+    {
+        if (_opts.ScreenshotWorkbench == null) return;
+        ShowWorkbench();
+        if (_benches.TryGetValue("workbench", out var w) && !w.IsDisposed && w is WorkbenchWindow wb)
+        {
+            Program.AppLog($"smoke: workbench opened; selected table {wb.SelectedTableForSmoke ?? "(none)"}; {wb.IssueCountForSmoke} issue(s)");
+            wb.SaveScreenshot(_opts.ScreenshotWorkbench);
+        }
+        else
+        {
+            Program.AppLog("smoke: --screenshot-workbench given but the workbench did not open.");
+            Program.ExitCode = 1;
+        }
+    }
+
     /// <summary>Smoke: opens the ledger window (once rules are loaded) and optionally saves a screenshot of it.</summary>
     void SmokeLedger()
     {
@@ -638,7 +667,7 @@ sealed class MainForm : Form
         var w = create();
         open[key] = w;
         w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); };
-        ShowDoc(w, (ReferenceEquals(open, _charts) ? "chart:" : ReferenceEquals(open, _ledgers) ? "ledger:" : "doc:") + key);
+        ShowDoc(w, (ReferenceEquals(open, _charts) ? "chart:" : ReferenceEquals(open, _ledgers) ? "ledger:" : ReferenceEquals(open, _benches) ? "bench:" : "doc:") + key);
     }
 
     /// <summary>Shows a new document window: floating at its remembered bounds, otherwise as a maximized MDI tab.</summary>
@@ -788,6 +817,7 @@ sealed class MainForm : Form
         Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
         Guard(SmokeFormulaDialog);
         Guard(SmokeLedger);
+        Guard(SmokeWorkbench);
         if (_opts.Screenshot != null) Guard(() => SaveScreenshot(this, _opts.Screenshot, true));
         if (_opts.ScreenshotFloat != null)
         {
