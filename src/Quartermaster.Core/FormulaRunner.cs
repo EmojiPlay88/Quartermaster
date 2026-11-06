@@ -12,7 +12,8 @@ public sealed record VariableState(string Variable, Value? Value, bool Auto, boo
 public sealed record OutputPreview(string Key, string PropertyId, string PropertyName, double Before, double After);
 
 public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableState> Variables, Value? Result, string Working,
-    IReadOnlyList<OutputPreview> Outputs, string? Error, IReadOnlyList<DiceEntry> Rolls);
+    IReadOnlyList<OutputPreview> Outputs, string? Error, IReadOnlyList<DiceEntry> Rolls,
+    IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey);
 
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
     IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls);
@@ -43,7 +44,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     }
 
     private static FormulaTrace Fail(FormulaDef f, string error) =>
-        new(f, Array.Empty<VariableState>(), null, "", Array.Empty<OutputPreview>(), error, Array.Empty<DiceEntry>());
+        new(f, Array.Empty<VariableState>(), null, "", Array.Empty<OutputPreview>(), error, Array.Empty<DiceEntry>(),
+            new Dictionary<string, IReadOnlyList<int>>());
 
     private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula)
     {
@@ -74,10 +76,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var needsUnit = formula.Bindings.Any(b => b.Kind == BindingKind.Unit)
             || formula.Outputs.Any(o => o.Target == OutputTarget.Unit);
         if (needsUnit && piece == null)
-            return new(formula, states, null, "", Array.Empty<OutputPreview>(), NeedsUnit, rolls);
+            return new(formula, states, null, "", Array.Empty<OutputPreview>(), NeedsUnit, rolls, run.RollsByKey);
 
         if (states.Any(x => x.MissingReason != null))
-            return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls);
+            return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls, run.RollsByKey);
 
         var result = Evaluator.Evaluate(expr, new RunContext(run));
         var working = WorkingLine.Render(expr, formula.Text ?? "", n => run.Cached(n)?.Value) + " = " + result.Display();
@@ -109,13 +111,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var a = Value.Of(after).Display();
             parts.Add(o.Op switch
             {
-                OutputOp.Subtract => $" → {prop.Name} {b} − {xs} = {a}",
-                OutputOp.Add => $" → {prop.Name} {b} + {xs} = {a}",
-                _ => $" → {prop.Name} = {a}",
+                OutputOp.Subtract => $"{prop.Name} {b} − {xs} = {a}",
+                OutputOp.Add => $"{prop.Name} {b} + {xs} = {a}",
+                _ => $"{prop.Name} = {a}",
             });
         }
-        if (parts.Count > 0) working += string.Join("; ", parts);
-        return new(formula, states, result, working, outputs, null, rolls);
+        if (parts.Count > 0) working += " → " + string.Join("; ", parts);
+        return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey);
     }
 
     public IReadOnlyList<GameCommand> Commands(FormulaTrace t, string? note)
@@ -138,12 +140,23 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public PieceInstance? Piece => piece;
         public GameState State => s;
         public RulesPack Pack => owner._pack;
-        public IReadOnlyList<int> Roll(int n, int sides)
+        private readonly Dictionary<string, IReadOnlyList<int>> _byKey = new(StringComparer.Ordinal);
+        private int _inlineDice;
+        public IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey => _byKey;
+
+        /// <summary>Rolls (or reuses the pinned roll for) a key: a Roll binding's variable name, or "dice#i" for the i-th inline dice() call of this run.
+        /// A pin whose count or sides do not match is ignored. Inline call order follows evaluation order, so an `if` that changes branch can renumber keys.</summary>
+        public IReadOnlyList<int> RollKey(string key, int n, int sides)
         {
-            var res = owner._roller(n, sides);
-            _rolls.Add(new DiceEntry(0, $"{formula.Name}: dice", n, sides, res));
+            IReadOnlyList<int> res;
+            if (r.FixedRolls.TryGetValue(key, out var pin) && pin != null && pin.Count == n && pin.All(x => x >= 1 && x <= sides)) res = pin;
+            else res = owner._roller(n, sides);
+            _rolls.Add(new DiceEntry(0, $"{formula.Name}: {key}", n, sides, res));
+            _byKey[key] = res;
             return res;
         }
+
+        public IReadOnlyList<int> Roll(int n, int sides) => RollKey("dice#" + _inlineDice++, n, sides);
 
         public VariableState? Cached(string name) => _done.TryGetValue(name, out var v) ? v : null;
 
@@ -224,9 +237,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 {
                     var n = b.DiceCount ?? 1;
                     var sides = b.DiceSides ?? 6;
-                    var purpose = $"{formula.Name}: {name}";
-                    var res = r.FixedRolls.TryGetValue(name, out var fixedRoll) && fixedRoll != null ? fixedRoll : owner._roller(n, sides);
-                    _rolls.Add(new DiceEntry(0, purpose, n, sides, res));
+                    var res = RollKey(name, n, sides);
                     return new(name, Value.Of(res.Sum()), true, false, null);
                 }
                 default:

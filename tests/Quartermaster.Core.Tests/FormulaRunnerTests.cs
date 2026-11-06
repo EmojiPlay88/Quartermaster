@@ -163,6 +163,58 @@ public class FormulaRunnerTests
         Assert.Equal(13, t2.Result!.Value.Number);
     }
 
+    private static RulesPack InlinePack() => RunnerFx.Pack(f => f with
+    {
+        Text = "dice(1, 6) * 10 + dice(2, 6)",
+        Bindings = new(),
+        Outputs = new(),
+    });
+
+    [Fact]
+    public void Run_InlineDice_PinnedViaRollsByKey_SecondRunIdenticalWithoutRoller()
+    {
+        var calls = 0;
+        var runner = RunnerFx.Runner(InlinePack(), (n, sides) => { calls++; return Enumerable.Repeat(calls + 1, n).ToList(); });
+        var t1 = runner.Run(RunnerFx.State(), RunnerFx.Req());
+        Assert.Equal(2, calls);
+        Assert.Equal(new[] { "dice#0", "dice#1" }, t1.RollsByKey.Keys.OrderBy(k => k));
+        Assert.Equal(new[] { "Fuel Use: dice#0", "Fuel Use: dice#1" }, t1.Rolls.Select(r => r.Purpose));
+        var pins = t1.RollsByKey.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var t2 = runner.Run(RunnerFx.State(), RunnerFx.Req(rolls: pins));
+        Assert.Equal(2, calls);
+        Assert.Equal(t1.Result, t2.Result);
+        Assert.Equal(t1.Working, t2.Working);
+    }
+
+    [Fact]
+    public void Run_PinWithMismatchedShape_IsIgnored()
+    {
+        var calls = 0;
+        var runner = RunnerFx.Runner(RollPack(), (n, sides) => { calls++; return Enumerable.Repeat(4, n).ToList(); });
+        var pins = new Dictionary<string, IReadOnlyList<int>> { ["Dmg"] = new[] { 2, 3, 1 } };
+        var t = runner.Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "1")), rolls: pins));
+        Assert.Equal(1, calls);
+        Assert.Equal(9, t.Result!.Value.Number);
+        var pins2 = new Dictionary<string, IReadOnlyList<int>> { ["Dmg"] = new[] { 2, 9 } };
+        runner.Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "1")), rolls: pins2));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void Run_TwoOutputs_WorkingUsesSingleArrow()
+    {
+        var pack = RunnerFx.Pack(f => f with
+        {
+            Outputs = new()
+            {
+                new FormulaOutput { Target = OutputTarget.Unit, Property = "fuel", Op = OutputOp.Subtract },
+                new FormulaOutput { Target = OutputTarget.Holder, HolderId = "depot", Property = "supply", Op = OutputOp.Set },
+            },
+        });
+        var t = RunnerFx.Runner(pack).Run(RunnerFx.State(), RunnerFx.Req(typed: Full));
+        Assert.Equal("12 × Rates[4] ÷ 2 = 12 → Fuel 140 − 12 = 128; Supply = 12", t.Working);
+    }
+
     [Fact]
     public void Run_DeletedTable_ReturnsErrorTraceNotThrow()
     {
