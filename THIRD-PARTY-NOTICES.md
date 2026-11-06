@@ -6,3 +6,4 @@ which is licensed under the GNU Lesser General Public License, version 2.1 (LGPL
 Ported files:
 
 - `src/Quartermaster.Vassal/SequenceEncoder.cs` (from `VASSAL/tools/SequenceEncoder.java`)
+- `src/Quartermaster.Vassal/Obfuscation.cs` (from `VASSAL/tools/io/DeobfuscatingInputStream.java`)
