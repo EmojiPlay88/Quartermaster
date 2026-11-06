@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
+    <ProjectReference Include="..\Quartermaster.Rules\Quartermaster.Rules.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
