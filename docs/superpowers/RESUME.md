@@ -24,7 +24,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
 
 ## Repo and git
 
-- Location: `C:\Users\emoji\Documents\Projects\CNAEngine`. Solution: `Quartermaster.slnx`.
+- Location: `%USERPROFILE%\Documents\Projects\CNAEngine`. Solution: `Quartermaster.slnx`.
 - Projects:
   - `Quartermaster.Vassal`: `.vmod` parsing, partly ported from VASSAL under LGPL-2.1.
   - `Quartermaster.Rules`: rules packs and the expression language.
@@ -71,8 +71,8 @@ How the formula window behaves:
 
 ## User's test material (outside the repo, never commit)
 
-- Module: `C:\Users\emoji\Downloads\CNAv2.1.0.vmod`.
-- Test rules pack: `C:\Users\emoji\Documents\Quartermaster\Rules\CNA-TEST-invented.qrules`, with a `.bak` of the pre-phase version beside it. All of it is **invented**.
+- Module: `%USERPROFILE%\Downloads\CNAv2.1.0.vmod`.
+- Test rules pack: `%USERPROFILE%\Documents\Quartermaster\Rules\CNA-TEST-invented.qrules`, with a `.bak` of the pre-phase version beside it. All of it is **invented**.
   - Values tracked: Fuel, Ammo, Water, Stores, Readiness and Weather.
   - Holders: two test depots.
   - 4 tables and 7 TEST formulas.
