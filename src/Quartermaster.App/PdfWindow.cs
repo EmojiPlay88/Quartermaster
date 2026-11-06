@@ -10,32 +10,34 @@ sealed class PdfWindow : Form
 {
     public const string RuntimeUrl = "https://developer.microsoft.com/microsoft-edge/webview2/";
 
+    readonly ModuleSession _s;
     WebView2? _web;
-    readonly string? _file;
+    string? _file;
     int _page;
 
     public PdfWindow(ModuleSession s, DocumentDef d, int page = 1)
     {
+        _s = s;
         Document = d;
         _page = Math.Max(1, page);
         Text = d.Title;
         ShowIcon = false;
         try
         {
-            _file = Extract(s, d);
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
-        {
-            ShowMessage("This document could not be extracted: " + ex.Message);
-            return;
-        }
-        if (d.Kind == DocumentKind.Text)
-        {
-            Controls.Add(new TextBox
+            _file = DocumentCache.Extract(s.Archive, s.CacheDir, d.EntryName);
+            if (d.Kind == DocumentKind.Text)
             {
-                Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false,
-                Font = new Font("Consolas", 9f), Text = File.ReadAllText(_file), BackColor = SystemColors.Window,
-            });
+                Controls.Add(new TextBox
+                {
+                    Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false,
+                    Font = new Font("Consolas", 9f), Text = File.ReadAllText(_file), BackColor = SystemColors.Window,
+                });
+                return;
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Fail("This document could not be opened: " + ex.Message, ex);
             return;
         }
         _web = new WebView2 { Dock = DockStyle.Fill };
@@ -46,27 +48,11 @@ sealed class PdfWindow : Form
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public DocumentDef Document { get; }
 
-    public static string SanitizeName(string name)
+    void Fail(string message, Exception ex)
     {
-        var bad = Path.GetInvalidFileNameChars();
-        var t = new string(name.Select(c => bad.Contains(c) ? '_' : c).ToArray()).Trim();
-        return t.Length == 0 ? "document" : t;
-    }
-
-    static string Extract(ModuleSession s, DocumentDef d)
-    {
-        var dir = Path.Combine(s.CacheDir, "docs");
-        Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, SanitizeName(d.EntryName));
-        if (!File.Exists(path))
-        {
-            var tmp = path + ".tmp";
-            using (var src = s.Archive.OpenEntry(d.EntryName))
-            using (var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-                src.CopyTo(dst);
-            File.Move(tmp, path, overwrite: true);
-        }
-        return path;
+        Program.AppLog("document window failed: " + ex);
+        _s.Log.Add(DiagnosticSeverity.Warning, "document", message, Document.Title);
+        ShowMessage(message);
     }
 
     static string UserDataFolder =>
@@ -74,21 +60,23 @@ sealed class PdfWindow : Form
 
     async Task InitAsync()
     {
-        if (_web == null || IsDisposed) return;
         try
         {
+            if (_web == null || IsDisposed || Disposing) return;
             var env = await CoreWebView2Environment.CreateAsync(null, UserDataFolder);
+            if (IsDisposed || Disposing) return;
             await _web.EnsureCoreWebView2Async(env);
+            if (IsDisposed || Disposing) return;
             Navigate();
         }
         catch (WebView2RuntimeNotFoundException)
         {
-            ShowMissingRuntime();
+            if (!IsDisposed && !Disposing) ShowMissingRuntime();
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or ArgumentException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Program.AppLog("webview2 failed: " + ex.Message);
-            ShowMessage("The document viewer could not be started: " + ex.Message);
+            if (IsDisposed || Disposing) return;
+            Fail("The document viewer could not be started: " + ex.Message, ex);
         }
     }
 
@@ -122,6 +110,10 @@ sealed class PdfWindow : Form
         Controls.Add(link);
     }
 
-    void ShowMessage(string text) =>
+    void ShowMessage(string text)
+    {
+        if (IsDisposed || Disposing) return;
+        if (_web != null) { Controls.Remove(_web); _web.Dispose(); _web = null; }
         Controls.Add(new Label { Dock = DockStyle.Fill, Padding = new Padding(12), Text = text });
+    }
 }
