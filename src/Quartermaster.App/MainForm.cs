@@ -21,6 +21,9 @@ sealed partial class MainForm : Form
     readonly Splitter _logSplitter = new() { Dock = DockStyle.Bottom, Height = 4, Visible = false };
     readonly ToolStripMenuItem _viewLog = new("&Log");
     readonly LogDock _logDock;
+    readonly Panel _paletteHost = new() { Dock = DockStyle.Right, Width = 260, Visible = false };
+    readonly Splitter _paletteSplitter = new() { Dock = DockStyle.Right, Width = 4, Visible = false };
+    readonly PaletteDock _paletteDock;
     readonly MenuStrip _menu = new();
     readonly ToolStrip _toolbar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
     readonly StatusStrip _status = new() { RenderMode = ToolStripRenderMode.System };
@@ -68,6 +71,7 @@ sealed partial class MainForm : Form
         _wm = new WindowManager(this, _tabs, _layoutStore);
         _wm.FloatingChanged += RebuildFloatingMenu;
         _logDock = new LogDock(this, _wm, _logHost, _logSplitter, _viewLog, CentreOnPiece, Guard);
+        _paletteDock = new PaletteDock(this, _wm, _paletteHost, _paletteSplitter, Guard);
         RegisterCommands();
         _cmdItems["view.log"] = _viewLog;
         BuildMenu();
@@ -78,6 +82,8 @@ sealed partial class MainForm : Form
         Controls.Add(_tabs); // added first so it docks after the tree and spans only the MDI area
         Controls.Add(_logSplitter); // the log docks at the bottom of the MDI area, beside the tree
         Controls.Add(_logHost);
+        Controls.Add(_paletteSplitter); // the palette docks at the right of the MDI area, in game master mode
+        Controls.Add(_paletteHost);
         Controls.Add(_splitter);
         _leftSplit.Panel1.Controls.Add(_tree);
         _leftSplit.Panel2.Controls.Add(_tablesTree);
@@ -363,6 +369,8 @@ sealed partial class MainForm : Form
         _tablesTree.Bind(_session);
         _logDock.Create(_session);
         _logDock.Panel?.ApplySettings(_settings.Current);
+        _paletteDock.Create(_session);
+        _paletteDock.SetGameMaster(GameMaster);
         _sbModule.Text = $"{_session.Model.Name} {_session.Model.Version}".Trim();
         _sbLocation.Text = "-";
         _sbZoom.Text = "-";
@@ -432,6 +440,7 @@ sealed partial class MainForm : Form
     {
         _wm.EndModule(); // layout is written before the windows go away
         _logDock.Destroy();
+        _paletteDock.Destroy();
         CloseAllWindows();
         if (_session == null) return;
         _session.Log.Added -= OnLogAdded;

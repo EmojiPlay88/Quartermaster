@@ -59,7 +59,7 @@ sealed class GeneralTab : SettingsTab
     readonly CheckBox _reopen = Check("Reopen the last module when Quartermaster starts");
     readonly NumericUpDown _autosave = Num(0, 240);
     readonly CheckBox _confirmDelete = Check("Ask before deleting pieces");
-    readonly CheckBox _gm = Check("Game master mode (shows the counter palette — next update)");
+    readonly CheckBox _gm = Check("Game master mode (shows the counter palette)");
 
     public override string Title => "General";
 

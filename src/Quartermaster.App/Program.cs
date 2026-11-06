@@ -2,9 +2,9 @@ using System.Globalization;
 
 namespace Quartermaster.App;
 
-/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;] [--workbench-tab tables|formulas|properties] [--screenshot-log &lt;png&gt;] [--screenshot-settings &lt;png&gt;] [--settings-tab general|display|map|dice|toolbar|keyboard|folders].</summary>
+/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;] [--workbench-tab tables|formulas|properties] [--gm] [--screenshot-palette &lt;png&gt;] [--screenshot-log &lt;png&gt;] [--screenshot-settings &lt;png&gt;] [--settings-tab general|display|map|dice|toolbar|keyboard|folders].</summary>
 sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null, bool FloatMainMap = false, string? ScreenshotFloat = null,
-    string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null, string? ScreenshotWorkbench = null, string? WorkbenchTab = null, string? ScreenshotLog = null, string? ScreenshotSettings = null, string? SettingsTab = null)
+    string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null, string? ScreenshotWorkbench = null, string? WorkbenchTab = null, string? ScreenshotLog = null, string? ScreenshotSettings = null, string? SettingsTab = null, bool GameMaster = false, string? ScreenshotPalette = null)
 {
     public bool Smoke => SmokeSeconds != null;
 
@@ -13,7 +13,8 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
         string? path = null;
         int? setup = null, smoke = null;
         var newGame = false;
-        string? shot = null, shotFloat = null, rules = null, newRules = null, shotFormula = null, shotLedger = null, shotBench = null, benchTab = null, shotLog = null, shotSettings = null, settingsTab = null;
+        string? shot = null, shotFloat = null, rules = null, newRules = null, shotFormula = null, shotLedger = null, shotBench = null, benchTab = null, shotLog = null, shotSettings = null, settingsTab = null, shotPalette = null;
+        var gm = false;
         var floatMain = false;
         for (var i = 0; i < args.Length; i++)
         {
@@ -21,6 +22,11 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
             switch (a)
             {
                 case "--new": newGame = true; break;
+                case "--gm": gm = true; break; // game master mode for this run only (not saved)
+                case "--screenshot-palette":
+                    if (i + 1 < args.Length) shotPalette = args[++i];
+                    else warn("--screenshot-palette needs a file path; ignored.");
+                    break;
                 case "--setup" or "--smoke":
                     if (i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var n))
                     {
@@ -81,7 +87,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     break;
             }
         }
-        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat, rules, newRules, shotFormula, shotLedger, shotBench, benchTab, shotLog, shotSettings, settingsTab);
+        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat, rules, newRules, shotFormula, shotLedger, shotBench, benchTab, shotLog, shotSettings, settingsTab, gm, shotPalette);
     }
 }
 

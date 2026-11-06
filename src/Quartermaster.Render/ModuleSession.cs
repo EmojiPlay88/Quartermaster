@@ -210,7 +210,7 @@ public sealed class ModuleSession : IDisposable
     }
 
     /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
-    private void SeedLedgers()
+    public void SeedLedgers()
     {
         if (Game == null || Rules == null) return;
         try

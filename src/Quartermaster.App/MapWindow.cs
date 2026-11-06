@@ -23,6 +23,7 @@ sealed class MapWindow : Form
         Canvas.Guarded = Run;
 
         Canvas.ContextRequested += OnContext;
+        Canvas.DropMessage += m => Host?.SetStatus(m);
         Canvas.StatusChanged += (loc, zoom) =>
         {
             if (Host is { } mf && mf.IsActiveDocument(this)) { mf.SetLocationText(loc); mf.SetZoomText(zoom); }
@@ -213,6 +214,11 @@ sealed class MapWindow : Form
             }
         }
         AddCalculateMenu(menu, piece, game);
+        if (Host?.GameMaster == true)
+        {
+            if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("Delete counter", null, (_, _) => Run(() => DeleteCounters(piece, game))));
+        }
         if (menu.Items.Count == 0) menu.Items.Add(new ToolStripMenuItem("(no commands)") { Enabled = false });
     }
 
@@ -297,6 +303,14 @@ sealed class MapWindow : Form
         }
         if (!ConfirmDeletes(game.State, deleting, clicked)) return;
         foreach (var b in batches) Execute(b);
+    }
+
+    /// <summary>Game master: removes the clicked counter and any other selected ones (after the usual confirmation).</summary>
+    void DeleteCounters(PieceInstance clicked, GameSession game)
+    {
+        var ids = game.State.Pieces.Keys.Where(id => id == clicked.Id || Canvas.Selected.Contains(id)).ToList();
+        if (!ConfirmDeletes(game.State, ids, clicked)) return;
+        Execute(ids.Select(id => new RemovePiece(id)));
     }
 
     /// <summary>Settings "ask before deleting": one Yes/No for the pieces a trait Delete action would remove. Always true when the setting is off or in smoke mode.</summary>

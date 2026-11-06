@@ -134,6 +134,7 @@ sealed partial class MainForm
         }
         if (_opts.FloatMainMap) Guard(SmokeDockRoundTrip);
         if (_opts.ScreenshotLog != null) Guard(SmokeLog);
+        if (_opts.GameMaster || _opts.ScreenshotPalette != null) Guard(SmokePalette);
         if (_opts.ScreenshotSettings != null) Guard(SmokeSettings);
         Close();
     }
@@ -207,6 +208,45 @@ sealed partial class MainForm
         Update();
         Program.AppLog($"smoke: log has {game.State.Log.Count} entr(y/ies)");
         _logDock.Panel!.SaveScreenshot(_opts.ScreenshotLog!);
+    }
+
+    /// <summary>
+    /// Smoke (game master mode): lists the first folder with counters, places one at the centre of the first board through the drop code path
+    /// (ResolveDrop, FromSlot, Execute) and expects exactly one new "place" log entry; then removes it like the Delete counter menu does.
+    /// </summary>
+    void SmokePalette()
+    {
+        var panel = _paletteDock.Panel;
+        if (_session?.Game is not { } game || panel == null) { SmokePaletteFail("no game or palette panel"); return; }
+        if (!_paletteDock.Host.Visible) { SmokePaletteFail("palette is not shown in game master mode"); return; }
+        panel.SelectFirstFolderWithSlots();
+        var slot = panel.ListedSlots.FirstOrDefault();
+        var map = _session.Model.Maps.FirstOrDefault(m => !m.IsOrgDisplay && m.Boards.Count > 0);
+        if (slot == null || map == null) { SmokePaletteFail("no counters in the palette or no map with a board"); return; }
+        var b = map.Boards[0];
+        var places = game.State.Log.Count(e => e.Kind == LogKind.Place);
+        var pieces = game.State.Pieces.Count;
+        var (placed, msg) = PaletteDrop.Place(_session, map, slot, new PointD(b.Offset.X + b.Width / 2.0, b.Offset.Y + b.Height / 2.0), _settings.Current.SnapOnDrop);
+        var newPlaces = game.State.Log.Count(e => e.Kind == LogKind.Place) - places;
+        var ok = placed && newPlaces == 1 && game.State.Pieces.Count == pieces + 1 && game.State.Log[^1].Text.Contains(" placed", StringComparison.Ordinal);
+        Program.AppLog($"smoke: palette drop {(ok ? "ok" : "FAILED")} ('{msg}'; {newPlaces} place entr(y/ies); last log '{game.State.Log[^1].Text}')");
+        if (!ok) Program.ExitCode = 1;
+        var outside = PaletteDrop.Place(_session, map, slot, new PointD(-100000, -100000), true);
+        if (outside.Placed || outside.Message != "Drop onto a board" || game.State.Pieces.Count != pieces + 1) { SmokePaletteFail("drop outside boards was not rejected"); }
+        if (placed && game.State.Pieces.Keys.FirstOrDefault(k => k.StartsWith("p:", StringComparison.Ordinal)) is { } id)
+        {
+            game.Execute(CommandLog.Prepare(new RemovePiece(id), game.State, _session.Model));
+            if (!game.State.Log[^1].Text.EndsWith(" removed", StringComparison.Ordinal) || game.State.Pieces.ContainsKey(id)) SmokePaletteFail("delete counter did not log a removal");
+        }
+        var until = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(20); } // let the thumbnail worker finish
+        if (_opts.ScreenshotPalette != null) panel.SaveScreenshot(_opts.ScreenshotPalette);
+    }
+
+    static void SmokePaletteFail(string why)
+    {
+        Program.AppLog("smoke: palette FAILED: " + why);
+        Program.ExitCode = 1;
     }
 
     /// <summary>Main form via DrawToBitmap, with each visible map canvas re-rendered by Skia on top of its screen area.</summary>

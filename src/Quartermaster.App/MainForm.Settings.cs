@@ -15,6 +15,9 @@ sealed partial class MainForm
 
     public Settings CurrentSettings => _settings.Current;
 
+    /// <summary>Game master mode: the saved setting, or --gm for this run only.</summary>
+    public bool GameMaster => _opts.GameMaster || _settings.Current.GameMasterMode;
+
     /// <summary>Raised after settings were applied to the main window; map windows re-read their options.</summary>
     public event Action<Settings>? SettingsApplied;
 
@@ -84,7 +87,7 @@ sealed partial class MainForm
             _dice.ShowLastRoll = s.ShowLastRollInStatus;
         });
         Step(() => _logDock.Panel?.ApplySettings(s));
-        // Palette visibility (settings for the palette window) hooks in here with the palette task.
+        Step(() => _paletteDock.SetGameMaster(GameMaster));
         Step(() => SettingsApplied?.Invoke(s));
     }
 

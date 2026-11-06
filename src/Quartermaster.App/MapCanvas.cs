@@ -87,6 +87,8 @@ sealed class MapCanvas : SKControl
     void Guard(Action a) { if (Guarded != null) Guarded(a); else a(); }
 
     public event Action<string, string>? StatusChanged;
+    /// <summary>A short message for the main window's status bar (palette drops).</summary>
+    public event Action<string>? DropMessage;
     /// <summary>Right click: the piece under the cursor (or null) and the client point.</summary>
     public event Action<string?, Point>? ContextRequested;
 
@@ -557,6 +559,7 @@ sealed class MapCanvas : SKControl
     protected override void OnDragOver(DragEventArgs e)
     {
         base.OnDragOver(e);
+        if (PaletteDrop.FromData(_s, e.Data) != null && _s.Game != null) { e.Effect = DragDropEffects.Copy; return; }
         if (!CanAccept(e)) { e.Effect = DragDropEffects.None; return; }
         e.Effect = DragDropEffects.Move;
         if (State is not { } st || MapDragController.Current is not { } d) return;
@@ -574,6 +577,16 @@ sealed class MapCanvas : SKControl
     protected override void OnDragDrop(DragEventArgs e)
     {
         base.OnDragDrop(e);
+        if (PaletteDrop.FromData(_s, e.Data) is { } slot)
+        {
+            Guard(() =>
+            {
+                var (_, msg) = PaletteDrop.Place(_s, Map, slot, MapPoint(PointToClient(new Point(e.X, e.Y))), _drag.Snap);
+                DropMessage?.Invoke(msg);
+            });
+            Invalidate();
+            return;
+        }
         if (CanAccept(e) && State is { } st && _s.Game != null && _drag.Info != null)
             _drag.Commit(st, MapPoint(PointToClient(new Point(e.X, e.Y))));
         else
