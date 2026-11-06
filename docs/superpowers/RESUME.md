@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-06, after piece 3 was merged. A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-06, after piece 3 was merged and pushed. A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -32,9 +32,8 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
 - Tests: xUnit under `tests/`. 755 tests are green on `master` (ee23e65 plus a docs commit).
-- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster.
-  - `origin/master` is still at 4338edd (README + licence). Pieces 3+ are **local only, not pushed**.
-  - Push only when the user asks.
+- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 3 is **pushed** (`master` in sync with `origin/master`). Push again only when the user asks.
+- Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
 - Commit messages end with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Never commit `startapp.cmd`.** It is untracked, names a private file path, and the repo is public. `.claude/` is excluded locally via `.git/info/exclude`.
@@ -95,7 +94,7 @@ How the formula window behaves:
    - Load a phase-boundary autosave.
 
    Fix whatever they find.
-2. **Ask before pushing** master to the public GitHub repo. Consider refreshing README "Status"/"Roadmap", since the sequencer and difficulty modes are now built.
+2. **README is out of date in one place:** the "Status" line (and Roadmap) still says the turn sequencer and difficulty modes aren't built. Offer to fix and push. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
 3. **Next piece: undecided.** Candidates from the master spec:
    - HOI4-style accessibility layer (number tooltips, alerts, outliner) — §10;
    - hot-seat / live online multiplayer with chat (master spec §11, "pieces 4–5");
