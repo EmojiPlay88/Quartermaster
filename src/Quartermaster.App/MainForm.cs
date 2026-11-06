@@ -298,6 +298,7 @@ sealed partial class MainForm : Form
 
     bool ConfirmDiscard()
     {
+        FlushNotes(); // pending note text becomes a command first, so the dirty check below counts it
         if (!_dirty || Program.Smoke) return true;
         return MessageBox.Show(this, "The current game has unsaved changes. Discard them?", "Quartermaster",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;

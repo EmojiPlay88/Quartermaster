@@ -19,6 +19,12 @@ sealed partial class MainForm
         OpenChild(_docs, "notes", () => new NotesWindow(s));
     }
 
+    /// <summary>Commits an open notes window's pending text into the current game (before it is replaced or closed).</summary>
+    void FlushNotes()
+    {
+        if (_docs.TryGetValue("notes", out var f) && f is NotesWindow { IsDisposed: false } nw) nw.FlushNow();
+    }
+
     /// <summary>Smoke: opens the inventory (optionally saving a screenshot) and the notes window; sets notes through the window and expects one "note" log entry.</summary>
     void SmokeInventoryNotes()
     {
@@ -45,6 +51,15 @@ sealed partial class MainForm
             Program.AppLog($"smoke: notes {(ok ? "ok" : "FAILED")} ({added} note entr(y/ies) added)");
             if (!ok) Program.ExitCode = 1;
             nw.SaveScreenshot(_opts.ScreenshotNotes);
+            // Text typed just before a game replacement must land in the OLD game through the normal New Game path.
+            const string late = "Typed just before New Game.";
+            nw.TypeForSmoke(late);
+            var old = game;
+            var oldNotes = old.State.Log.Count(e => e.Kind == LogKind.Note);
+            NewGame();
+            var landed = old.State.Notes == late && old.State.Log.Count(e => e.Kind == LogKind.Note) == oldNotes + 1 && !ReferenceEquals(_session!.Game, old);
+            Program.AppLog($"smoke: notes flushed into old game before New Game {(landed ? "ok" : "FAILED")}");
+            if (!landed) Program.ExitCode = 1;
         }
         else { Program.AppLog("smoke: notes window did not open."); Program.ExitCode = 1; }
     }

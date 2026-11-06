@@ -53,18 +53,23 @@ sealed class NotesWindow : Form
         if (_game != null) _game.Changed += OnGameChanged;
     }
 
-    void OnGameChanged(GameCommand _) => OnUi(() => { if (!_box.Focused && !Pending) Run(Reload); });
+    void OnGameChanged(GameCommand _) => OnUi(() => { if (NotesSync.ShouldReload(_box.Focused, Pending)) Run(Reload); });
+    // Pending text was already flushed into the old game by MainForm (FlushNow) before the replacement; this only reloads.
     void OnGameReplaced() => OnUi(() => { _commitTimer.Stop(); HookGame(); Run(Reload); });
 
     /// <summary>Writes the box text to the state when it differs from it. Never commits an unchanged text.</summary>
     void Flush()
     {
         _commitTimer.Stop();
-        if (_game == null || IsDisposed) return;
+        // Only into the session's current game: a stale or disposed one drops the text silently.
+        if (_game == null || IsDisposed || _s.Disposed || !ReferenceEquals(_game, _s.Game)) return;
         var text = _box.Text;
-        if (text == _game.State.Notes) return;
+        if (!NotesSync.ShouldCommit(text, _game.State.Notes)) return;
         _game.Execute(CommandLog.Stamp(new SetNotes(text)));
     }
+
+    /// <summary>Commits pending text now; MainForm calls this before anything that replaces or closes the game.</summary>
+    public void FlushNow() => Run(Flush);
 
     void Reload()
     {
@@ -111,6 +116,9 @@ sealed class NotesWindow : Form
         Flush();
         return _s.Game?.State.Notes;
     }
+
+    /// <summary>Smoke: puts text in the box without committing (as typing does before the 1 s pause).</summary>
+    public void TypeForSmoke(string text) => _box.Text = text;
 
     public void SaveScreenshot(string path)
     {

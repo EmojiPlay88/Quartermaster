@@ -49,7 +49,7 @@ sealed class InventoryWindow : Form
 
         _key.SelectedIndexChanged += (_, _) => Run(() => { _cycle.Clear(); FillKeyNames(); Reload(); });
         _keyName.SelectedIndexChanged += (_, _) => Run(() => { if (!_loadingCombos) { _cycle.Clear(); Reload(); } });
-        _filter.TextChanged += (_, _) => Kick();
+        _filter.TextChanged += (_, _) => { _cycle.Clear(); Kick(); };
         _list.DoubleClick += (_, _) => Run(CycleSelected);
         _debounce.Tick += (_, _) => { _debounce.Stop(); Run(() => { FillKeyNames(); Reload(); }); };
 
@@ -120,7 +120,7 @@ sealed class InventoryWindow : Form
         IReadOnlyList<string> names = CurrentKey switch
         {
             InventoryKey.Marker => _s.Game is { } g ? InventoryQuery.MarkerKeys(g.State) : Array.Empty<string>(),
-            InventoryKey.LedgerProperty => _s.Rules?.Properties.Where(p => p.Scope != PropertyScope.Holders).Select(p => p.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>(),
+            InventoryKey.LedgerProperty => _s.Rules?.Properties.Where(p => p.Scope is PropertyScope.Pieces or PropertyScope.Both).Select(p => p.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>(),
             _ => Array.Empty<string>(),
         };
         var keep = _keyName.SelectedItem as string;

@@ -235,5 +235,7 @@ public sealed class ModuleSession : IDisposable
         GameReplaced?.Invoke();
     }
 
-    public void Dispose() => Archive.Dispose();
+    public bool Disposed { get; private set; }
+
+    public void Dispose() { Disposed = true; Archive.Dispose(); }
 }
