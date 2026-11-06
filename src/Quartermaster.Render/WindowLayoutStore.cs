@@ -6,7 +6,8 @@ using System.Text.RegularExpressions;
 namespace Quartermaster.Render;
 
 /// <summary>Remembered state of one window. Bounds are screen coordinates (empty when unknown).</summary>
-public readonly record struct SavedWindow(bool Floating, Rectangle Bounds, bool Maximized);
+/// <remarks><c>Dpi</c> is the DPI of the monitor the bounds were captured on (0 = unknown).</remarks>
+public readonly record struct SavedWindow(bool Floating, Rectangle Bounds, bool Maximized, int Dpi = 0);
 
 /// <summary>
 /// Per-module layout (<c>layout/&lt;sha&gt;.json</c>) and global main-window layout (<c>layout.json</c>) under an injected root.
@@ -14,7 +15,7 @@ public readonly record struct SavedWindow(bool Floating, Rectangle Bounds, bool 
 /// </summary>
 public sealed class WindowLayoutStore(string root)
 {
-    sealed class Dto { public int X { get; set; } public int Y { get; set; } public int W { get; set; } public int H { get; set; } public bool Floating { get; set; } public bool Maximized { get; set; } }
+    sealed class Dto { public int X { get; set; } public int Y { get; set; } public int W { get; set; } public int H { get; set; } public bool Floating { get; set; } public bool Maximized { get; set; } public int Dpi { get; set; } }
     sealed class ModuleFile { public Dictionary<string, Dto>? Windows { get; set; } }
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
@@ -62,8 +63,8 @@ public sealed class WindowLayoutStore(string root)
         catch (Exception) { return null; }
     }
 
-    static SavedWindow From(Dto d) => new(d.Floating, new Rectangle(d.X, d.Y, d.W, d.H), d.Maximized);
-    static Dto To(SavedWindow w) => new() { X = w.Bounds.X, Y = w.Bounds.Y, W = w.Bounds.Width, H = w.Bounds.Height, Floating = w.Floating, Maximized = w.Maximized };
+    static SavedWindow From(Dto d) => new(d.Floating, new Rectangle(d.X, d.Y, d.W, d.H), d.Maximized, d.Dpi);
+    static Dto To(SavedWindow w) => new() { X = w.Bounds.X, Y = w.Bounds.Y, W = w.Bounds.Width, H = w.Bounds.Height, Floating = w.Floating, Maximized = w.Maximized, Dpi = w.Dpi };
 
     static void Write(string path, object value)
     {

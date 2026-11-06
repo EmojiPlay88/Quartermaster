@@ -6,7 +6,7 @@ using Quartermaster.Vassal;
 namespace Quartermaster.App;
 
 /// <summary>MDI child showing one document: PDF/HTML in WebView2, text in a read-only TextBox.</summary>
-sealed class PdfWindow : Form
+sealed class PdfWindow : Form, WindowManager.IReparentAware
 {
     public const string RuntimeUrl = "https://developer.microsoft.com/microsoft-edge/webview2/";
 
@@ -47,6 +47,28 @@ sealed class PdfWindow : Form
 
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public DocumentDef Document { get; }
+
+    bool _rebuildWeb;
+
+    // Moving between MDI and desktop recreates this window's handle, which can leave a WebView2 control blank. The control is
+    // discarded before the move and rebuilt (same file, same page) after it.
+    void WindowManager.IReparentAware.BeforeReparent()
+    {
+        if (_web == null || IsDisposed) return;
+        Controls.Remove(_web);
+        _web.Dispose();
+        _web = null;
+        _rebuildWeb = true;
+    }
+
+    void WindowManager.IReparentAware.AfterReparent()
+    {
+        if (!_rebuildWeb || IsDisposed) return;
+        _rebuildWeb = false;
+        _web = new WebView2 { Dock = DockStyle.Fill };
+        Controls.Add(_web);
+        BeginInvoke(new Action(async () => await InitAsync())); // InitAsync has its own guarded error handling
+    }
 
     void Fail(string message, Exception ex)
     {

@@ -1,4 +1,4 @@
-﻿using Quartermaster.Core;
+using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 using SkiaSharp;

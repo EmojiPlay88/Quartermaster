@@ -17,6 +17,8 @@ sealed class WindowManager
     [DllImport("user32.dll")] static extern IntPtr GetSystemMenu(IntPtr hWnd, bool revert);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool AppendMenu(IntPtr hMenu, uint flags, UIntPtr id, string? text);
     [DllImport("user32.dll")] static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(Point pt, uint flags);
+    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     /// <summary>Adds "Dock to Main Window" to a floating window's system menu and reports its selection.</summary>
@@ -62,8 +64,51 @@ sealed class WindowManager
         }
     }
 
+    /// <summary>Working areas with the DPI of each monitor (physical pixels).</summary>
+    internal static ScreenInfo[] Screens() => Screen.AllScreens.Select(sc => new ScreenInfo(sc.WorkingArea, MonitorDpi(sc.WorkingArea))).ToArray();
+
+    internal static ScreenInfo PrimaryScreen()
+    {
+        var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1024, 768);
+        return new ScreenInfo(wa, MonitorDpi(wa));
+    }
+
+    static int MonitorDpi(Rectangle area)
+    {
+        try
+        {
+            var h = MonitorFromPoint(new Point(area.X + area.Width / 2, area.Y + area.Height / 2), 2 /* nearest */);
+            if (h != IntPtr.Zero && GetDpiForMonitor(h, 0, out var x, out _) == 0 && x > 0) return (int)x;
+        }
+        catch (Exception) { /* old OS / missing export */ }
+        return 96;
+    }
+
+    /// <summary>
+    /// Places a form from saved bounds: target monitor and size are worked out by <see cref="ScreenFit.Restore"/>; the location is set
+    /// first and the handle created so the form is on the target monitor (and its DPI has settled) before the size is applied.
+    /// </summary>
+    internal static void ApplyBounds(Form f, Rectangle saved, int savedDpi)
+    {
+        var rect = ScreenFit.Restore(saved, savedDpi, Screens(), PrimaryScreen());
+        f.StartPosition = FormStartPosition.Manual;
+        f.Location = rect.Location;
+        _ = f.Handle;
+        f.Location = rect.Location;
+        f.Size = rect.Size;
+    }
+
+    /// <summary>Optional hook for windows whose content cannot survive a handle recreation (WebView2).</summary>
+    internal interface IReparentAware
+    {
+        void BeforeReparent();
+        void AfterReparent();
+    }
+
     sealed class FloatState
     {
+        public bool ShowIcon, KeyPreview, MinimizeBox, MaximizeBox, ShowInTaskbar;
+        public Icon? Icon;
         public SysMenuHook? Hook;
         public Size SizeAtBegin;
         public bool Moving;
@@ -115,10 +160,10 @@ sealed class WindowManager
         if (_float.ContainsKey(f))
         {
             var max = f.WindowState == FormWindowState.Maximized;
-            _saved[key] = new SavedWindow(true, f.WindowState == FormWindowState.Normal ? f.Bounds : f.RestoreBounds, max);
+            _saved[key] = new SavedWindow(true, f.WindowState == FormWindowState.Normal ? f.Bounds : f.RestoreBounds, max, f.DeviceDpi);
         }
         else
-            _saved[key] = new SavedWindow(false, prev.Bounds, f.WindowState == FormWindowState.Maximized);
+            _saved[key] = new SavedWindow(false, prev.Bounds, f.WindowState == FormWindowState.Maximized, prev.Dpi);
     }
 
     public SavedWindow? LoadMain() => _store.LoadMain();
@@ -145,8 +190,6 @@ sealed class WindowManager
 
     // ---------- floating ----------
 
-    static Rectangle[] WorkAreas() => Screen.AllScreens.Select(s => s.WorkingArea).ToArray();
-
     Rectangle DefaultBounds(Point? cursor)
     {
         var w = Math.Max(640, _host.Width * 3 / 4);
@@ -159,7 +202,8 @@ sealed class WindowManager
     /// <summary>Makes a registered, not-yet-shown window a floating window at the saved bounds (layout restore).</summary>
     public void ShowFloating(Form w, SavedWindow saved)
     {
-        ConfigureFloating(w, saved.Bounds.IsEmpty ? DefaultBounds(null) : saved.Bounds, saved.Maximized);
+        if (saved.Bounds.IsEmpty) ConfigureFloating(w, DefaultBounds(null), _host.DeviceDpi, saved.Maximized);
+        else ConfigureFloating(w, saved.Bounds, saved.Dpi, saved.Maximized);
         Program.AppLog("restored floating: " + TitleOf(w));
         w.Show();
     }
@@ -168,15 +212,20 @@ sealed class WindowManager
     public void PopOut(Form f, Point? cursor = null)
     {
         if (f.IsDisposed || _float.ContainsKey(f) || !_keys.ContainsKey(f)) return;
+        var dpi = _host.DeviceDpi;
+        SavedWindow s = default;
         var bounds = cursor != null ? DefaultBounds(cursor)
-            : _saved.TryGetValue(_keys[f], out var s) && !s.Bounds.IsEmpty ? s.Bounds : DefaultBounds(null);
+            : _saved.TryGetValue(_keys[f], out s) && !s.Bounds.IsEmpty ? s.Bounds : DefaultBounds(null);
+        if (cursor == null && s.Dpi > 0 && !s.Bounds.IsEmpty) dpi = s.Dpi;
+        (f as IReparentAware)?.BeforeReparent();
         f.SuspendLayout();
         f.Hide();
         f.WindowState = FormWindowState.Normal;
         f.MdiParent = null;
-        ConfigureFloating(f, bounds, false);
+        ConfigureFloating(f, bounds, dpi, false);
         f.ResumeLayout();
         f.Show();
+        (f as IReparentAware)?.AfterReparent();
         f.Activate();
         _host.SyncTabs(null);
         if (cursor != null && Control.MouseButtons == MouseButtons.Left)
@@ -190,9 +239,13 @@ sealed class WindowManager
         SendMessage(f.Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
     }
 
-    void ConfigureFloating(Form f, Rectangle wanted, bool maximized)
+    void ConfigureFloating(Form f, Rectangle wanted, int wantedDpi, bool maximized)
     {
-        var primary = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1024, 768);
+        var st = new FloatState
+        {
+            ShowIcon = f.ShowIcon, KeyPreview = f.KeyPreview, MinimizeBox = f.MinimizeBox, MaximizeBox = f.MaximizeBox,
+            ShowInTaskbar = f.ShowInTaskbar, Icon = f.Icon,
+        };
         f.MdiParent = null;
         f.Owner = null;
         f.FormBorderStyle = FormBorderStyle.Sizable;
@@ -200,14 +253,12 @@ sealed class WindowManager
         f.ShowIcon = true;
         f.Icon = _host.Icon;
         f.MinimizeBox = f.MaximizeBox = true;
-        f.StartPosition = FormStartPosition.Manual;
-        f.Bounds = ScreenFit.Fit(wanted, WorkAreas(), primary);
+        ApplyBounds(f, wanted, wantedDpi);
         f.Text = TitleOf(f) + " — Quartermaster";
         f.KeyPreview = true;
         f.KeyDown += FloatKeyDown;
         f.ResizeBegin += OnResizeBegin;
         f.ResizeEnd += OnResizeEnd;
-        var st = new FloatState();
         st.Hook = new SysMenuHook(f, () => Dock(f));
         _float[f] = st;
         _order.Add(f);
@@ -227,15 +278,22 @@ sealed class WindowManager
         f.KeyDown -= FloatKeyDown;
         f.ResizeBegin -= OnResizeBegin;
         f.ResizeEnd -= OnResizeEnd;
+        (f as IReparentAware)?.BeforeReparent();
         f.SuspendLayout();
         f.Hide();
         f.WindowState = FormWindowState.Normal;
         f.Text = TitleOf(f);
-        f.ShowInTaskbar = false;
-        _saved[_keys[f]] = new SavedWindow(false, _saved[_keys[f]].Bounds, true);
+        f.ShowInTaskbar = st.ShowInTaskbar;
+        f.ShowIcon = st.ShowIcon;
+        f.Icon = st.Icon;
+        f.KeyPreview = st.KeyPreview;
+        f.MinimizeBox = st.MinimizeBox;
+        f.MaximizeBox = st.MaximizeBox;
+        _saved[_keys[f]] = new SavedWindow(false, _saved[_keys[f]].Bounds, true, _saved[_keys[f]].Dpi);
         _host.PrepareDock(f);
         f.ResumeLayout();
         f.Show();
+        (f as IReparentAware)?.AfterReparent();
         f.Activate();
         _host.SyncTabs(null);
         FloatingChanged?.Invoke();

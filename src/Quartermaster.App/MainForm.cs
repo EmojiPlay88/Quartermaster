@@ -1,4 +1,4 @@
-﻿using System.Xml;
+using System.Xml;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -86,10 +86,7 @@ sealed class MainForm : Form
     void RestoreMainBounds()
     {
         if (_wm.LoadMain() is not { } m) return;
-        var areas = Screen.AllScreens.Select(sc => sc.WorkingArea).ToArray();
-        var primary = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1024, 768);
-        StartPosition = FormStartPosition.Manual;
-        Bounds = ScreenFit.Fit(m.Bounds, areas, primary);
+        WindowManager.ApplyBounds(this, m.Bounds, m.Dpi);
         if (m.Maximized) WindowState = FormWindowState.Maximized;
     }
 
@@ -652,14 +649,25 @@ sealed class MainForm : Form
     /// <summary>Docks the floating window back as a tab and pops it out again, checking the tab strip each time.</summary>
     void SmokeDockRoundTrip()
     {
-        if (_wm.Floating.FirstOrDefault(f => !f.IsDisposed) is not { } f) return;
-        var before = _tabs.Tabs.Count;
+        foreach (var d in _docs.Values.Where(d => !d.IsDisposed).ToList()) RoundTrip(d); // text document: handle recreation
+        if (_wm.Floating.FirstOrDefault(f => !f.IsDisposed) is { } f) RoundTrip(f);
+    }
+
+    /// <summary>pop out, dock, pop out again (and re-dock if it started docked), verifying tab strip and parent each time.</summary>
+    void RoundTrip(Form f)
+    {
+        var wasFloating = _wm.IsFloating(f);
+        bool Floated() => !_tabs.Tabs.Contains(f) && f.MdiParent == null && _wm.IsFloating(f) && f.Text.EndsWith("— Quartermaster");
+        bool Docked() => _tabs.Tabs.Contains(f) && f.MdiParent == this && !_wm.IsFloating(f);
+        if (!wasFloating) _wm.PopOut(f);
+        var a = Floated();
         _wm.Dock(f);
-        var docked = _tabs.Tabs.Contains(f) && f.MdiParent == this && !_wm.IsFloating(f);
+        var b = Docked();
         _wm.PopOut(f);
-        var floated = !_tabs.Tabs.Contains(f) && f.MdiParent == null && _wm.IsFloating(f) && f.Text.EndsWith("— Quartermaster");
-        var ok = docked && floated && _tabs.Tabs.Count == before;
-        Program.AppLog($"smoke: dock/pop-out round trip {(ok ? "ok" : "FAILED")} (tabs {before}; docked {docked}; floated {floated})");
+        var c = Floated();
+        if (!wasFloating) _wm.Dock(f);
+        var ok = a && b && c && (wasFloating ? Floated() : Docked());
+        Program.AppLog($"smoke: dock/pop-out round trip {(ok ? "ok" : "FAILED")} ({f.Text}; floated {a}; docked {b}; refloated {c})");
         if (!ok) Program.ExitCode = 1;
     }
 
@@ -701,7 +709,7 @@ sealed class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _smokeTimer?.Dispose();
-        _wm.SaveMain(new SavedWindow(false, WindowState == FormWindowState.Normal ? Bounds : RestoreBounds, WindowState == FormWindowState.Maximized));
+        _wm.SaveMain(new SavedWindow(false, WindowState == FormWindowState.Normal ? Bounds : RestoreBounds, WindowState == FormWindowState.Maximized, DeviceDpi));
         CloseSession();
         base.OnFormClosed(e);
     }

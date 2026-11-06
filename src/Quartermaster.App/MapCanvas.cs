@@ -1,4 +1,4 @@
-﻿using Quartermaster.Core;
+using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 using SkiaSharp;
@@ -402,20 +402,26 @@ sealed class MapCanvas : SKControl
         if (_drag.Active && !Capture) EndDrag(commit: false, default); // capture stolen (Alt+Tab, dialog): cancel
     }
 
-    int _lastDpi = 96;
+    int _zoomDpi; // DPI the current zoom was set at (0 until the first handle)
+
+    void SyncZoomDpi()
+    {
+        if (_zoomDpi == 0) { _zoomDpi = DeviceDpi; return; }
+        if (DeviceDpi > 0 && DeviceDpi != _zoomDpi) View.Zoom *= DeviceDpi / (float)_zoomDpi;
+        _zoomDpi = DeviceDpi;
+    }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        _lastDpi = DeviceDpi;
+        SyncZoomDpi(); // a pop-out/dock can recreate the handle directly on a monitor with another DPI
     }
 
     /// <summary>Moved to a monitor with different scaling: keep the same map area visible by scaling zoom with the DPI ratio, then repaint crisply.</summary>
     protected override void OnDpiChangedAfterParent(EventArgs e)
     {
         base.OnDpiChangedAfterParent(e);
-        if (DeviceDpi > 0 && _lastDpi > 0 && DeviceDpi != _lastDpi) View.Zoom *= DeviceDpi / (float)_lastDpi;
-        _lastDpi = DeviceDpi;
+        SyncZoomDpi();
         HidePopup();
         Invalidate();
     }

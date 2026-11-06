@@ -1,4 +1,4 @@
-﻿using Quartermaster.Render;
+using Quartermaster.Render;
 using Quartermaster.Vassal;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
@@ -23,19 +23,25 @@ sealed class ChartWindow : Form
             BackColor = SystemColors.AppWorkspace;
         }
 
-        int _lastDpi = 96;
+        int _zoomDpi; // DPI the current zoom was set at (0 until the first handle)
+
+        void SyncZoomDpi()
+        {
+            if (_zoomDpi == 0) { _zoomDpi = DeviceDpi; return; }
+            if (DeviceDpi > 0 && DeviceDpi != _zoomDpi) _view.Zoom *= DeviceDpi / (float)_zoomDpi;
+            _zoomDpi = DeviceDpi;
+        }
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            _lastDpi = DeviceDpi;
+            SyncZoomDpi();
         }
 
         protected override void OnDpiChangedAfterParent(EventArgs e)
         {
             base.OnDpiChangedAfterParent(e);
-            if (DeviceDpi > 0 && _lastDpi > 0 && DeviceDpi != _lastDpi) _view.Zoom *= DeviceDpi / (float)_lastDpi;
-            _lastDpi = DeviceDpi;
+            SyncZoomDpi();
             Invalidate();
         }
 

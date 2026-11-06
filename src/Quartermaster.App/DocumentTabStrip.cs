@@ -1,4 +1,4 @@
-﻿using System.Windows.Forms.VisualStyles;
+using System.Windows.Forms.VisualStyles;
 using Quartermaster.Render;
 
 namespace Quartermaster.App;
@@ -226,7 +226,8 @@ sealed class DocumentTabStrip : Control
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
-        if (_dragTab != null && e.Button == MouseButtons.Left && !ClientRectangle.Contains(e.Location)) PopOutDragged(); // released outside the strip
+        // released clearly above/below the strip (a small sideways overshoot is not a pop-out)
+        if (_dragTab != null && e.Button == MouseButtons.Left && (e.Y < -Height / 2 || e.Y > Height + Height / 2)) PopOutDragged();
         _dragTab = null;
     }
 

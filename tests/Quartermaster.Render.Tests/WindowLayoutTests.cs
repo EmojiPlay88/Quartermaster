@@ -159,3 +159,84 @@ public class WindowLayoutStoreTests : IDisposable
         finally { File.Delete(f); }
     }
 }
+
+public class ScreenFitTitleAndDpiTests
+{
+    static readonly Rectangle P = new(0, 0, 1920, 1040);
+
+    [Fact]
+    public void TitleAboveTop_MovedDown()
+    {
+        var r = ScreenFit.Fit(new Rectangle(100, -500, 800, 600), [P], P);
+        Assert.Equal(new Rectangle(100, 0, 800, 600), r);
+    }
+
+    [Fact]
+    public void TitleBelowBottom_MovedUp()
+    {
+        // 70 px visible passes the 64 rule only if tall enough; make it exactly the title-strip case
+        var r = ScreenFit.Fit(new Rectangle(100, 1040 - 64, 800, 600), [P], P);
+        Assert.True(r.Y <= P.Bottom - ScreenFit.TitleHeight);
+        Assert.Equal(800, r.Width);
+    }
+
+    [Fact]
+    public void TitleMostlyOffLeft_NudgedSoStripVisible()
+    {
+        var r = ScreenFit.Fit(new Rectangle(-736, 100, 800, 600), [P], P);
+        Assert.True(r.Right - P.Left >= 64);
+        Assert.Equal(new Rectangle(-736, 100, 800, 600), r); // exactly 64 visible is allowed
+    }
+
+    [Fact]
+    public void Restore_SameDpi_KeepsBounds()
+    {
+        var s = new ScreenInfo(P, 96);
+        Assert.Equal(new Rectangle(100, 100, 800, 600), ScreenFit.Restore(new Rectangle(100, 100, 800, 600), 96, [s], s));
+    }
+
+    [Fact]
+    public void Restore_SavedOn96_NowMonitorIs192_SizeDoubled()
+    {
+        var p = new ScreenInfo(new Rectangle(0, 0, 1920, 1040), 96);
+        var hi = new ScreenInfo(new Rectangle(1920, 0, 3840, 2120), 192);
+        var r = ScreenFit.Restore(new Rectangle(2000, 100, 800, 600), 96, [p, hi], p);
+        Assert.Equal(new Rectangle(2000, 100, 1600, 1200), r);
+    }
+
+    [Fact]
+    public void Restore_SavedOn192_NowMonitorIs96_SizeHalved()
+    {
+        var p = new ScreenInfo(new Rectangle(0, 0, 1920, 1040), 96);
+        var r = ScreenFit.Restore(new Rectangle(100, 100, 1600, 1200), 192, [p], p);
+        Assert.Equal(new Rectangle(100, 100, 800, 600), r);
+    }
+
+    [Fact]
+    public void Restore_UnknownDpi_NoScaling()
+    {
+        var p = new ScreenInfo(new Rectangle(0, 0, 1920, 1040), 144);
+        Assert.Equal(new Rectangle(100, 100, 800, 600), ScreenFit.Restore(new Rectangle(100, 100, 800, 600), 0, [p], p));
+    }
+
+    [Fact]
+    public void Restore_MonitorGone_ScaledToPrimaryAndCentred()
+    {
+        var p = new ScreenInfo(new Rectangle(0, 0, 1920, 1040), 96);
+        var r = ScreenFit.Restore(new Rectangle(5000, 100, 1600, 1200), 192, [p], p);
+        Assert.Equal(new Rectangle(560, 220, 800, 600), r);
+    }
+
+    [Fact]
+    public void SavedWindow_RoundTripsDpi()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "qm-dpi-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var s = new WindowLayoutStore(root);
+            s.SaveMain(new SavedWindow(false, new Rectangle(1, 2, 3, 4), false, 144));
+            Assert.Equal(144, s.LoadMain()!.Value.Dpi);
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+    }
+}
