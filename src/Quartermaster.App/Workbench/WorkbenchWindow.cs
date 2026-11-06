@@ -15,6 +15,8 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
     readonly TabPage _tablesPage = new("Tables"), _formulasPage = new("Formulas"), _propsPage = new("Properties & Holders");
     readonly TablesTab _tables;
+    readonly FormulasTab _formulas;
+    readonly PropertiesTab _props;
     readonly ListView _issues = new()
     {
         Dock = DockStyle.Bottom, Height = 110, View = View.Details, FullRowSelect = true, HideSelection = false, MultiSelect = false,
@@ -33,8 +35,10 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _viewer = new PdfViewerControl(s, toolbar: true, allowWeb: !Program.Smoke) { Dock = DockStyle.Fill };
         _tables = new TablesTab(s, LinkCurrentPage, ShowRule) { Dock = DockStyle.Fill };
         _tablesPage.Controls.Add(_tables);
-        _formulasPage.Controls.Add(new Label { Dock = DockStyle.Fill, Padding = new Padding(12), Text = "The formula editor is not available yet." });
-        _propsPage.Controls.Add(new Label { Dock = DockStyle.Fill, Padding = new Padding(12), Text = "The property and holder editor is not available yet." });
+        _formulas = new FormulasTab(s, LinkCurrentPage, ShowRule) { Dock = DockStyle.Fill };
+        _formulasPage.Controls.Add(_formulas);
+        _props = new PropertiesTab(s) { Dock = DockStyle.Fill };
+        _propsPage.Controls.Add(_props);
         _tabs.TabPages.AddRange(new[] { _tablesPage, _formulasPage, _propsPage });
         _split.Panel1.Controls.Add(_viewer);
         _split.Panel2.Controls.Add(_tabs);
@@ -134,8 +138,9 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     {
         if (_issues.SelectedItems.Count == 0 || _issues.SelectedItems[0].Tag is not RulesIssue i || _s.Rules is not { } p) return;
         if (p.ById<TableDef>(i.EntityId) != null) { _tabs.SelectedTab = _tablesPage; _tables.SelectTable(i.EntityId); }
-        else if (p.ById<FormulaDef>(i.EntityId) != null) _tabs.SelectedTab = _formulasPage; // selection arrives with the formula editor
-        else if (p.ById<PropertyDef>(i.EntityId) != null || p.ById<HolderDef>(i.EntityId) != null) _tabs.SelectedTab = _propsPage;
+        else if (p.ById<FormulaDef>(i.EntityId) != null) { _tabs.SelectedTab = _formulasPage; _formulas.SelectFormula(i.EntityId); }
+        else if (p.ById<PropertyDef>(i.EntityId) != null) { _tabs.SelectedTab = _propsPage; _props.SelectProperty(i.EntityId); }
+        else if (p.ById<HolderDef>(i.EntityId) != null) { _tabs.SelectedTab = _propsPage; _props.SelectHolder(i.EntityId); }
     }
 
     // ---------- rule references ----------
@@ -174,6 +179,13 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     }
 
     // ---------- smoke ----------
+
+    /// <summary>Smoke: shows the named tab (tables, formulas, properties); unknown or empty keeps the Tables tab.</summary>
+    public void SelectTabForSmoke(string? name)
+    {
+        _tabs.SelectedTab = name?.ToLowerInvariant() switch { "formulas" => _formulasPage, "properties" => _propsPage, _ => _tablesPage };
+        if (_tabs.SelectedTab == _formulasPage && _formulas.SelectedFormulaId == null) Program.AppLog("smoke: no formula to show");
+    }
 
     public string? SelectedTableForSmoke => _tables.SelectedTableId;
 

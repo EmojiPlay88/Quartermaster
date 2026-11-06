@@ -22,8 +22,9 @@ sealed class FormulaDialog : Form
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 150 };
     readonly TableLayoutPanel _body = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Padding = new Padding(8, 8, 8, 0) };
     readonly GroupBox _formulaGroup;
-    readonly string _formulaId;
-    readonly string? _pieceId;
+    string _formulaId;
+    string? _pieceId;
+    bool _embedded;
     DialogView? _last;
     GameSession? _game;
     bool _closing;
@@ -96,12 +97,9 @@ sealed class FormulaDialog : Form
         _apply.Visible = !previewOnly;
         AcceptButton = _apply;
         CancelButton = _cancel;
-        if (!previewOnly)
-        {
-            s.RulesChanged += OnRulesChanged;
-            s.GameReplaced += OnGameReplaced;
-            HookGame();
-        }
+        s.RulesChanged += OnRulesChanged;
+        s.GameReplaced += OnGameReplaced;
+        HookGame();
         Recalc();
     }
 
@@ -124,7 +122,12 @@ sealed class FormulaDialog : Form
 
     void CheckPieceThenRefresh()
     {
-        if (_pieceId != null && _s.Game?.State.Pieces.ContainsKey(_pieceId) != true) { Close(); return; }
+        if (_pieceId != null && _s.Game?.State.Pieces.ContainsKey(_pieceId) != true)
+        {
+            if (_embedded) { SetPiece(null); return; }
+            Close();
+            return;
+        }
         _debounce.Stop();
         _debounce.Start();
     }
@@ -134,14 +137,15 @@ sealed class FormulaDialog : Form
     {
         try
         {
-            if (_s.Rules?.ById<FormulaDef>(_formulaId) is not { } f || _s.Runner is not { } runner) { Close(); return; }
+            if (_s.Rules?.ById<FormulaDef>(_formulaId) is not { } f || _s.Runner is not { } runner)
+            {
+                if (_embedded) { _body.Visible = false; return; } // the editor keeps the window; it just has nothing to show
+                Close();
+                return;
+            }
+            _body.Visible = true;
             _model.Rebind(runner, f);
-            var old = _view;
-            _view = new FormulaFormView(FormulaLayout.Build(f, _s.Rules), OnEdit, key => { _model.Reroll(key); Recalc(); }) { MinimumSize = new Size(540, 0) };
-            _view.Margin = Padding.Empty;
-            var host = old.Parent;
-            if (host != null) { host.Controls.Remove(old); host.Controls.Add(_view); }
-            old.Dispose();
+            ReplaceView(f);
             _ruleRef.Enabled = f.RuleRefId != null && _s.Rules.ById<RuleRef>(f.RuleRefId) != null;
             _debounce.Stop();
             Recalc();
@@ -152,7 +156,24 @@ sealed class FormulaDialog : Form
         }
     });
 
-    protected override void OnFormClosed(FormClosedEventArgs e)
+    /// <summary>Builds the form view for the formula and swaps it in; a view made after the window was scaled is scaled to match.</summary>
+    void ReplaceView(FormulaDef f)
+    {
+        var old = _view;
+        _view = new FormulaFormView(FormulaLayout.Build(f, _s.Rules!), OnEdit, key => { _model.Reroll(key); Recalc(); }) { MinimumSize = new Size(540, 0) };
+        _view.Margin = Padding.Empty;
+        var host = old.Parent;
+        if (host != null)
+        {
+            host.Controls.Remove(old);
+            host.Controls.Add(_view);
+            var factor = DeviceDpi / 96f;
+            if (Math.Abs(factor - 1f) > 0.01f) _view.Scale(new SizeF(factor, factor));
+        }
+        old.Dispose();
+    }
+
+    void Unhook()
     {
         _closing = true;
         _s.RulesChanged -= OnRulesChanged;
@@ -161,6 +182,11 @@ sealed class FormulaDialog : Form
         _game = null;
         _debounce.Stop();
         Open.Remove(this);
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        Unhook();
         base.OnFormClosed(e);
     }
 
@@ -181,12 +207,39 @@ sealed class FormulaDialog : Form
         return row;
     }
 
-    /// <summary>The body without its window, for embedding in another form (the rules editor preview). Apply is hidden.</summary>
-    public Control CreatePreviewPanel()
+    /// <summary>
+    /// Shows this (preview-only) dialog as a child of another control, e.g. the workbench preview. The dialog keeps owning its body, timer and
+    /// event hooks and releases them when disposed (disposing the host disposes it); it no longer closes itself when the piece or formula goes away.
+    /// </summary>
+    public void Embed(Control host)
     {
-        Controls.Remove(_body);
-        _apply.Visible = false;
-        return _body;
+        _embedded = true;
+        _cancel.Visible = false;
+        TopLevel = false;
+        FormBorderStyle = FormBorderStyle.None;
+        AutoSize = false;
+        AutoScroll = true;
+        Dock = DockStyle.Fill;
+        host.Controls.Add(this);
+        Show();
+    }
+
+    /// <summary>Embedded preview: another formula (by id) of the same pack.</summary>
+    public void SetFormula(string formulaId)
+    {
+        if (formulaId == _formulaId) return;
+        _formulaId = formulaId;
+        _model.PieceId = _pieceId;
+        OnRulesChanged();
+    }
+
+    /// <summary>Embedded preview: run against another piece (null = no unit). Typed values are kept.</summary>
+    public void SetPiece(string? pieceId)
+    {
+        _pieceId = pieceId;
+        _model.PieceId = pieceId;
+        _debounce.Stop();
+        Recalc();
     }
 
     void OnEdit(string variable, string text)
@@ -284,7 +337,11 @@ sealed class FormulaDialog : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _debounce.Dispose();
+        if (disposing)
+        {
+            Unhook();
+            _debounce.Dispose();
+        }
         base.Dispose(disposing);
     }
 }

@@ -33,7 +33,11 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         runner = newRunner;
         formula = newFormula;
     }
-    public string? PieceId => pieceId;
+    public string? PieceId
+    {
+        get => pieceId;
+        set => pieceId = value;
+    }
 
     /// <summary>When on, Roll variables become typed boxes (the player rolled real dice).</summary>
     public bool PhysicalDice

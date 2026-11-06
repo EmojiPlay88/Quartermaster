@@ -604,6 +604,7 @@ sealed class MainForm : Form
         ShowWorkbench();
         if (_benches.TryGetValue("workbench", out var w) && !w.IsDisposed && w is WorkbenchWindow wb)
         {
+            wb.SelectTabForSmoke(_opts.WorkbenchTab);
             Program.AppLog($"smoke: workbench opened; selected table {wb.SelectedTableForSmoke ?? "(none)"}; {wb.IssueCountForSmoke} issue(s)");
             wb.SaveScreenshot(_opts.ScreenshotWorkbench);
         }
