@@ -62,6 +62,9 @@ public static class LedgerTable
         return rows.Where(r => r.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || r.Kind.Contains(f, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
+    /// <summary>UI/CSV number text: invariant culture, "0.##".</summary>
+    public static string FormatNumber(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
     /// <summary>RFC 4180 (CRLF line ends); numbers invariant "0.##"; empty for missing values.</summary>
     public static string ToCsv(IReadOnlyList<PropertyDef> cols, IReadOnlyList<LedgerRow> rows)
     {

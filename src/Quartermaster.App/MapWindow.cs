@@ -290,9 +290,10 @@ sealed class MapWindow : Form
     {
         if (_s.Rules is not { } rules) return null;
         var prop = rules.Properties.FirstOrDefault(p => p.Scope != Quartermaster.Rules.PropertyScope.Holders
-            && string.Equals(p.SheetField, rowName, StringComparison.OrdinalIgnoreCase));
+            && string.Equals(p.SheetField, rowName, StringComparison.OrdinalIgnoreCase)
+            && PieceFilter.Matches(p.AppliesTo, piece, game.State, _s.Model, rules));
         if (prop == null) return null;
-        return Ledger.GetOrDefault(game.State, LedgerKey.Piece(piece.Id), prop).ToString("0.##", System.Globalization.CultureInfo.CurrentCulture);
+        return Ledger.GetOrDefault(game.State, LedgerKey.Piece(piece.Id), prop).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     void EditSheet(PieceAction action, PieceInstance piece, GameSession game)

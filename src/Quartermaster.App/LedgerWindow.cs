@@ -101,10 +101,14 @@ sealed class LedgerWindow : Form
     void OnGameReplaced() => OnUi(() => { HookGame(); Kick(); });
     void OnRulesChanged() => OnUi(Kick);
 
-    protected override void OnFormClosing(FormClosingEventArgs e)
+    protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        base.OnFormClosing(e);
-        if (e.Cancel) return;
+        base.OnFormClosed(e);
+        Unhook();
+    }
+
+    void Unhook()
+    {
         _closing = true;
         _debounce.Stop();
         _s.RulesChanged -= OnRulesChanged;
@@ -115,7 +119,7 @@ sealed class LedgerWindow : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _debounce.Dispose();
+        if (disposing) { Unhook(); _debounce.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -223,7 +227,7 @@ sealed class LedgerWindow : Form
         }
     }
 
-    static string Fmt(double v) => v.ToString("0.##", CultureInfo.CurrentCulture);
+    static string Fmt(double v) => LedgerTable.FormatNumber(v);
 
     void OnCellValueNeeded(object? sender, DataGridViewCellValueEventArgs e)
     {
@@ -295,6 +299,7 @@ sealed class LedgerWindow : Form
             return;
         }
         if (_s.Game is not { } game) return;
+        if (Ledger.Get(game.State, key, prop.Id) is { } cur && cur == after) { Reload(); return; } // unchanged: no history entry
         var note = InputDialog.Ask(this, "Manual change", $"Why is {prop.Name} being set to {Fmt(after)}? (required)");
         if (string.IsNullOrWhiteSpace(note)) { Reload(); return; }
         var before = Ledger.GetOrDefault(game.State, key, prop);

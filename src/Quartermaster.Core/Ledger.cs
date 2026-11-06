@@ -44,7 +44,7 @@ public static class Ledger
         var prop = pack?.ById<PropertyDef>(e.PropertyId)?.Name ?? "(deleted property)";
         string who = e.Source switch
         {
-            "formula" => (e.FormulaId == null ? null : pack?.ById<FormulaDef>(e.FormulaId)?.Name) ?? "(deleted formula)",
+            "formula" => (e.FormulaId == null ? null : pack?.ById<FormulaDef>(e.FormulaId)?.Name) ?? "deleted formula",
             "manual" => "manual: " + e.Note,
             "seed" => "seed",
             _ => e.Source,

@@ -203,6 +203,8 @@ public class LedgerTests
         Assert.Equal("−27 Fuel (Fuel Use)", Ledger.Describe(e, pack));
         Assert.Contains("(deleted formula)", Ledger.Describe(e with { FormulaId = "gone" }, pack));
         Assert.Contains("(deleted formula)", Ledger.Describe(e, null));
+        Assert.DoesNotContain("((", Ledger.Describe(e, null));
+        Assert.Equal("−27 (deleted property) (Fuel Use)", Ledger.Describe(e with { PropertyId = "zz" }, pack));
         Assert.Equal("+2.5 Fuel (manual: oops)", Ledger.Describe(e with { Before = 1, After = 3.5, Source = "manual", Note = "oops" }, pack));
         Assert.Equal("0 (deleted property) (seed)", Ledger.Describe(e with { PropertyId = "zz", After = 100, Source = "seed" }, pack));
     }

@@ -58,12 +58,27 @@ public class LedgerTableTests
     }
 
     [Fact]
+    public void FormatNumber_InvariantUnderCommaCulture()
+    {
+        var old = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+        try
+        {
+            Assert.Equal("7.25", LedgerTable.FormatNumber(7.25));
+            Assert.Equal("-4.5", LedgerTable.FormatNumber(-4.5));
+            Assert.Equal("1234.57", LedgerTable.FormatNumber(1234.5678));
+            Assert.Equal("+2.5 Fuel (manual: x)", Ledger.Describe(new LedgerEntry(1, "p:u1", "fuel", 1, 3.5, "manual", null, null, "x", null), RunnerFx.Pack()));
+        }
+        finally { System.Globalization.CultureInfo.CurrentCulture = old; }
+    }
+
+    [Fact]
     public void LedgerHistory_DeletedFormula_DescribedAsDeleted()
     {
         var s = new GameState();
         s.Apply(new LedgerDelta("p:u1", "fuel", 100, 73, "formula", "gone", null, null, null));
         var line = Ledger.Describe(Ledger.History(s, "p:u1", "fuel")[0], RunnerFx.Pack());
-        Assert.Equal("−27 Fuel ((deleted formula))", line);
+        Assert.Equal("−27 Fuel (deleted formula)", line);
         Assert.Contains("(deleted formula)", line);
     }
 }
