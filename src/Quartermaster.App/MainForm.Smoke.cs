@@ -1,0 +1,210 @@
+using Quartermaster.Core;
+using Quartermaster.Render;
+using Quartermaster.Vassal;
+
+namespace Quartermaster.App;
+
+/// <summary>Smoke-mode helpers of the main window (screenshots and self-checks driven by command-line flags).</summary>
+sealed partial class MainForm
+{
+    /// <summary>Smoke: opens the first formula for the first piece it applies to (preview mode), optionally saving a screenshot.</summary>
+    void SmokeFormulaDialog()
+    {
+        if (_session is not { Rules: { } rules, Game: { } game } s) return;
+        foreach (var piece in game.State.Pieces.Values)
+        {
+            var f = PieceFilter.FormulasFor(rules, piece, game.State, s.Model).FirstOrDefault();
+            if (f == null) continue;
+            using var dlg = new FormulaDialog(s, f.Id, piece.Id, previewOnly: true) { Host = this };
+            dlg.Show(this);
+            dlg.Update();
+            Program.AppLog($"smoke: formula dialog '{dlg.Text}' opened");
+            if (_opts.ScreenshotFormula != null) { dlg.SmokeFillInputs(); dlg.SaveScreenshot(_opts.ScreenshotFormula); }
+            dlg.Close();
+            // Modeless dialog owned by an MDI child map, as the Calculate menu opens it; opening twice must reuse it.
+            var owner = (Form?)FirstMap() ?? this;
+            var live = FormulaDialog.Show(s, f.Id, piece.Id, owner, this);
+            var again = FormulaDialog.Show(s, f.Id, piece.Id, owner, this);
+            Program.AppLog($"smoke: modeless formula dialog owner={live?.Owner?.Text} deduped={ReferenceEquals(live, again)}");
+            if (live == null || !ReferenceEquals(live, again)) Program.ExitCode = 1;
+            var problem = live?.SmokeApply();
+            Program.AppLog("smoke: formula apply " + (problem ?? "closed the dialog and recorded exactly the previewed entries"));
+            if (problem != null) Program.ExitCode = 1;
+            if (live is { IsDisposed: false }) live.Close();
+            return;
+        }
+        if (_opts.ScreenshotFormula != null)
+        {
+            Program.AppLog("smoke: --screenshot-formula given but no formula applies to any piece.");
+            Program.ExitCode = 1;
+        }
+    }
+
+    /// <summary>Smoke: opens the workbench (Tables tab, first table selected) and saves a screenshot when asked.</summary>
+    void SmokeWorkbench()
+    {
+        if (_opts.ScreenshotWorkbench == null) return;
+        ShowWorkbench();
+        if (_benches.TryGetValue("workbench", out var w) && !w.IsDisposed && w is WorkbenchWindow wb)
+        {
+            wb.SelectTabForSmoke(_opts.WorkbenchTab);
+            Program.AppLog($"smoke: workbench opened; selected table {wb.SelectedTableForSmoke ?? "(none)"}; {wb.IssueCountForSmoke} issue(s)");
+            wb.SaveScreenshot(_opts.ScreenshotWorkbench);
+        }
+        else
+        {
+            Program.AppLog("smoke: --screenshot-workbench given but the workbench did not open.");
+            Program.ExitCode = 1;
+        }
+    }
+
+    /// <summary>Smoke: opens the ledger window (once rules are loaded) and optionally saves a screenshot of it.</summary>
+    void SmokeLedger()
+    {
+        if (_session?.Rules == null)
+        {
+            if (_opts.ScreenshotLedger != null) { Program.AppLog("smoke: --screenshot-ledger given but no rules pack is loaded."); Program.ExitCode = 1; }
+            return;
+        }
+        ShowLedger();
+        if (_ledgers.TryGetValue("ledger", out var w) && !w.IsDisposed && w is LedgerWindow lw)
+        {
+            Program.AppLog($"smoke: ledger window opened with {lw.RowCountForSmoke} row(s)");
+            if (_opts.ScreenshotLedger != null) lw.SaveScreenshot(_opts.ScreenshotLedger);
+        }
+        else Program.ExitCode = 1;
+    }
+
+    // ---------- smoke: wait for tiling, optional screenshot ----------
+
+    DateTime? _smokeWaitStart;
+    readonly DateTime _smokeStartedAt = DateTime.UtcNow;
+
+    bool _smokeExtrasOpened;
+
+    /// <summary>Opens the first chart and first text document so the tab strip shows several tabs (no PDF/WebView2 in smoke).</summary>
+    void OpenSmokeDocuments()
+    {
+        if (_session == null) return;
+        if (_session.Model.Charts.FirstOrDefault() is { } c) OnNodeActivated(new WindowTreeNode(c.Name, WindowNodeKind.Chart, c, []));
+        if (_session.Model.Documents.FirstOrDefault(d => d.Kind == DocumentKind.Text) is { } d)
+            OnNodeActivated(new WindowTreeNode(d.Title, WindowNodeKind.Document, d, []));
+        if (_maps.Values.FirstOrDefault(w => !w.IsDisposed) is { } m) m.Activate(); // tab strip shows all tabs, map on top
+        Update();
+        Program.AppLog($"smoke: strip bounds {_tabs.Bounds} visible {_tabs.Visible}; mdi states {string.Join(',', MdiChildren.Select(m => m.WindowState))}");
+        Program.AppLog($"smoke: {_tabs.Tabs.Count} document tab(s): " + string.Join(" | ", _tabs.Tabs.Select(t => t.Text)));
+    }
+
+    void FinishSmoke()
+    {
+        var pending = _maps.Values.Any(w => !w.IsDisposed && !w.TilingDone);
+        _smokeWaitStart ??= DateTime.UtcNow;
+        if (pending && DateTime.UtcNow - _smokeWaitStart < TimeSpan.FromSeconds(60))
+        {
+            _smokeTimer!.Interval = 200;
+            _smokeTimer.Start();
+            return;
+        }
+        if (!_smokeExtrasOpened) { _smokeExtrasOpened = true; Guard(OpenSmokeDocuments); }
+        if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
+        else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
+        Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
+        Guard(SmokeFormulaDialog);
+        Guard(SmokeLedger);
+        Guard(SmokeWorkbench);
+        if (_opts.Screenshot != null) Guard(() => SaveScreenshot(this, _opts.Screenshot, true));
+        if (_opts.ScreenshotFloat != null)
+        {
+            var fl = _wm.Floating.FirstOrDefault(f => !f.IsDisposed);
+            if (fl == null) Program.AppLog("smoke: --screenshot-float given but no floating window exists.");
+            else Guard(() => SaveScreenshot(fl, _opts.ScreenshotFloat, false));
+        }
+        if (_opts.FloatMainMap) Guard(SmokeDockRoundTrip);
+        if (_opts.ScreenshotLog != null) Guard(SmokeLog);
+        Close();
+    }
+
+    /// <summary>Docks the floating window back as a tab and pops it out again, checking the tab strip each time.</summary>
+    void SmokeDockRoundTrip()
+    {
+        foreach (var d in _docs.Values.Where(d => !d.IsDisposed).ToList()) RoundTrip(d); // text document: handle recreation
+        if (_wm.Floating.FirstOrDefault(f => !f.IsDisposed) is { } f) RoundTrip(f);
+    }
+
+    /// <summary>pop out, dock, pop out again (and re-dock if it started docked), verifying tab strip and parent each time.</summary>
+    void RoundTrip(Form f)
+    {
+        var wasFloating = _wm.IsFloating(f);
+        const string suffix = " — Quartermaster";
+        bool Floated() => !_tabs.Tabs.Contains(f) && f.MdiParent == null && _wm.IsFloating(f) && f.Text.EndsWith(suffix)
+            && f.Text.IndexOf(suffix, StringComparison.Ordinal) == f.Text.Length - suffix.Length; // exactly one suffix
+        bool Docked() => _tabs.Tabs.Contains(f) && f.MdiParent == this && !_wm.IsFloating(f);
+        if (!wasFloating) _wm.PopOut(f);
+        var a = Floated();
+        _wm.Dock(f);
+        var b = Docked();
+        _wm.PopOut(f);
+        var c = Floated();
+        if (!wasFloating) _wm.Dock(f);
+        var ok = a && b && c && (wasFloating ? Floated() : Docked());
+        Program.AppLog($"smoke: dock/pop-out round trip {(ok ? "ok" : "FAILED")} ({f.Text}; floated {a}; docked {b}; refloated {c})");
+        if (!ok) Program.ExitCode = 1;
+    }
+
+    /// <summary>Issues a 2d6 roll and one move (both stamped like real UI commands) so the log is not empty, then saves the panel screenshot.</summary>
+    void SmokeLog()
+    {
+        if (_session?.Game is not { } game || _logDock.Panel == null)
+        {
+            Program.AppLog("smoke: --screenshot-log given but there is no game or log panel.");
+            Program.ExitCode = 1;
+            return;
+        }
+        game.Execute(CommandLog.Stamp(new RollDice("Smoke attack", 2, 6, new[] { 3, 4 })));
+        var piece = game.State.Pieces.Values.FirstOrDefault();
+        if (piece != null)
+            game.Execute(CommandLog.Prepare(new MovePieces(new[] { piece.Id }, piece.MapId, new PointD(piece.Pos.X + 50, piece.Pos.Y - 20), null), game.State, _session.Model));
+        else Program.AppLog("smoke: no piece to move for the log screenshot.");
+        _logDock.PopOut();
+        var floated = _logDock.Float is { } lf && _logDock.Panel!.Parent == lf && lf.Text == "Log — Quartermaster" && _wm.IsFloating(lf);
+        _logDock.DockBack();
+        var docked = _logDock.Float == null && _logDock.Panel!.Parent == _logDock.Host && _logDock.Host.Visible && !_wm.Floating.Any(x => x is LogFloatForm);
+        Program.AppLog($"smoke: log pop-out/dock {(floated && docked ? "ok" : "FAILED")} (floated {floated}; docked {docked})");
+        if (!floated || !docked) Program.ExitCode = 1;
+        _logDock.Wanted = true;
+        _logDock.Apply();
+        PerformLayout();
+        Update();
+        Program.AppLog($"smoke: log has {game.State.Log.Count} entr(y/ies)");
+        _logDock.Panel!.SaveScreenshot(_opts.ScreenshotLog!);
+    }
+
+    /// <summary>Main form via DrawToBitmap, with each visible map canvas re-rendered by Skia on top of its screen area.</summary>
+    void SaveScreenshot(Form form, string path, bool withTabs)
+    {
+        form.Update();
+        using var shot = new Bitmap(Math.Max(form.Width, 1), Math.Max(form.Height, 1));
+        form.DrawToBitmap(shot, new Rectangle(0, 0, shot.Width, shot.Height));
+        using (var g = Graphics.FromImage(shot))
+        {
+            if (withTabs && _tabs.Visible)
+            {
+                using var tb = new Bitmap(_tabs.Width, _tabs.Height);
+                _tabs.DrawToBitmap(tb, new Rectangle(Point.Empty, tb.Size));
+                g.DrawImageUnscaled(tb, _tabs.PointToScreen(Point.Empty).X - form.Bounds.X, _tabs.PointToScreen(Point.Empty).Y - form.Bounds.Y);
+            }
+            var active = form as MapWindow ?? ActiveMdiChild as MapWindow ?? _maps.Values.FirstOrDefault(w => !w.IsDisposed && !_wm.IsFloating(w));
+            if (active != null && active.Visible && (form == this ? !_wm.IsFloating(active) : active == form))
+            {
+                using var snap = active.Canvas.Snapshot();
+                using var bmp = SkiaSharp.Views.Desktop.Extensions.ToBitmap(snap);
+                var origin = new Point(active.Canvas.PointToScreen(Point.Empty).X - form.Bounds.X, active.Canvas.PointToScreen(Point.Empty).Y - form.Bounds.Y);
+                g.DrawImageUnscaled(bmp, origin);
+            }
+        }
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        shot.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        Program.AppLog("smoke: screenshot saved to " + path);
+    }
+}

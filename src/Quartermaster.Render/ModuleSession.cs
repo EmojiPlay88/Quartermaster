@@ -76,8 +76,11 @@ public sealed class ModuleSession : IDisposable
         }
     }
 
-    public void StartNewGame() =>
-        Replace(NewGameBuilder.FromSetupStacks(Model, Log));
+    public void StartNewGame()
+    {
+        var state = NewGameBuilder.FromSetupStacks(Model, Log);
+        Replace(state, $"New game: {state.Pieces.Count} pieces");
+    }
 
     public void LoadSetup(SetupDef s)
     {
@@ -86,7 +89,8 @@ public sealed class ModuleSession : IDisposable
             throw new InvalidDataException($"Setup '{s.Name}' refers to '{s.FileEntry}', which is not in the module.");
         using var entry = Archive.OpenEntry(s.FileEntry);
         var save = SaveFileReader.Read(entry);
-        Replace(SaveImporter.Import(save, Model, Log).State);
+        var state = SaveImporter.Import(save, Model, Log).State;
+        Replace(state, $"Setup \"{s.Name}\" loaded: {state.Pieces.Count} pieces");
     }
 
     public void LoadNative(string path)
@@ -217,8 +221,11 @@ public sealed class ModuleSession : IDisposable
         }
     }
 
-    private void Replace(GameState state)
+    /// <summary>Starts a game from a freshly built state. The builders log one "placed" row per piece; replace those with a single summary entry.</summary>
+    private void Replace(GameState state, string summary)
     {
+        state.Log.Clear();
+        state.Log.Add(new LogEntry(1, LogKind.System, summary, "local", null, null, DateTimeOffset.UtcNow));
         Game = new GameSession(state, Archive.Sha256);
         if (Rules != null) Game.RulesSha256 = SafeHash(Rules);
         SeedLedgers();

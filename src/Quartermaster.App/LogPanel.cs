@@ -104,8 +104,13 @@ sealed class LogPanel : UserControl
     {
         var log = _s.Game?.State.Log ?? (IReadOnlyList<LogEntry>)Array.Empty<LogEntry>();
         var follow = IsAtBottom();
+        // Selection is by row index, which changes when the rows do: re-select by Seq so Copy / double-click act on what is highlighted.
+        var selected = _list.SelectedIndices.Cast<int>().Where(i => i < _rows.Count).Select(i => _rows[i].Seq).ToHashSet();
         _rows = LogFilter.Apply(log, Spec());
+        _list.SelectedIndices.Clear();
         _list.VirtualListSize = _rows.Count;
+        if (selected.Count > 0)
+            for (var i = 0; i < _rows.Count; i++) if (selected.Contains(_rows[i].Seq)) _list.SelectedIndices.Add(i);
         _list.Invalidate();
         if (follow && _rows.Count > 0) _list.EnsureVisible(_rows.Count - 1);
     }
