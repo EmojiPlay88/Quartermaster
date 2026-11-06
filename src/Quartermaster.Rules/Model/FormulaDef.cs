@@ -1,6 +1,6 @@
 namespace Quartermaster.Rules;
 
-public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll }
+public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll, Moved }
 public enum OutputTarget { Unit, Global, Holder }
 public enum OutputOp { Subtract, Add, Set }
 
@@ -19,6 +19,8 @@ public sealed record VariableBinding
     public int? DiceCount { get; init; }
     public int? DiceSides { get; init; }
     public string? Caption { get; init; }
+    /// <summary>Expression giving the value to pre-fill (checked mode compares typed input against it).</summary>
+    public string? AutoValue { get; init; }
 }
 
 public sealed record FormulaOutput
