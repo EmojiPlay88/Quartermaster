@@ -100,6 +100,8 @@ sealed partial class MainForm : Form
         _showGrid.CheckedChanged += (_, _) => GridVisibleChanged?.Invoke();
         _viewLog.Click += (_, _) => Guard(_logDock.Toggle);
         _viewTree.CheckedChanged += (_, _) => _leftSplit.Visible = _splitter.Visible = _viewTree.Checked;
+        _floatKeys = new FloatKeyFilter(this);
+        Application.AddMessageFilter(_floatKeys);
         InitSettings();
         UpdateUi();
         UpdateTitle();
@@ -229,7 +231,7 @@ sealed partial class MainForm : Form
         _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
         SetCommandHandler("dice.1d6", () => _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll"));
         SetCommandHandler("dice.2d6", () => _dice!.RollSpec(new DiceSpec(2, 6, 0), "Roll"));
-        SetCommandHandler("turn.next", () => _dice!.StepTurn(1));
+        SetCommandHandler("turn.next", () => { if (_session?.Game == null) return false; _dice!.StepTurn(1); return true; });
         _toolsMenu!.DropDownItems.Add(new ToolStripSeparator());
         Item(_toolsMenu.DropDownItems, "&Settings...", ShowSettings, "tools.settings");
     }
@@ -776,7 +778,7 @@ sealed partial class MainForm : Form
                 if (ActiveMdiChild is { } a) CloseTab(a);
                 return true;
         }
-        if (TryDispatchShortcut(keyData)) return true;
+        if (TryDispatchShortcut(keyData, ActiveMdiChild ?? this)) return true;
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
@@ -818,6 +820,7 @@ sealed partial class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        if (_floatKeys != null) Application.RemoveMessageFilter(_floatKeys);
         _smokeTimer?.Dispose();
         _autosaveTimer?.Dispose();
         _dice?.Dispose();

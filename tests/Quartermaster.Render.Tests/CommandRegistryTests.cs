@@ -64,3 +64,22 @@ public class CommandRegistryTests
         Assert.False(CommandRegistry.IsTextEntryKey("Ctrl+L"));
     }
 }
+
+public class ShortcutGateTests
+{
+    [Theory]
+    [InlineData("Ctrl+Right", true, false, false)]   // word navigation in a text box
+    [InlineData("Ctrl+Shift+Left", true, false, false)]
+    [InlineData("Ctrl+Right", false, false, true)]
+    [InlineData("Delete", true, false, false)]
+    [InlineData("Ctrl+C", true, false, false)]
+    [InlineData("Ctrl+Z", true, false, false)]
+    [InlineData("Ctrl+C", false, false, true)]
+    [InlineData("F5", true, false, true)]
+    [InlineData("Ctrl+S", true, false, true)]
+    [InlineData("L", false, true, true)]
+    [InlineData("L", false, false, false)]
+    [InlineData("L", true, true, false)]
+    public void ShouldDispatch(string shortcut, bool text, bool map, bool expected) =>
+        Assert.Equal(expected, ShortcutGate.ShouldDispatch(shortcut, text, map));
+}
