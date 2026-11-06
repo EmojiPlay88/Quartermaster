@@ -103,7 +103,7 @@ sealed class FormulaDialog : Form
         _debounce.Tick += (_, _) => { _debounce.Stop(); Recalc(); };
         _apply.Click += (_, _) => Guarded(ApplyToLedger);
         _calc.Click += (_, _) => Guarded(CalculateAll);
-        _calc.Visible = !previewOnly;
+        _calc.Visible = _model.Checked;
         _cancel.Click += (_, _) => { if (!_embedded) Close(); };
         _ruleRef.Click += (_, _) => Guarded(OpenRuleRef);
         _physical.CheckedChanged += (_, _) => { _model.PhysicalDice = _physical.Checked; Recalc(); };
@@ -136,6 +136,11 @@ sealed class FormulaDialog : Form
 
     void CheckPieceThenRefresh()
     {
+        if (_link != null && HostForm?.Phases is { } ph && !ph.IsPending(_link.RunId, _pieceId))
+        {
+            Close();   // its run was cleared (phase change) or the game was replaced: applying now would write into the wrong place
+            return;
+        }
         if (_pieceId != null && _s.Game?.State.Pieces.ContainsKey(_pieceId) != true)
         {
             if (_embedded) { SetPiece(null); return; }
@@ -340,7 +345,15 @@ sealed class FormulaDialog : Form
         if (_debounce.Enabled) { _debounce.Stop(); Recalc(); }
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
         // v.Trace is the engine's own (expected) run: typed values only gate Apply, so a wrong formula can never reach the ledger.
-        if (HostForm?.Phases is { } phases) phases.ApplyFormula(_link?.RunId, _pieceId, v.Trace, _model.AutoCalculated);
+        if (HostForm?.Phases is { } phases)
+        {
+            if (!phases.ApplyFormula(_link?.RunId, _pieceId, v.Trace, _model.AutoCalculated))
+            {
+                _status.Text = "This calculation is no longer waiting.";
+                _apply.Enabled = false;
+                return;
+            }
+        }
         else foreach (var c in runner.Commands(v.Trace, null)) game.Execute(CommandLog.Stamp(c));
         if (!_embedded) Close();
     }

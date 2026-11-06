@@ -191,7 +191,7 @@ sealed partial class MainForm
             SetStatus($"{runs.Count} calculation(s) waiting in the phase panel");
             foreach (var r in runs) Guard(() => OpenPendingRun(r.Id));
         }
-        if (InvokeRequired) BeginInvoke(Open); else Open();
+        if (IsHandleCreated) BeginInvoke(Open);   // never inside Advance / ExecuteMove: the autosave and drag end finish first
     }
 
     /// <summary>
@@ -210,7 +210,10 @@ sealed partial class MainForm
         {
             if (Program.Smoke) { Program.AppLog($"smoke: run {run.FormulaName} needs input; dialog skipped in smoke"); return; }
             using var dlg = new MissingInputDialog(_session, _phases, run);
-            if (dlg.ShowDialog(this) == DialogResult.Retry) OpenUnitDialog(run, open[0]);   // "Per unit..." (batch grid hook in Task 12)
+            if (dlg.ShowDialog(this) == DialogResult.Retry
+                && _session?.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } fresh   // re-read: the dialog may have applied some units
+                && fresh.Units.FirstOrDefault(u => !u.Applied) is { } next)
+                OpenUnitDialog(fresh, next);   // "Per unit..." (batch grid hook in Task 12)
             return;
         }
         // TASK 12 HOOK: when open.Count > 1 open the batch grid for runId here instead of the first unit's dialog.
@@ -300,6 +303,7 @@ sealed partial class MainForm
 
     void CloseFormulaDialogs()
     {
+        Application.DoEvents();   // dialogs for queued runs open through BeginInvoke
         foreach (var d in OwnedForms.OfType<FormulaDialog>().ToList()) d.Close();
     }
 
@@ -387,7 +391,7 @@ sealed partial class MainForm
         Application.DoEvents();
         var added = game.State.Log.Skip(logMark).ToList();
         var applyOk = (dlg.IsDisposed || !dlg.Visible) && !game.State.Pending.Any(r => r.Id == run.Id)
-            && added.Any(e => e.Kind is LogKind.Formula or LogKind.Calc);
+            && added.Any(e => e.Kind == LogKind.Calc);
         Program.AppLog($"smoke: Apply {(applyOk ? "ok" : "FAILED")}: {added.Count} new log line(s) [{string.Join(", ", added.Select(e => e.Kind).Distinct())}], run still pending {game.State.Pending.Any(r => r.Id == run.Id)}");
         if (!applyOk) Program.ExitCode = 1;
         CloseFormulaDialogs();

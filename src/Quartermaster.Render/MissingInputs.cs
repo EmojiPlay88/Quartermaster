@@ -1,5 +1,6 @@
 using Quartermaster.Core;
 using Quartermaster.Rules;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Render;
 
@@ -34,7 +35,10 @@ public static class MissingInputs
                 }
             }
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            s.Log.Add(DiagnosticSeverity.Error, "formula", $"Could not work out which inputs are missing for \"{run.FormulaName}\": {ex.Message}");
+        }
         return result;
     }
 
@@ -58,7 +62,11 @@ public static class MissingInputs
                     failed.Add($"{u.Label}: {trace.Error ?? "still missing input"}");
                     continue;
                 }
-                controller.ApplyFormula(run.Id, u.PieceId, trace, true);
+                if (!controller.ApplyFormula(run.Id, u.PieceId, trace, false))
+                {
+                    failed.Add($"{u.Label}: no longer waiting");
+                    continue;
+                }
                 applied++;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
