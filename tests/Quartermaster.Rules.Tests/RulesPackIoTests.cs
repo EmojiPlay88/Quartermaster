@@ -131,4 +131,80 @@ public class RulesPackIoTests : IDisposable
         Assert.Equal("f1", p.ById<FormulaDef>("f1")!.Id);
         Assert.Null(p.TableByName("nope"));
     }
+
+    private string FolderWith(string packJson, params (string Path, string Json)[] extra)
+    {
+        var folder = Path.Combine(_dir, "g" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "pack.json"), packJson);
+        foreach (var (p, j) in extra)
+        {
+            var full = Path.Combine(folder, p);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, j);
+        }
+        return folder;
+    }
+
+    [Fact]
+    public void Load_FutureFormatWithChangedSchema_SaysNewer()
+    {
+        var f = FolderWith("{\"format\":99,\"properties\":\"now a string\"}");
+        Assert.Contains("newer", Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(f)).Message);
+    }
+
+    [Theory]
+    [InlineData("{\"format\":0,\"id\":\"x\"}")]
+    [InlineData("{\"id\":\"x\"}")]
+    public void Load_BadFormat_Unsupported(string json)
+    {
+        var f = FolderWith(json);
+        Assert.Contains("unsupported format", Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(f)).Message);
+    }
+
+    [Fact]
+    public void Load_NullId_Throws()
+    {
+        var f = FolderWith("{\"format\":1}", ("tables/x.json", "{\"id\":null,\"name\":\"n\"}"));
+        Assert.Contains("tables/x.json", Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(f)).Message);
+        var g = FolderWith("{\"format\":1,\"holders\":[{\"name\":\"n\"}]}");
+        Assert.Contains("holder", Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(g)).Message);
+    }
+
+    [Fact]
+    public void Load_NumericEnum_Throws()
+    {
+        var f = FolderWith("{\"format\":1}", ("tables/x.json", "{\"id\":\"x\",\"kind\":1}"));
+        Assert.Contains("tables/x.json", Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(f)).Message);
+    }
+
+    [Fact]
+    public void Save_DuplicateTableIds_Throws_NoTmpLeft()
+    {
+        var p = Sample();
+        p = p with { Tables = new List<TableDef> { new TableDef { Id = "a" }, new TableDef { Id = "a" } } };
+        var zip = Path.Combine(_dir, "d.qrules");
+        Assert.Throws<InvalidOperationException>(() => RulesPackIo.Save(p, zip));
+        Assert.False(File.Exists(zip + ".tmp"));
+        Assert.False(File.Exists(zip));
+    }
+
+    [Fact]
+    public void Save_IdsDifferingByCase_Throws()
+    {
+        var p = Sample() with { Tables = new List<TableDef> { new TableDef { Id = "A" }, new TableDef { Id = "a" } } };
+        Assert.Throws<InvalidOperationException>(() => RulesPackIo.Save(p, Path.Combine(_dir, "c.qrules")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("a/b")]
+    [InlineData("con")]
+    [InlineData("x.")]
+    [InlineData("sp ace")]
+    public void Save_UnsafeId_Throws(string id)
+    {
+        var p = Sample() with { Tables = new List<TableDef> { new TableDef { Id = id } } };
+        Assert.Throws<InvalidOperationException>(() => RulesPackIo.Save(p, Path.Combine(_dir, "u.qrules")));
+    }
 }
