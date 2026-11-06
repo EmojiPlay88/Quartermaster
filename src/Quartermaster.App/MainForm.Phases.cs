@@ -7,12 +7,38 @@ namespace Quartermaster.App;
 sealed partial class MainForm
 {
     readonly PhaseStrip _strip = new() { Visible = false };
-    readonly Panel _phaseHost = new() { Dock = DockStyle.Right, Width = 300, Visible = false };
-    readonly Splitter _phaseSplitter = new() { Dock = DockStyle.Right, Width = 4, Visible = false };
+    // The right-hand column: phase panel on top, palette below. The docks only toggle their own host (and a private splitter that is never
+    // parented); the column's width and the real splitters follow from which hosts are showing.
+    readonly Panel _rightHost = new() { Dock = DockStyle.Right, Width = 0 };
+    readonly Splitter _rightSplitter = new() { Dock = DockStyle.Right, Width = 4, Visible = false };
+    readonly Splitter _stackSplit = new() { Dock = DockStyle.Top, Height = 4, Visible = false };
+    readonly Panel _phaseHost = new() { Dock = DockStyle.Top, Height = 330, Visible = false };
+    readonly Splitter _phaseSplitter = new() { Visible = false };
     readonly ToolStripMenuItem _viewPhases = new("&Phase panel");
     PhaseDock? _phaseDock;
     PhaseController? _phases;
     PhaseWatcher? _stripWatch;
+
+    void BuildRightStack()
+    {
+        _rightHost.Controls.Add(_paletteHost);  // docks last (Fill)
+        _rightHost.Controls.Add(_stackSplit);
+        _rightHost.Controls.Add(_phaseHost);    // docks first (Top)
+        _phaseHost.VisibleChanged += (_, _) => SyncRightStack();
+        _paletteHost.VisibleChanged += (_, _) => SyncRightStack();
+    }
+
+    void SyncRightStack()
+    {
+        var ph = _phaseHost.Visible;
+        var pal = _paletteHost.Visible;
+        _phaseHost.Dock = pal ? DockStyle.Top : DockStyle.Fill;
+        _stackSplit.Visible = ph && pal;
+        var any = ph || pal;
+        _rightSplitter.Visible = any;
+        if (any && _rightHost.Width < 50) _rightHost.Width = 300;
+        else if (!any) _rightHost.Width = 0;
+    }
 
     void InitPhases()
     {
@@ -143,8 +169,12 @@ sealed partial class MainForm
     void JumpToDecision(Decision d)
     {
         if (d.Kind == DecisionKind.Pending && d.RunId != null) OpenPendingRun(d.RunId);
+        else if (d.Kind == DecisionKind.Checklist)
+        {
+            _phaseDock?.Reveal();
+            _phaseDock?.Panel?.SelectChecklist(d.Index);
+        }
         else if (d.PieceIds.FirstOrDefault() is { } id) CentreOnPiece(id);
-        if (_phaseDock?.Float is { } f) f.Activate();
     }
 
     /// <summary>Opens the calculation UI of a pending run. Until the batch window lands this only says so in the status bar.</summary>
@@ -215,6 +245,30 @@ sealed partial class MainForm
             SaveScreenshot(this, Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started.png", true);
             _phaseDock?.Panel?.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started-panel.png");
         }
+    }
+
+    /// <summary>Smoke: renders the Next Phase dialog with three invented decisions (no ShowDialog) to a PNG.</summary>
+    void SmokeNextPhaseDialog()
+    {
+        var none = Array.Empty<string>();
+        using var dlg = new NextPhaseDialog(new[]
+        {
+            new Decision(DecisionKind.Checklist, "Smoke checklist item", 0, null, none),
+            new Decision(DecisionKind.Pending, "Smoke formula — 2 of 3 applied", -1, "run1", none),
+            new Decision(DecisionKind.Warning, "Smoke warning — 2 units", 0, null, none),
+        });
+        dlg.StartPosition = FormStartPosition.Manual;
+        dlg.Location = new Point(-20000, -20000); // shown off-screen (modeless) so every child paints; never ShowDialog in smoke
+        dlg.Show();
+        Application.DoEvents();
+        using var bmp = new Bitmap(dlg.Width, dlg.Height);
+        dlg.DrawToBitmap(bmp, new Rectangle(Point.Empty, bmp.Size));
+        dlg.Hide();
+        var path = _opts.ScreenshotNextPhase!;
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        Program.AppLog("smoke: next phase dialog screenshot saved to " + path);
     }
 
     int CountAutosaves()

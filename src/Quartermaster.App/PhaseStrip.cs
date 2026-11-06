@@ -12,7 +12,7 @@ sealed class PhaseStrip : Panel
     public const string NoPhasesText = "No phases defined — add them in the Rules Workbench (Phases tab)";
     const int MaxRows = 3, PadX = 6, Gap = 4, Margin0 = 4;
 
-    enum Kind { Label, Done, Current, Upcoming, Notice }
+    enum Kind { Label, Done, Current, Upcoming }
     sealed record Item(string Text, Kind Kind, Rectangle Bounds);
 
     readonly Button _start = new() { Text = "Start game ▶", AutoSize = true, FlatStyle = FlatStyle.System, Visible = false };
@@ -20,6 +20,8 @@ sealed class PhaseStrip : Panel
     PhaseView? _view;
     List<Item> _items = new();
     int _laidWidth = -1;
+    string? _noticeText;
+    Rectangle _noticeRect;
 
     public PhaseStrip()
     {
@@ -109,14 +111,11 @@ sealed class PhaseStrip : Panel
         var items = Place(avail, true, out var rows, out var maxX);
         var scroll = rows > MaxRows;
         if (scroll) items = Place(avail, false, out rows, out maxX);
-        var items2 = items.ToList();
-        if (noticeW > 0)
-        {
-            var nx = scroll ? maxX : Math.Max(maxX, avail - noticeW - Margin0);
-            items2.Add(new Item(v.Notice!, Kind.Notice, new Rectangle(nx, 2, noticeW, rowH - 2)));
-            maxX = nx + noticeW + Margin0;
-        }
-        _items = items2;
+        _items = items.ToList();
+        // The notice lives in a fixed area at the right of the first row; it does not scroll with the chips.
+        _noticeText = noticeW > 0 ? v.Notice : null;
+        _noticeRect = noticeW > 0 ? new Rectangle(Math.Max(Margin0, avail - noticeW - Margin0), 2, noticeW, rowH - 2) : Rectangle.Empty;
+        if (scroll && noticeW > 0) maxX += noticeW + Margin0; // the last chip can scroll clear of the notice
         RowsForSmoke = scroll ? 1 : rows;
 
         if (startW > 0)
@@ -151,9 +150,6 @@ sealed class PhaseStrip : Panel
                 case Kind.Label:
                     TextRenderer.DrawText(g, it.Text, Font, it.Bounds, SystemColors.ControlText, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                     break;
-                case Kind.Notice:
-                    TextRenderer.DrawText(g, it.Text, _bold, it.Bounds, SystemColors.HotTrack, TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.NoPrefix);
-                    break;
                 default:
                 {
                     var cur = it.Kind == Kind.Current;
@@ -167,6 +163,12 @@ sealed class PhaseStrip : Panel
                     break;
                 }
             }
+        }
+        g.ResetTransform();
+        if (_noticeText != null)
+        {
+            using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, _noticeRect);
+            TextRenderer.DrawText(g, _noticeText, _bold, _noticeRect, SystemColors.HotTrack, TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.NoPrefix);
         }
     }
 

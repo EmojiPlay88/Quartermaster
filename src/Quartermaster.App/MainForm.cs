@@ -21,7 +21,7 @@ sealed partial class MainForm : Form
     readonly Splitter _logSplitter = new() { Dock = DockStyle.Bottom, Height = 4, Visible = false };
     readonly ToolStripMenuItem _viewLog = new("&Log");
     readonly LogDock _logDock;
-    readonly Panel _paletteHost = new() { Dock = DockStyle.Right, Width = 260, Visible = false };
+    readonly Panel _paletteHost = new() { Dock = DockStyle.Fill, Visible = false };
     readonly Splitter _paletteSplitter = new() { Dock = DockStyle.Right, Width = 4, Visible = false };
     readonly PaletteDock _paletteDock;
     readonly ToolStripMenuItem _viewPalette = new("Counter &palette") { Visible = false };
@@ -86,10 +86,9 @@ sealed partial class MainForm : Form
         Controls.Add(_tabs); // added first so it docks after the tree and spans only the MDI area
         Controls.Add(_logSplitter); // the log docks at the bottom of the MDI area, beside the tree
         Controls.Add(_logHost);
-        Controls.Add(_phaseSplitter); // the phase panel docks at the right too, beside the palette
-        Controls.Add(_phaseHost);
-        Controls.Add(_paletteSplitter); // the palette docks at the right of the MDI area, in game master mode
-        Controls.Add(_paletteHost);
+        BuildRightStack(); // phase panel on top, counter palette (game master mode) below, in one right-hand column
+        Controls.Add(_rightSplitter);
+        Controls.Add(_rightHost);
         Controls.Add(_splitter);
         _leftSplit.Panel1.Controls.Add(_tree);
         _leftSplit.Panel2.Controls.Add(_tablesTree);

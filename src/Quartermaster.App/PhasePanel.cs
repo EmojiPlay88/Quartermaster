@@ -91,6 +91,14 @@ sealed class PhasePanel : UserControl
 
     public void Flush() => _watch.Flush();
 
+    /// <summary>Highlights a checklist item (used when the Next Phase dialog jumps to it).</summary>
+    public void SelectChecklist(int index)
+    {
+        if (index < 0 || index >= _checklist.Items.Count) return;
+        _checklist.SelectedIndex = index;
+        _checklist.Focus();
+    }
+
     public string NextButtonText => _nextButton.Text;
     public string CountText => _count.Text;
     public Color CountColor => _count.ForeColor;
@@ -123,7 +131,7 @@ sealed class PhasePanel : UserControl
             ShowDecisions(v);
             _nextButton.Text = v.BeforeStart ? "Start game ▶" : v.NextName != null ? "Next Phase ▶ " + v.NextName : "Next Phase ▶";
             var n = v.Decisions.Count;
-            _count.Text = $"{n} decisions left";
+            _count.Text = n == 1 ? "1 decision left" : $"{n} decisions left";
             _count.ForeColor = n > 0 ? Color.Red : SystemColors.ControlText;
             _count.Visible = !v.BeforeStart;
         }
@@ -162,7 +170,6 @@ sealed class PhasePanel : UserControl
             if (selIndex == w.Index) _warnings.SelectedNode = node;
         }
         _warnings.EndUpdate();
-        _warnCaption.Visible = _warnings.Visible = _ack.Visible = true;
         UpdateAckEnabled();
     }
 

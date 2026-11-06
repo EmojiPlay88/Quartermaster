@@ -65,6 +65,15 @@ sealed class PhaseDock
         Apply();
     }
 
+    /// <summary>Shows the panel (docked, or the floating window) and makes sure the dock is wanted.</summary>
+    public void Reveal()
+    {
+        if (Panel == null) return;
+        _wanted = true;
+        Apply();
+        Float?.Activate();
+    }
+
     public void PopOut()
     {
         if (Panel == null || Float != null) return;
