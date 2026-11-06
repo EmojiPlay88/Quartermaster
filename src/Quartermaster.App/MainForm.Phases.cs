@@ -1,5 +1,7 @@
 using Quartermaster.Core;
 using Quartermaster.Render;
+using Quartermaster.Rules;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.App;
 
@@ -52,7 +54,7 @@ sealed partial class MainForm
     {
         var c = new PhaseController(session, (cmd, st) => CommandLog.Prepare(cmd, st, session.Model));
         c.PhaseBoundary += OnPhaseBoundary;
-        c.RunsQueued += runs => { if (!IsDisposed) SetStatus($"{runs.Count} calculation(s) waiting in the phase panel"); };
+        c.RunsQueued += OnRunsQueued;
         _phases = c;
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);
         _phaseDock!.Create(new PhasePanel(session, c, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
@@ -65,7 +67,7 @@ sealed partial class MainForm
         _stripWatch?.Dispose();
         _stripWatch = null;
         _phaseDock?.Destroy();
-        if (_phases != null) _phases.PhaseBoundary -= OnPhaseBoundary;
+        if (_phases != null) { _phases.PhaseBoundary -= OnPhaseBoundary; _phases.RunsQueued -= OnRunsQueued; }
         _phases = null;
         _strip.Visible = false;
     }
@@ -177,8 +179,53 @@ sealed partial class MainForm
         else if (d.PieceIds.FirstOrDefault() is { } id) CentreOnPiece(id);
     }
 
-    /// <summary>Opens the calculation UI of a pending run. Until the batch window lands this only says so in the status bar.</summary>
-    public void OpenPendingRun(string runId) => SetStatus("Pending calculation " + runId[..Math.Min(8, runId.Length)] + ": the batch window is not available yet.");
+    /// <summary>The session's phase controller (null without a game); map windows route move gestures through it.</summary>
+    public PhaseController? Phases => _phases;
+
+    /// <summary>Triggers queued runs: each opens its calculation UI at once. Always on the UI thread, never throws.</summary>
+    void OnRunsQueued(IReadOnlyList<PendingRun> runs)
+    {
+        void Open()
+        {
+            if (IsDisposed) return;
+            SetStatus($"{runs.Count} calculation(s) waiting in the phase panel");
+            foreach (var r in runs) Guard(() => OpenPendingRun(r.Id));
+        }
+        if (IsHandleCreated) BeginInvoke(Open);   // never inside Advance / ExecuteMove: the autosave and drag end finish first
+    }
+
+    /// <summary>
+    /// Opens the calculation UI of a pending run. A run that needs input (fully automatic) asks once through the missing-input dialog.
+    /// Otherwise a single unfinished unit opens its formula dialog linked to the run; several units will open the batch grid (Task 12 hook:
+    /// replace the marked line), until then the first unfinished unit's dialog is shown.
+    /// </summary>
+    public void OpenPendingRun(string runId)
+    {
+        if (_session?.Game is not { } game || _phases == null) return;
+        var run = game.State.Pending.FirstOrDefault(r => r.Id == runId);
+        if (run == null) { SetStatus("That calculation is no longer waiting."); return; }
+        var open = run.Units.Where(u => !u.Applied).ToList();
+        if (open.Count == 0) return;
+        if (run.NeedsInput)
+        {
+            if (Program.Smoke) { Program.AppLog($"smoke: run {run.FormulaName} needs input; dialog skipped in smoke"); return; }
+            using var dlg = new MissingInputDialog(_session, _phases, run);
+            if (dlg.ShowDialog(this) == DialogResult.Retry
+                && _session?.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } fresh   // re-read: the dialog may have applied some units
+                && fresh.Units.FirstOrDefault(u => !u.Applied) is { } next)
+                OpenUnitDialog(fresh, next);   // "Per unit..." (batch grid hook in Task 12)
+            return;
+        }
+        // TASK 12 HOOK: when open.Count > 1 open the batch grid for runId here instead of the first unit's dialog.
+        OpenUnitDialog(run, open[0]);
+    }
+
+    void OpenUnitDialog(PendingRun run, PendingUnit unit)
+    {
+        if (_session?.Game is not { } game) return;
+        if (unit.PieceId != null && !game.State.Pieces.ContainsKey(unit.PieceId)) { SetStatus($"{unit.Label} is no longer on the map."); return; }
+        FormulaDialog.Show(_session, run.FormulaId, unit.PieceId, this, this, new RunLink(run.Id, unit.Moved));
+    }
 
     // ---------- smoke ----------
 
@@ -245,6 +292,121 @@ sealed partial class MainForm
             SaveScreenshot(this, Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started.png", true);
             _phaseDock?.Panel?.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started-panel.png");
         }
+        SmokeMoveFlow();
+    }
+
+    void SmokeFail(string text)
+    {
+        Program.AppLog("smoke: move flow FAILED: " + text);
+        Program.ExitCode = 1;
+    }
+
+    void CloseFormulaDialogs()
+    {
+        Application.DoEvents();   // dialogs for queued runs open through BeginInvoke
+        foreach (var d in OwnedForms.OfType<FormulaDialog>().ToList()) d.Close();
+    }
+
+    /// <summary>
+    /// Smoke: goes to a phase that has an OnMove entry, drags a piece two cells through ExecuteMove, and checks the mode's calculation UI:
+    /// hardcore / semi-auto open a checked dialog with an empty Moved box (wrong value disables Apply, Calculate enables it, Apply logs the
+    /// calculation and resolves the run; semi-auto also shows the cheat sheet); fully automatic applies it without any dialog.
+    /// </summary>
+    void SmokeMoveFlow()
+    {
+        if (_phases == null || _session?.Game is not { } game || _session.Rules is not { } pack) return;
+        var target = pack.Phases.FirstOrDefault(p => p.OnMove is { Count: > 0 });
+        if (target == null) { Program.AppLog("smoke: move flow skipped (no phase has an OnMove entry)"); return; }
+        CloseFormulaDialogs();
+        for (var i = 0; i < pack.Phases.Count * 4 && _phases.View().Current?.Id != target.Id; i++) _phases.Advance();
+        CloseFormulaDialogs();
+        if (_phases.View().Current?.Id != target.Id) { SmokeFail("could not reach the move phase"); return; }
+        var piece = game.State.Pieces.Values.FirstOrDefault(p => PieceInfo.Name(p) == "Red 1") ?? game.State.Pieces.Values.FirstOrDefault();
+        if (piece == null) { SmokeFail("no piece to move"); return; }
+
+        var mode = game.State.Difficulty;
+        var pendingBefore = game.State.Pending.Select(r => r.Id).ToHashSet();
+        var logBefore = game.State.Log.Count;
+        _phases.ExecuteMove(new[] { new MovePieces(new[] { piece.Id }, piece.MapId, new PointD(piece.Pos.X + 100, piece.Pos.Y), null) });
+        Application.DoEvents();
+        var run = game.State.Pending.LastOrDefault(r => !pendingBefore.Contains(r.Id) && r.Trigger == "move");
+        var dialogs = OwnedForms.OfType<FormulaDialog>().Where(d => d.Link != null).ToList();
+        if (mode == Difficulty.FullyAuto)
+        {
+            var ok = dialogs.Count == 0 && game.State.Log.Count > logBefore;
+            Program.AppLog($"smoke: move flow (fully automatic) {(ok ? "ok" : "FAILED")}: {dialogs.Count} dialog(s), {game.State.Log.Count - logBefore} new log line(s), run pending {run != null}");
+            if (!ok) Program.ExitCode = 1;
+            SmokeMissingInputDialog();
+            return;
+        }
+        if (run == null) { SmokeFail("the move queued no run"); return; }
+        var dlg = dialogs.FirstOrDefault(d => d.Link!.RunId == run.Id);
+        if (dlg == null) { SmokeFail("no formula dialog opened for the queued run"); return; }
+        var formula = pack.ById<FormulaDef>(run.FormulaId);
+        var movedVar = formula?.Bindings.FirstOrDefault(b => b.Kind == BindingKind.Moved)?.Variable;
+        if (movedVar == null) { SmokeFail("the move formula has no Moved variable"); dlg.Close(); return; }
+        dlg.Update();
+        if (!dlg.IsChecked || dlg.SmokeBoxText(movedVar) != "") { SmokeFail($"dialog not checked or Moved box not empty ('{dlg.SmokeBoxText(movedVar)}')"); dlg.Close(); return; }
+
+        dlg.SmokeType(movedVar, "999");
+        var wrongOk = dlg.SmokeBoxWrong(movedVar) && !dlg.ApplyEnabled;
+        Program.AppLog($"smoke: wrong value disables Apply {(wrongOk ? "ok" : "FAILED")} (wrong {dlg.SmokeBoxWrong(movedVar)}, apply {dlg.ApplyEnabled})");
+        if (!wrongOk) Program.ExitCode = 1;
+        var shotBase = _opts.ScreenshotCheatSheet ?? _opts.ScreenshotPhases;
+        if (shotBase != null) dlg.SaveScreenshot(Path.ChangeExtension(shotBase, null) + "-formula-wrong.png");
+
+        dlg.SmokeCalculate();
+        var unit = run.Units[0];
+        var calcOk = dlg.ApplyEnabled && !dlg.SmokeBoxWrong(movedVar)
+            && double.TryParse(dlg.SmokeBoxText(movedVar), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var moved) && moved == unit.Moved;
+        Program.AppLog($"smoke: Calculate enables Apply {(calcOk ? "ok" : "FAILED")} (Moved box '{dlg.SmokeBoxText(movedVar)}', run distance {unit.Moved})");
+        if (!calcOk) Program.ExitCode = 1;
+        if (shotBase != null) dlg.SaveScreenshot(Path.ChangeExtension(shotBase, null) + "-formula.png");
+
+        if (mode == Difficulty.SemiAuto)
+        {
+            var cheat = dlg.CheatSheet;
+            var cheatOk = cheat is { IsDisposed: false, Visible: true } && cheat.RowTexts.Count > 0;
+            Program.AppLog($"smoke: cheat sheet {(cheatOk ? "ok" : "FAILED")} ({cheat?.RowTexts.Count ?? 0} row(s), {cheat?.GoldCells ?? 0} gold cell(s))");
+            if (!cheatOk) Program.ExitCode = 1;
+            if (_opts.ScreenshotCheatSheet != null) cheat?.SaveScreenshot(_opts.ScreenshotCheatSheet);
+            // The fixture formula reads its table through lookup() in the text, so no row carries a table cell; draw one by hand to check the table grid.
+            if (pack.Tables.FirstOrDefault() is { } table && table.RowKeys.Count > 0 && table.ColumnKeys.Count > 0)
+            {
+                using var demo = new CheatSheetWindow { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000) };
+                demo.Show();
+                demo.Render(new[] { new CheatRow("Smoke", "table " + table.Name, table.Cells[0][0], table, 0, 0) });
+                demo.Update();
+                var goldOk = demo.GoldCells == 1;
+                Program.AppLog($"smoke: cheat sheet table grid {(goldOk ? "ok" : "FAILED")} ({demo.GoldCells} gold cell(s))");
+                if (!goldOk) Program.ExitCode = 1;
+                if (_opts.ScreenshotCheatSheet != null) demo.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotCheatSheet, null) + "-table.png");
+                demo.Hide();
+            }
+        }
+        else if (dlg.CheatSheet != null) SmokeFail("hardcore must not show the cheat sheet");
+
+        var logMark = game.State.Log.Count;
+        dlg.SmokeClickApply();
+        Application.DoEvents();
+        var added = game.State.Log.Skip(logMark).ToList();
+        var applyOk = (dlg.IsDisposed || !dlg.Visible) && !game.State.Pending.Any(r => r.Id == run.Id)
+            && added.Any(e => e.Kind == LogKind.Calc);
+        Program.AppLog($"smoke: Apply {(applyOk ? "ok" : "FAILED")}: {added.Count} new log line(s) [{string.Join(", ", added.Select(e => e.Kind).Distinct())}], run still pending {game.State.Pending.Any(r => r.Id == run.Id)}");
+        if (!applyOk) Program.ExitCode = 1;
+        CloseFormulaDialogs();
+    }
+
+    /// <summary>Smoke: the missing-input dialog builds for a run (fixture runs never lack input, so this only checks construction).</summary>
+    void SmokeMissingInputDialog()
+    {
+        if (_session?.Game is not { } game || _phases == null) return;
+        var piece = game.State.Pieces.Values.FirstOrDefault();
+        var formula = _session.Rules?.Formulas.FirstOrDefault();
+        if (piece == null || formula == null) return;
+        var run = new PendingRun("smoke", formula.Id, formula.Name, "move", new[] { new PendingUnit(piece.Id, PieceInfo.Name(piece), null, false) }, true);
+        using var dlg = new MissingInputDialog(_session, _phases, run);
+        Program.AppLog($"smoke: missing input dialog built ({dlg.AskedVariables.Count} input(s), {dlg.Controls.Count} control(s))");
     }
 
     /// <summary>Smoke: renders the Next Phase dialog with three invented decisions (no ShowDialog) to a PNG.</summary>

@@ -194,12 +194,17 @@ sealed class MapDragController : IDisposable
             return;
         }
         if (Incoming) ClearIncoming(); else End();
-        foreach (var g in groups)
-        {
-            var move = new MovePieces(g.Ids, _map.Id, g.Pos, g.StackOnto);
-            _guard(() => game!.Execute(CommandLog.Prepare(move, game.State, _s.Model)));
-        }
+        if (groups.Count == 0) return;
+        var moves = groups.Select(g => new MovePieces(g.Ids, _map.Id, g.Pos, g.StackOnto)).ToList();
+        // Every group of one drop is one move gesture: the phase controller executes them and fires the phase's OnMove formulas.
+        if (Phases?.Invoke() is { } phases) _guard(() => phases.ExecuteMove(moves));
+        else
+            foreach (var move in moves)
+                _guard(() => game!.Execute(CommandLog.Prepare(move, game.State, _s.Model)));
     }
+
+    /// <summary>The main window's phase controller, when there is one; move gestures go through it.</summary>
+    public Func<PhaseController?>? Phases { get; set; }
 
     /// <summary>Leaves captured drag mode and frees the snapshot and sprites.</summary>
     public void End()

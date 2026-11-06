@@ -197,11 +197,11 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
         var snapshot = _views.TryGetValue(row, out var cached) ? cached with { Applied = true, CanApply = false }
             : new BatchRowView(u.PieceId, u.Label, vars.Select(v => dv.Boxes.FirstOrDefault(b => b.Variable == v)?.Text ?? "").ToList(),
                 new bool[vars.Count], dv.ResultText, LedgerOf(dv), "", true, false);
-        phases.ApplyFormula(runId, u.PieceId, trace, model.AutoCalculated);
-        // A run that finished is gone from the state, which also means this unit was applied.
-        var done = Run is not { } r || (row < r.Units.Count && r.Units[row].Applied);
-        if (done) { _appliedSnapshots[row] = snapshot; _views.Remove(row); }
-        return done;
+        // Refused (run cleared, unit already applied): nothing was written, so no snapshot and not counted.
+        if (!phases.ApplyFormula(runId, u.PieceId, trace, model.AutoCalculated)) return false;
+        _appliedSnapshots[row] = snapshot;
+        _views.Remove(row);
+        return true;
     }
 
     /// <summary>Applies every row that can apply (rows with a wrong or missing checked cell are left alone). Returns how many were applied.

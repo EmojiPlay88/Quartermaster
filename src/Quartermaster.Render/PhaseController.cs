@@ -156,16 +156,23 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     }
 
     /// <summary>Applies a formula result; <paramref name="runId"/> (when set) marks that unit of the pending run done.</summary>
-    public void ApplyFormula(string? runId, string? pieceId, FormulaTrace trace, bool calculated)
+    public bool ApplyFormula(string? runId, string? pieceId, FormulaTrace trace, bool calculated)
     {
-        if (s.Game == null || s.Runner == null) return;
-        if (trace.Error != null || trace.Result == null) return;   // a failed trace changes nothing and keeps the run pending
+        if (s.Game == null || s.Runner == null) return false;
+        if (trace.Error != null || trace.Result == null) return false;   // a failed trace changes nothing and keeps the run pending
+        // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
+        if (runId != null && !IsPending(runId, pieceId)) return false;
         var unit = UnitName(pieceId) ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
         foreach (var c in s.Runner.Commands(trace, null, tag, unit)) Exec(c);
         LogWorking(trace, unit, tag);
         if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }));
+        return true;
     }
+
+    /// <summary>True while the run exists and the unit for this piece is not yet applied.</summary>
+    public bool IsPending(string runId, string? pieceId) =>
+        s.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } run && run.Units.Any(u => u.PieceId == pieceId && !u.Applied);
 
     /// <summary>A run with no ledger outputs has no ledger line carrying its working; log it so every calculation is visible (spec 9).</summary>
     private void LogWorking(FormulaTrace trace, string unit, string? tag)
