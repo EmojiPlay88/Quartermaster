@@ -34,7 +34,7 @@ public class ModuleModelTests
           </{{V}}module.ChartWindow>
           <{{V}}module.PredefinedSetup name="Scenario 1" useFile="true" file="s1.vsav"/>
           <{{V}}module.PredefinedSetup name="Empty" useFile="false"/>
-          <{{V}}module.SpecialDie name="d6"><{{V}}module.SpecialDieFace text="one" value="1"/><{{V}}module.SpecialDieFace text="two" value="2"/></{{V}}module.SpecialDie>
+          <{{V}}module.SpecialDiceButton name="Roll"><{{V}}module.SpecialDie name="d6"><{{V}}module.SpecialDieFace text="one" value="1"/><{{V}}module.SpecialDieFace text="two" value="2"/></{{V}}module.SpecialDie></{{V}}module.SpecialDiceButton>
           <{{V}}module.Map mapName="Main Map" markMoved="Never" backgroundcolor="255,0,0">
             <{{V}}module.map.BoardPicker>
               <{{BP}}Board name="Left" image="left.png"/>
@@ -167,6 +167,7 @@ public class ModuleModelTests
         Assert.DoesNotContain(m.Documents, d => d.EntryName.Contains("inner"));
         Assert.Equal("s1.vsav", m.Setups.Single(s => s.Name == "Scenario 1").FileEntry);
         Assert.Null(m.Setups.Single(s => s.Name == "Empty").FileEntry);
+        Assert.Equal("d6", m.Dice.Single().Name);
         Assert.Equal(new[] { "one", "two" }, m.Dice.Single().Faces);
     }
 
@@ -194,6 +195,7 @@ public class ModuleModelTests
         Assert.Contains("2", d.Message);
         Assert.DoesNotContain(log.Items, x => x.Category == "component" && x.Message.Contains("Zoomer"));
         Assert.DoesNotContain(log.Items, x => x.Category == "component" && x.Message.Contains("GlobalOptions"));
+        Assert.DoesNotContain(log.Items, x => x.Category == "component" && x.Message.Contains("SpecialDiceButton"));
     }
 
     [Fact]

@@ -99,9 +99,13 @@ public static class ModuleModelBuilder
                     break;
                 case "PrototypeDefinition": AddPrototype(n); break;
                 case "PredefinedSetup": AddSetup(n, nav); break;
-                case "SpecialDie":
-                    _dice.Add(new DieDef(n.Attr("name"),
-                        n.Children.Where(c => c.ShortName == "SpecialDieFace").Select(c => c.Attr("text")).ToArray()));
+                case "SpecialDiceButton":
+                    foreach (var die in n.Children)
+                    {
+                        if (die.ShortName != "SpecialDie") { Unknown(die); continue; }
+                        _dice.Add(new DieDef(die.Attr("name"),
+                            die.Children.Where(c => c.ShortName == "SpecialDieFace").Select(c => c.Attr("text")).ToArray()));
+                    }
                     break;
                 case "PlayerRoster":
                     foreach (var e in n.Children)
