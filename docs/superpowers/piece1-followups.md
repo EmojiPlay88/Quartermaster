@@ -168,3 +168,9 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - Opening a pending run always uses the current difficulty: fully automatic finishes it from the auto values and asks only for missing inputs; hardcore and semi-automatic open the checked dialog or batch grid (cheat sheet in semi-automatic).
 - Batch grid: Input columns that index a table with plain keys are editable dropdowns; axes with range keys stay free text. Values still go through the checked comparison.
 - Starting a setup by double-clicking it in the window tree shows the same difficulty chooser as File > Load Setup (default = last used).
+
+### Piece 3 — residual minors after the final re-review
+- Silent finish of a pending run in fully automatic, and answers from the missing-values prompt, log as an untagged `formula` entry instead of `calc` "(auto)"; units that fail there show only in the status line, not the log.
+- The Settings → Game hint doesn't mention that switching difficulty closes open formula windows and batch grids.
+- `MainForm.OnDifficultyChanged` has no `InvokeRequired` guard (its only caller is on the UI thread today).
+- Not covered by any smoke (check by hand): batch-grid key dropdowns, debounced Phases-tab commits, setup chooser on tree double-click, windows closing on a difficulty switch.
