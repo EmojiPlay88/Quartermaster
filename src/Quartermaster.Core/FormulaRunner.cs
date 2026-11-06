@@ -26,6 +26,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 {
     private const string NeedsUnit = "This formula needs a unit";
     private readonly RulesPack _pack = pack;
+    public RulesPack Pack => _pack;
     private readonly ModuleModel _model = model;
     private readonly Func<int, int, IReadOnlyList<int>> _roller = roller;
 

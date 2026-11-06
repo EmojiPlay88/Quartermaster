@@ -25,7 +25,7 @@ public static class TableLookup
 
     private static string Dashes(string s) => s.Replace('–', '-').Replace('—', '-').Replace('−', '-');
 
-    internal static bool TryNum(string s, out double d)
+    public static bool TryNum(string s, out double d)
     {
         d = 0;
         s = Dashes(s).Trim();
