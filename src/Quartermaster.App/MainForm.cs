@@ -23,6 +23,8 @@ sealed class MainForm : Form
     readonly List<ToolStripItem> _needsModule = new();
     readonly List<ToolStripItem> _needsGame = new();
     readonly Dictionary<string, MapWindow> _maps = new();
+    readonly Dictionary<string, Form> _charts = new();
+    readonly Dictionary<string, Form> _docs = new();
 
     ModuleSession? _session;
     DiagnosticsWindow? _diag;
@@ -426,8 +428,31 @@ sealed class MainForm : Form
             Guard(() => OpenMap(map, maximized: false));
             return;
         }
-        // Chart and document windows arrive in a later step.
-        SetStatus("Opens in a later step");
+        if (n.Kind == WindowNodeKind.Chart && n.Ref is ChartDef chart)
+        {
+            Guard(() => OpenChild(_charts, chart.Name + "|" + chart.FileName, () => new ChartWindow(_session, chart)));
+            return;
+        }
+        if (n.Kind == WindowNodeKind.Document && n.Ref is DocumentDef doc)
+        {
+            if (Program.Smoke && doc.Kind != DocumentKind.Text) return; // no WebView2 windows in smoke mode
+            Guard(() => OpenChild(_docs, doc.EntryName, () => new PdfWindow(_session, doc)));
+        }
+    }
+
+    void OpenChild(Dictionary<string, Form> open, string key, Func<Form> create)
+    {
+        if (open.TryGetValue(key, out var existing) && !existing.IsDisposed)
+        {
+            existing.Activate();
+            return;
+        }
+        var w = create();
+        w.MdiParent = this;
+        w.Size = new Size(720, 520);
+        open[key] = w;
+        w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); };
+        w.Show();
     }
 
     // ---------- startup / shutdown ----------
@@ -458,6 +483,7 @@ sealed class MainForm : Form
     // ---------- smoke: wait for tiling, optional screenshot ----------
 
     DateTime? _smokeWaitStart;
+    readonly DateTime _smokeStartedAt = DateTime.UtcNow;
 
     void FinishSmoke()
     {
@@ -470,6 +496,8 @@ sealed class MainForm : Form
             return;
         }
         if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
+        else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
+        Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
         if (_opts.Screenshot != null) Guard(() => SaveScreenshot(_opts.Screenshot));
         Close();
     }

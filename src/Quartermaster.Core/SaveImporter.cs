@@ -66,6 +66,10 @@ public static class SaveImporter
                 }
             }
             else if (TryBoardPicker(cmd, model, log)) { }
+            else if (IsFramingNoise(cmd))
+            {
+                log.AddOnce("save:framing", DiagnosticSeverity.Info, "save", "Setup-stack markers and empty command separators in the save are ignored.");
+            }
             else
             {
                 skipped++;
@@ -126,6 +130,10 @@ public static class SaveImporter
             log.Add(DiagnosticSeverity.Info, "save", $"{offMap} piece(s) in the save are off-map and were kept unplaced.");
         return new ImportResult(state, imported, skipped);
     }
+
+    /// <summary>VASSAL framing that carries no game state: a "SETUP_STACK" marker (GameState) or a lone command separator.</summary>
+    private static bool IsFramingNoise(string cmd) =>
+        cmd == "\\" || cmd == "SETUP_STACK" || cmd.StartsWith("SETUP_STACK	", StringComparison.Ordinal);
 
     private static string Printable(string s) => s.Replace("\t", "\\t").Replace("\u001B", "\\e");
 

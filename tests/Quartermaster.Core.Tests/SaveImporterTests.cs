@@ -83,6 +83,19 @@ public class SaveImporterTests
     }
 
     [Fact]
+    public void Import_SetupStackMarkerAndLoneSeparator_NotSkipped()
+    {
+        var (r, log) = Run(new[]
+        {
+            "\\", "SETUP_STACK	", Add("p1", PieceType("A"), "M;1;2;1;0"),
+        });
+        Assert.Equal(0, r.CommandsSkipped);
+        Assert.DoesNotContain(log.Items, d => d.Category == "save" && d.Severity >= DiagnosticSeverity.Warning);
+        Assert.Contains(log.Items, d => d.Severity == DiagnosticSeverity.Info && d.Category == "save");
+        Assert.Single(r.State.Pieces);
+    }
+
+    [Fact]
     public void Import_NullMapPiece_CountedAsOrphan()
     {
         var (r, log) = Run(new[] { Add("p1", PieceType("A"), "null;0;0;1;0"), Add("p2", PieceType("B"), "M;3;4;1;0") });
