@@ -20,6 +20,7 @@ sealed class MapWindow : Form
         ShowIcon = false;
         Canvas = new MapCanvas(s, map) { Dock = DockStyle.Fill, Preparing = map.Boards.Count > 0 ? 0 : null };
         Controls.Add(Canvas);
+        Canvas.Guarded = Run;
 
         Canvas.ContextRequested += OnContext;
         Canvas.StatusChanged += (loc, zoom) =>

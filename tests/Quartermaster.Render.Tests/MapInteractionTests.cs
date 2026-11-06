@@ -93,6 +93,26 @@ public class MapInteractionTests : IDisposable
     }
 
     [Fact]
+    public void DragTarget_OffCentreGrab_LandsInCellUnderGhostCentre()
+    {
+        // piece centre is (+30,+20) from the grab point; cursor at (95,45) -> ghost centre (125,65)
+        var r = DropResolver.ResolveDrag(_state, Map, new PointD(95, 45), new PointD(30, 20), new[] { "x" }, _s.Images);
+        var expected = Map.Boards[0].Grid!.Snap(new PointD(125, 65));
+        Assert.Equal(expected, r.Pos);
+        var raw = DropResolver.Resolve(_state, Map, new PointD(95, 45), new[] { "x" }, _s.Images);
+        Assert.NotEqual(raw.Pos, r.Pos);
+    }
+
+    [Fact]
+    public void DragTarget_StackTargetUsesGhostCentre()
+    {
+        Add("a", 75, 75);
+        var r = DropResolver.ResolveDrag(_state, Map, new PointD(40, 40), new PointD(35, 35), new[] { "x", "y" }, _s.Images);
+        Assert.Equal(_state.Pieces["a"].StackId, r.StackOnto);
+        Assert.Equal(new PointD(75, 75), r.Pos);
+    }
+
+    [Fact]
     public void RubberBand_SelectsPiecesWithCentreInside()
     {
         Add("a", 50, 50);

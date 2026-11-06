@@ -17,6 +17,13 @@ public static class DropResolver
         return new DropTarget(Snap(map, drop), null);
     }
 
+    /// <summary>
+    /// Drag point to target: the grabbed piece's centre (cursor + grab offset) is what gets snapped or stacked onto,
+    /// and all dragged pieces land at that single point.
+    /// </summary>
+    public static DropTarget ResolveDrag(GameState s, MapDef map, PointD cursor, PointD grabOffset, IReadOnlyCollection<string> draggedIds, ImageSource images) =>
+        Resolve(s, map, new PointD(cursor.X + grabOffset.X, cursor.Y + grabOffset.Y), draggedIds, images);
+
     /// <summary>Snaps with the grid of the board under the point, in board-local coordinates.</summary>
     public static PointD Snap(MapDef map, PointD p)
     {
