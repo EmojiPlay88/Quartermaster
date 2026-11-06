@@ -2,8 +2,8 @@ using System.Globalization;
 
 namespace Quartermaster.App;
 
-/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;].</summary>
-sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds)
+/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;].</summary>
+sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null)
 {
     public bool Smoke => SmokeSeconds != null;
 
@@ -12,6 +12,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
         string? path = null;
         int? setup = null, smoke = null;
         var newGame = false;
+        string? shot = null;
         for (var i = 0; i < args.Length; i++)
         {
             var a = args[i];
@@ -26,6 +27,10 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     }
                     else warn($"{a} needs a non-negative integer; ignored.");
                     break;
+                case "--screenshot":
+                    if (i + 1 < args.Length) shot = args[++i];
+                    else warn("--screenshot needs a file path; ignored.");
+                    break;
                 default:
                     if (a.StartsWith("--", StringComparison.Ordinal)) warn($"Unknown option '{a}'; ignored.");
                     else if (path == null) path = a;
@@ -33,7 +38,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     break;
             }
         }
-        return new StartupOptions(path, setup, newGame, smoke);
+        return new StartupOptions(path, setup, newGame, smoke, shot);
     }
 }
 

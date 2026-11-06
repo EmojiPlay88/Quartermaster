@@ -24,7 +24,13 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
         {
             tiles.TryGetValue(board.Name, out var ts);
             DrawBoard(c, board, ts, vp, visible);
-            if (opt.ShowGrid && board.Grid != null) DrawGrid(c, board, vp, visible);
+            if (opt.ShowGrid && board.Grid != null)
+            {
+                var save = c.Save();
+                c.ClipRect(ScreenRect(vp, board.Offset.X, board.Offset.Y, board.Offset.X + board.Width, board.Offset.Y + board.Height));
+                DrawGrid(c, board, vp, visible);
+                c.RestoreToCount(save);
+            }
         }
         DrawTrails(c, map, s, vp);
         DrawStacks(c, map, s, vp, visible, opt);

@@ -22,6 +22,7 @@ sealed class MainForm : Form
     readonly ToolStripMenuItem _viewTree = new("Module &Tree") { Checked = true, CheckOnClick = true };
     readonly List<ToolStripItem> _needsModule = new();
     readonly List<ToolStripItem> _needsGame = new();
+    readonly Dictionary<string, MapWindow> _maps = new();
 
     ModuleSession? _session;
     DiagnosticsWindow? _diag;
@@ -283,7 +284,25 @@ sealed class MainForm : Form
 
     void OpenMainMap()
     {
-        // Task 12: open Model.Maps[0] maximized in an MDI child.
+        var map = _session?.Model.Maps.FirstOrDefault(x => !x.IsOrgDisplay) ?? _session?.Model.Maps.FirstOrDefault();
+        if (map != null) Guard(() => OpenMap(map, maximized: true));
+    }
+
+    /// <summary>Opens a window for the map, or activates it when already open.</summary>
+    MapWindow? OpenMap(MapDef map, bool maximized)
+    {
+        if (_session == null) return null;
+        if (_maps.TryGetValue(map.Id, out var existing) && !existing.IsDisposed)
+        {
+            existing.Activate();
+            return existing;
+        }
+        var w = new MapWindow(_session, map) { MdiParent = this, Size = new Size(720, 520) };
+        _maps[map.Id] = w;
+        w.FormClosed += (_, _) => { if (_maps.TryGetValue(map.Id, out var cur) && cur == w) _maps.Remove(map.Id); };
+        if (maximized) w.WindowState = FormWindowState.Maximized;
+        w.Show();
+        return w;
     }
 
     void CloseSession()
@@ -402,7 +421,12 @@ sealed class MainForm : Form
             Guard(() => _session.LoadSetup(s));
             return;
         }
-        // Map, chart and document windows arrive in later steps.
+        if (n.Kind is WindowNodeKind.Map or WindowNodeKind.OrgDisplay && n.Ref is MapDef map)
+        {
+            Guard(() => OpenMap(map, maximized: false));
+            return;
+        }
+        // Chart and document windows arrive in a later step.
         SetStatus("Opens in a later step");
     }
 
@@ -417,7 +441,7 @@ sealed class MainForm : Form
             _smokeTimer.Tick += (_, _) =>
             {
                 _smokeTimer!.Stop();
-                Close();
+                FinishSmoke();
             };
             _smokeTimer.Start();
         }
@@ -429,6 +453,48 @@ sealed class MainForm : Form
                 if (!OpenModule(_opts.ModulePath, fromArgs: true) && Program.Smoke) Program.ExitCode = 1;
             }));
         }
+    }
+
+    // ---------- smoke: wait for tiling, optional screenshot ----------
+
+    DateTime? _smokeWaitStart;
+
+    void FinishSmoke()
+    {
+        var pending = _maps.Values.Any(w => !w.IsDisposed && !w.TilingDone);
+        _smokeWaitStart ??= DateTime.UtcNow;
+        if (pending && DateTime.UtcNow - _smokeWaitStart < TimeSpan.FromSeconds(60))
+        {
+            _smokeTimer!.Interval = 200;
+            _smokeTimer.Start();
+            return;
+        }
+        if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
+        if (_opts.Screenshot != null) Guard(() => SaveScreenshot(_opts.Screenshot));
+        Close();
+    }
+
+    /// <summary>Main form via DrawToBitmap, with each visible map canvas re-rendered by Skia on top of its screen area.</summary>
+    void SaveScreenshot(string path)
+    {
+        Update();
+        using var shot = new Bitmap(Math.Max(Width, 1), Math.Max(Height, 1));
+        DrawToBitmap(shot, new Rectangle(0, 0, shot.Width, shot.Height));
+        using (var g = Graphics.FromImage(shot))
+        {
+            var active = ActiveMdiChild as MapWindow ?? _maps.Values.FirstOrDefault(w => !w.IsDisposed);
+            if (active != null && active.Visible)
+            {
+                using var snap = active.Canvas.Snapshot();
+                using var bmp = SkiaSharp.Views.Desktop.Extensions.ToBitmap(snap);
+                var origin = new Point(active.Canvas.PointToScreen(Point.Empty).X - Bounds.X, active.Canvas.PointToScreen(Point.Empty).Y - Bounds.Y);
+                g.DrawImageUnscaled(bmp, origin);
+            }
+        }
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        shot.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        Program.AppLog("smoke: screenshot saved to " + path);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
