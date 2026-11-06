@@ -21,7 +21,7 @@ sealed partial class MainForm : Form
     readonly Splitter _logSplitter = new() { Dock = DockStyle.Bottom, Height = 4, Visible = false };
     readonly ToolStripMenuItem _viewLog = new("&Log");
     readonly LogDock _logDock;
-    readonly Panel _paletteHost = new() { Dock = DockStyle.Right, Width = 260, Visible = false };
+    readonly Panel _paletteHost = new() { Dock = DockStyle.Fill, Visible = false };
     readonly Splitter _paletteSplitter = new() { Dock = DockStyle.Right, Width = 4, Visible = false };
     readonly PaletteDock _paletteDock;
     readonly ToolStripMenuItem _viewPalette = new("Counter &palette") { Visible = false };
@@ -74,6 +74,7 @@ sealed partial class MainForm : Form
         _wm.FloatingChanged += RebuildFloatingMenu;
         _logDock = new LogDock(this, _wm, _logHost, _logSplitter, _viewLog, CentreOnPiece, Guard);
         _paletteDock = new PaletteDock(this, _wm, _paletteHost, _paletteSplitter, Guard);
+        InitPhases();
         RegisterCommands();
         InitLos();
         _cmdItems["view.log"] = _viewLog;
@@ -85,15 +86,19 @@ sealed partial class MainForm : Form
         Controls.Add(_tabs); // added first so it docks after the tree and spans only the MDI area
         Controls.Add(_logSplitter); // the log docks at the bottom of the MDI area, beside the tree
         Controls.Add(_logHost);
-        Controls.Add(_paletteSplitter); // the palette docks at the right of the MDI area, in game master mode
-        Controls.Add(_paletteHost);
+        BuildRightStack(); // phase panel on top, counter palette (game master mode) below, in one right-hand column
+        Controls.Add(_rightSplitter);
+        Controls.Add(_rightHost);
         Controls.Add(_splitter);
         _leftSplit.Panel1.Controls.Add(_tree);
         _leftSplit.Panel2.Controls.Add(_tablesTree);
         Controls.Add(_leftSplit);
         Controls.Add(_status);
         Controls.Add(_toolbar);
+        Controls.Add(_strip); // the phase tracker sits directly under the toolbar
         Controls.Add(_menu);
+        // Explicit z-order (highest index docks first): menu, toolbar, then the phase strip, so the strip sits under the toolbar.
+        FixTopOrder();
         MainMenuStrip = _menu;
 
         _tree.NodeActivated += OnNodeActivated;
@@ -206,6 +211,7 @@ sealed partial class MainForm : Form
         view.DropDownItems.Add(_showGrid);
         _needsGame.Add(_viewLog);
         view.DropDownItems.Add(_viewLog);
+        view.DropDownItems.Add(_viewPhases);
         _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, "view.ledger"));
         Item(view.DropDownItems, "&Overview", ShowOverview, needsGame: true);
         _viewPalette.Click += (_, _) => Guard(TogglePalette);
@@ -253,7 +259,7 @@ sealed partial class MainForm : Form
         _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
         SetCommandHandler("dice.1d6", () => _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll"));
         SetCommandHandler("dice.2d6", () => _dice!.RollSpec(new DiceSpec(2, 6, 0), "Roll"));
-        SetCommandHandler("turn.next", () => { if (_session?.Game == null) return false; _dice!.StepTurn(1); return true; });
+        SetCommandHandler("turn.next", NextTurnCommand);
         _toolsMenu!.DropDownItems.Add(new ToolStripSeparator());
         Item(_toolsMenu.DropDownItems, "&Settings...", ShowSettings, "tools.settings");
     }
@@ -322,6 +328,7 @@ sealed partial class MainForm : Form
         foreach (var i in _needsGame) i.Enabled = _session?.Game != null;
         foreach (var i in _needsRules) i.Enabled = _session?.Rules != null;
         _dice?.Refresh();
+        UpdatePhaseUi();
     }
 
     void UpdateTitle()
@@ -389,6 +396,7 @@ sealed partial class MainForm : Form
         _logDock.Panel?.ApplySettings(_settings.Current);
         _paletteDock.Create(_session);
         _paletteDock.SetGameMaster(GameMaster);
+        CreatePhases(_session);
         _sbModule.Text = $"{_session.Model.Name} {_session.Model.Version}".Trim();
         _sbLocation.Text = "-";
         _sbZoom.Text = "-";
@@ -408,15 +416,15 @@ sealed partial class MainForm : Form
     {
         if (fromArgs && _opts.SetupIndex is { } idx)
         {
-            if (idx < s.Model.Setups.Count) s.LoadSetup(s.Model.Setups[idx]);
+            if (idx < s.Model.Setups.Count) s.LoadSetup(s.Model.Setups[idx], _opts.Difficulty);
             else
             {
                 Program.AppLog($"--setup {idx} is out of range (module has {s.Model.Setups.Count}); starting a new game.");
                 if (Program.Smoke) Program.ExitCode = 1;
-                s.StartNewGame();
+                s.StartNewGame(_opts.Difficulty);
             }
         }
-        else if (fromArgs && _opts.NewGame) s.StartNewGame();
+        else if (fromArgs && _opts.NewGame) s.StartNewGame(_opts.Difficulty);
         else if (Program.Smoke)
         {
             Program.AppLog("Smoke mode: setup chooser skipped; starting a new game.");
@@ -459,6 +467,7 @@ sealed partial class MainForm : Form
         _wm.EndModule(); // layout is written before the windows go away
         _logDock.Destroy();
         _paletteDock.Destroy();
+        DestroyPhases();
         CloseAllWindows();
         if (_session == null) return;
         _session.Log.Added -= OnLogAdded;
@@ -497,6 +506,7 @@ sealed partial class MainForm : Form
         _recoveredAutosave = false;
         UpdateUi();
         UpdateTitle();
+        ReconcilePhases();
     }
 
     // Log.Added can fire from any thread, and an exception here would propagate into the logger.
@@ -612,6 +622,7 @@ sealed partial class MainForm : Form
         if (IsDisposed) return;
         UpdateUi();
         UpdateTitle();
+        ReconcilePhases();
     }
 
     void LoadRulesFromArgs(ModuleSession s)
