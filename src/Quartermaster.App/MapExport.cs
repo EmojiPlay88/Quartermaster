@@ -7,6 +7,8 @@ namespace Quartermaster.App;
 /// <summary>"Save map as picture": the background whole-map render and the dialogs around it.</summary>
 static class MapExport
 {
+    static bool _running;
+
     /// <summary>Smoke/helper overload: snapshots the canvas map's game and renders it.</summary>
     public static string? RunWhole(ModuleSession s, MapCanvas canvas, double zoom, string path, IProgress<double>? progress, CancellationToken ct)
         => RunWhole(s, canvas.Map, canvas.Tiles, s.Game?.State.DeepClone(), zoom, path, progress, ct);
@@ -43,6 +45,14 @@ static class MapExport
     /// <summary>The user-facing flow, started from the map window.</summary>
     public static async Task ShowAsync(MapWindow owner, ModuleSession s, MapCanvas canvas, Action<string> status)
     {
+        if (_running) { status("An export is already running"); return; }
+        _running = true;
+        try { await ShowCoreAsync(owner, s, canvas, status); }
+        finally { _running = false; }
+    }
+
+    static async Task ShowCoreAsync(MapWindow owner, ModuleSession s, MapCanvas canvas, Action<string> status)
+    {
         if (s.Game == null) { MessageBox.Show(owner, "There is no game in progress.", "Save map as picture", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         using var choice = new ExportChoiceDialog(canvas.Map.Name);
         if (choice.ShowDialog(owner) != DialogResult.OK) return;
@@ -72,10 +82,12 @@ static class MapExport
         using var cts = new CancellationTokenSource();
         using var dlg = new ExportProgressDialog(cts);
         var progress = new Progress<double>(p => { if (!dlg.IsDisposed) dlg.SetProgress(p); });
+        FormClosedEventHandler onClosed = (_, _) => { try { cts.Cancel(); } catch (ObjectDisposedException) { } };
+        owner.FormClosed += onClosed;
         dlg.Show(owner);
         string? error;
         try { error = await Task.Run(() => RunWhole(s, map, tiles, snapshot, zoom, path, progress, cts.Token)); }
-        finally { if (!dlg.IsDisposed) dlg.Close(); }
+        finally { owner.FormClosed -= onClosed; if (!dlg.IsDisposed) dlg.Close(); }
         if (owner.IsDisposed) return;
         if (error == null) status("Saved " + path);
         else if (error == "Cancelled") status("Export cancelled");

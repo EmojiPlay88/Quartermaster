@@ -61,10 +61,13 @@ public static class MapImageExporter
         }
     }
 
+    /// <summary>A unique sibling temp name, so two exports to the same target never share (or delete) each other's temp file.</summary>
+    public static string TempPathFor(string path) => path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
     /// <summary>Encodes as PNG into a temp file beside <paramref name="path"/> and moves it over the target. Throws on failure; never leaves the temp file behind.</summary>
     public static void SavePng(SKBitmap bmp, string path)
     {
-        var tmp = path + ".tmp";
+        var tmp = TempPathFor(path);
         try
         {
             using (var img = SKImage.FromBitmap(bmp))

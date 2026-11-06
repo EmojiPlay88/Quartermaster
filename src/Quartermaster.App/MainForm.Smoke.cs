@@ -1,6 +1,7 @@
 using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
+using Quartermaster.Rules;
 
 namespace Quartermaster.App;
 
@@ -62,6 +63,18 @@ sealed partial class MainForm
     void SmokeTablesTree()
     {
         if (_session?.Rules is not { } pack) return;
+        if (_opts.NewRulesName != null && pack.Tables.Count == 0 && pack.Formulas.Count == 0)
+        {
+            // The scratch pack made by --new-rules is empty; give it one invented table and formula so the Tables and Formulas branches are both exercised.
+            _session.UpdateRules(p =>
+            {
+                p.Tables.Add(new TableDef { Id = "t-smoke", Name = "Smoke Table", Kind = TableKind.OneD, RowKeys = new() { "1+" }, ColumnKeys = new() { "Value" }, Cells = new() { new() { "1" } } });
+                p.Formulas.Add(new FormulaDef { Id = "f-smoke", Name = "Smoke Formula", Text = "1 + 1" });
+                return p;
+            });
+            _tablesTree.Bind(_session);
+            pack = _session.Rules!;
+        }
         var (t, f) = _tablesTree.CountsForSmoke;
         var ok = t == pack.Tables.Count && f == pack.Formulas.Count;
         Program.AppLog($"smoke: tables tree {(ok ? "ok" : "FAILED")} ({t}/{pack.Tables.Count} tables, {f}/{pack.Formulas.Count} formulas); left split {_leftFraction:F2}");
@@ -272,8 +285,9 @@ sealed partial class MainForm
                 _tabs.DrawToBitmap(tb, new Rectangle(Point.Empty, tb.Size));
                 g.DrawImageUnscaled(tb, _tabs.PointToScreen(Point.Empty).X - form.Bounds.X, _tabs.PointToScreen(Point.Empty).Y - form.Bounds.Y);
             }
-            var active = form as MapWindow ?? ActiveMdiChild as MapWindow ?? _maps.Values.FirstOrDefault(w => !w.IsDisposed && !_wm.IsFloating(w));
-            if (active != null && active.Visible && (form == this ? !_wm.IsFloating(active) : active == form))
+            // Only the map that is actually on top (the screenshot target itself, or the active MDI child) is composited, so a map never gets pasted over another active window.
+            var active = form as MapWindow ?? ActiveMdiChild as MapWindow;
+            if (active != null && !active.IsDisposed && active.Visible && (form == this ? !_wm.IsFloating(active) : active == form))
             {
                 using var snap = active.Canvas.Snapshot();
                 using var bmp = SkiaSharp.Views.Desktop.Extensions.ToBitmap(snap);

@@ -111,4 +111,33 @@ public class MapImageExporterTests
         Assert.Equal(new PointD(50, 20), MapViewTools.SelectionCentre(s, "m", new HashSet<string> { "a", "b", "c" }));
         Assert.Null(MapViewTools.SelectionCentre(s, "m", new HashSet<string>()));
     }
+
+    [Fact]
+    public void SavePng_TempNameIsUnique()
+    {
+        var a = MapImageExporter.TempPathFor("x.png");
+        var b = MapImageExporter.TempPathFor("x.png");
+        Assert.NotEqual(a, b);
+        Assert.StartsWith("x.png.", a);
+        Assert.EndsWith(".tmp", a);
+    }
+
+    [Fact]
+    public void SavePng_FailureLeavesNoTempFile()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "qm-png-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var target = Path.Combine(dir, "out.png");
+            Directory.CreateDirectory(target); // moving a file over a directory fails
+            using var bmp = new SKBitmap(4, 4);
+            Assert.ThrowsAny<Exception>(() => MapImageExporter.SavePng(bmp, target));
+            Assert.Empty(Directory.GetFiles(dir));
+            var ok = Path.Combine(dir, "ok.png");
+            MapImageExporter.SavePng(bmp, ok);
+            Assert.Equal(new[] { ok }, Directory.GetFiles(dir));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
 }
