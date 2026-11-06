@@ -5,7 +5,7 @@ namespace Quartermaster.Core;
 /// <summary>Native .qsave format: JSON { format, moduleSha256, rulesSha256?, snapshot, log }.</summary>
 public static class NativeSave
 {
-    public const int FormatVersion = 3;
+    public const int FormatVersion = 4;
     const int MinFormat = 1;
 
     sealed class SaveFile
@@ -45,6 +45,9 @@ public static class NativeSave
         Need(f.Log!.All(c => c != null), "log entry");
         Need(snap.Log != null && snap.Log.All(e => e != null && e.Kind != null && e.Text != null), "game log");
         snap.Notes ??= "";
+        snap.Ticked ??= new();
+        snap.Acknowledged ??= new();
+        snap.Pending = (snap.Pending ?? new()).Where(r => r != null && r.Units != null).ToList();
         snap.Turn ??= new TurnState(1, null);
     }
 
