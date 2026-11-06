@@ -169,6 +169,39 @@ public class PieceTypeTests
     }
 
     [Fact]
+    public void EncodeType_RoundTripsChainWithoutPrototypes()
+    {
+        var t = Chain("mark;m", "label;" + Enc(';', "Chg", "10"), "hide;" + Enc(';', "k"), Basic());
+        var parsed = PieceTypeParser.Parse(t, new DiagnosticLog(), null);
+        Assert.Equal(t, PieceTypeParser.EncodeType(parsed.Traits));
+    }
+
+    [Fact]
+    public void EncodeState_RoundTripsThroughSplitState()
+    {
+        var xs = new[] { "a", "", "b;c", "", "null;1;2;3;0" };
+        Assert.Equal(xs, PieceTypeParser.SplitState(PieceTypeParser.EncodeState(xs), xs.Length));
+        var ys = new[] { "a", "" };
+        Assert.Equal(ys, PieceTypeParser.SplitState(PieceTypeParser.EncodeState(ys), 2));
+    }
+
+    [Fact]
+    public void ExpandTypeAndState_SplicesAndAlignsState()
+    {
+        var log = new DiagnosticLog();
+        var protos = new Dictionary<string, PieceType> { ["Proto"] = P(Chain("mark;m", Basic("p.png", "P")), log) };
+        var type = Chain("label;" + Enc(';', ""), Proto("Proto"), Basic());
+        var state = Chain("L", "", "null;1;2;7;0");
+        var x = new PrototypeExpander(protos, log).ExpandTypeAndState(type, state, out var xs);
+        var parsed = PieceTypeParser.Parse(x, log, null);
+        Assert.Equal(new[] { "label", "mark", "piece" }, parsed.Traits.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { "L", "", "null;1;2;7;0" }, PieceTypeParser.SplitState(xs, 3));
+        var same = new PrototypeExpander(protos, log).ExpandTypeAndState(Basic(), "s", out var ss);
+        Assert.Equal(Basic(), same);
+        Assert.Equal("s", ss);
+    }
+
+    [Fact]
     public void RgbColor_Parse()
     {
         Assert.Null(RgbColor.Parse(null));

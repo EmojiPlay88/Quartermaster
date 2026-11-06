@@ -13,3 +13,5 @@ Ported files:
 - `src/Quartermaster.Vassal/Grids/HexGrid.cs` (from `.../board/HexGrid.java`)
 - `src/Quartermaster.Vassal/Grids/ZonedGrid.cs` (from `.../board/ZonedGrid.java` and `mapgrid/Zone.java`)
 - `src/Quartermaster.Vassal/Model/ModuleModelBuilder.cs` (board arrangement from `VASSAL/build/module/map/BoardPicker.java` default setup and `VASSAL/build/module/Map.java` setBoardBoundaries/getLocation)
+- `src/Quartermaster.Core/SaveImporter.cs` (from `VASSAL/build/module/BasicCommandEncoder.java`, `counters/Stack.java`, `counters/BasicPiece.java`, `build/module/map/BoardPicker.java`, `build/module/PlayerRoster.java`, `build/module/GameState.java`)
+- `src/Quartermaster.Core/NewGameBuilder.cs` (from `VASSAL/build/module/map/SetupStack.java` and `counters/BasicPiece.java`)

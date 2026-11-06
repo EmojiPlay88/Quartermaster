@@ -40,6 +40,25 @@ public sealed class PrototypeExpander(IReadOnlyDictionary<string, PieceType> pro
         return new ExpandedPiece(new PieceType(traits), index);
     }
 
+    /// <summary>
+    /// Expands the prototypes of an encoded piece type, as VASSAL's PieceCloner does when a piece is made from a slot.
+    /// Returns the re-encoded type; <paramref name="expandedState"/> is the matching state chain (unexpanded traits keep their
+    /// state, prototype-derived traits get ""). A type without prototype traits is returned unchanged with its state.
+    /// </summary>
+    public string ExpandTypeAndState(string type, string state, out string expandedState)
+    {
+        var parsed = PieceTypeParser.Parse(type, log, null);
+        if (!parsed.Traits.Any(t => t is PrototypeRef))
+        {
+            expandedState = state;
+            return type;
+        }
+        var e = Expand(parsed);
+        var states = PieceTypeParser.SplitState(state, parsed.Traits.Count);
+        expandedState = PieceTypeParser.EncodeState(e.StateIndex.Select(i => i >= 0 ? states[i] : "").ToList());
+        return PieceTypeParser.EncodeType(e.Type.Traits);
+    }
+
     /// <summary>Appends the named prototype's traits (minus its BasicPiece) to <paramref name="outList"/>; false when it cannot be expanded.</summary>
     private bool Splice(PrototypeRef pr, List<TraitDef> outList, List<string> stack)
     {

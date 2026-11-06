@@ -64,6 +64,23 @@ public static class PieceTypeParser
         return result;
     }
 
+    /// <summary>
+    /// Re-encodes a trait chain (outermost first) as VASSAL's nested tab encoding: each layer's raw type followed by the
+    /// encoded remainder as one escaped token. Inverse of <see cref="Parse"/> for chains whose last trait is the BasicPiece.
+    /// </summary>
+    public static string EncodeType(IReadOnlyList<TraitDef> traits) => EncodeChain(traits.Select(t => t.RawType).ToList());
+
+    /// <summary>Encodes a per-trait state list (outermost first) in the nested tab encoding. Inverse of <see cref="SplitState"/>.</summary>
+    public static string EncodeState(IReadOnlyList<string> states) => EncodeChain(states);
+
+    private static string EncodeChain(IReadOnlyList<string> layers)
+    {
+        if (layers.Count == 0) return "";
+        var cur = layers[^1];
+        for (var i = layers.Count - 2; i >= 0; i--) cur = SequenceEncoder.Encode(new[] { layers[i], cur }, Tab);
+        return cur;
+    }
+
     private static string IdOf(string layer)
     {
         var i = layer.IndexOf(';');
