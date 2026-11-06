@@ -64,42 +64,87 @@ sealed class MapDragController : IDisposable
     public static string[] MovableIds(GameState st, IEnumerable<string> selected) =>
         selected.Where(id => st.Pieces.TryGetValue(id, out var p) && PieceActions.CanMove(p)).ToArray();
 
+    /// <summary>Raised when a failure cancelled a captured drag, so the owner can release the mouse.</summary>
+    public event Action? Aborted;
+
+    void Fail(Exception ex, bool wasActive)
+    {
+        _s.Log.AddOnce("drag:" + ex.GetType().Name, DiagnosticSeverity.Error, "render", "Dragging failed and was cancelled: " + ex.Message, _map.Name);
+        Program.AppLog("drag failed: " + ex);
+        End();
+        ClearIncoming();
+        if (wasActive) Aborted?.Invoke();
+    }
+
     /// <summary>
     /// Enters captured drag mode: snapshots the scene minus the dragged pieces and pre-renders them.
-    /// <paramref name="renderBase"/> draws the scene with the given pieces hidden. Returns false when there is nothing to drag.
+    /// <paramref name="renderBase"/> draws the scene with the given pieces hidden. Returns false when there is nothing to drag
+    /// or something failed (logged); fields are only assigned once everything succeeded.
     /// </summary>
     public bool Begin(GameState st, string grabbed, IEnumerable<string> selected, PointD grabPoint, Viewport vp, SKSize size,
         Func<IReadOnlySet<string>, SKImage?> renderBase)
     {
         End();
-        var ids = MovableIds(st, selected);
-        if (ids.Length == 0) return false;
-        var primary = ids.Contains(grabbed) ? grabbed : ids[0];
-        var pp = st.Pieces[primary];
-        var info = new DragInfo(_s, ids, primary, new PointD(pp.Pos.X - grabPoint.X, pp.Pos.Y - grabPoint.Y));
-        var snap = renderBase(new HashSet<string>(ids));
-        if (snap == null) return false;
-        _info = info;
-        _base = snap;
-        _baseSize = size;
-        _baseZoom = vp.Zoom;
-        _basePan = vp.Pan;
-        BuildSprites(st, vp.Zoom);
-        Update(st, grabPoint);
-        return true;
+        SKImage? snap = null;
+        List<Item>? items = null;
+        try
+        {
+            var ids = MovableIds(st, selected);
+            if (ids.Length == 0) return false;
+            var primary = ids.Contains(grabbed) ? grabbed : ids[0];
+            var pp = st.Pieces[primary];
+            var info = new DragInfo(_s, ids, primary, new PointD(pp.Pos.X - grabPoint.X, pp.Pos.Y - grabPoint.Y));
+            snap = renderBase(new HashSet<string>(ids));
+            if (snap == null) return false;
+            items = MakeSprites(st, info, vp.Zoom);
+            var delta = DropResolver.GhostDelta(st, info.PrimaryId, grabPoint, info.GrabOffset);
+            var groups = DropResolver.ResolveFormation(st, _map, grabPoint, info.GrabOffset, info.PrimaryId, info.Ids, _s.Images);
+            // Everything succeeded: only now touch the fields.
+            _info = info;
+            _base = snap;
+            _baseSize = size;
+            _baseZoom = vp.Zoom;
+            _basePan = vp.Pan;
+            _items = items;
+            _spriteZoom = vp.Zoom;
+            _delta = delta;
+            _groups = groups;
+            snap = null;
+            items = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Fail(ex, false);
+            return false;
+        }
+        finally
+        {
+            snap?.Dispose();
+            if (items != null) foreach (var it in items) it.Sprite.Dispose();
+        }
     }
 
     /// <summary>Starts or refreshes the preview for a drag arriving from another window (or back into this one).</summary>
     public void UpdateIncoming(DragInfo d, GameState st, PointD cursor, float zoom)
     {
-        if (_info != d || !Incoming || _spriteZoom != zoom)
+        try
         {
-            DisposeSprites();
-            _info = d;
-            Incoming = true;
-            BuildSprites(st, zoom);
+            if (_info != d || !Incoming || _spriteZoom != zoom)
+            {
+                var items = MakeSprites(st, d, zoom);
+                DisposeSprites();
+                _items = items;
+                _spriteZoom = zoom;
+                _info = d;
+                Incoming = true;
+            }
+            UpdateCore(st, cursor);
         }
-        Update(st, cursor);
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Fail(ex, false);
+        }
     }
 
     public void ClearIncoming()
@@ -118,6 +163,12 @@ sealed class MapDragController : IDisposable
     /// <summary>Recomputes the unsnapped ghost offset and the landing groups for a cursor position (map space).</summary>
     public void Update(GameState st, PointD cursor)
     {
+        try { UpdateCore(st, cursor); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Fail(ex, Active); }
+    }
+
+    void UpdateCore(GameState st, PointD cursor)
+    {
         if (_info is not { } d) return;
         _delta = DropResolver.GhostDelta(st, d.PrimaryId, cursor, d.GrabOffset);
         _groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images);
@@ -129,8 +180,16 @@ sealed class MapDragController : IDisposable
         var d = _info;
         var game = _s.Game;
         IReadOnlyList<FormationGroup> groups = Array.Empty<FormationGroup>();
-        if (d != null && game != null)
-            groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images);
+        try
+        {
+            if (d != null && game != null)
+                groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Fail(ex, false);
+            return;
+        }
         if (Incoming) ClearIncoming(); else End();
         foreach (var g in groups)
         {
@@ -183,15 +242,22 @@ sealed class MapDragController : IDisposable
         }
     }
 
-    void BuildSprites(GameState st, float zoom)
+    List<Item> MakeSprites(GameState st, DragInfo d, float zoom)
     {
-        DisposeSprites();
-        _spriteZoom = zoom;
-        if (_info is not { } d) return;
-        foreach (var id in d.Ids)
+        var items = new List<Item>();
+        try
         {
-            if (!st.Pieces.TryGetValue(id, out var p)) continue;
-            _items.Add(new Item(id, CurrentCenter(st, p), _pieces.RenderSprite(p, zoom, PieceDrawFlags.Ghost)));
+            foreach (var id in d.Ids)
+            {
+                if (!st.Pieces.TryGetValue(id, out var p)) continue;
+                items.Add(new Item(id, CurrentCenter(st, p), _pieces.RenderSprite(p, zoom, PieceDrawFlags.Ghost)));
+            }
+            return items;
+        }
+        catch
+        {
+            foreach (var it in items) it.Sprite.Dispose();
+            throw;
         }
     }
 

@@ -39,6 +39,7 @@ sealed class MapCanvas : SKControl
         _pieces = new PieceRenderer(s.Images);
         _renderer = new MapRenderer(s.Images, _pieces);
         _drag = new MapDragController(s, map, _pieces, Guard);
+        _drag.Aborted += CancelDrag;
         AllowDrop = true;
         TabStop = true;
         DoubleBuffered = true;
@@ -90,6 +91,8 @@ sealed class MapCanvas : SKControl
     {
         var st = State;
         _selected.RemoveWhere(id => st == null || !st.Pieces.ContainsKey(id));
+        // The game changed: a captured drag's snapshot is out of date; an incoming ghost is rebuilt on the next drag-over.
+        if (_drag.Active) CancelDrag(); else _drag.ClearIncoming();
         HidePopup();
         Invalidate();
     }
@@ -162,7 +165,11 @@ sealed class MapCanvas : SKControl
                 Message(c, size, "No game in progress");
                 return;
             }
-            if (_drag.IsStale(View, size)) _drag.End();
+            if (_drag.IsStale(View, size))
+            {
+                _drag.End();
+                BeginInvoke(CancelDrag); // release the mouse outside the paint
+            }
             if (_drag.Active)
                 _drag.Draw(c, View, st);
             else
@@ -432,7 +439,7 @@ sealed class MapCanvas : SKControl
         HidePopup();
         _hoverStack = null;
         var size = SceneSize();
-        if (!_drag.Begin(st, grabbed, _selected, MapPoint(_downPos), View, size, RenderWithout)) return;
+        if (!_drag.Begin(st, grabbed, _selected, MapPoint(_downPos), View, size, RenderWithout)) { Invalidate(); return; }
         Capture = true;
         _drag.Update(st, MapPoint(at));
         Request();
@@ -451,12 +458,20 @@ sealed class MapCanvas : SKControl
         return surface.Snapshot();
     }
 
+    /// <summary>The one way out of a captured drag: frees the snapshot and sprites, releases the mouse, repaints. Safe to call twice.</summary>
+    void CancelDrag()
+    {
+        if (IsDisposed) return;
+        _drag.End();
+        if (Capture) Capture = false;
+        Invalidate();
+    }
+
     void EndDrag(bool commit, Point at)
     {
         var st = State;
         if (commit && st != null) _drag.Commit(st, MapPoint(at)); else _drag.End();
-        Capture = false;
-        Invalidate();
+        CancelDrag();
         if (commit) PruneSelection();
     }
 

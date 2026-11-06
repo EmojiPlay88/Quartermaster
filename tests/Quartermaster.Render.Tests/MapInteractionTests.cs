@@ -217,6 +217,15 @@ public class MapInteractionTests : IDisposable
     }
 
     [Fact]
+    public void Formation_MissingPrimaryOrIds_DoesNotThrow()
+    {
+        Add("a", 50, 50);
+        var g = Formation(new PointD(110, 60), new PointD(-60, -10), "gone", "a", "also-gone");
+        Assert.Equal(new[] { "a" }, Assert.Single(g).Ids);
+        Assert.Empty(Formation(new PointD(0, 0), new PointD(0, 0), "gone", "none"));
+    }
+
+    [Fact]
     public void GhostDelta_IsCursorPlusGrabMinusPrimaryOrigin_Unsnapped()
     {
         Add("a", 50, 50);
