@@ -13,6 +13,10 @@ sealed class MapCanvas : SKControl
     readonly MapRenderer _renderer;
     readonly PieceRenderer _pieces;
     readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = 600 };
+    double _zoomStep = 1.2;
+    int _dragThreshold = 4;
+    SKColor? _highlight;
+    bool _moduleGrids = true;
     readonly HashSet<string> _selected = new();
     Dictionary<string, TileSet> _tiles = new();
     CounterDetailPopup? _popup;
@@ -54,6 +58,21 @@ sealed class MapCanvas : SKControl
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     /// <summary>Forces grids on for all boards; false (default) draws only grids the module marks visible.</summary>
     public bool ShowGrid { get; set; }
+
+    /// <summary>Applies the map-related settings: wheel zoom step, drag threshold, hover delay, selection colour, label size and grid default.</summary>
+    public void ApplySettings(Settings s)
+    {
+        _zoomStep = Math.Clamp(s.WheelZoomStep, 1.05, 2);
+        _dragThreshold = Math.Max(0, s.DragThresholdPx);
+        _hoverTimer.Interval = Math.Max(1, s.HoverDelayMs);
+        var (r, g, b) = s.HighlightRgb;
+        _highlight = new SKColor(r, g, b);
+        _pieces.LabelScale = Math.Clamp(s.LabelFontSize, 6, 20) / 8f;
+        _moduleGrids = s.GridDefault != GridMode.Never;
+        Invalidate();
+    }
+
+    public double ZoomStepForSmoke => _zoomStep;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public IReadOnlySet<string> Selected => _selected;
     /// <summary>0..1 while board tiles are being prepared; null once ready.</summary>
@@ -182,7 +201,7 @@ sealed class MapCanvas : SKControl
                 _drag.Draw(c, View, st);
             else
             {
-                _renderer.Draw(c, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, _hoverStack));
+                _renderer.Draw(c, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, _hoverStack, null, _highlight, _moduleGrids));
                 if (_drag.Incoming) _drag.Draw(c, View, st);
             }
             DrawBand(c);
@@ -313,8 +332,7 @@ sealed class MapCanvas : SKControl
         }
         if (e.Button == MouseButtons.Left && _downPiece != null)
         {
-            var ds = SystemInformation.DragSize;
-            if (Math.Abs(e.X - _downPos.X) > ds.Width / 2 || Math.Abs(e.Y - _downPos.Y) > ds.Height / 2) BeginDrag(e.Location);
+            if (Math.Abs(e.X - _downPos.X) > _dragThreshold || Math.Abs(e.Y - _downPos.Y) > _dragThreshold) BeginDrag(e.Location);
             return;
         }
         if (e.Button == MouseButtons.None) UpdateHover(e.Location);
@@ -372,7 +390,7 @@ sealed class MapCanvas : SKControl
         base.OnMouseWheel(e);
         if (_drag.Active) return; // zoom is ignored mid-drag: the snapshot is only valid for the view the drag started in
         HidePopup();
-        View.ZoomAt(new SKPoint(e.X, e.Y), (float)Math.Pow(1.2, e.Delta / 120.0));
+        View.ZoomAt(new SKPoint(e.X, e.Y), (float)Math.Pow(_zoomStep, e.Delta / 120.0));
         ReportStatus(e.Location);
         Invalidate();
     }
@@ -486,7 +504,7 @@ sealed class MapCanvas : SKControl
         var size = SceneSize();
         using var surface = SKSurface.Create(new SKImageInfo((int)size.Width, (int)size.Height));
         if (surface == null) return null;
-        _renderer.Draw(surface.Canvas, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, null, hidden));
+        _renderer.Draw(surface.Canvas, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, null, hidden, _highlight, _moduleGrids));
         return surface.Snapshot();
     }
 

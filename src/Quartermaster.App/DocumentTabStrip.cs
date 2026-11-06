@@ -6,7 +6,8 @@ namespace Quartermaster.App;
 /// <summary>Owner-drawn browser-style tab strip for MDI children. Pure view: owns no game logic.</summary>
 sealed class DocumentTabStrip : Control
 {
-    const int BaseMaxTab = 160, BaseMinTab = 80, BaseArrowW = 17, BaseCloseSize = 11, BaseHeight = 24;
+    const int BaseArrowW = 17, BaseCloseSize = 11, BaseHeight = 24;
+    int BaseMaxTab = 160, BaseMinTab = 80; // Settings: tab min/max width at 96 dpi
     // All pixel sizes scale with the monitor the strip is on (PerMonitorV2).
     int S(int px) => (int)Math.Round(px * DeviceDpi / 96.0);
     int MaxTab => S(BaseMaxTab);
@@ -23,6 +24,13 @@ sealed class DocumentTabStrip : Control
     string? _tipText;
     Form? _dragTab;      // tab pressed with the left button (candidate for drag-out)
     int _lastDpi = 96;
+
+    public void SetWidths(int min, int max)
+    {
+        BaseMinTab = Math.Max(20, min);
+        BaseMaxTab = Math.Max(BaseMinTab, max);
+        Invalidate();
+    }
 
     public event Action<Form>? TabActivated;
     public event Action<Form>? TabCloseRequested;

@@ -1,0 +1,75 @@
+using Quartermaster.Render;
+
+namespace Quartermaster.Render.Tests;
+
+public class AutosaverTests : IDisposable
+{
+    private readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-autosave-" + Guid.NewGuid().ToString("N"));
+
+    public AutosaverTests() => Directory.CreateDirectory(_tmp);
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_tmp, true); } catch (IOException) { }
+    }
+
+    static readonly DateTimeOffset T0 = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void Autosaver_SavesOnlyWhenDirtyAndElapsed()
+    {
+        var saved = new List<string>();
+        var a = new Autosaver(() => "abc", p => { File.WriteAllText(p, "x"); saved.Add(p); }, _tmp);
+
+        Assert.Null(a.Tick(T0, 5, dirty: false));
+        Assert.Null(a.Tick(T0.AddMinutes(1), 5, dirty: true));           // interval not elapsed
+        Assert.Null(a.Tick(T0.AddMinutes(5), 0, dirty: true));           // 0 = off
+        Assert.Empty(saved);
+
+        var path = a.Tick(T0.AddMinutes(7), 5, dirty: true);             // dirty and elapsed
+        Assert.NotNull(path);
+        Assert.Equal(Path.Combine(_tmp, "autosave", "abc", "autosave-20261106-120700.qsave"), path);
+        Assert.True(File.Exists(path));
+
+        Assert.Null(a.Tick(T0.AddMinutes(8), 5, dirty: true));           // just saved
+        Assert.Null(a.Tick(T0.AddMinutes(13), 5, dirty: false));         // clean game: nothing to save
+        Assert.Null(a.Tick(T0.AddMinutes(14), 5, dirty: true));          // idle clock restarted by the clean tick
+        Assert.NotNull(a.Tick(T0.AddMinutes(19), 5, dirty: true));
+        Assert.Equal(2, saved.Count);
+    }
+
+    [Fact]
+    public void Autosaver_NoModule_OrFailingSave_ReturnsNullWithoutThrowing()
+    {
+        var errors = new List<string>();
+        var none = new Autosaver(() => null, _ => throw new InvalidOperationException(), _tmp);
+        none.Tick(T0, 1, true);
+        Assert.Null(none.Tick(T0.AddMinutes(9), 1, true));
+
+        var bad = new Autosaver(() => "m", _ => throw new IOException("disk full"), _tmp, errors.Add);
+        bad.Tick(T0, 1, true);
+        Assert.Null(bad.Tick(T0.AddMinutes(2), 1, true));
+        Assert.Single(errors);
+        Assert.Contains("disk full", errors[0]);
+    }
+
+    [Fact]
+    public void Autosaver_Prune_KeepsNewest10()
+    {
+        var dir = Path.Combine(_tmp, "d");
+        Directory.CreateDirectory(dir);
+        for (var i = 0; i < 14; i++) File.WriteAllText(Path.Combine(dir, $"autosave-20261106-1200{i:00}.qsave"), "x");
+        File.WriteAllText(Path.Combine(dir, "mine.qsave"), "x");        // not ours: never touched
+
+        Autosaver.Prune(dir);
+
+        var left = Directory.GetFiles(dir).Select(Path.GetFileName).OrderBy(n => n, StringComparer.Ordinal).ToList();
+        Assert.Equal(11, left.Count);
+        Assert.Contains("mine.qsave", left);
+        Assert.DoesNotContain("autosave-20261106-120000.qsave", left);
+        Assert.DoesNotContain("autosave-20261106-120003.qsave", left);
+        Assert.Contains("autosave-20261106-120004.qsave", left);
+        Assert.Contains("autosave-20261106-120013.qsave", left);
+        Autosaver.Prune(Path.Combine(_tmp, "missing")); // tolerant
+    }
+}

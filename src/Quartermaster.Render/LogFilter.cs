@@ -26,7 +26,14 @@ public static class LogFilter
             && (search.Length == 0 || (e.Text ?? "").Contains(search, StringComparison.OrdinalIgnoreCase))).ToList();
     }
 
-    public static string Time(LogEntry e) => e.At.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+    public static string Time(LogEntry e) => Time(e, "HH:mm:ss");
+
+    /// <summary>Local time in a user format; an unusable format falls back to HH:mm:ss.</summary>
+    public static string Time(LogEntry e, string format)
+    {
+        try { return e.At.ToLocalTime().ToString(format, System.Globalization.CultureInfo.InvariantCulture); }
+        catch (FormatException) { return Time(e); }
+    }
 
     public static string ToText(IReadOnlyList<LogEntry> rows)
     {

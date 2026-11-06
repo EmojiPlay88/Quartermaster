@@ -17,8 +17,11 @@ sealed class DiceTools : IDisposable
     readonly ToolStripMenuItem _prev = new("&Previous turn");
     string? _shown;
 
-    /// <summary>Temporary until Settings (Task 5) binds it: prompt for each die value instead of rolling.</summary>
+    /// <summary>Prompt for each die value instead of rolling (Settings: physical dice).</summary>
     public bool PhysicalDice { get; set; }
+
+    /// <summary>Whether a roll's result text is shown in the status bar (Settings).</summary>
+    public bool ShowLastRoll { get; set; } = true;
 
     public ToolStripStatusLabel TurnLabel { get; } = new("Turn 1")
     {
@@ -147,7 +150,7 @@ sealed class DiceTools : IDisposable
         var results = Results(s, spec.Count, spec.Sides);
         if (results == null) return false;
         game.Execute(CommandLog.Stamp(new RollDice(purpose, spec.Count, spec.Sides, results, DiceExpr.Format(spec), null, spec.Modifier)));
-        if (!quiet) ShowResult(game.State.Log.LastOrDefault()?.Text);
+        if (!quiet && ShowLastRoll) ShowResult(game.State.Log.LastOrDefault()?.Text);
         return true;
     }
 
@@ -158,7 +161,7 @@ sealed class DiceTools : IDisposable
         if (results == null) return false;
         var face = die.Faces[results[0] - 1];
         game.Execute(CommandLog.Stamp(new RollDice(die.Name, 1, die.Faces.Count, results, null, new[] { face })));
-        ShowResult(game.State.Log.LastOrDefault()?.Text);
+        if (ShowLastRoll) ShowResult(game.State.Log.LastOrDefault()?.Text);
         return true;
     }
 

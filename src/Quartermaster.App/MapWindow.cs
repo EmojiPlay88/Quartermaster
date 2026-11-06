@@ -89,6 +89,8 @@ sealed class MapWindow : Form
         {
             mf.GridVisibleChanged += OnGridVisibleChanged;
             Canvas.ShowGrid = mf.GridVisible;
+            mf.SettingsApplied += OnSettingsApplied;
+            Canvas.ApplySettings(mf.CurrentSettings);
         }
         _ = PrepareTilesAsync();
     }
@@ -101,6 +103,11 @@ sealed class MapWindow : Form
             mf.SetZoomText($"{Math.Round(Canvas.View.Zoom * 100)}%");
             mf.SetLocationText("-");
         }
+    }
+
+    void OnSettingsApplied(Settings s)
+    {
+        if (!IsDisposed) Canvas.ApplySettings(s);
     }
 
     void OnGridVisibleChanged()
@@ -121,6 +128,7 @@ sealed class MapWindow : Form
         if (Host is { } mf)
         {
             mf.GridVisibleChanged -= OnGridVisibleChanged;
+            mf.SettingsApplied -= OnSettingsApplied;
             mf.SetTilingProgress(null);
         }
         Canvas.HidePopup();

@@ -6,7 +6,9 @@ namespace Quartermaster.Render;
 
 /// <param name="ShowGrid">True forces every board's grid overlay on (View > Show Grid); false draws only grids the module marks visible.</param>
 /// <param name="HiddenPieceIds">Pieces left out of the drawing (being dragged); their stacks close up around the gap.</param>
-public sealed record MapDrawOptions(bool ShowGrid, IReadOnlySet<string> SelectedPieceIds, string? HoverStackId, IReadOnlySet<string>? HiddenPieceIds = null);
+/// <param name="Highlight">Selection outline colour; null keeps the default blue.</param>
+/// <param name="ModuleGrids">False hides grids the module marks visible (Settings: grid never); <paramref name="ShowGrid"/> still forces them on.</param>
+public sealed record MapDrawOptions(bool ShowGrid, IReadOnlySet<string> SelectedPieceIds, string? HoverStackId, IReadOnlySet<string>? HiddenPieceIds = null, SKColor? Highlight = null, bool ModuleGrids = true);
 
 /// <summary>
 /// Draws a map into a screen-space canvas: board tiles, grid overlay, movement trails, stacks (insertion order),
@@ -26,7 +28,7 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
         {
             tiles.TryGetValue(BoardTiler.TileKey(board), out var ts);
             DrawBoard(c, board, ts, vp, visible);
-            if (board.Grid != null && (opt.ShowGrid || board.Grid.Visible))
+            if (board.Grid != null && (opt.ShowGrid || (opt.ModuleGrids && board.Grid.Visible)))
             {
                 var save = c.Save();
                 c.ClipRect(ScreenRect(vp, board.Offset.X, board.Offset.Y, board.Offset.X + board.Width, board.Offset.Y + board.Height));
@@ -145,7 +147,7 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
                 }
             }
         }
-        using var selPaint = new SKPaint { Color = new SKColor(0x00, 0x78, 0xD7), StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+        using var selPaint = new SKPaint { Color = opt.Highlight ?? new SKColor(0x00, 0x78, 0xD7), StrokeWidth = 2, Style = SKPaintStyle.Stroke };
         using var hoverPaint = new SKPaint { Color = new SKColor(0x80, 0x80, 0x80, 0xC0), StrokeWidth = 1, Style = SKPaintStyle.Stroke };
         foreach (var (center, bounds, rot, selected) in outlines)
         {

@@ -132,6 +132,7 @@ sealed partial class MainForm
         }
         if (_opts.FloatMainMap) Guard(SmokeDockRoundTrip);
         if (_opts.ScreenshotLog != null) Guard(SmokeLog);
+        if (_opts.ScreenshotSettings != null) Guard(SmokeSettings);
         Close();
     }
 

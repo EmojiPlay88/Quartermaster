@@ -24,6 +24,8 @@ sealed class LogPanel : UserControl
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 150 };
     GameSession? _attached;
     IReadOnlyList<LogEntry> _rows = Array.Empty<LogEntry>();
+    bool _showMoves = true;
+    string _timeFormat = "HH:mm:ss";
 
     public LogPanel(ModuleSession s, Action<string> centreOnPiece)
     {
@@ -60,6 +62,14 @@ sealed class LogPanel : UserControl
         Name = "LogPanel";
         _s.GameReplaced += OnGameReplaced;
         Attach();
+        Reload();
+    }
+
+    /// <summary>Settings: whether move/place/delete rows are listed (display only; the log itself is untouched) and the time column format.</summary>
+    public void ApplySettings(Settings s)
+    {
+        _showMoves = s.LogShowMoves;
+        _timeFormat = s.LogTimeFormat;
         Reload();
     }
 
@@ -107,6 +117,7 @@ sealed class LogPanel : UserControl
         // Selection is by row index, which changes when the rows do: re-select by Seq so Copy / double-click act on what is highlighted.
         var selected = _list.SelectedIndices.Cast<int>().Where(i => i < _rows.Count).Select(i => _rows[i].Seq).ToHashSet();
         _rows = LogFilter.Apply(log, Spec());
+        if (!_showMoves) _rows = _rows.Where(r => LogFilter.DisplayKind(r.Kind) is not (LogKind.Move or LogKind.Place or LogKind.Delete)).ToList();
         _list.SelectedIndices.Clear();
         _list.VirtualListSize = _rows.Count;
         if (selected.Count > 0)
@@ -133,7 +144,7 @@ sealed class LogPanel : UserControl
     {
         if (e.ItemIndex < 0 || e.ItemIndex >= _rows.Count) { e.Item = new ListViewItem(new[] { "", "", "" }); return; }
         var r = _rows[e.ItemIndex];
-        e.Item = new ListViewItem(new[] { LogFilter.Time(r), LogFilter.DisplayKind(r.Kind), r.Text ?? "" });
+        e.Item = new ListViewItem(new[] { LogFilter.Time(r, _timeFormat), LogFilter.DisplayKind(r.Kind), r.Text ?? "" });
     }
 
     // ---------- actions ----------

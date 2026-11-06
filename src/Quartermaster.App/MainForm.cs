@@ -98,6 +98,7 @@ sealed partial class MainForm : Form
         _showGrid.CheckedChanged += (_, _) => GridVisibleChanged?.Invoke();
         _viewLog.Click += (_, _) => Guard(_logDock.Toggle);
         _viewTree.CheckedChanged += (_, _) => _leftSplit.Visible = _splitter.Visible = _viewTree.Checked;
+        InitSettings();
         UpdateUi();
         UpdateTitle();
         RestoreMainBounds();
@@ -223,6 +224,8 @@ sealed partial class MainForm : Form
         _toolbar.Items.Add(new ToolStripSeparator());
         Tool("Diagnostics", ShowDiagnostics, needsModule: true);
         _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
+        _toolsMenu!.DropDownItems.Add(new ToolStripSeparator());
+        Item(_toolsMenu.DropDownItems, "&Settings...", ShowSettings);
     }
 
     void BuildStatus()
@@ -345,11 +348,13 @@ sealed partial class MainForm : Form
         _savePath = null;
         _dirty = false;
         _session.Log.Added += OnLogAdded;
+        ReportSettingsProblems(_session);
         _session.GameReplaced += OnGameReplaced;
         _session.RulesChanged += OnRulesChanged;
         _tree.Load(_session.Model);
         _tablesTree.Bind(_session);
         _logDock.Create(_session);
+        _logDock.Panel?.ApplySettings(_settings.Current);
         _sbModule.Text = $"{_session.Model.Name} {_session.Model.Version}".Trim();
         _sbLocation.Text = "-";
         _sbZoom.Text = "-";
@@ -361,6 +366,7 @@ sealed partial class MainForm : Form
         if (fromArgs) Guard(() => LoadRulesFromArgs(_session));
         OpenMainMap();
         if (_opts.FloatMainMap && Program.Smoke && FirstMap() is { } fm) _wm.PopOut(fm);
+        RememberModule(path);
         return true;
     }
 
@@ -449,8 +455,9 @@ sealed partial class MainForm : Form
 
     void OnGameReplaced()
     {
-        if (_session?.Game is { } g) g.Changed += _ => { _dirty = true; UpdateTitle(); _dice?.Refresh(); };
+        if (_session?.Game is { } g) g.Changed += _ => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); };
         _dirty = false;
+        _autosavedSeq = _changeSeq;
         _savePath = null;
         UpdateUi();
         UpdateTitle();
@@ -535,6 +542,7 @@ sealed partial class MainForm : Form
         _session.SaveNative(path);
         _savePath = path;
         _dirty = false;
+        _autosavedSeq = _changeSeq;
         UpdateTitle();
     }
 
@@ -782,6 +790,7 @@ sealed partial class MainForm : Form
             };
             _smokeTimer.Start();
         }
+        ReopenLastModuleIfWanted();
         if (_opts.ModulePath != null && !_startupDone)
         {
             _startupDone = true;
@@ -802,6 +811,7 @@ sealed partial class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _smokeTimer?.Dispose();
+        _autosaveTimer?.Dispose();
         _dice?.Dispose();
         RememberLeftSplit();
         _layoutStore.SaveLeftSplit(_leftFraction);

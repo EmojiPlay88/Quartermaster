@@ -19,6 +19,9 @@ public sealed class PieceRenderer(ImageSource images)
 
     public PieceTypeCache Types { get; } = PieceTypeCache.For(images);
 
+    /// <summary>Multiplies every label's font size (Settings label size / 8); 1 keeps the sizes the module asks for.</summary>
+    public float LabelScale { get; set; } = 1f;
+
     public void Draw(SKCanvas c, PieceInstance p, PieceType x, PointD center, float zoom, PieceDrawFlags flags)
     {
         var traits = x.Traits;
@@ -140,7 +143,7 @@ public sealed class PieceRenderer(ImageSource images)
     {
         var text = TraitState.LabelText(lb, PieceGeometry.StateAt(p, index));
         if (text.Length == 0) return;
-        using var font = new SKFont(Face(lb), Math.Max(1, lb.FontSize)) { Subpixel = true };
+        using var font = new SKFont(Face(lb), Math.Max(1, lb.FontSize * LabelScale)) { Subpixel = true };
         var m = font.Metrics;
         var w = font.MeasureText(text);
         var h = m.Descent - m.Ascent;
