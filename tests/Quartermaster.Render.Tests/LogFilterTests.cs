@@ -52,6 +52,26 @@ public class LogFilterTests
     }
 
     [Fact]
+    public void LogFilter_CalcKind_LabelAndFilter()
+    {
+        Assert.Contains(LogKind.Calc, LogFilter.AllKinds);
+        Assert.Equal("Calculations", LogFilter.KindLabel(LogKind.Calc));
+        Assert.Equal("dice", LogFilter.KindLabel(LogKind.Dice));
+        var rows = new[] { E(1, LogKind.Calc, "Daily water: 3 units"), E(2, LogKind.Dice, "roll") };
+        Assert.Equal(new long[] { 1 }, LogFilter.Apply(rows, Spec("", LogKind.Calc)).Select(e => e.Seq));
+        Assert.Equal(LogKind.Calc, LogFilter.DisplayKind(LogKind.Calc));
+    }
+
+    [Fact]
+    public void ToText_IncludesTurnPhaseTag()
+    {
+        var tagged = E(9, LogKind.Calc, "x") with { Turn = 3, Phase = "Supply" };
+        var lines = LogFilter.ToText(new[] { tagged, E(10, LogKind.Dice, "y") }).Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal("[14:03:09] T3 Supply calc  x", lines[0]);
+        Assert.Equal("[14:03:10] dice  y", lines[1]);
+    }
+
+    [Fact]
     public void ToHtml_EscapesText()
     {
         var html = LogFilter.ToHtml(new[] { E(1, LogKind.Note, "<b>\"x\" & y</b>") });

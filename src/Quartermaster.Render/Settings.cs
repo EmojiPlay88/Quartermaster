@@ -1,3 +1,5 @@
+using Quartermaster.Core;
+
 namespace Quartermaster.Render;
 
 /// <summary>How the map grid overlay is shown by default.</summary>
@@ -35,6 +37,10 @@ public sealed record Settings
     public bool ShowLastRollInStatus { get; init; } = true;
     public bool LogShowMoves { get; init; } = true;
     public string LogTimeFormat { get; init; } = "HH:mm:ss";
+
+    // Game
+    /// <summary>Difficulty preselected at game setup and shown in Settings → Game.</summary>
+    public Difficulty LastDifficulty { get; init; } = Difficulty.SemiAuto;
 
     // Toolbar / Keyboard
     /// <summary>Toolbar item id to visibility; a missing key means visible.</summary>

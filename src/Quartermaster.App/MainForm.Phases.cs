@@ -196,8 +196,7 @@ sealed partial class MainForm
 
     /// <summary>
     /// Opens the calculation UI of a pending run. A run that needs input (fully automatic) asks once through the missing-input dialog.
-    /// Otherwise a single unfinished unit opens its formula dialog linked to the run; several units will open the batch grid (Task 12 hook:
-    /// replace the marked line), until then the first unfinished unit's dialog is shown.
+    /// Otherwise a single unfinished unit opens its formula dialog linked to the run; several units open the batch grid.
     /// </summary>
     public void OpenPendingRun(string runId)
     {
@@ -212,12 +211,38 @@ sealed partial class MainForm
             using var dlg = new MissingInputDialog(_session, _phases, run);
             if (dlg.ShowDialog(this) == DialogResult.Retry
                 && _session?.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } fresh   // re-read: the dialog may have applied some units
-                && fresh.Units.FirstOrDefault(u => !u.Applied) is { } next)
-                OpenUnitDialog(fresh, next);   // "Per unit..." (batch grid hook in Task 12)
+                && fresh.Units.Where(u => !u.Applied).ToList() is { Count: > 0 } left)
+                OpenPendingRunAsUnits(fresh, left);   // "Per unit..."
             return;
         }
-        // TASK 12 HOOK: when open.Count > 1 open the batch grid for runId here instead of the first unit's dialog.
+        if (open.Count > 1)
+        {
+            var model = new BatchModel(_session, _phases, runId);
+            OpenChild(_docs, "batch:" + runId, () => new BatchGridWindow(model, _session, runId, row => Guard(() => OpenBatchRow(runId, row))));
+            return;
+        }
         OpenUnitDialog(run, open[0]);
+    }
+
+    /// <summary>"Per unit..." from the missing-input dialog: the batch grid for several units, the unit dialog for one.</summary>
+    void OpenPendingRunAsUnits(PendingRun run, List<PendingUnit> open)
+    {
+        if (_session == null || _phases == null) return;
+        if (open.Count > 1)
+        {
+            var model = new BatchModel(_session, _phases, run.Id);
+            OpenChild(_docs, "batch:" + run.Id, () => new BatchGridWindow(model, _session, run.Id, row => Guard(() => OpenBatchRow(run.Id, row))));
+        }
+        else OpenUnitDialog(run, open[0]);
+    }
+
+    /// <summary>Double-click in the batch grid: that unit's formula dialog, linked to the run so applying it counts for the batch.</summary>
+    void OpenBatchRow(string runId, int row)
+    {
+        if (_session?.Game is not { } game) return;
+        var run = game.State.Pending.FirstOrDefault(r => r.Id == runId);
+        if (run == null || row < 0 || row >= run.Units.Count || run.Units[row].Applied) return;
+        OpenUnitDialog(run, run.Units[row]);
     }
 
     void OpenUnitDialog(PendingRun run, PendingUnit unit)
@@ -292,7 +317,79 @@ sealed partial class MainForm
             SaveScreenshot(this, Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started.png", true);
             _phaseDock?.Panel?.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started-panel.png");
         }
+        SmokeBatchFlow();
         SmokeMoveFlow();
+    }
+
+    void BatchFail(string text)
+    {
+        Program.AppLog("smoke: batch grid FAILED: " + text);
+        Program.ExitCode = 1;
+    }
+
+    /// <summary>
+    /// Smoke: goes to a phase whose OnStart runs per unit; hardcore / semi-automatic open the batch grid (virtual rows, cheat sheet in semi-automatic).
+    /// A wrong value must be skipped by Apply all, Calculate all must fix it, and the second Apply all finishes the run (window closes, summary logged).
+    /// Fully automatic applies the run itself and logs the summary.
+    /// </summary>
+    void SmokeBatchFlow()
+    {
+        if (_phases == null || _session?.Game is not { } game || _session.Rules is not { } pack) return;
+        var target = pack.Phases.FirstOrDefault(p => p.OnStart.Any(e => e.ForEach == ForEachMode.Units));
+        if (target == null) { Program.AppLog("smoke: batch grid skipped (no phase starts a per-unit run)"); return; }
+        var pendingBefore = game.State.Pending.Select(r => r.Id).ToHashSet();
+        for (var i = 0; i < pack.Phases.Count * 4 && _phases.View().Current?.Id != target.Id; i++) _phases.Advance();
+        Application.DoEvents();
+        if (_phases.View().Current?.Id != target.Id) { BatchFail("could not reach the per-unit phase"); return; }
+        var formulaId = target.OnStart.First(e => e.ForEach == ForEachMode.Units).FormulaId;
+        var run = game.State.Pending.LastOrDefault(r => !pendingBefore.Contains(r.Id) && r.FormulaId == formulaId);
+        if (game.State.Difficulty == Difficulty.FullyAuto)
+        {
+            var ok = run == null && game.State.Log.Any(e => e.Kind == LogKind.Calc && e.Text.Contains(" units, ", StringComparison.Ordinal));
+            Program.AppLog($"smoke: batch (fully automatic) {(ok ? "ok" : "FAILED")}: run pending {run != null}, summary line logged {game.State.Log.Any(e => e.Kind == LogKind.Calc)}");
+            if (!ok) Program.ExitCode = 1;
+            return;
+        }
+        if (run == null) { BatchFail("the phase queued no run"); return; }
+        if (!_docs.TryGetValue("batch:" + run.Id, out var form) || form is not BatchGridWindow win || win.IsDisposed) { BatchFail("no batch grid opened for a run of " + run.Units.Count + " units"); return; }
+        win.Update();
+        var rowsOk = win.SmokeRowCount == run.Units.Count && win.Text.StartsWith(run.FormulaName, StringComparison.Ordinal);
+        Program.AppLog($"smoke: batch grid opened: title '{win.Text}', {win.SmokeRowCount} row(s) for {run.Units.Count} unit(s) {(rowsOk ? "ok" : "FAILED")}");
+        if (!rowsOk) Program.ExitCode = 1;
+        win.SmokeSelectRow(0);
+        if (game.State.Difficulty == Difficulty.SemiAuto)
+        {
+            var cheatOk = win.CheatSheet is { IsDisposed: false, Visible: true } && win.CheatSheet.RowTexts.Count > 0;
+            Program.AppLog($"smoke: batch cheat sheet follows the row {(cheatOk ? "ok" : "FAILED")} ({win.CheatSheet?.RowTexts.Count ?? 0} row(s))");
+            if (!cheatOk) Program.ExitCode = 1;
+        }
+        else if (win.CheatSheet != null) BatchFail("hardcore must not show the cheat sheet");
+
+        win.SmokeCalculateAll();
+        var wrongAfterCalc = win.SmokeWrongCells;
+        win.SmokeSetCell(0, 1, "999");
+        var wrongTyped = win.SmokeWrongCells;
+        var okWrong = wrongAfterCalc == 0 && wrongTyped == 1;
+        Program.AppLog($"smoke: batch Calculate all then a wrong value: wrong cells {wrongAfterCalc} -> {wrongTyped} {(okWrong ? "ok" : "FAILED")}");
+        if (!okWrong) Program.ExitCode = 1;
+        if (_opts.ScreenshotBatch != null) win.SaveScreenshot(_opts.ScreenshotBatch);
+
+        win.SmokeApplyAll();
+        var stillPending = game.State.Pending.FirstOrDefault(r => r.Id == run.Id);
+        var appliedNow = stillPending?.Units.Count(u => u.Applied) ?? run.Units.Count;
+        var skipOk = stillPending != null && appliedNow == run.Units.Count - 1 && !stillPending.Units[0].Applied && !win.IsDisposed;
+        Program.AppLog($"smoke: batch Apply all skipped the wrong row {(skipOk ? "ok" : "FAILED")} ({appliedNow} of {run.Units.Count} applied)");
+        if (!skipOk) { Program.ExitCode = 1; return; }
+
+        win.SmokeCalculateAll();
+        var logMark = game.State.Log.Count;
+        win.SmokeApplyAll();
+        Application.DoEvents();
+        var summary = game.State.Log.Skip(logMark).Any(e => e.Kind == LogKind.Calc && e.Text.Contains(" units, ", StringComparison.Ordinal));
+        var doneOk = !game.State.Pending.Any(r => r.Id == run.Id) && (win.IsDisposed || !win.Visible) && summary;
+        Program.AppLog($"smoke: batch Apply all finished the run {(doneOk ? "ok" : "FAILED")} (decision gone {!game.State.Pending.Any(r => r.Id == run.Id)}, window closed {win.IsDisposed || !win.Visible}, summary line {summary})");
+        if (!doneOk) Program.ExitCode = 1;
+        CloseFormulaDialogs();
     }
 
     void SmokeFail(string text)
@@ -407,6 +504,25 @@ sealed partial class MainForm
         var run = new PendingRun("smoke", formula.Id, formula.Name, "move", new[] { new PendingUnit(piece.Id, PieceInfo.Name(piece), null, false) }, true);
         using var dlg = new MissingInputDialog(_session, _phases, run);
         Program.AppLog($"smoke: missing input dialog built ({dlg.AskedVariables.Count} input(s), {dlg.Controls.Count} control(s))");
+    }
+
+    /// <summary>Smoke: renders the setup chooser with its Difficulty group (no ShowDialog) to a PNG.</summary>
+    void SmokeSetupDialog()
+    {
+        if (_session == null) return;
+        using var dlg = new SetupChooserDialog(_session.Model, _settings.Current.LastDifficulty, preselectNew: true);
+        dlg.StartPosition = FormStartPosition.Manual;
+        dlg.Location = new Point(-20000, -20000);
+        dlg.Show();
+        Application.DoEvents();
+        using var bmp = new Bitmap(dlg.Width, dlg.Height);
+        dlg.DrawToBitmap(bmp, new Rectangle(Point.Empty, bmp.Size));
+        dlg.Hide();
+        var path = _opts.ScreenshotSetup!;
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        Program.AppLog("smoke: setup chooser screenshot saved to " + path);
     }
 
     /// <summary>Smoke: renders the Next Phase dialog with three invented decisions (no ShowDialog) to a PNG.</summary>

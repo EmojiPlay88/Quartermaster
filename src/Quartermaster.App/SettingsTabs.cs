@@ -1,4 +1,5 @@
 using System.Globalization;
+using Quartermaster.Core;
 using Quartermaster.Render;
 
 namespace Quartermaster.App;
@@ -9,7 +10,10 @@ namespace Quartermaster.App;
 /// <param name="OpenModuleCache">Cache folder of the module that is open now (its files are in use), or null.</param>
 /// <param name="Notify">Shows a message to the user (logged instead in smoke mode).</param>
 /// <param name="Commands">Commands whose shortcuts the Keyboard page edits.</param>
-sealed record SettingsContext(IReadOnlyList<(string Id, string Text)> ToolbarItems, string CacheRoot, Func<string?> OpenModuleCache, Action<string> Notify, CommandRegistry? Commands = null);
+/// <param name="GameDifficulty">Difficulty of the open game, or null when no game is open.</param>
+/// <param name="SetGameDifficulty">Switches the open game's difficulty (a logged command; takes effect from the next run).</param>
+sealed record SettingsContext(IReadOnlyList<(string Id, string Text)> ToolbarItems, string CacheRoot, Func<string?> OpenModuleCache, Action<string> Notify, CommandRegistry? Commands = null,
+    Func<Difficulty?>? GameDifficulty = null, Action<Difficulty>? SetGameDifficulty = null);
 
 /// <summary>One page of the settings window: builds its controls, shows a <see cref="Settings"/> and writes its fields back into one.</summary>
 abstract class SettingsTab
@@ -85,6 +89,48 @@ sealed class GeneralTab : SettingsTab
     {
         ReopenLastModule = _reopen.Checked, AutosaveMinutes = (int)_autosave.Value, ConfirmDelete = _confirmDelete.Checked, GameMasterMode = _gm.Checked,
     };
+}
+
+/// <summary>Settings -> Game: the difficulty of the open game (switchable mid-game) and the one new games start with.</summary>
+sealed class GameTab(SettingsContext ctx) : SettingsTab
+{
+    static readonly (Difficulty D, string Name)[] Modes =
+    {
+        (Difficulty.Hardcore, "Hardcore"), (Difficulty.SemiAuto, "Semi-automatic"), (Difficulty.FullyAuto, "Fully automatic"),
+    };
+    readonly ComboBox _difficulty = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
+    readonly Label _hint = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 6, 3, 6) };
+
+    public override string Title => "Game";
+
+    public override Control Build()
+    {
+        foreach (var m in Modes) _difficulty.Items.Add(m.Name);
+        var t = Table();
+        Row(t, "Difficulty:", _difficulty);
+        Full(t, _hint);
+        return t;
+    }
+
+    public override void Load(Settings s)
+    {
+        var open = ctx.GameDifficulty?.Invoke();
+        Select(open ?? s.LastDifficulty);
+        _difficulty.Enabled = open != null;
+        _hint.Text = open != null ? "A change takes effect from the next calculation." : "Open a game first";
+    }
+
+    void Select(Difficulty d) => _difficulty.SelectedIndex = Math.Max(0, Array.FindIndex(Modes, m => m.D == d));
+
+    Difficulty Chosen => _difficulty.SelectedIndex >= 0 ? Modes[_difficulty.SelectedIndex].D : Difficulty.SemiAuto;
+
+    public override Settings Collect(Settings s) => _difficulty.Enabled ? s with { LastDifficulty = Chosen } : s;
+
+    /// <summary>Called after the settings were applied: switches the open game to the chosen difficulty.</summary>
+    public void AfterApply()
+    {
+        if (_difficulty.Enabled && ctx.GameDifficulty?.Invoke() != null) ctx.SetGameDifficulty?.Invoke(Chosen);
+    }
 }
 
 sealed class DisplayTab : SettingsTab

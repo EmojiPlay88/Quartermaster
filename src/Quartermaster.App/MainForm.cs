@@ -428,14 +428,9 @@ sealed partial class MainForm : Form
         else if (Program.Smoke)
         {
             Program.AppLog("Smoke mode: setup chooser skipped; starting a new game.");
-            s.StartNewGame();
+            s.StartNewGame(_opts.Difficulty ?? Difficulty.SemiAuto);
         }
-        else
-        {
-            using var dlg = new SetupChooserDialog(s.Model);
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            if (dlg.Selected is { } setup) s.LoadSetup(setup); else s.StartNewGame();
-        }
+        else ChooseAndStart(s, preselectNew: false);
     }
 
     MapWindow? FirstMap() => _maps.Values.FirstOrDefault(w => !w.IsDisposed);
@@ -552,15 +547,23 @@ sealed partial class MainForm : Form
     void NewGame()
     {
         if (_session == null || !ConfirmDiscard()) return;
-        _session.StartNewGame();
+        if (Program.Smoke) { _session.StartNewGame(_opts.Difficulty ?? Difficulty.SemiAuto); return; }
+        ChooseAndStart(_session, preselectNew: true);
+    }
+
+    /// <summary>Shows the setup chooser (with the difficulty choice), remembers the difficulty, and starts the chosen game.</summary>
+    void ChooseAndStart(ModuleSession s, bool preselectNew)
+    {
+        using var dlg = new SetupChooserDialog(s.Model, _settings.Current.LastDifficulty, preselectNew);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        if (dlg.SelectedDifficulty != _settings.Current.LastDifficulty) _settings.Save(_settings.Current with { LastDifficulty = dlg.SelectedDifficulty });
+        if (dlg.Selected is { } setup) s.LoadSetup(setup, dlg.SelectedDifficulty); else s.StartNewGame(dlg.SelectedDifficulty);
     }
 
     void LoadSetupDialog()
     {
         if (_session == null || !ConfirmDiscard()) return;
-        using var dlg = new SetupChooserDialog(_session.Model);
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        if (dlg.Selected is { } s) _session.LoadSetup(s); else _session.StartNewGame();
+        ChooseAndStart(_session, preselectNew: false);
     }
 
     void OpenGameDialog() => OpenGameCore(autosaves: false);
@@ -723,7 +726,7 @@ sealed partial class MainForm : Form
         if (n.Kind == WindowNodeKind.Setup && n.Ref is SetupDef s)
         {
             if (!ConfirmDiscard()) return;
-            Guard(() => _session.LoadSetup(s));
+            Guard(() => _session.LoadSetup(s, _settings.Current.LastDifficulty));
             return;
         }
         if (n.Kind is WindowNodeKind.Map or WindowNodeKind.OrgDisplay && n.Ref is MapDef map)
