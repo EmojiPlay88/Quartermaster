@@ -23,11 +23,27 @@ public class SaveFileReaderTests
         Assert.Equal(plain, Obfuscation.Deobfuscate(plain));
     }
 
-    [Fact]
-    public void Deobfuscate_MalformedHex_ReturnsInputUnchanged()
+    [Theory]
+    [InlineData("!VCSK5a1")]   // odd body length
+    [InlineData("!VCSKzz00")]  // bad key digit
+    [InlineData("!VCSK5azz")]  // bad data digit
+    public void Deobfuscate_Malformed_Throws(string text)
     {
-        var bad = System.Text.Encoding.ASCII.GetBytes("!VCSK5Azz1");
-        Assert.Equal(bad, Obfuscation.Deobfuscate(bad));
+        var ex = Assert.Throws<InvalidDataException>(() => Obfuscation.Deobfuscate(System.Text.Encoding.ASCII.GetBytes(text)));
+        Assert.Contains("Corrupt obfuscated save data", ex.Message);
+    }
+
+    [Fact]
+    public void Read_CorruptSavedGame_Throws()
+    {
+        var ms = new MemoryStream();
+        using (var z = new ZipArchive(ms, ZipArchiveMode.Create, true))
+        {
+            using var w = z.CreateEntry("savedGame").Open();
+            w.Write("!VCSK5azz"u8);
+        }
+        ms.Position = 0;
+        Assert.Throws<InvalidDataException>(() => SaveFileReader.Read(ms));
     }
 
     [Fact]
