@@ -9,19 +9,26 @@ namespace Quartermaster.Core;
 public static class PieceFilter
 {
     /// <summary>Null or empty matches every piece. Parse and evaluation errors give false.</summary>
-    public static bool Matches(string? appliesTo, PieceInstance p, GameState s, ModuleModel model, RulesPack pack)
+    public static bool Matches(string? appliesTo, PieceInstance p, GameState s, ModuleModel model, RulesPack pack) =>
+        Compile(appliesTo, s, pack)(p);
+
+    /// <summary>Parses once. Null or empty matches every piece. A parse error, or an evaluation error on a piece, gives false.</summary>
+    public static Func<PieceInstance, bool> Compile(string? expr, GameState s, RulesPack pack)
     {
-        if (string.IsNullOrWhiteSpace(appliesTo)) return true;
-        try
+        if (string.IsNullOrWhiteSpace(expr)) return _ => true;
+        var e = TryParse(expr);
+        if (e == null) return _ => false;
+        return p =>
         {
-            var e = Parser.Parse(appliesTo);
-            var v = Evaluator.Evaluate(e, new FilterContext(p, s, pack));
-            return v.IsTruthy;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
+            try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack)).IsTruthy; }
+            catch (Exception) { return false; }
+        };
+    }
+
+    private static Quartermaster.Rules.Expr.Expr? TryParse(string text)
+    {
+        try { return Parser.Parse(text); }
+        catch (Exception) { return null; }
     }
 
     /// <summary>Formulas that need a unit (a Unit binding or output) and apply to this piece, ordered by name.</summary>
