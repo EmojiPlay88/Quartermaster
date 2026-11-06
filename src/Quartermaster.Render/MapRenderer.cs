@@ -8,7 +8,11 @@ namespace Quartermaster.Render;
 /// <param name="HiddenPieceIds">Pieces left out of the drawing (being dragged); their stacks close up around the gap.</param>
 /// <param name="Highlight">Selection outline colour; null keeps the default blue.</param>
 /// <param name="ModuleGrids">False hides grids the module marks visible (Settings: grid never); <paramref name="ShowGrid"/> still forces them on.</param>
-public sealed record MapDrawOptions(bool ShowGrid, IReadOnlySet<string> SelectedPieceIds, string? HoverStackId, IReadOnlySet<string>? HiddenPieceIds = null, SKColor? Highlight = null, bool ModuleGrids = true);
+/// <param name="HighlightPieceIds">Pieces outlined (2 px, <paramref name="HighlightColor"/>) as "last moved"; null or empty draws nothing extra.</param>
+/// <param name="HideAllPieces">True draws the board, grid and trails but no counters.</param>
+/// <param name="HighlightColor">Colour of the last-moved outline; null uses the selection colour.</param>
+public sealed record MapDrawOptions(bool ShowGrid, IReadOnlySet<string> SelectedPieceIds, string? HoverStackId, IReadOnlySet<string>? HiddenPieceIds = null, SKColor? Highlight = null, bool ModuleGrids = true,
+    IReadOnlySet<string>? HighlightPieceIds = null, bool HideAllPieces = false, SKColor? HighlightColor = null);
 
 /// <summary>
 /// Draws a map into a screen-space canvas: board tiles, grid overlay, movement trails, stacks (insertion order),
@@ -125,8 +129,9 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
 
     private void DrawStacks(SKCanvas c, MapDef map, GameState s, Viewport vp, RectD visible, MapDrawOptions opt)
     {
+        if (opt.HideAllPieces) return;
         var margin = 400.0;
-        var outlines = new List<(SKPoint Center, SKRect Bounds, double Rot, bool Selected)>();
+        var outlines = new List<(SKPoint Center, SKRect Bounds, double Rot, bool Selected, bool Moved)>();
         foreach (var st in s.StacksOn(map.Id))
         {
             var span = st.PieceIds.Count * Math.Max(Math.Abs(map.Stacking.ExSepX) + Math.Abs(map.Stacking.ExSepY), 1);
@@ -140,22 +145,24 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
                 var sel = opt.SelectedPieceIds.Contains(p.Id);
                 var sp = vp.ToScreen(center);
                 pieces.Draw(c, p, type, new PointD(sp.X, sp.Y), vp.Zoom, sel ? PieceDrawFlags.Selected : PieceDrawFlags.None);
-                if (sel || st.Id == opt.HoverStackId)
+                var moved = opt.HighlightPieceIds != null && opt.HighlightPieceIds.Contains(p.Id);
+                if (sel || moved || st.Id == opt.HoverStackId)
                 {
                     var b = PieceGeometry.LocalBounds(type, p, images);
-                    outlines.Add((sp, b, PieceGeometry.Rotation(type, p), sel));
+                    outlines.Add((sp, b, PieceGeometry.Rotation(type, p), sel, moved));
                 }
             }
         }
         using var selPaint = new SKPaint { Color = opt.Highlight ?? new SKColor(0x00, 0x78, 0xD7), StrokeWidth = 2, Style = SKPaintStyle.Stroke };
         using var hoverPaint = new SKPaint { Color = new SKColor(0x80, 0x80, 0x80, 0xC0), StrokeWidth = 1, Style = SKPaintStyle.Stroke };
-        foreach (var (center, bounds, rot, selected) in outlines)
+        using var movedPaint = new SKPaint { Color = opt.HighlightColor ?? opt.Highlight ?? new SKColor(0x00, 0x78, 0xD7), StrokeWidth = 2f / vp.Zoom, Style = SKPaintStyle.Stroke };
+        foreach (var (center, bounds, rot, selected, moved) in outlines)
         {
             var save = c.Save();
             c.Translate(center.X, center.Y);
             if (rot != 0) c.RotateDegrees((float)rot);
             c.Scale(vp.Zoom);
-            c.DrawRect(bounds, selected ? selPaint : hoverPaint);
+            c.DrawRect(bounds, selected ? selPaint : moved ? movedPaint : hoverPaint);
             c.RestoreToCount(save);
         }
     }

@@ -31,6 +31,13 @@ sealed partial class MainForm
             map.ToggleLos();
             return true;
         });
+        SetCommandHandler("view.hideCounters", () =>
+        {
+            var map = (ActiveForm as MapWindow) ?? (ActiveMdiChild as MapWindow) ?? LastActiveMap;
+            if (map == null || map.IsDisposed) return false;
+            map.ToggleHideCounters();
+            return true;
+        });
     }
 
     void ShowOverview()

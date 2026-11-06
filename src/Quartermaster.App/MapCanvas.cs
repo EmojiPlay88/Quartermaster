@@ -209,7 +209,7 @@ sealed partial class MapCanvas : SKControl
                 _drag.Draw(c, View, st);
             else
             {
-                _renderer.Draw(c, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, _hoverStack, null, _highlight, _moduleGrids));
+                _renderer.Draw(c, Map, _tiles, st, _s.Model, View, size, Options(null, _hoverStack));
                 if (_drag.Incoming) _drag.Draw(c, View, st);
             }
             DrawBand(c);
@@ -257,7 +257,7 @@ sealed partial class MapCanvas : SKControl
 
     string? PieceAt(Point p)
     {
-        if (State is not { } st) return null;
+        if (State is not { } st || _hideCounters) return null;
         try
         {
             return HitTester.PieceAt(st, Map, _s.Model, _s.Images, MapPoint(p), _pieces.Types);
@@ -374,7 +374,7 @@ sealed partial class MapCanvas : SKControl
         if (_bandActive)
         {
             _bandActive = false;
-            if (State is { } st && Math.Abs(e.X - _downPos.X) + Math.Abs(e.Y - _downPos.Y) >= 3)
+            if (State is { } st && !_hideCounters && Math.Abs(e.X - _downPos.X) + Math.Abs(e.Y - _downPos.Y) >= 3)
             {
                 var r = SelectionRect.FromCorners(_bandStart, _bandNow);
                 foreach (var id in SelectionRect.PieceIdsIn(st, Map, r, _s.Images)) _selected.Add(id);
@@ -520,7 +520,7 @@ sealed partial class MapCanvas : SKControl
         var size = SceneSize();
         using var surface = SKSurface.Create(new SKImageInfo((int)size.Width, (int)size.Height));
         if (surface == null) return null;
-        _renderer.Draw(surface.Canvas, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, null, hidden, _highlight, _moduleGrids));
+        _renderer.Draw(surface.Canvas, Map, _tiles, st, _s.Model, View, size, Options(hidden, null));
         return surface.Snapshot();
     }
 

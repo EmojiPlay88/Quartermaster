@@ -137,6 +137,7 @@ sealed partial class MainForm
         if (_opts.GameMaster || _opts.ScreenshotPalette != null) Guard(SmokePalette);
         if (_opts.ScreenshotSettings != null) Guard(SmokeSettings);
         Guard(SmokeOverview);
+        if (_opts.ScreenshotExport != null) Guard(SmokeExport);
         Close();
     }
 
@@ -283,5 +284,28 @@ sealed partial class MainForm
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         shot.Save(path, System.Drawing.Imaging.ImageFormat.Png);
         Program.AppLog("smoke: screenshot saved to " + path);
+    }
+
+    /// <summary>Smoke: exports the whole main map at 25% and checks the PNG exists and its long side is within 1..8192.</summary>
+    void SmokeExport()
+    {
+        var path = _opts.ScreenshotExport!;
+        var ok = false;
+        string detail;
+        if (FirstMap() is not { } map || _session?.Game == null) detail = "no map or game";
+        else
+        {
+            var err = MapExport.RunWhole(_session, map.Canvas, 0.25, path, null, CancellationToken.None);
+            if (err != null) detail = err;
+            else
+            {
+                using var bmp = SkiaSharp.SKBitmap.Decode(path);
+                var side = bmp == null ? 0 : Math.Max(bmp.Width, bmp.Height);
+                ok = side is > 0 and <= 8192;
+                detail = bmp == null ? "PNG did not decode" : $"{bmp.Width}x{bmp.Height}";
+            }
+        }
+        Program.AppLog($"smoke: map export {(ok ? "ok" : "FAILED")} ({detail}) -> {path}");
+        if (!ok) Program.ExitCode = 1;
     }
 }

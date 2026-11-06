@@ -56,10 +56,10 @@ sealed class MapWindow : Form
     void OnGameReplaced()
     {
         Attach();
-        OnUi(Canvas.PruneSelection);
+        OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
     }
 
-    void OnGameChanged(GameCommand _) => OnUi(Canvas.PruneSelection);
+    void OnGameChanged(GameCommand _) => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
 
     void OnUi(Action a)
     {
@@ -104,8 +104,38 @@ sealed class MapWindow : Form
         los.Click += (_, _) => Canvas.LosEnabled = los.Checked;
         Canvas.LosChanged += () => los.Checked = Canvas.LosEnabled;
         bar.Items.Add(los);
+        var last = new ToolStripButton("Last moved") { CheckOnClick = true, ToolTipText = "Outline the counters of the most recent move on this map" };
+        last.Click += (_, _) => Canvas.HighlightLastMoved = last.Checked;
+        bar.Items.Add(last);
+        var hide = new ToolStripButton("Hide counters") { CheckOnClick = true, ToolTipText = "Show only the board (H)" };
+        hide.Click += (_, _) => Canvas.HideCounters = hide.Checked;
+        Canvas.HideCountersChanged += v => hide.Checked = v;
+        bar.Items.Add(hide);
+        bar.Items.Add(new ToolStripButton("Centre on selected", null, (_, _) => Run(Canvas.CentreOnSelection)) { ToolTipText = "Scroll to the selected counters" });
+        var zoom = new ToolStripDropDownButton("Zoom") { ToolTipText = "Zoom presets" };
+        foreach (var pct in new[] { 25, 50, 100, 200 })
+        {
+            var f = pct / 100f;
+            zoom.DropDownItems.Add(new ToolStripMenuItem(pct + "%", null, (_, _) => Run(() => Canvas.ZoomPreset(f))));
+        }
+        zoom.DropDownItems.Add(new ToolStripMenuItem("Fit", null, (_, _) => Run(Canvas.ZoomFit)));
+        bar.Items.Add(zoom);
+        bar.Items.Add(new ToolStripButton("Save map as picture…", null, (_, _) => Run(() => _ = SaveAsPictureAsync())) { ToolTipText = "Save the view or the whole map as a PNG" });
         return bar;
     }
+
+    async Task SaveAsPictureAsync()
+    {
+        try { await MapExport.ShowAsync(this, _s, Canvas, m => Host?.SetStatus(m)); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Program.AppLog("map export failed: " + ex);
+            if (!IsDisposed) MessageBox.Show(this, "The picture could not be saved: " + ex.Message, "Save map as picture", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>The view.hideCounters command: flips counter visibility of this window.</summary>
+    public void ToggleHideCounters() => Canvas.HideCounters = !Canvas.HideCounters;
 
     /// <summary>The tool.los command: flips the line-of-sight mode of this window.</summary>
     public void ToggleLos() => Canvas.LosEnabled = !Canvas.LosEnabled;
@@ -274,6 +304,10 @@ sealed class MapWindow : Form
         menu.Items.Add(grid);
         menu.Items.Add(new ToolStripMenuItem("Zoom to Fit", null, (_, _) => Canvas.ZoomFit()));
         menu.Items.Add(new ToolStripMenuItem("Zoom 100%", null, (_, _) => Canvas.ZoomTo100()));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("Hide counters", null, (_, _) => ToggleHideCounters()) { Checked = Canvas.HideCounters });
+        menu.Items.Add(new ToolStripMenuItem("Centre on selected", null, (_, _) => Canvas.CentreOnSelection()));
+        menu.Items.Add(new ToolStripMenuItem("Save map as picture…", null, (_, _) => Run(() => _ = SaveAsPictureAsync())));
     }
 
     void Run(Action a)
