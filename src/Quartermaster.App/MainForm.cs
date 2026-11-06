@@ -1,4 +1,4 @@
-using System.Xml;
+﻿using System.Xml;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -27,6 +27,9 @@ sealed class MainForm : Form
     readonly Dictionary<string, Form> _charts = new();
     readonly Dictionary<string, Form> _docs = new();
 
+    readonly WindowManager _wm;
+    readonly ToolStripMenuItem _floatingMenu = new("&Floating windows") { Visible = false };
+    readonly ToolStripMenuItem _popOutActive = new("&Pop Out Active Window");
     ModuleSession? _session;
     DiagnosticsWindow? _diag;
     string? _savePath;
@@ -47,6 +50,8 @@ sealed class MainForm : Form
         Text = "Quartermaster";
         ClientSize = new Size(1024, 700);
         StartPosition = FormStartPosition.CenterScreen;
+        _wm = new WindowManager(this, _tabs, new WindowLayoutStore(LayoutRoot));
+        _wm.FloatingChanged += RebuildFloatingMenu;
         BuildMenu();
         BuildToolbar();
         BuildStatus();
@@ -64,11 +69,28 @@ sealed class MainForm : Form
         MdiChildActivate += (_, _) => { KeepMaximized(); SyncTabs(null); };
         _tabs.TabActivated += f => { if (!f.IsDisposed) f.Activate(); };
         _tabs.TabCloseRequested += CloseTab;
+        _tabs.TabPopOutRequested += (f, at) => Guard(() => _wm.PopOut(f, at));
         _tabs.TabsCloseRequested += fs => { foreach (var f in fs) if (!f.IsDisposed) f.Close(); };
         _showGrid.CheckedChanged += (_, _) => GridVisibleChanged?.Invoke();
         _viewTree.CheckedChanged += (_, _) => _tree.Visible = _splitter.Visible = _viewTree.Checked;
         UpdateUi();
         UpdateTitle();
+        RestoreMainBounds();
+    }
+
+    /// <summary>Layout files live here; QUARTERMASTER_LAYOUT_ROOT redirects them (used by smoke runs).</summary>
+    static string LayoutRoot =>
+        Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT") is { Length: > 0 } r ? r
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
+
+    void RestoreMainBounds()
+    {
+        if (_wm.LoadMain() is not { } m) return;
+        var areas = Screen.AllScreens.Select(sc => sc.WorkingArea).ToArray();
+        var primary = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1024, 768);
+        StartPosition = FormStartPosition.Manual;
+        Bounds = ScreenFit.Fit(m.Bounds, areas, primary);
+        if (m.Maximized) WindowState = FormWindowState.Maximized;
     }
 
     // ---------- construction ----------
@@ -117,6 +139,11 @@ sealed class MainForm : Form
         Item(window.DropDownItems, "Tile &Vertically", () => Arrange(MdiLayout.TileVertical));
         Item(window.DropDownItems, "Close &All", CloseAllWindows);
         window.DropDownItems.Add(new ToolStripSeparator());
+        _popOutActive.Click += (_, _) => Guard(() => { if (ActiveMdiChild is { } a) _wm.PopOut(a); });
+        window.DropDownItems.Add(_popOutActive);
+        window.DropDownItems.Add(_floatingMenu);
+        window.DropDownItems.Add(new ToolStripSeparator());
+        window.DropDownOpening += (_, _) => _popOutActive.Enabled = ActiveMdiChild is { IsDisposed: false };
 
         var help = new ToolStripMenuItem("&Help");
         Item(help.DropDownItems, "&About", () => Info("Quartermaster\nA VASSAL module reader and engine.", "About Quartermaster"));
@@ -228,12 +255,14 @@ sealed class MainForm : Form
     {
         if (!ConfirmDiscard()) return false;
         ModuleSession next;
+        string? moduleHash;
         var prevWait = Application.UseWaitCursor;
         Application.UseWaitCursor = true;
         Cursor.Current = Cursors.WaitCursor;
         try
         {
             next = ModuleSession.Open(path);
+            moduleHash = WindowLayoutStore.HashFile(path);
         }
         catch (Exception ex) when (ex is InvalidDataException or XmlException or IOException or UnauthorizedAccessException)
         {
@@ -247,6 +276,7 @@ sealed class MainForm : Form
 
         CloseSession();
         _session = next;
+        _wm.BeginModule(moduleHash);
         _savePath = null;
         _dirty = false;
         _session.Log.Added += OnLogAdded;
@@ -261,6 +291,7 @@ sealed class MainForm : Form
 
         Guard(() => StartGameFor(_session, fromArgs));
         OpenMainMap();
+        if (_opts.FloatMainMap && Program.Smoke && FirstMap() is { } fm) _wm.PopOut(fm);
         return true;
     }
 
@@ -290,6 +321,8 @@ sealed class MainForm : Form
         }
     }
 
+    MapWindow? FirstMap() => _maps.Values.FirstOrDefault(w => !w.IsDisposed);
+
     void OpenMainMap()
     {
         var map = _session?.Model.Maps.FirstOrDefault(x => !x.IsOrgDisplay) ?? _session?.Model.Maps.FirstOrDefault();
@@ -305,17 +338,16 @@ sealed class MainForm : Form
             existing.Activate();
             return existing;
         }
-        var w = new MapWindow(_session, map) { MdiParent = this, Size = new Size(720, 520) };
+        var w = new MapWindow(_session, map) { Host = this };
         _maps[map.Id] = w;
         w.FormClosed += (_, _) => { if (_maps.TryGetValue(map.Id, out var cur) && cur == w) _maps.Remove(map.Id); };
-        w.FormClosed += (_, _) => SyncTabs(w);
-        if (maximized) { _maximizeDocs = true; w.WindowState = FormWindowState.Maximized; }
-        w.Show();
+        ShowDoc(w, "map:" + map.Id);
         return w;
     }
 
     void CloseSession()
     {
+        _wm.EndModule(); // layout is written before the windows go away
         CloseAllWindows();
         if (_session == null) return;
         _session.Log.Added -= OnLogAdded;
@@ -328,6 +360,7 @@ sealed class MainForm : Form
     void CloseAllWindows()
     {
         foreach (var c in MdiChildren) c.Close();
+        _wm.CloseFloating();
     }
 
     void OnGameReplaced()
@@ -372,13 +405,9 @@ sealed class MainForm : Form
             _diag.Activate();
             return;
         }
-        _diag = new DiagnosticsWindow(_session.Log) { MdiParent = this, Size = new Size(760, 320) };
+        _diag = new DiagnosticsWindow(_session.Log);
         _diag.FormClosed += (_, _) => { _diag = null; };
-        var d = _diag;
-        d.FormClosed += (_, _) => SyncTabs(d);
-        _maximizeDocs = true;
-        d.WindowState = FormWindowState.Maximized;
-        d.Show();
+        ShowDoc(_diag, "diag");
     }
 
     // ---------- game commands ----------
@@ -459,13 +488,43 @@ sealed class MainForm : Form
             return;
         }
         var w = create();
+        open[key] = w;
+        w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); };
+        ShowDoc(w, (ReferenceEquals(open, _charts) ? "chart:" : "doc:") + key);
+    }
+
+    /// <summary>Shows a new document window: floating at its remembered bounds, otherwise as a maximized MDI tab.</summary>
+    void ShowDoc(Form w, string layoutKey)
+    {
+        _wm.Register(w, layoutKey);
+        if (_wm.Saved(layoutKey) is { Floating: true } sv) { _wm.ShowFloating(w, sv); return; }
+        PrepareDock(w);
+        w.Show();
+    }
+
+    /// <summary>Makes a window an MDI child that fills the document area (browser feel).</summary>
+    public void PrepareDock(Form w)
+    {
         w.MdiParent = this;
         w.Size = new Size(720, 520);
-        open[key] = w;
-        w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); SyncTabs(w); };
         _maximizeDocs = true;
         w.WindowState = FormWindowState.Maximized;
-        w.Show();
+    }
+
+    public bool IsActiveDocument(Form w) => ReferenceEquals(ActiveMdiChild, w) || ReferenceEquals(ActiveForm, w);
+
+    void RebuildFloatingMenu()
+    {
+        _floatingMenu.DropDownItems.Clear();
+        foreach (var f in _wm.Floating)
+        {
+            var form = f;
+            var sub = new ToolStripMenuItem(_wm.TitleOf(form));
+            sub.DropDownItems.Add("&Activate", null, (_, _) => { if (!form.IsDisposed) form.Activate(); });
+            sub.DropDownItems.Add("&Dock", null, (_, _) => Guard(() => _wm.Dock(form)));
+            _floatingMenu.DropDownItems.Add(sub);
+        }
+        _floatingMenu.Visible = _floatingMenu.DropDownItems.Count > 0;
     }
 
     // ---------- document tabs ----------
@@ -484,7 +543,7 @@ sealed class MainForm : Form
         if (_maximizeDocs && ActiveMdiChild is { IsDisposed: false, WindowState: not FormWindowState.Maximized } a) a.WindowState = FormWindowState.Maximized;
     }
 
-    void SyncTabs(Form? closing) =>
+    public void SyncTabs(Form? closing) =>
         _tabs.Sync(MdiChildren.Where(c => c != closing && !c.IsDisposed), ActiveMdiChild != closing ? ActiveMdiChild : null);
 
     /// <summary>Closes a tab's window; if it was the active one, activates its neighbour in tab order.</summary>
@@ -579,30 +638,51 @@ sealed class MainForm : Form
         if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
         else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
         Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
-        if (_opts.Screenshot != null) Guard(() => SaveScreenshot(_opts.Screenshot));
+        if (_opts.Screenshot != null) Guard(() => SaveScreenshot(this, _opts.Screenshot, true));
+        if (_opts.ScreenshotFloat != null)
+        {
+            var fl = _wm.Floating.FirstOrDefault(f => !f.IsDisposed);
+            if (fl == null) Program.AppLog("smoke: --screenshot-float given but no floating window exists.");
+            else Guard(() => SaveScreenshot(fl, _opts.ScreenshotFloat, false));
+        }
+        if (_opts.FloatMainMap) Guard(SmokeDockRoundTrip);
         Close();
     }
 
-    /// <summary>Main form via DrawToBitmap, with each visible map canvas re-rendered by Skia on top of its screen area.</summary>
-    void SaveScreenshot(string path)
+    /// <summary>Docks the floating window back as a tab and pops it out again, checking the tab strip each time.</summary>
+    void SmokeDockRoundTrip()
     {
-        Update();
-        using var shot = new Bitmap(Math.Max(Width, 1), Math.Max(Height, 1));
-        DrawToBitmap(shot, new Rectangle(0, 0, shot.Width, shot.Height));
+        if (_wm.Floating.FirstOrDefault(f => !f.IsDisposed) is not { } f) return;
+        var before = _tabs.Tabs.Count;
+        _wm.Dock(f);
+        var docked = _tabs.Tabs.Contains(f) && f.MdiParent == this && !_wm.IsFloating(f);
+        _wm.PopOut(f);
+        var floated = !_tabs.Tabs.Contains(f) && f.MdiParent == null && _wm.IsFloating(f) && f.Text.EndsWith("— Quartermaster");
+        var ok = docked && floated && _tabs.Tabs.Count == before;
+        Program.AppLog($"smoke: dock/pop-out round trip {(ok ? "ok" : "FAILED")} (tabs {before}; docked {docked}; floated {floated})");
+        if (!ok) Program.ExitCode = 1;
+    }
+
+    /// <summary>Main form via DrawToBitmap, with each visible map canvas re-rendered by Skia on top of its screen area.</summary>
+    void SaveScreenshot(Form form, string path, bool withTabs)
+    {
+        form.Update();
+        using var shot = new Bitmap(Math.Max(form.Width, 1), Math.Max(form.Height, 1));
+        form.DrawToBitmap(shot, new Rectangle(0, 0, shot.Width, shot.Height));
         using (var g = Graphics.FromImage(shot))
         {
-            if (_tabs.Visible)
+            if (withTabs && _tabs.Visible)
             {
                 using var tb = new Bitmap(_tabs.Width, _tabs.Height);
                 _tabs.DrawToBitmap(tb, new Rectangle(Point.Empty, tb.Size));
-                g.DrawImageUnscaled(tb, _tabs.PointToScreen(Point.Empty).X - Bounds.X, _tabs.PointToScreen(Point.Empty).Y - Bounds.Y);
+                g.DrawImageUnscaled(tb, _tabs.PointToScreen(Point.Empty).X - form.Bounds.X, _tabs.PointToScreen(Point.Empty).Y - form.Bounds.Y);
             }
-            var active = ActiveMdiChild as MapWindow ?? _maps.Values.FirstOrDefault(w => !w.IsDisposed);
-            if (active != null && active.Visible)
+            var active = form as MapWindow ?? ActiveMdiChild as MapWindow ?? _maps.Values.FirstOrDefault(w => !w.IsDisposed && !_wm.IsFloating(w));
+            if (active != null && active.Visible && (form == this ? !_wm.IsFloating(active) : active == form))
             {
                 using var snap = active.Canvas.Snapshot();
                 using var bmp = SkiaSharp.Views.Desktop.Extensions.ToBitmap(snap);
-                var origin = new Point(active.Canvas.PointToScreen(Point.Empty).X - Bounds.X, active.Canvas.PointToScreen(Point.Empty).Y - Bounds.Y);
+                var origin = new Point(active.Canvas.PointToScreen(Point.Empty).X - form.Bounds.X, active.Canvas.PointToScreen(Point.Empty).Y - form.Bounds.Y);
                 g.DrawImageUnscaled(bmp, origin);
             }
         }
@@ -621,6 +701,7 @@ sealed class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _smokeTimer?.Dispose();
+        _wm.SaveMain(new SavedWindow(false, WindowState == FormWindowState.Normal ? Bounds : RestoreBounds, WindowState == FormWindowState.Maximized));
         CloseSession();
         base.OnFormClosed(e);
     }

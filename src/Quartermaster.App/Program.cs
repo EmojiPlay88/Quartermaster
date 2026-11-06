@@ -1,9 +1,9 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace Quartermaster.App;
 
-/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;].</summary>
-sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null)
+/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;].</summary>
+sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null, bool FloatMainMap = false, string? ScreenshotFloat = null)
 {
     public bool Smoke => SmokeSeconds != null;
 
@@ -12,7 +12,8 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
         string? path = null;
         int? setup = null, smoke = null;
         var newGame = false;
-        string? shot = null;
+        string? shot = null, shotFloat = null;
+        var floatMain = false;
         for (var i = 0; i < args.Length; i++)
         {
             var a = args[i];
@@ -31,6 +32,11 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     if (i + 1 < args.Length) shot = args[++i];
                     else warn("--screenshot needs a file path; ignored.");
                     break;
+                case "--float-main-map": floatMain = true; break;
+                case "--screenshot-float":
+                    if (i + 1 < args.Length) shotFloat = args[++i];
+                    else warn("--screenshot-float needs a file path; ignored.");
+                    break;
                 default:
                     if (a.StartsWith("--", StringComparison.Ordinal)) warn($"Unknown option '{a}'; ignored.");
                     else if (path == null) path = a;
@@ -38,7 +44,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     break;
             }
         }
-        return new StartupOptions(path, setup, newGame, smoke, shot);
+        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat);
     }
 }
 

@@ -1,4 +1,4 @@
-using Quartermaster.Core;
+﻿using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 using SkiaSharp;
@@ -402,6 +402,24 @@ sealed class MapCanvas : SKControl
         if (_drag.Active && !Capture) EndDrag(commit: false, default); // capture stolen (Alt+Tab, dialog): cancel
     }
 
+    int _lastDpi = 96;
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        _lastDpi = DeviceDpi;
+    }
+
+    /// <summary>Moved to a monitor with different scaling: keep the same map area visible by scaling zoom with the DPI ratio, then repaint crisply.</summary>
+    protected override void OnDpiChangedAfterParent(EventArgs e)
+    {
+        base.OnDpiChangedAfterParent(e);
+        if (DeviceDpi > 0 && _lastDpi > 0 && DeviceDpi != _lastDpi) View.Zoom *= DeviceDpi / (float)_lastDpi;
+        _lastDpi = DeviceDpi;
+        HidePopup();
+        Invalidate();
+    }
+
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
@@ -549,7 +567,7 @@ sealed class MapCanvas : SKControl
         _hoverTimer.Stop();
         if (_hoverStack == null || _panning || _bandActive || State is not { } st || !st.Stacks.TryGetValue(_hoverStack, out var stack)) return;
         HidePopup();
-        _popup = CounterDetailPopup.Create(_s, st, stack, _pieces);
+        _popup = CounterDetailPopup.Create(_s, st, stack, _pieces, DeviceDpi / 96f);
         _popup.ShowAt(Cursor.Position);
     }
 

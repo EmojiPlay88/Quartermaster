@@ -1,4 +1,4 @@
-using Quartermaster.Core;
+﻿using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 using SkiaSharp;
@@ -62,7 +62,7 @@ sealed class CounterDetailPopup : Form
         Show();
     }
 
-    public static CounterDetailPopup Create(ModuleSession s, GameState state, StackInstance stack, PieceRenderer pieces)
+    public static CounterDetailPopup Create(ModuleSession s, GameState state, StackInstance stack, PieceRenderer pieces, float scale = 1f)
     {
         var rows = new List<(PieceInstance Piece, PieceType Type, PieceDetail Detail, SKSizeI Cell)>();
         foreach (var id in Enumerable.Reverse(stack.PieceIds).Take(MaxRows))
@@ -93,10 +93,13 @@ sealed class CounterDetailPopup : Form
         if (extra > 0) height += (int)line + Pad;
         width = Math.Min(width, 520);
 
-        var bmp = new SKBitmap((int)Math.Ceiling(width), Math.Max(height, 24));
+        var logicalW = (int)Math.Ceiling(width);
+        var logicalH = Math.Max(height, 24);
+        var bmp = new SKBitmap((int)Math.Ceiling(logicalW * scale), (int)Math.Ceiling(logicalH * scale));
         using (var c = new SKCanvas(bmp))
         {
             c.Clear(new SKColor(0xFF, 0xFF, 0xE1));
+            c.Scale(scale); // layout is in 96-dpi units; render at the monitor's pixel density
             using var ink = new SKPaint { Color = SKColors.Black, IsAntialias = true };
             using var edge = new SKPaint { Color = SKColors.Black, Style = SKPaintStyle.Stroke };
             var y = (float)Pad;
@@ -104,7 +107,7 @@ sealed class CounterDetailPopup : Form
             {
                 var r = rows[i];
                 var cx = Pad + r.Cell.Width / 2f;
-                pieces.Draw(c, r.Piece, r.Type, new PointD(cx, y + r.Cell.Height / 2f), 1f, PieceDrawFlags.None);
+                pieces.Draw(c, r.Piece, r.Type, new PointD(cx, y + r.Cell.Height / 2f), scale, PieceDrawFlags.None);
                 var tx = Pad * 2 + r.Cell.Width;
                 var ty = y + 11;
                 c.DrawText(r.Detail.Name, tx, ty, SKTextAlign.Left, bold, ink);
@@ -116,6 +119,7 @@ sealed class CounterDetailPopup : Form
                 y += heights[i];
             }
             if (extra > 0) c.DrawText($"+ {extra} more", Pad, y + 11, SKTextAlign.Left, font, ink);
+            c.ResetMatrix();
             c.DrawRect(SKRect.Create(0, 0, bmp.Width - 1, bmp.Height - 1), edge);
         }
         var form = new CounterDetailPopup { _image = bmp.ToBitmap() };

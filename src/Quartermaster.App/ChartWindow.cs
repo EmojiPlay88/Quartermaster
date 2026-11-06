@@ -1,4 +1,4 @@
-using Quartermaster.Render;
+﻿using Quartermaster.Render;
 using Quartermaster.Vassal;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
@@ -21,6 +21,22 @@ sealed class ChartWindow : Form
             _s = s; _chart = chart;
             DoubleBuffered = true;
             BackColor = SystemColors.AppWorkspace;
+        }
+
+        int _lastDpi = 96;
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            _lastDpi = DeviceDpi;
+        }
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            if (DeviceDpi > 0 && _lastDpi > 0 && DeviceDpi != _lastDpi) _view.Zoom *= DeviceDpi / (float)_lastDpi;
+            _lastDpi = DeviceDpi;
+            Invalidate();
         }
 
         SKSize Natural

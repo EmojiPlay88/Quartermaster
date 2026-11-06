@@ -1,4 +1,4 @@
-using Quartermaster.Core;
+﻿using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -25,7 +25,7 @@ sealed class MapWindow : Form
         Canvas.ContextRequested += OnContext;
         Canvas.StatusChanged += (loc, zoom) =>
         {
-            if (MdiParent is MainForm mf && ReferenceEquals(mf.ActiveMdiChild, this)) { mf.SetLocationText(loc); mf.SetZoomText(zoom); }
+            if (Host is { } mf && mf.IsActiveDocument(this)) { mf.SetLocationText(loc); mf.SetZoomText(zoom); }
         };
         s.GameReplaced += OnGameReplaced;
         Attach();
@@ -38,6 +38,9 @@ sealed class MapWindow : Form
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool TilingDone { get; private set; }
     public event Action? TilingCompleted;
+    /// <summary>The main window; set before Show. Unlike MdiParent it stays valid while the window is floating.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public MainForm? Host { get; set; }
 
     // ---------- game wiring ----------
 
@@ -67,22 +70,33 @@ sealed class MapWindow : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        if (MdiParent is MainForm mf)
+        StartOnce();
+    }
+
+    // Shown does not fire if the window is moved between MDI and desktop (hidden/re-shown) before its first Shown event,
+    // so the first time the window becomes visible by any route also starts it.
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (Visible && IsHandleCreated) StartOnce();
+    }
+
+    void StartOnce()
+    {
+        if (_tilingStarted) return;
+        _tilingStarted = true;
+        if (Host is { } mf)
         {
             mf.GridVisibleChanged += OnGridVisibleChanged;
             Canvas.ShowGrid = mf.GridVisible;
         }
-        if (!_tilingStarted)
-        {
-            _tilingStarted = true;
-            _ = PrepareTilesAsync();
-        }
+        _ = PrepareTilesAsync();
     }
 
     protected override void OnActivated(EventArgs e)
     {
         base.OnActivated(e);
-        if (MdiParent is MainForm mf)
+        if (Host is { } mf)
         {
             mf.SetZoomText($"{Math.Round(Canvas.View.Zoom * 100)}%");
             mf.SetLocationText("-");
@@ -91,7 +105,7 @@ sealed class MapWindow : Form
 
     void OnGridVisibleChanged()
     {
-        if (MdiParent is MainForm mf) Canvas.ShowGrid = mf.GridVisible;
+        if (Host is { } mf) Canvas.ShowGrid = mf.GridVisible;
         Canvas.Invalidate();
     }
 
@@ -104,7 +118,7 @@ sealed class MapWindow : Form
         _cts.Cancel();
         _s.GameReplaced -= OnGameReplaced;
         if (_attached != null) _attached.Changed -= OnGameChanged;
-        if (MdiParent is MainForm mf)
+        if (Host is { } mf)
         {
             mf.GridVisibleChanged -= OnGridVisibleChanged;
             mf.SetTilingProgress(null);
@@ -146,7 +160,7 @@ sealed class MapWindow : Form
         if (IsDisposed) return;
         Canvas.Preparing = null;
         TilingDone = true;
-        if (MdiParent is MainForm mf) mf.SetTilingProgress(null);
+        if (Host is { } mf) mf.SetTilingProgress(null);
         Canvas.Invalidate();
         TilingCompleted?.Invoke();
     }
@@ -155,7 +169,7 @@ sealed class MapWindow : Form
     {
         if (IsDisposed || TilingDone) return;
         Canvas.Preparing = fraction;
-        if (MdiParent is MainForm mf) mf.SetTilingProgress(fraction);
+        if (Host is { } mf) mf.SetTilingProgress(fraction);
         Canvas.Invalidate();
     }
 
