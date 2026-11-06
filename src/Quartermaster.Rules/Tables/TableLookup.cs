@@ -11,7 +11,7 @@ public readonly record struct TableKey(TableKeyKind Kind, double Lo, double Hi, 
 /// <summary>Parses table row/column keys and resolves lookups. Failures are <see cref="EvalError"/>.</summary>
 public static class TableLookup
 {
-    internal static string Normalise(string? raw)
+    public static string Normalise(string? raw)
     {
         if (string.IsNullOrEmpty(raw)) return "";
         var sb = new StringBuilder(raw.Length);
@@ -94,6 +94,20 @@ public static class TableLookup
 
     public static Value Lookup(TableDef t, Value row, Value? col)
     {
+        var (r, c) = Locate(t, row, col);
+        return CellAt(t, r, c);
+    }
+
+    /// <summary>The cell at the given indices, as a number when it parses, else as text.</summary>
+    public static Value CellAt(TableDef t, int r, int c)
+    {
+        var cell = Normalise(r >= 0 && r < t.Cells.Count && c >= 0 && c < t.Cells[r].Count ? t.Cells[r][c] : "");
+        return TryNum(cell, out var num) ? Value.Of(num) : Value.Of(cell);
+    }
+
+    /// <summary>Finds the matched (row, column) indices. Throws <see cref="EvalError"/> when nothing matches.</summary>
+    public static (int Row, int Col) Locate(TableDef t, Value row, Value? col)
+    {
         int c = 0;
         if (t.Kind == TableKind.TwoD)
         {
@@ -103,7 +117,6 @@ public static class TableLookup
         }
         int r = FindIndex(t.RowKeys, row);
         if (r < 0) throw new EvalError($"No row for {row.Display()} in {t.Name}");
-        var cell = Normalise(r < t.Cells.Count && c < t.Cells[r].Count ? t.Cells[r][c] : "");
-        return TryNum(cell, out var num) ? Value.Of(num) : Value.Of(cell);
+        return (r, c);
     }
 }

@@ -276,4 +276,125 @@ public class FormulaRunnerTests
         Assert.Null(t.Error);
         Assert.Equal(expected, t.Result!.Value.Text);
     }
+
+    private static RulesPack PackWith(string text, params VariableBinding[] bindings) =>
+        new()
+        {
+            Properties = new()
+            {
+                new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, Default = 0 },
+                new PropertyDef { Id = "divisor", Name = "Divisor", Scope = PropertyScope.Holders, Default = 1 },
+                new PropertyDef { Id = "supply", Name = "Supply", Scope = PropertyScope.Holders },
+            },
+            Holders = new() { new HolderDef { Id = "depot", Name = "Depot A" } },
+            Tables = new()
+            {
+                new TableDef { Id = "t1", Name = "TestTerrainCost", Kind = TableKind.TwoD,
+                    RowKeys = new() { "Sand", "Mud" }, ColumnKeys = new() { "Dry", "Wet" },
+                    Cells = new() { new() { "1", "2" }, new() { "3", "4" } } },
+                new TableDef { Id = "t2", Name = "OneT", Kind = TableKind.OneD,
+                    RowKeys = new() { "1-2", "3+" }, ColumnKeys = new() { "Value" }, Cells = new() { new() { "5" }, new() { "6" } } },
+            },
+            Formulas = new() { new FormulaDef { Id = "f", Name = "F", Text = text, Bindings = bindings.ToList() } },
+        };
+
+    [Fact]
+    public void Moved_FromRequest_Auto()
+    {
+        var pack = PackWith("M * 2", new VariableBinding { Variable = "M", Kind = BindingKind.Moved });
+        var t = RunnerFx.Runner(pack).Run(RunnerFx.State(), RunnerFx.Req("f") with { Moved = 3.5 });
+        Assert.Null(t.Error);
+        var v = t.Variables.Single();
+        Assert.True(v.Auto);
+        Assert.Equal(3.5, v.Value!.Value.Number);
+        Assert.Equal(7, t.Result!.Value.Number);
+        Assert.Equal("distance moved", v.Source);
+    }
+
+    [Fact]
+    public void Moved_Absent_MissingWithReason()
+    {
+        var pack = PackWith("M * 2", new VariableBinding { Variable = "M", Kind = BindingKind.Moved });
+        var runner = RunnerFx.Runner(pack);
+        var t = runner.Run(RunnerFx.State(), RunnerFx.Req("f"));
+        Assert.Null(t.Result);
+        Assert.Equal("Only known when a unit is moved", t.Variables.Single().MissingReason);
+        var o = runner.Run(RunnerFx.State(), RunnerFx.Req("f", overrides: RunnerFx.D(("M", "4"))));
+        Assert.Equal(8, o.Result!.Value.Number);
+        Assert.True(o.Variables.Single().Overridden);
+    }
+
+    private static RulesPack AutoPack(string auto) => PackWith("Pace",
+        new VariableBinding { Variable = "Pace", Kind = BindingKind.Input, Choices = new() { "Slow", "Normal", "Fast" }, AutoValue = auto });
+
+    [Fact]
+    public void AutoValue_UsedOnlyWhenRequested()
+    {
+        var runner = RunnerFx.Runner(AutoPack("\"Normal\""));
+        var off = runner.Run(RunnerFx.State(), RunnerFx.Req("f"));
+        Assert.Equal("Waiting for input", off.Variables.Single().MissingReason);
+        var on = runner.Run(RunnerFx.State(), RunnerFx.Req("f") with { UseAutoValues = true });
+        Assert.Equal("Normal", on.Variables.Single().Value!.Value.Text);
+        Assert.Equal("default", on.Variables.Single().Source);
+        var typed = runner.Run(RunnerFx.State(), RunnerFx.Req("f", typed: RunnerFx.D(("Pace", "fast"))) with { UseAutoValues = true });
+        Assert.Equal("Fast", typed.Variables.Single().Value!.Value.Text);
+        Assert.Null(typed.Variables.Single().Source);
+        var o = RunnerFx.Runner(AutoPack("\"Sprint\"")).Run(RunnerFx.State(), RunnerFx.Req("f") with { UseAutoValues = true });
+        Assert.StartsWith("Choose one of", o.Variables.Single().MissingReason);
+    }
+
+    [Theory]
+    [InlineData("1 +")]
+    [InlineData("nosuch + 1")]
+    [InlineData("\"a\" + 1")]
+    public void AutoValue_BadExpression_Missing(string auto)
+    {
+        var t = RunnerFx.Runner(AutoPack(auto)).Run(RunnerFx.State(), RunnerFx.Req("f") with { UseAutoValues = true });
+        Assert.Null(t.Error);
+        var v = t.Variables.Single();
+        Assert.Null(v.Value);
+        Assert.False(string.IsNullOrEmpty(v.MissingReason));
+    }
+
+    [Fact]
+    public void Sources_PerBindingKind()
+    {
+        var pack = PackWith("U + G + H + T + O + 0",
+            new VariableBinding { Variable = "U", Kind = BindingKind.Unit, Property = "fuel" },
+            new VariableBinding { Variable = "G", Kind = BindingKind.Global, Property = "divisor" },
+            new VariableBinding { Variable = "H", Kind = BindingKind.Holder, Property = "supply", HolderId = "depot" },
+            new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t1", RowExpr = "\"Sand\"", ColExpr = "\"Dry\"" },
+            new VariableBinding { Variable = "O", Kind = BindingKind.Table, TableId = "t2", RowExpr = "4" });
+        var t = RunnerFx.Runner(pack).Run(RunnerFx.State(), RunnerFx.Req("f"));
+        Assert.Null(t.Error);
+        VariableState V(string n) => t.Variables.Single(x => x.Variable == n);
+        Assert.Equal("Fuel of Rifle", V("U").Source);
+        Assert.Equal("Divisor (global)", V("G").Source);
+        Assert.Equal("Supply of Depot A", V("H").Source);
+        Assert.Equal("TestTerrainCost, row Sand, column Dry", V("T").Source);
+        Assert.Equal(new TableCell("t1", 0, 0), V("T").Cell);
+        Assert.Equal("OneT, row 3+", V("O").Source);
+        Assert.Equal(new TableCell("t2", 1, 0), V("O").Cell);
+
+        var loc = PackWith("L", new VariableBinding { Variable = "L", Kind = BindingKind.Location });
+        var lt = RunnerFx.Runner(loc).Run(RunnerFx.State(), RunnerFx.Req("f"));
+        Assert.Equal("location of Rifle", lt.Variables.Single().Source);
+
+        var roll = PackWith("R + I", new VariableBinding { Variable = "R", Kind = BindingKind.Roll }, new VariableBinding { Variable = "I", Kind = BindingKind.Input });
+        var rt = RunnerFx.Runner(roll).Run(RunnerFx.State(), RunnerFx.Req("f", typed: RunnerFx.D(("I", "2"))));
+        Assert.All(rt.Variables, x => Assert.Null(x.Source));
+    }
+
+    [Fact]
+    public void Commands_CarryTagAndSubject()
+    {
+        var runner = RunnerFx.Runner(RunnerFx.Pack());
+        var t = runner.Run(RunnerFx.State(), RunnerFx.Req(typed: Full));
+        var d = runner.Commands(t, "n", "move", "Rifle").OfType<LedgerDelta>().Single();
+        Assert.Equal("move", d.Tag);
+        Assert.Equal("Rifle", d.Subject);
+        var d0 = runner.Commands(t, "n").OfType<LedgerDelta>().Single();
+        Assert.Null(d0.Tag);
+        Assert.Null(d0.Subject);
+    }
 }
