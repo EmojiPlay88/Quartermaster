@@ -111,7 +111,9 @@ sealed partial class MainForm
         ToolbarIds.All,
         ModuleSession.DefaultCacheRoot,
         () => _session?.CacheDir,
-        m => Info(m, "Settings"), _commands);
+        m => Info(m, "Settings"), _commands,
+        () => _session?.Game?.State.Difficulty,
+        d => { try { _phases?.SetDifficulty(d); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("set difficulty: " + ex.Message); } });
 
     void ShowSettings()
     {
@@ -146,10 +148,10 @@ sealed partial class MainForm
         using (var dlg = new SettingsDialog(_settings.Current, _ => { }, SettingsCtx()))
         {
             dlg.Show(this);
-            var ti = Array.IndexOf(new[] { "general", "display", "map", "dice", "toolbar", "keyboard", "folders" }, (_opts.SettingsTab ?? "general").ToLowerInvariant());
+            var ti = Array.IndexOf(new[] { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders" }, (_opts.SettingsTab ?? "general").ToLowerInvariant());
             dlg.SelectTab(Math.Max(0, ti));
             dlg.Update();
-            if (ti == 6)
+            if (ti == 7)
             {
                 var until = DateTime.UtcNow.AddSeconds(10);
                 while (!dlg.FoldersLoadedForSmoke && DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(20); }
@@ -159,7 +161,9 @@ sealed partial class MainForm
             }
             var back = dlg.CollectForSmoke();
             var cur = _settings.Current;
-            var same = back with { ToolbarVisible = cur.ToolbarVisible, ShortcutOverrides = cur.ShortcutOverrides } == cur;
+            // The Game tab shows the open game's difficulty (what OK would store as the next game's default), not the stored default.
+            var same = back with { ToolbarVisible = cur.ToolbarVisible, ShortcutOverrides = cur.ShortcutOverrides, LastDifficulty = cur.LastDifficulty } == cur
+                && back.LastDifficulty == (_session?.Game?.State.Difficulty ?? cur.LastDifficulty);
             Program.AppLog($"smoke: settings dialog round trip {(same ? "ok" : "FAILED")}");
             if (!same) Program.ExitCode = 1;
             dlg.SaveScreenshot(shot);

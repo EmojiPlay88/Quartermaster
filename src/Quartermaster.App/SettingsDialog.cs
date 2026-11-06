@@ -20,7 +20,7 @@ sealed class SettingsDialog : Form
         _latest = latest;
         _apply = apply;
         Keyboard = new KeyboardTab(ctx.Commands ?? new CommandRegistry());
-        _tabs = new SettingsTab[] { new GeneralTab(), new DisplayTab(), new MapTab(), new DiceLogTab(), new ToolbarTab(ctx.ToolbarItems), Keyboard, new FoldersTab(ctx) };
+        _tabs = new SettingsTab[] { new GeneralTab(), new GameTab(ctx), new DisplayTab(), new MapTab(), new DiceLogTab(), new ToolbarTab(ctx.ToolbarItems), Keyboard, new FoldersTab(ctx) };
 
         Text = "Settings";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -83,6 +83,7 @@ sealed class SettingsDialog : Form
         }
         _current = _tabs.Aggregate(_latest?.Invoke() ?? _current, (s, t) => t.Collect(s)); // on top of what the store holds now
         _apply(_current);
+        _tabs.OfType<GameTab>().First().AfterApply();
         return true;
     }
 
