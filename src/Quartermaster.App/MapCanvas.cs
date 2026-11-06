@@ -6,15 +6,9 @@ using SkiaSharp.Views.Desktop;
 
 namespace Quartermaster.App;
 
-/// <summary>What a drag carries. Pieces are identified by id; offsets are map-space deltas from the grab point.</summary>
-sealed record DragInfo(ModuleSession Session, string[] Ids, PointD GrabOffset);
-
 /// <summary>Skia map view: rendering, pan/zoom, selection, drag and drop, hover. Menus and game commands live in <see cref="MapWindow"/>.</summary>
 sealed class MapCanvas : SKControl
 {
-    public const string DragFormat = "Quartermaster.PieceIds";
-    static DragInfo? _currentDrag;
-
     readonly ModuleSession _s;
     readonly MapRenderer _renderer;
     readonly PieceRenderer _pieces;
@@ -33,7 +27,8 @@ sealed class MapCanvas : SKControl
     bool _downWasSelected;
     bool _bandActive;
     PointD _bandStart, _bandNow;
-    DropTarget? _ghost;
+    readonly MapDragController _drag;
+    SKSize _sceneSize;
     bool _repaintPending;
     bool _paintFailed;
 
@@ -43,6 +38,7 @@ sealed class MapCanvas : SKControl
         Map = map;
         _pieces = new PieceRenderer(s.Images);
         _renderer = new MapRenderer(s.Images, _pieces);
+        _drag = new MapDragController(s, map, _pieces, Guard);
         AllowDrop = true;
         TabStop = true;
         DoubleBuffered = true;
@@ -146,6 +142,7 @@ sealed class MapCanvas : SKControl
     {
         try
         {
+            _sceneSize = size;
             if (!_initialView && size.Width > 1 && size.Height > 1)
             {
                 _initialView = true;
@@ -165,8 +162,14 @@ sealed class MapCanvas : SKControl
                 Message(c, size, "No game in progress");
                 return;
             }
-            _renderer.Draw(c, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, _hoverStack));
-            DrawGhost(c, st);
+            if (_drag.IsStale(View, size)) _drag.End();
+            if (_drag.Active)
+                _drag.Draw(c, View, st);
+            else
+            {
+                _renderer.Draw(c, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, _hoverStack));
+                if (_drag.Incoming) _drag.Draw(c, View, st);
+            }
             DrawBand(c);
             if (Preparing is { } p) Message(c, size, $"Preparing map… {(int)Math.Round(p * 100)}%");
             _paintFailed = false;
@@ -205,22 +208,6 @@ sealed class MapCanvas : SKControl
         c.DrawRect(r, edge);
     }
 
-    void DrawGhost(SKCanvas c, GameState st)
-    {
-        if (_ghost is not { } g || _currentDrag is not { } d || d.Session != _s) return;
-        var offsets = StackLayout.Offsets(d.Ids.Length + (g.StackOnto != null && st.Stacks.TryGetValue(g.StackOnto, out var onto) ? onto.PieceIds.Count : 0),
-            false, Map.Stacking);
-        var skip = g.StackOnto != null && st.Stacks.TryGetValue(g.StackOnto, out var tgt) ? tgt.PieceIds.Count : 0;
-        var n = 0;
-        foreach (var id in d.Ids)
-        {
-            if (!st.Pieces.TryGetValue(id, out var p)) continue;
-            var o = offsets[Math.Min(skip + n++, offsets.Count - 1)];
-            var sp = View.ToScreen(new PointD(g.Pos.X + o.X, g.Pos.Y + o.Y));
-            _pieces.Draw(c, p, _pieces.Types.Get(p.TypeString), new PointD(sp.X, sp.Y), View.Zoom, PieceDrawFlags.Ghost);
-        }
-    }
-
     // ---------- mouse ----------
 
     PointD MapPoint(Point p) => View.ToMap(new SKPoint(p.X, p.Y));
@@ -243,6 +230,7 @@ sealed class MapCanvas : SKControl
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        if (_drag.Active) return; // a drag owns the mouse until it ends
         Focus();
         HidePopup();
         _downPos = e.Location;
@@ -288,6 +276,13 @@ sealed class MapCanvas : SKControl
         _lastMove = e.Location;
         ReportStatus(e.Location);
 
+        if (_drag.Active)
+        {
+            if (!ClientRectangle.Contains(e.Location)) { HandOffToOle(); return; }
+            if (State is { } dst) _drag.Update(dst, MapPoint(e.Location));
+            Request();
+            return;
+        }
         if (_panning)
         {
             View.Pan = new SKPoint(View.Pan.X - (e.X - _panLast.X) / View.Zoom, View.Pan.Y - (e.Y - _panLast.Y) / View.Zoom);
@@ -303,7 +298,8 @@ sealed class MapCanvas : SKControl
         }
         if (e.Button == MouseButtons.Left && _downPiece != null)
         {
-            if (Math.Abs(e.X - _downPos.X) + Math.Abs(e.Y - _downPos.Y) >= 4) BeginDrag();
+            var ds = SystemInformation.DragSize;
+            if (Math.Abs(e.X - _downPos.X) > ds.Width / 2 || Math.Abs(e.Y - _downPos.Y) > ds.Height / 2) BeginDrag(e.Location);
             return;
         }
         if (e.Button == MouseButtons.None) UpdateHover(e.Location);
@@ -312,6 +308,11 @@ sealed class MapCanvas : SKControl
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
+        if (_drag.Active)
+        {
+            if (e.Button == MouseButtons.Left) EndDrag(commit: true, e.Location);
+            return;
+        }
         if (_panning && (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Left))
         {
             _panning = false;
@@ -354,6 +355,7 @@ sealed class MapCanvas : SKControl
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
+        if (_drag.Active) return; // zoom is ignored mid-drag: the snapshot is only valid for the view the drag started in
         HidePopup();
         View.ZoomAt(new SKPoint(e.X, e.Y), (float)Math.Pow(1.2, e.Delta / 120.0));
         ReportStatus(e.Location);
@@ -371,6 +373,7 @@ sealed class MapCanvas : SKControl
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (e.KeyCode == Keys.Escape && _drag.Active) { EndDrag(commit: false, default); e.Handled = true; return; }
         if (e.KeyCode == Keys.Space) { _space = true; Cursor = Cursors.Hand; e.Handled = true; }
     }
 
@@ -384,6 +387,18 @@ sealed class MapCanvas : SKControl
     {
         base.OnLostFocus(e);
         _space = false;
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        base.OnMouseCaptureChanged(e);
+        if (_drag.Active && !Capture) EndDrag(commit: false, default); // capture stolen (Alt+Tab, dialog): cancel
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (_drag.Active) EndDrag(commit: false, default); // the snapshot no longer matches the client area
     }
 
     void ReportStatus(Point? at)
@@ -407,29 +422,65 @@ sealed class MapCanvas : SKControl
     }
 
     // ---------- drag and drop ----------
+    // In-window drags use mouse capture (no OLE, so no lag); leaving the client area hands the drag to OLE so it can land in another window.
 
-    void BeginDrag()
+    void BeginDrag(Point at)
     {
         if (State is not { } st || _downPiece == null) return;
         var grabbed = _downPiece;
-        var ids = _selected.Where(id => st.Pieces.TryGetValue(id, out var p) && PieceActions.CanMove(p)).ToArray();
         _downPiece = null;
-        if (ids.Length == 0) return;
-        var grab = MapPoint(_downPos);
-        var primary = st.Pieces.TryGetValue(grabbed, out var gp) ? gp : st.Pieces[ids[0]];
-        _currentDrag = new DragInfo(_s, ids, new PointD(primary.Pos.X - grab.X, primary.Pos.Y - grab.Y));
+        HidePopup();
+        _hoverStack = null;
+        var size = SceneSize();
+        if (!_drag.Begin(st, grabbed, _selected, MapPoint(_downPos), View, size, RenderWithout)) return;
+        Capture = true;
+        _drag.Update(st, MapPoint(at));
+        Request();
+    }
+
+    SKSize SceneSize() => _sceneSize.Width > 1 && _sceneSize.Height > 1 ? _sceneSize : new SKSize(Math.Max(Width, 1), Math.Max(Height, 1));
+
+    /// <summary>Renders the scene once with the given pieces left out (the drag snapshot).</summary>
+    SKImage? RenderWithout(IReadOnlySet<string> hidden)
+    {
+        if (State is not { } st) return null;
+        var size = SceneSize();
+        using var surface = SKSurface.Create(new SKImageInfo((int)size.Width, (int)size.Height));
+        if (surface == null) return null;
+        _renderer.Draw(surface.Canvas, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, null, hidden));
+        return surface.Snapshot();
+    }
+
+    void EndDrag(bool commit, Point at)
+    {
+        var st = State;
+        if (commit && st != null) _drag.Commit(st, MapPoint(at)); else _drag.End();
+        Capture = false;
+        Invalidate();
+        if (commit) PruneSelection();
+    }
+
+    /// <summary>Cursor left the window while dragging: switch to OLE so the drop can land on another MapWindow.</summary>
+    void HandOffToOle()
+    {
+        var info = _drag.Info;
+        _drag.End();
+        Capture = false;
+        Invalidate();
+        if (info == null) return;
+        MapDragController.Current = info;
         var data = new DataObject();
-        data.SetData(DragFormat, string.Join("\n", ids));
+        data.SetData(MapDragController.Format, string.Join("\n", info.Ids));
         try { DoDragDrop(data, DragDropEffects.Move); }
         finally
         {
-            _currentDrag = null;
-            _ghost = null;
+            MapDragController.Current = null;
+            _drag.ClearIncoming();
             Invalidate();
         }
     }
 
-    bool CanAccept(DragEventArgs e) => _currentDrag is { } d && d.Session == _s && e.Data?.GetDataPresent(DragFormat) == true;
+    bool CanAccept(DragEventArgs e) => MapDragController.Current is { } d && d.Session == _s && e.Data?.GetDataPresent(MapDragController.Format) == true;
 
     protected override void OnDragEnter(DragEventArgs e)
     {
@@ -442,32 +493,26 @@ sealed class MapCanvas : SKControl
         base.OnDragOver(e);
         if (!CanAccept(e)) { e.Effect = DragDropEffects.None; return; }
         e.Effect = DragDropEffects.Move;
-        if (State is not { } st || _currentDrag is not { } d) return;
-        var t = DropResolver.ResolveDrag(st, Map, MapPoint(PointToClient(new Point(e.X, e.Y))), d.GrabOffset, d.Ids, _s.Images);
-        if (_ghost == t) return;
-        _ghost = t;
+        if (State is not { } st || MapDragController.Current is not { } d) return;
+        _drag.UpdateIncoming(d, st, MapPoint(PointToClient(new Point(e.X, e.Y))), View.Zoom);
         Request();
     }
 
     protected override void OnDragLeave(EventArgs e)
     {
         base.OnDragLeave(e);
-        _ghost = null;
+        _drag.ClearIncoming();
         Invalidate();
     }
 
     protected override void OnDragDrop(DragEventArgs e)
     {
         base.OnDragDrop(e);
-        _ghost = null;
+        if (CanAccept(e) && State is { } st && _s.Game != null && _drag.Info != null)
+            _drag.Commit(st, MapPoint(PointToClient(new Point(e.X, e.Y))));
+        else
+            _drag.ClearIncoming();
         Invalidate();
-        if (!CanAccept(e) || State is not { } st || _s.Game == null || _currentDrag is not { } d) return;
-        var ids = d.Ids.Where(st.Pieces.ContainsKey).ToArray();
-        if (ids.Length == 0) return;
-        var cursor = MapPoint(PointToClient(new Point(e.X, e.Y)));
-        var target = DropResolver.ResolveDrag(st, Map, cursor, d.GrabOffset, ids, _s.Images);
-        var game = _s.Game;
-        Guard(() => game.Execute(new MovePieces(ids, Map.Id, target.Pos, target.StackOnto)));
     }
 
     // ---------- hover popup ----------
@@ -506,6 +551,7 @@ sealed class MapCanvas : SKControl
         if (disposing)
         {
             HidePopup();
+            _drag.Dispose();
             _hoverTimer.Dispose();
         }
         base.Dispose(disposing);

@@ -7,6 +7,9 @@ namespace Quartermaster.Render;
 /// <summary>Where a dropped group lands: the (snapped) position and the stack it joins, if any.</summary>
 public sealed record DropTarget(PointD Pos, string? StackOnto);
 
+/// <summary>One MovePieces worth of a formation drop: the pieces (bottom to top), where they land, and the stack they join.</summary>
+public sealed record FormationGroup(IReadOnlyList<string> Ids, PointD Pos, string? StackOnto);
+
 /// <summary>Decides snap point and stack target for a drop on a map. UI-free.</summary>
 public static class DropResolver
 {
@@ -23,6 +26,63 @@ public static class DropResolver
     /// </summary>
     public static DropTarget ResolveDrag(GameState s, MapDef map, PointD cursor, PointD grabOffset, IReadOnlyCollection<string> draggedIds, ImageSource images) =>
         Resolve(s, map, new PointD(cursor.X + grabOffset.X, cursor.Y + grabOffset.Y), draggedIds, images);
+
+    /// <summary>
+    /// How far the dragged formation is shifted while the ghost follows the mouse unsnapped:
+    /// (cursor + grab offset) minus the primary piece's original position. Zero when the primary is gone.
+    /// </summary>
+    public static PointD GhostDelta(GameState s, string primaryId, PointD cursor, PointD grabOffset) =>
+        s.Pieces.TryGetValue(primaryId, out var p)
+            ? new PointD(cursor.X + grabOffset.X - p.Pos.X, cursor.Y + grabOffset.Y - p.Pos.Y)
+            : new PointD(0, 0);
+
+    /// <summary>
+    /// Formation-preserving drop (VASSAL PieceMover): the primary piece resolves like <see cref="ResolveDrag"/>; every other
+    /// dragged piece moves by the same delta, unsnapped and never onto foreign stacks. Pieces from one source stack stay
+    /// together; a group that lands exactly on the primary's resolved point joins the primary's group.
+    /// The primary's group comes first. Ids that no longer exist are dropped.
+    /// </summary>
+    public static IReadOnlyList<FormationGroup> ResolveFormation(GameState s, MapDef map, PointD cursor, PointD grabOffset,
+        string primaryId, IReadOnlyCollection<string> ids, ImageSource images)
+    {
+        var live = ids.Where(s.Pieces.ContainsKey).Distinct().ToList();
+        if (live.Count == 0) return Array.Empty<FormationGroup>();
+        if (!s.Pieces.TryGetValue(primaryId, out var primary)) primary = s.Pieces[live[0]];
+        if (!live.Contains(primary.Id)) live.Insert(0, primary.Id);
+
+        var target = ResolveDrag(s, map, cursor, grabOffset, live, images);
+        var delta = new PointD(target.Pos.X - primary.Pos.X, target.Pos.Y - primary.Pos.Y);
+
+        // Group by source stack (stack order, bottom to top); stackless pieces are their own group.
+        var groups = new List<List<string>>();
+        var byStack = new Dictionary<string, List<string>>();
+        foreach (var id in live)
+        {
+            var sid = s.Pieces[id].StackId;
+            if (sid == null || !s.Stacks.ContainsKey(sid)) { groups.Add(new List<string> { id }); continue; }
+            if (!byStack.TryGetValue(sid, out var g)) { byStack[sid] = g = new List<string>(); groups.Add(g); }
+            g.Add(id);
+        }
+        foreach (var (sid, g) in byStack)
+        {
+            var order = s.Stacks[sid].PieceIds;
+            g.Sort((a, b) => order.IndexOf(a).CompareTo(order.IndexOf(b)));
+        }
+
+        var primaryGroup = groups.First(g => g.Contains(primary.Id));
+        groups.Remove(primaryGroup);
+        var result = new List<FormationGroup>();
+        var primaryIds = new List<string>(primaryGroup);
+        foreach (var g in groups)
+        {
+            var o = s.Pieces[g[0]].Pos;
+            var pos = new PointD(o.X + delta.X, o.Y + delta.Y);
+            if (pos == target.Pos) primaryIds.AddRange(g);
+            else result.Add(new FormationGroup(g, pos, null));
+        }
+        result.Insert(0, new FormationGroup(primaryIds, target.Pos, target.StackOnto));
+        return result;
+    }
 
     /// <summary>Snaps with the grid of the board under the point, in board-local coordinates.</summary>
     public static PointD Snap(MapDef map, PointD p)

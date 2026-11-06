@@ -52,6 +52,32 @@ public sealed class PieceRenderer(ImageSource images)
         }
     }
 
+    /// <summary>
+    /// A piece pre-rendered once for dragging: <see cref="Image"/> is square and centred on the piece (side <c>2 * Half</c> pixels);
+    /// <see cref="Bounds"/> and <see cref="Rotation"/> let callers outline where it will land. Dispose when the drag ends.
+    /// </summary>
+    public sealed record PieceSprite(SKImage Image, float Half, SKRect Bounds, double Rotation) : IDisposable
+    {
+        public void Dispose() => Image.Dispose();
+    }
+
+    /// <summary>
+    /// Renders the piece at <paramref name="zoom"/> into a transparent square image. The size follows the piece's image bounds plus a
+    /// margin for labels; anything further out is clipped. Capped at 1024 px per half-side.
+    /// </summary>
+    public PieceSprite RenderSprite(PieceInstance p, float zoom, PieceDrawFlags flags)
+    {
+        var x = Types.Get(p.TypeString);
+        var b = PieceGeometry.LocalBounds(x, p, images);
+        if (b.Width < 1 || b.Height < 1) b = SKRect.Create(-16, -16, 32, 32);
+        var radius = Math.Sqrt(Math.Pow(Math.Max(Math.Abs(b.Left), Math.Abs(b.Right)), 2) + Math.Pow(Math.Max(Math.Abs(b.Top), Math.Abs(b.Bottom)), 2));
+        var half = (int)Math.Clamp(Math.Ceiling(radius * zoom) + 48, 16, 1024);
+        using var surface = SKSurface.Create(new SKImageInfo(half * 2, half * 2));
+        surface.Canvas.Clear(SKColors.Transparent);
+        Draw(surface.Canvas, p, x, new PointD(half, half), zoom, flags);
+        return new PieceSprite(surface.Snapshot(), half, b, PieceGeometry.Rotation(x, p));
+    }
+
     private void DrawBody(SKCanvas c, PieceInstance p, PieceType x, float zoom, PieceDrawFlags flags)
     {
         var traits = x.Traits;

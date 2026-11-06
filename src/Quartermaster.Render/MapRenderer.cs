@@ -5,7 +5,8 @@ using SkiaSharp;
 namespace Quartermaster.Render;
 
 /// <param name="ShowGrid">True forces every board's grid overlay on (View > Show Grid); false draws only grids the module marks visible.</param>
-public sealed record MapDrawOptions(bool ShowGrid, IReadOnlySet<string> SelectedPieceIds, string? HoverStackId);
+/// <param name="HiddenPieceIds">Pieces left out of the drawing (being dragged); their stacks close up around the gap.</param>
+public sealed record MapDrawOptions(bool ShowGrid, IReadOnlySet<string> SelectedPieceIds, string? HoverStackId, IReadOnlySet<string>? HiddenPieceIds = null);
 
 /// <summary>
 /// Draws a map into a screen-space canvas: board tiles, grid overlay, movement trails, stacks (insertion order),
@@ -130,7 +131,8 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
             if (st.Pos.X < visible.X - margin - span || st.Pos.X > visible.X + visible.W + margin + span ||
                 st.Pos.Y < visible.Y - margin - span || st.Pos.Y > visible.Y + visible.H + margin + span) continue;
 
-            foreach (var (p, center) in PieceGeometry.Placed(s, st, map))
+            var placed = opt.HiddenPieceIds is { Count: > 0 } hidden ? PieceGeometry.PlacedExcept(s, st, map, hidden) : PieceGeometry.Placed(s, st, map);
+            foreach (var (p, center) in placed)
             {
                 var type = pieces.Types.Get(p.TypeString);
                 var sel = opt.SelectedPieceIds.Contains(p.Id);

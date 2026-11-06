@@ -112,6 +112,149 @@ public class MapInteractionTests : IDisposable
         Assert.Equal(new PointD(75, 75), r.Pos);
     }
 
+    private static PointD Shift(PointD p, PointD d) => new(p.X + d.X, p.Y + d.Y);
+
+    private IReadOnlyList<FormationGroup> Formation(PointD cursor, PointD grab, string primary, params string[] ids) =>
+        DropResolver.ResolveFormation(_state, Map, cursor, grab, primary, ids, _s.Images);
+
+    [Fact]
+    public void Formation_SinglePiece_MatchesResolveDrag()
+    {
+        Add("a", 50, 50);
+        var g = Formation(new PointD(95, 45), new PointD(-45, 5), "a", "a");
+        var t = DropResolver.ResolveDrag(_state, Map, new PointD(95, 45), new PointD(-45, 5), new[] { "a" }, _s.Images);
+        var only = Assert.Single(g);
+        Assert.Equal(new[] { "a" }, only.Ids);
+        Assert.Equal(t.Pos, only.Pos);
+        Assert.Equal(t.StackOnto, only.StackOnto);
+    }
+
+    [Fact]
+    public void Formation_TwoPiecesKeepSeparation()
+    {
+        Add("a", 50, 50);
+        Add("b", 150, 50);
+        var g = Formation(new PointD(110, 60), new PointD(-60, -10), "a", "a", "b");
+        Assert.Equal(2, g.Count);
+        var a = g.Single(x => x.Ids.Contains("a"));
+        var b = g.Single(x => x.Ids.Contains("b"));
+        Assert.Equal(100, b.Pos.X - a.Pos.X, 6);
+        Assert.Equal(0, b.Pos.Y - a.Pos.Y, 6);
+    }
+
+    [Fact]
+    public void Formation_PrimarySnaps_OthersShiftByTheSameDeltaUnsnapped()
+    {
+        Add("a", 50, 50);
+        Add("b", 153, 57);
+        var cursor = new PointD(112, 61);
+        var grab = new PointD(-62, -11);
+        var g = Formation(cursor, grab, "a", "a", "b");
+        var a = g.Single(x => x.Ids.Contains("a"));
+        var b = g.Single(x => x.Ids.Contains("b"));
+        Assert.Equal(DropResolver.ResolveDrag(_state, Map, cursor, grab, new[] { "a", "b" }, _s.Images).Pos, a.Pos);
+        var delta = new PointD(a.Pos.X - 50, a.Pos.Y - 50);
+        Assert.Equal(Shift(new PointD(153, 57), delta), b.Pos);
+    }
+
+    [Fact]
+    public void Formation_PiecesFromOneStackStayOneStack()
+    {
+        Add("a", 50, 50);
+        Add("b", 50, 50, _state.Pieces["a"].StackId);
+        Add("c", 300, 300);
+        var g = Formation(new PointD(110, 60), new PointD(-60, -10), "c", "a", "b", "c");
+        Assert.Equal(2, g.Count);
+        Assert.Contains(g, x => x.Ids.SequenceEqual(new[] { "a", "b" }));
+    }
+
+    [Fact]
+    public void Formation_OthersNeverStackOntoForeignStacks()
+    {
+        Add("a", 50, 50);
+        Add("b", 150, 50);
+        Add("f", 400, 400);
+        var g = Formation(new PointD(300, 400), new PointD(0, 0), "a", "a", "b");
+        var b = g.Single(x => x.Ids.Contains("b"));
+        Assert.Null(b.StackOnto);
+        var a = g.Single(x => x.Ids.Contains("a"));
+        Assert.Equal(new PointD(150 + a.Pos.X - 50, 50 + a.Pos.Y - 50), b.Pos);
+    }
+
+    [Fact]
+    public void Formation_PrimaryMayStackOntoForeignStack_OthersStillFree()
+    {
+        Add("f", 75, 75);
+        Add("a", 400, 400);
+        Add("b", 500, 400);
+        var g = Formation(new PointD(80, 70), new PointD(0, 0), "a", "a", "b");
+        var a = g.Single(x => x.Ids.Contains("a"));
+        var b = g.Single(x => x.Ids.Contains("b"));
+        Assert.Equal(_state.Pieces["f"].StackId, a.StackOnto);
+        Assert.Equal(new PointD(75, 75), a.Pos);
+        Assert.Null(b.StackOnto);
+        Assert.Equal(new PointD(175, 75), b.Pos);
+    }
+
+    [Fact]
+    public void Formation_GroupLandingOnPrimaryPosJoinsPrimaryGroup()
+    {
+        Add("a", 50, 50);
+        Add("c", 50, 50); // separate stack, same spot
+        var g = Formation(new PointD(110, 60), new PointD(-60, -10), "a", "a", "c");
+        var only = Assert.Single(g);
+        Assert.Equal(new[] { "a", "c" }, only.Ids.OrderBy(x => x));
+    }
+
+    [Fact]
+    public void Formation_StackingDisabled_NeverStacks()
+    {
+        Add("f", 75, 75);
+        Add("a", 400, 400);
+        var map = Map with { Stacking = Map.Stacking with { Disabled = true } };
+        var g = DropResolver.ResolveFormation(_state, map, new PointD(80, 70), new PointD(0, 0), "a", new[] { "a" }, _s.Images);
+        Assert.Null(Assert.Single(g).StackOnto);
+    }
+
+    [Fact]
+    public void GhostDelta_IsCursorPlusGrabMinusPrimaryOrigin_Unsnapped()
+    {
+        Add("a", 50, 50);
+        var d = DropResolver.GhostDelta(_state, "a", new PointD(113, 61), new PointD(-60, -10));
+        Assert.Equal(new PointD(3, 1), d);
+    }
+
+    [Fact]
+    public void Sprite_RendersCentredNonEmptyImage()
+    {
+        Add("a", 50, 50);
+        var pr = new PieceRenderer(_s.Images);
+        using var sprite = pr.RenderSprite(_state.Pieces["a"], 1f, PieceDrawFlags.Ghost);
+        Assert.Equal(sprite.Half * 2, sprite.Image.Width);
+        Assert.Equal(sprite.Image.Width, sprite.Image.Height);
+        Assert.True(sprite.Bounds.Width >= 1);
+    }
+
+    [Fact]
+    public void HiddenPieces_AreNotDrawn()
+    {
+        Add("a", 100, 100);
+        var pr = new PieceRenderer(_s.Images);
+        var r = new MapRenderer(_s.Images, pr);
+        var vp = new Viewport();
+        SKBitmap Shot(IReadOnlySet<string>? hidden)
+        {
+            var bmp = new SKBitmap(300, 300);
+            using var c = new SKCanvas(bmp);
+            r.Draw(c, Map, new Dictionary<string, TileSet>(), _state, _s.Model, vp, new SKSize(300, 300),
+                new MapDrawOptions(false, new HashSet<string>(), null, hidden));
+            return bmp;
+        }
+        using var shown = Shot(null);
+        using var gone = Shot(new HashSet<string> { "a" });
+        Assert.NotEqual(shown.Bytes, gone.Bytes);
+    }
+
     [Fact]
     public void RubberBand_SelectsPiecesWithCentreInside()
     {

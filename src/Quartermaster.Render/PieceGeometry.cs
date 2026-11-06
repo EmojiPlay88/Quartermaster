@@ -47,4 +47,14 @@ internal static class PieceGeometry
             if (s.Pieces.TryGetValue(st.PieceIds[i], out var p))
                 yield return (p, new PointD(st.Pos.X + offsets[i].X, st.Pos.Y + offsets[i].Y));
     }
+
+    /// <summary>Like <see cref="Placed"/> but with some pieces taken out of the stack; the rest close up as if they were gone.</summary>
+    public static IEnumerable<(PieceInstance Piece, PointD Center)> PlacedExcept(GameState s, StackInstance st, MapDef map, IReadOnlySet<string> hidden)
+    {
+        var rest = st.PieceIds.Where(id => !hidden.Contains(id)).ToList();
+        var offsets = StackLayout.Offsets(rest.Count, st.Expanded, map.Stacking);
+        for (var i = 0; i < rest.Count; i++)
+            if (s.Pieces.TryGetValue(rest[i], out var p))
+                yield return (p, new PointD(st.Pos.X + offsets[i].X, st.Pos.Y + offsets[i].Y));
+    }
 }
