@@ -103,4 +103,14 @@ public class TableTests
         var h = TablePaste.Parse("x\ty\t\n1\t2\t", false, false);
         Assert.Equal(2, h.Cells[0].Count);
     }
+
+    [Fact] public void Matches_NumericKey_TextValue()
+    {
+        Assert.True(TableLookup.Matches(TableLookup.ParseKey("0405"), Value.Of("0405")));
+        Assert.True(TableLookup.Matches(TableLookup.ParseKey("0100-0199"), Value.Of("0150")));
+        Assert.False(TableLookup.Matches(TableLookup.ParseKey("0100-0199"), Value.Of("abc")));
+        Assert.False(TableLookup.Matches(TableLookup.ParseKey("5"), Value.Of("abc")));
+        var t = OneD("Terrain", new[] { "0405", "0406" }, new[] { "Hill", "Marsh" });
+        Assert.Equal("Marsh", TableLookup.Lookup(t, Value.Of("0406"), null).Text);
+    }
 }

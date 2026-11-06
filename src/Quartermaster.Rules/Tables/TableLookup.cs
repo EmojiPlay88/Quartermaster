@@ -41,9 +41,9 @@ public static class TableLookup
         var d = Dashes(s);
         double a, b;
 
-        if (d.StartsWith(">=") && TryNum(d[2..], out a)) return new(TableKeyKind.AtLeast, a, double.PositiveInfinity, s);
+        if (d.StartsWith(">=", StringComparison.Ordinal) && TryNum(d[2..], out a)) return new(TableKeyKind.AtLeast, a, double.PositiveInfinity, s);
         if (d.StartsWith('≥') && TryNum(d[1..], out a)) return new(TableKeyKind.AtLeast, a, double.PositiveInfinity, s);
-        if (d.StartsWith("<=") && TryNum(d[2..], out a)) return new(TableKeyKind.AtMost, double.NegativeInfinity, a, s);
+        if (d.StartsWith("<=", StringComparison.Ordinal) && TryNum(d[2..], out a)) return new(TableKeyKind.AtMost, double.NegativeInfinity, a, s);
         if (d.StartsWith('≤') && TryNum(d[1..], out a)) return new(TableKeyKind.AtMost, double.NegativeInfinity, a, s);
         if (d.EndsWith('+') && TryNum(d[..^1], out a)) return new(TableKeyKind.AtLeast, a, double.PositiveInfinity, s);
         if (d.EndsWith('-') && TryNum(d[..^1], out a)) return new(TableKeyKind.AtMost, double.NegativeInfinity, a, s);
@@ -66,8 +66,15 @@ public static class TableLookup
             var vt = v.Kind == ValueKind.Number ? v.Display() : Normalise(v.Text);
             return string.Equals(k.Text, vt, StringComparison.OrdinalIgnoreCase);
         }
-        if (v.Kind != ValueKind.Number) return false;
-        var n = v.Number;
+        double n;
+        if (v.Kind == ValueKind.Number) n = v.Number;
+        else if (v.Kind == ValueKind.Text)
+        {
+            var nt = Normalise(v.Text);
+            if (k.Kind == TableKeyKind.Number && string.Equals(k.Text, nt, StringComparison.OrdinalIgnoreCase)) return true;
+            if (!TryNum(nt, out n)) return false;
+        }
+        else return false;
         return k.Kind switch
         {
             TableKeyKind.Number => n == k.Lo,
