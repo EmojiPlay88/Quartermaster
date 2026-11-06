@@ -1,0 +1,106 @@
+using System.Globalization;
+
+namespace Quartermaster.App;
+
+/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;].</summary>
+sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null)
+{
+    public bool Smoke => SmokeSeconds != null;
+
+    public static StartupOptions Parse(string[] args, Action<string> warn)
+    {
+        string? path = null;
+        int? setup = null, smoke = null;
+        var newGame = false;
+        string? shot = null;
+        for (var i = 0; i < args.Length; i++)
+        {
+            var a = args[i];
+            switch (a)
+            {
+                case "--new": newGame = true; break;
+                case "--setup" or "--smoke":
+                    if (i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var n))
+                    {
+                        if (a == "--setup") setup = n; else smoke = n;
+                        i++;
+                    }
+                    else warn($"{a} needs a non-negative integer; ignored.");
+                    break;
+                case "--screenshot":
+                    if (i + 1 < args.Length) shot = args[++i];
+                    else warn("--screenshot needs a file path; ignored.");
+                    break;
+                default:
+                    if (a.StartsWith("--", StringComparison.Ordinal)) warn($"Unknown option '{a}'; ignored.");
+                    else if (path == null) path = a;
+                    else warn($"Extra argument '{a}'; ignored.");
+                    break;
+            }
+        }
+        return new StartupOptions(path, setup, newGame, smoke, shot);
+    }
+}
+
+static class Program
+{
+    public static bool Smoke { get; private set; }
+    public static int ExitCode { get; set; }
+
+    static string LogDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
+
+    /// <summary>Appends a line to app.log (used instead of dialogs in smoke mode).</summary>
+    public static void AppLog(string text)
+    {
+        try
+        {
+            Directory.CreateDirectory(LogDir);
+            File.AppendAllText(Path.Combine(LogDir, "app.log"), $"{DateTime.Now:s} {text}{Environment.NewLine}");
+        }
+        catch (Exception) { /* logging must never throw */ }
+    }
+
+    static void Crash(Exception ex)
+    {
+        ExitCode = 1;
+        try
+        {
+            Directory.CreateDirectory(LogDir);
+            File.AppendAllText(Path.Combine(LogDir, "crash.log"), $"{DateTime.Now:s}{Environment.NewLine}{ex}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch (Exception) { /* nothing more we can do */ }
+        if (Smoke) { Application.Exit(); return; }
+        try
+        {
+            MessageBox.Show("Quartermaster hit an unexpected error:\n\n" + ex.Message +
+                "\n\nDetails were written to " + Path.Combine(LogDir, "crash.log"),
+                "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        catch (Exception) { }
+    }
+
+    [STAThread]
+    static int Main(string[] args)
+    {
+        try
+        {
+            var opts = StartupOptions.Parse(args, AppLog);
+            Smoke = opts.Smoke;
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            Application.SetDefaultFont(new Font("Tahoma", 8.25f));
+            ApplicationConfiguration.Initialize();
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (_, e) => Crash(e.Exception);
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            {
+                if (e.ExceptionObject is Exception ex) Crash(ex);
+            };
+            Application.Run(new MainForm(opts));
+        }
+        catch (Exception ex)
+        {
+            Crash(ex);
+        }
+        return ExitCode;
+    }
+}
