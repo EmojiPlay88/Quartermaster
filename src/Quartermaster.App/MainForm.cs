@@ -10,6 +10,7 @@ sealed class MainForm : Form
     readonly StartupOptions _opts;
     readonly ModuleTreePanel _tree = new() { Dock = DockStyle.Left, Width = 220 };
     readonly Splitter _splitter = new() { Dock = DockStyle.Left, Width = 4 };
+    readonly DocumentTabStrip _tabs = new();
     readonly MenuStrip _menu = new();
     readonly ToolStrip _toolbar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
     readonly StatusStrip _status = new() { RenderMode = ToolStripRenderMode.System };
@@ -51,6 +52,7 @@ sealed class MainForm : Form
         BuildStatus();
 
         // Dock order: the last control added is docked first (menu on top, then toolbar, status, left panel).
+        Controls.Add(_tabs); // added first so it docks after the tree and spans only the MDI area
         Controls.Add(_splitter);
         Controls.Add(_tree);
         Controls.Add(_status);
@@ -59,6 +61,10 @@ sealed class MainForm : Form
         MainMenuStrip = _menu;
 
         _tree.NodeActivated += OnNodeActivated;
+        MdiChildActivate += (_, _) => { KeepMaximized(); SyncTabs(null); };
+        _tabs.TabActivated += f => { if (!f.IsDisposed) f.Activate(); };
+        _tabs.TabCloseRequested += CloseTab;
+        _tabs.TabsCloseRequested += fs => { foreach (var f in fs) if (!f.IsDisposed) f.Close(); };
         _showGrid.CheckedChanged += (_, _) => GridVisibleChanged?.Invoke();
         _viewTree.CheckedChanged += (_, _) => _tree.Visible = _splitter.Visible = _viewTree.Checked;
         UpdateUi();
@@ -106,9 +112,9 @@ sealed class MainForm : Form
         view.DropDownItems.Add(_showGrid);
 
         var window = new ToolStripMenuItem("&Window");
-        Item(window.DropDownItems, "&Cascade", () => LayoutMdi(MdiLayout.Cascade));
-        Item(window.DropDownItems, "Tile &Horizontally", () => LayoutMdi(MdiLayout.TileHorizontal));
-        Item(window.DropDownItems, "Tile &Vertically", () => LayoutMdi(MdiLayout.TileVertical));
+        Item(window.DropDownItems, "&Cascade", () => Arrange(MdiLayout.Cascade));
+        Item(window.DropDownItems, "Tile &Horizontally", () => Arrange(MdiLayout.TileHorizontal));
+        Item(window.DropDownItems, "Tile &Vertically", () => Arrange(MdiLayout.TileVertical));
         Item(window.DropDownItems, "Close &All", CloseAllWindows);
         window.DropDownItems.Add(new ToolStripSeparator());
 
@@ -302,7 +308,8 @@ sealed class MainForm : Form
         var w = new MapWindow(_session, map) { MdiParent = this, Size = new Size(720, 520) };
         _maps[map.Id] = w;
         w.FormClosed += (_, _) => { if (_maps.TryGetValue(map.Id, out var cur) && cur == w) _maps.Remove(map.Id); };
-        if (maximized) w.WindowState = FormWindowState.Maximized;
+        w.FormClosed += (_, _) => SyncTabs(w);
+        if (maximized) { _maximizeDocs = true; w.WindowState = FormWindowState.Maximized; }
         w.Show();
         return w;
     }
@@ -366,8 +373,12 @@ sealed class MainForm : Form
             return;
         }
         _diag = new DiagnosticsWindow(_session.Log) { MdiParent = this, Size = new Size(760, 320) };
-        _diag.FormClosed += (_, _) => _diag = null;
-        _diag.Show();
+        _diag.FormClosed += (_, _) => { _diag = null; };
+        var d = _diag;
+        d.FormClosed += (_, _) => SyncTabs(d);
+        _maximizeDocs = true;
+        d.WindowState = FormWindowState.Maximized;
+        d.Show();
     }
 
     // ---------- game commands ----------
@@ -425,7 +436,7 @@ sealed class MainForm : Form
         }
         if (n.Kind is WindowNodeKind.Map or WindowNodeKind.OrgDisplay && n.Ref is MapDef map)
         {
-            Guard(() => OpenMap(map, maximized: false));
+            Guard(() => OpenMap(map, maximized: true));
             return;
         }
         if (n.Kind == WindowNodeKind.Chart && n.Ref is ChartDef chart)
@@ -451,8 +462,62 @@ sealed class MainForm : Form
         w.MdiParent = this;
         w.Size = new Size(720, 520);
         open[key] = w;
-        w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); };
+        w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); SyncTabs(w); };
+        _maximizeDocs = true;
+        w.WindowState = FormWindowState.Maximized;
         w.Show();
+    }
+
+    // ---------- document tabs ----------
+
+    bool _maximizeDocs = true; // browser feel: documents fill the MDI area until the user cascades/tiles
+
+    void Arrange(MdiLayout layout)
+    {
+        _maximizeDocs = false;
+        foreach (var c in MdiChildren) if (c.WindowState == FormWindowState.Maximized) c.WindowState = FormWindowState.Normal;
+        LayoutMdi(layout);
+    }
+
+    void KeepMaximized()
+    {
+        if (_maximizeDocs && ActiveMdiChild is { IsDisposed: false, WindowState: not FormWindowState.Maximized } a) a.WindowState = FormWindowState.Maximized;
+    }
+
+    void SyncTabs(Form? closing) =>
+        _tabs.Sync(MdiChildren.Where(c => c != closing && !c.IsDisposed), ActiveMdiChild != closing ? ActiveMdiChild : null);
+
+    /// <summary>Closes a tab's window; if it was the active one, activates its neighbour in tab order.</summary>
+    void CloseTab(Form f)
+    {
+        if (f.IsDisposed) return;
+        var wasActive = ReferenceEquals(f, ActiveMdiChild);
+        var idx = _tabs.Tabs.ToList().IndexOf(f);
+        var count = _tabs.Tabs.Count;
+        f.Close();
+        if (!wasActive || !f.IsDisposed) return;
+        var next = TabOrder.AfterClose(count, idx);
+        if (next >= 0 && next < _tabs.Tabs.Count && !_tabs.Tabs[next].IsDisposed) _tabs.Tabs[next].Activate();
+    }
+
+    void StepTab(int delta)
+    {
+        var tabs = _tabs.Tabs;
+        var i = TabOrder.Step(tabs.Count, ActiveMdiChild == null ? -1 : tabs.ToList().IndexOf(ActiveMdiChild), delta);
+        if (i >= 0) tabs[i].Activate();
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        switch (keyData)
+        {
+            case Keys.Control | Keys.Tab: StepTab(1); return true;
+            case Keys.Control | Keys.Shift | Keys.Tab: StepTab(-1); return true;
+            case Keys.Control | Keys.W:
+                if (ActiveMdiChild is { } a) CloseTab(a);
+                return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     // ---------- startup / shutdown ----------
@@ -485,6 +550,21 @@ sealed class MainForm : Form
     DateTime? _smokeWaitStart;
     readonly DateTime _smokeStartedAt = DateTime.UtcNow;
 
+    bool _smokeExtrasOpened;
+
+    /// <summary>Opens the first chart and first text document so the tab strip shows several tabs (no PDF/WebView2 in smoke).</summary>
+    void OpenSmokeDocuments()
+    {
+        if (_session == null) return;
+        if (_session.Model.Charts.FirstOrDefault() is { } c) OnNodeActivated(new WindowTreeNode(c.Name, WindowNodeKind.Chart, c, []));
+        if (_session.Model.Documents.FirstOrDefault(d => d.Kind == DocumentKind.Text) is { } d)
+            OnNodeActivated(new WindowTreeNode(d.Title, WindowNodeKind.Document, d, []));
+        if (_maps.Values.FirstOrDefault(w => !w.IsDisposed) is { } m) m.Activate(); // tab strip shows all tabs, map on top
+        Update();
+        Program.AppLog($"smoke: strip bounds {_tabs.Bounds} visible {_tabs.Visible}; mdi states {string.Join(',', MdiChildren.Select(m => m.WindowState))}");
+        Program.AppLog($"smoke: {_tabs.Tabs.Count} document tab(s): " + string.Join(" | ", _tabs.Tabs.Select(t => t.Text)));
+    }
+
     void FinishSmoke()
     {
         var pending = _maps.Values.Any(w => !w.IsDisposed && !w.TilingDone);
@@ -495,6 +575,7 @@ sealed class MainForm : Form
             _smokeTimer.Start();
             return;
         }
+        if (!_smokeExtrasOpened) { _smokeExtrasOpened = true; Guard(OpenSmokeDocuments); }
         if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
         else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
         Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
@@ -510,6 +591,12 @@ sealed class MainForm : Form
         DrawToBitmap(shot, new Rectangle(0, 0, shot.Width, shot.Height));
         using (var g = Graphics.FromImage(shot))
         {
+            if (_tabs.Visible)
+            {
+                using var tb = new Bitmap(_tabs.Width, _tabs.Height);
+                _tabs.DrawToBitmap(tb, new Rectangle(Point.Empty, tb.Size));
+                g.DrawImageUnscaled(tb, _tabs.PointToScreen(Point.Empty).X - Bounds.X, _tabs.PointToScreen(Point.Empty).Y - Bounds.Y);
+            }
             var active = ActiveMdiChild as MapWindow ?? _maps.Values.FirstOrDefault(w => !w.IsDisposed);
             if (active != null && active.Visible)
             {
