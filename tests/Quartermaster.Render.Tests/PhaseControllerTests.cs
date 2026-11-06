@@ -327,6 +327,44 @@ public class PhaseControllerTests : IDisposable
         Assert.Equal("Weather", line.Phase);
     }
 
+    private FormulaTrace WaterTrace(ModuleSession s) => s.Runner!.Run(s.Game!.State, new RunRequest("f-water", "r1", new Dictionary<string, string>(),
+        new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>(), null, true));
+
+    [Fact]
+    public void ApplyFormula_RunClearedByAdvance_RefusesAndLogsNothing()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        c.Start();
+        c.Advance();
+        var run = s.Game!.State.Pending.Single();
+        var trace = WaterTrace(s);
+        c.Advance();   // clears the pending runs of the old phase
+        Assert.DoesNotContain(s.Game.State.Pending, r => r.Id == run.Id);
+        var n = s.Game.Log.Count;
+
+        Assert.False(c.ApplyFormula(run.Id, "r1", trace, false));
+
+        Assert.Equal(n, s.Game.Log.Count);
+        Assert.Equal(10, Water(s, "r1"));
+    }
+
+    [Fact]
+    public void ApplyFormula_UnitAlreadyApplied_RefusesTheSecondApply()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        c.Start();
+        c.Advance();
+        var run = s.Game!.State.Pending.Single();
+        var trace = WaterTrace(s);
+        Assert.True(c.ApplyFormula(run.Id, "r1", trace, false));
+        var n = s.Game.Log.Count;
+
+        Assert.False(c.ApplyFormula(run.Id, "r1", WaterTrace(s), false));
+
+        Assert.Equal(n, s.Game.Log.Count);
+        Assert.Equal(9, Water(s, "r1"));
+    }
+
     [Fact]
     public void ApplyFormula_FailedTrace_KeepsRunPending()
     {
