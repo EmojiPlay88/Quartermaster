@@ -25,26 +25,27 @@ public interface IMapGrid
     IEnumerable<(PointD A, PointD B)> OverlayLines(RectD area);
 }
 
-internal readonly record struct SizeD(double W, double H);
+public readonly record struct SizeD(double W, double H);
 
 /// <summary>Builds grids from buildFile nodes.</summary>
 public static class GridFactory
 {
     /// <summary>Builds the grid child of a Board node; null when the board has none.</summary>
-    public static IMapGrid? From(ModuleNode boardNode, DiagnosticLog log)
+    /// <param name="containerSize">Real board size (e.g. read from the board image); overrides the Board width/height attributes when positive.</param>
+    public static IMapGrid? From(ModuleNode boardNode, DiagnosticLog log, SizeD? containerSize = null)
     {
         foreach (var c in boardNode.Children)
         {
             if (c.ShortName is "SquareGrid" or "HexGrid" or "ZonedGrid" or "RegionGrid")
-                return FromGridNode(c, log);
+                return FromGridNode(c, log, containerSize);
         }
         return null;
     }
 
     /// <summary>Builds a grid from a SquareGrid/HexGrid/ZonedGrid node (also used for zone-owned grids). Unsupported grids give null plus a diagnostic.</summary>
-    public static IMapGrid? FromGridNode(ModuleNode gridNode, DiagnosticLog log)
+    public static IMapGrid? FromGridNode(ModuleNode gridNode, DiagnosticLog log, SizeD? containerSize = null)
     {
-        var size = ContainerSize(gridNode.Parent);
+        var size = containerSize is { W: > 0, H: > 0 } given && gridNode.Parent?.ShortName == "Board" ? given : ContainerSize(gridNode.Parent);
         switch (gridNode.ShortName)
         {
             case "SquareGrid": return new SquareGrid(gridNode, size, log);

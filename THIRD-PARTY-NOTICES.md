@@ -12,3 +12,4 @@ Ported files:
 - `src/Quartermaster.Vassal/Grids/SquareGrid.cs` (from `.../board/SquareGrid.java`)
 - `src/Quartermaster.Vassal/Grids/HexGrid.cs` (from `.../board/HexGrid.java`)
 - `src/Quartermaster.Vassal/Grids/ZonedGrid.cs` (from `.../board/ZonedGrid.java` and `mapgrid/Zone.java`)
+- `src/Quartermaster.Vassal/Model/ModuleModelBuilder.cs` (board arrangement from `VASSAL/build/module/map/BoardPicker.java` default setup and `VASSAL/build/module/Map.java` setBoardBoundaries/getLocation)
