@@ -10,7 +10,14 @@ sealed class FormulaFormView : FlowLayoutPanel
     static readonly Font CaptionFont = new("Tahoma", 7f);
     static readonly Font CaptionItalic = new("Tahoma", 7f, FontStyle.Italic);
 
-    sealed record Slot(TextBox Box, Label Caption, Button Reroll, string BaseCaption);
+    sealed class Slot(Control box, FlowLayoutPanel host, Label caption, Button reroll, string baseCaption)
+    {
+        public Control Box = box;
+        public FlowLayoutPanel Host = host;
+        public Label Caption = caption;
+        public Button Reroll = reroll;
+        public string BaseCaption = baseCaption;
+    }
 
     readonly Dictionary<string, Slot> _slots = new(StringComparer.Ordinal);
     readonly Dictionary<string, List<Label>> _mirrors = new(StringComparer.Ordinal);
@@ -89,7 +96,7 @@ sealed class FormulaFormView : FlowLayoutPanel
         var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(1, 0, 3, 0) };
         col.Controls.Add(top);
         col.Controls.Add(cap);
-        if (!_slots.ContainsKey(name)) _slots[name] = new Slot(tb, cap, re, b.Caption);
+        if (!_slots.ContainsKey(name)) _slots[name] = new Slot(tb, top, cap, re, b.Caption);
         return col;
     }
 
@@ -97,6 +104,28 @@ sealed class FormulaFormView : FlowLayoutPanel
     public void Type(string variable, string text)
     {
         if (_slots.TryGetValue(variable, out var s)) s.Box.Text = text;
+    }
+
+    /// <summary>Turns the slot's text box into an editable drop-down of the choices (typing is still allowed), or refreshes the list.</summary>
+    void UseCombo(Slot s, string name, IReadOnlyList<string> choices)
+    {
+        if (s.Box is not ComboBox combo)
+        {
+            combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 80, Margin = s.Box.Margin, Text = s.Box.Text };
+            combo.TextChanged += (_, _) => { if (!_updating) _onEdit(name, combo.Text); };
+            var at = s.Host.Controls.GetChildIndex(s.Box);
+            var old = s.Box;
+            s.Host.Controls.Remove(old);
+            old.Dispose();
+            s.Host.Controls.Add(combo);
+            s.Host.Controls.SetChildIndex(combo, at);
+            s.Box = combo;
+        }
+        if (!combo.Items.Cast<object>().Select(o => o.ToString()).SequenceEqual(choices))
+        {
+            combo.Items.Clear();
+            combo.Items.AddRange(choices.Cast<object>().ToArray());
+        }
     }
 
     /// <summary>Pushes a run's view onto the controls without raising edit events.</summary>
@@ -109,8 +138,9 @@ sealed class FormulaFormView : FlowLayoutPanel
             {
                 if (_slots.TryGetValue(b.Variable, out var s))
                 {
+                    if (b.Choices != null) UseCombo(s, name: b.Variable, b.Choices);
                     if (s.Box.Text != b.Text) s.Box.Text = b.Text;
-                    s.Box.BackColor = b.Background == BoxBackground.Auto ? AutoColor : SystemColors.Window;
+                    s.Box.BackColor = b.Wrong ? Color.MistyRose : b.Background == BoxBackground.Auto ? AutoColor : SystemColors.Window;
                     s.Box.Enabled = b.Enabled;
                     s.Caption.Text = s.BaseCaption + b.CaptionSuffix;
                     s.Caption.Font = b.CaptionSuffix.Length > 0 ? CaptionItalic : CaptionFont;

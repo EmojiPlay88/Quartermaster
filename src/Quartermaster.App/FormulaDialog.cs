@@ -5,6 +5,9 @@ using Quartermaster.Vassal;
 
 namespace Quartermaster.App;
 
+/// <summary>Links a formula dialog to one unit of a pending run: Apply marks that unit done. Moved is the measured distance for OnMove runs.</summary>
+sealed record RunLink(string RunId, double? Moved);
+
 /// <summary>Layout-C formula dialog: the formula written out with an input box per variable, a live result and working line, and Apply to the ledger.</summary>
 sealed class FormulaDialog : Form
 {
@@ -15,6 +18,7 @@ sealed class FormulaDialog : Form
     readonly Label _working = new() { AutoSize = true, Font = new Font("Consolas", 9f), MaximumSize = new Size(540, 0), Margin = new Padding(0, 2, 0, 2) };
     readonly FlowLayoutPanel _inline = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, MaximumSize = new Size(540, 0), Margin = Padding.Empty };
     readonly Button _apply = new() { Text = "&Apply to ledger", Width = 110, Height = 25, Enabled = false };
+    readonly Button _calc = new() { Text = "&Calculate", Width = 85, Height = 25 };
     readonly Button _cancel = new() { Text = "Cancel", Width = 75, Height = 25 };
     readonly Button _ruleRef = new() { Text = "&Rule ref…", Width = 85, Height = 25 };
     readonly CheckBox _physical = new() { Text = "Physical dice", AutoSize = true, Margin = new Padding(12, 5, 0, 0) };
@@ -28,21 +32,23 @@ sealed class FormulaDialog : Form
     DialogView? _last;
     GameSession? _game;
     bool _closing;
+    readonly RunLink? _link;
+    CheatSheetWindow? _cheat;
 
     static readonly List<FormulaDialog> Open = new();
 
     /// <summary>Shows a modeless dialog for the formula and piece, or activates the one already open.</summary>
-    public static FormulaDialog? Show(ModuleSession s, string formulaId, string? pieceId, Form owner, MainForm? host)
+    public static FormulaDialog? Show(ModuleSession s, string formulaId, string? pieceId, Form owner, MainForm? host, RunLink? link = null)
     {
         Open.RemoveAll(d => d.IsDisposed);
-        var existing = Open.FirstOrDefault(d => d._s == s && d._formulaId == formulaId && d._pieceId == pieceId);
+        var existing = Open.FirstOrDefault(d => d._s == s && d._formulaId == formulaId && d._pieceId == pieceId && d._link?.RunId == link?.RunId);
         if (existing != null)
         {
             if (existing.WindowState == FormWindowState.Minimized) existing.WindowState = FormWindowState.Normal;
             existing.Activate();
             return existing;
         }
-        var dlg = new FormulaDialog(s, formulaId, pieceId) { Host = host };
+        var dlg = new FormulaDialog(s, formulaId, pieceId, false, link) { Host = host };
         Open.Add(dlg);
         dlg.Show(owner);
         return dlg;
@@ -52,16 +58,21 @@ sealed class FormulaDialog : Form
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public MainForm? Host { get; set; }
 
-    public FormulaDialog(ModuleSession s, string formulaId, string? pieceId, bool previewOnly = false)
+    public FormulaDialog(ModuleSession s, string formulaId, string? pieceId, bool previewOnly = false, RunLink? link = null)
     {
         _s = s;
         _formulaId = formulaId;
         _pieceId = pieceId;
         _previewOnly = previewOnly;
+        _link = link;
         var rules = s.Rules ?? throw new InvalidOperationException("No rules pack is loaded.");
         var runner = s.Runner ?? throw new InvalidOperationException("No rules pack is loaded.");
         var formula = rules.ById<FormulaDef>(formulaId) ?? new FormulaDef { Id = formulaId, Name = "(missing formula)" };
-        _model = new FormulaDialogModel(runner, formula, pieceId);
+        _model = new FormulaDialogModel(runner, formula, pieceId) { Moved = link?.Moved };
+        // Hardcore and semi-automatic: the user types the values and the dialog only checks them. Fully automatic keeps the prefilled dialog.
+        var mode = s.Game?.State.Difficulty;
+        if (!previewOnly && mode is Difficulty.Hardcore or Difficulty.SemiAuto) _model.Checked = true;
+        if (!previewOnly && mode == Difficulty.SemiAuto) _cheat = new CheatSheetWindow();
 
         string? piece = null;
         if (pieceId != null && s.Game?.State.Pieces.TryGetValue(pieceId, out var pi) == true) piece = PieceInfo.Name(pi);
@@ -91,6 +102,8 @@ sealed class FormulaDialog : Form
 
         _debounce.Tick += (_, _) => { _debounce.Stop(); Recalc(); };
         _apply.Click += (_, _) => Guarded(ApplyToLedger);
+        _calc.Click += (_, _) => Guarded(CalculateAll);
+        _calc.Visible = !previewOnly;
         _cancel.Click += (_, _) => { if (!_embedded) Close(); };
         _ruleRef.Click += (_, _) => Guarded(OpenRuleRef);
         _physical.CheckedChanged += (_, _) => { _model.PhysicalDice = _physical.Checked; Recalc(); };
@@ -187,6 +200,38 @@ sealed class FormulaDialog : Form
         Open.Remove(this);
     }
 
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        ShowCheatSheet();
+    }
+
+    /// <summary>Opens the cheat sheet beside the dialog (right side, or left when there is no room), owned by it.</summary>
+    void ShowCheatSheet()
+    {
+        if (_cheat == null || _cheat.IsDisposed || _cheat.Visible) return;
+        var area = Screen.FromControl(this).WorkingArea;
+        var x = Right + 8;
+        if (x + _cheat.Width > area.Right) x = Math.Max(area.Left, Left - 8 - _cheat.Width);
+        _cheat.Location = new Point(x, Math.Max(area.Top, Math.Min(Top, area.Bottom - _cheat.Height)));
+        RenderCheat();
+        _cheat.Show(this);
+    }
+
+    void RenderCheat()
+    {
+        if (_cheat == null || _cheat.IsDisposed || _model.LastExpected is not { } exp || _s.Rules is not { } rules) return;
+        _cheat.Render(CheatSheetModel.Build(exp, rules));
+    }
+
+    /// <summary>The Calculate button: fills every box with the engine's value (rolling any dice); the boxes stay editable.</summary>
+    void CalculateAll()
+    {
+        _debounce.Stop();
+        _model.Calculate(_s.Game?.State ?? new GameState());
+        Recalc();
+    }
+
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         Unhook();
@@ -206,7 +251,7 @@ sealed class FormulaDialog : Form
     Control Buttons()
     {
         var row = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Anchor = AnchorStyles.Right, Margin = new Padding(0, 0, 0, 8) };
-        row.Controls.AddRange(new Control[] { _apply, _cancel, _ruleRef, _physical });
+        row.Controls.AddRange(new Control[] { _apply, _calc, _cancel, _ruleRef, _physical });
         return row;
     }
 
@@ -266,6 +311,7 @@ sealed class FormulaDialog : Form
             _status.ForeColor = v.Trace.Error != null ? Color.Firebrick : SystemColors.ControlText;
             _apply.Enabled = v.CanApply && !_previewOnly && _s.Game != null;
             RebuildInline(v);
+            RenderCheat();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -293,14 +339,18 @@ sealed class FormulaDialog : Form
     {
         if (_debounce.Enabled) { _debounce.Stop(); Recalc(); }
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
-        foreach (var c in runner.Commands(v.Trace, null)) game.Execute(CommandLog.Stamp(c));
+        // v.Trace is the engine's own (expected) run: typed values only gate Apply, so a wrong formula can never reach the ledger.
+        if (HostForm?.Phases is { } phases) phases.ApplyFormula(_link?.RunId, _pieceId, v.Trace, _model.AutoCalculated);
+        else foreach (var c in runner.Commands(v.Trace, null)) game.Execute(CommandLog.Stamp(c));
         if (!_embedded) Close();
     }
+
+    MainForm? HostForm => Host ?? Owner as MainForm ?? (Owner as MapWindow)?.Host;
 
     void OpenRuleRef()
     {
         var rr = _model.Formula.RuleRefId is { } id ? _s.Rules?.ById<RuleRef>(id) : null;
-        var host = Host ?? Owner as MainForm ?? (Owner as MapWindow)?.Host;
+        var host = HostForm;
         if (rr == null || host == null) return;
         host.OpenDocumentAtPage(rr.DocumentEntry, rr.Page);
     }
@@ -328,7 +378,7 @@ sealed class FormulaDialog : Form
     /// <summary>Smoke: fills the inputs, clicks Apply and checks that the dialog closed and exactly the previewed commands were recorded. Null when fine, else the problem.</summary>
     public string? SmokeApply()
     {
-        SmokeFillInputs();
+        if (_model.Checked) _calc.PerformClick(); else SmokeFillInputs();
         if (_last is not { CanApply: true } v || _s.Game is not { } game) return "Apply is not available for this formula with filled inputs";
         var ledger = game.State.LedgerHistory.Count;
         var dice = game.State.DiceHistory.Count;
@@ -338,6 +388,17 @@ sealed class FormulaDialog : Form
         if (game.State.DiceHistory.Count != dice + v.Trace.Rolls.Count) return $"expected {v.Trace.Rolls.Count} dice entries, got {game.State.DiceHistory.Count - dice}";
         return null;
     }
+
+    // ---- smoke hooks for the checked-mode flow ----
+    public bool IsChecked => _model.Checked;
+    public bool ApplyEnabled => _apply.Enabled;
+    public CheatSheetWindow? CheatSheet => _cheat;
+    public RunLink? Link => _link;
+    public string? SmokeBoxText(string variable) => _last?.Boxes.FirstOrDefault(b => b.Variable == variable)?.Text;
+    public bool SmokeBoxWrong(string variable) => _last?.Boxes.FirstOrDefault(b => b.Variable == variable)?.Wrong == true;
+    public void SmokeType(string variable, string text) { _view.Type(variable, text); _debounce.Stop(); Recalc(); }
+    public void SmokeCalculate() => _calc.PerformClick();
+    public void SmokeClickApply() => _apply.PerformClick();
 
     /// <summary>Draws the dialog to a PNG (smoke screenshots).</summary>
     public void SaveScreenshot(string path)
@@ -358,6 +419,7 @@ sealed class FormulaDialog : Form
         {
             Unhook();
             _debounce.Dispose();
+            _cheat?.Dispose();
         }
         base.Dispose(disposing);
     }
