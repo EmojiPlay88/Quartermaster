@@ -55,31 +55,48 @@ public static class Ledger
 
 public static class LedgerSeeder
 {
-    /// <summary>Seeds for piece-scoped properties bound to a property-sheet row. Null when nothing to seed.</summary>
-    public static SeedLedger? BuildSeeds(GameState s, RulesPack pack, Func<PieceInstance, bool> appliesTo)
+    /// <summary>
+    /// Seeds for piece-scoped properties bound to a property-sheet row. Null when nothing to seed.
+    /// A property's own AppliesTo filter is honoured. Malformed pieces are skipped with a "rules" warning when a log is given.
+    /// </summary>
+    public static SeedLedger? BuildSeeds(GameState s, RulesPack pack, Func<PieceInstance, bool> appliesTo, ModuleModel? model = null, DiagnosticLog? log = null)
     {
         var seeds = new List<LedgerSeed>();
         foreach (var piece in s.Pieces.Values)
         {
             if (!appliesTo(piece)) continue;
-            var key = LedgerKey.Piece(piece.Id);
-            var traits = PieceTypeParser.Parse(piece.TypeString, new DiagnosticLog(), null).Traits;
-            foreach (var prop in pack.Properties)
+            try { SeedPiece(s, pack, piece, model, seeds); }
+            catch (Exception ex)
             {
-                if (prop.Scope == PropertyScope.Holders || string.IsNullOrWhiteSpace(prop.SheetField)) continue;
-                if (Ledger.Get(s, key, prop.Id) != null) continue;
-                for (var i = 0; i < traits.Count; i++)
-                {
-                    if (traits[i] is not PropertySheetDef def
-                        || !def.Rows.Any(r => string.Equals(r.Name, prop.SheetField, StringComparison.OrdinalIgnoreCase))) continue;
-                    var row = PieceActions.ReadSheet(piece, i)
-                        .First(r => string.Equals(r.Name, prop.SheetField, StringComparison.OrdinalIgnoreCase));
-                    if (double.TryParse(row.Value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v))
-                        seeds.Add(new LedgerSeed(key, prop.Id, v));
-                    break; // first sheet having the row wins
-                }
+                log?.AddOnce("seed:" + piece.Id, DiagnosticSeverity.Warning, "rules",
+                    $"Could not read starting values for piece '{piece.Id}': {ex.Message}");
             }
         }
         return seeds.Count == 0 ? null : new SeedLedger(seeds);
+    }
+
+    private static void SeedPiece(GameState s, RulesPack pack, PieceInstance piece, ModuleModel? model, List<LedgerSeed> seeds)
+    {
+        var key = LedgerKey.Piece(piece.Id);
+        var traits = PieceTypeParser.Parse(piece.TypeString, new DiagnosticLog(), null).Traits;
+        var local = new List<LedgerSeed>();
+        foreach (var prop in pack.Properties)
+        {
+            if (prop.Scope == PropertyScope.Holders || string.IsNullOrWhiteSpace(prop.SheetField)) continue;
+            if (Ledger.Get(s, key, prop.Id) != null) continue;
+            if (!string.IsNullOrWhiteSpace(prop.AppliesTo) && !PieceFilter.Matches(prop.AppliesTo, piece, s, model!, pack)) continue;
+            for (var i = 0; i < traits.Count; i++)
+            {
+                if (traits[i] is not PropertySheetDef def
+                    || !def.Rows.Any(r => string.Equals(r.Name, prop.SheetField, StringComparison.OrdinalIgnoreCase))) continue;
+                var row = PieceActions.ReadSheet(piece, i)
+                    .FirstOrDefault(r => string.Equals(r.Name, prop.SheetField, StringComparison.OrdinalIgnoreCase));
+                if (row.Name == null) break;
+                if (double.TryParse(row.Value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v))
+                    local.Add(new LedgerSeed(key, prop.Id, v));
+                break; // first sheet having the row wins
+            }
+        }
+        seeds.AddRange(local); // a piece that fails midway contributes nothing
     }
 }

@@ -112,6 +112,22 @@ public class LedgerTests
     }
 
     [Fact]
+    public void Seeder_ShortSheetState_AndMalformedType_SkipsAndCompletes()
+    {
+        var s = S();
+        var sheet = PieceTypeParser.EncodeState(new[] { "propertysheet;0Name~0Fuel;Sheet;", "piece;;;unit.svg;Unit" });
+        s.Apply(new AddPiece("short", sheet, "", "m1", new PointD(0, 0), null));
+        s.Apply(new AddPiece("bad", ";;;;;(((", "", "m1", new PointD(0, 0), null));
+        s.Apply(new AddPiece("ok", sheet, "", "m1", new PointD(0, 0), null));
+        s.Apply(new SetTraitState("ok", 0, "Tank~7"));
+        var pack = new RulesPack { Properties = { new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, SheetField = "Fuel" } } };
+        var log = new DiagnosticLog();
+        var seed = LedgerSeeder.BuildSeeds(s, pack, _ => true, null, log);
+        Assert.Contains(("p:ok", "fuel", 7.0), seed!.Seeds.Select(x => (x.Key, x.PropertyId, x.Value)));
+        Assert.DoesNotContain(seed.Seeds, x => x.Key == "p:short");
+    }
+
+    [Fact]
     public void NativeSave_LedgerAndRulesHash_RoundTrip()
     {
         var sess = new GameSession(S(), "mod") { RulesSha256 = "rules1" };
