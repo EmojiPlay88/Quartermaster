@@ -95,3 +95,30 @@ Deferred minors and rulings from the piece-2 execution ledger (generic engine no
 - Ruling P2-R9: all UI number display invariant 0.##; Describe fixed at source (single parens). Folded: unsubscribe in OnFormClosed/Dispose; ManagedSheetValue honours AppliesTo; skip manual delta when before==after.
 - Ruling P2-R10: (I1) timer flush commits text but keeps stale bindings with a visible "unused" marker; add a "Remove unused bindings" action; final flush (deferred via BeginInvoke, not inside Leave) asks once. (I2/I3) when !InvokeRequired act directly regardless of handle; tabs reload on VisibleChanged when marked dirty; SetFormula rebuilds directly. (I5) Reload flushes pending text first. (I6) reject empty/duplicate (case-insensitive) names on rename/edit for properties, holders, tables, formulas with a message.
 - Ruling P2-R11 (final-review fix wave): (C1) FormulaDialog Apply executes then Close(); Cancel.Click closes (no-op embedded); smoke asserts Apply closes and records exactly the previewed entries; OnUi guards IsDisposed/_closing. (I1) FormulaDialogModel merges dice pins (only Reroll and the PhysicalDice toggle remove them); FormulaRunner.Fail carries RollsByKey already produced. (I2) workbench New/Open prompt buttons go through Guard. (I3) RulesValidator checks property names referenced by AppliesTo (variables and has()) — unknown is an Error. (M1) LedgerSeeder exits early when no Pieces/Both property has a SheetField and uses PieceInfo.TypeOf cache. (M12) WindowManager follows TextChanged of registered forms.
+
+## Piece 2b (UI tools) — deferred minors and rulings
+
+Generic engine notes only; all items were reviewed and deferred by the controller. Items marked "fixed in Task 11" were closed by the final task.
+
+### Rulings
+
+- Ruling P2b-R1: CommandRegistry (ids, defaults, overrides, conflicts, reserved) lives in Render with string shortcuts; `ShortcutParser.TryParse` lives in App.
+- Ruling P2b-R2: "last moved" reads GameSession.Log (the command list), via `MapViewTools.LastMovedIds`.
+- Ruling P2b-R3: WindowManager must not record the floating " — Quartermaster" suffix as the base title.
+- Ruling P2b-R4/R5: building a game from a setup or import must not produce per-piece log entries; the log is cleared and one system entry is added (`Setup "{name}" loaded: N pieces` / `New game: N pieces`). LoadNative leaves the saved log untouched.
+- Ruling P2b-R6: SnapOnDrop and ConfirmDelete are wired; settings Commit merges onto the store's current values; Autosaver.Reset on manual save.
+- Ruling P2b-R7: floating forms route shortcuts through MainForm.TryDispatchShortcut; editing and navigation keys never dispatch while a text control has focus.
+- Ruling P2b-R8: an open NotesWindow is flushed into the current game before any replacement or close decision.
+- Ruling P2b-R9: smoke SaveScreenshot composites a map canvas only for the screenshot target or the active MDI child; map export has a re-entrancy guard, a unique temp name (`path.<guid>.tmp`) and cancels when the owner window closes (fixed in Task 11).
+
+### Deferred minors
+
+- Game log / commands: RemovePiece logs before detach; no old-command-JSON back-compat test; DeepClone cost grows with the log; `Num()` NaN text; multi-piece move "from" and StackOnto "to" approximations; CentreOnPiece is silent for deleted pieces; `OnGameReplaced` Changed lambda is never removed (pre-existing).
+- Log panel: virtual ListView reselect may raise SelectedIndexChanged; DockLog relies on WindowManager closed-form handling.
+- Dice / turn: multi-roll physical cancel keeps earlier rolls; StepTurn clears the phase (documented choice); unguarded DropDownOpening/Refresh; Next-turn caption refreshes only on dropdown open; filter wiring untested (smoke calls dispatch directly); Action/Func<bool> overload fragility.
+- Trees: splitter fraction drift from SizeChanged; TryPending leaves a stale pending id after 5 passes. The Formulas branch is now exercised by the smoke (an invented table and formula are added to the empty pack made with --new-rules) (fixed in Task 11).
+- Settings: dialog is fixed size (DPI); PieceRenderer.LabelScale is shared; toolbar ids equal captions; linked-folder skip is not logged.
+- Palette: thumbnail cache clears at 2000 (LRU would be better); per-thumbnail BeginInvoke flood; search text overrides the folder selection; palette pop-out not restored on reopen; seed is not undone with a placement; a stale worker may steal one pending item; first prioritisation is wrong before bounds are realised; no BeginUpdate in Apply; the scroll timer ticks while hidden.
+- LOS / overview: LOS drag is stuck if the window pops out mid-drag; OverviewWindow OnTargetClosed BeginInvoke has no handle guard; overview tile image cache is never invalidated; GridFor resolution is duplicated; TryCell expects snapped input (undocumented).
+- Map export: whole-map export ignores hide counters / last moved; cancel is ignored during PNG encode; RefreshLastMoved does work when the option is off; incoming drag preview while hidden. (Concurrent export collision, ".tmp" clobbering and no cancel on owner close were fixed in Task 11.)
+- Inventory / notes: marker keys are recomputed each refresh; group label casing is order-dependent; no notes size cap; the Leave/timer flush can run between GameReplaced and its deferred handler.
