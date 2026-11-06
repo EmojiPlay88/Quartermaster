@@ -10,7 +10,7 @@ namespace Quartermaster.App;
 /// </summary>
 sealed class PalettePanel : UserControl
 {
-    const int ThumbCap = 600, CacheCap = 2000;
+    const int CacheCap = 3000, Batch = 20;
     readonly ModuleSession _s;
     readonly PaletteThumbs _thumbs;
     readonly TreeView _tree = new() { Dock = DockStyle.Fill, HideSelection = false };
@@ -18,7 +18,15 @@ sealed class PalettePanel : UserControl
     readonly TextBox _search = new() { Width = 150 };
     readonly ToolStripButton _popButton = new("Pop out") { Alignment = ToolStripItemAlignment.Right };
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 250 };
-    readonly Dictionary<string, Bitmap> _cache = new();
+    readonly Dictionary<string, LinkedListNode<(string Key, Bitmap Bmp)>> _cache = new();
+    readonly LinkedList<(string Key, Bitmap Bmp)> _lru = new();
+    readonly System.Windows.Forms.Timer _scroll = new() { Interval = 100 };
+    readonly object _gate = new();
+    List<(ListViewItem Item, PieceSlotDef Slot)> _pending = new();
+    ListViewItem[] _items = Array.Empty<ListViewItem>();
+    (int First, int Last) _range = (-1, -1);
+    Task? _worker;
+    volatile bool _closing;
     CancellationTokenSource? _cts;
     ImageList? _images;
     int _generation;
@@ -42,6 +50,8 @@ sealed class PalettePanel : UserControl
         FillTree(PaletteModel.Build(s.Model));
         _tree.AfterSelect += (_, _) => Guard(ShowSelection);
         _search.TextChanged += (_, _) => { _debounce.Stop(); _debounce.Start(); };
+        _scroll.Tick += (_, _) => Guard(UpdateRange);
+        _scroll.Start();
         _debounce.Tick += (_, _) => { _debounce.Stop(); Guard(ShowSelection); };
         _list.ItemDrag += (_, e) => Guard(() => Drag(e.Item as ListViewItem));
         if (_tree.Nodes.Count > 0) _tree.SelectedNode = _tree.Nodes[0];
@@ -67,6 +77,18 @@ sealed class PalettePanel : UserControl
             return null;
         }
         if (Find(_tree.Nodes) is { } node) _tree.SelectedNode = node;
+    }
+
+    /// <summary>Smoke: scrolls to the last listed counter and returns how many of the last 12 have a real thumbnail after the worker had time.</summary>
+    public int ScrollToEndAndCountThumbs()
+    {
+        if (_items.Length == 0) return 0;
+        _list.EnsureVisible(_items.Length - 1);
+        var until = DateTime.UtcNow.AddSeconds(4);
+        while (DateTime.UtcNow < until && _items.Skip(_items.Length - 12).Any(i => i.ImageIndex == 0)) { Application.DoEvents(); Thread.Sleep(20); }
+        int pend; lock (_gate) pend = _pending.Count;
+        Program.AppLog($"smoke: palette range {_range} pending {pend}");
+        return _items.Skip(_items.Length - 12).Count(i => i.ImageIndex > 0);
     }
 
     void FillTree(PaletteNode root)
@@ -107,45 +129,129 @@ sealed class PalettePanel : UserControl
         using (var ph = Placeholder()) images.Images.Add(ph);
         _list.LargeImageList = images;
         _images = images;
+        var items = new List<ListViewItem>(slots.Count);
         var missing = new List<(ListViewItem Item, PieceSlotDef Slot)>();
         foreach (var slot in slots)
         {
             var item = new ListViewItem(slot.EntryName, 0) { Tag = slot, ToolTipText = slot.EntryName };
-            _list.Items.Add(item);
-            if (_cache.TryGetValue(PaletteModel.Key(slot), out var bmp))
+            items.Add(item);
+            if (TryCached(PaletteModel.Key(slot), out var bmp))
             {
                 images.Images.Add(bmp, Color.Transparent);
                 item.ImageIndex = images.Images.Count - 1;
             }
-            else if (missing.Count < ThumbCap) missing.Add((item, slot));
+            else missing.Add((item, slot));
         }
+        _list.Items.AddRange(items.ToArray());
+        _items = items.ToArray();
         _list.EndUpdate();
         old?.Dispose();
+        _range = (-1, -1);
+        lock (_gate) _pending = missing;
         if (missing.Count == 0) return;
+        Prioritise(CurrentRange());
         var cts = _cts = new CancellationTokenSource();
         var token = cts.Token;
-        _ = Task.Run(() =>
+        _worker = Task.Run(() => Work(gen, token), token);
+    }
+
+    void Work(int gen, CancellationToken token)
+    {
+        var batch = new List<(int Gen, ListViewItem Item, PieceSlotDef Slot, Bitmap Bmp)>();
+        while (!token.IsCancellationRequested && !_closing)
         {
-            foreach (var (item, slot) in missing)
+            (ListViewItem Item, PieceSlotDef Slot) next;
+            lock (_gate)
             {
-                if (token.IsCancellationRequested) return;
-                var bmp = _thumbs.Render(slot);
-                if (bmp == null) continue;
-                try
-                {
-                    if (IsDisposed || !IsHandleCreated) { bmp.Dispose(); return; }
-                    BeginInvoke(() => Apply(gen, item, slot, bmp));
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException) { bmp.Dispose(); return; }
+                if (_pending.Count == 0) break;
+                next = _pending[0];
+                _pending.RemoveAt(0);
             }
-        }, token);
+            var bmp = _thumbs.Render(next.Slot);
+            if (bmp != null) batch.Add((gen, next.Item, next.Slot, bmp));
+            bool empty;
+            lock (_gate) empty = _pending.Count == 0;
+            if (batch.Count >= Batch || (empty && batch.Count > 0)) Flush(batch);
+        }
+        foreach (var b in batch) b.Bmp.Dispose();
+    }
+
+    void Flush(List<(int Gen, ListViewItem Item, PieceSlotDef Slot, Bitmap Bmp)> batch)
+    {
+        var send = batch.ToList();
+        batch.Clear();
+        try
+        {
+            if (_closing || IsDisposed || !IsHandleCreated) throw new ObjectDisposedException(nameof(PalettePanel));
+            BeginInvoke(() => { foreach (var b in send) Apply(b.Gen, b.Item, b.Slot, b.Bmp); });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            foreach (var b in send) b.Bmp.Dispose();
+        }
+    }
+
+    (int First, int Last) CurrentRange()
+    {
+        if (_items.Length == 0) return (0, 0);
+        // TopItem is unavailable in icon views; item rows are monotone in Y, so binary-search the first item that is not scrolled off the top.
+        int lo = 0, hi = _items.Length - 1;
+        while (lo < hi)
+        {
+            var mid = (lo + hi) / 2;
+            if (_items[mid].Bounds.Bottom > 0) hi = mid; else lo = mid + 1;
+        }
+        var first = lo;
+        var last = first;
+        while (last + 1 < _items.Length && _items[last + 1].Bounds.Top < _list.ClientSize.Height) last++;
+        return (first, last);
+    }
+
+    void UpdateRange()
+    {
+        var r = CurrentRange();
+        if (r != _range) Prioritise(r);
+    }
+
+    /// <summary>Re-sorts the pending thumbnails so the visible range, then its neighbours, come first.</summary>
+    void Prioritise((int First, int Last) r)
+    {
+        _range = r;
+        lock (_gate)
+        {
+            if (_pending.Count == 0) return;
+            var rank = new Dictionary<ListViewItem, int>();
+            var order = ThumbQueue.Order(_items.Length, r.First, r.Last);
+            for (var k = 0; k < order.Count; k++) rank[_items[order[k]]] = k;
+            _pending = _pending.OrderBy(p => rank.GetValueOrDefault(p.Item, int.MaxValue)).ToList();
+        }
+    }
+
+    bool TryCached(string key, out Bitmap bmp)
+    {
+        if (_cache.TryGetValue(key, out var node))
+        {
+            _lru.Remove(node);
+            _lru.AddFirst(node);
+            bmp = node.Value.Bmp;
+            return true;
+        }
+        bmp = null!;
+        return false;
     }
 
     void Apply(int gen, ListViewItem item, PieceSlotDef slot, Bitmap bmp)
     {
-        if (IsDisposed) { bmp.Dispose(); return; }
-        if (_cache.Count >= CacheCap) ClearCache();
-        _cache[PaletteModel.Key(slot)] = bmp;
+        if (IsDisposed || _closing) { bmp.Dispose(); return; }
+        var key = PaletteModel.Key(slot);
+        if (_cache.TryGetValue(key, out var old)) { _lru.Remove(old); old.Value.Bmp.Dispose(); }
+        _cache[key] = _lru.AddFirst((key, bmp));
+        while (_cache.Count > CacheCap && _lru.Last is { } last)
+        {
+            _lru.RemoveLast();
+            _cache.Remove(last.Value.Key);
+            last.Value.Bmp.Dispose();
+        }
         if (gen != _generation || _images == null || item.ListView != _list) return;
         _images.Images.Add(bmp, Color.Transparent);
         item.ImageIndex = _images.Images.Count - 1;
@@ -153,8 +259,19 @@ sealed class PalettePanel : UserControl
 
     void ClearCache()
     {
-        foreach (var b in _cache.Values) b.Dispose();
+        foreach (var n in _lru) n.Bmp.Dispose();
+        _lru.Clear();
         _cache.Clear();
+    }
+
+    /// <summary>Stops the thumbnail worker and waits briefly for an in-flight render, so the module archive can be closed safely.</summary>
+    public void StopWorker()
+    {
+        _closing = true;
+        _scroll.Stop();
+        _cts?.Cancel();
+        try { _worker?.Wait(2000); }
+        catch (Exception ex) when (ex is AggregateException or OperationCanceledException) { }
     }
 
     static Bitmap Placeholder()
@@ -196,7 +313,8 @@ sealed class PalettePanel : UserControl
     {
         if (disposing)
         {
-            _cts?.Cancel();
+            StopWorker();
+            _scroll.Dispose();
             _debounce.Dispose();
             _list.LargeImageList = null;
             _images?.Dispose();

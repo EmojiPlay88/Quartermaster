@@ -305,10 +305,13 @@ sealed class MapWindow : Form
         foreach (var b in batches) Execute(b);
     }
 
-    /// <summary>Game master: removes the clicked counter and any other selected ones (after the usual confirmation).</summary>
+    /// <summary>Game master: removes the clicked counter, or the whole selection when the clicked counter is selected (after the usual confirmation).</summary>
     void DeleteCounters(PieceInstance clicked, GameSession game)
     {
-        var ids = game.State.Pieces.Keys.Where(id => id == clicked.Id || Canvas.Selected.Contains(id)).ToList();
+        // The selection is the target only when the clicked counter is part of it; otherwise just the clicked counter.
+        var ids = Canvas.Selected.Contains(clicked.Id)
+            ? game.State.Pieces.Keys.Where(Canvas.Selected.Contains).ToList()
+            : new List<string> { clicked.Id };
         if (!ConfirmDeletes(game.State, ids, clicked)) return;
         Execute(ids.Select(id => new RemovePiece(id)));
     }

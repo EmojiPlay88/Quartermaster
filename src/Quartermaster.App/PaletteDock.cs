@@ -36,6 +36,7 @@ sealed class PaletteDock
         var f = Float;
         Float = null;
         f?.CloseForReal();
+        Panel?.StopWorker(); // before the session's archive goes away
         Panel?.Dispose();
         Panel = null;
         Host.Controls.Clear();

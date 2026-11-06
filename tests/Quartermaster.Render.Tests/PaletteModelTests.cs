@@ -79,3 +79,24 @@ public class PaletteModelTests : IDisposable
 
     private static IEnumerable<PieceSlotDef> Flatten(PaletteNode n) => n.Slots.Concat(n.Children.SelectMany(Flatten));
 }
+
+public class ThumbQueueTests
+{
+    [Fact]
+    public void Order_VisibleRangeFirst_ThenNearest()
+    {
+        var o = ThumbQueue.Order(1000, 800, 803);
+        Assert.Equal(new[] { 800, 801, 802, 803 }, o.Take(4));
+        Assert.Equal(new[] { 804, 799, 805 }, o.Skip(4).Take(3));
+        Assert.Equal(1000, o.Distinct().Count());
+    }
+
+    [Fact]
+    public void Order_ScrolledPast600_StillRendersFarItemsEarly()
+    {
+        var o = ThumbQueue.Order(2400, 1500, 1510);
+        Assert.True(o.ToList().IndexOf(1505) < 11);
+        Assert.True(o.ToList().IndexOf(0) > 1000);
+        Assert.Empty(ThumbQueue.Order(0, 0, 0));
+    }
+}

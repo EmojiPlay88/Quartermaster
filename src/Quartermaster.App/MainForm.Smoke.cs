@@ -238,6 +238,12 @@ sealed partial class MainForm
             game.Execute(CommandLog.Prepare(new RemovePiece(id), game.State, _session.Model));
             if (!game.State.Log[^1].Text.EndsWith(" removed", StringComparison.Ordinal) || game.State.Pieces.ContainsKey(id)) SmokePaletteFail("delete counter did not log a removal");
         }
+        if (panel.ListedSlots.Count > 600)
+        {
+            var n = panel.ScrollToEndAndCountThumbs();
+            Program.AppLog($"smoke: palette far-down thumbnails {(n > 0 ? "ok" : "FAILED")} ({n} of last 12 of {panel.ListedSlots.Count})");
+            if (n == 0) Program.ExitCode = 1;
+        }
         var until = DateTime.UtcNow.AddSeconds(2);
         while (DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(20); } // let the thumbnail worker finish
         if (_opts.ScreenshotPalette != null) panel.SaveScreenshot(_opts.ScreenshotPalette);
