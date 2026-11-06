@@ -26,7 +26,7 @@ public class ValidatorTests
                     new VariableBinding { Variable = "MP", Kind = BindingKind.Input, Min = 0, Max = 9 },
                     new VariableBinding { Variable = "Rate", Kind = BindingKind.Table, TableId = "t1", RowExpr = "MP" },
                 },
-                Outputs = new() { new FormulaOutput { Target = OutputTarget.Holder, HolderId = "h1", Property = "Fuel", Op = OutputOp.Subtract } },
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Holder, HolderId = "h1", Property = "p1", Op = OutputOp.Subtract } },
             },
         },
     };
@@ -110,7 +110,7 @@ public class ValidatorTests
     {
         var f = Fx("A", In("A")) with
         {
-            Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "Steps", Op = OutputOp.Set } },
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "p2", Op = OutputOp.Set } },
         };
         var i = Assert.Single(RulesValidator.Validate(WithFormula(f)));
         Assert.Equal(RulesIssueSeverity.Error, i.Severity);
@@ -124,13 +124,21 @@ public class ValidatorTests
             new VariableBinding { Variable = "A", Kind = BindingKind.Input, Min = 5, Max = 1 },
             new VariableBinding { Variable = "B", Kind = BindingKind.Roll, DiceCount = 0, DiceSides = 6 },
             new VariableBinding { Variable = "C", Kind = BindingKind.Table, TableId = "t1" },
-            new VariableBinding { Variable = "D", Kind = BindingKind.Global, Property = "Nothing" });
+            new VariableBinding { Variable = "D", Kind = BindingKind.Global, Property = "gone" });
         var msgs = RulesValidator.Validate(WithFormula(f)).Select(x => x.Message).ToList();
         Assert.Equal(4, msgs.Count);
         Assert.Contains(msgs, m => m.Contains("\"A\""));
         Assert.Contains(msgs, m => m.Contains("\"B\""));
         Assert.Contains(msgs, m => m.Contains("\"C\""));
-        Assert.Contains(msgs, m => m.Contains("Nothing"));
+        Assert.Contains(msgs, m => m.Contains("no longer exists"));
+    }
+
+    [Fact]
+    public void Validate_RenamedProperty_StaysValid()
+    {
+        var p = Clean();
+        p = p with { Properties = new() { p.Properties[0] with { Name = "Petrol" }, p.Properties[1] } };
+        Assert.Empty(RulesValidator.Validate(p));
     }
 
     [Fact]

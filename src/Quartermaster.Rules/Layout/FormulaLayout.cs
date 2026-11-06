@@ -42,18 +42,21 @@ public static class FormulaLayout
     private static FormulaLayoutModel Raw(string text) =>
         new(new LayoutItem[] { new TextItem(text) }, Array.Empty<SubRow>());
 
+    private static string PropName(VariableBinding b, RulesPack pack) =>
+        pack.ById<PropertyDef>(b.Property ?? "")?.Name ?? b.Property ?? "?";
+
     private static string DefaultCaption(VariableBinding b, RulesPack pack)
     {
         if (!string.IsNullOrWhiteSpace(b.Caption)) return b.Caption!;
         switch (b.Kind)
         {
-            case BindingKind.Unit: return $"{b.Property} (unit)";
-            case BindingKind.Global: return $"{b.Property} (global)";
+            case BindingKind.Unit: return $"{PropName(b, pack)} (unit)";
+            case BindingKind.Global: return $"{PropName(b, pack)} (global)";
             case BindingKind.Holder:
             {
                 var h = pack.ById<HolderDef>(b.HolderId ?? "");
                 var name = h?.Name ?? (b.HolderId == HolderDef.GlobalId ? "global" : b.HolderId ?? "?");
-                return $"{b.Property} ({name})";
+                return $"{PropName(b, pack)} ({name})";
             }
             case BindingKind.Table: return pack.ById<TableDef>(b.TableId ?? "")?.Name ?? b.TableId ?? b.Variable;
             case BindingKind.Location: return "location";

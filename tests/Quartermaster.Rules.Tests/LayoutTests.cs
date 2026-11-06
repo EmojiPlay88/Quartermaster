@@ -25,7 +25,7 @@ public class LayoutTests
     [Fact]
     public void Layout_BoxesInSourceOrder_WithOperatorsAsText()
     {
-        var f = F("MP * Rate", Bind("MP", BindingKind.Unit) with { Property = "MP" }, Bind("Rate", BindingKind.Input));
+        var f = F("MP * Rate", Bind("MP", BindingKind.Unit) with { Property = "p1" }, Bind("Rate", BindingKind.Input));
         var m = FormulaLayout.Build(f, Pack());
         Assert.Equal(3, m.Main.Count);
         Assert.Equal("MP", Assert.IsType<BoxItem>(m.Main[0]).Variable);
@@ -107,16 +107,25 @@ public class LayoutTests
     public void Layout_CaptionDefaults_And_Override()
     {
         var f = F("A + B + C + D + E + G + H + I",
-            Bind("A", BindingKind.Unit) with { Property = "MP" },
-            Bind("B", BindingKind.Global) with { Property = "Fuel" },
-            Bind("C", BindingKind.Holder) with { Property = "Fuel", HolderId = "h1" },
+            Bind("A", BindingKind.Unit) with { Property = "p1" },
+            Bind("B", BindingKind.Global) with { Property = "p1" },
+            Bind("C", BindingKind.Holder) with { Property = "p1", HolderId = "h1" },
             Bind("D", BindingKind.Table) with { TableId = "t1" },
             Bind("E", BindingKind.Location),
             Bind("G", BindingKind.Input) with { Min = 1, Max = 6 },
             Bind("H", BindingKind.Roll) with { DiceCount = 2, DiceSides = 6 },
             Bind("I", BindingKind.Input) with { Caption = "Custom" });
         var c = FormulaLayout.Build(f, Pack()).Main.OfType<BoxItem>().Select(b => b.Caption).ToList();
-        Assert.Equal(new[] { "MP (unit)", "Fuel (global)", "Fuel (Depot)", "Rates", "location", "G 1–6", "2d6", "Custom" }, c);
+        Assert.Equal(new[] { "MP (unit)", "MP (global)", "MP (Depot)", "Rates", "location", "G 1–6", "2d6", "Custom" }, c);
+    }
+
+    [Fact]
+    public void Layout_RenamedProperty_CaptionShowsNewName()
+    {
+        var pack = Pack();
+        pack = pack with { Properties = new() { pack.Properties[0] with { Name = "Movement" } } };
+        var f = F("A", Bind("A", BindingKind.Unit) with { Property = "p1" });
+        Assert.Equal("Movement (unit)", FormulaLayout.Build(f, pack).Main.OfType<BoxItem>().Single().Caption);
     }
 
     [Fact]

@@ -191,13 +191,13 @@ public static class RulesValidator
     private static void CheckProperty(RulesPack pack, string? name, string v, Action<string> err)
     {
         if (string.IsNullOrWhiteSpace(name)) err($"{v} has no property chosen");
-        else if (pack.PropertyByName(name!) is null) err($"{v} refers to unknown property \"{name}\"");
+        else if (pack.ById<PropertyDef>(name!) is null) err($"{v} refers to a property that no longer exists");
     }
 
     private static void CheckOutput(RulesPack pack, FormulaOutput o, Action<string> err)
     {
-        var p = pack.PropertyByName(o.Property ?? "");
-        if (p is null) { err($"output refers to unknown property \"{o.Property}\""); }
+        var p = pack.ById<PropertyDef>(o.Property ?? "");
+        if (p is null) { err("an output refers to a property that no longer exists"); }
         if (o.Target == OutputTarget.Holder && o.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(o.HolderId ?? "") is null)
             err($"output refers to unknown holder \"{o.HolderId}\"");
         if (p is null) return;
