@@ -207,6 +207,8 @@ sealed partial class MainForm : Form
 
         var tools = _toolsMenu = new ToolStripMenuItem("&Tools");
         Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", needsModule: true);
+        Item(tools.DropDownItems, "&Inventory", ShowInventory, needsGame: true);
+        Item(tools.DropDownItems, "&Notes", ShowNotes, needsGame: true);
 
         var window = new ToolStripMenuItem("&Window");
         Item(window.DropDownItems, "&Cascade", () => Arrange(MdiLayout.Cascade));
