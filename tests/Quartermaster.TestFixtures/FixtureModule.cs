@@ -41,7 +41,9 @@ public sealed class FixtureModule : IDisposable
         using var ms = new MemoryStream();
         using (var z = new ZipArchive(ms, ZipArchiveMode.Create, true))
         {
-            using var s = z.CreateEntry("savedGame").Open();
+            var entry = z.CreateEntry("savedGame");
+            entry.LastWriteTime = FixedTime;
+            using var s = entry.Open();
             s.Write(obf);
         }
         return AddFile(entryName, ms.ToArray());
@@ -52,6 +54,8 @@ public sealed class FixtureModule : IDisposable
         _files[name] = bytes;
         return this;
     }
+
+    private static readonly DateTimeOffset FixedTime = new(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     public string Build()
     {
@@ -67,7 +71,9 @@ public sealed class FixtureModule : IDisposable
         using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
         foreach (var (name, bytes) in _files)
         {
-            using var s = zip.CreateEntry(name).Open();
+            var entry = zip.CreateEntry(name);
+            entry.LastWriteTime = FixedTime;   // a fixed stamp keeps two builds of the same content byte-identical (same module sha)
+            using var s = entry.Open();
             s.Write(bytes);
         }
         return _path;

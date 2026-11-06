@@ -297,19 +297,6 @@ sealed partial class MainForm
         Program.AppLog($"smoke: phases start {(startOk ? "ok" : "FAILED")} (autosaves {autosaves} -> {CountAutosaves()}, interval {_settings.Current.AutosaveMinutes} min)");
         if (!startOk) Program.ExitCode = 1;
 
-        var steps = 0;
-        for (; steps < pack.Phases.Count + 2; steps++)
-        {
-            var before = _session.Game.State.Position;
-            var moved = _handlers.TryGetValue("turn.next", out var h) && h();
-            if (!moved || Equals(before, _session.Game.State.Position)) break;
-        }
-        RefreshPhaseViews();
-        var after = _phases.View();
-        var advOk = steps > 0 && !after.BeforeStart && _session.Game.State.Log.Any(e => e.Text.Contains(" → ", StringComparison.Ordinal) && e.Text.StartsWith("Turn ", StringComparison.Ordinal));
-        Program.AppLog($"smoke: phases advanced {steps} step(s) via turn.next {(advOk ? "ok" : "FAILED")}; now turn {after.Turn}, {string.Join(" | ", _strip.ItemTexts)}");
-        if (!advOk) Program.ExitCode = 1;
-
         using (var dlg = new NextPhaseDialog(new[] { new Decision(DecisionKind.Checklist, "Smoke item", 0, null, Array.Empty<string>()) }))
             Program.AppLog($"smoke: next phase dialog built with {dlg.Controls.Count} control(s)");
         if (_opts.ScreenshotPhases != null)
@@ -317,8 +304,86 @@ sealed partial class MainForm
             SaveScreenshot(this, Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started.png", true);
             _phaseDock?.Panel?.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started-panel.png");
         }
+        SmokeTurnWrap(pack);
+        if (_opts.ScreenshotPhases != null)
+        {
+            SaveScreenshot(this, Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-wrapped.png", true);
+            _phaseDock?.Panel?.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-wrapped-panel.png");
+        }
         SmokeBatchFlow();
         SmokeMoveFlow();
+    }
+
+    bool SmokeUiOpen() => OwnedForms.OfType<FormulaDialog>().Any() || _docs.Any(kv => kv.Key.StartsWith("batch:", StringComparison.Ordinal) && kv.Value is { IsDisposed: false });
+
+    /// <summary>Manual modes: Calculate + Apply in every opened dialog, Calculate all + Apply all in every batch grid, then tick the checklist.</summary>
+    void SmokeClearDecisions(PhaseDef cur, bool leaveChecklist)
+    {
+        if (_session?.Game is not { } game || _phases == null) return;
+        Application.DoEvents();
+        foreach (var run in game.State.Pending.ToList())
+        {
+            if (_docs.TryGetValue("batch:" + run.Id, out var form) && form is BatchGridWindow { IsDisposed: false } win)
+            {
+                win.SmokeCalculateAll();
+                win.SmokeApplyAll();
+            }
+            foreach (var d in OwnedForms.OfType<FormulaDialog>().Where(d => d.Link?.RunId == run.Id).ToList())
+            {
+                d.SmokeCalculate();
+                d.SmokeClickApply();
+            }
+            Application.DoEvents();
+            if (game.State.Pending.Any(r => r.Id == run.Id))
+            {
+                Program.AppLog($"smoke: turn wrap FAILED: run {run.FormulaName} still pending in {cur.Name}");
+                Program.ExitCode = 1;
+            }
+        }
+        CloseFormulaDialogs();
+        if (leaveChecklist) return;
+        for (var i = 0; i < (cur.Checklist?.Count ?? 0); i++) _phases.Tick(i, true);
+    }
+
+    /// <summary>
+    /// Smoke: plays turn 1 to the wrap into turn 2 through the Ctrl+Right handler, repeating the block. Manual modes clear the decisions as they go
+    /// (the first Combat visit leaves the checklist open so Next Phase takes the Continue-anyway path); fully automatic must never open a dialog or grid.
+    /// </summary>
+    void SmokeTurnWrap(RulesPack pack)
+    {
+        if (_session?.Game is not { } game || _phases == null) return;
+        var auto = game.State.Difficulty == Difficulty.FullyAuto;
+        var sawUi = false;
+        var combatVisits = 0;
+        var visits = 0;
+        for (; visits < pack.Phases.Count * 4 && game.State.Position is { Turn: 1 }; visits++)
+        {
+            Application.DoEvents();
+            if (_phases.View().Current is not { } cur) break;
+            var firstCombat = cur.Checklist is { Count: > 0 } && ++combatVisits == 1;
+            if (cur.OnMove is { Count: > 0 } && game.State.Pieces.Values.FirstOrDefault(p => PieceInfo.Name(p) == "Red 1") is { } piece)
+            {
+                _phases.ExecuteMove(new[] { new MovePieces(new[] { piece.Id }, piece.MapId, new PointD(piece.Pos.X + (visits % 2 == 0 ? 60 : -60), piece.Pos.Y), null) });
+                Application.DoEvents();
+            }
+            sawUi |= SmokeUiOpen();
+            if (!auto) SmokeClearDecisions(cur, firstCombat);
+            else CloseFormulaDialogs();
+            var before = game.State.Position;
+            var moved = _handlers.TryGetValue("turn.next", out var h) && h();
+            if (!moved || Equals(before, game.State.Position)) break;
+        }
+        Application.DoEvents();
+        sawUi |= SmokeUiOpen();
+        RefreshPhaseViews();
+        var after = _phases.View();
+        var blockLines = game.State.Log.Count(e => e.Text.StartsWith("Turn 1 · ", StringComparison.Ordinal) && e.Text.EndsWith("Movement → Combat", StringComparison.Ordinal));
+        var autosaves = CountAutosaves();
+        var ok = after.Turn == 2 && game.State.Position?.Turn == 2 && blockLines == 2
+            && (autosaves > 0 || _settings.Current.AutosaveMinutes <= 0) && (!auto || !sawUi);
+        Program.AppLog($"smoke: turn wrap {(ok ? "ok" : "FAILED")} in {visits} step(s): turn {after.Turn}, Movement → Combat lines {blockLines}, autosaves {autosaves}, dialog or grid opened {sawUi} ({(auto ? "must be false" : "allowed")})");
+        if (!ok) Program.ExitCode = 1;
+        CloseFormulaDialogs();
     }
 
     void BatchFail(string text)
