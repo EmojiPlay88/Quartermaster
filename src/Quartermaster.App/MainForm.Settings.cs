@@ -102,7 +102,7 @@ sealed partial class MainForm
     void ShowSettings()
     {
         if (Program.Smoke) return;
-        using var dlg = new SettingsDialog(_settings.Current, s => _settings.Save(s), SettingsCtx());
+        using var dlg = new SettingsDialog(_settings.Current, s => _settings.Save(s), SettingsCtx(), () => _settings.Current);
         dlg.ShowDialog(this);
         if (_settings.LastSaveError is { } err) ShowError("The settings could not be saved: " + err);
     }
@@ -132,8 +132,17 @@ sealed partial class MainForm
         using (var dlg = new SettingsDialog(_settings.Current, _ => { }, SettingsCtx()))
         {
             dlg.Show(this);
-            dlg.SelectTab(0);
+            var ti = Array.IndexOf(new[] { "general", "display", "map", "dice", "toolbar", "keyboard", "folders" }, (_opts.SettingsTab ?? "general").ToLowerInvariant());
+            dlg.SelectTab(Math.Max(0, ti));
             dlg.Update();
+            if (ti == 6)
+            {
+                var until = DateTime.UtcNow.AddSeconds(10);
+                while (!dlg.FoldersLoadedForSmoke && DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(20); }
+                Program.AppLog($"smoke: folders sizes loaded {dlg.FoldersLoadedForSmoke}");
+                if (!dlg.FoldersLoadedForSmoke) Program.ExitCode = 1;
+                dlg.Update();
+            }
             var back = dlg.CollectForSmoke();
             var cur = _settings.Current;
             var same = back with { ToolbarVisible = cur.ToolbarVisible, ShortcutOverrides = cur.ShortcutOverrides } == cur;

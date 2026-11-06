@@ -23,7 +23,6 @@ public class AutosaverTests : IDisposable
 
         Assert.Null(a.Tick(T0, 5, dirty: false));
         Assert.Null(a.Tick(T0.AddMinutes(1), 5, dirty: true));           // interval not elapsed
-        Assert.Null(a.Tick(T0.AddMinutes(5), 0, dirty: true));           // 0 = off
         Assert.Empty(saved);
 
         var path = a.Tick(T0.AddMinutes(7), 5, dirty: true);             // dirty and elapsed
@@ -36,6 +35,28 @@ public class AutosaverTests : IDisposable
         Assert.Null(a.Tick(T0.AddMinutes(14), 5, dirty: true));          // idle clock restarted by the clean tick
         Assert.NotNull(a.Tick(T0.AddMinutes(19), 5, dirty: true));
         Assert.Equal(2, saved.Count);
+    }
+
+    [Fact]
+    public void Autosaver_Reset_RestartsTheInterval()
+    {
+        var saved = 0;
+        var a = new Autosaver(() => "abc", p => { File.WriteAllText(p, "x"); saved++; }, _tmp);
+        a.Tick(T0, 5, true);
+        a.Reset(T0.AddMinutes(4));                       // user saved manually
+        Assert.Null(a.Tick(T0.AddMinutes(6), 5, true));
+        Assert.NotNull(a.Tick(T0.AddMinutes(9), 5, true));
+        Assert.Equal(1, saved);
+    }
+
+    [Fact]
+    public void Autosaver_IntervalZero_KeepsClockMoving()
+    {
+        var a = new Autosaver(() => "abc", p => File.WriteAllText(p, "x"), _tmp);
+        Assert.Null(a.Tick(T0, 0, true));
+        Assert.Null(a.Tick(T0.AddMinutes(60), 0, true));
+        Assert.Null(a.Tick(T0.AddMinutes(61), 5, true));  // just enabled: must not fire at once
+        Assert.NotNull(a.Tick(T0.AddMinutes(66), 5, true));
     }
 
     [Fact]

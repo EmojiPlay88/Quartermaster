@@ -81,6 +81,9 @@ sealed class MapDragController : IDisposable
     /// <paramref name="renderBase"/> draws the scene with the given pieces hidden. Returns false when there is nothing to drag
     /// or something failed (logged); fields are only assigned once everything succeeded.
     /// </summary>
+    /// <summary>Settings: snap dropped pieces to the grid.</summary>
+    public bool Snap { get; set; } = true;
+
     public bool Begin(GameState st, string grabbed, IEnumerable<string> selected, PointD grabPoint, Viewport vp, SKSize size,
         Func<IReadOnlySet<string>, SKImage?> renderBase)
     {
@@ -98,7 +101,7 @@ sealed class MapDragController : IDisposable
             if (snap == null) return false;
             items = MakeSprites(st, info, vp.Zoom);
             var delta = DropResolver.GhostDelta(st, info.PrimaryId, grabPoint, info.GrabOffset);
-            var groups = DropResolver.ResolveFormation(st, _map, grabPoint, info.GrabOffset, info.PrimaryId, info.Ids, _s.Images);
+            var groups = DropResolver.ResolveFormation(st, _map, grabPoint, info.GrabOffset, info.PrimaryId, info.Ids, _s.Images, Snap);
             // Everything succeeded: only now touch the fields.
             _info = info;
             _base = snap;
@@ -171,7 +174,7 @@ sealed class MapDragController : IDisposable
     {
         if (_info is not { } d) return;
         _delta = DropResolver.GhostDelta(st, d.PrimaryId, cursor, d.GrabOffset);
-        _groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images);
+        _groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images, Snap);
     }
 
     /// <summary>Drops at the cursor: one MovePieces per group, each through the owner's error guard. Ends the drag.</summary>
@@ -183,7 +186,7 @@ sealed class MapDragController : IDisposable
         try
         {
             if (d != null && game != null)
-                groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images);
+                groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images, Snap);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

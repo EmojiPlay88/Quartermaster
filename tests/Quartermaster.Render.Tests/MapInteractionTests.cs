@@ -41,6 +41,26 @@ public class MapInteractionTests : IDisposable
     }
 
     [Fact]
+    public void Drop_SnapOff_KeepsRawPoint()
+    {
+        var raw = new PointD(110, 60);
+        Assert.NotEqual(raw, Map.Boards[0].Grid!.Snap(raw));
+        Assert.Equal(raw, DropResolver.Resolve(_state, Map, raw, new[] { "x" }, _s.Images, snap: false).Pos);
+        Assert.Equal(raw, DropResolver.ResolveDrag(_state, Map, new PointD(80, 40), new PointD(30, 20), new[] { "x" }, _s.Images, snap: false).Pos);
+        Add("p", 300, 300);
+        var g = DropResolver.ResolveFormation(_state, Map, new PointD(80, 40), new PointD(30, 20), "p", new[] { "p" }, _s.Images, snap: false);
+        Assert.Equal(raw, g[0].Pos);
+    }
+
+    [Fact]
+    public void Drop_SnapOff_StillStacksOntoFootprint()
+    {
+        Add("a", 80, 70);
+        var r = DropResolver.Resolve(_state, Map, new PointD(80, 70), new[] { "x" }, _s.Images, snap: false);
+        Assert.NotNull(r.StackOnto);
+    }
+
+    [Fact]
     public void Drop_SnapIsBoardLocalWithOffset()
     {
         var b = Map.Boards[0] with { Offset = new PointD(1000, 500) };

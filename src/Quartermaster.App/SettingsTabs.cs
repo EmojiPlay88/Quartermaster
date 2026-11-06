@@ -55,7 +55,7 @@ sealed class GeneralTab : SettingsTab
     readonly CheckBox _reopen = Check("Reopen the last module when Quartermaster starts");
     readonly NumericUpDown _autosave = Num(0, 240);
     readonly CheckBox _confirmDelete = Check("Ask before deleting pieces");
-    readonly CheckBox _gm = Check("Game master mode (show hidden pieces and notes)");
+    readonly CheckBox _gm = Check("Game master mode (shows the counter palette — next update)");
 
     public override string Title => "General";
 
@@ -262,40 +262,53 @@ sealed class KeyboardTab : SettingsTab
 sealed class FoldersTab(SettingsContext ctx) : SettingsTab
 {
     readonly Label _sizes = new() { AutoSize = true, Text = "Calculating sizes..." };
+    readonly Button _tiles = new() { Text = "Clear tile cache", AutoSize = true };
+    readonly Button _docs = new() { Text = "Clear document cache", AutoSize = true };
+    bool _started;
 
     public override string Title => "Folders";
 
+    /// <summary>True once the sizes have been computed and shown (smoke waits for it).</summary>
+    public bool Loaded { get; private set; }
+
     public override Control Build()
     {
-        var tiles = new Button { Text = "Clear tile cache", AutoSize = true };
-        var docs = new Button { Text = "Clear document cache", AutoSize = true };
-        tiles.Click += (_, _) => Clear("tiles");
-        docs.Click += (_, _) => Clear("docs");
+        _tiles.Click += (_, _) => Clear("tiles");
+        _docs.Click += (_, _) => Clear("docs");
         var t = Table();
         Full(t, new Label { Text = "Cache folder:", AutoSize = true });
         Full(t, new TextBox { Text = ctx.CacheRoot, ReadOnly = true, Width = 440 });
         Full(t, _sizes);
         var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-        row.Controls.AddRange(new Control[] { tiles, docs });
+        row.Controls.AddRange(new Control[] { _tiles, _docs });
         Full(t, row);
         Full(t, new Label { Text = "The module that is open keeps its cache while it is open.", AutoSize = true });
-        Refresh();
+        // No handle exists while the dialog is built; start when the page is first shown.
+        _sizes.VisibleChanged += (_, _) => { if (_sizes.Visible && !_started) Refresh(); };
+        _sizes.HandleCreated += (_, _) => { if (_sizes.Visible && !_started) Refresh(); };
         return t;
+    }
+
+    /// <summary>Runs work on a worker thread and posts done back to the UI thread (skipped when the dialog is gone).</summary>
+    void OffUi<T>(Func<T> work, Action<T> done)
+    {
+        var sync = SynchronizationContext.Current;
+        _ = Task.Run(work).ContinueWith(r =>
+        {
+            if (r.IsFaulted) return;
+            void Back(object? _) { if (!_sizes.IsDisposed) done(r.Result); }
+            if (sync != null) sync.Post(Back, null); else Back(null);
+        });
     }
 
     void Refresh()
     {
-        _ = Task.Run(() => CacheFolders.Sizes(ctx.CacheRoot)).ContinueWith(t =>
+        _started = true;
+        _sizes.Text = "Calculating sizes...";
+        OffUi(() => CacheFolders.Sizes(ctx.CacheRoot), r =>
         {
-            if (t.IsFaulted || _sizes.IsDisposed || !_sizes.IsHandleCreated) return;
-            try
-            {
-                _sizes.BeginInvoke(() =>
-                {
-                    if (!_sizes.IsDisposed) _sizes.Text = $"Tile cache: {Mb(t.Result.Tiles)}     Document cache: {Mb(t.Result.Docs)}";
-                });
-            }
-            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { /* dialog closed meanwhile */ }
+            _sizes.Text = $"Tile cache: {Mb(r.Tiles)}     Document cache: {Mb(r.Docs)}";
+            Loaded = true;
         });
     }
 
@@ -304,71 +317,17 @@ sealed class FoldersTab(SettingsContext ctx) : SettingsTab
     void Clear(string kind)
     {
         var open = ctx.OpenModuleCache();
-        var (freed, skippedOpen) = CacheFolders.Clear(ctx.CacheRoot, kind, open);
-        ctx.Notify($"Cleared {Mb(freed)} of cached {(kind == "tiles" ? "tiles" : "documents")}." +
-            (skippedOpen ? "\nThe open module's files are in use and were left alone; close the module to clear them." : ""));
-        _sizes.Text = "Calculating sizes...";
-        Refresh();
+        _tiles.Enabled = _docs.Enabled = false;
+        _sizes.Text = "Clearing...";
+        OffUi(() => CacheFolders.Clear(ctx.CacheRoot, kind, open), r =>
+        {
+            _tiles.Enabled = _docs.Enabled = true;
+            ctx.Notify($"Cleared {Mb(r.Freed)} of cached {(kind == "tiles" ? "tiles" : "documents")}." +
+                (r.SkippedOpen ? "\nThe open module's files are in use and were left alone; close the module to clear them." : ""));
+            Refresh();
+        });
     }
 
     public override void Load(Settings s) { }
     public override Settings Collect(Settings s) => s;
-}
-
-/// <summary>Sizes and clearing of the per-module caches (<c>&lt;root&gt;/&lt;module sha&gt;/tiles</c> and <c>/docs</c>).</summary>
-static class CacheFolders
-{
-    public static (long Tiles, long Docs) Sizes(string root)
-    {
-        long tiles = 0, docs = 0;
-        try
-        {
-            foreach (var m in Directory.EnumerateDirectories(root))
-            {
-                tiles += Size(Path.Combine(m, "tiles"));
-                docs += Size(Path.Combine(m, "docs"));
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return (tiles, docs);
-    }
-
-    static long Size(string dir)
-    {
-        long n = 0;
-        try
-        {
-            foreach (var f in new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories))
-            {
-                try { n += f.Length; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return n;
-    }
-
-    /// <summary>Deletes <paramref name="kind"/> under every module folder except <paramref name="openModuleDir"/>. Returns bytes freed and whether the open module was skipped.</summary>
-    public static (long Freed, bool SkippedOpen) Clear(string root, string kind, string? openModuleDir)
-    {
-        long freed = 0;
-        var skipped = false;
-        try
-        {
-            foreach (var m in Directory.EnumerateDirectories(root))
-            {
-                var sub = Path.Combine(m, kind);
-                if (!Directory.Exists(sub)) continue;
-                if (openModuleDir != null && string.Equals(Path.GetFullPath(m).TrimEnd('\\', '/'), Path.GetFullPath(openModuleDir).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
-                {
-                    skipped = true;
-                    continue;
-                }
-                var size = Size(sub);
-                try { Directory.Delete(sub, true); freed += size; }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* in use elsewhere: keep */ }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return (freed, skipped);
-    }
 }

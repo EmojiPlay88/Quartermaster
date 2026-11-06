@@ -10,10 +10,13 @@ public sealed class Autosaver(Func<string?> moduleSha, Action<string> saveTo, st
 {
     DateTimeOffset? _last;
 
+    /// <summary>The user saved by hand: the interval starts over.</summary>
+    public void Reset(DateTimeOffset now) => _last = now;
+
     /// <returns>The written path, or null when nothing was saved.</returns>
     public string? Tick(DateTimeOffset now, int intervalMinutes, bool dirty)
     {
-        if (intervalMinutes <= 0) return null;
+        if (intervalMinutes <= 0) { _last = now; return null; } // off: keep the clock moving so enabling it later does not fire at once
         if (!dirty || _last == null)
         {
             _last = now; // the interval counts from the last save, or from when the game was last seen clean

@@ -12,10 +12,12 @@ sealed class SettingsDialog : Form
     readonly SettingsTab[] _tabs;
     readonly TabControl _pages = new() { Dock = DockStyle.Fill };
     Settings _current;
+    readonly Func<Settings>? _latest;
 
-    public SettingsDialog(Settings initial, Action<Settings> apply, SettingsContext ctx)
+    public SettingsDialog(Settings initial, Action<Settings> apply, SettingsContext ctx, Func<Settings>? latest = null)
     {
         _current = initial;
+        _latest = latest;
         _apply = apply;
         Keyboard = new KeyboardTab();
         _tabs = new SettingsTab[] { new GeneralTab(), new DisplayTab(), new MapTab(), new DiceLogTab(), new ToolbarTab(ctx.ToolbarItems), Keyboard, new FoldersTab(ctx) };
@@ -59,6 +61,8 @@ sealed class SettingsDialog : Form
 
     public Settings CollectForSmoke() => Collect();
 
+    public bool FoldersLoadedForSmoke => _tabs.OfType<FoldersTab>().First().Loaded;
+
     public void SelectTab(int index)
     {
         if (index >= 0 && index < _pages.TabPages.Count) _pages.SelectedIndex = index;
@@ -68,7 +72,7 @@ sealed class SettingsDialog : Form
 
     void Commit()
     {
-        _current = Collect();
+        _current = _tabs.Aggregate(_latest?.Invoke() ?? _current, (s, t) => t.Collect(s)); // on top of what the store holds now
         _apply(_current);
     }
 

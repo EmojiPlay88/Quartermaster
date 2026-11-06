@@ -68,6 +68,7 @@ sealed class MapCanvas : SKControl
         var (r, g, b) = s.HighlightRgb;
         _highlight = new SKColor(r, g, b);
         _pieces.LabelScale = Math.Clamp(s.LabelFontSize, 6, 20) / 8f;
+        _drag.Snap = s.SnapOnDrop;
         _moduleGrids = s.GridDefault != GridMode.Never;
         Invalidate();
     }

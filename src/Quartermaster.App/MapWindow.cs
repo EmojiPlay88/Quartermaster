@@ -284,14 +284,28 @@ sealed class MapWindow : Form
             input = InputDialog.Ask(this, action.Label, action.PromptText is { Length: > 0 } t ? t : action.Label);
             if (input == null) return;
         }
+        var batches = new List<GameCommand[]>();
         foreach (var p in targets)
         {
             var mine = p.Id == clicked.Id
                 ? action
                 : PieceActions.For(p, _s.Model, game.State, NewId).FirstOrDefault(a => a.Label == action.Label && a.Group == action.Group && a.Enabled);
             if (mine == null) continue;
-            Execute(input != null && mine.BuildWithInput != null ? mine.BuildWithInput(game.State, input) : mine.Build(game.State));
+            batches.Add((input != null && mine.BuildWithInput != null ? mine.BuildWithInput(game.State, input) : mine.Build(game.State)).ToArray());
         }
+        if (!ConfirmDeletes(game.State, batches, clicked)) return;
+        foreach (var b in batches) Execute(b);
+    }
+
+    /// <summary>Settings "ask before deleting": one Yes/No for the pieces the commands would remove. Always true when the setting is off or in smoke mode.</summary>
+    bool ConfirmDeletes(GameState st, IEnumerable<GameCommand[]> batches, PieceInstance clicked)
+    {
+        var ids = batches.SelectMany(b => b).OfType<RemovePiece>().Select(r => r.PieceId).Distinct().ToList();
+        if (ids.Count == 0 || Program.Smoke || Host?.CurrentSettings.ConfirmDelete == false) return true;
+        var what = ids.Count == 1
+            ? (st.Pieces.TryGetValue(ids[0], out var p) ? PieceInfo.Name(p) : clicked.Id) is { Length: > 0 } n ? n : "this piece"
+            : ids.Count + " pieces";
+        return MessageBox.Show(this, $"Delete {what}?", "Quartermaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
     }
 
     /// <summary>Ledger value text for a sheet row that a rules-pack property manages; null when no pack is loaded or no property is bound to the row.</summary>

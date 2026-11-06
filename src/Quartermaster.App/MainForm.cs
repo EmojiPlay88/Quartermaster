@@ -543,6 +543,7 @@ sealed partial class MainForm : Form
         _savePath = path;
         _dirty = false;
         _autosavedSeq = _changeSeq;
+        _autosaver?.Reset(DateTimeOffset.UtcNow);
         UpdateTitle();
     }
 
