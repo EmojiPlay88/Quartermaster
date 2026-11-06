@@ -179,7 +179,7 @@ public class LedgerTests
         try
         {
             NativeSave.Write(path, sess);
-            Assert.Contains("\"format\":2", File.ReadAllText(path).Replace(" ", ""));
+            Assert.Contains("\"format\":3", File.ReadAllText(path).Replace(" ", ""));
             var back = NativeSave.Read(path);
             Assert.Equal("rules1", back.RulesSha256);
             Assert.Equal(12.5, Ledger.Get(back.State, "h:global", "fuel"));
@@ -187,7 +187,7 @@ public class LedgerTests
             Assert.Equal([2, 6], back.State.DiceHistory[0].Results);
             Assert.IsType<RollDice>(back.Log[2]);
             Assert.Equal(JsonSerializer.Serialize(sess.State, QuartermasterJson.Options), JsonSerializer.Serialize(back.State, QuartermasterJson.Options));
-            File.WriteAllText(path, "{\"format\":2,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[],\"ledgers\":null,\"ledgerHistory\":[],\"diceHistory\":[]},\"log\":[]}");
+            File.WriteAllText(path, "{\"format\":3,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[],\"ledgers\":null,\"ledgerHistory\":[],\"diceHistory\":[]},\"log\":[]}");
             Assert.Throws<InvalidDataException>(() => NativeSave.Read(path));
         }
         finally { File.Delete(path); }

@@ -5,7 +5,7 @@ namespace Quartermaster.Core;
 /// <summary>Native .qsave format: JSON { format, moduleSha256, rulesSha256?, snapshot, log }.</summary>
 public static class NativeSave
 {
-    public const int FormatVersion = 2;
+    public const int FormatVersion = 3;
     const int MinFormat = 1;
 
     sealed class SaveFile
@@ -43,6 +43,9 @@ public static class NativeSave
         foreach (var st in snap.Stacks!.Values)
             Need(st != null && st.PieceIds != null && st.Id != null && st.MapId != null, "stack data");
         Need(f.Log!.All(c => c != null), "log entry");
+        Need(snap.Log != null && snap.Log.All(e => e != null && e.Kind != null && e.Text != null), "game log");
+        snap.Notes ??= "";
+        snap.Turn ??= new TurnState(1, null);
     }
 
     public static GameSession Read(string path)
@@ -59,7 +62,7 @@ public static class NativeSave
         }
         if (f == null) throw new InvalidDataException("Empty save file.");
         if (f.Format < MinFormat || f.Format > FormatVersion)
-            throw new InvalidDataException($"Unsupported save format version {f.Format} (expected {MinFormat} or {FormatVersion}).");
+            throw new InvalidDataException($"Unsupported save format version {f.Format} (expected {MinFormat} to {FormatVersion}).");
         Validate(f);
         var session = new GameSession(f.Snapshot, f.ModuleSha256) { RulesSha256 = f.RulesSha256 };
         session.RestoreLog(f.Log);
