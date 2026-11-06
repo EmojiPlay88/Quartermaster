@@ -208,3 +208,39 @@ public class FormulaEditTests
         Assert.True(g.TryEnter("a"));
     }
 }
+
+public class FormulaEditAutoTests
+{
+    [Fact]
+    public void ParseDetails_InputWithAuto()
+    {
+        var b = new VariableBinding { Variable = "Pace", Kind = BindingKind.Input };
+        var (nb, err) = FormulaEdit.ParseDetails(b, "Slow, Normal, Fast | auto: \"Normal\"");
+        Assert.Null(err);
+        Assert.Equal(new[] { "Slow", "Normal", "Fast" }, nb.Choices);
+        Assert.Equal("\"Normal\"", nb.AutoValue);
+        var (r, e2) = FormulaEdit.ParseDetails(b, "0..20 | auto: 5");
+        Assert.Null(e2);
+        Assert.Equal(20, r.Max);
+        Assert.Equal("5", r.AutoValue);
+        var (only, e3) = FormulaEdit.ParseDetails(b, "| auto: 3");
+        Assert.Null(e3);
+        Assert.Equal("3", only.AutoValue);
+        var (bad, e4) = FormulaEdit.ParseDetails(b, "1..5 | auto: 2 +");
+        Assert.StartsWith("Auto value: ", e4);
+        Assert.Same(b, bad);
+        var (cleared, _) = FormulaEdit.ParseDetails(nb, "Slow, Normal");
+        Assert.Null(cleared.AutoValue);
+    }
+
+    [Fact]
+    public void FormatDetails_InputWithAuto_RoundTrip()
+    {
+        var b = new VariableBinding { Variable = "Pace", Kind = BindingKind.Input, Choices = new() { "Slow", "Normal" }, AutoValue = "\"Normal\"" };
+        var text = FormulaEdit.FormatDetails(b);
+        Assert.Equal("Slow, Normal | auto: \"Normal\"", text);
+        Assert.Equal(b.AutoValue, FormulaEdit.ParseDetails(new VariableBinding { Variable = "Pace", Kind = BindingKind.Input }, text).Binding.AutoValue);
+        Assert.Equal("| auto: 3", FormulaEdit.FormatDetails(new VariableBinding { Variable = "x", Kind = BindingKind.Input, AutoValue = "3" }));
+        Assert.True(FormulaEdit.IsConfigured(new VariableBinding { Variable = "x", Kind = BindingKind.Input, AutoValue = "3" }));
+    }
+}

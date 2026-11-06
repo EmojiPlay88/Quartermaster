@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Quartermaster.App;
 
-/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;] [--workbench-tab tables|formulas|properties] [--gm] [--screenshot-palette &lt;png&gt;] [--screenshot-log &lt;png&gt;] [--screenshot-overview &lt;png&gt;] [--screenshot-export &lt;png&gt;] [--screenshot-inventory &lt;png&gt;] [--screenshot-notes &lt;png&gt;] [--screenshot-settings &lt;png&gt;] [--settings-tab general|display|map|dice|toolbar|keyboard|folders].</summary>
+/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;] [--workbench-tab tables|formulas|properties|phases] [--gm] [--screenshot-palette &lt;png&gt;] [--screenshot-log &lt;png&gt;] [--screenshot-overview &lt;png&gt;] [--screenshot-export &lt;png&gt;] [--screenshot-inventory &lt;png&gt;] [--screenshot-notes &lt;png&gt;] [--screenshot-settings &lt;png&gt;] [--settings-tab general|display|map|dice|toolbar|keyboard|folders].</summary>
 sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null, bool FloatMainMap = false, string? ScreenshotFloat = null,
     string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null, string? ScreenshotWorkbench = null, string? WorkbenchTab = null, string? ScreenshotLog = null, string? ScreenshotSettings = null, string? SettingsTab = null, bool GameMaster = false, string? ScreenshotPalette = null, string? ScreenshotOverview = null, string? ScreenshotExport = null, string? ScreenshotInventory = null, string? ScreenshotNotes = null)
 {
@@ -94,7 +94,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     break;
                 case "--workbench-tab":
                     if (i + 1 < args.Length) benchTab = args[++i];
-                    else warn("--workbench-tab needs tables, formulas or properties; ignored.");
+                    else warn("--workbench-tab needs tables, formulas, properties or phases; ignored.");
                     break;
                 default:
                     if (a.StartsWith("--", StringComparison.Ordinal)) warn($"Unknown option '{a}'; ignored.");
