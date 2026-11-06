@@ -122,3 +122,49 @@ Generic engine notes only; all items were reviewed and deferred by the controlle
 - LOS / overview: LOS drag is stuck if the window pops out mid-drag; OverviewWindow OnTargetClosed BeginInvoke has no handle guard; overview tile image cache is never invalidated; GridFor resolution is duplicated; TryCell expects snapped input (undocumented).
 - Map export: whole-map export ignores hide counters / last moved; cancel is ignored during PNG encode; RefreshLastMoved does work when the option is off; incoming drag preview while hidden. (Concurrent export collision, ".tmp" clobbering and no cancel on owner close were fixed in Task 11.)
 - Inventory / notes: marker keys are recomputed each refresh; group label casing is order-dependent; no notes size cap; the Leave/timer flush can run between GameReplaced and its deferred handler.
+
+## Piece 3 — deferred minors and rulings
+
+Engine notes only. No game content: phase names, order, formulas and warnings are the user's to author in the Rules Workbench.
+
+### Rulings made during execution
+
+- Ruling P3-R1 / R2: tasks ran as parallel worktrees, each started as soon as its own dependencies were done; dependent worktrees merged their dependency branches first, and the whole branch was re-tested after each merge.
+- Ruling P3-R3: repeat semantics. Moving within a block keeps the repeat count and increments it on wrap-back to the block start. Entering or leaving a block resets it to 1. (Resetting on every phase change would loop forever.)
+- Ruling P3-R4 (implemented in the final review fixes): Phases-tab combo and checkbox cells commit at once; text cells commit when the edit ends or about 400 ms after the last keystroke, and validation runs at that commit. "Move" refuses only a move that would invert a block that was valid before it; blocks that are already inverted never prevent a reorder, so the user can repair them.
+- Ruling P3-R5: in checked modes the typed values only gate Apply. When every checked box matches, the commands applied come from the expected (engine) run, so the ledger never sees typed text. The expected run uses the same roll overrides and pins as the actual run. Numbers compare by exact engine value (Calculate fills full-precision invariant text, not the rounded display), text compares through `TableLookup.Normalise` on both sides, and a Location compares as text.
+- Ruling P3-R6: an Input without Choices accepts text when its binding has no Min or Max. With Min or Max set it stays numeric-only.
+- Ruling P3-R7: "1 decision left" is singular and "N decisions left" plural; grammar wins over the spec's illustrative text.
+- Ruling: Calculate-then-Apply logs as the `calc` kind (the brief's `formula` was superseded). Typed answers in the missing-input dialog count as `calculated = false`.
+- Ruling: fixture module zips are built with a fixed entry timestamp, so two builds of the same content hash identically (this fixed a flaky `RulesMemory_RemembersAndAutoOpens`, which compared two builds with different zip stamps).
+
+### Resolved spec ambiguities
+
+- "Calculations" log kind: a new kind `calc` for engine-computed lines (fully automatic, Calculate, batch summaries, skipped runs, trigger problems). A manual Apply stays `formula`.
+- Key dropdowns: offered only when the Input is the whole row or column expression or a bare `lookup` argument, and never for an axis with range keys. A computed expression has no single valid key set.
+- Checking Inputs: Inputs, including those with an AutoValue, are never checked. An AutoValue is a default, not a correct answer.
+- Unit-menu formulas in fully automatic show the piece-2 prefilled dialog; Hardcore and Semi-automatic open it checked. "Not opened" in the spec refers to sequencer triggers.
+- Stage label is `"{Label or Stage} 2 of 3"` everywhere (the spec uses both "Stage 2 of 3" and "Stage 2/3").
+- Old saves (formats 1-3) load as Semi-automatic and before turn 1, so nothing applies itself unexpectedly.
+- The phase-boundary autosave honours `AutosaveMinutes = 0` as off.
+- Moved without a measurable distance (across maps or boards, or no grid) counts as 0 with a log line.
+- Missing inputs in fully automatic: the small dialog asks once per run and applies the values to every unit; "Per unit..." opens the batch grid.
+- Pack storage: sides, phases and blocks are stored in `pack.json` in authored order, not sorted. Pack format is 2; format 1 loads as "no phases"; format above 2 is rejected with a message.
+- Relocation: a mid-game relocation (the current phase was deleted) is a logged `AdvancePhase` with a `Reason`, so it replays.
+
+### Deferred minors
+
+- Rules model: normalising maps null checklist items to "" instead of dropping them; a negative stored Repeat is not clamped on the increment path; `UnitsFor` returns dictionary order; `Current` is null on a stale id (callers must Resolve first); an overridden Moved binding with no Source is unpinned.
+- Commands / replay: the replay test lacks Tag/Subject through GameSession; `NativeSave.Validate` keeps null Units entries; `AdvancePhase` with a null To is a silent no-op.
+- Tests: the block-error test uses Contains rather than an exact count; the `UnitsFor` test uses `name() ==` not `startsWith`; no test for a numeric AutoValue against Min/Max; the judgement-call cases of the message formatter are untested.
+- Messages: removing `{unit}` from a warning leaves a double space mid-message.
+- Phases tab: `FormulaIdByName` takes the first match on duplicate names; `GoToIssue` is a no-op for side and block issues; `RemoveSide` skips Flush.
+- Smoke: `AppLog` writes to the real `%LOCALAPPDATA%\Quartermaster\app.log` even when `QUARTERMASTER_LAYOUT_ROOT` is set (logging only; layout, autosave and settings do honour the root). The smoke's Weather-style once-per-turn dialog may be partly visible behind the screenshot.
+- Deferred by the spec: stepping back a phase.
+
+### Final review fixes (piece 3)
+
+- Difficulty switch: a change of difficulty (Settings, Game tab) closes every open formula dialog, batch grid and cheat sheet and shows "Difficulty changed — reopen from the phase panel". Pending runs stay pending and reopen in the new mode. As defence in depth the dialog and batch models re-read the current difficulty on every evaluation, so an override typed while fully automatic can never reach the ledger after a switch to a checked mode.
+- Opening a pending run always uses the current difficulty: fully automatic finishes it from the auto values and asks only for missing inputs; hardcore and semi-automatic open the checked dialog or batch grid (cheat sheet in semi-automatic).
+- Batch grid: Input columns that index a table with plain keys are editable dropdowns; axes with range keys stay free text. Values still go through the checked comparison.
+- Starting a setup by double-clicking it in the window tree shows the same difficulty chooser as File > Load Setup (default = last used).

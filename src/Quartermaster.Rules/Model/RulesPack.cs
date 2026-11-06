@@ -43,12 +43,15 @@ public sealed record RulesPack
     public List<TableDef> Tables { get; init; } = new();
     public List<FormulaDef> Formulas { get; init; } = new();
     public List<RuleRef> RuleRefs { get; init; } = new();
+    public List<SideDef> Sides { get; init; } = new();
+    public List<PhaseDef> Phases { get; init; } = new();
+    public List<PhaseBlock> Blocks { get; init; } = new();
 
     public TableDef? TableByName(string name) => Tables.FirstOrDefault(t => Eq(t.Name, name));
     public PropertyDef? PropertyByName(string name) => Properties.FirstOrDefault(p => Eq(p.Name, name));
     public HolderDef? HolderByName(string name) => Holders.FirstOrDefault(h => Eq(h.Name, name));
 
-    /// <summary>Finds an entity by exact id. Supported: PropertyDef, HolderDef, TableDef, FormulaDef, RuleRef.</summary>
+    /// <summary>Finds an entity by exact id. Supported: PropertyDef, HolderDef, TableDef, FormulaDef, RuleRef, SideDef, PhaseDef.</summary>
     public T? ById<T>(string id) where T : class
     {
         if (typeof(T) == typeof(PropertyDef)) return Properties.FirstOrDefault(x => x.Id == id) as T;
@@ -56,6 +59,8 @@ public sealed record RulesPack
         if (typeof(T) == typeof(TableDef)) return Tables.FirstOrDefault(x => x.Id == id) as T;
         if (typeof(T) == typeof(FormulaDef)) return Formulas.FirstOrDefault(x => x.Id == id) as T;
         if (typeof(T) == typeof(RuleRef)) return RuleRefs.FirstOrDefault(x => x.Id == id) as T;
+        if (typeof(T) == typeof(SideDef)) return Sides.FirstOrDefault(x => x.Id == id) as T;
+        if (typeof(T) == typeof(PhaseDef)) return Phases.FirstOrDefault(x => x.Id == id) as T;
         return null;
     }
 

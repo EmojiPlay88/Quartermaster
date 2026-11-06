@@ -200,6 +200,10 @@ public static class Evaluator
                 string prop = a[0] is VarRef v ? v.Name : TextArg(a[0], ctx, "has");
                 return Value.Of(ctx.Has(prop));
             }
+            case "startswith":
+                return Value.Of(TextArg(a[0], ctx, "startsWith").StartsWith(TextArg(a[1], ctx, "startsWith"), StringComparison.OrdinalIgnoreCase));
+            case "contains":
+                return Value.Of(TextArg(a[0], ctx, "contains").Contains(TextArg(a[1], ctx, "contains"), StringComparison.OrdinalIgnoreCase));
             case "name": return ctx.PieceName();
             case "marker": return ctx.Marker(TextArg(a[0], ctx, "marker"));
             default: throw new EvalError($"Unknown function '{c.Function}'", c);

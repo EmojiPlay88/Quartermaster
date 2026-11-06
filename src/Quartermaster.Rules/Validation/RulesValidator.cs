@@ -31,7 +31,10 @@ public static class RulesValidator
                             Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to refers to unknown property \"{u}\"");
                 }
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
-            foreach (var f in pack.Formulas) CheckFormula(pack, f, issues);
+            foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues));
+            foreach (var s in pack.Sides) Guarded(issues, s.Id, s.Name, () => CheckSide(s, pack, issues));
+            foreach (var ph in pack.Phases) Guarded(issues, ph.Id, ph.Name, () => CheckPhase(pack, ph, issues));
+            CheckBlocks(pack, issues);
         }
         catch (Exception ex)
         {
@@ -63,6 +66,80 @@ public static class RulesValidator
                     break;
             }
         }
+    }
+
+    private static void Guarded(List<RulesIssue> issues, string id, string name, Action check)
+    {
+        try { check(); }
+        catch (Exception ex) { Add(issues, RulesIssueSeverity.Error, id, name, $"Validation of \"{name}\" failed unexpectedly: {ex.Message}"); }
+    }
+
+    // ---- phases ----
+
+    /// <summary>Checks an expression: parse error, else unknown property names. Message is "{who}: {what} {problem}".</summary>
+    private static void CheckPhaseExpr(RulesPack pack, string? text, string who, string what, Action<string> err)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        if (ParseProblem(text!) is { } pe) err($"{who}: {what} {pe}");
+        else foreach (var u in UnknownPropertyRefs(text!, pack)) err($"{who}: {what} refers to unknown property \"{u}\"");
+    }
+
+    private static void CheckSide(SideDef s, RulesPack pack, List<RulesIssue> issues) =>
+        CheckPhaseExpr(pack, s.UnitFilter, $"Side \"{s.Name}\"", "unit filter",
+            m => Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, m));
+
+    private static void CheckPhase(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
+    {
+        string who = $"Phase \"{ph.Name}\"";
+        void Err(string m) => Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, m);
+
+        if (!string.IsNullOrEmpty(ph.SideId) && pack.ById<SideDef>(ph.SideId!) is null)
+            Err($"{who}: side \"{ph.SideId}\" does not exist");
+        if (!string.IsNullOrEmpty(ph.RuleRefId) && pack.ById<RuleRef>(ph.RuleRefId!) is null)
+            Err($"{who}: rule reference \"{ph.RuleRefId}\" does not exist");
+
+        foreach (var e in ph.OnStart)
+        {
+            if (pack.ById<FormulaDef>(e.FormulaId) is null) Err($"{who}: formula \"{e.FormulaId}\" does not exist");
+            CheckPhaseExpr(pack, e.UnitFilter, who, "on-start filter", Err);
+        }
+        foreach (var e in ph.OnMove)
+        {
+            var f = pack.ById<FormulaDef>(e.FormulaId);
+            if (f is null) Err($"{who}: formula \"{e.FormulaId}\" does not exist");
+            else if (!f.Bindings.Any(b => b.Kind == BindingKind.Moved))
+                Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: on-move formula \"{f.Name}\" has no Moved binding");
+            CheckPhaseExpr(pack, e.UnitFilter, who, "on-move filter", Err);
+        }
+        foreach (var w in ph.Warnings)
+        {
+            CheckPhaseExpr(pack, w.Condition, who, "warning condition", Err);
+            if (string.IsNullOrWhiteSpace(w.Message)) Err($"{who}: warning message is empty");
+        }
+    }
+
+    private static void CheckBlocks(RulesPack pack, List<RulesIssue> issues)
+    {
+        var valid = new List<(PhaseBlock B, int Lo, int Hi, string Label)>();
+        foreach (var b in pack.Blocks)
+            Guarded(issues, b.FirstPhaseId, b.Label, () =>
+            {
+                string label = string.IsNullOrEmpty(b.Label) ? "(unnamed)" : b.Label;
+                string who = $"Block \"{label}\"";
+                void Err(string m) => Add(issues, RulesIssueSeverity.Error, b.FirstPhaseId, b.Label, m);
+                int lo = pack.Phases.FindIndex(p => p.Id == b.FirstPhaseId);
+                int hi = pack.Phases.FindIndex(p => p.Id == b.LastPhaseId);
+                if (lo < 0) Err($"{who}: phase \"{b.FirstPhaseId}\" does not exist");
+                if (hi < 0) Err($"{who}: phase \"{b.LastPhaseId}\" does not exist");
+                if (lo >= 0 && hi >= 0 && lo > hi) Err($"{who}: its first phase comes after its last phase");
+                if (b.Count < 1) Err($"{who}: count must be at least 1");
+                if (lo >= 0 && hi >= lo) valid.Add((b, lo, hi, label));
+            });
+        for (int i = 0; i < valid.Count; i++)
+            for (int j = i + 1; j < valid.Count; j++)
+                if (valid[i].Lo <= valid[j].Hi && valid[j].Lo <= valid[i].Hi)
+                    Add(issues, RulesIssueSeverity.Error, valid[i].B.FirstPhaseId, valid[i].B.Label,
+                        $"Block \"{valid[i].Label}\" overlaps block \"{valid[j].Label}\"");
     }
 
     private static void Add(List<RulesIssue> l, RulesIssueSeverity s, string id, string name, string msg) =>
@@ -148,6 +225,8 @@ public static class RulesValidator
         {
             if (!bindingNames.Add(b.Variable)) Err($"variable \"{b.Variable}\" is bound more than once");
             CheckBinding(pack, f, b, used, Err);
+            if (!string.IsNullOrWhiteSpace(b.AutoValue) && ParseProblem(b.AutoValue!) is { } ae)
+                Err($"variable \"{b.Variable}\" auto value {ae}");
         }
 
         if (ast is not null)

@@ -79,20 +79,22 @@ public sealed class ModuleSession : IDisposable
         }
     }
 
-    public void StartNewGame()
+    public void StartNewGame(Difficulty? difficulty = null)
     {
         var state = NewGameBuilder.FromSetupStacks(Model, Log);
+        if (difficulty is { } d) state.Difficulty = d;
         Replace(state, $"New game: {state.Pieces.Count} pieces");
     }
 
-    public void LoadSetup(SetupDef s)
+    public void LoadSetup(SetupDef s, Difficulty? difficulty = null)
     {
-        if (s.FileEntry == null) { StartNewGame(); return; }
+        if (s.FileEntry == null) { StartNewGame(difficulty); return; }
         if (!Archive.HasEntry(s.FileEntry))
             throw new InvalidDataException($"Setup '{s.Name}' refers to '{s.FileEntry}', which is not in the module.");
         using var entry = Archive.OpenEntry(s.FileEntry);
         var save = SaveFileReader.Read(entry);
         var state = SaveImporter.Import(save, Model, Log).State;
+        if (difficulty is { } d) state.Difficulty = d;
         Replace(state, $"Setup \"{s.Name}\" loaded: {state.Pieces.Count} pieces");
     }
 

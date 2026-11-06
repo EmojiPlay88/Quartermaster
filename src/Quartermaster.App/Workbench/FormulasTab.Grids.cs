@@ -11,17 +11,17 @@ sealed partial class FormulasTab
     readonly List<IReadOnlyList<TargetOption>> _targets = new();
     bool _rebuilding;
 
-    static DataGridView NewGrid() => new()
+    internal static DataGridView NewGrid() => new()
     {
         Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false,
         EditMode = DataGridViewEditMode.EditOnEnter, BackgroundColor = SystemColors.AppWorkspace, RowHeadersWidth = 24,
         AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, SelectionMode = DataGridViewSelectionMode.CellSelect, MultiSelect = false,
     };
 
-    static DataGridViewTextBoxColumn Col(string title, bool ro = false, float weight = 100) =>
+    internal static DataGridViewTextBoxColumn Col(string title, bool ro = false, float weight = 100) =>
         new() { HeaderText = title, ReadOnly = ro, FillWeight = weight, SortMode = DataGridViewColumnSortMode.NotSortable, MinimumWidth = 50 };
 
-    static DataGridViewComboBoxCell ComboCell(IEnumerable<string> items, string value)
+    internal static DataGridViewComboBoxCell ComboCell(IEnumerable<string> items, string value)
     {
         var list = items.ToList();
         if (value.Length > 0 && !list.Contains(value)) list.Add(value);
@@ -105,7 +105,7 @@ sealed partial class FormulasTab
                     row.Cells[2].Style.BackColor = SystemColors.Control;
                 }
                 else row.Cells[2] = ComboCell(opts.Select(o => o.Display), FormulaEdit.TargetDisplay(pack, b));
-                var noDetails = b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Location;
+                var noDetails = b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Location or BindingKind.Moved;
                 row.Cells[3].ReadOnly = noDetails;
                 if (noDetails) row.Cells[3].Style.BackColor = SystemColors.Control;
             }

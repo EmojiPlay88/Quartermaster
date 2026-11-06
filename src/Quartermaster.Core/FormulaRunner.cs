@@ -7,7 +7,10 @@ using AstExpr = Quartermaster.Rules.Expr.Expr;
 
 namespace Quartermaster.Core;
 
-public sealed record VariableState(string Variable, Value? Value, bool Auto, bool Overridden, string? MissingReason);
+public sealed record TableCell(string TableId, int Row, int Col);
+
+public sealed record VariableState(string Variable, Value? Value, bool Auto, bool Overridden, string? MissingReason,
+    string? Source = null, TableCell? Cell = null);
 
 public sealed record OutputPreview(string Key, string PropertyId, string PropertyName, double Before, double After);
 
@@ -16,13 +19,14 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
     IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey);
 
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
-    IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls);
+    IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false);
 
 /// <summary>Binds a formula's variables to game data, evaluates it and previews/produces the ledger commands. Run never throws.</summary>
 public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, int, IReadOnlyList<int>> roller)
 {
     private const string NeedsUnit = "This formula needs a unit";
     private readonly RulesPack _pack = pack;
+    public RulesPack Pack => _pack;
     private readonly ModuleModel _model = model;
     private readonly Func<int, int, IReadOnlyList<int>> _roller = roller;
 
@@ -121,13 +125,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey);
     }
 
-    public IReadOnlyList<GameCommand> Commands(FormulaTrace t, string? note)
+    public IReadOnlyList<GameCommand> Commands(FormulaTrace t, string? note, string? tag = null, string? subject = null)
     {
         var list = new List<GameCommand>();
         if (t.Result == null || t.Error != null) return list;
         foreach (var d in t.Rolls) list.Add(new RollDice(d.Purpose, d.Count, d.Sides, d.Results));
         foreach (var o in t.Outputs)
-            list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note, t.Working));
+            list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note, t.Working, Tag: tag, Subject: subject));
         return list;
     }
 
@@ -185,8 +189,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
 
         private static bool Numeric(VariableBinding b) =>
-            b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Roll
-            || (b.Kind == BindingKind.Input && !(b.Choices is { Count: > 0 } && !b.Choices.All(c => TryNum(c, out _))));
+            b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Roll or BindingKind.Moved
+            || (b.Kind == BindingKind.Input && (b.Choices is { Count: > 0 } ? b.Choices.All(c => TryNum(c, out _)) : b.Min != null || b.Max != null));
 
         private static bool TryNum(string s, out double d) =>
             double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out d) && double.IsFinite(d);
@@ -209,15 +213,23 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 {
                     if (piece == null) throw new Missing("Needs a unit");
                     var prop = Prop(b);
-                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Piece(piece.Id), prop)), true, false, null);
+                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Piece(piece.Id), prop)), true, false, null,
+                        $"{prop.Name} of {PieceInfo.Name(piece)}");
                 }
                 case BindingKind.Global:
-                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), Prop(b))), true, false, null);
+                {
+                    var prop = Prop(b);
+                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), prop)), true, false, null,
+                        $"{prop.Name} (global)");
+                }
                 case BindingKind.Holder:
                 {
                     var hid = b.HolderId;
                     if (hid == null || (hid != HolderDef.GlobalId && owner._pack.ById<HolderDef>(hid) == null)) throw new Missing("Unknown holder");
-                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(hid), Prop(b))), true, false, null);
+                    var prop = Prop(b);
+                    var hname = hid == HolderDef.GlobalId ? "global" : owner._pack.ById<HolderDef>(hid)!.Name;
+                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(hid), prop)), true, false, null,
+                        $"{prop.Name} of {hname}");
                 }
                 case BindingKind.Table:
                 {
@@ -226,13 +238,16 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     var ctx = new RunContext(this);
                     var row = Evaluator.Evaluate(Parser.Parse(b.RowExpr ?? ""), ctx);
                     Value? col = string.IsNullOrWhiteSpace(b.ColExpr) ? null : Evaluator.Evaluate(Parser.Parse(b.ColExpr), ctx);
-                    return new(name, TableLookup.Lookup(table, row, col), true, false, null);
+                    var (ri, ci) = TableLookup.Locate(table, row, col);
+                    var src = $"{table.Name}, row {TableLookup.Normalise(table.RowKeys[ri])}"
+                        + (table.Kind == TableKind.TwoD ? $", column {TableLookup.Normalise(table.ColumnKeys[ci])}" : "");
+                    return new(name, TableLookup.CellAt(table, ri, ci), true, false, null, src, new TableCell(table.Id, ri, ci));
                 }
                 case BindingKind.Location:
                 {
                     if (piece == null) throw new Missing("Needs a unit");
                     var loc = PieceInfo.Location(piece, owner._model) ?? throw new Missing("No grid location");
-                    return new(name, Value.Of(loc), true, false, null);
+                    return new(name, Value.Of(loc), true, false, null, $"location of {PieceInfo.Name(piece)}");
                 }
                 case BindingKind.Roll:
                 {
@@ -241,6 +256,9 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     var res = RollKey(name, n, sides);
                     return new(name, Value.Of(res.Sum()), true, false, null);
                 }
+                case BindingKind.Moved:
+                    if (r.Moved is not { } m || !double.IsFinite(m)) throw new Missing("Only known when a unit is moved");
+                    return new(name, Value.Of(m), true, false, null, "distance moved");
                 default:
                     return Input(b);
             }
@@ -252,16 +270,26 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private VariableState Input(VariableBinding b)
         {
             var name = b.Variable;
-            if (!r.Typed.TryGetValue(name, out var raw) || string.IsNullOrWhiteSpace(raw)) return new(name, null, false, false, "Waiting for input");
+            string? source = null;
+            if (!r.Typed.TryGetValue(name, out var raw) || string.IsNullOrWhiteSpace(raw))
+            {
+                if (!r.UseAutoValues || string.IsNullOrWhiteSpace(b.AutoValue)) return new(name, null, false, false, "Waiting for input");
+                try { raw = Evaluator.Evaluate(Parser.Parse(b.AutoValue), new RunContext(this)).Display(); }
+                catch (Exception ex) when (ex is EvalError or ParseError) { return new(name, null, false, false, ex.Message); }
+                source = "default";
+            }
             raw = raw.Trim();
             if (b.Choices is { Count: > 0 })
             {
                 var hit = b.Choices.FirstOrDefault(c => string.Equals(c.Trim(), raw, StringComparison.OrdinalIgnoreCase));
                 if (hit == null) return new(name, null, false, false, "Choose one of " + string.Join(", ", b.Choices));
                 return b.Choices.All(c => TryNum(c, out _)) && TryNum(hit, out var cn)
-                    ? new(name, Value.Of(cn), false, false, null)
-                    : new(name, Value.Of(hit.Trim()), false, false, null);
+                    ? new(name, Value.Of(cn), false, false, null, source)
+                    : new(name, Value.Of(hit.Trim()), false, false, null, source);
             }
+            if (b.Min == null && b.Max == null)
+                return TryNum(raw, out var free) ? new(name, Value.Of(free), false, false, null, source)
+                    : new(name, Value.Of(raw), false, false, null, source);   // unbounded, no choices: text allowed
             if (!TryNum(raw, out var v)) return new(name, null, false, false, "Not a number");
             if ((b.Min != null && v < b.Min) || (b.Max != null && v > b.Max))
             {
@@ -270,7 +298,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     : $"Must be at most {Value.Of(b.Max!.Value).Display()}";
                 return new(name, null, false, false, msg);
             }
-            return new(name, Value.Of(v), false, false, null);
+            return new(name, Value.Of(v), false, false, null, source);
         }
     }
 

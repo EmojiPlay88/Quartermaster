@@ -45,6 +45,23 @@ sealed partial class MainForm
     void SmokeWorkbench()
     {
         if (_opts.ScreenshotWorkbench == null) return;
+        if (string.Equals(_opts.WorkbenchTab, "phases", StringComparison.OrdinalIgnoreCase) && _session?.Rules is { Phases.Count: 0 } && _opts.NewRulesName != null)
+        {
+            // The scratch pack is empty; two neutral phases and a block through PhaseEdit exercise the Phases tab.
+            _session.UpdateRules(p =>
+            {
+                p = PhaseEdit.AddSide(p, "Smoke side").Pack;
+                p = PhaseEdit.Add(p, "Smoke phase A", 0).Pack;
+                p = PhaseEdit.Add(p, "Smoke phase B", 1).Pack;
+                p = PhaseEdit.MakeBlock(p, 0, 1, 2, "Smoke block").Pack;
+                var sid = p.Sides[0].Id;
+                return PhaseEdit.UpdatePhase(p, p.Phases[0].Id, x => x with
+                {
+                    SideId = sid, Instructions = "Smoke instructions.", Checklist = new() { "Smoke check" },
+                    Warnings = new() { new PhaseWarning { Condition = "1 +", Message = "Smoke warning {unit}" } },
+                });
+            });
+        }
         ShowWorkbench();
         if (_benches.TryGetValue("workbench", out var w) && !w.IsDisposed && w is WorkbenchWindow wb)
         {
@@ -148,6 +165,9 @@ sealed partial class MainForm
         }
         if (_opts.FloatMainMap) Guard(SmokeDockRoundTrip);
         if (_opts.ScreenshotLog != null) Guard(SmokeLog);
+        if (_opts.ScreenshotNextPhase != null) Guard(SmokeNextPhaseDialog);
+        if (_opts.ScreenshotSetup != null) Guard(SmokeSetupDialog);
+        if (_opts.SmokePhases || _opts.ScreenshotPhases != null) Guard(SmokePhases);
         if (_opts.GameMaster || _opts.ScreenshotPalette != null) Guard(SmokePalette);
         if (_opts.ScreenshotSettings != null) Guard(SmokeSettings);
         Guard(SmokeOverview);

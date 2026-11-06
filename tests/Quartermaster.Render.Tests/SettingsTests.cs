@@ -106,6 +106,21 @@ public class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void SettingsStore_LastDifficulty_RoundTripAndBadValue()
+    {
+        var store = new SettingsStore(_tmp);
+        Assert.Equal(Quartermaster.Core.Difficulty.SemiAuto, new Settings().LastDifficulty);
+        store.Save(new Settings { LastDifficulty = Quartermaster.Core.Difficulty.FullyAuto });
+        Assert.Equal(Quartermaster.Core.Difficulty.FullyAuto, new SettingsStore(_tmp).Load(null).LastDifficulty);
+
+        File.WriteAllText(Path.Combine(_tmp, "settings.json"), """{ "LastDifficulty": "Impossible" }""");
+        var log = new DiagnosticLog();
+        var s = new SettingsStore(_tmp).Load(log);
+        Assert.Equal(Quartermaster.Core.Difficulty.SemiAuto, s.LastDifficulty);
+        Assert.Single(log.Items, d => d.Message.Contains("LastDifficulty"));
+    }
+
+    [Fact]
     public void SettingsStore_EnumByNameIgnoringCase()
     {
         File.WriteAllText(Path.Combine(_tmp, "settings.json"), """{ "GridDefault": "never" }""");

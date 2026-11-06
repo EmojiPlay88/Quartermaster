@@ -36,11 +36,12 @@ sealed class LogPanel : UserControl
         _centre = centreOnPiece;
         _list.Columns.Add("Time", 64);
         _list.Columns.Add("Kind", 60);
+        _list.Columns.Add("Turn · Phase", 100);
         _list.Columns.Add("Text", 600);
 
         foreach (var kind in LogFilter.AllKinds)
         {
-            var b = new ToolStripButton(kind) { CheckOnClick = true, Checked = true, DisplayStyle = ToolStripItemDisplayStyle.Text };
+            var b = new ToolStripButton(LogFilter.KindLabel(kind)) { CheckOnClick = true, Checked = true, DisplayStyle = ToolStripItemDisplayStyle.Text };
             b.CheckedChanged += (_, _) => Refresh_();
             _kindButtons[kind] = b;
             _bar.Items.Add(b);
@@ -139,15 +140,15 @@ sealed class LogPanel : UserControl
 
     void FitTextColumn()
     {
-        if (_list.Columns.Count == 3)
-            _list.Columns[2].Width = Math.Max(120, _list.ClientSize.Width - _list.Columns[0].Width - _list.Columns[1].Width - 2);
+        if (_list.Columns.Count == 4)
+            _list.Columns[3].Width = Math.Max(120, _list.ClientSize.Width - _list.Columns[0].Width - _list.Columns[1].Width - _list.Columns[2].Width - 2);
     }
 
     void OnRetrieve(object? s, RetrieveVirtualItemEventArgs e)
     {
-        if (e.ItemIndex < 0 || e.ItemIndex >= _rows.Count) { e.Item = new ListViewItem(new[] { "", "", "" }); return; }
+        if (e.ItemIndex < 0 || e.ItemIndex >= _rows.Count) { e.Item = new ListViewItem(new[] { "", "", "", "" }); return; }
         var r = _rows[e.ItemIndex];
-        e.Item = new ListViewItem(new[] { LogFilter.Time(r, _timeFormat), LogFilter.DisplayKind(r.Kind), r.Text ?? "" });
+        e.Item = new ListViewItem(new[] { LogFilter.Time(r, _timeFormat), LogFilter.DisplayKind(r.Kind), LogFilter.TurnPhase(r), r.Text ?? "" });
     }
 
     // ---------- actions ----------

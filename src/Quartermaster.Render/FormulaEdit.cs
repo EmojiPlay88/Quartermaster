@@ -46,7 +46,7 @@ public static class FormulaEdit
     /// <summary>True when the binding holds anything beyond a default, unconfigured Input.</summary>
     public static bool IsConfigured(VariableBinding b) =>
         b.Kind != BindingKind.Input || b.Property != null || b.HolderId != null || b.TableId != null || b.RowExpr != null || b.ColExpr != null
-        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null;
+        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null;
 
     /// <summary>Bindings whose variable no longer appears in the text.</summary>
     public static IReadOnlyList<VariableBinding> Stale(FormulaDef f, IReadOnlyList<string> variables) =>
@@ -99,9 +99,12 @@ public static class FormulaEdit
         switch (b.Kind)
         {
             case BindingKind.Input:
-                if (b.Choices is { Count: > 0 }) return string.Join(", ", b.Choices);
-                if (b.Min == null && b.Max == null) return "";
-                return (b.Min is { } lo ? Num(lo) : "") + ".." + (b.Max is { } hi ? Num(hi) : "");
+                string basic;
+                if (b.Choices is { Count: > 0 }) basic = string.Join(", ", b.Choices);
+                else if (b.Min == null && b.Max == null) basic = "";
+                else basic = (b.Min is { } lo ? Num(lo) : "") + ".." + (b.Max is { } hi ? Num(hi) : "");
+                if (string.IsNullOrWhiteSpace(b.AutoValue)) return basic;
+                return (basic.Length == 0 ? "" : basic + " ") + "| auto: " + b.AutoValue;
             case BindingKind.Roll:
                 return b.DiceCount is { } n && b.DiceSides is { } s ? $"{n}d{s}" : "";
             case BindingKind.Table:
@@ -121,16 +124,25 @@ public static class FormulaEdit
         switch (b.Kind)
         {
             case BindingKind.Input:
-                if (text.Length == 0) return (b with { Min = null, Max = null, Choices = null }, null);
+                string? auto = null;
+                var bar = AutoBar(text);
+                if (bar >= 0)
+                {
+                    auto = text[(bar + 1)..].Trim()[5..].Trim();
+                    text = text[..bar].Trim();
+                    if (auto.Length == 0) auto = null;
+                    else if (SyntaxProblem(auto) is { } autoErr) return (b, "Auto value: " + autoErr);
+                }
+                if (text.Length == 0) return (b with { Min = null, Max = null, Choices = null, AutoValue = auto }, null);
                 var dots = text.IndexOf("..", StringComparison.Ordinal);
                 if (dots < 0)
                 {
                     var choices = text.Split(',').Select(c => c.Trim()).Where(c => c.Length > 0).ToList();
-                    return (b with { Min = null, Max = null, Choices = choices.Count == 0 ? null : choices }, null);
+                    return (b with { Min = null, Max = null, Choices = choices.Count == 0 ? null : choices, AutoValue = auto }, null);
                 }
                 if (!TryNum(text[..dots], out var lo) || !TryNum(text[(dots + 2)..], out var hi))
-                    return (b, "Use a range like 0..20, or a comma-separated list of choices.");
-                return (b with { Min = lo, Max = hi, Choices = null }, null);
+                    return (b, "Use a range like 0..20, or a comma-separated list of choices; add | auto: expression for the automatic value.");
+                return (b with { Min = lo, Max = hi, Choices = null, AutoValue = auto }, null);
             case BindingKind.Roll:
                 if (text.Length == 0) return (b with { DiceCount = null, DiceSides = null }, null);
                 var d = text.ToLowerInvariant().Split('d');
@@ -151,6 +163,14 @@ public static class FormulaEdit
             default:
                 return (b, null);
         }
+    }
+
+    /// <summary>Index of the '|' that starts an "auto:" part, else -1.</summary>
+    private static int AutoBar(string text)
+    {
+        for (var i = text.IndexOf('|'); i >= 0; i = text.IndexOf('|', i + 1))
+            if (text[(i + 1)..].TrimStart().StartsWith("auto:", StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
     }
 
     private static bool TryNum(string s, out double? v)

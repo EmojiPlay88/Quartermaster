@@ -84,6 +84,10 @@ sealed partial class MapCanvas : SKControl
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Action<Action>? Guarded { get; set; }
 
+    /// <summary>Supplies the phase controller that executes drops as move gestures (null result = plain commands).</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Func<PhaseController?>? Phases { get => _drag.Phases; set => _drag.Phases = value; }
+
     void Guard(Action a) { if (Guarded != null) Guarded(a); else a(); }
 
     public event Action<string, string>? StatusChanged;

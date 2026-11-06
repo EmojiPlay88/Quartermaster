@@ -207,4 +207,103 @@ public class RulesPackIoTests : IDisposable
         var p = Sample() with { Tables = new List<TableDef> { new TableDef { Id = id } } };
         Assert.Throws<InvalidOperationException>(() => RulesPackIo.Save(p, Path.Combine(_dir, "u.qrules")));
     }
+
+    private static PhaseDef Ph(string id) => new PhaseDef
+    {
+        Id = id, Name = "Phase " + id, SideId = "s1", Instructions = "do " + id, RuleRefId = "r1",
+        Checklist = new() { "one", "two" },
+        OnStart = new() { new StartEntry { FormulaId = "f1", ForEach = ForEachMode.Units, UnitFilter = "x > 1" } },
+        OnMove = new() { new MoveEntry { FormulaId = "f1", UnitFilter = "y" } },
+        Warnings = new() { new PhaseWarning { Condition = "a > b", Message = "{unit} bad", IsDecision = true } },
+    };
+
+    [Fact]
+    public void Format2_RoundTrip_PhasesSidesBlocksInOrder()
+    {
+        var p = Sample() with
+        {
+            Sides = new() { new SideDef { Id = "z", Name = "Zed", UnitFilter = "s == 1" }, new SideDef { Id = "a", Name = "Ay" } },
+            Phases = new() { Ph("C"), Ph("A"), Ph("B") },
+            Blocks = new() { new PhaseBlock { FirstPhaseId = "C", LastPhaseId = "B", Count = 3, Label = "Round" } },
+        };
+        var zip = Path.Combine(_dir, "p.qrules");
+        RulesPackIo.Save(p, zip);
+        var l = RulesPackIo.Load(zip);
+        Assert.Equal(2, l.Format);
+        Assert.Equal(new[] { "C", "A", "B" }, l.Phases.Select(x => x.Id));
+        Assert.Equal(new[] { "z", "a" }, l.Sides.Select(x => x.Id));
+        Assert.Equal(J(p with { Tables = p.Tables.OrderBy(t => t.Id).ToList() }), J(l));
+        Assert.Equal(ForEachMode.Units, l.Phases[0].OnStart[0].ForEach);
+        Assert.True(l.Phases[0].Warnings[0].IsDecision);
+        Assert.Same(l.Phases[1], l.ById<PhaseDef>("A"));
+        Assert.Equal("Ay", l.ById<SideDef>("a")!.Name);
+    }
+
+    [Fact]
+    public void Format1_Loads_NoPhases()
+    {
+        var f = FolderWith("{\"format\":1,\"id\":\"x\",\"name\":\"n\"}");
+        var p = RulesPackIo.Load(f);
+        Assert.Empty(p.Sides);
+        Assert.Empty(p.Phases);
+        Assert.Empty(p.Blocks);
+    }
+
+    [Fact]
+    public void Format3_Rejected_NewerThanSupported()
+    {
+        var f = FolderWith("{\"format\":3,\"id\":\"x\"}");
+        Assert.Equal("pack.json: pack format 3 is newer than supported format 2",
+            Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(f)).Message);
+    }
+
+    [Fact]
+    public void NullPhaseLists_Normalised()
+    {
+        var f = FolderWith("{\"format\":2,\"id\":\"x\",\"sides\":null,\"blocks\":[null],\"phases\":[null,{\"id\":\"p\",\"name\":null,\"instructions\":null,\"checklist\":null,\"onStart\":[null],\"onMove\":null,\"warnings\":[null,{\"condition\":null,\"message\":null}]}]}");
+        var p = RulesPackIo.Load(f);
+        Assert.Empty(p.Sides);
+        Assert.Empty(p.Blocks);
+        var ph = Assert.Single(p.Phases);
+        Assert.Equal("", ph.Name);
+        Assert.Equal("", ph.Instructions);
+        Assert.Empty(ph.Checklist);
+        Assert.Empty(ph.OnStart);
+        Assert.Empty(ph.OnMove);
+        var w = Assert.Single(ph.Warnings);
+        Assert.Equal("", w.Condition);
+        Assert.Equal("", w.Message);
+    }
+
+    [Fact]
+    public void DuplicatePhaseId_LoadAndSaveRejected()
+    {
+        var f = FolderWith("{\"format\":2,\"id\":\"x\",\"phases\":[{\"id\":\"d\"},{\"id\":\"d\"}]}");
+        Assert.Equal("Duplicate phase id 'd'", Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(f)).Message);
+        var g = FolderWith("{\"format\":2,\"id\":\"x\",\"sides\":[{\"id\":\"d\"},{\"id\":\"d\"}]}");
+        Assert.Equal("Duplicate side id 'd'", Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(g)).Message);
+        var zip = Path.Combine(_dir, "d.qrules");
+        var ex = Assert.Throws<InvalidOperationException>(() => RulesPackIo.Save(Sample() with { Phases = new() { Ph("d"), Ph("d") } }, zip));
+        Assert.Equal("Duplicate phase id 'd'", ex.Message);
+        ex = Assert.Throws<InvalidOperationException>(() => RulesPackIo.Save(Sample() with { Sides = new() { new SideDef { Id = "d" }, new SideDef { Id = "d" } } }, zip));
+        Assert.Equal("Duplicate side id 'd'", ex.Message);
+        Assert.False(File.Exists(zip));
+    }
+
+    [Fact]
+    public void Binding_MovedAndAutoValue_RoundTrip()
+    {
+        var p = Sample();
+        var f = p.Formulas[0] with
+        {
+            Bindings = new() { new VariableBinding { Variable = "m", Kind = BindingKind.Moved, AutoValue = "Dist * 2" } },
+        };
+        p = p with { Formulas = new() { f } };
+        var zip = Path.Combine(_dir, "m.qrules");
+        RulesPackIo.Save(p, zip);
+        var b = RulesPackIo.Load(zip).Formulas[0].Bindings[0];
+        Assert.Equal(BindingKind.Moved, b.Kind);
+        Assert.Equal("Dist * 2", b.AutoValue);
+        Assert.Equal(7, (int)BindingKind.Moved);
+    }
 }

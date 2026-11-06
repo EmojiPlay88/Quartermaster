@@ -12,8 +12,14 @@ public static class LogFilter
 {
     public static readonly IReadOnlyList<string> AllKinds = new[]
     {
-        LogKind.Dice, LogKind.Move, LogKind.Place, LogKind.Delete, LogKind.Formula, LogKind.Ledger, LogKind.Note, LogKind.Turn, LogKind.System,
+        LogKind.Dice, LogKind.Move, LogKind.Place, LogKind.Delete, LogKind.Formula, LogKind.Ledger, LogKind.Note, LogKind.Turn, LogKind.Calc, LogKind.System,
     };
+
+    /// <summary>The filter-button label of a kind: "Calculations" for calc, the kind itself otherwise.</summary>
+    public static string KindLabel(string kind) => kind == LogKind.Calc ? "Calculations" : kind;
+
+    /// <summary>"T3 Supply" for an entry tagged with a turn and phase; empty otherwise.</summary>
+    public static string TurnPhase(LogEntry e) => e.Turn is { } t ? (string.IsNullOrEmpty(e.Phase) ? $"T{t}" : $"T{t} {e.Phase}") : "";
 
     /// <summary>The kind shown for an entry: kinds this build does not know count as system.</summary>
     public static string DisplayKind(string? kind) =>
@@ -38,7 +44,12 @@ public static class LogFilter
     public static string ToText(IReadOnlyList<LogEntry> rows)
     {
         var sb = new StringBuilder();
-        foreach (var e in rows) sb.Append('[').Append(Time(e)).Append("] ").Append(DisplayKind(e.Kind)).Append("  ").Append(e.Text).AppendLine();
+        foreach (var e in rows)
+        {
+            sb.Append('[').Append(Time(e)).Append("] ");
+            if (TurnPhase(e) is { Length: > 0 } tag) sb.Append(tag).Append(' ');
+            sb.Append(DisplayKind(e.Kind)).Append("  ").Append(e.Text).AppendLine();
+        }
         return sb.ToString();
     }
 

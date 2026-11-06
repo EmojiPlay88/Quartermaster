@@ -22,6 +22,7 @@ sealed class MapWindow : Form
         Controls.Add(Canvas);
         Controls.Add(BuildToolbar());
         Canvas.Guarded = Run;
+        Canvas.Phases = () => Host?.Phases;
 
         Canvas.ContextRequested += OnContext;
         Canvas.DropMessage += m => Host?.SetStatus(m);
@@ -323,7 +324,23 @@ sealed class MapWindow : Form
     void Execute(IEnumerable<GameCommand> commands)
     {
         if (_s.Game is not { } game) return;
-        foreach (var c in commands) game.Execute(CommandLog.Prepare(c, game.State, _s.Model));
+        var phases = Host?.Phases;
+        var gesture = new List<MovePieces>();
+        void FlushMoves()
+        {
+            if (gesture.Count == 0) return;
+            var moves = gesture.ToList();
+            gesture.Clear();
+            phases!.ExecuteMove(moves);
+        }
+        foreach (var c in commands)
+        {
+            // Move commands (Send to, keyboard moves) are move gestures: consecutive ones go through the phase controller as one call.
+            if (phases != null && c is MovePieces m) { gesture.Add(m); continue; }
+            FlushMoves();
+            game.Execute(CommandLog.Prepare(c, game.State, _s.Model));
+        }
+        FlushMoves();
     }
 
     void RunAction(PieceAction action, PieceInstance clicked)

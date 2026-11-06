@@ -168,4 +168,78 @@ public class ValidatorTests
         var msgs = RulesValidator.Validate(p).Select(m => m.Message).ToList();
         Assert.Contains("Property \"Fuel\": applies-to refers to unknown property \"Nope\"", msgs);
     }
+
+    private static PhaseDef Ph(string id, string name = "") => new() { Id = id, Name = name == "" ? id : name };
+    private static IReadOnlyList<RulesIssue> V(RulesPack p) => RulesValidator.Validate(p);
+
+    [Fact]
+    public void Validator_PhaseDanglingIds_Errors()
+    {
+        var ph = Ph("a", "Alpha") with
+        {
+            SideId = "nope", RuleRefId = "gone",
+            OnStart = new() { new StartEntry { FormulaId = "zz" } },
+            OnMove = new() { new MoveEntry { FormulaId = "yy" } },
+        };
+        var msgs = V(Clean() with { Phases = new() { ph } }).Where(i => i.EntityId == "a").Select(i => i.Message).ToList();
+        Assert.Contains("Phase \"Alpha\": formula \"zz\" does not exist", msgs);
+        Assert.Contains("Phase \"Alpha\": formula \"yy\" does not exist", msgs);
+        Assert.Contains("Phase \"Alpha\": side \"nope\" does not exist", msgs);
+        Assert.Contains("Phase \"Alpha\": rule reference \"gone\" does not exist", msgs);
+    }
+
+    [Fact]
+    public void Validator_UnparsableConditionAndFilters_Errors()
+    {
+        var ph = Ph("a", "Alpha") with
+        {
+            Warnings = new() { new PhaseWarning { Condition = "1 + * 2", Message = "m" }, new PhaseWarning { Condition = "Nope > 1", Message = "" } },
+            OnStart = new() { new StartEntry { FormulaId = "f1", UnitFilter = "1 +" } },
+            OnMove = new() { new MoveEntry { FormulaId = "f1", UnitFilter = "has(Zork)" } },
+        };
+        var side = new SideDef { Id = "s", Name = "Red", UnitFilter = "* 2" };
+        var msgs = V(Clean() with { Phases = new() { ph }, Sides = new() { side } }).Select(i => i.Message).ToList();
+        Assert.Contains(msgs, m => m.StartsWith("Phase \"Alpha\": warning condition ") && !m.Contains("unknown"));
+        Assert.Contains("Phase \"Alpha\": warning condition refers to unknown property \"Nope\"", msgs);
+        Assert.Contains("Phase \"Alpha\": warning message is empty", msgs);
+        Assert.Contains(msgs, m => m.StartsWith("Phase \"Alpha\": on-start filter "));
+        Assert.Contains("Phase \"Alpha\": on-move filter refers to unknown property \"Zork\"", msgs);
+        Assert.Contains(msgs, m => m.StartsWith("Side \"Red\": unit filter "));
+    }
+
+    [Fact]
+    public void Validator_Blocks_OverlapReversedCountMissing()
+    {
+        var phases = new List<PhaseDef> { Ph("a"), Ph("b"), Ph("c") };
+        var blocks = new List<PhaseBlock>
+        {
+            new() { FirstPhaseId = "a", LastPhaseId = "b", Count = 2, Label = "One" },
+            new() { FirstPhaseId = "b", LastPhaseId = "c", Count = 2, Label = "Two" },
+            new() { FirstPhaseId = "c", LastPhaseId = "a", Count = 2, Label = "Rev" },
+            new() { FirstPhaseId = "c", LastPhaseId = "x", Count = 0, Label = "" },
+        };
+        var errs = V(Clean() with { Phases = phases, Blocks = blocks }).Where(i => i.Severity == RulesIssueSeverity.Error).Select(i => i.Message).ToList();
+        Assert.Contains("Block \"One\" overlaps block \"Two\"", errs);
+        Assert.Contains("Block \"Rev\": its first phase comes after its last phase", errs);
+        Assert.Contains("Block \"(unnamed)\": phase \"x\" does not exist", errs);
+        Assert.Contains("Block \"(unnamed)\": count must be at least 1", errs);
+    }
+
+    [Fact]
+    public void Validator_OnMoveWithoutMovedBinding_Warning()
+    {
+        var ph = Ph("a", "Alpha") with { OnMove = new() { new MoveEntry { FormulaId = "f1" } } };
+        var w = Assert.Single(V(Clean() with { Phases = new() { ph } }), i => i.Severity == RulesIssueSeverity.Warning);
+        Assert.Equal("Phase \"Alpha\": on-move formula \"Fuel Use\" has no Moved binding", w.Message);
+        Assert.Equal("a", w.EntityId);
+    }
+
+    [Fact]
+    public void Validator_BadAutoValue_Error()
+    {
+        var f = Fx("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input, AutoValue = "1 +" });
+        var i = Assert.Single(V(WithFormula(f)));
+        Assert.Equal(RulesIssueSeverity.Error, i.Severity);
+        Assert.StartsWith("Formula \"Fuel Use\": variable \"A\" auto value ", i.Message);
+    }
 }
