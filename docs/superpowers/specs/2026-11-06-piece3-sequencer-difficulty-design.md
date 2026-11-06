@@ -26,6 +26,8 @@ The engine ships no game content. Phase names, their order, their instructions, 
 7. Phases are built in the workbench with **a list editor where you add phases in order**.
 8. Each phase says **which side is acting**, and the tracker **shows whose turn it is**.
 9. **Repeating groups** of phases within a turn are included.
+10. Values that are **table keys** (like "Clear") are picked from a **dropdown of all the keys** that can go there, not typed.
+11. Typed values **are compared** with the right ones. Hardcore differs from semi-automatic **only** in having no cheat sheet.
 
 ## 4. Goals, non-goals, anti-goals
 
@@ -72,6 +74,9 @@ A new `BindingKind.Moved` gives the distance of the move that triggered the form
 ### 5.5 Input defaults
 `VariableBinding` gains an optional `AutoValue` expression. Fully automatic and Calculate use it for `Input` bindings (e.g. `"Normal"` for pace). *Assistant's call, needed so fully automatic can run without asking.*
 
+### 5.6 Key dropdowns (user's decision)
+Any box whose value is used as a table key is a **dropdown** of the valid keys instead of a text box, in the formula dialog, the batch grid and the "missing values" prompt. The engine finds them itself: an `Input` used in a Table binding's `RowExpr`/`ColExpr` (or in `lookup(Table, X)` in the formula text) gets that table's row or column keys. An `Input` with `Choices` uses those. Numeric range keys ("1-3", "6+") are not offered as a dropdown, because any number in range is valid. The user can still type.
+
 ## 6. Game state additions (native save format 4; formats 1–3 load at "no phase yet")
 
 - `Position`: turn number, block repeat index, **phase Id** (not index). *Assistant's call (builder check):* the user edits phases mid-game, so position is kept by Id. If a loaded game's phase Id no longer exists in the pack, the game is placed on the phase that now sits at the old index (clamped to the list), with a log line and a notice in the strip.
@@ -113,7 +118,7 @@ A new `BindingKind.Moved` gives the distance of the move that triggered the form
 
 | | Hardcore | Semi-automatic | Fully automatic |
 |---|---|---|---|
-| Formula dialog | Opens with **all** boxes empty, including those the engine could fill (unit, global, holder, table, location, moved) | Opens like hardcore **plus the cheat-sheet window** | Not opened; computed and applied |
+| Formula dialog | Opens with **all** boxes empty, including those the engine could fill (unit, global, holder, table, location, moved). Typed values are checked | Exactly like hardcore **plus the cheat-sheet window** | Not opened; computed and applied |
 | Dice | Roll button or physical dice, as today | Same | Rolled by the engine, logged |
 | Calculate button | Available: fills every box it can, the user reviews, then Apply | Same | n/a |
 | OnStart, ForEach units | Batch grid (§7.4) with empty cells | Batch grid plus cheat sheet for the selected row | Applied to every unit, one log line per unit, plus a phase summary line |
@@ -122,7 +127,7 @@ A new `BindingKind.Moved` gives the distance of the move that triggered the form
 
 - **Cheat sheet:** a modeless window next to the formula dialog. For each variable it shows where the value comes from and the value or table: a unit/global/holder property with its current value; a table shown whole, with the row/cell the formula would use highlighted; the location and moved distance. Dice are not pre-rolled.
 - **Calculate:** fills every box it can, with the same values fully automatic would use (rolls dice too). The filled boxes stay editable before Apply. The log marks the run "auto-calculated".
-- **Hardcore typed values** are not checked against the computed ones. The log records what was typed. *(Assistant's call.)*
+- **Typed values are checked** (user's decision), in hardcore and semi-automatic alike; hardcore differs only in having no cheat sheet. When a typed value differs from what the engine would use, the box turns red and its tooltip says "Doesn't match: should be 4 (TestTerrainCost, row Sand)". Apply still works. Applying with a mismatch asks "Use your values anyway?", and the log records both the typed and the expected value. *(The red box, the revealed value and the allowed override are the assistant's guesses.)* Dice and Input values with no engine source are not checked.
 - **Switching difficulty** (Settings → Game tab, or the setup dialog) logs "Difficulty changed to X" and takes effect from the next formula run. Already-pending runs keep their place in the decisions list and open in the new mode.
 
 ### 7.4 Batch grid (for ForEach-units in the manual modes)
