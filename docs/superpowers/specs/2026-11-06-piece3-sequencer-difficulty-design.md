@@ -27,7 +27,7 @@ The engine ships no game content. Phase names, their order, their instructions, 
 8. Each phase says **which side is acting**, and the tracker **shows whose turn it is**.
 9. **Repeating groups** of phases within a turn are included.
 10. Values that are **table keys** (like "Clear") are picked from a **dropdown of all the keys** that can go there, not typed.
-11. Typed values **are compared** with the right ones. Hardcore differs from semi-automatic **only** in having no cheat sheet.
+11. Typed values **are compared** with the right ones, and **a wrong entry can't be applied to the ledger**. Hardcore differs from semi-automatic **only** in having no cheat sheet.
 
 ## 4. Goals, non-goals, anti-goals
 
@@ -127,7 +127,7 @@ Any box whose value is used as a table key is a **dropdown** of the valid keys i
 
 - **Cheat sheet:** a modeless window next to the formula dialog. For each variable it shows where the value comes from and the value or table: a unit/global/holder property with its current value; a table shown whole, with the row/cell the formula would use highlighted; the location and moved distance. Dice are not pre-rolled.
 - **Calculate:** fills every box it can, with the same values fully automatic would use (rolls dice too). The filled boxes stay editable before Apply. The log marks the run "auto-calculated".
-- **Typed values are checked** (user's decision), in hardcore and semi-automatic alike; hardcore differs only in having no cheat sheet. When a typed value differs from what the engine would use, the box turns red and its tooltip says "Doesn't match: should be 4 (TestTerrainCost, row Sand)". Apply still works. Applying with a mismatch asks "Use your values anyway?", and the log records both the typed and the expected value. *(The red box, the revealed value and the allowed override are the assistant's guesses.)* Dice and Input values with no engine source are not checked.
+- **Typed values are checked** (user's decision), in hardcore and semi-automatic alike; hardcore differs only in having no cheat sheet. When a typed value differs from what the engine would use, the box turns red and its tooltip says "Doesn't match (TestTerrainCost, row Sand)". **Apply stays disabled while any box is wrong** (user's decision: a wrong formula can never reach the ledger). The status line names the wrong boxes. The user fixes them or presses Calculate. Each wrong attempt is not logged; the applied run is. *(The tooltip naming the source, not the right value, is the assistant's guess.)* Dice and Input values with no engine source are not checked.
 - **Switching difficulty** (Settings → Game tab, or the setup dialog) logs "Difficulty changed to X" and takes effect from the next formula run. Already-pending runs keep their place in the decisions list and open in the new mode.
 
 ### 7.4 Batch grid (for ForEach-units in the manual modes)
