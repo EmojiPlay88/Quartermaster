@@ -26,6 +26,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 {
     private const string NeedsUnit = "This formula needs a unit";
     private readonly RulesPack _pack = pack;
+    public RulesPack Pack => _pack;
     private readonly ModuleModel _model = model;
     private readonly Func<int, int, IReadOnlyList<int>> _roller = roller;
 
@@ -189,7 +190,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         private static bool Numeric(VariableBinding b) =>
             b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Roll or BindingKind.Moved
-            || (b.Kind == BindingKind.Input && !(b.Choices is { Count: > 0 } && !b.Choices.All(c => TryNum(c, out _))));
+            || (b.Kind == BindingKind.Input && (b.Choices is { Count: > 0 } ? b.Choices.All(c => TryNum(c, out _)) : b.Min != null || b.Max != null));
 
         private static bool TryNum(string s, out double d) =>
             double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out d) && double.IsFinite(d);
@@ -286,6 +287,9 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     ? new(name, Value.Of(cn), false, false, null, source)
                     : new(name, Value.Of(hit.Trim()), false, false, null, source);
             }
+            if (b.Min == null && b.Max == null)
+                return TryNum(raw, out var free) ? new(name, Value.Of(free), false, false, null, source)
+                    : new(name, Value.Of(raw), false, false, null, source);   // unbounded, no choices: text allowed
             if (!TryNum(raw, out var v)) return new(name, null, false, false, "Not a number");
             if ((b.Min != null && v < b.Min) || (b.Max != null && v > b.Max))
             {

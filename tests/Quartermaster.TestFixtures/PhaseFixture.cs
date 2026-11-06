@@ -62,7 +62,7 @@ public static class PhaseFixture
                 Bindings = new()
                 {
                     new VariableBinding { Variable = "Moved", Kind = BindingKind.Moved },
-                    new VariableBinding { Variable = "Terrain", Kind = BindingKind.Input, AutoValue = "\"Clear\"", Choices = new() { "Clear", "Sand" } },
+                    new VariableBinding { Variable = "Terrain", Kind = BindingKind.Input, AutoValue = "\"Clear\"" },
                 },
                 Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "fuel", Op = OutputOp.Subtract } },
             },

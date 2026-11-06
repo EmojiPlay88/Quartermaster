@@ -316,6 +316,43 @@ public class PhaseControllerTests : IDisposable
     }
 
     [Fact]
+    public void FullyAuto_NoOutputFormula_LogsWorking()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto);
+        c.Start();
+        var line = s.Game!.State.Log.Single(l => l.Kind == LogKind.Calc && l.Text.StartsWith("Weather roll: "));
+        Assert.Contains("= 3", line.Text);
+        Assert.EndsWith("(auto)", line.Text);
+        Assert.Equal(1, line.Turn);
+        Assert.Equal("Weather", line.Phase);
+    }
+
+    [Fact]
+    public void ApplyFormula_FailedTrace_KeepsRunPending()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        c.Start();
+        c.Advance();
+        var run = s.Game!.State.Pending.Single();
+        var bad = s.Runner!.Run(s.Game.State, new RunRequest("f-nope", "r1", new Dictionary<string, string>(),
+            new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+        var n = s.Game.Log.Count;
+        c.ApplyFormula(run.Id, "r1", bad, false);
+        Assert.Equal(n, s.Game.Log.Count);
+        Assert.All(s.Game.State.Pending.Single().Units, u => Assert.False(u.Applied));
+    }
+
+    [Fact]
+    public void Advance_KeepsRelocationNotice()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        ToMovement(c);
+        s.UpdateRules(p => p with { Phases = p.Phases.Where(x => x.Id != "ph-move").ToList() });
+        c.Advance();
+        Assert.Contains("no longer exists", c.View().Notice);
+    }
+
+    [Fact]
     public void ApplyFormula_Manual_NoTag()
     {
         var (s, c) = Make(Difficulty.Hardcore);
