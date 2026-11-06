@@ -196,4 +196,15 @@ public class FormulaEditTests
         Assert.NotNull(NameRules.Problem(existing, "fuel", "x"));
         Assert.Null(NameRules.Problem(existing, "FUEL", "Fuel")); // unchanged / own name
     }
+
+    [Fact]
+    public void AskGate_allows_one_pending_or_active_ask_per_key()
+    {
+        var g = new AskGate();
+        Assert.True(g.TryEnter("a"));
+        Assert.False(g.TryEnter("a"));
+        Assert.True(g.TryEnter("b"));
+        g.Exit("a");
+        Assert.True(g.TryEnter("a"));
+    }
 }

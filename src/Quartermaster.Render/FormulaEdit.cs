@@ -292,3 +292,11 @@ public static class NameRules
         return existingNames.Any(e => string.Equals(e.Trim(), n, StringComparison.OrdinalIgnoreCase)) ? $"There is already an item named \"{n}\"." : null;
     }
 }
+
+/// <summary>De-duplicates deferred confirmations: one queued or showing ask per key.</summary>
+public sealed class AskGate
+{
+    private readonly HashSet<string> _keys = new(StringComparer.Ordinal);
+    public bool TryEnter(string key) => _keys.Add(key);
+    public void Exit(string key) => _keys.Remove(key);
+}

@@ -31,6 +31,7 @@ sealed partial class FormulasTab : UserControl
     FormulaDialog? _preview;
     string? _selected;
     string? _pieceId;
+    readonly AskGate _askGate = new();
     readonly HashSet<string> _declined = new(StringComparer.Ordinal);
     bool _selfEdit, _loadingUi, _dirty;
 
@@ -308,10 +309,12 @@ sealed partial class FormulasTab : UserControl
     /// <summary>Asks once per formula and variable. Deferred: never a modal box inside a Leave or selection handler.</summary>
     void AskRemoveUnused(string id)
     {
-        if (IsDisposed || !IsHandleCreated) return;
+        if (IsDisposed || !IsHandleCreated || !_askGate.TryEnter(id)) return;
         BeginInvoke(new Action(() =>
         {
-            if (IsDisposed) return;
+            if (IsDisposed) { _askGate.Exit(id); return; }
+            try
+            {
             Run(() =>
             {
                 if (_s.Rules?.ById<FormulaDef>(id) is not { } f) return;
@@ -326,6 +329,8 @@ sealed partial class FormulasTab : UserControl
                 }
                 else foreach (var b in asked) _declined.Add(id + "|" + b.Variable);
             });
+            }
+            finally { _askGate.Exit(id); }
         }));
     }
 
