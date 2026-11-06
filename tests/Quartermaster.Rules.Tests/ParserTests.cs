@@ -210,4 +210,43 @@ public class ParserTests
         var ok = new string('(', 100) + "1" + new string(')', 100);
         Assert.IsType<NumberLit>(Parser.Parse(ok));
     }
+
+    private static string Chain(string op, int n, string term = "a") =>
+        string.Join(op, Enumerable.Repeat(term, n));
+
+    [Theory]
+    [InlineData(" + ")]
+    [InlineData(" - ")]
+    [InlineData("*")]
+    [InlineData("/")]
+    [InlineData(" or ")]
+    [InlineData(" and ")]
+    public void LongLeftChains_AreRejected(string op)
+    {
+        var ex = Assert.Throws<ParseError>(() => Parser.Parse(Chain(op, 1500, "1")));
+        Assert.Contains("nests too deeply", ex.Detail);
+    }
+
+    [Fact]
+    public void ChainBoundary()
+    {
+        Assert.IsType<Binary>(Parser.Parse(Chain("+", 150, "1")));
+        Assert.IsType<Binary>(Parser.Parse(Chain(" or ", 150)));
+        Assert.Throws<ParseError>(() => Parser.Parse(Chain("+", 250, "1")));
+    }
+
+    [Fact]
+    public void MixedNesting_JustOver200_IsRejected()
+    {
+        // 120-term chain (height 120) wrapped in 100 calls -> height > 200
+        string s = Chain("+", 120, "1");
+        for (int i = 0; i < 100; i++) s = "abs(" + s + ")";
+        Assert.Contains("nests too deeply", Assert.Throws<ParseError>(() => Parser.Parse(s)).Detail);
+        // Unary chain and call args also count
+        Assert.Throws<ParseError>(() => Parser.Parse(new string('-', 150) + "(" + Chain("+", 100, "1") + ")"));
+        // within limits still fine
+        string ok = Chain("+", 50, "1");
+        for (int i = 0; i < 50; i++) ok = "abs(" + ok + ")";
+        Assert.IsType<Call>(Parser.Parse(ok));
+    }
 }

@@ -87,6 +87,27 @@ public static class Parser
 
         private static int EndOf(Expr e) => e.Start + e.Length;
 
+        // AST height per node (reference-keyed); bounded so later recursive walkers cannot overflow the stack.
+        private readonly Dictionary<Expr, int> _height = new(ReferenceEqualityComparer.Instance);
+
+        private int HeightOf(Expr e) => _height[e];
+
+        private T Track<T>(T node, int height, Token at) where T : Expr
+        {
+            if (height > MaxDepth) throw new ParseError(at.Start, "Formula nests too deeply");
+            _height[node] = height;
+            return node;
+        }
+
+        private Expr Bin(string op, Expr left, Expr right)
+        {
+            var node = new Binary(op, left, right, left.Start, EndOf(right) - left.Start);
+            return Track(node, 1 + Math.Max(HeightOf(left), HeightOf(right)), Peek);
+        }
+
+        private Expr Un(string op, Expr operand, Token t) =>
+            Track(new Unary(op, operand, t.Start, EndOf(operand) - t.Start), 1 + HeightOf(operand), t);
+
         public Expr ParseOr()
         {
             Enter(Peek);
@@ -95,7 +116,7 @@ public static class Parser
             {
                 Next();
                 var right = ParseAnd();
-                left = new Binary("or", left, right, left.Start, EndOf(right) - left.Start);
+                left = Bin("or", left, right);
             }
             _depth--;
             return left;
@@ -108,7 +129,7 @@ public static class Parser
             {
                 Next();
                 var right = ParseNot();
-                left = new Binary("and", left, right, left.Start, EndOf(right) - left.Start);
+                left = Bin("and", left, right);
             }
             return left;
         }
@@ -121,7 +142,7 @@ public static class Parser
                 Enter(t);
                 var operand = ParseNot();
                 _depth--;
-                return new Unary("not", operand, t.Start, EndOf(operand) - t.Start);
+                return Un("not", operand, t);
             }
             return ParseCmp();
         }
@@ -137,7 +158,7 @@ public static class Parser
                 var op = Next();
                 var right = ParseAdd();
                 if (IsCmp(Peek)) throw new ParseError(Peek.Start, "Comparisons can't be chained");
-                return new Binary(op.Text, left, right, left.Start, EndOf(right) - left.Start);
+                return Bin(op.Text, left, right);
             }
             return left;
         }
@@ -149,7 +170,7 @@ public static class Parser
             {
                 var op = Next();
                 var right = ParseMul();
-                left = new Binary(op.Text, left, right, left.Start, EndOf(right) - left.Start);
+                left = Bin(op.Text, left, right);
             }
             return left;
         }
@@ -161,7 +182,7 @@ public static class Parser
             {
                 var op = Next();
                 var right = ParseUnary();
-                left = new Binary(op.Text, left, right, left.Start, EndOf(right) - left.Start);
+                left = Bin(op.Text, left, right);
             }
             return left;
         }
@@ -174,7 +195,7 @@ public static class Parser
                 Enter(t);
                 var operand = ParseUnary();
                 _depth--;
-                return new Unary("-", operand, t.Start, EndOf(operand) - t.Start);
+                return Un("-", operand, t);
             }
             return ParsePrimary();
         }
@@ -186,10 +207,10 @@ public static class Parser
             {
                 case TokKind.Number:
                     Next();
-                    return new NumberLit(t.Number, t.Start, t.Length);
+                    return Track(new NumberLit(t.Number, t.Start, t.Length), 1, t);
                 case TokKind.String:
                     Next();
-                    return new TextLit(t.Text, t.Start, t.Length);
+                    return Track(new TextLit(t.Text, t.Start, t.Length), 1, t);
                 case TokKind.Ident:
                     return ParseIdent();
                 case TokKind.Op when t.Text == "(":
@@ -198,7 +219,8 @@ public static class Parser
                     var inner = ParseOr();
                     if (!IsOp(")")) throw new ParseError(Peek.Start, "Expected ')'");
                     var close = Next();
-                    return inner with { Start = t.Start, Length = close.End - t.Start };
+                    var wrapped = inner with { Start = t.Start, Length = close.End - t.Start };
+                    return Track(wrapped, HeightOf(inner), t);
                 }
                 case TokKind.End:
                     throw new ParseError(t.Start, "Formula ended unexpectedly");
@@ -211,12 +233,12 @@ public static class Parser
         {
             var t = Next();
             string lower = t.Text.ToLowerInvariant();
-            if (lower == "true") return new BoolLit(true, t.Start, t.Length);
-            if (lower == "false") return new BoolLit(false, t.Start, t.Length);
+            if (lower == "true") return Track(new BoolLit(true, t.Start, t.Length), 1, t);
+            if (lower == "false") return Track(new BoolLit(false, t.Start, t.Length), 1, t);
             if (lower is "and" or "or" or "not")
                 throw new ParseError(t.Start, $"Unexpected '{t.Text}'");
 
-            if (!IsOp("(")) return new VarRef(t.Text, t.Start, t.Length);
+            if (!IsOp("(")) return Track(new VarRef(t.Text, t.Start, t.Length), 1, t);
 
             if (!Arity.TryGetValue(lower, out var range))
                 throw new ParseError(t.Start, $"Unknown function '{t.Text}'");
@@ -238,7 +260,8 @@ public static class Parser
                 throw new ParseError(t.Start, $"'{lower}' takes {Describe(range)}, not {args.Count}");
             if (lower == "lookup" && args[0] is not VarRef)
                 throw new ParseError(args[0].Start, "lookup needs a table name");
-            return new Call(lower, args, t.Start, close.End - t.Start);
+            var call = new Call(lower, args, t.Start, close.End - t.Start);
+            return Track(call, 1 + args.Select(HeightOf).DefaultIfEmpty(0).Max(), t);
         }
 
         private static string Describe((int Min, int Max) r)
