@@ -1,6 +1,6 @@
 # Quartermaster
 
-Quartermaster is a desktop engine for playing tabletop wargames, a small alternative to [VASSAL](https://vassalengine.org) aimed at the heaviest board games. It opens the VASSAL modules you already have and then takes the paperwork off your hands. It runs the game's procedures for you, does the arithmetic, rolls the dice, and keeps count of everything a big game asks you to track, from fuel and ammunition to whose turn it is.
+Quartermaster is a desktop engine for playing tabletop wargames, a small alternative to [VASSAL](https://vassalengine.org) aimed at the heaviest board games. It opens the VASSAL modules you already have and then takes the paperwork off your hands. It runs the game's procedures for you, does the arithmetic, rolls the dice, and keeps count of everything a big game asks you to track, from fuel and ammunition to whose turn it is. No more keeping a spreadsheet open next to the map for the whole game.
 
 > **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers and the tools below work. The turn sequencer, difficulty modes and online multiplayer are designed but not built yet (see [Roadmap](#roadmap)).
 
