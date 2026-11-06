@@ -17,7 +17,11 @@ public class FormulaDialogCheckedTests
 
     private static RulesPack Pack() => new()
     {
-        Properties = new() { new PropertyDef { Id = "bonus", Name = "Bonus", Scope = PropertyScope.Holders, Default = 3 } },
+        Properties = new()
+        {
+            new PropertyDef { Id = "bonus", Name = "Bonus", Scope = PropertyScope.Holders, Default = 3 },
+            new PropertyDef { Id = "third", Name = "Third", Scope = PropertyScope.Holders, Default = 1.0 / 3 },
+        },
         Tables = new()
         {
             new TableDef { Id = "t1", Name = "TestTerrainCost", Kind = TableKind.OneD, RowKeys = new() { "Sand", "Swamp" },
@@ -30,6 +34,7 @@ public class FormulaDialogCheckedTests
             new FormulaDef
             {
                 Id = "f1", Name = "Cost", Text = "Cost + Bonus",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "bonus", Op = OutputOp.Add } },
                 Bindings = new()
                 {
                     new VariableBinding { Variable = "Terrain", Kind = BindingKind.Input, Choices = new() { "Sand", "Swamp" } },
@@ -50,6 +55,7 @@ public class FormulaDialogCheckedTests
             new FormulaDef
             {
                 Id = "f3", Name = "Dice", Text = "R + Cost",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "bonus", Op = OutputOp.Add } },
                 Bindings = new()
                 {
                     new VariableBinding { Variable = "Terrain", Kind = BindingKind.Input, Choices = new() { "Sand", "Swamp" }, AutoValue = "\"Sand\"" },
@@ -61,6 +67,101 @@ public class FormulaDialogCheckedTests
     };
 
     private static int _next;
+
+    private static string Cmds(FormulaTrace t, FormulaRunner r) => string.Join("|", r.Commands(t, null).Select(c => c.ToString()));
+
+    private static FormulaRunner Runner() =>
+        new(Pack(), LazyModel.Value, (n, _) => Enumerable.Range(0, n).Select(_ => (_next++ % 6) + 1).ToList());
+
+    private static GameState PieceState()
+    {
+        var s = new GameState();
+        s.Pieces["u1"] = new PieceInstance { Id = "u1", TypeString = "piece;;;unit.svg;Rifle", MapId = "Main Map", Pos = new PointD(60, 40), TraitStates = new() { "" } };
+        return s;
+    }
+
+    [Fact]
+    public void Regression_WhitespaceCaseText_CommandsEqualExpectedRun()
+    {
+        var checkedM = Make("f2");
+        var plain = Make("f2", isChecked: false);
+        foreach (var m in new[] { checkedM, plain }) m.SetBoxText("Terrain", "Sand");
+        checkedM.SetBoxText("Cost", "2");
+        checkedM.SetBoxText("Label", " hill   FORT ");
+        var v = checkedM.Evaluate(new GameState());
+        Assert.True(v.CanApply);
+        var expected = plain.Run(new GameState());
+        Assert.Equal(expected.Result, v.Trace.Result);
+        Assert.Equal(expected.Working, v.Trace.Working);
+        Assert.DoesNotContain("hill", v.Trace.Working);
+    }
+
+    [Fact]
+    public void Regression_LocationTypedAsText_NeverNumberCoerced()
+    {
+        var pack = new RulesPack
+        {
+            Formulas = new() { new FormulaDef { Id = "fl", Name = "Loc", Text = "Loc == \"zzz\"",
+                Bindings = new() { new VariableBinding { Variable = "Loc", Kind = BindingKind.Location } } } },
+        };
+        var runner = new FormulaRunner(pack, LazyModel.Value, (n, _) => Enumerable.Repeat(1, n).ToList());
+        var m = new FormulaDialogModel(runner, pack.Formulas[0], "u1") { Checked = true };
+        var exp = m.Run(PieceState());
+        var loc = exp.Variables.FirstOrDefault()?.Value;
+        if (loc is not { } l) return; // the fixture map has no grid; nothing to compare
+        var padded = "0" + l.Display();
+        m.SetBoxText("Loc", padded);
+        Assert.False(m.Evaluate(PieceState()).CanApply); // "0304" is not "304"
+        m.SetBoxText("Loc", l.Display());
+        Assert.True(m.Evaluate(PieceState()).CanApply);
+    }
+
+    [Fact]
+    public void Regression_OneThird_CalculateThenApplyIsExact_RoundedTextIsWrong()
+    {
+        var pack = Pack();
+        var f = new FormulaDef
+        {
+            Id = "f5", Name = "Third", Text = "Third * 3",
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "bonus", Op = OutputOp.Add } },
+            Bindings = new() { new VariableBinding { Variable = "Third", Kind = BindingKind.Global, Property = "third" } },
+        };
+        pack.Formulas.Add(f);
+        var runner = new FormulaRunner(pack, LazyModel.Value, (n, _) => Enumerable.Repeat(1, n).ToList());
+        var m = new FormulaDialogModel(runner, f, null) { Checked = true };
+        m.SetBoxText("Third", "0.33");
+        Assert.False(m.Evaluate(new GameState()).CanApply);
+        m.Calculate(new GameState());
+        var v = m.Evaluate(new GameState());
+        Assert.True(v.CanApply);
+        var plain = new FormulaDialogModel(runner, f, null);
+        Assert.Equal(Cmds(plain.Run(new GameState()), runner), Cmds(v.Trace, runner));
+        Assert.Contains("4", Cmds(v.Trace, runner)); // 3 + 1: not 3 + 0.99
+    }
+
+    [Fact]
+    public void Regression_RollOverride_ExpectedRunHonoursIt()
+    {
+        var checkedM = Make("f3");
+        var plain = Make("f3", isChecked: false);
+        foreach (var m in new[] { checkedM, plain }) { m.SetBoxText("Terrain", "Sand"); m.SetBoxText("R", "6"); }
+        checkedM.SetBoxText("Cost", "2");
+        var v = checkedM.Evaluate(new GameState());
+        Assert.True(v.CanApply);
+        Assert.Equal("8", v.ResultText);
+        Assert.Equal(plain.Run(new GameState()).Result, v.Trace.Result);
+    }
+
+    [Fact]
+    public void Regression_NotApplicable_TraceCarriesNoResultOrCommands()
+    {
+        var m = Make("f1");
+        m.SetBoxText("Terrain", "Sand");
+        m.SetBoxText("Cost", "9");
+        var t = m.Run(new GameState());
+        Assert.Null(t.Result);
+        Assert.Empty(Runner().Commands(t, null));
+    }
 
     private static FormulaDialogModel Make(string id, bool isChecked = true)
     {

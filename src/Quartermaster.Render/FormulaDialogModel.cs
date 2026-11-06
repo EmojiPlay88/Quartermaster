@@ -123,28 +123,18 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     public FormulaTrace Run(GameState state)
     {
         var typed = new Dictionary<string, string>(_typed);
-        if (Checked)
-        {
-            // Expected run: engine values only (typed Inputs, no overrides), sharing the dice pins with the actual run.
-            var expected = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, PhysicalRollOverrides(), _fixedRolls, Moved, false));
-            MergePins(expected);
-            _lastExpected = expected;
-        }
         // Physical roll boxes always carry an override (blank = still waiting), so the runner never rolls for them.
-        var ov = new Dictionary<string, string>(_overrides);
+        var ov = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var kv in _overrides)
+            if (!Checked || Binding(kv.Key)?.Kind == BindingKind.Roll) ov[kv.Key] = kv.Value; // checked: typed text only gates, never feeds the run
         foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice))
             ov.TryAdd(b.Variable, "");
-        if (Checked)
-            foreach (var b in formula.Bindings.Where(b => IsCheckedKind(b.Kind)))
-            {
-                ov.TryAdd(b.Variable, "");
-                // Accept the same number spellings as the comparison (a U+2212 minus, a stray space) before the runner parses them.
-                if (TableLookup.TryNum(ov[b.Variable], out var num))
-                    ov[b.Variable] = num.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
-            }
         var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false));
         MergePins(trace);
-        return trace;
+        if (!Checked) return trace;
+        // Checked: this is the EXPECTED engine run, the only source of ledger commands. Until every box matches it carries no result.
+        _lastExpected = trace;
+        return View(trace).CanApply ? trace : trace with { Result = null, Working = "", Outputs = Array.Empty<OutputPreview>() };
     }
 
     /// <summary>Runs with the engine's auto values (rolling and pinning dice) and copies every value into the boxes.</summary>
@@ -158,8 +148,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             if (v.Value is not { } val) continue;
             var b = Binding(v.Variable);
             if (b == null) continue;
-            if (b.Kind == BindingKind.Input) _typed[v.Variable] = val.Display();
-            else if (b.Kind != BindingKind.Roll && Checked) _overrides[v.Variable] = val.Display();
+            if (b.Kind == BindingKind.Input) _typed[v.Variable] = Exact(val);
+            else if (b.Kind != BindingKind.Roll && Checked) _overrides[v.Variable] = Exact(val);
         }
         AutoCalculated = true;
     }
@@ -168,8 +158,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     public DialogView View(FormulaTrace t)
     {
-        // A mistyped manual value can make the typed run fail before binding anything; keep the boxes (from the expected run) so the user can fix it.
-        var vars = t.Variables.Count == 0 && Checked && _lastExpected != null ? _lastExpected.Variables : t.Variables;
+        var vars = t.Variables;
         var boxes = vars.Select(v => Box(v, t)).ToList();
         var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal))
             .Select(kv => new InlineRollView(kv.Key, DiceText(kv.Value))).ToList();
@@ -224,7 +213,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             tip = exp?.MissingReason is { } r && r != "Waiting for input" ? r : "Waiting for input";
         else if (exp?.Value is not { } ev)
             tip = exp?.MissingReason ?? "Cannot be checked yet";
-        else if (!SameValue(ev, text, out var notNumber))
+        else if (!SameValue(ev, text, Binding(v.Variable)?.Kind == BindingKind.Location, out var notNumber))
         {
             wrong = true;
             tip = notNumber ? "Not a number" : $"Doesn't match ({exp.Source ?? v.Variable})";
@@ -232,22 +221,19 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         return new BoxView(v.Variable, text, BoxBackground.Typed, "", true, tip, null, wrong);
     }
 
-    /// <summary>Numbers compare invariantly (a comma decimal is not a number); text compares case- and space-insensitively.</summary>
-    private static bool SameValue(Value expected, string typed, out bool notNumber)
+    /// <summary>Full-precision invariant text for a value, so a Calculate-then-Apply compares exactly.</summary>
+    private static string Exact(Value v) =>
+        v.Kind == ValueKind.Number ? v.Number.ToString("R", System.Globalization.CultureInfo.InvariantCulture) : v.Display();
+
+    /// <summary>Numbers compare invariantly against the exact engine value (a comma decimal is not a number); text compares after TableLookup.Normalise
+    /// on both sides; Location is always text. The typed text only gates Apply, it never feeds the run.</summary>
+    private static bool SameValue(Value expected, string typed, bool asText, out bool notNumber)
     {
         notNumber = false;
-        typed = typed.Trim();
-        switch (expected.Kind)
-        {
-            case ValueKind.Number:
-                if (!TableLookup.TryNum(typed, out var n)) { notNumber = true; return false; }
-                // The engine shows 0.## precision, so the displayed figure counts as correct too.
-                return n == expected.Number || (TableLookup.TryNum(expected.Display(), out var shown) && n == shown);
-            case ValueKind.Text:
-                return TableLookup.Matches(new TableKey(TableKeyKind.Text, 0, 0, TableLookup.Normalise(expected.Text)), Value.Of(typed));
-            default:
-                return string.Equals(typed, expected.Display(), StringComparison.OrdinalIgnoreCase);
-        }
+        if (asText || expected.Kind != ValueKind.Number)
+            return string.Equals(TableLookup.Normalise(typed), TableLookup.Normalise(expected.Display()), StringComparison.OrdinalIgnoreCase);
+        if (!TableLookup.TryNum(typed, out var n)) { notNumber = true; return false; }
+        return n == expected.Number;
     }
 
     private string Raw(string variable) =>
