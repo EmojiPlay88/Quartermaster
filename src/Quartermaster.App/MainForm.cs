@@ -28,6 +28,7 @@ sealed class MainForm : Form
     readonly Dictionary<string, MapWindow> _maps = new();
     readonly Dictionary<string, Form> _charts = new();
     readonly Dictionary<string, Form> _docs = new();
+    readonly Dictionary<string, Form> _ledgers = new();
 
     readonly WindowManager _wm;
     readonly ToolStripMenuItem _floatingMenu = new("&Floating windows") { Visible = false };
@@ -136,6 +137,7 @@ sealed class MainForm : Form
         view.DropDownItems.Add(_viewTree);
         Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, Keys.Control | Keys.D, needsModule: true);
         view.DropDownItems.Add(_showGrid);
+        _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, Keys.Control | Keys.L));
 
         var window = new ToolStripMenuItem("&Window");
         Item(window.DropDownItems, "&Cascade", () => Arrange(MdiLayout.Cascade));
@@ -575,6 +577,31 @@ sealed class MainForm : Form
         }
     }
 
+    /// <summary>Opens (or activates) the ledger window; needs a loaded rules pack.</summary>
+    void ShowLedger()
+    {
+        if (_session?.Rules == null) return;
+        var s = _session;
+        OpenChild(_ledgers, "ledger", () => new LedgerWindow(s));
+    }
+
+    /// <summary>Smoke: opens the ledger window (once rules are loaded) and optionally saves a screenshot of it.</summary>
+    void SmokeLedger()
+    {
+        if (_session?.Rules == null)
+        {
+            if (_opts.ScreenshotLedger != null) { Program.AppLog("smoke: --screenshot-ledger given but no rules pack is loaded."); Program.ExitCode = 1; }
+            return;
+        }
+        ShowLedger();
+        if (_ledgers.TryGetValue("ledger", out var w) && !w.IsDisposed && w is LedgerWindow lw)
+        {
+            Program.AppLog($"smoke: ledger window opened with {lw.RowCountForSmoke} row(s)");
+            if (_opts.ScreenshotLedger != null) lw.SaveScreenshot(_opts.ScreenshotLedger);
+        }
+        else Program.ExitCode = 1;
+    }
+
     void OnNodeActivated(WindowTreeNode n)
     {
         if (_session == null) return;
@@ -611,7 +638,7 @@ sealed class MainForm : Form
         var w = create();
         open[key] = w;
         w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); };
-        ShowDoc(w, (ReferenceEquals(open, _charts) ? "chart:" : "doc:") + key);
+        ShowDoc(w, (ReferenceEquals(open, _charts) ? "chart:" : ReferenceEquals(open, _ledgers) ? "ledger:" : "doc:") + key);
     }
 
     /// <summary>Shows a new document window: floating at its remembered bounds, otherwise as a maximized MDI tab.</summary>
@@ -760,6 +787,7 @@ sealed class MainForm : Form
         else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
         Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
         Guard(SmokeFormulaDialog);
+        Guard(SmokeLedger);
         if (_opts.Screenshot != null) Guard(() => SaveScreenshot(this, _opts.Screenshot, true));
         if (_opts.ScreenshotFloat != null)
         {

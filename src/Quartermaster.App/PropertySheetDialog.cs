@@ -5,7 +5,8 @@ sealed class PropertySheetDialog : Form
 {
     readonly List<TextBox> _boxes = new();
 
-    public PropertySheetDialog(string title, IReadOnlyList<(string Name, string Value)> rows)
+    public PropertySheetDialog(string title, IReadOnlyList<(string Name, string Value)> rows,
+        Func<string, string?>? managedValue = null)
     {
         Text = title;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -14,7 +15,7 @@ sealed class PropertySheetDialog : Form
         StartPosition = FormStartPosition.CenterParent;
         AutoScaleMode = AutoScaleMode.Font;
 
-        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true, Padding = new Padding(8) };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, AutoSize = true, Padding = new Padding(8) };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
         foreach (var (name, value) in rows)
@@ -22,8 +23,11 @@ sealed class PropertySheetDialog : Form
             var multi = value.Contains('\n');
             var box = new TextBox { Text = value.Replace("\n", "\r\n"), Width = 250, Multiline = multi, Height = multi ? 60 : 21, AcceptsReturn = multi };
             _boxes.Add(box);
+            var managed = managedValue?.Invoke(name);
+            if (managed != null) box.ReadOnly = true; // the ledger owns this value; the text stays as it was so OK writes it back unchanged
             grid.Controls.Add(new Label { Text = name, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 8, 0) });
             grid.Controls.Add(box);
+            grid.Controls.Add(new Label { Text = managed == null ? "" : $"(managed by ledger: {managed})", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(8, 6, 0, 0) });
         }
 
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Width = 75 };

@@ -285,6 +285,16 @@ sealed class MapWindow : Form
         }
     }
 
+    /// <summary>Ledger value text for a sheet row that a rules-pack property manages; null when no pack is loaded or no property is bound to the row.</summary>
+    string? ManagedSheetValue(PieceInstance piece, GameSession game, string rowName)
+    {
+        if (_s.Rules is not { } rules) return null;
+        var prop = rules.Properties.FirstOrDefault(p => p.Scope != Quartermaster.Rules.PropertyScope.Holders
+            && string.Equals(p.SheetField, rowName, StringComparison.OrdinalIgnoreCase));
+        if (prop == null) return null;
+        return Ledger.GetOrDefault(game.State, LedgerKey.Piece(piece.Id), prop).ToString("0.##", System.Globalization.CultureInfo.CurrentCulture);
+    }
+
     void EditSheet(PieceAction action, PieceInstance piece, GameSession game)
     {
         var traits = PieceTypeCache.For(_s.Images).Get(piece.TypeString).Traits;
@@ -293,7 +303,7 @@ sealed class MapWindow : Form
             if (traits[i] is PropertySheetDef d && d.MenuName == action.Label) { index = i; break; }
         if (index < 0) return;
         var rows = PieceActions.ReadSheet(piece, index);
-        using var dlg = new PropertySheetDialog(action.Label, rows);
+        using var dlg = new PropertySheetDialog(action.Label, rows, name => ManagedSheetValue(piece, game, name));
         if (dlg.ShowDialog(this) == DialogResult.OK) game.Execute(PieceActions.WriteSheet(piece, index, dlg.Values));
     }
 }
