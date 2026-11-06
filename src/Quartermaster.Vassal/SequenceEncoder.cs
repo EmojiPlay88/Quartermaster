@@ -61,6 +61,9 @@ public sealed class SequenceDecoder(string? value, char delim)
 
     public bool HasMoreTokens => _val != null;
 
+    /// <summary>Everything not yet consumed, raw and unescaped (VASSAL Decoder.getRemaining); "" when exhausted.</summary>
+    public string GetRemaining() => _val == null ? "" : _val.Substring(_start, _stop - _start);
+
     public string NextToken(string def = "")
     {
         return _val != null ? ReadToken() : def;
