@@ -53,6 +53,16 @@ internal sealed class Zone
         });
     }
 
+    /// <summary>Zone.getCenter: the polygon's vertex centroid (board coordinates), or its first vertex if that lies outside. Null for an empty polygon.</summary>
+    public PointD? Center()
+    {
+        if (_polygon.Count == 0) return null;
+        long sx = 0, sy = 0;
+        for (int i = 0; i < _polygon.Count; i++) { sx += _polygon.Xs[i]; sy += _polygon.Ys[i]; }
+        int cx = (int)(sx / _polygon.Count), cy = (int)(sy / _polygon.Count);
+        return Contains(cx, cy) ? new PointD(cx, cy) : new PointD(_polygon.Xs[0], _polygon.Ys[0]);
+    }
+
     public PointD? GetLocation(string location, IMapGrid? background)
     {
         var grid = GridOf(background);
@@ -106,6 +116,10 @@ public sealed class ZonedGrid : IMapGrid
                     $"Unsupported ZonedGrid child '{c.ShortName}' ignored.", c.ClassName);
         }
     }
+
+    /// <summary>Centre of the named zone in board coordinates; null when there is no such zone or it has no polygon.</summary>
+    public PointD? ZoneCenter(string zoneName)
+        => _zones.FirstOrDefault(z => z.Name == zoneName)?.Center();
 
     private Zone? FindZone(PointD p)
     {

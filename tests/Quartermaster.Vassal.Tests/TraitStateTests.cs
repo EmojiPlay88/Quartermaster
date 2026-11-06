@@ -71,4 +71,77 @@ public class TraitStateTests
         Assert.Equal("ab", TraitState.LabelText(d, "a$TextLabel$b"));
         Assert.Equal("", TraitState.LabelText(d, ""));
     }
+
+    [Fact]
+    public void LayerSetLevel_RoundTripsWithLayerLevel()
+    {
+        var d = Layer(false);
+        Assert.Equal((2, true), TraitState.LayerLevel(d, TraitState.LayerSetLevel(d, "", 2, true)));
+        Assert.Equal((3, false), TraitState.LayerLevel(d, TraitState.LayerSetLevel(d, "", 3, false)));
+        Assert.Equal((3, true), TraitState.LayerLevel(d, TraitState.LayerSetLevel(d, "", 9, true)));
+    }
+
+    [Fact]
+    public void LayerStep_LoopsOrClamps()
+    {
+        var loop = Layer();
+        Assert.Equal((1, true), TraitState.LayerLevel(loop, TraitState.LayerStep(loop, "3", +1)));
+        Assert.Equal((3, true), TraitState.LayerLevel(loop, TraitState.LayerStep(loop, "1", -1)));
+        var flat = Layer() with { Loop = false };
+        Assert.Equal((3, true), TraitState.LayerLevel(flat, TraitState.LayerStep(flat, "3", +1)));
+        Assert.Equal((1, true), TraitState.LayerLevel(flat, TraitState.LayerStep(flat, "1", -1)));
+        Assert.Equal((3, false), TraitState.LayerLevel(flat, TraitState.LayerStep(flat, "-2", +1)));
+    }
+
+    [Fact]
+    public void LayerToggleAndReset()
+    {
+        var d = Layer(false) with { ResetLevel = 2 };
+        Assert.Equal((1, true), TraitState.LayerLevel(d, TraitState.LayerToggleActive(d, "")));
+        Assert.Equal((2, true), TraitState.LayerLevel(d, TraitState.LayerReset(d, "-3")));
+        var neg = d with { ResetLevel = -2 };
+        Assert.Equal((2, false), TraitState.LayerLevel(neg, TraitState.LayerReset(neg, "3")));
+    }
+
+    [Theory]
+    [InlineData("", 1, 90.0)]
+    [InlineData("3", 1, 0.0)]
+    [InlineData("0", -1, 270.0)]
+    public void RotationStep_FixedFacings(string state, int delta, double expected)
+    {
+        var d = new RotatorDef("rotate") { ValidAngles = 4 };
+        Assert.Equal(expected, TraitState.RotationAngle(d, TraitState.RotationStep(d, state, delta)));
+    }
+
+    [Fact]
+    public void RotationStep_FreeRotationUnchanged()
+        => Assert.Equal("45", TraitState.RotationStep(new RotatorDef("rotate") { ValidAngles = 1 }, "45", 1));
+
+    [Fact]
+    public void HiddenAndObscuredToggle_RoundTrip()
+    {
+        var h = new HideableDef("hide");
+        var on = TraitState.HiddenToggle(h, "", "local");
+        Assert.True(TraitState.IsHidden(h, on));
+        Assert.False(TraitState.IsHidden(h, TraitState.HiddenToggle(h, on, "local")));
+        var o = new ObscurableDef("obs");
+        var oOn = TraitState.ObscuredToggle(o, "null;", "local");
+        Assert.True(TraitState.IsObscured(o, oOn));
+        Assert.False(TraitState.IsObscured(o, TraitState.ObscuredToggle(o, oOn, "local")));
+    }
+
+    [Fact]
+    public void DynamicIncrement_ClampsWrapsAndTolerates()
+    {
+        var clamp = new DynamicPropertyDef("PROP") { Numeric = true, Min = 0, Max = 5 };
+        Assert.Equal("5", TraitState.DynamicIncrement(clamp, "4", 3));
+        Assert.Equal("0", TraitState.DynamicIncrement(clamp, "1", -3));
+        Assert.Equal("1", TraitState.DynamicIncrement(clamp, "", 1));
+        var wrap = clamp with { Wrap = true };
+        Assert.Equal("1", TraitState.DynamicIncrement(wrap, "5", 2));
+        Assert.Equal("5", TraitState.DynamicIncrement(wrap, "0", -1));
+        Assert.Equal("abc", TraitState.DynamicIncrement(clamp, "abc", 1));
+        Assert.Equal("12", TraitState.DynamicIncrement(new DynamicPropertyDef("PROP"), "10", 2));
+        Assert.Equal("x", TraitState.DynamicValue(clamp, TraitState.DynamicSet(clamp, "x")));
+    }
 }

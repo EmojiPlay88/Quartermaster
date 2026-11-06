@@ -1,10 +1,11 @@
-// Ported from VASSAL Embellishment.java, FreeRotator.java, Hideable.java, Obscurable.java and Labeler.java (mySetState readers) (LGPL-2.1).
+// Ported from VASSAL Embellishment.java, FreeRotator.java, Hideable.java, Obscurable.java, DynamicProperty.java, IncrementProperty.java and Labeler.java
+// (mySetState readers, myGetState writers and key-event state changes) (LGPL-2.1).
 using System.Globalization;
 
 namespace Quartermaster.Vassal;
 
 /// <summary>
-/// Pure readers for per-trait state strings (the VASSAL mySetState side). A state of "" means the trait's default.
+/// Pure readers and writers for per-trait state strings (the VASSAL mySetState / myGetState / myKeyEvent sides). A state of "" means the trait's default.
 /// </summary>
 public static class TraitState
 {
@@ -61,5 +62,91 @@ public static class TraitState
         int i;
         while ((i = s.IndexOf(token, StringComparison.Ordinal)) >= 0) s = s.Remove(i, token.Length);
         return s;
+    }
+
+    // ---- write side ----
+
+    private static int LayerCount(LayerDef def) => Math.Max(Math.Max(def.Images.Count, def.LevelNames.Count), 1);
+
+    /// <summary>Embellishment myGetState: one signed integer, magnitude is the level and the sign is the active flag. The level is clamped to 0..image count.</summary>
+    public static string LayerSetLevel(LayerDef def, string? state, int level, bool active)
+    {
+        var l = Math.Min(Math.Max(level, 0), LayerCount(def));
+        return (active ? l : -l).ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Embellishment activate key: flips the sign of the value.</summary>
+    public static string LayerToggleActive(LayerDef def, string? state)
+    {
+        var (level, active) = LayerLevel(def, state);
+        return LayerSetLevel(def, state, level, !active);
+    }
+
+    /// <summary>Embellishment doIncrease / doDecrease: steps the level by +-1, wrapping when the layer loops, otherwise clamping.</summary>
+    public static string LayerStep(LayerDef def, string? state, int delta)
+    {
+        var (level, active) = LayerLevel(def, state);
+        var n = LayerCount(def);
+        var v = Math.Abs(level);
+        if (delta >= 0)
+        {
+            if (++v > n) v = def.Loop ? 1 : n;
+        }
+        else
+        {
+            if (--v < 1) v = def.Loop ? n : 1;
+        }
+        return LayerSetLevel(def, state, v, active);
+    }
+
+    /// <summary>Embellishment reset key: level |ResetLevel|, active when ResetLevel is positive.</summary>
+    public static string LayerReset(LayerDef def, string? state) => LayerSetLevel(def, state, Math.Abs(def.ResetLevel), def.ResetLevel > 0);
+
+    /// <summary>FreeRotator rotate CW / CCW for fixed facings: angleIndex moves by +-1 modulo the number of angles. Free rotation is returned unchanged.</summary>
+    public static string RotationStep(RotatorDef def, string? state, int delta)
+    {
+        var n = Math.Max(def.ValidAngles, 1);
+        if (n == 1) return state ?? "";
+        if (!int.TryParse((state ?? "").Trim(), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var idx)) idx = 0;
+        idx = Math.Min(Math.Max(idx, 0), n - 1);
+        idx = (((idx + delta) % n) + n) % n;
+        return idx.ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Hideable: toggles between visible ("null") and hidden by <paramref name="playerId"/>.</summary>
+    public static string HiddenToggle(HideableDef def, string? state, string playerId) => IsHidden(def, state) ? "null" : playerId;
+
+    /// <summary>Obscurable: toggles between not obscured ("null") and obscured by <paramref name="playerId"/> (no display options).</summary>
+    public static string ObscuredToggle(ObscurableDef def, string? state, string playerId)
+        => IsObscured(def, state) ? "null" : SequenceEncoder.Encode(new[] { playerId, "" }, ';');
+
+    /// <summary>DynamicProperty: the state is the value itself.</summary>
+    public static string DynamicValue(DynamicPropertyDef def, string? state) => state ?? "";
+
+    public static string DynamicSet(DynamicPropertyDef def, string value) => value ?? "";
+
+    /// <summary>
+    /// IncrementProperty.getNewValue: adds <paramref name="incr"/> to the integer value (blank counts as 0), wrapping within
+    /// Min..Max when numeric and wrapping, clamping when numeric only. A non-integer old value is returned unchanged.
+    /// </summary>
+    public static string DynamicIncrement(DynamicPropertyDef def, string? state, int incr)
+    {
+        int value;
+        if (string.IsNullOrEmpty(state)) value = 0;
+        else if (!int.TryParse(state, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value)) return state;
+
+        if (!def.Numeric) value += incr;
+        else if (def.Wrap)
+        {
+            var range = def.Max - def.Min + 1;
+            if (range > 0) value = def.Min + ((value - def.Min + incr) % range + range) % range;
+        }
+        else
+        {
+            value += incr;
+            value = Math.Min(def.Max, value);
+            value = Math.Max(def.Min, value);
+        }
+        return value.ToString(CultureInfo.InvariantCulture);
     }
 }

@@ -23,7 +23,7 @@ public static class NewGameBuilder
                 foreach (var slot in stack.Pieces)
                 {
                     var id = "n:" + (++seq).ToString(CultureInfo.InvariantCulture);
-                    var (type, st) = BuildPiece(model, slot, map.Id, pos);
+                    var (type, st) = PieceFactory.FromSlot(model, slot, map.Id, pos);
                     state.Apply(new AddPiece(id, type, st, map.Id, pos, stackId));
                     stackId ??= state.Pieces[id].StackId;
                 }
@@ -56,28 +56,5 @@ public static class NewGameBuilder
         // Owning board: offset by the board origin; otherwise by the map's edge buffer (SetupStack.setup).
         var off = owner?.Offset ?? new PointD(map.EdgeWidth, map.EdgeHeight);
         return new PointD(p.X + off.X, p.Y + off.Y);
-    }
-
-    /// <summary>Expanded type plus the matching state chain whose BasicPiece layer carries map and position.</summary>
-    private static (string Type, string State) BuildPiece(ModuleModel model, PieceSlotDef slot, string mapId, PointD pos)
-    {
-        var type = model.Expander.ExpandTypeAndState(slot.TypeString, slot.StateString, out var expandedState);
-        var count = PieceTypeParser.Parse(type, new DiagnosticLog(), null).Traits.Count;
-        var states = PieceTypeParser.SplitState(expandedState, count).ToList();
-
-        // BasicPiece state: mapId;x;y;gpid;propCount;key;value...
-        var old = new List<string>();
-        var d = new SequenceDecoder(states[^1], ';');
-        while (d.HasMoreTokens) old.Add(d.NextToken());
-        var tokens = new List<string>
-        {
-            mapId,
-            Math.Round(pos.X, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture),
-            Math.Round(pos.Y, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture),
-            slot.Gpid.Length > 0 ? slot.Gpid : old.Count > 3 ? old[3] : "",
-        };
-        if (old.Count > 4) tokens.AddRange(old.Skip(4)); else tokens.Add("0");
-        states[^1] = SequenceEncoder.Encode(tokens, ';');
-        return (type, PieceTypeParser.EncodeState(states));
     }
 }
