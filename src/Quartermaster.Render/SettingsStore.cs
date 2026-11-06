@@ -98,7 +98,7 @@ public sealed class SettingsStore(string root)
             ShowLastRollInStatus = r.Bool("ShowLastRollInStatus", d.ShowLastRollInStatus),
             LogShowMoves = r.Bool("LogShowMoves", d.LogShowMoves),
             LogTimeFormat = r.Str("LogTimeFormat", d.LogTimeFormat, ValidTimeFormat),
-            ToolbarVisible = r.Map<bool>("ToolbarVisible", (JsonNode? n, out bool b) => { b = false; return n is JsonValue v && v.TryGetValue(out b); }),
+            ToolbarVisible = ToolbarIds.Migrate(r.Map<bool>("ToolbarVisible", (JsonNode? n, out bool b) => { b = false; return n is JsonValue v && v.TryGetValue(out b); })),
             ShortcutOverrides = r.Map<string>("ShortcutOverrides", (JsonNode? n, out string s) => { s = ""; return n is JsonValue v && v.TryGetValue(out s!) && s != null; }),
             LeftSplitterDistance = r.Double("LeftSplitterDistance", d.LeftSplitterDistance, 0.2, 0.8),
             LastModulePath = r.NullableStr("LastModulePath"),

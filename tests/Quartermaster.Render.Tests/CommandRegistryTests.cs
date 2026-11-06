@@ -63,6 +63,31 @@ public class CommandRegistryTests
         Assert.False(CommandRegistry.IsTextEntryKey("F5"));
         Assert.False(CommandRegistry.IsTextEntryKey("Ctrl+L"));
     }
+
+    [Theory]
+    [InlineData("Alt+F4")]
+    [InlineData("Esc")]
+    [InlineData("Tab")]
+    [InlineData("Shift+Tab")]
+    [InlineData("Enter")]
+    [InlineData("Alt+F")]
+    [InlineData("Alt+Z")]
+    public void Reserved_WindowKeys_AreConflicts(string key)
+    {
+        Assert.True(CommandRegistry.IsReserved(key));
+        var r = Sample();
+        var c = Assert.Single(r.Conflicts(Ov(("b", key))));
+        Assert.Equal(key, c.Key);
+    }
+
+    [Theory]
+    [InlineData("F5")]
+    [InlineData("L")]
+    [InlineData("Ctrl+L")]
+    [InlineData("Alt+Shift+F")]
+    [InlineData("Alt+F5")]
+    [InlineData("Alt+1")]
+    public void Reserved_OrdinaryKeys_AreNot(string key) => Assert.False(CommandRegistry.IsReserved(key));
 }
 
 public class ShortcutGateTests

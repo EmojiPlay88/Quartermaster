@@ -78,7 +78,9 @@ sealed partial class MainForm
         Step(() =>
         {
             foreach (ToolStripItem i in _toolbar.Items)
-                if (i is not ToolStripSeparator && i.Text is { Length: > 0 } text) i.Visible = s.IsToolbarVisible(text);
+                if (i is not ToolStripSeparator && i.Name is { Length: > 0 } id)
+                    i.Visible = s.IsToolbarVisible(id) && (id != "tool.palette" || GameMaster);
+            _viewPalette.Visible = GameMaster;
         });
         Step(() =>
         {
@@ -87,8 +89,16 @@ sealed partial class MainForm
             _dice.ShowLastRoll = s.ShowLastRollInStatus;
         });
         Step(() => _logDock.Panel?.ApplySettings(s));
-        Step(() => _paletteDock.SetGameMaster(GameMaster));
+        Step(() => { _paletteDock.SetGameMaster(GameMaster); _viewPalette.Checked = _paletteDock.Shown; });
         Step(() => SettingsApplied?.Invoke(s));
+    }
+
+    /// <summary>Shows or hides the counter palette (game master mode only); the toolbar button and View menu item share this.</summary>
+    void TogglePalette()
+    {
+        if (!GameMaster) return;
+        _paletteDock.ToggleShown();
+        _viewPalette.Checked = _paletteDock.Shown;
     }
 
     static void Step(Action a)
@@ -98,7 +108,7 @@ sealed partial class MainForm
     }
 
     SettingsContext SettingsCtx() => new(
-        _toolbar.Items.Cast<ToolStripItem>().Where(i => i is not ToolStripSeparator && i.Text is { Length: > 0 }).Select(i => (i.Text!, i.Text!)).ToList(),
+        ToolbarIds.All,
         ModuleSession.DefaultCacheRoot,
         () => _session?.CacheDir,
         m => Info(m, "Settings"), _commands);

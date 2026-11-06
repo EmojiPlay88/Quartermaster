@@ -12,6 +12,8 @@ sealed class PaletteDock
     readonly WindowManager _wm;
     readonly Action<Action> _guard;
     bool _gm;
+    bool _shown = true; // the show/hide toggle (View, Counter palette)
+    ModuleSession? _session;
 
     public PaletteDock(Form main, WindowManager wm, Panel host, Splitter splitter, Action<Action> guard)
     {
@@ -23,16 +25,36 @@ sealed class PaletteDock
     public PalettePanel? Panel { get; private set; }
     public PaletteFloatForm? Float { get; private set; }
 
+    /// <summary>Whether the palette is wanted on screen (only has an effect in game master mode).</summary>
+    public bool Shown => _shown && _gm;
+
+    /// <summary>Remembers the session; the panel (with its scroll timer and thumbnail worker) is built only once game master mode is on.</summary>
     public void Create(ModuleSession session)
     {
-        Panel = new PalettePanel(session) { Dock = DockStyle.Fill };
+        _session = session;
+        EnsurePanel();
+        Apply();
+    }
+
+    void EnsurePanel()
+    {
+        if (!_gm || _session == null || Panel != null) return;
+        Panel = new PalettePanel(_session) { Dock = DockStyle.Fill };
         Panel.PopToggleRequested += () => _guard(() => { if (Float == null) PopOut(); else DockBack(); });
         Host.Controls.Add(Panel);
+    }
+
+    /// <summary>Toggles the palette; a floating palette is docked back first and hidden.</summary>
+    public void ToggleShown()
+    {
+        _shown = !_shown;
+        if (!_shown && Float != null) DockBack();
         Apply();
     }
 
     public void Destroy()
     {
+        _session = null;
         var f = Float;
         Float = null;
         f?.CloseForReal();
@@ -48,10 +70,11 @@ sealed class PaletteDock
     {
         _gm = gm;
         if (!gm && Float != null) DockBack();
+        EnsurePanel();
         Apply();
     }
 
-    void Apply() => Host.Visible = Splitter.Visible = Panel != null && Float == null && _gm;
+    void Apply() => Host.Visible = Splitter.Visible = Panel != null && Float == null && _gm && _shown;
 
     public void PopOut()
     {

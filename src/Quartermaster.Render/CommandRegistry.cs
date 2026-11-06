@@ -21,8 +21,12 @@ public sealed class CommandRegistry
         ["Control"] = "Ctrl", ["Escape"] = "Esc", ["Return"] = "Enter", ["Del"] = "Delete", ["Ins"] = "Insert", ["PgUp"] = "PageUp", ["PgDn"] = "PageDown", ["Back"] = "Backspace",
     };
 
-    /// <summary>Keys the window itself uses (tab switching and closing); they cannot be bound to commands.</summary>
-    public static IReadOnlySet<string> Reserved { get; } = new HashSet<string> { "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+W" };
+    /// <summary>Keys the window itself uses (tab switching and closing, focus, dialogs); they cannot be bound to commands. Alt+letter (menu mnemonics) is covered by <see cref="IsReserved"/>.</summary>
+    public static IReadOnlySet<string> Reserved { get; } = new HashSet<string> { "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+W", "Alt+F4", "Esc", "Tab", "Shift+Tab", "Enter" };
+
+    /// <summary>True for a canonical shortcut the window keeps for itself: <see cref="Reserved"/> or Alt plus a letter (menu mnemonics).</summary>
+    public static bool IsReserved(string canonical) =>
+        Reserved.Contains(canonical) || (canonical.StartsWith("Alt+", StringComparison.Ordinal) && canonical.Length == 5 && char.IsAsciiLetter(canonical[4]));
 
     readonly List<CommandDef> _all = new();
 
@@ -55,7 +59,7 @@ public sealed class CommandRegistry
         _all.Select(d => (d.Id, Key: EffectiveShortcut(d.Id, overrides)))
             .Where(x => x.Key.Length > 0)
             .GroupBy(x => x.Key)
-            .Where(g => g.Count() > 1 || Reserved.Contains(g.Key))
+            .Where(g => g.Count() > 1 || IsReserved(g.Key))
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g => (g.Key, (IReadOnlyList<string>)g.Select(x => x.Id).ToList()))
             .ToList();

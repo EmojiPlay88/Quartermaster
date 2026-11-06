@@ -27,6 +27,9 @@ sealed class LogPanel : UserControl
     bool _showMoves = true;
     string _timeFormat = "HH:mm:ss";
 
+    /// <summary>Smoke: handle of the search box's edit control (a main-window-hosted text box).</summary>
+    public IntPtr SearchHandleForSmoke => _search.Control.Handle;
+
     public LogPanel(ModuleSession s, Action<string> centreOnPiece)
     {
         _s = s;

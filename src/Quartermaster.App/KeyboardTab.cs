@@ -93,7 +93,7 @@ sealed class KeyboardTab(CommandRegistry registry) : SettingsTab
         var cs = registry.Conflicts(_eff);
         if (cs.Count == 0) return null;
         string Names(IReadOnlyList<string> ids) => string.Join(", ", ids.Select(i => registry.Find(i)?.Label ?? i));
-        return string.Join("; ", cs.Select(c => CommandRegistry.Reserved.Contains(c.Key)
+        return string.Join("; ", cs.Select(c => CommandRegistry.IsReserved(c.Key)
             ? $"{c.Key} is reserved by the window ({Names(c.Ids)})"
             : $"{c.Key} is used by {Names(c.Ids)}"));
     }

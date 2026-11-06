@@ -24,7 +24,7 @@ public class SettingsTests : IDisposable
             GridDefault = GridMode.Always, LabelFontSize = 11, HighlightColor = "#112233", TabMinWidth = 70, TabMaxWidth = 200,
             WheelZoomStep = 1.5, SnapOnDrop = false, DragThresholdPx = 9, HoverDelayMs = 250,
             PhysicalDiceDefault = true, ShowLastRollInStatus = false, LogShowMoves = false, LogTimeFormat = "mm:ss",
-            ToolbarVisible = new Dictionary<string, bool> { ["Diagnostics"] = false },
+            ToolbarVisible = new Dictionary<string, bool> { ["tool.diagnostics"] = false },
             ShortcutOverrides = new Dictionary<string, string> { ["file.save"] = "Ctrl+Alt+S", ["file.new"] = "" },
             LeftSplitterDistance = 0.4, LastModulePath = @"C:\x\y.vmod",
         };
@@ -38,8 +38,8 @@ public class SettingsTests : IDisposable
         var back = new SettingsStore(_tmp).Load(log);
         Assert.Empty(log.Items);
         Assert.Equal(s with { ToolbarVisible = back.ToolbarVisible, ShortcutOverrides = back.ShortcutOverrides }, back);
-        Assert.False(back.ToolbarVisible["Diagnostics"]);
-        Assert.False(back.IsToolbarVisible("Diagnostics"));
+        Assert.False(back.ToolbarVisible["tool.diagnostics"]);
+        Assert.False(back.IsToolbarVisible("tool.diagnostics"));
         Assert.True(back.IsToolbarVisible("Missing"));
         Assert.Equal("Ctrl+Alt+S", back.ShortcutOverrides["file.save"]);
         Assert.Equal("", back.ShortcutOverrides["file.new"]);
@@ -110,5 +110,33 @@ public class SettingsTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_tmp, "settings.json"), """{ "GridDefault": "never" }""");
         Assert.Equal(GridMode.Never, new SettingsStore(_tmp).Load(null).GridDefault);
+    }
+
+    [Fact]
+    public void ToolbarIds_MigrateCaptionKeys_ToStableIds()
+    {
+        var m = ToolbarIds.Migrate(new Dictionary<string, bool>
+        {
+            ["Diagnostics"] = false, ["1d6"] = false, ["Dice"] = false, ["tool.notes"] = false, ["Bogus"] = false,
+            ["Save Game"] = false, ["tool.saveGame"] = true,
+        });
+        Assert.False(m["tool.diagnostics"]);
+        Assert.False(m["dice.1d6"]);
+        Assert.False(m["dice.menu"]);
+        Assert.False(m["tool.notes"]);
+        Assert.True(m["tool.saveGame"]);          // the new id wins over a legacy caption
+        Assert.DoesNotContain("Bogus", m.Keys);   // unknown keys are ignored
+        Assert.DoesNotContain("Diagnostics", m.Keys);
+    }
+
+    [Fact]
+    public void SettingsStore_Load_MigratesToolbarCaptions()
+    {
+        File.WriteAllText(Path.Combine(_tmp, "settings.json"), "{\"ToolbarVisible\":{\"Open Game\":false,\"Weird\":false}}");
+        var log = new DiagnosticLog();
+        var back = new SettingsStore(_tmp).Load(log);
+        Assert.False(back.IsToolbarVisible("tool.openGame"));
+        Assert.True(back.IsToolbarVisible("Weird"));
+        Assert.DoesNotContain("Open Game", back.ToolbarVisible.Keys);
     }
 }

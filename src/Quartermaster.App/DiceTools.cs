@@ -44,13 +44,14 @@ sealed class DiceTools : IDisposable
         };
 
         toolbar.Items.Add(new ToolStripSeparator());
-        AddButton(toolbar, "1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll"), needsGame);
-        AddButton(toolbar, "2d6", () => RollSpec(new DiceSpec(2, 6, 0), "Roll"), needsGame);
-        var dd = new ToolStripDropDownButton("Dice") { DisplayStyle = ToolStripItemDisplayStyle.Text };
+        AddButton(toolbar, "dice.1d6", "1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll"), needsGame);
+        AddButton(toolbar, "dice.2d6", "2d6", () => RollSpec(new DiceSpec(2, 6, 0), "Roll"), needsGame);
+        var dd = new ToolStripDropDownButton("Dice") { Name = "dice.menu", DisplayStyle = ToolStripItemDisplayStyle.Text };
         dd.DropDownOpening += (_, _) => _guard(() => BuildDiceItems(dd.DropDownItems));
         dd.DropDownItems.Add("(no game)").Enabled = false;
         toolbar.Items.Add(dd);
         needsGame.Add(dd);
+        AddButton(toolbar, "turn.next", "Next turn", () => StepTurn(1), needsGame);
 
         toolsMenu.DropDownItems.Add(new ToolStripSeparator());
         var dice = new ToolStripMenuItem("&Dice");
@@ -72,9 +73,9 @@ sealed class DiceTools : IDisposable
         needsGame.Add(turn);
     }
 
-    void AddButton(ToolStrip bar, string text, Action act, List<ToolStripItem> needsGame)
+    void AddButton(ToolStrip bar, string id, string text, Action act, List<ToolStripItem> needsGame)
     {
-        var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text };
+        var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = id };
         b.Click += (_, _) => _guard(act);
         bar.Items.Add(b);
         needsGame.Add(b);

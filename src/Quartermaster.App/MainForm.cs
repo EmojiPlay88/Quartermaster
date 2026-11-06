@@ -24,6 +24,7 @@ sealed partial class MainForm : Form
     readonly Panel _paletteHost = new() { Dock = DockStyle.Right, Width = 260, Visible = false };
     readonly Splitter _paletteSplitter = new() { Dock = DockStyle.Right, Width = 4, Visible = false };
     readonly PaletteDock _paletteDock;
+    readonly ToolStripMenuItem _viewPalette = new("Counter &palette") { Visible = false };
     readonly MenuStrip _menu = new();
     readonly ToolStrip _toolbar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
     readonly StatusStrip _status = new() { RenderMode = ToolStripRenderMode.System };
@@ -51,6 +52,7 @@ sealed partial class MainForm : Form
     DiceTools? _dice;
     DiagnosticsWindow? _diag;
     string? _savePath;
+    bool _recoveredAutosave; // the open game came from an autosave file; Save goes to Save As
     bool _dirty;
     bool _noticePending;
     bool _startupDone;
@@ -168,13 +170,14 @@ sealed partial class MainForm : Form
         return mi;
     }
 
-    void Tool(string text, Action act, bool needsModule = false, bool needsGame = false)
+    ToolStripButton Tool(string id, string text, Action act, bool needsModule = false, bool needsGame = false)
     {
-        var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text };
+        var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = id };
         b.Click += (_, _) => Guard(act);
         _toolbar.Items.Add(b);
         if (needsModule) _needsModule.Add(b);
         if (needsGame) _needsGame.Add(b);
+        return b;
     }
 
     void BuildMenu()
@@ -185,6 +188,7 @@ sealed partial class MainForm : Form
         Item(file.DropDownItems, "&New Game", NewGame, "file.newGame", needsModule: true);
         Item(file.DropDownItems, "Load &Setup...", LoadSetupDialog, needsModule: true);
         Item(file.DropDownItems, "Open &Game...", OpenGameDialog, "file.openGame", needsModule: true);
+        Item(file.DropDownItems, "Open Auto&save...", OpenAutosaveDialog, needsModule: true);
         file.DropDownItems.Add(new ToolStripSeparator());
         Item(file.DropDownItems, "&Save Game", () => SaveGame(false), "file.saveGame", needsGame: true);
         Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), "file.saveGameAs", needsGame: true);
@@ -204,6 +208,9 @@ sealed partial class MainForm : Form
         view.DropDownItems.Add(_viewLog);
         _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, "view.ledger"));
         Item(view.DropDownItems, "&Overview", ShowOverview, needsGame: true);
+        _viewPalette.Click += (_, _) => Guard(TogglePalette);
+        _needsGame.Add(_viewPalette);
+        view.DropDownItems.Add(_viewPalette);
 
         var tools = _toolsMenu = new ToolStripMenuItem("&Tools");
         Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", needsModule: true);
@@ -231,13 +238,18 @@ sealed partial class MainForm : Form
 
     void BuildToolbar()
     {
-        Tool("Open Module", OpenModuleDialog);
-        Tool("New Game", NewGame, needsModule: true);
-        Tool("Load Setup", LoadSetupDialog, needsModule: true);
-        Tool("Open Game", OpenGameDialog, needsModule: true);
-        Tool("Save Game", () => SaveGame(false), needsGame: true);
+        Tool("tool.openModule", "Open Module", OpenModuleDialog);
+        Tool("tool.newGame", "New Game", NewGame, needsModule: true);
+        Tool("tool.loadSetup", "Load Setup", LoadSetupDialog, needsModule: true);
+        Tool("tool.openGame", "Open Game", OpenGameDialog, needsModule: true);
+        Tool("tool.saveGame", "Save Game", () => SaveGame(false), needsGame: true);
         _toolbar.Items.Add(new ToolStripSeparator());
-        Tool("Diagnostics", ShowDiagnostics, needsModule: true);
+        Tool("tool.diagnostics", "Diagnostics", ShowDiagnostics, needsModule: true);
+        Tool("tool.notes", "Notes", ShowNotes, needsGame: true);
+        Tool("tool.overview", "Overview", ShowOverview, needsGame: true);
+        Tool("tool.inventory", "Inventory", ShowInventory, needsGame: true);
+        Tool("tool.palette", "Palette", TogglePalette, needsGame: true); // shown in game master mode only (ApplySettings)
+        Tool("tool.los", "LOS", () => { if (_handlers.TryGetValue("tool.los", out var h)) h(); }, needsGame: true);
         _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
         SetCommandHandler("dice.1d6", () => _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll"));
         SetCommandHandler("dice.2d6", () => _dice!.RollSpec(new DiceSpec(2, 6, 0), "Roll"));
@@ -321,6 +333,7 @@ sealed partial class MainForm : Form
             if (_session.Game != null)
             {
                 if (_savePath != null) t += " — " + Path.GetFileNameWithoutExtension(_savePath);
+                else if (_recoveredAutosave) t += " — (recovered autosave)";
                 if (_dirty) t += "*";
             }
             if (_session.Rules is { } r) t += $" — rules: {r.Name}{(_session.RulesDirty ? "*" : "")}";
@@ -481,6 +494,7 @@ sealed partial class MainForm : Form
         _dirty = false;
         _autosavedSeq = _changeSeq;
         _savePath = null;
+        _recoveredAutosave = false;
         UpdateUi();
         UpdateTitle();
     }
@@ -539,13 +553,29 @@ sealed partial class MainForm : Form
         if (dlg.Selected is { } s) _session.LoadSetup(s); else _session.StartNewGame();
     }
 
-    void OpenGameDialog()
+    void OpenGameDialog() => OpenGameCore(autosaves: false);
+
+    void OpenAutosaveDialog() => OpenGameCore(autosaves: true);
+
+    void OpenGameCore(bool autosaves)
     {
         if (_session == null || Program.Smoke || !ConfirmDiscard()) return;
-        using var dlg = new OpenFileDialog { Filter = "Quartermaster saves (*.qsave)|*.qsave|All files (*.*)|*.*", Title = "Open Game" };
+        using var dlg = new OpenFileDialog
+        {
+            Filter = "Quartermaster saves (*.qsave)|*.qsave|All files (*.*)|*.*",
+            Title = autosaves ? "Open Autosave" : "Open Game",
+        };
+        if (autosaves)
+        {
+            var root = Autosaver.AutosaveRoot(LayoutRoot);
+            var mine = _session.Archive.Sha256 is { Length: > 0 } sha ? Path.Combine(root, sha) : null;
+            dlg.InitialDirectory = mine != null && Directory.Exists(mine) ? mine : Directory.Exists(root) ? root : "";
+        }
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         _session.LoadNative(dlg.FileName);
-        _savePath = dlg.FileName;
+        // A file inside the autosave folder is pruned automatically, so it must never become the target of Save.
+        _recoveredAutosave = Autosaver.IsAutosavePath(dlg.FileName, LayoutRoot);
+        _savePath = _recoveredAutosave ? null : dlg.FileName;
         _dirty = false;
         UpdateTitle();
     }
@@ -560,9 +590,15 @@ sealed partial class MainForm : Form
             using var dlg = new SaveFileDialog { Filter = "Quartermaster saves (*.qsave)|*.qsave", DefaultExt = "qsave", Title = "Save Game" };
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             path = dlg.FileName;
+            if (Autosaver.IsAutosavePath(path, LayoutRoot))
+            {
+                ShowError("Saves inside the autosave folder are deleted automatically. Choose another folder.");
+                return;
+            }
         }
         _session.SaveNative(path);
         _savePath = path;
+        _recoveredAutosave = false;
         _dirty = false;
         _autosavedSeq = _changeSeq;
         _autosaver?.Reset(DateTimeOffset.UtcNow);
@@ -792,7 +828,7 @@ sealed partial class MainForm : Form
                 if (ActiveMdiChild is { } a) CloseTab(a);
                 return true;
         }
-        if (TryDispatchShortcut(keyData, ActiveMdiChild ?? this)) return true;
+        if (TryDispatchShortcut(keyData, ActiveMdiChild ?? this, Control.FromChildHandle(msg.HWnd))) return true;
         return base.ProcessCmdKey(ref msg, keyData);
     }
 

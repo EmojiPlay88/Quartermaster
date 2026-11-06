@@ -41,6 +41,21 @@ public sealed class Autosaver(Func<string?> moduleSha, Action<string> saveTo, st
         }
     }
 
+    /// <summary>True when <paramref name="path"/> lies inside <c>&lt;root&gt;/autosave</c> (where pruning may delete files). Never throws.</summary>
+    public static bool IsAutosavePath(string path, string root)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(root)) return false;
+            var dir = Path.GetFullPath(Path.Combine(root, "autosave")).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return Path.GetFullPath(path).StartsWith(dir, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException) { return false; }
+    }
+
+    /// <summary>The folder holding autosaves of all modules.</summary>
+    public static string AutosaveRoot(string root) => Path.Combine(root, "autosave");
+
     /// <summary>Deletes all but the newest <paramref name="keep"/> autosave files (by name, which sorts by time). Other files are left alone.</summary>
     public static void Prune(string dir, int keep = 10)
     {
