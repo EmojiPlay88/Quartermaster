@@ -86,6 +86,19 @@ public class PieceActionsTests
     }
 
     [Fact]
+    public void SendTo_Zone_UsesBoundingBoxCentre_NotVertexCentroid()
+    {
+        // triangle: vertex centroid (100,100), bounding-box centre (150,150)
+        var zone = $"<{P}mapgrid.Zone name=\"Tri\" path=\"0,0;300,0;0,300\" locationFormat=\"$name$\"/>";
+        var model = Model(BuildXml(zone));
+        var s = new GameState();
+        var p = Add(s, "a", Chain("sendto;Go;K;Main Map;Main Board;0;0;;;0;0;1;1;;Z;Tri;;;", Basic));
+        var off = model.Maps[0].Boards[0].Offset;
+        var mv = Assert.IsType<MovePieces>(Assert.Single(Find(PieceActions.For(p, model, s, Ids()), "Go").Build(s)));
+        Assert.Equal(new PointD(150 + off.X, 150 + off.Y), mv.Pos);
+    }
+
+    [Fact]
     public void SendTo_Unresolvable_IsDisabled()
     {
         var model = Model();

@@ -68,10 +68,10 @@ public static class TraitState
 
     private static int LayerCount(LayerDef def) => Math.Max(Math.Max(def.Images.Count, def.LevelNames.Count), 1);
 
-    /// <summary>Embellishment myGetState: one signed integer, magnitude is the level and the sign is the active flag. The level is clamped to 0..image count.</summary>
+    /// <summary>Embellishment myGetState: one signed integer, magnitude is the level and the sign is the active flag. The level is clamped to 1..image count (Embellishment never writes 0); the sign carries the active flag.</summary>
     public static string LayerSetLevel(LayerDef def, string? state, int level, bool active)
     {
-        var l = Math.Min(Math.Max(level, 0), LayerCount(def));
+        var l = Math.Min(Math.Max(level, 1), LayerCount(def));
         return (active ? l : -l).ToString(CultureInfo.InvariantCulture);
     }
 

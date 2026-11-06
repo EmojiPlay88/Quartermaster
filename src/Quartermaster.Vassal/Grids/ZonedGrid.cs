@@ -53,14 +53,12 @@ internal sealed class Zone
         });
     }
 
-    /// <summary>Zone.getCenter: the polygon's vertex centroid (board coordinates), or its first vertex if that lies outside. Null for an empty polygon.</summary>
+    /// <summary>Zone.getCenter: the centre of the polygon's bounding box (integer division, board-local coordinates; the caller adds the board origin). Null for an empty polygon.</summary>
     public PointD? Center()
     {
         if (_polygon.Count == 0) return null;
-        long sx = 0, sy = 0;
-        for (int i = 0; i < _polygon.Count; i++) { sx += _polygon.Xs[i]; sy += _polygon.Ys[i]; }
-        int cx = (int)(sx / _polygon.Count), cy = (int)(sy / _polygon.Count);
-        return Contains(cx, cy) ? new PointD(cx, cy) : new PointD(_polygon.Xs[0], _polygon.Ys[0]);
+        var (x, y, w, h) = _polygon.Bounds;
+        return new PointD(x + w / 2, y + h / 2);
     }
 
     public PointD? GetLocation(string location, IMapGrid? background)

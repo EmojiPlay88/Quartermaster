@@ -144,4 +144,19 @@ public class TraitStateTests
         Assert.Equal("12", TraitState.DynamicIncrement(new DynamicPropertyDef("PROP"), "10", 2));
         Assert.Equal("x", TraitState.DynamicValue(clamp, TraitState.DynamicSet(clamp, "x")));
     }
+
+    [Fact]
+    public void LayerReset_LevelZero_ClampsToInactiveLevelOne()
+    {
+        var d = Layer(false) with { ResetLevel = 0 };
+        Assert.Equal("-1", TraitState.LayerReset(d, "3"));
+    }
+
+    [Fact]
+    public void LayerToggleActive_FromZero_TreatsAsLevelOne()
+    {
+        var d = Layer(false);
+        Assert.Equal("1", TraitState.LayerToggleActive(d, "0"));
+        Assert.Equal("-1", TraitState.LayerSetLevel(d, "", 0, false));
+    }
 }
