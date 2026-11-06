@@ -63,7 +63,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
 
         _validateTimer.Tick += (_, _) => { _validateTimer.Stop(); Validate2(); };
         _s.RulesChanged += OnRulesChanged;
-        Shown += (_, _) => SetSplit();
+        Shown += (_, _) => { SetSplit(); TryPending(); };
         FormClosed += (_, _) => { _s.RulesChanged -= OnRulesChanged; _validateTimer.Dispose(); };
 
         if (Program.Smoke && s.Model.Documents.FirstOrDefault(d => d.Kind == Quartermaster.Vassal.DocumentKind.Pdf) is { } doc) _viewer.Open(doc);
@@ -141,6 +141,51 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         else if (p.ById<FormulaDef>(i.EntityId) != null) { _tabs.SelectedTab = _formulasPage; _formulas.SelectFormula(i.EntityId); }
         else if (p.ById<PropertyDef>(i.EntityId) != null) { _tabs.SelectedTab = _propsPage; _props.SelectProperty(i.EntityId); }
         else if (p.ById<HolderDef>(i.EntityId) != null) { _tabs.SelectedTab = _propsPage; _props.SelectHolder(i.EntityId); }
+    }
+
+    // ---------- navigation from the tables tree ----------
+
+    string? _pendingTable, _pendingFormula;
+
+    /// <summary>Shows the Tables tab with the table selected. Unknown id: no-op. Deferred until the tab has the table.</summary>
+    public void ShowTable(string tableId)
+    {
+        if (IsDisposed || _s.Rules?.ById<TableDef>(tableId) == null) return;
+        _pendingTable = tableId;
+        _pendingTries = 0;
+        _tabs.SelectedTab = _tablesPage;
+        TryPending();
+    }
+
+    /// <summary>Shows the Formulas tab with the formula selected. Unknown id: no-op. Deferred until the tab has the formula.</summary>
+    public void ShowFormula(string formulaId)
+    {
+        if (IsDisposed || _s.Rules?.ById<FormulaDef>(formulaId) == null) return;
+        _pendingFormula = formulaId;
+        _pendingTries = 0;
+        _tabs.SelectedTab = _formulasPage;
+        TryPending();
+    }
+
+    int _pendingTries;
+
+    void TryPending()
+    {
+        if (IsDisposed) return;
+        if (_pendingTable is { } t)
+        {
+            _tables.SelectTable(t);
+            if (_tables.SelectedTableId == t) _pendingTable = null;
+        }
+        if (_pendingFormula is { } f)
+        {
+            _formulas.SelectFormula(f);
+            if (_formulas.SelectedFormulaId == f) _pendingFormula = null;
+        }
+        if (_pendingTable == null && _pendingFormula == null) { _pendingTries = 0; return; }
+        // A tab that has not loaded yet (no handle) picks the item up on a later pass; give up after a few.
+        if (++_pendingTries > 5 || !IsHandleCreated) return;
+        BeginInvoke(new Action(TryPending));
     }
 
     // ---------- rule references ----------

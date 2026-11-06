@@ -9,7 +9,12 @@ namespace Quartermaster.App;
 sealed partial class MainForm : Form
 {
     readonly StartupOptions _opts;
-    readonly ModuleTreePanel _tree = new() { Dock = DockStyle.Left, Width = 220 };
+    readonly SplitContainer _leftSplit = new() { Dock = DockStyle.Left, Width = 220, Orientation = Orientation.Horizontal, FixedPanel = FixedPanel.None };
+    readonly ModuleTreePanel _tree = new() { Dock = DockStyle.Fill };
+    readonly TablesTreePanel _tablesTree = new() { Dock = DockStyle.Fill };
+    readonly WindowLayoutStore _layoutStore = new(LayoutRoot);
+    double _leftFraction = WindowLayoutStore.DefaultLeftSplit;
+    bool _leftSplitReady, _applyingSplit;
     readonly Splitter _splitter = new() { Dock = DockStyle.Left, Width = 4 };
     readonly DocumentTabStrip _tabs = new();
     readonly Panel _logHost = new() { Dock = DockStyle.Bottom, Height = 170, Visible = false };
@@ -60,7 +65,7 @@ sealed partial class MainForm : Form
         Text = "Quartermaster";
         ClientSize = new Size(1024, 700);
         StartPosition = FormStartPosition.CenterScreen;
-        _wm = new WindowManager(this, _tabs, new WindowLayoutStore(LayoutRoot));
+        _wm = new WindowManager(this, _tabs, _layoutStore);
         _wm.FloatingChanged += RebuildFloatingMenu;
         _logDock = new LogDock(this, _wm, _logHost, _logSplitter, _viewLog, CentreOnPiece, Guard);
         BuildMenu();
@@ -72,13 +77,19 @@ sealed partial class MainForm : Form
         Controls.Add(_logSplitter); // the log docks at the bottom of the MDI area, beside the tree
         Controls.Add(_logHost);
         Controls.Add(_splitter);
-        Controls.Add(_tree);
+        _leftSplit.Panel1.Controls.Add(_tree);
+        _leftSplit.Panel2.Controls.Add(_tablesTree);
+        Controls.Add(_leftSplit);
         Controls.Add(_status);
         Controls.Add(_toolbar);
         Controls.Add(_menu);
         MainMenuStrip = _menu;
 
         _tree.NodeActivated += OnNodeActivated;
+        _tablesTree.TableActivated += id => Guard(() => ShowWorkbenchItem(w => w.ShowTable(id)));
+        _tablesTree.FormulaActivated += id => Guard(() => ShowWorkbenchItem(w => w.ShowFormula(id)));
+        _leftSplit.SplitterMoved += (_, _) => RememberLeftSplit();
+        _leftSplit.SizeChanged += (_, _) => ApplyLeftSplit();
         MdiChildActivate += (_, _) => { KeepMaximized(); SyncTabs(null); };
         _tabs.TabActivated += f => { if (!f.IsDisposed) f.Activate(); };
         _tabs.TabCloseRequested += CloseTab;
@@ -86,7 +97,7 @@ sealed partial class MainForm : Form
         _tabs.TabsCloseRequested += fs => { foreach (var f in fs) if (!f.IsDisposed) f.Close(); };
         _showGrid.CheckedChanged += (_, _) => GridVisibleChanged?.Invoke();
         _viewLog.Click += (_, _) => Guard(_logDock.Toggle);
-        _viewTree.CheckedChanged += (_, _) => _tree.Visible = _splitter.Visible = _viewTree.Checked;
+        _viewTree.CheckedChanged += (_, _) => _leftSplit.Visible = _splitter.Visible = _viewTree.Checked;
         UpdateUi();
         UpdateTitle();
         RestoreMainBounds();
@@ -96,6 +107,34 @@ sealed partial class MainForm : Form
     static string LayoutRoot =>
         Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT") is { Length: > 0 } r ? r
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
+
+    void ApplyLeftSplit()
+    {
+        if (!_leftSplitReady || _leftSplit.Height < 100) return;
+        var d = (int)Math.Round(_leftSplit.Height * _leftFraction);
+        d = Math.Clamp(d, _leftSplit.Panel1MinSize, Math.Max(_leftSplit.Panel1MinSize, _leftSplit.Height - _leftSplit.Panel2MinSize - _leftSplit.SplitterWidth));
+        if (_leftSplit.SplitterDistance == d) return;
+        _applyingSplit = true;
+        try { _leftSplit.SplitterDistance = d; }
+        finally { _applyingSplit = false; }
+    }
+
+    void RememberLeftSplit()
+    {
+        if (!_leftSplitReady || _applyingSplit || _leftSplit.Height < 100) return;
+        _leftFraction = Math.Clamp((double)_leftSplit.SplitterDistance / _leftSplit.Height, WindowLayoutStore.MinLeftSplit, WindowLayoutStore.MaxLeftSplit);
+    }
+
+    /// <summary>Opens the workbench and runs the action on it (a no-op without a module).</summary>
+    void ShowWorkbenchItem(Action<WorkbenchWindow> act)
+    {
+        ShowWorkbench();
+        if (_benches.TryGetValue("workbench", out var w) && !w.IsDisposed && w is WorkbenchWindow wb)
+        {
+            wb.Activate();
+            act(wb);
+        }
+    }
 
     void RestoreMainBounds()
     {
@@ -309,6 +348,7 @@ sealed partial class MainForm : Form
         _session.GameReplaced += OnGameReplaced;
         _session.RulesChanged += OnRulesChanged;
         _tree.Load(_session.Model);
+        _tablesTree.Bind(_session);
         _logDock.Create(_session);
         _sbModule.Text = $"{_session.Model.Name} {_session.Model.Version}".Trim();
         _sbLocation.Text = "-";
@@ -386,6 +426,7 @@ sealed partial class MainForm : Form
         _session.Dispose();
         _session = null;
         _tree.Clear();
+        _tablesTree.Bind(null);
     }
 
     // ---------- log panel (see LogDock) ----------
@@ -728,6 +769,9 @@ sealed partial class MainForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        _leftFraction = _layoutStore.LoadLeftSplit();
+        _leftSplitReady = true;
+        ApplyLeftSplit();
         if (_opts.SmokeSeconds is { } secs)
         {
             _smokeTimer = new System.Windows.Forms.Timer { Interval = Math.Max(1, secs) * 1000 };
@@ -759,6 +803,8 @@ sealed partial class MainForm : Form
     {
         _smokeTimer?.Dispose();
         _dice?.Dispose();
+        RememberLeftSplit();
+        _layoutStore.SaveLeftSplit(_leftFraction);
         _wm.SaveMain(new SavedWindow(false, WindowState == FormWindowState.Normal ? Bounds : RestoreBounds, WindowState == FormWindowState.Maximized, DeviceDpi));
         CloseSession();
         base.OnFormClosed(e);

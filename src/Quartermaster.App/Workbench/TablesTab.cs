@@ -98,6 +98,7 @@ sealed class TablesTab : UserControl
         _grid.DataError += (_, e) => e.ThrowException = false;
 
         s.RulesChanged += OnRulesChanged;
+        HandleCreated += (_, _) => { if (_staleBeforeHandle) { _staleBeforeHandle = false; Run(Reload); } };
         Reload();
     }
 
@@ -110,6 +111,8 @@ sealed class TablesTab : UserControl
         }
         base.Dispose(disposing);
     }
+
+    bool _staleBeforeHandle;
 
     public string? SelectedTableId => _selected;
 
@@ -161,7 +164,8 @@ sealed class TablesTab : UserControl
 
     void OnUi(Action a)
     {
-        if (IsDisposed || !IsHandleCreated) return;
+        if (IsDisposed) return;
+        if (!IsHandleCreated) { _staleBeforeHandle = true; return; } // reloaded when the handle appears
         if (InvokeRequired) BeginInvoke(new Action(() => { if (!IsDisposed) a(); }));
         else a();
     }

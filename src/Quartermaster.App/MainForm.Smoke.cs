@@ -58,6 +58,16 @@ sealed partial class MainForm
         }
     }
 
+    /// <summary>Smoke: the Tables tree must list exactly the pack's tables and formulas.</summary>
+    void SmokeTablesTree()
+    {
+        if (_session?.Rules is not { } pack) return;
+        var (t, f) = _tablesTree.CountsForSmoke;
+        var ok = t == pack.Tables.Count && f == pack.Formulas.Count;
+        Program.AppLog($"smoke: tables tree {(ok ? "ok" : "FAILED")} ({t}/{pack.Tables.Count} tables, {f}/{pack.Formulas.Count} formulas); left split {_leftFraction:F2}");
+        if (!ok) Program.ExitCode = 1;
+    }
+
     /// <summary>Smoke: opens the ledger window (once rules are loaded) and optionally saves a screenshot of it.</summary>
     void SmokeLedger()
     {
@@ -109,6 +119,7 @@ sealed partial class MainForm
         if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
         else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
         Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
+        Guard(SmokeTablesTree);
         Guard(SmokeFormulaDialog);
         Guard(SmokeLedger);
         Guard(SmokeWorkbench);

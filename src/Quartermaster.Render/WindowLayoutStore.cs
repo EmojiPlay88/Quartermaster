@@ -52,6 +52,24 @@ public sealed class WindowLayoutStore(string root)
 
     public void SaveMain(SavedWindow main) => Write(MainPath, To(main));
 
+    public const double DefaultLeftSplit = 0.6, MinLeftSplit = 0.2, MaxLeftSplit = 0.8;
+
+    sealed class UiFile { public double LeftSplit { get; set; } }
+
+    /// <summary>Fraction of the left panel height given to the module tree (clamped 0.2-0.8; default 0.6 when missing or corrupt).</summary>
+    public double LoadLeftSplit()
+    {
+        try
+        {
+            var f = JsonSerializer.Deserialize<UiFile>(File.ReadAllText(Path.Combine(root, "ui.json")));
+            return f != null && double.IsFinite(f.LeftSplit) && f.LeftSplit > 0 ? Math.Clamp(f.LeftSplit, MinLeftSplit, MaxLeftSplit) : DefaultLeftSplit;
+        }
+        catch (Exception) { return DefaultLeftSplit; }
+    }
+
+    public void SaveLeftSplit(double fraction)
+        => Write(Path.Combine(root, "ui.json"), new UiFile { LeftSplit = double.IsFinite(fraction) ? Math.Clamp(fraction, MinLeftSplit, MaxLeftSplit) : DefaultLeftSplit });
+
     /// <summary>Lower-case hex SHA-256 of the file, or null when it cannot be read.</summary>
     public static string? HashFile(string path)
     {
