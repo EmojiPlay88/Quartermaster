@@ -42,8 +42,13 @@ sealed partial class FormulasTab
                 e.ToolTipText = DetailsHint(f.Bindings[e.RowIndex].Kind);
         };
         _bind.DataError += (_, e) => e.ThrowException = false;
+        var bar = new ToolStrip { Dock = DockStyle.Top, GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
+        var clean = new ToolStripButton("Remove unused bindings") { DisplayStyle = ToolStripItemDisplayStyle.Text };
+        bar.Items.Add(clean);
+        clean.Click += (_, _) => Run(() => { Commit(FormulaEdit.RemoveUnused); RebuildBindings(); });
         var g = new GroupBox { Text = "Bindings (what each variable means)", Dock = DockStyle.Fill, Padding = new Padding(4) };
         g.Controls.Add(_bind);
+        g.Controls.Add(bar);
         return g;
     }
 
@@ -86,9 +91,10 @@ sealed partial class FormulasTab
             _targets.Clear();
             _bind.Enabled = Current != null;
             if (Current is not { } f || _s.Rules is not { } pack) return;
+            var unused = FormulaEdit.Unused(f).Select(b => b.Variable).ToHashSet(StringComparer.Ordinal);
             foreach (var b in f.Bindings)
             {
-                var i = _bind.Rows.Add(b.Variable, "", "", FormulaEdit.FormatDetails(b), b.Caption ?? "");
+                var i = _bind.Rows.Add(unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, "", "", FormulaEdit.FormatDetails(b), b.Caption ?? "");
                 var row = _bind.Rows[i];
                 row.Cells[1] = ComboCell(Enum.GetNames<BindingKind>(), b.Kind.ToString());
                 var opts = FormulaEdit.TargetOptions(pack, b.Kind);

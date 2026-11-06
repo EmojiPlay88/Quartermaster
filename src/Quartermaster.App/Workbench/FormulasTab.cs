@@ -32,7 +32,7 @@ sealed partial class FormulasTab : UserControl
     string? _selected;
     string? _pieceId;
     readonly HashSet<string> _declined = new(StringComparer.Ordinal);
-    bool _selfEdit, _loadingUi;
+    bool _selfEdit, _loadingUi, _dirty;
 
     public FormulasTab(ModuleSession s, Func<string, RuleRef?> linkCurrentPage, Action<RuleRef>? showRef = null)
     {
@@ -103,6 +103,11 @@ sealed partial class FormulasTab : UserControl
         _piece.Leave += (_, _) => Run(OnPieceChosen);
         _piece.DropDown += (_, _) => Run(RefreshPieces);
 
+        VisibleChanged += (_, _) =>
+        {
+            if (!Visible) Run(() => FlushPending(final: true));
+            else if (_dirty) Run(Reload);
+        };
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
         Reload();
@@ -114,6 +119,7 @@ sealed partial class FormulasTab : UserControl
         {
             _s.RulesChanged -= OnRulesChanged;
             _s.GameReplaced -= OnGameReplaced;
+            if (_timer.Enabled) { try { FlushPending(final: false); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("formulas tab flush on close: " + ex.Message); } }
             _timer.Dispose();
         }
         base.Dispose(disposing); // the embedded preview is a child control, so it is disposed (and unhooked) with the tab
@@ -143,7 +149,11 @@ sealed partial class FormulasTab : UserControl
 
     void Commit(Func<FormulaDef, FormulaDef> edit)
     {
-        if (_selected is not { } id) return;
+        if (_selected is { } id) CommitFor(id, edit);
+    }
+
+    void CommitFor(string id, Func<FormulaDef, FormulaDef> edit)
+    {
         _selfEdit = true;
         try { _s.UpdateRules(p => p with { Formulas = p.Formulas.Select(f => f.Id == id ? edit(f) : f).ToList() }); }
         finally { _selfEdit = false; }
@@ -159,15 +169,18 @@ sealed partial class FormulasTab : UserControl
 
     void OnUi(Action a)
     {
-        if (IsDisposed || !IsHandleCreated) return;
-        if (InvokeRequired) BeginInvoke(new Action(() => { if (!IsDisposed) Run(a); }));
-        else Run(a);
+        if (IsDisposed) return;
+        if (!InvokeRequired) { Run(a); return; } // acts directly even before the handle exists, so never-visited tabs stay current
+        if (!IsHandleCreated) { _dirty = true; return; }
+        BeginInvoke(new Action(() => { if (!IsDisposed) Run(a); }));
     }
 
     // ---------- list ----------
 
     void Reload()
     {
+        _dirty = false;
+        if (_timer.Enabled) FlushPending(final: false); // typed text is never overwritten by an outside change
         var pack = _s.Rules;
         var previous = _selected;
         _loadingUi = true;
@@ -182,7 +195,6 @@ sealed partial class FormulasTab : UserControl
             _selected = idx >= 0 ? _ids[idx] : null;
         }
         finally { _loadingUi = false; }
-        if (_selected != previous) _declined.Clear();
         LoadDetails();
         RebuildBindings();
         RebuildOutputs();
@@ -195,7 +207,6 @@ sealed partial class FormulasTab : UserControl
         if (_loadingUi) return;
         FlushPending(final: true);
         _selected = _list.SelectedIndex >= 0 && _list.SelectedIndex < _ids.Count ? _ids[_list.SelectedIndex] : null;
-        _declined.Clear();
         LoadDetails();
         RebuildBindings();
         RebuildOutputs();
@@ -206,6 +217,7 @@ sealed partial class FormulasTab : UserControl
     {
         var name = InputDialog.Ask(this, "New formula", "Name of the new formula:", "Formula " + (_ids.Count + 1));
         if (string.IsNullOrWhiteSpace(name) || _s.Rules == null) return;
+        if (NameRules.Problem(_s.Rules.Formulas.Select(x => x.Name), name, null) is { } bad) { MessageBox.Show(this, bad, "New formula", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
         var f = new FormulaDef { Id = Guid.NewGuid().ToString("N"), Name = name.Trim() };
         FlushPending(final: true);
         _s.UpdateRules(p => p with { Formulas = p.Formulas.Append(f).ToList() });
@@ -217,6 +229,8 @@ sealed partial class FormulasTab : UserControl
         if (Current is not { } f) return;
         var name = InputDialog.Ask(this, "Rename formula", "New name:", f.Name);
         if (string.IsNullOrWhiteSpace(name)) return;
+        if (NameRules.Problem(_s.Rules!.Formulas.Select(x => x.Name), name, f.Name) is { } bad) { MessageBox.Show(this, bad, "Rename formula", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        FlushPending(final: false);
         Commit(x => FormulaEdit.Rename(x, name.Trim()));
         Reload();
     }
@@ -267,7 +281,10 @@ sealed partial class FormulasTab : UserControl
         _text.ScrollToCaret();
     }
 
-    /// <summary>Commits text and AppliesTo. A parse error does not block saving (the validator reports it). Dropping a configured binding is only asked on the final flush.</summary>
+    /// <summary>
+    /// Commits text and AppliesTo. A parse error does not block saving (the validator reports it). Bindings of variables that left the text are kept
+    /// (shown as unused) unless they were never configured; the final flush asks once whether to remove the configured ones.
+    /// </summary>
     void FlushPending(bool final)
     {
         _timer.Stop();
@@ -275,30 +292,41 @@ sealed partial class FormulasTab : UserControl
         var text = _text.Text;
         var apply = _applies.Text;
         var textChanged = f.Text != text;
-        var appliesChanged = (f.AppliesTo ?? "") != apply.Trim();
-        if (!textChanged && !appliesChanged && !(final && _declined.Count > 0)) return;
-        var analysis = FormulaEdit.Analyze(text);
-        var keep = true;
-        if (analysis.Error == null && textChanged)
+        if (textChanged || (f.AppliesTo ?? "") != apply.Trim())
         {
-            var asked = FormulaEdit.Stale(f, analysis.Variables).Where(FormulaEdit.IsConfigured).Where(b => !_declined.Contains(b.Variable)).ToList();
-            if (final && asked.Count > 0)
+            var analysis = FormulaEdit.Analyze(text);
+            Commit(x =>
             {
-                var names = string.Join(", ", asked.Select(b => b.Variable));
-                keep = MessageBox.Show(this, $"The variable(s) {names} are no longer in the formula. Remove their settings (kind, target, details)?", "Remove bindings",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes;
-                if (keep) foreach (var b in asked) _declined.Add(b.Variable);
-            }
+                var y = FormulaEdit.SetAppliesTo(FormulaEdit.SetText(x, text), apply);
+                return analysis.Error != null || !textChanged ? y : FormulaEdit.Sync(y, analysis.Variables, keepConfigured: true).Formula;
+            });
+            if (analysis.Error == null && textChanged) RebuildBindings();
         }
-        var rebuild = false;
-        Commit(x =>
+        if (final) AskRemoveUnused(f.Id);
+    }
+
+    /// <summary>Asks once per formula and variable. Deferred: never a modal box inside a Leave or selection handler.</summary>
+    void AskRemoveUnused(string id)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        BeginInvoke(new Action(() =>
         {
-            var y = FormulaEdit.SetAppliesTo(FormulaEdit.SetText(x, text), apply);
-            if (analysis.Error != null || !textChanged) return y;
-            rebuild = true;
-            return FormulaEdit.Sync(y, analysis.Variables, keepConfigured: keep).Formula;
-        });
-        if (rebuild) RebuildBindings();
+            if (IsDisposed) return;
+            Run(() =>
+            {
+                if (_s.Rules?.ById<FormulaDef>(id) is not { } f) return;
+                var asked = FormulaEdit.Unused(f).Where(FormulaEdit.IsConfigured).Where(b => !_declined.Contains(id + "|" + b.Variable)).ToList();
+                if (asked.Count == 0) return;
+                var names = string.Join(", ", asked.Select(b => b.Variable));
+                if (MessageBox.Show(this, $"In \"{f.Name}\", the variable(s) {names} are no longer in the formula. Remove their settings (kind, target, details)?", "Remove unused bindings",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
+                {
+                    CommitFor(id, FormulaEdit.RemoveUnused);
+                    if (_selected == id) RebuildBindings();
+                }
+                else foreach (var b in asked) _declined.Add(id + "|" + b.Variable);
+            });
+        }));
     }
 
     // ---------- rule ref ----------

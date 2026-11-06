@@ -52,6 +52,19 @@ public static class FormulaEdit
     public static IReadOnlyList<VariableBinding> Stale(FormulaDef f, IReadOnlyList<string> variables) =>
         f.Bindings.Where(b => !variables.Contains(b.Variable, StringComparer.Ordinal)).ToList();
 
+    /// <summary>Bindings whose variable is not in the formula's current text.</summary>
+    public static IReadOnlyList<VariableBinding> Unused(FormulaDef f)
+    {
+        var a = Analyze(f.Text);
+        return a.Error != null ? Array.Empty<VariableBinding>() : Stale(f, a.Variables);
+    }
+
+    public static FormulaDef RemoveUnused(FormulaDef f)
+    {
+        var a = Analyze(f.Text);
+        return a.Error != null ? f : Sync(f, a.Variables).Formula;
+    }
+
     /// <summary>Bindings follow the variables in text order; new ones are Input. Removed ones are reported (configured ones are kept on request).</summary>
     public static SyncResult Sync(FormulaDef f, IReadOnlyList<string> variables, bool keepConfigured = false)
     {
@@ -264,5 +277,18 @@ public static class PieceChoices
             list.Add(new PieceEntry(p.Id, $"{name} ({mapName(p.MapId)})"));
         }
         return list;
+    }
+}
+
+/// <summary>Names must be unique (case-insensitive) and non-empty, because formulas are matched to them by name in places.</summary>
+public static class NameRules
+{
+    /// <summary>Null when acceptable; otherwise a message. currentName is the entity's own present name (allowed to stay).</summary>
+    public static string? Problem(IEnumerable<string> existingNames, string? name, string? currentName)
+    {
+        var n = (name ?? "").Trim();
+        if (n.Length == 0) return "The name cannot be empty.";
+        if (currentName != null && string.Equals(currentName.Trim(), n, StringComparison.OrdinalIgnoreCase)) return null;
+        return existingNames.Any(e => string.Equals(e.Trim(), n, StringComparison.OrdinalIgnoreCase)) ? $"There is already an item named \"{n}\"." : null;
     }
 }

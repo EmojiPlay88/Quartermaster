@@ -177,4 +177,23 @@ public class FormulaEditTests
         Assert.Equal("Panzer (Board)", Assert.Single(e).Display);
         Assert.Equal("p1", e[0].PieceId);
     }
+
+    [Fact]
+    public void RemoveUnused_drops_every_stale_binding_only()
+    {
+        var f = F("C", new VariableBinding { Variable = "A", Kind = BindingKind.Table, TableId = "t" }, new VariableBinding { Variable = "C", Kind = BindingKind.Input });
+        var g = FormulaEdit.RemoveUnused(f);
+        Assert.Equal(new[] { "C" }, g.Bindings.Select(b => b.Variable));
+        Assert.Equal(new[] { "A" }, FormulaEdit.Unused(f).Select(b => b.Variable));
+    }
+
+    [Fact]
+    public void NameRules_reject_empty_and_duplicate_names_case_insensitively()
+    {
+        var existing = new[] { "Fuel", "Ammo" };
+        Assert.Null(NameRules.Problem(existing, "Supply", "x"));
+        Assert.NotNull(NameRules.Problem(existing, "  ", "x"));
+        Assert.NotNull(NameRules.Problem(existing, "fuel", "x"));
+        Assert.Null(NameRules.Problem(existing, "FUEL", "Fuel")); // unchanged / own name
+    }
 }

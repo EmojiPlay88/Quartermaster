@@ -133,7 +133,9 @@ sealed class FormulaDialog : Form
     }
 
     /// <summary>The pack changed while open: rebuild the layout from the new pack, or close if the formula is gone.</summary>
-    void OnRulesChanged() => OnUi(() =>
+    void OnRulesChanged() => OnUi(ApplyPack);
+
+    void ApplyPack()
     {
         try
         {
@@ -154,7 +156,7 @@ sealed class FormulaDialog : Form
         {
             _status.Text = "Could not update: " + ex.Message;
         }
-    });
+    }
 
     /// <summary>Builds the form view for the formula and swaps it in; a view made after the window was scaled is scaled to match.</summary>
     void ReplaceView(FormulaDef f)
@@ -230,7 +232,7 @@ sealed class FormulaDialog : Form
         if (formulaId == _formulaId) return;
         _formulaId = formulaId;
         _model.PieceId = _pieceId;
-        OnRulesChanged();
+        ApplyPack(); // direct: must not depend on the handle
     }
 
     /// <summary>Embedded preview: run against another piece (null = no unit). Typed values are kept.</summary>

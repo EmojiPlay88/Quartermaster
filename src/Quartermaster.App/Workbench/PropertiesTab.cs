@@ -15,7 +15,7 @@ sealed class PropertiesTab : UserControl
     readonly Label _status = new() { Dock = DockStyle.Bottom, AutoSize = true, ForeColor = Color.Firebrick };
     readonly List<string> _propIds = new(), _holderIds = new();
     IReadOnlyList<string>? _fields;
-    bool _rebuilding, _selfEdit;
+    bool _rebuilding, _selfEdit, _dirty;
 
     public PropertiesTab(ModuleSession s)
     {
@@ -70,6 +70,7 @@ sealed class PropertiesTab : UserControl
         Controls.Add(_status);
         HandleCreated += (_, _) => { if (split.Height > 100) split.SplitterDistance = split.Height * 60 / 100; };
 
+        VisibleChanged += (_, _) => { if (Visible && _dirty) Run(Rebuild); };
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
         Rebuild();
@@ -136,9 +137,10 @@ sealed class PropertiesTab : UserControl
 
     void OnUi(Action a)
     {
-        if (IsDisposed || !IsHandleCreated) return;
-        if (InvokeRequired) BeginInvoke(new Action(() => { if (!IsDisposed) Run(a); }));
-        else Run(a);
+        if (IsDisposed) return;
+        if (!InvokeRequired) { Run(a); return; } // direct even before the handle exists
+        if (!IsHandleCreated) { _dirty = true; return; }
+        BeginInvoke(new Action(() => { if (!IsDisposed) Run(a); }));
     }
 
     void Commit(Func<RulesPack, RulesPack> edit)
@@ -152,6 +154,7 @@ sealed class PropertiesTab : UserControl
 
     void Rebuild()
     {
+        _dirty = false;
         var pack = _s.Rules;
         _fields ??= SafeFields();
         _rebuilding = true;
@@ -209,7 +212,15 @@ sealed class PropertiesTab : UserControl
         _status.Text = "";
         switch (col)
         {
-            case 0: Commit(p => Edit(p, id, x => x with { Name = text.Trim() })); break;
+            case 0:
+                if (NameRules.Problem(_s.Rules!.Properties.Where(x => x.Id != id).Select(x => x.Name), text, null) is { } bad)
+                {
+                    _status.Text = bad + " The name was not changed.";
+                    BeginInvoke(new Action(() => Run(Rebuild)));
+                    return;
+                }
+                Commit(p => Edit(p, id, x => x with { Name = text.Trim() }));
+                break;
             case 1:
                 if (!Enum.TryParse<PropertyScope>(text, out var sc)) return;
                 Commit(p => Edit(p, id, x => x with { Scope = sc }));
@@ -240,6 +251,12 @@ sealed class PropertiesTab : UserControl
         if (_rebuilding || row < 1 || row - 1 >= _holderIds.Count) return;
         var id = _holderIds[row - 1];
         var text = Convert.ToString(_holders[col, row].Value) ?? "";
+        if (col == 0 && NameRules.Problem(_s.Rules!.Holders.Where(x => x.Id != id).Select(x => x.Name).Append(HolderDef.GlobalId), text, null) is { } bad)
+        {
+            _status.Text = bad + " The name was not changed.";
+            BeginInvoke(new Action(() => Run(Rebuild)));
+            return;
+        }
         Commit(p => p with
         {
             Holders = p.Holders.Select(h => h.Id != id ? h : col == 0 ? h with { Name = text.Trim() } : h with { Notes = text.Length == 0 ? null : text }).ToList(),

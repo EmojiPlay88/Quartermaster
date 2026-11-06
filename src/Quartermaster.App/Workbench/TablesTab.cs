@@ -200,6 +200,7 @@ sealed class TablesTab : UserControl
     {
         var name = InputDialog.Ask(this, "New table", "Name of the new table:", "Table " + (_ids.Count + 1));
         if (string.IsNullOrWhiteSpace(name) || _s.Rules == null) return;
+        if (NameRules.Problem(_s.Rules.Tables.Select(x => x.Name), name, null) is { } bad) { MessageBox.Show(this, bad, "New table", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
         var t = TableEdit.New(name.Trim(), TableKind.OneD);
         _s.UpdateRules(p => p with { Tables = p.Tables.Append(t).ToList() }); // RulesChanged reloads the list
         SelectTable(t.Id);
@@ -210,6 +211,7 @@ sealed class TablesTab : UserControl
         if (Current is not { } t) return;
         var name = InputDialog.Ask(this, "Rename table", "New name:", t.Name);
         if (string.IsNullOrWhiteSpace(name)) return;
+        if (NameRules.Problem(_s.Rules!.Tables.Select(x => x.Name), name, t.Name) is { } bad) { MessageBox.Show(this, bad, "Rename table", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
         Commit(x => x with { Name = name.Trim() });
         Reload();
     }
