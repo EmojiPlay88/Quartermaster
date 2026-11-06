@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Quartermaster.Core\Quartermaster.Core.csproj" />
@@ -7,6 +7,10 @@
   <ItemGroup>
     <PackageReference Include="SkiaSharp" Version="4.154.0" />
     <PackageReference Include="Svg.Skia" Version="5.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Quartermaster.Render.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

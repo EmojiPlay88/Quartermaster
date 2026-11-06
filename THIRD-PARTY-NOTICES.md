@@ -15,3 +15,5 @@ Ported files:
 - `src/Quartermaster.Vassal/Model/ModuleModelBuilder.cs` (board arrangement from `VASSAL/build/module/map/BoardPicker.java` default setup and `VASSAL/build/module/Map.java` setBoardBoundaries/getLocation)
 - `src/Quartermaster.Core/SaveImporter.cs` (from `VASSAL/build/module/BasicCommandEncoder.java`, `counters/Stack.java`, `counters/BasicPiece.java`, `build/module/map/BoardPicker.java`, `build/module/PlayerRoster.java`, `build/module/GameState.java`)
 - `src/Quartermaster.Core/NewGameBuilder.cs` (from `VASSAL/build/module/map/SetupStack.java` and `counters/BasicPiece.java`)
+- `src/Quartermaster.Vassal/Traits/TraitState.cs` (trait `mySetState` readers from `VASSAL/counters/` Embellishment, FreeRotator, Hideable, Obscurable, Labeler)
+- `src/Quartermaster.Render/ShapeParser.cs` (shape spec parsing from `VASSAL/counters/NonRectangular.java`)

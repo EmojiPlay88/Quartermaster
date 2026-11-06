@@ -14,10 +14,10 @@ public sealed class FixtureModule : IDisposable
     private readonly Dictionary<string, byte[]> _files = new();
     private string? _path;
 
-    public FixtureModule AddImage(string name, int w, int h)
+    public FixtureModule AddImage(string name, int w, int h, SKColor? color = null)
     {
         using var bmp = new SKBitmap(w, h);
-        bmp.Erase(new SKColor(0x40, 0x80, 0xC0));
+        bmp.Erase(color ?? new SKColor(0x40, 0x80, 0xC0));
         using var img = SKImage.FromBitmap(bmp);
         using var data = img.Encode(SKEncodedImageFormat.Png, 100);
         _files["images/" + name] = data.ToArray();
