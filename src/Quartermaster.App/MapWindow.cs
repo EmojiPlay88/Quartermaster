@@ -259,7 +259,8 @@ sealed class MapWindow : Form
 
     void Execute(IEnumerable<GameCommand> commands)
     {
-        foreach (var c in commands) _s.Game?.Execute(c);
+        if (_s.Game is not { } game) return;
+        foreach (var c in commands) game.Execute(CommandLog.Prepare(c, game.State, _s.Model));
     }
 
     void RunAction(PieceAction action, PieceInstance clicked)

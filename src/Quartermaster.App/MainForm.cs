@@ -12,6 +12,12 @@ sealed class MainForm : Form
     readonly ModuleTreePanel _tree = new() { Dock = DockStyle.Left, Width = 220 };
     readonly Splitter _splitter = new() { Dock = DockStyle.Left, Width = 4 };
     readonly DocumentTabStrip _tabs = new();
+    readonly Panel _logHost = new() { Dock = DockStyle.Bottom, Height = 170, Visible = false };
+    readonly Splitter _logSplitter = new() { Dock = DockStyle.Bottom, Height = 4, Visible = false };
+    readonly ToolStripMenuItem _viewLog = new("&Log") { ShortcutKeys = Keys.Control | Keys.Shift | Keys.L };
+    LogPanel? _log;
+    LogFloatForm? _logFloat;
+    bool _logWanted = true;
     readonly MenuStrip _menu = new();
     readonly ToolStrip _toolbar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
     readonly StatusStrip _status = new() { RenderMode = ToolStripRenderMode.System };
@@ -62,6 +68,8 @@ sealed class MainForm : Form
 
         // Dock order: the last control added is docked first (menu on top, then toolbar, status, left panel).
         Controls.Add(_tabs); // added first so it docks after the tree and spans only the MDI area
+        Controls.Add(_logSplitter); // the log docks at the bottom of the MDI area, beside the tree
+        Controls.Add(_logHost);
         Controls.Add(_splitter);
         Controls.Add(_tree);
         Controls.Add(_status);
@@ -76,6 +84,7 @@ sealed class MainForm : Form
         _tabs.TabPopOutRequested += (f, at) => Guard(() => _wm.PopOut(f, at));
         _tabs.TabsCloseRequested += fs => { foreach (var f in fs) if (!f.IsDisposed) f.Close(); };
         _showGrid.CheckedChanged += (_, _) => GridVisibleChanged?.Invoke();
+        _viewLog.Click += (_, _) => Guard(ToggleLog);
         _viewTree.CheckedChanged += (_, _) => _tree.Visible = _splitter.Visible = _viewTree.Checked;
         UpdateUi();
         UpdateTitle();
@@ -138,6 +147,8 @@ sealed class MainForm : Form
         view.DropDownItems.Add(_viewTree);
         Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, Keys.Control | Keys.D, needsModule: true);
         view.DropDownItems.Add(_showGrid);
+        _needsGame.Add(_viewLog);
+        view.DropDownItems.Add(_viewLog);
         _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, Keys.Control | Keys.L));
 
         var tools = new ToolStripMenuItem("&Tools");
@@ -295,6 +306,7 @@ sealed class MainForm : Form
         _session.GameReplaced += OnGameReplaced;
         _session.RulesChanged += OnRulesChanged;
         _tree.Load(_session.Model);
+        CreateLog();
         _sbModule.Text = $"{_session.Model.Name} {_session.Model.Version}".Trim();
         _sbLocation.Text = "-";
         _sbZoom.Text = "-";
@@ -362,6 +374,7 @@ sealed class MainForm : Form
     void CloseSession()
     {
         _wm.EndModule(); // layout is written before the windows go away
+        DestroyLog();
         CloseAllWindows();
         if (_session == null) return;
         _session.Log.Added -= OnLogAdded;
@@ -370,6 +383,85 @@ sealed class MainForm : Form
         _session.Dispose();
         _session = null;
         _tree.Clear();
+    }
+
+    // ---------- log panel ----------
+
+    void CreateLog()
+    {
+        if (_session == null) return;
+        _log = new LogPanel(_session, CentreOnPiece) { Dock = DockStyle.Fill };
+        _log.PopToggleRequested += () => Guard(() => { if (_logFloat == null) PopOutLog(); else DockLog(); });
+        _logHost.Controls.Add(_log);
+        ApplyLogVisibility();
+    }
+
+    void DestroyLog()
+    {
+        var f = _logFloat;
+        _logFloat = null;
+        f?.CloseForReal();
+        _log?.Dispose();
+        _log = null;
+        _logHost.Controls.Clear();
+        _logHost.Visible = _logSplitter.Visible = false;
+        _viewLog.Checked = false;
+    }
+
+    void ApplyLogVisibility()
+    {
+        var docked = _log != null && _logFloat == null && _logWanted;
+        _logHost.Visible = _logSplitter.Visible = docked;
+        _viewLog.Checked = _log != null && (_logFloat != null || _logWanted);
+    }
+
+    /// <summary>View, Log: show or collapse the bottom panel; when it is floating, bring it back to the bottom dock instead.</summary>
+    void ToggleLog()
+    {
+        if (_log == null) return;
+        if (_logFloat != null) { _logWanted = true; DockLog(); return; }
+        _logWanted = !_logWanted;
+        ApplyLogVisibility();
+    }
+
+    void PopOutLog()
+    {
+        if (_log == null || _logFloat != null) return;
+        var f = new LogFloatForm(DockLog);
+        _logHost.Controls.Remove(_log);
+        _log.Dock = DockStyle.Fill;
+        f.Controls.Add(_log);
+        _log.SetFloating(true);
+        _logFloat = f;
+        _wm.Register(f, "log");
+        var saved = _wm.Saved("log") is { Bounds.IsEmpty: false } s ? s
+            : new SavedWindow(true, new Rectangle(Left + 40, Bottom - 320, Math.Max(480, Width - 80), 260), false, DeviceDpi);
+        _wm.ShowFloating(f, saved);
+        ApplyLogVisibility();
+    }
+
+    void DockLog()
+    {
+        if (_logFloat is not { } f) return;
+        _logFloat = null;
+        if (_log != null)
+        {
+            f.Controls.Remove(_log);
+            _logHost.Controls.Add(_log);
+            _log.SetFloating(false);
+        }
+        f.CloseForReal();
+        ApplyLogVisibility();
+    }
+
+    /// <summary>Opens or activates the piece's map and scrolls it to the piece (used by double-clicking a log row).</summary>
+    public void CentreOnPiece(string pieceId)
+    {
+        if (_session?.Game is not { } game || !game.State.Pieces.TryGetValue(pieceId, out var piece)) return;
+        var map = _session.Model.Maps.FirstOrDefault(m => m.Id == piece.MapId) ?? _session.Model.Maps.FirstOrDefault(m => m.Name == piece.MapId);
+        if (map == null || OpenMap(map, false) is not { } w) return;
+        w.Canvas.CentreOn(piece.Pos);
+        w.Canvas.SelectOnly(pieceId);
     }
 
     void CloseAllWindows()
@@ -830,6 +922,7 @@ sealed class MainForm : Form
             else Guard(() => SaveScreenshot(fl, _opts.ScreenshotFloat, false));
         }
         if (_opts.FloatMainMap) Guard(SmokeDockRoundTrip);
+        if (_opts.ScreenshotLog != null) Guard(SmokeLog);
         Close();
     }
 
@@ -844,7 +937,9 @@ sealed class MainForm : Form
     void RoundTrip(Form f)
     {
         var wasFloating = _wm.IsFloating(f);
-        bool Floated() => !_tabs.Tabs.Contains(f) && f.MdiParent == null && _wm.IsFloating(f) && f.Text.EndsWith("— Quartermaster");
+        const string suffix = " — Quartermaster";
+        bool Floated() => !_tabs.Tabs.Contains(f) && f.MdiParent == null && _wm.IsFloating(f) && f.Text.EndsWith(suffix)
+            && f.Text.IndexOf(suffix, StringComparison.Ordinal) == f.Text.Length - suffix.Length; // exactly one suffix
         bool Docked() => _tabs.Tabs.Contains(f) && f.MdiParent == this && !_wm.IsFloating(f);
         if (!wasFloating) _wm.PopOut(f);
         var a = Floated();
@@ -856,6 +951,34 @@ sealed class MainForm : Form
         var ok = a && b && c && (wasFloating ? Floated() : Docked());
         Program.AppLog($"smoke: dock/pop-out round trip {(ok ? "ok" : "FAILED")} ({f.Text}; floated {a}; docked {b}; refloated {c})");
         if (!ok) Program.ExitCode = 1;
+    }
+
+    /// <summary>Issues a 2d6 roll and one move (both stamped like real UI commands) so the log is not empty, then saves the panel screenshot.</summary>
+    void SmokeLog()
+    {
+        if (_session?.Game is not { } game || _log == null)
+        {
+            Program.AppLog("smoke: --screenshot-log given but there is no game or log panel.");
+            Program.ExitCode = 1;
+            return;
+        }
+        game.Execute(CommandLog.Stamp(new RollDice("Smoke attack", 2, 6, new[] { 3, 4 })));
+        var piece = game.State.Pieces.Values.FirstOrDefault();
+        if (piece != null)
+            game.Execute(CommandLog.Prepare(new MovePieces(new[] { piece.Id }, piece.MapId, new PointD(piece.Pos.X + 50, piece.Pos.Y - 20), null), game.State, _session.Model));
+        else Program.AppLog("smoke: no piece to move for the log screenshot.");
+        PopOutLog();
+        var floated = _logFloat is { } lf && _log.Parent == lf && lf.Text == "Log — Quartermaster" && _wm.IsFloating(lf);
+        DockLog();
+        var docked = _logFloat == null && _log.Parent == _logHost && _logHost.Visible && !_wm.Floating.Any(x => x is LogFloatForm);
+        Program.AppLog($"smoke: log pop-out/dock {(floated && docked ? "ok" : "FAILED")} (floated {floated}; docked {docked})");
+        if (!floated || !docked) Program.ExitCode = 1;
+        _logWanted = true;
+        ApplyLogVisibility();
+        PerformLayout();
+        Update();
+        Program.AppLog($"smoke: log has {game.State.Log.Count} entr(y/ies)");
+        _log.SaveScreenshot(_opts.ScreenshotLog!);
     }
 
     /// <summary>Main form via DrawToBitmap, with each visible map canvas re-rendered by Skia on top of its screen area.</summary>

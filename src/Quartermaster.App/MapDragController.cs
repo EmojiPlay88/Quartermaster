@@ -194,7 +194,7 @@ sealed class MapDragController : IDisposable
         foreach (var g in groups)
         {
             var move = new MovePieces(g.Ids, _map.Id, g.Pos, g.StackOnto);
-            _guard(() => game!.Execute(move));
+            _guard(() => game!.Execute(CommandLog.Prepare(move, game.State, _s.Model)));
         }
     }
 

@@ -293,7 +293,7 @@ sealed class FormulaDialog : Form
     {
         if (_debounce.Enabled) { _debounce.Stop(); Recalc(); }
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
-        foreach (var c in runner.Commands(v.Trace, null)) game.Execute(c);
+        foreach (var c in runner.Commands(v.Trace, null)) game.Execute(CommandLog.Stamp(c));
         if (!_embedded) Close();
     }
 

@@ -97,6 +97,14 @@ sealed class MapCanvas : SKControl
         Invalidate();
     }
 
+    /// <summary>Scrolls so the map point is in the middle of the view (zoom unchanged).</summary>
+    public void CentreOn(PointD p)
+    {
+        FitView.Center(View, p, new SKSize(Math.Max(Width, 1), Math.Max(Height, 1)));
+        ReportStatus(null);
+        Invalidate();
+    }
+
     public void ZoomTo100() => ZoomCentered(1f);
     public void ZoomFit()
     {

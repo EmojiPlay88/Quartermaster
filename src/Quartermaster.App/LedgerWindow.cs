@@ -303,7 +303,7 @@ sealed class LedgerWindow : Form
         var note = InputDialog.Ask(this, "Manual change", $"Why is {prop.Name} being set to {Fmt(after)}? (required)");
         if (string.IsNullOrWhiteSpace(note)) { Reload(); return; }
         var before = Ledger.GetOrDefault(game.State, key, prop);
-        game.Execute(new LedgerDelta(key, prop.Id, before, after, "manual", null, null, note.Trim(), null));
+        game.Execute(CommandLog.Stamp(new LedgerDelta(key, prop.Id, before, after, "manual", null, null, note.Trim(), null)));
     }
 
     void Warn(string message)

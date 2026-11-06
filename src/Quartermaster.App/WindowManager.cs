@@ -105,6 +105,12 @@ sealed class WindowManager
         void AfterReparent();
     }
 
+    /// <summary>For floating windows that do not dock as MDI tabs (the log panel): the manager asks the window to go home instead.</summary>
+    internal interface ICustomDock
+    {
+        void DockBack();
+    }
+
     sealed class FloatState
     {
         public bool ShowIcon, KeyPreview, MinimizeBox, MaximizeBox, ShowInTaskbar;
@@ -279,7 +285,6 @@ sealed class WindowManager
         f.Icon = _host.Icon;
         f.MinimizeBox = f.MaximizeBox = true;
         ApplyBounds(f, wanted, wantedDpi);
-        f.Text = TitleOf(f) + " — Quartermaster";
         f.KeyPreview = true;
         f.KeyDown += FloatKeyDown;
         f.ResizeBegin += OnResizeBegin;
@@ -287,6 +292,8 @@ sealed class WindowManager
         st.Hook = new SysMenuHook(f, () => Dock(f));
         _float[f] = st;
         _order.Add(f);
+        // Set the caption only once the form is tracked as floating, so OnTextChanged strips the suffix instead of storing it as the base title.
+        f.Text = TitleOf(f) + FloatSuffix;
         if (maximized) f.WindowState = FormWindowState.Maximized;
         FloatingChanged?.Invoke();
     }
@@ -297,6 +304,7 @@ sealed class WindowManager
     {
         if (f.IsDisposed || !_float.TryGetValue(f, out var st)) return;
         Record(f); // remembers the floating bounds for the next pop-out
+        if (f is ICustomDock custom) { custom.DockBack(); return; }
         _float.Remove(f);
         _order.Remove(f);
         st.Hook?.Detach();

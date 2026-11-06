@@ -1,0 +1,219 @@
+using Quartermaster.Core;
+using Quartermaster.Render;
+
+namespace Quartermaster.App;
+
+/// <summary>
+/// The game log: one row per <see cref="LogEntry"/>, filterable by kind and text, copyable and exportable. The list is virtual, refreshes are
+/// debounced 150 ms, and the view follows new rows unless the user has scrolled up. Hosted docked at the bottom of the main window or in a
+/// floating <see cref="LogFloatForm"/>; the same instance moves between them.
+/// </summary>
+sealed class LogPanel : UserControl
+{
+    readonly ModuleSession _s;
+    readonly Action<string> _centre;
+    readonly ToolStrip _bar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
+    readonly Dictionary<string, ToolStripButton> _kindButtons = new();
+    readonly ToolStripTextBox _search = new() { AutoSize = false, Width = 140 };
+    readonly ToolStripButton _popButton = new("Pop out") { Alignment = ToolStripItemAlignment.Right };
+    readonly ListView _list = new()
+    {
+        Dock = DockStyle.Fill, View = View.Details, VirtualMode = true, FullRowSelect = true, HideSelection = false,
+        MultiSelect = true, GridLines = true, HeaderStyle = ColumnHeaderStyle.Nonclickable,
+    };
+    readonly System.Windows.Forms.Timer _debounce = new() { Interval = 150 };
+    GameSession? _attached;
+    IReadOnlyList<LogEntry> _rows = Array.Empty<LogEntry>();
+
+    public LogPanel(ModuleSession s, Action<string> centreOnPiece)
+    {
+        _s = s;
+        _centre = centreOnPiece;
+        _list.Columns.Add("Time", 64);
+        _list.Columns.Add("Kind", 60);
+        _list.Columns.Add("Text", 600);
+
+        foreach (var kind in LogFilter.AllKinds)
+        {
+            var b = new ToolStripButton(kind) { CheckOnClick = true, Checked = true, DisplayStyle = ToolStripItemDisplayStyle.Text };
+            b.CheckedChanged += (_, _) => Refresh_();
+            _kindButtons[kind] = b;
+            _bar.Items.Add(b);
+        }
+        _bar.Items.Add(new ToolStripSeparator());
+        _bar.Items.Add(new ToolStripLabel("Search:"));
+        _search.TextChanged += (_, _) => Refresh_();
+        _bar.Items.Add(_search);
+        _bar.Items.Add(new ToolStripSeparator());
+        _bar.Items.Add(new ToolStripButton("Copy", null, (_, _) => Guard(Copy)));
+        _bar.Items.Add(new ToolStripButton("Export log…", null, (_, _) => Guard(Export)));
+        _popButton.Click += (_, _) => PopToggleRequested?.Invoke();
+        _bar.Items.Add(_popButton);
+
+        _list.RetrieveVirtualItem += OnRetrieve;
+        _list.DoubleClick += (_, _) => Guard(CentreSelected);
+        _list.Resize += (_, _) => FitTextColumn();
+        _debounce.Tick += (_, _) => { _debounce.Stop(); Guard(Reload); };
+
+        Controls.Add(_list);
+        Controls.Add(_bar);
+        Name = "LogPanel";
+        _s.GameReplaced += OnGameReplaced;
+        Attach();
+        Reload();
+    }
+
+    /// <summary>Raised by the Pop out / Dock button; the host moves the panel.</summary>
+    public event Action? PopToggleRequested;
+
+    public void SetFloating(bool floating) => _popButton.Text = floating ? "Dock" : "Pop out";
+    public int RowCountForSmoke => _list.VirtualListSize;
+
+    // ---------- game wiring ----------
+
+    void Attach()
+    {
+        if (_attached != null) _attached.Changed -= OnGameChanged;
+        _attached = _s.Game;
+        if (_attached != null) _attached.Changed += OnGameChanged;
+    }
+
+    void OnGameReplaced() { Attach(); Refresh_(); }
+    void OnGameChanged(GameCommand _) => Refresh_();
+
+    /// <summary>Schedules a debounced reload on the UI thread (events may arrive from any thread).</summary>
+    void Refresh_()
+    {
+        try
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                if (IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) { _debounce.Stop(); _debounce.Start(); } });
+            }
+            else { _debounce.Stop(); _debounce.Start(); }
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { /* shutting down */ }
+    }
+
+    LogFilterSpec Spec() =>
+        new(_kindButtons.Where(k => k.Value.Checked).Select(k => k.Key).ToHashSet(), _search.Text ?? "");
+
+    /// <summary>Recomputes the visible rows now (also used by smoke so the screenshot does not wait for the debounce).</summary>
+    public void Reload()
+    {
+        var log = _s.Game?.State.Log ?? (IReadOnlyList<LogEntry>)Array.Empty<LogEntry>();
+        var follow = IsAtBottom();
+        _rows = LogFilter.Apply(log, Spec());
+        _list.VirtualListSize = _rows.Count;
+        _list.Invalidate();
+        if (follow && _rows.Count > 0) _list.EnsureVisible(_rows.Count - 1);
+    }
+
+    /// <summary>True when the last row is in view (or the list is empty): new rows then scroll into view; a user who scrolled up is left alone.</summary>
+    bool IsAtBottom()
+    {
+        var n = _list.VirtualListSize;
+        if (n == 0 || !_list.IsHandleCreated) return true;
+        return _list.GetItemRect(n - 1).Bottom <= _list.ClientSize.Height + 1;
+    }
+
+    void FitTextColumn()
+    {
+        if (_list.Columns.Count == 3)
+            _list.Columns[2].Width = Math.Max(120, _list.ClientSize.Width - _list.Columns[0].Width - _list.Columns[1].Width - 2);
+    }
+
+    void OnRetrieve(object? s, RetrieveVirtualItemEventArgs e)
+    {
+        if (e.ItemIndex < 0 || e.ItemIndex >= _rows.Count) { e.Item = new ListViewItem(new[] { "", "", "" }); return; }
+        var r = _rows[e.ItemIndex];
+        e.Item = new ListViewItem(new[] { LogFilter.Time(r), LogFilter.DisplayKind(r.Kind), r.Text ?? "" });
+    }
+
+    // ---------- actions ----------
+
+    IReadOnlyList<LogEntry> SelectedOrAll()
+    {
+        var sel = _list.SelectedIndices.Cast<int>().Where(i => i < _rows.Count).OrderBy(i => i).Select(i => _rows[i]).ToList();
+        return sel.Count > 0 ? sel : _rows;
+    }
+
+    void Copy()
+    {
+        var text = LogFilter.ToText(SelectedOrAll());
+        if (text.Length > 0) Clipboard.SetText(text);
+    }
+
+    void Export()
+    {
+        using var dlg = new SaveFileDialog { Title = "Export log", Filter = "Text file (*.txt)|*.txt|HTML file (*.html)|*.html", FileName = "game-log" };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        var rows = _rows;
+        File.WriteAllText(dlg.FileName, dlg.FileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ? LogFilter.ToHtml(rows) : LogFilter.ToText(rows), System.Text.Encoding.UTF8);
+    }
+
+    void CentreSelected()
+    {
+        var i = _list.SelectedIndices.Count > 0 ? _list.SelectedIndices[0] : -1;
+        if (i < 0 || i >= _rows.Count || _rows[i].PieceId is not { Length: > 0 } id) return;
+        _centre(id);
+    }
+
+    void Guard(Action a)
+    {
+        try { a(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Program.AppLog("log panel: " + ex.Message);
+            _s.Log.Add(Quartermaster.Vassal.DiagnosticSeverity.Warning, "log", "The log panel could not complete an action: " + ex.Message);
+        }
+    }
+
+    public void SaveScreenshot(string path)
+    {
+        Reload();
+        using var bmp = new Bitmap(Math.Max(Width, 1), Math.Max(Height, 1));
+        DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        Program.AppLog("smoke: log screenshot saved to " + path);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _s.GameReplaced -= OnGameReplaced;
+            if (_attached != null) _attached.Changed -= OnGameChanged;
+            _debounce.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>Top-level window for a popped-out <see cref="LogPanel"/>. Closing it, or "Dock to Main Window", returns the panel to the main window.</summary>
+sealed class LogFloatForm : Form, WindowManager.ICustomDock
+{
+    readonly Action _dockBack;
+    bool _closingForReal;
+
+    public LogFloatForm(Action dockBack)
+    {
+        _dockBack = dockBack;
+        Text = "Log";
+        ShowIcon = false;
+    }
+
+    /// <summary>Closes the window without sending the panel home first (the host already moved it, or is shutting down).</summary>
+    public void CloseForReal() { _closingForReal = true; Close(); }
+
+    public void DockBack() => _dockBack();
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_closingForReal && !e.Cancel && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; BeginInvoke(_dockBack); return; }
+        base.OnFormClosing(e);
+    }
+}
