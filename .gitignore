@@ -1,0 +1,7 @@
+*.vmod
+*.vsav
+*.qrules
+*.qturn
+.superpowers/
+bin/
+obj/
