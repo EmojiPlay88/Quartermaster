@@ -20,6 +20,7 @@ sealed class PdfViewerControl : UserControl
     readonly ToolStripComboBox? _docs;
     readonly NumericUpDown? _pageBox;
     readonly List<DocumentDef> _docList = new();
+    readonly InitGate _gate = new();
     WebView2? _web;
     string? _file;
     int _page = 1;
@@ -143,14 +144,16 @@ sealed class PdfViewerControl : UserControl
 
     void StartInit()
     {
-        if (IsHandleCreated) BeginInvoke(new Action(async () => await InitAsync())); // InitAsync has its own guarded error handling
-        else HandleCreated += OnFirstHandle;
-    }
-
-    void OnFirstHandle(object? s, EventArgs e)
-    {
-        HandleCreated -= OnFirstHandle;
-        StartInit();
+        if (_web == null) return;
+        var web = _web;
+        var ticket = _gate.Next(); // one init per control instance; a newer ticket makes older inits stale
+        void Go() => _ = InitAsync(web, ticket); // InitAsync has its own guarded error handling
+        if (IsHandleCreated) BeginInvoke(new Action(Go));
+        else
+        {
+            void OnHandle(object? s, EventArgs e) { HandleCreated -= OnHandle; Go(); }
+            HandleCreated += OnHandle;
+        }
     }
 
     // Moving between MDI and desktop recreates the handle, which can leave a WebView2 control blank. The control is
@@ -158,6 +161,7 @@ sealed class PdfViewerControl : UserControl
     public void BeforeReparent()
     {
         if (_web == null || IsDisposed) return;
+        _gate.Invalidate();
         _body.Controls.Remove(_web);
         _web.Dispose();
         _web = null;
@@ -169,30 +173,33 @@ sealed class PdfViewerControl : UserControl
         if (!_rebuildWeb || IsDisposed) return;
         _rebuildWeb = false;
         AddWeb();
-        BeginInvoke(new Action(async () => await InitAsync()));
+        StartInit();
     }
 
     static string UserDataFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster", "webview2");
 
-    async Task InitAsync()
+    bool Stale(WebView2 web, int ticket) =>
+        IsDisposed || Disposing || !_gate.IsCurrent(ticket) || !ReferenceEquals(web, _web);
+
+    async Task InitAsync(WebView2 web, int ticket)
     {
         try
         {
-            if (_web == null || IsDisposed || Disposing) return;
+            if (Stale(web, ticket)) return;
             var env = await CoreWebView2Environment.CreateAsync(null, UserDataFolder);
-            if (IsDisposed || Disposing || _web == null) return;
-            await _web.EnsureCoreWebView2Async(env);
-            if (IsDisposed || Disposing) return;
+            if (Stale(web, ticket)) return;
+            await web.EnsureCoreWebView2Async(env);
+            if (Stale(web, ticket)) return;
             Navigate();
         }
         catch (WebView2RuntimeNotFoundException)
         {
-            if (!IsDisposed && !Disposing) ShowMissingRuntime();
+            if (!Stale(web, ticket)) ShowMissingRuntime();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            if (IsDisposed || Disposing) return;
+            if (Stale(web, ticket)) return; // superseded or disposed: not an error
             Fail("The document viewer could not be started: " + ex.Message, ex);
         }
     }
@@ -213,6 +220,7 @@ sealed class PdfViewerControl : UserControl
 
     void ClearBody()
     {
+        _gate.Invalidate();
         if (_web != null) { _body.Controls.Remove(_web); _web.Dispose(); _web = null; }
         foreach (var c in _body.Controls.Cast<Control>().ToList()) { _body.Controls.Remove(c); c.Dispose(); }
     }
