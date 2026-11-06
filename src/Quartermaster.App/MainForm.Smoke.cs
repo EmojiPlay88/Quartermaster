@@ -161,6 +161,14 @@ sealed partial class MainForm
             return;
         }
         game.Execute(CommandLog.Stamp(new RollDice("Smoke attack", 2, 6, new[] { 3, 4 })));
+        if (_dice != null)
+        {
+            var rolled = _dice.RollSpec(new DiceSpec(2, 6, 0), "Roll");
+            if (_session.Model.Dice.FirstOrDefault(d => d.Faces.Count >= 2) is { } die) rolled &= _dice.RollSpecial(die);
+            _dice.StepTurn(1);
+            Program.AppLog($"smoke: dice and turn {(rolled && game.State.Turn.Turn == 2 ? "ok" : "FAILED")}; turn label '{_dice.TurnLabel.Text}'");
+            if (!rolled || game.State.Turn.Turn != 2) Program.ExitCode = 1;
+        }
         var piece = game.State.Pieces.Values.FirstOrDefault();
         if (piece != null)
             game.Execute(CommandLog.Prepare(new MovePieces(new[] { piece.Id }, piece.MapId, new PointD(piece.Pos.X + 50, piece.Pos.Y - 20), null), game.State, _session.Model));

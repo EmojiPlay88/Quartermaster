@@ -39,6 +39,8 @@ sealed partial class MainForm : Form
     readonly ToolStripMenuItem _floatingMenu = new("&Floating windows") { Visible = false };
     readonly ToolStripMenuItem _popOutActive = new("&Pop Out Active Window");
     ModuleSession? _session;
+    ToolStripMenuItem? _toolsMenu;
+    DiceTools? _dice;
     DiagnosticsWindow? _diag;
     string? _savePath;
     bool _dirty;
@@ -150,7 +152,7 @@ sealed partial class MainForm : Form
         view.DropDownItems.Add(_viewLog);
         _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, Keys.Control | Keys.L));
 
-        var tools = new ToolStripMenuItem("&Tools");
+        var tools = _toolsMenu = new ToolStripMenuItem("&Tools");
         Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, Keys.Control | Keys.Shift | Keys.W, needsModule: true);
 
         var window = new ToolStripMenuItem("&Window");
@@ -181,6 +183,7 @@ sealed partial class MainForm : Form
         Tool("Save Game", () => SaveGame(false), needsGame: true);
         _toolbar.Items.Add(new ToolStripSeparator());
         Tool("Diagnostics", ShowDiagnostics, needsModule: true);
+        _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
     }
 
     void BuildStatus()
@@ -189,7 +192,7 @@ sealed partial class MainForm : Form
         {
             if (_problemCount > 0) ShowDiagnostics();
         };
-        _status.Items.AddRange(new ToolStripItem[] { _sbModule, _sbMessage, _sbTiling, _sbLocation, _sbZoom });
+        _status.Items.AddRange(new ToolStripItem[] { _sbModule, _sbMessage, _sbTiling, _dice!.TurnLabel, _sbLocation, _sbZoom });
     }
 
     // ---------- public hooks for map windows (Task 12) ----------
@@ -245,6 +248,7 @@ sealed partial class MainForm : Form
         foreach (var i in _needsModule) i.Enabled = _session != null;
         foreach (var i in _needsGame) i.Enabled = _session?.Game != null;
         foreach (var i in _needsRules) i.Enabled = _session?.Rules != null;
+        _dice?.Refresh();
     }
 
     void UpdateTitle()
@@ -404,7 +408,7 @@ sealed partial class MainForm : Form
 
     void OnGameReplaced()
     {
-        if (_session?.Game is { } g) g.Changed += _ => { _dirty = true; UpdateTitle(); };
+        if (_session?.Game is { } g) g.Changed += _ => { _dirty = true; UpdateTitle(); _dice?.Refresh(); };
         _dirty = false;
         _savePath = null;
         UpdateUi();

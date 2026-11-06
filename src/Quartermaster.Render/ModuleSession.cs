@@ -50,6 +50,9 @@ public sealed class ModuleSession : IDisposable
         if (Rules != null) Runner = new FormulaRunner(Rules, Model, _roller);
     }
 
+    /// <summary>Rolls n dice with the given sides using the session roller (the same one formulas use).</summary>
+    public IReadOnlyList<int> Roll(int n, int sides) => _roller(n, sides);
+
     public static string DefaultCacheRoot =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster", "cache");
 
