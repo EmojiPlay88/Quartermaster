@@ -20,6 +20,7 @@ sealed class MapWindow : Form
         ShowIcon = false;
         Canvas = new MapCanvas(s, map) { Dock = DockStyle.Fill, Preparing = map.Boards.Count > 0 ? 0 : null };
         Controls.Add(Canvas);
+        Controls.Add(BuildToolbar());
         Canvas.Guarded = Run;
 
         Canvas.ContextRequested += OnContext;
@@ -96,9 +97,23 @@ sealed class MapWindow : Form
         _ = PrepareTilesAsync();
     }
 
+    ToolStrip BuildToolbar()
+    {
+        var bar = new ToolStrip { Dock = DockStyle.Top, GripStyle = ToolStripGripStyle.Hidden };
+        var los = new ToolStripButton("Line of sight") { CheckOnClick = true, ToolTipText = "Drag to measure range between two locations (Esc or right-click cancels)" };
+        los.Click += (_, _) => Canvas.LosEnabled = los.Checked;
+        Canvas.LosChanged += () => los.Checked = Canvas.LosEnabled;
+        bar.Items.Add(los);
+        return bar;
+    }
+
+    /// <summary>The tool.los command: flips the line-of-sight mode of this window.</summary>
+    public void ToggleLos() => Canvas.LosEnabled = !Canvas.LosEnabled;
+
     protected override void OnActivated(EventArgs e)
     {
         base.OnActivated(e);
+        Host?.NoteActiveMap(this);
         if (Host is { } mf)
         {
             mf.SetZoomText($"{Math.Round(Canvas.View.Zoom * 100)}%");

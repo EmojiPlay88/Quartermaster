@@ -136,6 +136,7 @@ sealed partial class MainForm
         if (_opts.ScreenshotLog != null) Guard(SmokeLog);
         if (_opts.GameMaster || _opts.ScreenshotPalette != null) Guard(SmokePalette);
         if (_opts.ScreenshotSettings != null) Guard(SmokeSettings);
+        Guard(SmokeOverview);
         Close();
     }
 

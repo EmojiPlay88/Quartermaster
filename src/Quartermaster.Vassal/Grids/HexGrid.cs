@@ -229,6 +229,17 @@ public sealed class HexGrid : IMapGrid
             : JavaMath.Round((y - OriginY - Dy / 2) / Dy);
     }
 
+    /// <summary>Raw (unnumbered) offset column/row of the hex containing <paramref name="p"/>: odd columns sit half a hex lower, rotated when sideways. False when the grid is degenerate.</summary>
+    public bool TryCell(PointD p, out int col, out int row)
+    {
+        col = row = 0;
+        if (Degenerate) return false;
+        int x = JavaMath.Round(p.X), y = JavaMath.Round(p.Y);
+        col = RawColumn(x, y);
+        row = RawRow(x, y);
+        return true;
+    }
+
     public string LocationName(PointD p) =>
         _numbering == null ? "" : _numbering.LocationName(JavaMath.Round(p.X), JavaMath.Round(p.Y));
 

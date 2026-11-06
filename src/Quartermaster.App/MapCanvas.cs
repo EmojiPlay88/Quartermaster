@@ -7,7 +7,7 @@ using SkiaSharp.Views.Desktop;
 namespace Quartermaster.App;
 
 /// <summary>Skia map view: rendering, pan/zoom, selection, drag and drop, hover. Menus and game commands live in <see cref="MapWindow"/>.</summary>
-sealed class MapCanvas : SKControl
+sealed partial class MapCanvas : SKControl
 {
     readonly ModuleSession _s;
     readonly MapRenderer _renderer;
@@ -99,6 +99,7 @@ sealed class MapCanvas : SKControl
     {
         _tiles = new Dictionary<string, TileSet>(_tiles) { [tileKey] = ts };
         Invalidate();
+        NotifyViewport();
     }
 
     public void SelectOnly(string? id)
@@ -125,6 +126,7 @@ sealed class MapCanvas : SKControl
         FitView.Center(View, p, new SKSize(Math.Max(Width, 1), Math.Max(Height, 1)));
         ReportStatus(null);
         Invalidate();
+        NotifyViewport();
     }
 
     public void ZoomTo100() => ZoomCentered(1f);
@@ -133,6 +135,7 @@ sealed class MapCanvas : SKControl
         FitView.ZoomToFit(View, Map, new SKSize(Math.Max(Width, 1), Math.Max(Height, 1)));
         ReportStatus(null);
         Invalidate();
+        NotifyViewport();
     }
 
     void ZoomCentered(float zoom)
@@ -143,6 +146,7 @@ sealed class MapCanvas : SKControl
         FitView.Center(View, centre, size);
         ReportStatus(null);
         Invalidate();
+        NotifyViewport();
     }
 
     /// <summary>Coalesced repaint for high-frequency input (pan, band, drag): at most one queued until it paints.</summary>
@@ -187,6 +191,7 @@ sealed class MapCanvas : SKControl
                     FitView.Center(View, new PointD(e.X + e.W / 2, e.Y + e.H / 2), size);
                 }
                 ReportStatus(null);
+                NotifyViewport();
             }
             var st = State;
             if (st == null)
@@ -208,6 +213,7 @@ sealed class MapCanvas : SKControl
                 if (_drag.Incoming) _drag.Draw(c, View, st);
             }
             DrawBand(c);
+            _los?.Draw(c, View);
             if (Preparing is { } p) Message(c, size, $"Preparing map… {(int)Math.Round(p * 100)}%");
             _paintFailed = false;
         }
@@ -278,6 +284,7 @@ sealed class MapCanvas : SKControl
             Cursor = Cursors.SizeAll;
             return;
         }
+        if (LosMouseDown(e)) return;
         if (e.Button == MouseButtons.Right)
         {
             var hit = PieceAt(e.Location);
@@ -320,11 +327,13 @@ sealed class MapCanvas : SKControl
             Request();
             return;
         }
+        if (LosMouseMove(e)) return;
         if (_panning)
         {
             View.Pan = new SKPoint(View.Pan.X - (e.X - _panLast.X) / View.Zoom, View.Pan.Y - (e.Y - _panLast.Y) / View.Zoom);
             _panLast = e.Location;
             Request();
+            NotifyViewport();
             return;
         }
         if (_bandActive)
@@ -344,6 +353,7 @@ sealed class MapCanvas : SKControl
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
+        if (LosMouseUp(e)) return;
         if (_drag.Active)
         {
             if (e.Button == MouseButtons.Left) EndDrag(commit: true, e.Location);
@@ -352,7 +362,7 @@ sealed class MapCanvas : SKControl
         if (_panning && (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Left))
         {
             _panning = false;
-            Cursor = Cursors.Default;
+            Cursor = _los != null ? Cursors.Cross : Cursors.Default;
             return;
         }
         if (e.Button == MouseButtons.Right)
@@ -396,6 +406,7 @@ sealed class MapCanvas : SKControl
         View.ZoomAt(new SKPoint(e.X, e.Y), (float)Math.Pow(_zoomStep, e.Delta / 120.0));
         ReportStatus(e.Location);
         Invalidate();
+        NotifyViewport();
     }
 
     protected override void OnMouseLeave(EventArgs e)
@@ -409,6 +420,7 @@ sealed class MapCanvas : SKControl
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (e.KeyCode == Keys.Escape && LosEscape()) { e.Handled = true; return; }
         if (e.KeyCode == Keys.Escape && _drag.Active) { EndDrag(commit: false, default); e.Handled = true; return; }
         if (e.KeyCode == Keys.Space) { _space = true; Cursor = Cursors.Hand; e.Handled = true; }
     }
@@ -416,7 +428,7 @@ sealed class MapCanvas : SKControl
     protected override void OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
-        if (e.KeyCode == Keys.Space) { _space = false; if (!_panning) Cursor = Cursors.Default; }
+        if (e.KeyCode == Keys.Space) { _space = false; if (!_panning) Cursor = _los != null ? Cursors.Cross : Cursors.Default; }
     }
 
     protected override void OnLostFocus(EventArgs e)
@@ -459,6 +471,7 @@ sealed class MapCanvas : SKControl
     {
         base.OnResize(e);
         if (_drag.Active) EndDrag(commit: false, default); // the snapshot no longer matches the client area
+        NotifyViewport();
     }
 
     void ReportStatus(Point? at)

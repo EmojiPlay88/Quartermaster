@@ -73,6 +73,7 @@ sealed partial class MainForm : Form
         _logDock = new LogDock(this, _wm, _logHost, _logSplitter, _viewLog, CentreOnPiece, Guard);
         _paletteDock = new PaletteDock(this, _wm, _paletteHost, _paletteSplitter, Guard);
         RegisterCommands();
+        InitLos();
         _cmdItems["view.log"] = _viewLog;
         BuildMenu();
         BuildToolbar();
@@ -98,7 +99,7 @@ sealed partial class MainForm : Form
         _tablesTree.FormulaActivated += id => Guard(() => ShowWorkbenchItem(w => w.ShowFormula(id)));
         _leftSplit.SplitterMoved += (_, _) => RememberLeftSplit();
         _leftSplit.SizeChanged += (_, _) => ApplyLeftSplit();
-        MdiChildActivate += (_, _) => { KeepMaximized(); SyncTabs(null); };
+        MdiChildActivate += (_, _) => { KeepMaximized(); SyncTabs(null); NoteActiveMap(ActiveMdiChild as MapWindow); };
         _tabs.TabActivated += f => { if (!f.IsDisposed) f.Activate(); };
         _tabs.TabCloseRequested += CloseTab;
         _tabs.TabPopOutRequested += (f, at) => Guard(() => _wm.PopOut(f, at));
@@ -202,6 +203,7 @@ sealed partial class MainForm : Form
         _needsGame.Add(_viewLog);
         view.DropDownItems.Add(_viewLog);
         _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, "view.ledger"));
+        Item(view.DropDownItems, "&Overview", ShowOverview, needsGame: true);
 
         var tools = _toolsMenu = new ToolStripMenuItem("&Tools");
         Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", needsModule: true);
