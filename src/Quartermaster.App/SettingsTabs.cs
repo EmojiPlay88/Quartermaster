@@ -8,7 +8,8 @@ namespace Quartermaster.App;
 /// <param name="CacheRoot">Root of the per-module tile/document caches.</param>
 /// <param name="OpenModuleCache">Cache folder of the module that is open now (its files are in use), or null.</param>
 /// <param name="Notify">Shows a message to the user (logged instead in smoke mode).</param>
-sealed record SettingsContext(IReadOnlyList<(string Id, string Text)> ToolbarItems, string CacheRoot, Func<string?> OpenModuleCache, Action<string> Notify);
+/// <param name="Commands">Commands whose shortcuts the Keyboard page edits.</param>
+sealed record SettingsContext(IReadOnlyList<(string Id, string Text)> ToolbarItems, string CacheRoot, Func<string?> OpenModuleCache, Action<string> Notify, CommandRegistry? Commands = null);
 
 /// <summary>One page of the settings window: builds its controls, shows a <see cref="Settings"/> and writes its fields back into one.</summary>
 abstract class SettingsTab
@@ -17,6 +18,9 @@ abstract class SettingsTab
     public abstract Control Build();
     public abstract void Load(Settings s);
     public abstract Settings Collect(Settings s);
+
+    /// <summary>A reason the page cannot be applied as it stands, or null.</summary>
+    public virtual string? Validate() => null;
 
     protected static TableLayoutPanel Table()
     {
@@ -241,23 +245,6 @@ sealed class ToolbarTab(IReadOnlyList<(string Id, string Text)> items) : Setting
     }
 }
 
-/// <summary>Placeholder: the shortcut editor arrives with the keyboard task. Existing overrides pass through untouched.</summary>
-sealed class KeyboardTab : SettingsTab
-{
-    public override string Title => "Keyboard";
-
-    /// <summary>The page body; the shortcut editor replaces its content.</summary>
-    public Panel Host { get; } = new() { Dock = DockStyle.Fill, Padding = new Padding(10) };
-
-    public override Control Build()
-    {
-        if (Host.Controls.Count == 0) Host.Controls.Add(new Label { Text = "Shortcuts — coming next", AutoSize = true });
-        return Host;
-    }
-
-    public override void Load(Settings s) { }
-    public override Settings Collect(Settings s) => s;
-}
 
 sealed class FoldersTab(SettingsContext ctx) : SettingsTab
 {

@@ -19,7 +19,7 @@ sealed partial class MainForm : Form
     readonly DocumentTabStrip _tabs = new();
     readonly Panel _logHost = new() { Dock = DockStyle.Bottom, Height = 170, Visible = false };
     readonly Splitter _logSplitter = new() { Dock = DockStyle.Bottom, Height = 4, Visible = false };
-    readonly ToolStripMenuItem _viewLog = new("&Log") { ShortcutKeys = Keys.Control | Keys.Shift | Keys.L };
+    readonly ToolStripMenuItem _viewLog = new("&Log");
     readonly LogDock _logDock;
     readonly MenuStrip _menu = new();
     readonly ToolStrip _toolbar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
@@ -68,6 +68,8 @@ sealed partial class MainForm : Form
         _wm = new WindowManager(this, _tabs, _layoutStore);
         _wm.FloatingChanged += RebuildFloatingMenu;
         _logDock = new LogDock(this, _wm, _logHost, _logSplitter, _viewLog, CentreOnPiece, Guard);
+        RegisterCommands();
+        _cmdItems["view.log"] = _viewLog;
         BuildMenu();
         BuildToolbar();
         BuildStatus();
@@ -146,9 +148,10 @@ sealed partial class MainForm : Form
 
     // ---------- construction ----------
 
-    ToolStripMenuItem Item(ToolStripItemCollection into, string text, Action act, Keys keys = Keys.None, bool needsModule = false, bool needsGame = false)
+    ToolStripMenuItem Item(ToolStripItemCollection into, string text, Action act, string? cmd = null, bool needsModule = false, bool needsGame = false)
     {
-        var mi = new ToolStripMenuItem(text) { ShortcutKeys = keys };
+        var mi = new ToolStripMenuItem(text);
+        if (cmd != null) _cmdItems[cmd] = mi;
         mi.Click += (_, _) => Guard(act);
         into.Add(mi);
         if (needsModule) _needsModule.Add(mi);
@@ -168,14 +171,14 @@ sealed partial class MainForm : Form
     void BuildMenu()
     {
         var file = new ToolStripMenuItem("&File");
-        Item(file.DropDownItems, "&Open Module...", OpenModuleDialog, Keys.Control | Keys.O);
+        Item(file.DropDownItems, "&Open Module...", OpenModuleDialog, "file.openModule");
         file.DropDownItems.Add(new ToolStripSeparator());
-        Item(file.DropDownItems, "&New Game", NewGame, Keys.Control | Keys.N, needsModule: true);
+        Item(file.DropDownItems, "&New Game", NewGame, "file.newGame", needsModule: true);
         Item(file.DropDownItems, "Load &Setup...", LoadSetupDialog, needsModule: true);
-        Item(file.DropDownItems, "Open &Game...", OpenGameDialog, Keys.Control | Keys.G, needsModule: true);
+        Item(file.DropDownItems, "Open &Game...", OpenGameDialog, "file.openGame", needsModule: true);
         file.DropDownItems.Add(new ToolStripSeparator());
-        Item(file.DropDownItems, "&Save Game", () => SaveGame(false), Keys.Control | Keys.S, needsGame: true);
-        Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), Keys.Control | Keys.Shift | Keys.S, needsGame: true);
+        Item(file.DropDownItems, "&Save Game", () => SaveGame(false), "file.saveGame", needsGame: true);
+        Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), "file.saveGameAs", needsGame: true);
         file.DropDownItems.Add(new ToolStripSeparator());
         Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, needsModule: true);
         Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, needsModule: true);
@@ -186,14 +189,14 @@ sealed partial class MainForm : Form
 
         var view = new ToolStripMenuItem("&View");
         view.DropDownItems.Add(_viewTree);
-        Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, Keys.Control | Keys.D, needsModule: true);
+        Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, "view.diagnostics", needsModule: true);
         view.DropDownItems.Add(_showGrid);
         _needsGame.Add(_viewLog);
         view.DropDownItems.Add(_viewLog);
-        _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, Keys.Control | Keys.L));
+        _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, "view.ledger"));
 
         var tools = _toolsMenu = new ToolStripMenuItem("&Tools");
-        Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, Keys.Control | Keys.Shift | Keys.W, needsModule: true);
+        Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", needsModule: true);
 
         var window = new ToolStripMenuItem("&Window");
         Item(window.DropDownItems, "&Cascade", () => Arrange(MdiLayout.Cascade));
@@ -224,8 +227,11 @@ sealed partial class MainForm : Form
         _toolbar.Items.Add(new ToolStripSeparator());
         Tool("Diagnostics", ShowDiagnostics, needsModule: true);
         _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
+        SetCommandHandler("dice.1d6", () => _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll"));
+        SetCommandHandler("dice.2d6", () => _dice!.RollSpec(new DiceSpec(2, 6, 0), "Roll"));
+        SetCommandHandler("turn.next", () => _dice!.StepTurn(1));
         _toolsMenu!.DropDownItems.Add(new ToolStripSeparator());
-        Item(_toolsMenu.DropDownItems, "&Settings...", ShowSettings);
+        Item(_toolsMenu.DropDownItems, "&Settings...", ShowSettings, "tools.settings");
     }
 
     void BuildStatus()
@@ -770,6 +776,7 @@ sealed partial class MainForm : Form
                 if (ActiveMdiChild is { } a) CloseTab(a);
                 return true;
         }
+        if (TryDispatchShortcut(keyData)) return true;
         return base.ProcessCmdKey(ref msg, keyData);
     }
 

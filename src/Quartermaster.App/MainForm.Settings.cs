@@ -62,6 +62,7 @@ sealed partial class MainForm
     /// <summary>Every setting that can change while the app runs. Each part is guarded so one failure cannot block the rest.</summary>
     void ApplySettings(Settings s)
     {
+        Step(() => ApplyShortcuts(s));
         Step(() => { _tabs.SetWidths(s.TabMinWidth, s.TabMaxWidth); });
         Step(() =>
         {
@@ -97,7 +98,7 @@ sealed partial class MainForm
         _toolbar.Items.Cast<ToolStripItem>().Where(i => i is not ToolStripSeparator && i.Text is { Length: > 0 }).Select(i => (i.Text!, i.Text!)).ToList(),
         ModuleSession.DefaultCacheRoot,
         () => _session?.CacheDir,
-        m => Info(m, "Settings"));
+        m => Info(m, "Settings"), _commands);
 
     void ShowSettings()
     {

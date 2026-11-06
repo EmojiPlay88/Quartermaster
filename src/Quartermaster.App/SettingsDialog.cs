@@ -19,7 +19,7 @@ sealed class SettingsDialog : Form
         _current = initial;
         _latest = latest;
         _apply = apply;
-        Keyboard = new KeyboardTab();
+        Keyboard = new KeyboardTab(ctx.Commands ?? new CommandRegistry());
         _tabs = new SettingsTab[] { new GeneralTab(), new DisplayTab(), new MapTab(), new DiceLogTab(), new ToolbarTab(ctx.ToolbarItems), Keyboard, new FoldersTab(ctx) };
 
         Text = "Settings";
@@ -41,8 +41,8 @@ sealed class SettingsDialog : Form
         var cancel = new Button { Text = "Cancel", Width = 80, DialogResult = DialogResult.Cancel };
         var apply2 = new Button { Text = "Apply", Width = 80 };
         var restore = new Button { Text = "Restore defaults", Width = 110, Dock = DockStyle.Left };
-        ok.Click += (_, _) => Guarded(() => { Commit(); DialogResult = DialogResult.OK; });
-        apply2.Click += (_, _) => Guarded(Commit);
+        ok.Click += (_, _) => Guarded(() => { if (Commit()) DialogResult = DialogResult.OK; });
+        apply2.Click += (_, _) => Guarded(() => Commit());
         restore.Click += (_, _) => Guarded(RestoreTab);
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Right, FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false };
@@ -70,10 +70,20 @@ sealed class SettingsDialog : Form
 
     Settings Collect() => _tabs.Aggregate(_current, (s, t) => t.Collect(s));
 
-    void Commit()
+    /// <summary>Applies the pages; false (with a message, nothing saved) while a page reports a problem.</summary>
+    bool Commit()
     {
+        for (var i = 0; i < _tabs.Length; i++)
+        {
+            if (_tabs[i].Validate() is not { } problem) continue;
+            _pages.SelectedIndex = i;
+            Program.AppLog("settings dialog: " + problem);
+            if (!Program.Smoke) MessageBox.Show(this, problem, "Settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
         _current = _tabs.Aggregate(_latest?.Invoke() ?? _current, (s, t) => t.Collect(s)); // on top of what the store holds now
         _apply(_current);
+        return true;
     }
 
     void RestoreTab()

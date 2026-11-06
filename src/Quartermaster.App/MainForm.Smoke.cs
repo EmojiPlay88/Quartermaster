@@ -122,6 +122,7 @@ sealed partial class MainForm
         Guard(SmokeTablesTree);
         Guard(SmokeFormulaDialog);
         Guard(SmokeLedger);
+        Guard(SmokeShortcuts);
         Guard(SmokeWorkbench);
         if (_opts.Screenshot != null) Guard(() => SaveScreenshot(this, _opts.Screenshot, true));
         if (_opts.ScreenshotFloat != null)

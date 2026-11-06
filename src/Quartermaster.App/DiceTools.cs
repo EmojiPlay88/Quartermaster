@@ -23,6 +23,10 @@ sealed class DiceTools : IDisposable
     /// <summary>Whether a roll's result text is shown in the status bar (Settings).</summary>
     public bool ShowLastRoll { get; set; } = true;
 
+    /// <summary>Effective shortcut text of a command id, shown on menu items.</summary>
+    public Func<string, string> ShortcutText { get; set; } = _ => "";
+
+
     public ToolStripStatusLabel TurnLabel { get; } = new("Turn 1")
     {
         Visible = false, BorderSides = ToolStripStatusLabelBorderSides.Left, BorderStyle = Border3DStyle.Etched,
@@ -57,6 +61,7 @@ sealed class DiceTools : IDisposable
 
         var turn = new ToolStripMenuItem("&Turn");
         var next = new ToolStripMenuItem("&Next turn");
+        turn.DropDownOpening += (_, _) => next.ShortcutKeyDisplayString = ShortcutText("turn.next");
         next.Click += (_, _) => _guard(() => StepTurn(1));
         _prev.Click += (_, _) => _guard(() => StepTurn(-1));
         var set = new ToolStripMenuItem("&Set...");
@@ -106,8 +111,8 @@ sealed class DiceTools : IDisposable
         into.Clear();
         var s = _session();
         if (s == null) return;
-        Add(into, "&1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll"));
-        Add(into, "&2d6", () => RollSpec(new DiceSpec(2, 6, 0), "Roll"));
+        Add(into, "&1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll")).ShortcutKeyDisplayString = ShortcutText("dice.1d6");
+        Add(into, "&2d6", () => RollSpec(new DiceSpec(2, 6, 0), "Roll")).ShortcutKeyDisplayString = ShortcutText("dice.2d6");
         if (s.Model.Dice.Count > 0)
         {
             into.Add(new ToolStripSeparator());
