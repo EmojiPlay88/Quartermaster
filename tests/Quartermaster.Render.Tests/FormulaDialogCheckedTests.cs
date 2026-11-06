@@ -104,17 +104,28 @@ public class FormulaDialogCheckedTests
             Formulas = new() { new FormulaDef { Id = "fl", Name = "Loc", Text = "Loc == \"zzz\"",
                 Bindings = new() { new VariableBinding { Variable = "Loc", Kind = BindingKind.Location } } } },
         };
-        var runner = new FormulaRunner(pack, LazyModel.Value, (n, _) => Enumerable.Repeat(1, n).ToList());
+        var runner = new FormulaRunner(pack, NumberedModel.Value, (n, _) => Enumerable.Repeat(1, n).ToList());
         var m = new FormulaDialogModel(runner, pack.Formulas[0], "u1") { Checked = true };
-        var exp = m.Run(PieceState());
-        var loc = exp.Variables.FirstOrDefault()?.Value;
-        if (loc is not { } l) return; // the fixture map has no grid; nothing to compare
-        var padded = "0" + l.Display();
-        m.SetBoxText("Loc", padded);
-        Assert.False(m.Evaluate(PieceState()).CanApply); // "0304" is not "304"
-        m.SetBoxText("Loc", l.Display());
+        var loc = m.Run(PieceState()).Variables.Single().Value!.Value.Display();
+        Assert.StartsWith("0", loc); // a numbered grid gives a zero-padded name such as "0102"
+        Assert.True(loc.Length > 1);
+        m.SetBoxText("Loc", loc.TrimStart('0'));
+        var v = m.Evaluate(PieceState());
+        Assert.True(v.Boxes.Single().Wrong); // "102" is not "0102"
+        Assert.False(v.CanApply);
+        m.SetBoxText("Loc", loc);
         Assert.True(m.Evaluate(PieceState()).CanApply);
     }
+
+    private static readonly Lazy<ModuleModel> NumberedModel = new(() =>
+    {
+        const string P = "VASSAL.build.module.map.boardPicker.board.";
+        var xml = FixtureModule.MinimalBuildFile().Replace("y0=\"25\"/>",
+            $"y0=\"25\"><{P}mapgrid.SquareGridNumbering first=\"H\" hType=\"N\" vType=\"N\" sep=\"\" hLeading=\"1\" vLeading=\"1\" hOff=\"1\" vOff=\"1\"/></{P}SquareGrid>");
+        using var fx = new FixtureModule().WithBuildFile(xml).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        return ModuleModelBuilder.Build(arch, new DiagnosticLog());
+    });
 
     [Fact]
     public void Regression_OneThird_CalculateThenApplyIsExact_RoundedTextIsWrong()
@@ -148,7 +159,9 @@ public class FormulaDialogCheckedTests
         checkedM.SetBoxText("Cost", "2");
         var v = checkedM.Evaluate(new GameState());
         Assert.True(v.CanApply);
-        Assert.Equal("8", v.ResultText);
+        Assert.Equal("8", v.ResultText); // the roller would give 1 (total 3) if the expected run ignored the override
+        Assert.Equal("6", v.Boxes.Single(b => b.Variable == "R").Text);
+        Assert.Contains("6 + 2", v.Trace.Working);
         Assert.Equal(plain.Run(new GameState()).Result, v.Trace.Result);
     }
 
