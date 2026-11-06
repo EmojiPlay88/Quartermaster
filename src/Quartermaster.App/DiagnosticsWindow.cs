@@ -56,10 +56,18 @@ sealed class DiagnosticsWindow : Form
         try
         {
             _pending.Enqueue(d);
-            if (Interlocked.Exchange(ref _drainQueued, 1) == 0 && IsHandleCreated && !IsDisposed)
-                BeginInvoke(new Action(Drain));
+            if (!IsHandleCreated || IsDisposed) return; // OnHandleCreated drains what arrived early
+            if (Interlocked.Exchange(ref _drainQueued, 1) != 0) return;
+            try { BeginInvoke(new Action(Drain)); }
+            catch (Exception) { Interlocked.Exchange(ref _drainQueued, 0); }
         }
         catch (Exception) { /* window is closing */ }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Drain();
     }
 
     void Drain()

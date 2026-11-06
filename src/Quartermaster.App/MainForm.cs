@@ -165,6 +165,7 @@ sealed class MainForm : Form
         if (Program.Smoke)
         {
             Program.AppLog("error: " + message);
+            Program.ExitCode = 1;
             return;
         }
         MessageBox.Show(this, message, "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -262,6 +263,7 @@ sealed class MainForm : Form
             else
             {
                 Program.AppLog($"--setup {idx} is out of range (module has {s.Model.Setups.Count}); starting a new game.");
+                if (Program.Smoke) Program.ExitCode = 1;
                 s.StartNewGame();
             }
         }
