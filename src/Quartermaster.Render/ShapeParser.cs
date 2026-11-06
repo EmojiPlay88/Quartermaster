@@ -21,7 +21,7 @@ public static class ShapeParser
             var path = spec.StartsWith('d') ? ParseNew(spec.Substring(1)) : ParseLegacy(spec);
             return path != null && !path.IsEmpty ? path : null;
         }
-        catch (Exception ex) when (ex is FormatException or InvalidOperationException or IndexOutOfRangeException)
+        catch (Exception ex) when (ex is not OutOfMemoryException) // any malformed spec (incl. OverflowException) is "unparsable"
         {
             return null;
         }

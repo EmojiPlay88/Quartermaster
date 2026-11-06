@@ -136,7 +136,7 @@ sealed class MapWindow : Form
                     ts = new TileSet("", Math.Max(boards[i].Width, 1), Math.Max(boards[i].Height, 1), 0, isPlaceholder: true);
                 }
                 if (IsDisposed) return;
-                Canvas.SetTiles(boards[i].Name, ts);
+                Canvas.SetTiles(BoardTiler.TileKey(boards[i]), ts);
             }
         }
         catch (OperationCanceledException)

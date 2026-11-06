@@ -4,6 +4,7 @@ using SkiaSharp;
 
 namespace Quartermaster.Render;
 
+/// <param name="ShowGrid">True forces every board's grid overlay on (View > Show Grid); false draws only grids the module marks visible.</param>
 public sealed record MapDrawOptions(bool ShowGrid, IReadOnlySet<string> SelectedPieceIds, string? HoverStackId);
 
 /// <summary>
@@ -22,9 +23,9 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
         var visible = vp.VisibleMapRect(client);
         foreach (var board in map.Boards)
         {
-            tiles.TryGetValue(board.Name, out var ts);
+            tiles.TryGetValue(BoardTiler.TileKey(board), out var ts);
             DrawBoard(c, board, ts, vp, visible);
-            if (opt.ShowGrid && board.Grid != null)
+            if (board.Grid != null && (opt.ShowGrid || board.Grid.Visible))
             {
                 var save = c.Save();
                 c.ClipRect(ScreenRect(vp, board.Offset.X, board.Offset.Y, board.Offset.X + board.Width, board.Offset.Y + board.Height));

@@ -53,4 +53,34 @@ public class NewGameBuilderTests
         Assert.Equal(2, p.TraitStates.Count);
         Assert.Equal("Main Map;60;70;9;0", p.TraitStates[1]);
     }
+
+    private static string Enc(char d, params string[] f) => SequenceEncoder.Encode(f, d);
+
+    private static string Chain(params string[] levels) => PieceTypeParser.EncodeState(levels);
+
+    [Fact]
+    public void NewGame_PrototypeDerivedTraitsTakeThePrototypeDefinitionState()
+    {
+        // VASSAL PrototypeDefinition.getPiece decodes the definition's own AddPiece and sets its state; PieceCloner copies it.
+        var propType = "PROP;" + Enc(';', "hp", "true,0,99,false", "");
+        var layerType = "emb2;" + Enc(';', "Toggle", "130", "A", "Up", "130", "", "Down", "130", "", "Reset", "", "1", "false", "3", "-4",
+            "a.png,b.png,c.png", "Up,Down,Z", "true", "Lyr", "", "", "false", "", "1", "2", "true");
+        var basic = "piece;;;unit.svg;P";
+        var inner = Enc('/', "+", "null", Chain(propType, basic), Chain("7", "null;0;0;0;0"));
+        var outer = Enc('/', "+", "null", Chain(layerType, "prototype;Inner", basic), Chain("3", "", "null;0;0;0;0"));
+        var protos = "<VASSAL.build.module.PrototypesContainer>" +
+            $"<VASSAL.build.module.PrototypeDefinition name=\"Inner\">{inner}</VASSAL.build.module.PrototypeDefinition>" +
+            $"<VASSAL.build.module.PrototypeDefinition name=\"Outer\">{outer}</VASSAL.build.module.PrototypeDefinition>" +
+            "</VASSAL.build.module.PrototypesContainer>";
+        var xml = FixtureModule.MinimalBuildFile().Replace("<VASSAL.build.module.PrototypesContainer>", protos + "<VASSAL.build.module.PrototypesContainer>");
+        var slot = "<VASSAL.build.widget.PieceSlot entryName=\"U\" gpid=\"9\" height=\"32\" width=\"32\">" +
+            "+/null/prototype;Outer	piece;;;unit.svg;U/null;0;0;9</VASSAL.build.widget.PieceSlot>";
+        var s = Build(Stack(false, "", slot), out _, xml);
+        var p = s.Pieces["n:1"];
+        var traits = PieceTypeParser.Parse(p.TypeString, new DiagnosticLog(), null).Traits;
+        Assert.Equal(new[] { "emb2", "PROP", "piece" }, traits.Select(t => t.Id).ToArray());
+        Assert.Equal("3", p.TraitStates[0]);
+        Assert.Equal("7", p.TraitStates[1]);
+        Assert.Equal("Main Map;60;70;9;0", p.TraitStates[2]);
+    }
 }

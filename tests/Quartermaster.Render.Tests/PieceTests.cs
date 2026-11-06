@@ -236,6 +236,19 @@ public class HitTesterTests
     }
 
     [Fact]
+    public void HitTester_OutOfRangeLegacyShapeIntegerFallsBackWithoutThrowing()
+    {
+        using var e = new PieceEnv(); e.Fx.AddImage("a.png", 32, 32); e.Open();
+        var map = e.Model.Maps[0];
+        var shape = PieceEnv.Chain("nonRect2;" + PieceEnv.Enc("1.0", "m,99999999999999999999,0,l,10,10,c"), PieceEnv.Basic("a.png"));
+        var s = State(map, ("s1", shape, 100, 100));
+        var cache = new PieceTypeCache(e.Log);
+        Assert.Null(ShapeParser.TryParse("m,99999999999999999999,0,l,10,10,c"));
+        Assert.Equal("pc-s1", HitTester.PieceAt(s, map, e.Model, e.Images, new PointD(112, 112), cache));
+        Assert.Single(e.Log.Items, d => d.Category == "shape");
+    }
+
+    [Fact]
     public void HitTester_BadShapeFallsBackToImageRectWithOneDiagnostic()
     {
         using var e = new PieceEnv(); e.Fx.AddImage("a.png", 32, 32); e.Open();
@@ -274,7 +287,7 @@ public class MapRendererTests
         var map = e.Model.Maps[0];
         var tiler = new BoardTiler(e.Arch, e.Cache.Dir, e.Log);
         var ts = await tiler.EnsureTilesAsync(map.Boards[0], null, CancellationToken.None);
-        var tiles = new Dictionary<string, TileSet> { [map.Boards[0].Name] = ts };
+        var tiles = new Dictionary<string, TileSet> { [BoardTiler.TileKey(map.Boards[0])] = ts };
         var s = new GameState();
         var pc = PieceEnv.Piece("p1", PieceEnv.Basic("unit.png")); pc.MapId = map.Id; pc.StackId = "s1"; pc.Pos = new PointD(100, 50);
         s.Pieces["p1"] = pc;

@@ -1,3 +1,4 @@
+// Label placement ported from VASSAL Labeler.java getLabelPosition (LGPL-2.1).
 using Quartermaster.Core;
 using Quartermaster.Vassal;
 using SkiaSharp;

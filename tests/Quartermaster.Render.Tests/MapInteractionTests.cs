@@ -161,14 +161,16 @@ public class PieceDetailTests
     [Fact]
     public void Details_ListMarkAndPropAndName()
     {
-        var typeStr = SequenceEncoder.Encode(new[] { "mark;Side,Rank;Red,3",
+        // VASSAL shape: type "mark;" + comma-encoded keys; the values are the trait state, comma-encoded (Marker.myGetState).
+        var markState = SequenceEncoder.Encode(new[] { "Red", "3,5" }, ',');
+        var typeStr = SequenceEncoder.Encode(new[] { "mark;" + SequenceEncoder.Encode(new[] { "Side", "Rank" }, ','),
             SequenceEncoder.Encode(new[] { "PROP;Strength;;;;;;;;;;;", "piece;;;unit.svg;Rifle" }, '\t') }, '\t');
         var t = PieceTypeParser.Parse(typeStr, new DiagnosticLog(), null);
-        var p = new PieceInstance { Id = "p", TypeString = typeStr, TraitStates = new() { "", "7", "" } };
+        var p = new PieceInstance { Id = "p", TypeString = typeStr, TraitStates = new() { markState, "7", "" } };
         var d = PieceDetails.For(p, t);
         Assert.Equal("Rifle", d.Name);
         Assert.Contains(("Side", "Red"), d.Properties);
-        Assert.Contains(("Rank", "3"), d.Properties);
+        Assert.Contains(("Rank", "3,5"), d.Properties);
         Assert.Contains(d.Properties, x => x.Value == "7");
     }
 }

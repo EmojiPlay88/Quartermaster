@@ -120,12 +120,10 @@ public static class PieceDetails
             {
                 case MarkerDef m:
                 {
-                    // mark;name1,name2;value1,value2 (names and values are parsed here; MarkerDef.Keys only holds the first part reliably)
-                    var parts = m.RawType.Split(';');
-                    var names = parts.Length > 1 ? parts[1].Split(',') : Array.Empty<string>();
-                    var values = parts.Length > 2 ? parts[2].Split(',') : Array.Empty<string>();
-                    for (var k = 0; k < names.Length; k++)
-                        props.Add((names[k], k < values.Length ? values[k] : ""));
+                    // VASSAL Marker: the type holds the keys; the values live in the trait state (comma-encoded, myGetState).
+                    var values = SequenceEncoder.Decode(PieceGeometry.StateAt(p, i), ',');
+                    for (var k = 0; k < m.Keys.Count; k++)
+                        props.Add((m.Keys[k], k < values.Count ? values[k] : ""));
                     break;
                 }
                 case DynamicPropertyDef d:

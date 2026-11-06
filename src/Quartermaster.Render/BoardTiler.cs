@@ -28,6 +28,15 @@ public sealed class BoardTiler(VmodArchive archive, string cacheDir, DiagnosticL
         }
     }
 
+    /// <summary>The key under which a board's <see cref="TileSet"/> is stored and looked up: its image name (board names are only unique per map).</summary>
+    public static string TileKey(BoardDef board) => board.Image ?? "";
+
+    private static string FolderFor(string image)
+    {
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(image)))[..12].ToLowerInvariant();
+        return Sanitize(image) + "_" + hash;
+    }
+
     private static string Sanitize(string name)
     {
         var bad = Path.GetInvalidFileNameChars();
@@ -40,7 +49,7 @@ public sealed class BoardTiler(VmodArchive archive, string cacheDir, DiagnosticL
     private TileSet Ensure(BoardDef board, IProgress<double>? progress, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(board.Image)) return Placeholder(board);
-        var root = Path.Combine(cacheDir, "tiles", Sanitize(board.Name));
+        var root = Path.Combine(cacheDir, "tiles", FolderFor(board.Image));
         var donePath = Path.Combine(root, "done.json");
 
         var existing = ReadMarker(donePath);

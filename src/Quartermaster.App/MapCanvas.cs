@@ -55,7 +55,8 @@ sealed class MapCanvas : SKControl
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Viewport View { get; } = new();
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public bool ShowGrid { get; set; } = true;
+    /// <summary>Forces grids on for all boards; false (default) draws only grids the module marks visible.</summary>
+    public bool ShowGrid { get; set; }
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public IReadOnlySet<string> Selected => _selected;
     /// <summary>0..1 while board tiles are being prepared; null once ready.</summary>
@@ -74,9 +75,10 @@ sealed class MapCanvas : SKControl
 
     GameState? State => _s.Game?.State;
 
-    public void SetTiles(string board, TileSet ts)
+    /// <summary>Stores tiles under <see cref="BoardTiler.TileKey"/>.</summary>
+    public void SetTiles(string tileKey, TileSet ts)
     {
-        _tiles = new Dictionary<string, TileSet>(_tiles) { [board] = ts };
+        _tiles = new Dictionary<string, TileSet>(_tiles) { [tileKey] = ts };
         Invalidate();
     }
 
@@ -223,8 +225,20 @@ sealed class MapCanvas : SKControl
 
     PointD MapPoint(Point p) => View.ToMap(new SKPoint(p.X, p.Y));
 
-    string? PieceAt(Point p) =>
-        State is { } st ? HitTester.PieceAt(st, Map, _s.Model, _s.Images, MapPoint(p), _pieces.Types) : null;
+    string? PieceAt(Point p)
+    {
+        if (State is not { } st) return null;
+        try
+        {
+            return HitTester.PieceAt(st, Map, _s.Model, _s.Images, MapPoint(p), _pieces.Types);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Hit-testing must never take down a mouse handler.
+            _s.Log.AddOnce("hit:" + ex.GetType().Name, DiagnosticSeverity.Error, "render", "Hit-testing failed: " + ex.Message, Map.Name);
+            return null;
+        }
+    }
 
     protected override void OnMouseDown(MouseEventArgs e)
     {

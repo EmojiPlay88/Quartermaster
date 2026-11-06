@@ -1,4 +1,4 @@
-// Field sets mirror VASSAL trait classes in VASSAL/counters/ (LGPL-2.1); field readers live in PieceType.cs.
+// Ported from VASSAL counters/ trait classes (field sets; LGPL-2.1); field readers live in PieceType.cs.
 using System.Globalization;
 
 namespace Quartermaster.Vassal;

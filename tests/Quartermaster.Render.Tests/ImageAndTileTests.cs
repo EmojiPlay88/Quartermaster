@@ -86,6 +86,32 @@ public class ImageAndTileTests
     }
 
     [Fact]
+    public async Task Tiler_SameBoardNameDifferentImages_NeverShareOrOverwrite()
+    {
+        using var fx = new FixtureModule().AddImage("a.b.png", 700, 300).AddImage("a_b.png", 900, 400); using var tc = new TempCache();
+        using var arch = Open(fx);
+        var b1 = Board("Main", "a.b.png", 700, 300);
+        var b2 = Board("Main", "a_b.png", 900, 400);
+        var first = new BoardTiler(arch, tc.Dir, new DiagnosticLog());
+        var t1 = await first.EnsureTilesAsync(b1, null, CancellationToken.None);
+        var t2 = await first.EnsureTilesAsync(b2, null, CancellationToken.None);
+        Assert.NotEqual(t1.Root, t2.Root);
+        Assert.Equal((700, 300), (t1.Width, t1.Height));
+        Assert.Equal((900, 400), (t2.Width, t2.Height));
+        Assert.True(File.Exists(t1.TilePath(0, 1, 0)));
+        Assert.True(File.Exists(t2.TilePath(0, 1, 0)));
+        Assert.NotEqual(BoardTiler.TileKey(b1), BoardTiler.TileKey(b2));
+        Assert.Equal(2, first.DecodeCount);
+
+        var second = new BoardTiler(arch, tc.Dir, new DiagnosticLog());
+        var h1 = await second.EnsureTilesAsync(b1, null, CancellationToken.None);
+        var h2 = await second.EnsureTilesAsync(b2, null, CancellationToken.None);
+        Assert.Equal(0, second.DecodeCount);
+        Assert.Equal((700, 300), (h1.Width, h1.Height));
+        Assert.Equal((900, 400), (h2.Width, h2.Height));
+    }
+
+    [Fact]
     public async Task Tiler_SecondRunIsCacheHit()
     {
         using var fx = new FixtureModule().AddImage("big.png", 1300, 700); using var tc = new TempCache();

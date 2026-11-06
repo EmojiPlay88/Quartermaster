@@ -36,6 +36,7 @@ public static class ModuleModelBuilder
         private readonly List<MapDef> _maps = new();
         private readonly List<PieceSlotDef> _slots = new();
         private readonly Dictionary<string, PieceType> _protos = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _protoStates = new(StringComparer.Ordinal);
         private readonly List<ChartDef> _charts = new();
         private readonly List<DocumentDef> _docs = new();
         private readonly List<SetupDef> _setups = new();
@@ -59,7 +60,7 @@ public static class ModuleModelBuilder
                 log.AddOnce("component:" + cls, DiagnosticSeverity.Info, "component",
                     $"{count} unmodelled element(s) of type '{cls}' ignored.", cls);
 
-            var expander = new PrototypeExpander(_protos, log);
+            var expander = new PrototypeExpander(_protos, log, _protoStates);
             return new ModuleModel(root.Attr("name"), root.Attr("version"), root.Attr("VassalVersion"), _maps, _slots, _protos,
                 _charts, _docs, _setups, _dice, _sides, BuildTree(root.Attr("name")), expander);
         }
@@ -157,12 +158,13 @@ public static class ModuleModelBuilder
         private void AddPrototype(ModuleNode n)
         {
             var name = n.Attr("name");
-            if (!SplitPiece(n.Text, out var type, out _))
+            if (!SplitPiece(n.Text, out var type, out var protoState))
             {
                 log.AddOnce("proto-bad:" + name, DiagnosticSeverity.Warning, "component", $"Prototype '{name}' has malformed definition; skipped.", name);
                 return;
             }
             _protos[name] = PieceTypeParser.Parse(type, log, "prototype " + name);
+            _protoStates[name] = protoState;
         }
 
         /// <summary>Splits an AddPiece command "+/id/type/state" (VASSAL PieceSlot / PrototypeDefinition text).</summary>

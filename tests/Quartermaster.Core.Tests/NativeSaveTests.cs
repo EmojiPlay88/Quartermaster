@@ -68,4 +68,30 @@ public class NativeSaveTests
         }
         finally { File.Delete(path); }
     }
+
+    private static void AssertRejected(string json)
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
+        try
+        {
+            File.WriteAllText(path, json);
+            Assert.Throws<InvalidDataException>(() => NativeSave.Read(path));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void NativeSave_NullSnapshot_IsInvalidData() =>
+        AssertRejected("{\"format\":1,\"moduleSha256\":\"x\",\"snapshot\":null,\"log\":[]}");
+
+    [Fact]
+    public void NativeSave_NullLogOrNullTraitStates_IsInvalidData()
+    {
+        AssertRejected("{\"format\":1,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[]},\"log\":null}");
+        AssertRejected("{\"format\":1,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{\"a\":{\"id\":\"a\",\"traitStates\":null}},\"stacks\":{},\"mapOrder\":[]},\"log\":[]}");
+    }
+
+    [Fact]
+    public void NativeSave_LogEntryMissingTypeDiscriminator_IsInvalidData() =>
+        AssertRejected("{\"format\":1,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[]},\"log\":[{\"pieceId\":\"a\"}]}");
 }

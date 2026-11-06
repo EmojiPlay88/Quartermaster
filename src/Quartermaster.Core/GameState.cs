@@ -8,9 +8,9 @@ namespace Quartermaster.Core;
 public sealed class PieceInstance
 {
     public string Id { get; set; } = "";
-    /// <summary>Raw, unexpanded type string.</summary>
+    /// <summary>Type string with prototypes already expanded (VASSAL PieceCloner semantics); never contains "prototype" traits unless one could not be resolved.</summary>
     public string TypeString { get; set; } = "";
-    /// <summary>Aligned to the unexpanded trait chain.</summary>
+    /// <summary>Per-trait state aligned 1:1 to the (prototype-expanded) <see cref="TypeString"/> trait chain.</summary>
     public List<string> TraitStates { get; set; } = new();
     public string? StackId { get; set; }
     public string MapId { get; set; } = "";

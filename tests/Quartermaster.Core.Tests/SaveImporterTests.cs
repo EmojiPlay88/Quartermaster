@@ -129,4 +129,20 @@ public class SaveImporterTests
         Assert.Equal(new PointD(1, 2), p.Pos);
         Assert.Equal(traits.Count, p.TraitStates.Count);
     }
+
+    [Fact]
+    public void Import_OffMapStackWithCoordinateTokens_DoesNotWarnAboutThem()
+    {
+        // VASSAL Stack.getState always writes "map;x;y;ids"; its reader does not consume x/y for a null map and just fails to
+        // find pieces "0" and "0". That is normal, not a data problem.
+        var (r, log) = Run(new[]
+        {
+            "begin_save", "",
+            Add("p1", PieceType("A"), "null;0;0;1;0"),
+            Stack("st1", "null;0;0;p1;@@0"),
+            "end_save",
+        });
+        Assert.Equal(1, r.PiecesImported);
+        Assert.DoesNotContain(log.Items, d => d.Severity >= DiagnosticSeverity.Warning && d.Category == "save");
+    }
 }

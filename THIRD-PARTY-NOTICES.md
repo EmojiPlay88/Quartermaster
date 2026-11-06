@@ -2,6 +2,7 @@
 
 Parts of `src/Quartermaster.Vassal` are ported from VASSAL (https://github.com/vassalengine/vassal),
 which is licensed under the GNU Lesser General Public License, version 2.1 (LGPL-2.1).
+The full licence text is in [`LICENSES/LGPL-2.1.txt`](LICENSES/LGPL-2.1.txt).
 
 Ported files:
 
@@ -19,3 +20,6 @@ Ported files:
 - `src/Quartermaster.Render/ShapeParser.cs` (shape spec parsing from `VASSAL/counters/NonRectangular.java`)
 - `src/Quartermaster.Core/PieceActions.cs` (key-command menus and state changes from `VASSAL/counters/` SendToLocation, Clone, Delete, Embellishment, FreeRotator, Hideable, Obscurable, DynamicProperty, PlaceMarker, Replace, Footprint, PropertySheet, Immobilized)
 - `src/Quartermaster.Core/PieceFactory.cs` (from `VASSAL/counters/PieceCloner.java` and `BasicPiece.java`)
+- `src/Quartermaster.Render/PieceRenderer.cs` (label placement from `VASSAL/counters/Labeler.java` getLabelPosition)
+- `src/Quartermaster.Vassal/Traits/TraitDefs.cs` (trait field sets from the `VASSAL/counters/` trait classes)
+- `src/Quartermaster.Vassal/Traits/PrototypeExpander.cs` (prototype expansion and starting state from `VASSAL/build/module/PrototypeDefinition.java` and `counters/PieceCloner.java`)

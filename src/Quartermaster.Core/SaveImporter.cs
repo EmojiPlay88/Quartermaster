@@ -16,7 +16,11 @@ public static class SaveImporter
     private const string NullMap = "null";
 
     private sealed record Loose(string Id, string Type, string State, string? Map, PointD Pos);
-    private sealed record StackCmd(string? Map, PointD Pos, List<string> Ids);
+    private sealed record StackCmd(string? Map, PointD Pos, List<string> Ids, int CoordTokens = 0)
+    {
+        /// <summary>True for the x/y tokens of an off-map stack (see <see cref="ReadStack"/>).</summary>
+        public bool IsCoordToken(string id) => CoordTokens > 0 && Ids.Take(CoordTokens).Contains(id);
+    }
 
     public static ImportResult Import(SaveFile save, ModuleModel model, DiagnosticLog log)
     {
@@ -109,7 +113,7 @@ public static class SaveImporter
                 {
                     if (!pieces.TryGetValue(id, out var member))
                     {
-                        if (!id.StartsWith(LayerMarker, StringComparison.Ordinal))
+                        if (!id.StartsWith(LayerMarker, StringComparison.Ordinal) && !s.IsCoordToken(id))
                             log.AddOnce("save:missing:" + id, DiagnosticSeverity.Warning, "save", $"A stack names piece '{id}' which is not in the save.", id);
                         continue;
                     }
@@ -165,7 +169,10 @@ public static class SaveImporter
         if (onMap) pos = new PointD(d.NextInt(0), d.NextInt(0));
         var ids = new List<string>();
         while (d.HasMoreTokens) ids.Add(d.NextToken());
-        return new StackCmd(onMap ? map : null, pos, ids);
+        // Stack.getState writes "null;x;y;ids" for an off-map stack, but Stack.setState reads no x/y for a null map, so VASSAL
+        // looks up the coordinates as piece ids and silently finds nothing. Keep that behaviour, but do not report it.
+        var coords = !onMap && ids.Count >= 2 && int.TryParse(ids[0], out _) && int.TryParse(ids[1], out _) ? 2 : 0;
+        return new StackCmd(onMap ? map : null, pos, ids, coords);
     }
 
     private static Loose ReadPiece(string id, string type, string state, ModuleModel model, DiagnosticLog log)
