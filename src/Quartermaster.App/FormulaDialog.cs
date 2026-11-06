@@ -11,7 +11,7 @@ sealed class FormulaDialog : Form
     readonly ModuleSession _s;
     readonly FormulaDialogModel _model;
     readonly bool _previewOnly;
-    readonly FormulaFormView _view;
+    FormulaFormView _view;
     readonly Label _working = new() { AutoSize = true, Font = new Font("Consolas", 9f), MaximumSize = new Size(540, 0), Margin = new Padding(0, 2, 0, 2) };
     readonly FlowLayoutPanel _inline = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, MaximumSize = new Size(540, 0), Margin = Padding.Empty };
     readonly Button _apply = new() { Text = "&Apply to ledger", Width = 110, Height = 25, Enabled = false };
@@ -21,7 +21,31 @@ sealed class FormulaDialog : Form
     readonly ToolStripStatusLabel _status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 150 };
     readonly TableLayoutPanel _body = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Padding = new Padding(8, 8, 8, 0) };
+    readonly GroupBox _formulaGroup;
+    readonly string _formulaId;
+    readonly string? _pieceId;
     DialogView? _last;
+    GameSession? _game;
+    bool _closing;
+
+    static readonly List<FormulaDialog> Open = new();
+
+    /// <summary>Shows a modeless dialog for the formula and piece, or activates the one already open.</summary>
+    public static FormulaDialog? Show(ModuleSession s, string formulaId, string? pieceId, Form owner, MainForm? host)
+    {
+        Open.RemoveAll(d => d.IsDisposed);
+        var existing = Open.FirstOrDefault(d => d._s == s && d._formulaId == formulaId && d._pieceId == pieceId);
+        if (existing != null)
+        {
+            if (existing.WindowState == FormWindowState.Minimized) existing.WindowState = FormWindowState.Normal;
+            existing.Activate();
+            return existing;
+        }
+        var dlg = new FormulaDialog(s, formulaId, pieceId) { Host = host };
+        Open.Add(dlg);
+        dlg.Show(owner);
+        return dlg;
+    }
 
     /// <summary>Set before showing so Rule ref can open the document; falls back to the owner chain.</summary>
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -30,6 +54,8 @@ sealed class FormulaDialog : Form
     public FormulaDialog(ModuleSession s, string formulaId, string? pieceId, bool previewOnly = false)
     {
         _s = s;
+        _formulaId = formulaId;
+        _pieceId = pieceId;
         _previewOnly = previewOnly;
         var rules = s.Rules ?? throw new InvalidOperationException("No rules pack is loaded.");
         var runner = s.Runner ?? throw new InvalidOperationException("No rules pack is loaded.");
@@ -43,12 +69,15 @@ sealed class FormulaDialog : Form
         MaximizeBox = MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
+        AutoScaleDimensions = new SizeF(96f, 96f);
+        AutoScaleMode = AutoScaleMode.Dpi;
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
 
         _view = new FormulaFormView(FormulaLayout.Build(formula, rules), OnEdit, key => { _model.Reroll(key); Recalc(); });
         _view.MinimumSize = new Size(540, 0);
-        _body.Controls.Add(Group("Formula", _view));
+        _formulaGroup = Group("Formula", _view);
+        _body.Controls.Add(_formulaGroup);
         var wf = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
         wf.Controls.Add(_working);
         wf.Controls.Add(_inline);
@@ -67,7 +96,72 @@ sealed class FormulaDialog : Form
         _apply.Visible = !previewOnly;
         AcceptButton = _apply;
         CancelButton = _cancel;
+        if (!previewOnly)
+        {
+            s.RulesChanged += OnRulesChanged;
+            s.GameReplaced += OnGameReplaced;
+            HookGame();
+        }
         Recalc();
+    }
+
+    void HookGame()
+    {
+        if (_game != null) _game.Changed -= OnGameChanged;
+        _game = _s.Game;
+        if (_game != null) _game.Changed += OnGameChanged;
+    }
+
+    void OnUi(Action a)
+    {
+        if (IsDisposed || _closing || !IsHandleCreated) return;
+        if (InvokeRequired) BeginInvoke(a); else a();
+    }
+
+    void OnGameChanged(GameCommand _) => OnUi(CheckPieceThenRefresh);
+
+    void OnGameReplaced() => OnUi(() => { HookGame(); CheckPieceThenRefresh(); });
+
+    void CheckPieceThenRefresh()
+    {
+        if (_pieceId != null && _s.Game?.State.Pieces.ContainsKey(_pieceId) != true) { Close(); return; }
+        _debounce.Stop();
+        _debounce.Start();
+    }
+
+    /// <summary>The pack changed while open: rebuild the layout from the new pack, or close if the formula is gone.</summary>
+    void OnRulesChanged() => OnUi(() =>
+    {
+        try
+        {
+            if (_s.Rules?.ById<FormulaDef>(_formulaId) is not { } f || _s.Runner is not { } runner) { Close(); return; }
+            _model.Rebind(runner, f);
+            var old = _view;
+            _view = new FormulaFormView(FormulaLayout.Build(f, _s.Rules), OnEdit, key => { _model.Reroll(key); Recalc(); }) { MinimumSize = new Size(540, 0) };
+            _view.Margin = Padding.Empty;
+            var host = old.Parent;
+            if (host != null) { host.Controls.Remove(old); host.Controls.Add(_view); }
+            old.Dispose();
+            _ruleRef.Enabled = f.RuleRefId != null && _s.Rules.ById<RuleRef>(f.RuleRefId) != null;
+            _debounce.Stop();
+            Recalc();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _status.Text = "Could not update: " + ex.Message;
+        }
+    });
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _closing = true;
+        _s.RulesChanged -= OnRulesChanged;
+        _s.GameReplaced -= OnGameReplaced;
+        if (_game != null) _game.Changed -= OnGameChanged;
+        _game = null;
+        _debounce.Stop();
+        Open.Remove(this);
+        base.OnFormClosed(e);
     }
 
     static GroupBox Group(string title, Control inner)
@@ -141,6 +235,7 @@ sealed class FormulaDialog : Form
 
     void ApplyToLedger()
     {
+        if (_debounce.Enabled) { _debounce.Stop(); Recalc(); }
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
         foreach (var c in runner.Commands(v.Trace, null)) game.Execute(c);
         DialogResult = DialogResult.OK;

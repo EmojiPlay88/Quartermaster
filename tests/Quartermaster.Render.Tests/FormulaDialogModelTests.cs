@@ -184,3 +184,35 @@ public class FormulaDialogModelTests
         Assert.True(v.CanApply);
     }
 }
+
+public class FormulaDialogModelPhysicalToggleTests
+{
+    [Fact]
+    public void TogglingPhysicalDiceClearsRollOverridesBothWays()
+    {
+        var pack = new RulesPack
+        {
+            Formulas = new()
+            {
+                new FormulaDef
+                {
+                    Id = "f2", Name = "Dice", Text = "R + 1",
+                    Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 2, DiceSides = 6 } },
+                },
+            },
+        };
+        using var fx = new FixtureModule().WithBuildFile(FixtureModule.MinimalBuildFile()).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        var model = ModuleModelBuilder.Build(arch, new DiagnosticLog());
+        var m = new FormulaDialogModel(new FormulaRunner(pack, model, (n, _) => Enumerable.Repeat(2, n).ToList()), pack.Formulas[0], null);
+        var s = new GameState();
+        m.PhysicalDice = true;
+        m.SetBoxText("R", "9");
+        Assert.Equal("10", m.Evaluate(s).ResultText);
+        m.PhysicalDice = false;
+        var v = m.Evaluate(s);
+        Assert.Equal("4 (2+2)", v.Boxes.Single().Text);
+        m.PhysicalDice = true;
+        Assert.Equal("", m.Evaluate(s).Boxes.Single().Text);
+    }
+}

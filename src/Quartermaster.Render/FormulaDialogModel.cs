@@ -16,17 +16,38 @@ public sealed record DialogView(IReadOnlyList<BoxView> Boxes, IReadOnlyList<Inli
     string WorkingText, bool WorkingNegative, string Status, bool CanApply, FormulaTrace Trace);
 
 /// <summary>UI-free state of the formula dialog: typed values, overrides, pinned dice, and the mapping from a run to what the controls show.</summary>
-public sealed class FormulaDialogModel(FormulaRunner runner, FormulaDef formula, string? pieceId)
+public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef initialFormula, string? pieceId)
 {
+    private FormulaRunner runner = initialRunner;
+    private FormulaDef formula = initialFormula;
+
     private readonly Dictionary<string, string> _typed = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _overrides = new(StringComparer.Ordinal);
     private Dictionary<string, IReadOnlyList<int>> _fixedRolls = new(StringComparer.Ordinal);
 
     public FormulaDef Formula => formula;
+
+    /// <summary>The rules pack changed: keep what the user typed but run the new runner and formula.</summary>
+    public void Rebind(FormulaRunner newRunner, FormulaDef newFormula)
+    {
+        runner = newRunner;
+        formula = newFormula;
+    }
     public string? PieceId => pieceId;
 
     /// <summary>When on, Roll variables become typed boxes (the player rolled real dice).</summary>
-    public bool PhysicalDice { get; set; }
+    public bool PhysicalDice
+    {
+        get => _physical;
+        set
+        {
+            if (_physical == value) return;
+            _physical = value;
+            foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll)) _overrides.Remove(b.Variable);
+        }
+    }
+
+    private bool _physical;
 
     private VariableBinding? Binding(string v) => formula.Bindings.FirstOrDefault(b => b.Variable == v);
 

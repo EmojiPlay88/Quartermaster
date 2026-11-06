@@ -559,6 +559,13 @@ sealed class MainForm : Form
             Program.AppLog($"smoke: formula dialog '{dlg.Text}' opened");
             if (_opts.ScreenshotFormula != null) { dlg.SmokeFillInputs(); dlg.SaveScreenshot(_opts.ScreenshotFormula); }
             dlg.Close();
+            // Modeless dialog owned by an MDI child map, as the Calculate menu opens it; opening twice must reuse it.
+            var owner = (Form?)FirstMap() ?? this;
+            var live = FormulaDialog.Show(s, f.Id, piece.Id, owner, this);
+            var again = FormulaDialog.Show(s, f.Id, piece.Id, owner, this);
+            Program.AppLog($"smoke: modeless formula dialog owner={live?.Owner?.Text} deduped={ReferenceEquals(live, again)}");
+            if (live == null || !ReferenceEquals(live, again)) Program.ExitCode = 1;
+            live?.Close();
             return;
         }
         if (_opts.ScreenshotFormula != null)

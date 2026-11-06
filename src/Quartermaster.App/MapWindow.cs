@@ -232,8 +232,7 @@ sealed class MapWindow : Form
 
     void ShowFormula(string formulaId, string pieceId)
     {
-        using var dlg = new FormulaDialog(_s, formulaId, pieceId) { Host = Host };
-        dlg.ShowDialog(this);
+        FormulaDialog.Show(_s, formulaId, pieceId, this, Host);
     }
 
     void BuildMapMenu(ContextMenuStrip menu, GameSession game)
