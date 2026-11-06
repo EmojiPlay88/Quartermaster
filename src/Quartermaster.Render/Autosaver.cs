@@ -24,6 +24,18 @@ public sealed class Autosaver(Func<string?> moduleSha, Action<string> saveTo, st
         }
         if (now - _last < TimeSpan.FromMinutes(intervalMinutes)) return null;
         _last = now; // also after a failure, so a broken disk is retried once per interval, not every tick
+        return Write(now);
+    }
+
+    /// <summary>Writes an autosave right away (phase boundary) unless autosave is off, prunes, and restarts the interval. Never throws.</summary>
+    public string? SaveNow(DateTimeOffset now, int intervalMinutes)
+    {
+        _last = now;
+        return intervalMinutes <= 0 ? null : Write(now);
+    }
+
+    string? Write(DateTimeOffset now)
+    {
         try
         {
             if (moduleSha() is not { Length: > 0 } sha) return null;
