@@ -7,12 +7,16 @@ using SkiaSharp.Views.Desktop;
 namespace Quartermaster.App;
 
 /// <summary>Skia map view: rendering, pan/zoom, selection, drag and drop, hover. Menus and game commands live in <see cref="MapWindow"/>.</summary>
-sealed class MapCanvas : SKControl
+sealed partial class MapCanvas : SKControl
 {
     readonly ModuleSession _s;
     readonly MapRenderer _renderer;
     readonly PieceRenderer _pieces;
     readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = 600 };
+    double _zoomStep = 1.2;
+    int _dragThreshold = 4;
+    SKColor? _highlight;
+    bool _moduleGrids = true;
     readonly HashSet<string> _selected = new();
     Dictionary<string, TileSet> _tiles = new();
     CounterDetailPopup? _popup;
@@ -54,6 +58,22 @@ sealed class MapCanvas : SKControl
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     /// <summary>Forces grids on for all boards; false (default) draws only grids the module marks visible.</summary>
     public bool ShowGrid { get; set; }
+
+    /// <summary>Applies the map-related settings: wheel zoom step, drag threshold, hover delay, selection colour, label size and grid default.</summary>
+    public void ApplySettings(Settings s)
+    {
+        _zoomStep = Math.Clamp(s.WheelZoomStep, 1.05, 2);
+        _dragThreshold = Math.Max(0, s.DragThresholdPx);
+        _hoverTimer.Interval = Math.Max(1, s.HoverDelayMs);
+        var (r, g, b) = s.HighlightRgb;
+        _highlight = new SKColor(r, g, b);
+        _pieces.LabelScale = Math.Clamp(s.LabelFontSize, 6, 20) / 8f;
+        _drag.Snap = s.SnapOnDrop;
+        _moduleGrids = s.GridDefault != GridMode.Never;
+        Invalidate();
+    }
+
+    public double ZoomStepForSmoke => _zoomStep;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public IReadOnlySet<string> Selected => _selected;
     /// <summary>0..1 while board tiles are being prepared; null once ready.</summary>
@@ -67,6 +87,8 @@ sealed class MapCanvas : SKControl
     void Guard(Action a) { if (Guarded != null) Guarded(a); else a(); }
 
     public event Action<string, string>? StatusChanged;
+    /// <summary>A short message for the main window's status bar (palette drops).</summary>
+    public event Action<string>? DropMessage;
     /// <summary>Right click: the piece under the cursor (or null) and the client point.</summary>
     public event Action<string?, Point>? ContextRequested;
 
@@ -77,6 +99,7 @@ sealed class MapCanvas : SKControl
     {
         _tiles = new Dictionary<string, TileSet>(_tiles) { [tileKey] = ts };
         Invalidate();
+        NotifyViewport();
     }
 
     public void SelectOnly(string? id)
@@ -97,12 +120,22 @@ sealed class MapCanvas : SKControl
         Invalidate();
     }
 
+    /// <summary>Scrolls so the map point is in the middle of the view (zoom unchanged).</summary>
+    public void CentreOn(PointD p)
+    {
+        FitView.Center(View, p, new SKSize(Math.Max(Width, 1), Math.Max(Height, 1)));
+        ReportStatus(null);
+        Invalidate();
+        NotifyViewport();
+    }
+
     public void ZoomTo100() => ZoomCentered(1f);
     public void ZoomFit()
     {
         FitView.ZoomToFit(View, Map, new SKSize(Math.Max(Width, 1), Math.Max(Height, 1)));
         ReportStatus(null);
         Invalidate();
+        NotifyViewport();
     }
 
     void ZoomCentered(float zoom)
@@ -113,6 +146,7 @@ sealed class MapCanvas : SKControl
         FitView.Center(View, centre, size);
         ReportStatus(null);
         Invalidate();
+        NotifyViewport();
     }
 
     /// <summary>Coalesced repaint for high-frequency input (pan, band, drag): at most one queued until it paints.</summary>
@@ -157,6 +191,7 @@ sealed class MapCanvas : SKControl
                     FitView.Center(View, new PointD(e.X + e.W / 2, e.Y + e.H / 2), size);
                 }
                 ReportStatus(null);
+                NotifyViewport();
             }
             var st = State;
             if (st == null)
@@ -174,10 +209,11 @@ sealed class MapCanvas : SKControl
                 _drag.Draw(c, View, st);
             else
             {
-                _renderer.Draw(c, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, _hoverStack));
+                _renderer.Draw(c, Map, _tiles, st, _s.Model, View, size, Options(null, _hoverStack));
                 if (_drag.Incoming) _drag.Draw(c, View, st);
             }
             DrawBand(c);
+            _los?.Draw(c, View);
             if (Preparing is { } p) Message(c, size, $"Preparing map… {(int)Math.Round(p * 100)}%");
             _paintFailed = false;
         }
@@ -221,7 +257,7 @@ sealed class MapCanvas : SKControl
 
     string? PieceAt(Point p)
     {
-        if (State is not { } st) return null;
+        if (State is not { } st || _hideCounters) return null;
         try
         {
             return HitTester.PieceAt(st, Map, _s.Model, _s.Images, MapPoint(p), _pieces.Types);
@@ -248,6 +284,7 @@ sealed class MapCanvas : SKControl
             Cursor = Cursors.SizeAll;
             return;
         }
+        if (LosMouseDown(e)) return;
         if (e.Button == MouseButtons.Right)
         {
             var hit = PieceAt(e.Location);
@@ -290,11 +327,13 @@ sealed class MapCanvas : SKControl
             Request();
             return;
         }
+        if (LosMouseMove(e)) return;
         if (_panning)
         {
             View.Pan = new SKPoint(View.Pan.X - (e.X - _panLast.X) / View.Zoom, View.Pan.Y - (e.Y - _panLast.Y) / View.Zoom);
             _panLast = e.Location;
             Request();
+            NotifyViewport();
             return;
         }
         if (_bandActive)
@@ -305,8 +344,7 @@ sealed class MapCanvas : SKControl
         }
         if (e.Button == MouseButtons.Left && _downPiece != null)
         {
-            var ds = SystemInformation.DragSize;
-            if (Math.Abs(e.X - _downPos.X) > ds.Width / 2 || Math.Abs(e.Y - _downPos.Y) > ds.Height / 2) BeginDrag(e.Location);
+            if (Math.Abs(e.X - _downPos.X) > _dragThreshold || Math.Abs(e.Y - _downPos.Y) > _dragThreshold) BeginDrag(e.Location);
             return;
         }
         if (e.Button == MouseButtons.None) UpdateHover(e.Location);
@@ -315,6 +353,7 @@ sealed class MapCanvas : SKControl
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
+        if (LosMouseUp(e)) return;
         if (_drag.Active)
         {
             if (e.Button == MouseButtons.Left) EndDrag(commit: true, e.Location);
@@ -323,7 +362,7 @@ sealed class MapCanvas : SKControl
         if (_panning && (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Left))
         {
             _panning = false;
-            Cursor = Cursors.Default;
+            Cursor = _los != null ? Cursors.Cross : Cursors.Default;
             return;
         }
         if (e.Button == MouseButtons.Right)
@@ -335,7 +374,7 @@ sealed class MapCanvas : SKControl
         if (_bandActive)
         {
             _bandActive = false;
-            if (State is { } st && Math.Abs(e.X - _downPos.X) + Math.Abs(e.Y - _downPos.Y) >= 3)
+            if (State is { } st && !_hideCounters && Math.Abs(e.X - _downPos.X) + Math.Abs(e.Y - _downPos.Y) >= 3)
             {
                 var r = SelectionRect.FromCorners(_bandStart, _bandNow);
                 foreach (var id in SelectionRect.PieceIdsIn(st, Map, r, _s.Images)) _selected.Add(id);
@@ -364,9 +403,10 @@ sealed class MapCanvas : SKControl
         base.OnMouseWheel(e);
         if (_drag.Active) return; // zoom is ignored mid-drag: the snapshot is only valid for the view the drag started in
         HidePopup();
-        View.ZoomAt(new SKPoint(e.X, e.Y), (float)Math.Pow(1.2, e.Delta / 120.0));
+        View.ZoomAt(new SKPoint(e.X, e.Y), (float)Math.Pow(_zoomStep, e.Delta / 120.0));
         ReportStatus(e.Location);
         Invalidate();
+        NotifyViewport();
     }
 
     protected override void OnMouseLeave(EventArgs e)
@@ -380,6 +420,7 @@ sealed class MapCanvas : SKControl
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (e.KeyCode == Keys.Escape && LosEscape()) { e.Handled = true; return; }
         if (e.KeyCode == Keys.Escape && _drag.Active) { EndDrag(commit: false, default); e.Handled = true; return; }
         if (e.KeyCode == Keys.Space) { _space = true; Cursor = Cursors.Hand; e.Handled = true; }
     }
@@ -387,7 +428,7 @@ sealed class MapCanvas : SKControl
     protected override void OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
-        if (e.KeyCode == Keys.Space) { _space = false; if (!_panning) Cursor = Cursors.Default; }
+        if (e.KeyCode == Keys.Space) { _space = false; if (!_panning) Cursor = _los != null ? Cursors.Cross : Cursors.Default; }
     }
 
     protected override void OnLostFocus(EventArgs e)
@@ -402,10 +443,35 @@ sealed class MapCanvas : SKControl
         if (_drag.Active && !Capture) EndDrag(commit: false, default); // capture stolen (Alt+Tab, dialog): cancel
     }
 
+    int _zoomDpi; // DPI the current zoom was set at (0 until the first handle)
+
+    void SyncZoomDpi()
+    {
+        if (_zoomDpi == 0) { _zoomDpi = DeviceDpi; return; }
+        if (DeviceDpi > 0 && DeviceDpi != _zoomDpi) View.Zoom *= DeviceDpi / (float)_zoomDpi;
+        _zoomDpi = DeviceDpi;
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        SyncZoomDpi(); // a pop-out/dock can recreate the handle directly on a monitor with another DPI
+    }
+
+    /// <summary>Moved to a monitor with different scaling: keep the same map area visible by scaling zoom with the DPI ratio, then repaint crisply.</summary>
+    protected override void OnDpiChangedAfterParent(EventArgs e)
+    {
+        base.OnDpiChangedAfterParent(e);
+        SyncZoomDpi();
+        HidePopup();
+        Invalidate();
+    }
+
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
         if (_drag.Active) EndDrag(commit: false, default); // the snapshot no longer matches the client area
+        NotifyViewport();
     }
 
     void ReportStatus(Point? at)
@@ -454,7 +520,7 @@ sealed class MapCanvas : SKControl
         var size = SceneSize();
         using var surface = SKSurface.Create(new SKImageInfo((int)size.Width, (int)size.Height));
         if (surface == null) return null;
-        _renderer.Draw(surface.Canvas, Map, _tiles, st, _s.Model, View, size, new MapDrawOptions(ShowGrid, _selected, null, hidden));
+        _renderer.Draw(surface.Canvas, Map, _tiles, st, _s.Model, View, size, Options(hidden, null));
         return surface.Snapshot();
     }
 
@@ -506,6 +572,7 @@ sealed class MapCanvas : SKControl
     protected override void OnDragOver(DragEventArgs e)
     {
         base.OnDragOver(e);
+        if (PaletteDrop.FromData(_s, e.Data) != null && _s.Game != null) { e.Effect = DragDropEffects.Copy; return; }
         if (!CanAccept(e)) { e.Effect = DragDropEffects.None; return; }
         e.Effect = DragDropEffects.Move;
         if (State is not { } st || MapDragController.Current is not { } d) return;
@@ -523,6 +590,16 @@ sealed class MapCanvas : SKControl
     protected override void OnDragDrop(DragEventArgs e)
     {
         base.OnDragDrop(e);
+        if (PaletteDrop.FromData(_s, e.Data) is { } slot)
+        {
+            Guard(() =>
+            {
+                var (_, msg) = PaletteDrop.Place(_s, Map, slot, MapPoint(PointToClient(new Point(e.X, e.Y))), _drag.Snap);
+                DropMessage?.Invoke(msg);
+            });
+            Invalidate();
+            return;
+        }
         if (CanAccept(e) && State is { } st && _s.Game != null && _drag.Info != null)
             _drag.Commit(st, MapPoint(PointToClient(new Point(e.X, e.Y))));
         else
@@ -549,7 +626,7 @@ sealed class MapCanvas : SKControl
         _hoverTimer.Stop();
         if (_hoverStack == null || _panning || _bandActive || State is not { } st || !st.Stacks.TryGetValue(_hoverStack, out var stack)) return;
         HidePopup();
-        _popup = CounterDetailPopup.Create(_s, st, stack, _pieces);
+        _popup = CounterDetailPopup.Create(_s, st, stack, _pieces, DeviceDpi / 96f);
         _popup.ShowAt(Cursor.Position);
     }
 

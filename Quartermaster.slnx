@@ -3,11 +3,13 @@
     <Project Path="src/Quartermaster.App/Quartermaster.App.csproj" />
     <Project Path="src/Quartermaster.Core/Quartermaster.Core.csproj" />
     <Project Path="src/Quartermaster.Render/Quartermaster.Render.csproj" />
+    <Project Path="src/Quartermaster.Rules/Quartermaster.Rules.csproj" />
     <Project Path="src/Quartermaster.Vassal/Quartermaster.Vassal.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Quartermaster.Core.Tests/Quartermaster.Core.Tests.csproj" />
     <Project Path="tests/Quartermaster.Render.Tests/Quartermaster.Render.Tests.csproj" />
+    <Project Path="tests/Quartermaster.Rules.Tests/Quartermaster.Rules.Tests.csproj" />
     <Project Path="tests/Quartermaster.TestFixtures/Quartermaster.TestFixtures.csproj" />
     <Project Path="tests/Quartermaster.Vassal.Tests/Quartermaster.Vassal.Tests.csproj" />
   </Folder>

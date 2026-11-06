@@ -37,6 +37,13 @@ public sealed class GameState
     public OrderedDictionary<string, StackInstance> Stacks { get; set; } = new();
     public List<string> MapOrder { get; set; } = new();
     public long NextStackSeq { get; set; }
+    /// <summary>Ledger key (see LedgerKey) -> property id -> value.</summary>
+    public OrderedDictionary<string, OrderedDictionary<string, double>> Ledgers { get; set; } = new();
+    public List<LedgerEntry> LedgerHistory { get; set; } = new();
+    public List<DiceEntry> DiceHistory { get; set; } = new();
+    public List<LogEntry> Log { get; set; } = new();
+    public string Notes { get; set; } = "";
+    public TurnState Turn { get; set; } = new(1, null);
 
     public IEnumerable<StackInstance> StacksOn(string mapId) =>
         Stacks.Values.Where(s => s.MapId == mapId);
@@ -54,8 +61,10 @@ public sealed class GameState
             case RemovePiece r:
                 if (Pieces.TryGetValue(r.PieceId, out var rp))
                 {
+                    Log.Add(LogBuilder.Delete(this, r, rp.MapId));
                     DetachFromStack(rp);
                     Pieces.Remove(r.PieceId);
+                    Ledgers.Remove(LedgerKey.Piece(r.PieceId));
                     PruneEmpty();
                 }
                 break;
@@ -73,9 +82,50 @@ public sealed class GameState
                 foreach (var p in Pieces.Values)
                     if (p.MapId == cm.MapId) p.Moved = false;
                 break;
+            case LedgerDelta ld: DoLedgerDelta(ld); break;
+            case SeedLedger sl: DoSeed(sl); break;
+            case RollDice rd:
+                DiceHistory.Add(new DiceEntry(DiceHistory.Count + 1, rd.Purpose ?? "", rd.Count, rd.Sides, (rd.Results ?? Array.Empty<int>()).ToList()));
+                Log.Add(LogBuilder.Dice(this, rd));
+                break;
+            case SetNotes sn:
+                Notes = sn.Text ?? "";
+                Log.Add(LogBuilder.Notes(this, sn));
+                break;
+            case SetTurn st:
+                Turn = new TurnState(st.Turn, st.Phase);
+                Log.Add(LogBuilder.Turn(this, st));
+                break;
             case ToggleTrail tt:
                 if (Pieces.TryGetValue(tt.PieceId, out var trp)) trp.TrailVisible = !trp.TrailVisible;
                 break;
+        }
+    }
+
+    void SetLedger(string key, string propertyId, double value)
+    {
+        if (!Ledgers.TryGetValue(key, out var inner)) Ledgers[key] = inner = new();
+        inner[propertyId] = value;
+    }
+
+    void DoLedgerDelta(LedgerDelta d)
+    {
+        if (d.Key == null || d.PropertyId == null || !double.IsFinite(d.After)) return;
+        SetLedger(d.Key, d.PropertyId, d.After);
+        LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, d.Key, d.PropertyId, double.IsFinite(d.Before) ? d.Before : 0,
+            d.After, d.Source ?? "manual", d.FormulaId, d.RuleRefId, d.Note, d.Working));
+        Log.Add(LogBuilder.Ledger(this, d));
+    }
+
+    void DoSeed(SeedLedger sl)
+    {
+        if (sl.Seeds == null) return;
+        foreach (var s in sl.Seeds)
+        {
+            if (s == null || s.Key == null || s.PropertyId == null || !double.IsFinite(s.Value)) continue;
+            if (Ledgers.TryGetValue(s.Key, out var inner) && inner.ContainsKey(s.PropertyId)) continue;
+            SetLedger(s.Key, s.PropertyId, s.Value);
+            LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, s.Key, s.PropertyId, 0, s.Value, "seed", null, null, null, null));
         }
     }
 
@@ -89,6 +139,7 @@ public sealed class GameState
         };
         Pieces[a.PieceId] = p;
         Place(new[] { p }, a.MapId, a.Pos, a.StackOnto);
+        Log.Add(LogBuilder.Place(this, a));
     }
 
     static List<string> DecodeState(string typeString, string stateString)
@@ -108,13 +159,14 @@ public sealed class GameState
     void DoMove(MovePieces m)
     {
         var moved = new List<PieceInstance>();
-        foreach (var id in m.PieceIds)
+        foreach (var id in m.PieceIds ?? Array.Empty<string>())
             if (Pieces.TryGetValue(id, out var p) && !moved.Contains(p)) moved.Add(p);
         if (moved.Count == 0) return;
         foreach (var p in moved) DetachFromStack(p);
         Place(moved, m.MapId, m.Pos, m.StackOnto);
         foreach (var p in moved) { p.Moved = true; p.Trail.Add(p.Pos); }
         PruneEmpty();
+        Log.Add(LogBuilder.Move(this, m, moved.Count, moved[0].Id));
     }
 
     void Place(IReadOnlyList<PieceInstance> ps, string mapId, PointD pos, string? onto)

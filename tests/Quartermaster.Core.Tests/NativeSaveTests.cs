@@ -44,11 +44,56 @@ public class NativeSaveTests
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
         try
         {
-            File.WriteAllText(path, "{\"format\":2,\"moduleSha256\":\"x\",\"snapshot\":{},\"log\":[]}");
+            File.WriteAllText(path, "{\"format\":4,\"moduleSha256\":\"x\",\"snapshot\":{},\"log\":[]}");
             var ex = Assert.Throws<InvalidDataException>(() => NativeSave.Read(path));
-            Assert.Contains("2", ex.Message);
+            Assert.Contains("4", ex.Message);
             File.WriteAllText(path, "{not json");
             Assert.IsType<JsonException>(Assert.Throws<InvalidDataException>(() => NativeSave.Read(path)).InnerException);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void NativeSave_Format3_RoundTrip()
+    {
+        var st = new GameState(); st.MapOrder.Add("m1");
+        var sess = new GameSession(st, "h");
+        var at = new DateTimeOffset(2026, 3, 4, 5, 6, 7, TimeSpan.FromHours(1));
+        sess.Execute(new AddPiece("a", "t", "", "m1", new PointD(1, 2), null, null, at, "Ann"));
+        sess.Execute(new SetNotes("remember", at));
+        sess.Execute(new SetTurn(5, "Supply", at));
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
+        try
+        {
+            NativeSave.Write(path, sess);
+            Assert.Equal(3, NativeSave.FormatVersion);
+            var back = NativeSave.Read(path);
+            Assert.Equal(3, back.State.Log.Count);
+            Assert.Equal(sess.State.Log, back.State.Log);
+            Assert.Equal(at, back.State.Log[0].At);
+            Assert.Equal("remember", back.State.Notes);
+            Assert.Equal(new TurnState(5, "Supply"), back.State.Turn);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void NativeSave_ReadsFormat2_EmptyLogNotesTurn1()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
+        try
+        {
+            File.WriteAllText(path, "{\"format\":2,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[]},\"log\":[]}");
+            var s = NativeSave.Read(path);
+            Assert.Empty(s.State.Log);
+            Assert.Equal("", s.State.Notes);
+            Assert.Equal(new TurnState(1, null), s.State.Turn);
+            File.WriteAllText(path, "{\"format\":3,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[],\"notes\":null,\"log\":[{\"seq\":1,\"kind\":\"weird\",\"text\":\"t\",\"at\":\"2026-01-01T00:00:00+00:00\"}]},\"log\":[]}");
+            s = NativeSave.Read(path);
+            Assert.Equal("", s.State.Notes);
+            Assert.Equal("weird", s.State.Log[0].Kind);
+            File.WriteAllText(path, "{\"format\":3,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[],\"log\":null},\"log\":[]}");
+            Assert.Throws<InvalidDataException>(() => NativeSave.Read(path));
         }
         finally { File.Delete(path); }
     }

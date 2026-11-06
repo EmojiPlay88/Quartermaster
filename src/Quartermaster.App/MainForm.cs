@@ -1,16 +1,30 @@
 using System.Xml;
+using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.App;
 
 /// <summary>MDI shell: menus, toolbar, status bar, module tree, diagnostics, module/game lifecycle.</summary>
-sealed class MainForm : Form
+sealed partial class MainForm : Form
 {
     readonly StartupOptions _opts;
-    readonly ModuleTreePanel _tree = new() { Dock = DockStyle.Left, Width = 220 };
+    readonly SplitContainer _leftSplit = new() { Dock = DockStyle.Left, Width = 220, Orientation = Orientation.Horizontal, FixedPanel = FixedPanel.None };
+    readonly ModuleTreePanel _tree = new() { Dock = DockStyle.Fill };
+    readonly TablesTreePanel _tablesTree = new() { Dock = DockStyle.Fill };
+    readonly WindowLayoutStore _layoutStore = new(LayoutRoot);
+    double _leftFraction = WindowLayoutStore.DefaultLeftSplit;
+    bool _leftSplitReady, _applyingSplit;
     readonly Splitter _splitter = new() { Dock = DockStyle.Left, Width = 4 };
     readonly DocumentTabStrip _tabs = new();
+    readonly Panel _logHost = new() { Dock = DockStyle.Bottom, Height = 170, Visible = false };
+    readonly Splitter _logSplitter = new() { Dock = DockStyle.Bottom, Height = 4, Visible = false };
+    readonly ToolStripMenuItem _viewLog = new("&Log");
+    readonly LogDock _logDock;
+    readonly Panel _paletteHost = new() { Dock = DockStyle.Right, Width = 260, Visible = false };
+    readonly Splitter _paletteSplitter = new() { Dock = DockStyle.Right, Width = 4, Visible = false };
+    readonly PaletteDock _paletteDock;
+    readonly ToolStripMenuItem _viewPalette = new("Counter &palette") { Visible = false };
     readonly MenuStrip _menu = new();
     readonly ToolStrip _toolbar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
     readonly StatusStrip _status = new() { RenderMode = ToolStripRenderMode.System };
@@ -23,13 +37,22 @@ sealed class MainForm : Form
     readonly ToolStripMenuItem _viewTree = new("Module &Tree") { Checked = true, CheckOnClick = true };
     readonly List<ToolStripItem> _needsModule = new();
     readonly List<ToolStripItem> _needsGame = new();
+    readonly List<ToolStripItem> _needsRules = new();
     readonly Dictionary<string, MapWindow> _maps = new();
     readonly Dictionary<string, Form> _charts = new();
     readonly Dictionary<string, Form> _docs = new();
+    readonly Dictionary<string, Form> _ledgers = new();
+    readonly Dictionary<string, Form> _benches = new();
 
+    readonly WindowManager _wm;
+    readonly ToolStripMenuItem _floatingMenu = new("&Floating windows") { Visible = false };
+    readonly ToolStripMenuItem _popOutActive = new("&Pop Out Active Window");
     ModuleSession? _session;
+    ToolStripMenuItem? _toolsMenu;
+    DiceTools? _dice;
     DiagnosticsWindow? _diag;
     string? _savePath;
+    bool _recoveredAutosave; // the open game came from an autosave file; Save goes to Save As
     bool _dirty;
     bool _noticePending;
     bool _startupDone;
@@ -47,35 +70,99 @@ sealed class MainForm : Form
         Text = "Quartermaster";
         ClientSize = new Size(1024, 700);
         StartPosition = FormStartPosition.CenterScreen;
+        _wm = new WindowManager(this, _tabs, _layoutStore);
+        _wm.FloatingChanged += RebuildFloatingMenu;
+        _logDock = new LogDock(this, _wm, _logHost, _logSplitter, _viewLog, CentreOnPiece, Guard);
+        _paletteDock = new PaletteDock(this, _wm, _paletteHost, _paletteSplitter, Guard);
+        RegisterCommands();
+        InitLos();
+        _cmdItems["view.log"] = _viewLog;
         BuildMenu();
         BuildToolbar();
         BuildStatus();
 
         // Dock order: the last control added is docked first (menu on top, then toolbar, status, left panel).
         Controls.Add(_tabs); // added first so it docks after the tree and spans only the MDI area
+        Controls.Add(_logSplitter); // the log docks at the bottom of the MDI area, beside the tree
+        Controls.Add(_logHost);
+        Controls.Add(_paletteSplitter); // the palette docks at the right of the MDI area, in game master mode
+        Controls.Add(_paletteHost);
         Controls.Add(_splitter);
-        Controls.Add(_tree);
+        _leftSplit.Panel1.Controls.Add(_tree);
+        _leftSplit.Panel2.Controls.Add(_tablesTree);
+        Controls.Add(_leftSplit);
         Controls.Add(_status);
         Controls.Add(_toolbar);
         Controls.Add(_menu);
         MainMenuStrip = _menu;
 
         _tree.NodeActivated += OnNodeActivated;
-        MdiChildActivate += (_, _) => { KeepMaximized(); SyncTabs(null); };
+        _tablesTree.TableActivated += id => Guard(() => ShowWorkbenchItem(w => w.ShowTable(id)));
+        _tablesTree.FormulaActivated += id => Guard(() => ShowWorkbenchItem(w => w.ShowFormula(id)));
+        _leftSplit.SplitterMoved += (_, _) => RememberLeftSplit();
+        _leftSplit.SizeChanged += (_, _) => ApplyLeftSplit();
+        MdiChildActivate += (_, _) => { KeepMaximized(); SyncTabs(null); NoteActiveMap(ActiveMdiChild as MapWindow); };
         _tabs.TabActivated += f => { if (!f.IsDisposed) f.Activate(); };
         _tabs.TabCloseRequested += CloseTab;
+        _tabs.TabPopOutRequested += (f, at) => Guard(() => _wm.PopOut(f, at));
         _tabs.TabsCloseRequested += fs => { foreach (var f in fs) if (!f.IsDisposed) f.Close(); };
         _showGrid.CheckedChanged += (_, _) => GridVisibleChanged?.Invoke();
-        _viewTree.CheckedChanged += (_, _) => _tree.Visible = _splitter.Visible = _viewTree.Checked;
+        _viewLog.Click += (_, _) => Guard(_logDock.Toggle);
+        _viewTree.CheckedChanged += (_, _) => _leftSplit.Visible = _splitter.Visible = _viewTree.Checked;
+        _floatKeys = new FloatKeyFilter(this);
+        Application.AddMessageFilter(_floatKeys);
+        InitSettings();
         UpdateUi();
         UpdateTitle();
+        RestoreMainBounds();
+    }
+
+    /// <summary>Layout files live here; QUARTERMASTER_LAYOUT_ROOT redirects them (used by smoke runs).</summary>
+    static string LayoutRoot =>
+        Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT") is { Length: > 0 } r ? r
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
+
+    void ApplyLeftSplit()
+    {
+        if (!_leftSplitReady || _leftSplit.Height < 100) return;
+        var d = (int)Math.Round(_leftSplit.Height * _leftFraction);
+        d = Math.Clamp(d, _leftSplit.Panel1MinSize, Math.Max(_leftSplit.Panel1MinSize, _leftSplit.Height - _leftSplit.Panel2MinSize - _leftSplit.SplitterWidth));
+        if (_leftSplit.SplitterDistance == d) return;
+        _applyingSplit = true;
+        try { _leftSplit.SplitterDistance = d; }
+        finally { _applyingSplit = false; }
+    }
+
+    void RememberLeftSplit()
+    {
+        if (!_leftSplitReady || _applyingSplit || _leftSplit.Height < 100) return;
+        _leftFraction = Math.Clamp((double)_leftSplit.SplitterDistance / _leftSplit.Height, WindowLayoutStore.MinLeftSplit, WindowLayoutStore.MaxLeftSplit);
+    }
+
+    /// <summary>Opens the workbench and runs the action on it (a no-op without a module).</summary>
+    void ShowWorkbenchItem(Action<WorkbenchWindow> act)
+    {
+        ShowWorkbench();
+        if (_benches.TryGetValue("workbench", out var w) && !w.IsDisposed && w is WorkbenchWindow wb)
+        {
+            wb.Activate();
+            act(wb);
+        }
+    }
+
+    void RestoreMainBounds()
+    {
+        if (_wm.LoadMain() is not { } m) return;
+        WindowManager.ApplyBounds(this, m.Bounds, m.Dpi);
+        if (m.Maximized) WindowState = FormWindowState.Maximized;
     }
 
     // ---------- construction ----------
 
-    ToolStripMenuItem Item(ToolStripItemCollection into, string text, Action act, Keys keys = Keys.None, bool needsModule = false, bool needsGame = false)
+    ToolStripMenuItem Item(ToolStripItemCollection into, string text, Action act, string? cmd = null, bool needsModule = false, bool needsGame = false)
     {
-        var mi = new ToolStripMenuItem(text) { ShortcutKeys = keys };
+        var mi = new ToolStripMenuItem(text);
+        if (cmd != null) _cmdItems[cmd] = mi;
         mi.Click += (_, _) => Guard(act);
         into.Add(mi);
         if (needsModule) _needsModule.Add(mi);
@@ -83,33 +170,52 @@ sealed class MainForm : Form
         return mi;
     }
 
-    void Tool(string text, Action act, bool needsModule = false, bool needsGame = false)
+    ToolStripButton Tool(string id, string text, Action act, bool needsModule = false, bool needsGame = false)
     {
-        var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text };
+        var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = id };
         b.Click += (_, _) => Guard(act);
         _toolbar.Items.Add(b);
         if (needsModule) _needsModule.Add(b);
         if (needsGame) _needsGame.Add(b);
+        return b;
     }
 
     void BuildMenu()
     {
         var file = new ToolStripMenuItem("&File");
-        Item(file.DropDownItems, "&Open Module...", OpenModuleDialog, Keys.Control | Keys.O);
+        Item(file.DropDownItems, "&Open Module...", OpenModuleDialog, "file.openModule");
         file.DropDownItems.Add(new ToolStripSeparator());
-        Item(file.DropDownItems, "&New Game", NewGame, Keys.Control | Keys.N, needsModule: true);
+        Item(file.DropDownItems, "&New Game", NewGame, "file.newGame", needsModule: true);
         Item(file.DropDownItems, "Load &Setup...", LoadSetupDialog, needsModule: true);
-        Item(file.DropDownItems, "Open &Game...", OpenGameDialog, Keys.Control | Keys.G, needsModule: true);
+        Item(file.DropDownItems, "Open &Game...", OpenGameDialog, "file.openGame", needsModule: true);
+        Item(file.DropDownItems, "Open Auto&save...", OpenAutosaveDialog, needsModule: true);
         file.DropDownItems.Add(new ToolStripSeparator());
-        Item(file.DropDownItems, "&Save Game", () => SaveGame(false), Keys.Control | Keys.S, needsGame: true);
-        Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), Keys.Control | Keys.Shift | Keys.S, needsGame: true);
+        Item(file.DropDownItems, "&Save Game", () => SaveGame(false), "file.saveGame", needsGame: true);
+        Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), "file.saveGameAs", needsGame: true);
+        file.DropDownItems.Add(new ToolStripSeparator());
+        Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, needsModule: true);
+        Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, needsModule: true);
+        _needsRules.Add(Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false)));
+        _needsRules.Add(Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true)));
         file.DropDownItems.Add(new ToolStripSeparator());
         Item(file.DropDownItems, "E&xit", Close);
 
         var view = new ToolStripMenuItem("&View");
         view.DropDownItems.Add(_viewTree);
-        Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, Keys.Control | Keys.D, needsModule: true);
+        Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, "view.diagnostics", needsModule: true);
         view.DropDownItems.Add(_showGrid);
+        _needsGame.Add(_viewLog);
+        view.DropDownItems.Add(_viewLog);
+        _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, "view.ledger"));
+        Item(view.DropDownItems, "&Overview", ShowOverview, needsGame: true);
+        _viewPalette.Click += (_, _) => Guard(TogglePalette);
+        _needsGame.Add(_viewPalette);
+        view.DropDownItems.Add(_viewPalette);
+
+        var tools = _toolsMenu = new ToolStripMenuItem("&Tools");
+        Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", needsModule: true);
+        Item(tools.DropDownItems, "&Inventory", ShowInventory, needsGame: true);
+        Item(tools.DropDownItems, "&Notes", ShowNotes, needsGame: true);
 
         var window = new ToolStripMenuItem("&Window");
         Item(window.DropDownItems, "&Cascade", () => Arrange(MdiLayout.Cascade));
@@ -117,23 +223,39 @@ sealed class MainForm : Form
         Item(window.DropDownItems, "Tile &Vertically", () => Arrange(MdiLayout.TileVertical));
         Item(window.DropDownItems, "Close &All", CloseAllWindows);
         window.DropDownItems.Add(new ToolStripSeparator());
+        _popOutActive.Click += (_, _) => Guard(() => { if (ActiveMdiChild is { } a) _wm.PopOut(a); });
+        window.DropDownItems.Add(_popOutActive);
+        window.DropDownItems.Add(_floatingMenu);
+        window.DropDownItems.Add(new ToolStripSeparator());
+        window.DropDownOpening += (_, _) => _popOutActive.Enabled = ActiveMdiChild is { IsDisposed: false };
 
         var help = new ToolStripMenuItem("&Help");
         Item(help.DropDownItems, "&About", () => Info("Quartermaster\nA VASSAL module reader and engine.", "About Quartermaster"));
 
-        _menu.Items.AddRange(new ToolStripItem[] { file, view, window, help });
+        _menu.Items.AddRange(new ToolStripItem[] { file, view, tools, window, help });
         _menu.MdiWindowListItem = window;
     }
 
     void BuildToolbar()
     {
-        Tool("Open Module", OpenModuleDialog);
-        Tool("New Game", NewGame, needsModule: true);
-        Tool("Load Setup", LoadSetupDialog, needsModule: true);
-        Tool("Open Game", OpenGameDialog, needsModule: true);
-        Tool("Save Game", () => SaveGame(false), needsGame: true);
+        Tool("tool.openModule", "Open Module", OpenModuleDialog);
+        Tool("tool.newGame", "New Game", NewGame, needsModule: true);
+        Tool("tool.loadSetup", "Load Setup", LoadSetupDialog, needsModule: true);
+        Tool("tool.openGame", "Open Game", OpenGameDialog, needsModule: true);
+        Tool("tool.saveGame", "Save Game", () => SaveGame(false), needsGame: true);
         _toolbar.Items.Add(new ToolStripSeparator());
-        Tool("Diagnostics", ShowDiagnostics, needsModule: true);
+        Tool("tool.diagnostics", "Diagnostics", ShowDiagnostics, needsModule: true);
+        Tool("tool.notes", "Notes", ShowNotes, needsGame: true);
+        Tool("tool.overview", "Overview", ShowOverview, needsGame: true);
+        Tool("tool.inventory", "Inventory", ShowInventory, needsGame: true);
+        Tool("tool.palette", "Palette", TogglePalette, needsGame: true); // shown in game master mode only (ApplySettings)
+        Tool("tool.los", "LOS", () => { if (_handlers.TryGetValue("tool.los", out var h)) h(); }, needsGame: true);
+        _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
+        SetCommandHandler("dice.1d6", () => _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll"));
+        SetCommandHandler("dice.2d6", () => _dice!.RollSpec(new DiceSpec(2, 6, 0), "Roll"));
+        SetCommandHandler("turn.next", () => { if (_session?.Game == null) return false; _dice!.StepTurn(1); return true; });
+        _toolsMenu!.DropDownItems.Add(new ToolStripSeparator());
+        Item(_toolsMenu.DropDownItems, "&Settings...", ShowSettings, "tools.settings");
     }
 
     void BuildStatus()
@@ -142,7 +264,7 @@ sealed class MainForm : Form
         {
             if (_problemCount > 0) ShowDiagnostics();
         };
-        _status.Items.AddRange(new ToolStripItem[] { _sbModule, _sbMessage, _sbTiling, _sbLocation, _sbZoom });
+        _status.Items.AddRange(new ToolStripItem[] { _sbModule, _sbMessage, _sbTiling, _dice!.TurnLabel, _sbLocation, _sbZoom });
     }
 
     // ---------- public hooks for map windows (Task 12) ----------
@@ -188,6 +310,7 @@ sealed class MainForm : Form
 
     bool ConfirmDiscard()
     {
+        FlushNotes(); // pending note text becomes a command first, so the dirty check below counts it
         if (!_dirty || Program.Smoke) return true;
         return MessageBox.Show(this, "The current game has unsaved changes. Discard them?", "Quartermaster",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
@@ -197,6 +320,8 @@ sealed class MainForm : Form
     {
         foreach (var i in _needsModule) i.Enabled = _session != null;
         foreach (var i in _needsGame) i.Enabled = _session?.Game != null;
+        foreach (var i in _needsRules) i.Enabled = _session?.Rules != null;
+        _dice?.Refresh();
     }
 
     void UpdateTitle()
@@ -208,8 +333,10 @@ sealed class MainForm : Form
             if (_session.Game != null)
             {
                 if (_savePath != null) t += " — " + Path.GetFileNameWithoutExtension(_savePath);
+                else if (_recoveredAutosave) t += " — (recovered autosave)";
                 if (_dirty) t += "*";
             }
+            if (_session.Rules is { } r) t += $" — rules: {r.Name}{(_session.RulesDirty ? "*" : "")}";
         }
         Text = t;
     }
@@ -226,14 +353,16 @@ sealed class MainForm : Form
     /// <summary>Opens a module and starts a game. Returns false (leaving everything as it was) on failure.</summary>
     bool OpenModule(string path, bool fromArgs)
     {
-        if (!ConfirmDiscard()) return false;
+        if (!ConfirmDiscard() || !ConfirmRulesSaved()) return false;
         ModuleSession next;
+        string? moduleHash;
         var prevWait = Application.UseWaitCursor;
         Application.UseWaitCursor = true;
         Cursor.Current = Cursors.WaitCursor;
         try
         {
             next = ModuleSession.Open(path);
+            moduleHash = WindowLayoutStore.HashFile(path);
         }
         catch (Exception ex) when (ex is InvalidDataException or XmlException or IOException or UnauthorizedAccessException)
         {
@@ -247,11 +376,19 @@ sealed class MainForm : Form
 
         CloseSession();
         _session = next;
+        _wm.BeginModule(moduleHash);
         _savePath = null;
         _dirty = false;
         _session.Log.Added += OnLogAdded;
+        ReportSettingsProblems(_session);
         _session.GameReplaced += OnGameReplaced;
+        _session.RulesChanged += OnRulesChanged;
         _tree.Load(_session.Model);
+        _tablesTree.Bind(_session);
+        _logDock.Create(_session);
+        _logDock.Panel?.ApplySettings(_settings.Current);
+        _paletteDock.Create(_session);
+        _paletteDock.SetGameMaster(GameMaster);
         _sbModule.Text = $"{_session.Model.Name} {_session.Model.Version}".Trim();
         _sbLocation.Text = "-";
         _sbZoom.Text = "-";
@@ -260,7 +397,10 @@ sealed class MainForm : Form
         UpdateTitle();
 
         Guard(() => StartGameFor(_session, fromArgs));
+        if (fromArgs) Guard(() => LoadRulesFromArgs(_session));
         OpenMainMap();
+        if (_opts.FloatMainMap && Program.Smoke && FirstMap() is { } fm) _wm.PopOut(fm);
+        RememberModule(path);
         return true;
     }
 
@@ -290,6 +430,8 @@ sealed class MainForm : Form
         }
     }
 
+    MapWindow? FirstMap() => _maps.Values.FirstOrDefault(w => !w.IsDisposed);
+
     void OpenMainMap()
     {
         var map = _session?.Model.Maps.FirstOrDefault(x => !x.IsOrgDisplay) ?? _session?.Model.Maps.FirstOrDefault();
@@ -305,36 +447,54 @@ sealed class MainForm : Form
             existing.Activate();
             return existing;
         }
-        var w = new MapWindow(_session, map) { MdiParent = this, Size = new Size(720, 520) };
+        var w = new MapWindow(_session, map) { Host = this };
         _maps[map.Id] = w;
         w.FormClosed += (_, _) => { if (_maps.TryGetValue(map.Id, out var cur) && cur == w) _maps.Remove(map.Id); };
-        w.FormClosed += (_, _) => SyncTabs(w);
-        if (maximized) { _maximizeDocs = true; w.WindowState = FormWindowState.Maximized; }
-        w.Show();
+        ShowDoc(w, "map:" + map.Id);
         return w;
     }
 
     void CloseSession()
     {
+        _wm.EndModule(); // layout is written before the windows go away
+        _logDock.Destroy();
+        _paletteDock.Destroy();
         CloseAllWindows();
         if (_session == null) return;
         _session.Log.Added -= OnLogAdded;
         _session.GameReplaced -= OnGameReplaced;
+        _session.RulesChanged -= OnRulesChanged;
         _session.Dispose();
         _session = null;
         _tree.Clear();
+        _tablesTree.Bind(null);
+    }
+
+    // ---------- log panel (see LogDock) ----------
+
+    /// <summary>Opens or activates the piece's map and scrolls it to the piece (used by double-clicking a log row).</summary>
+    public void CentreOnPiece(string pieceId)
+    {
+        if (_session?.Game is not { } game || !game.State.Pieces.TryGetValue(pieceId, out var piece)) return;
+        var map = _session.Model.Maps.FirstOrDefault(m => m.Id == piece.MapId) ?? _session.Model.Maps.FirstOrDefault(m => m.Name == piece.MapId);
+        if (map == null || OpenMap(map, false) is not { } w) return;
+        w.Canvas.CentreOn(piece.Pos);
+        w.Canvas.SelectOnly(pieceId);
     }
 
     void CloseAllWindows()
     {
         foreach (var c in MdiChildren) c.Close();
+        _wm.CloseFloating();
     }
 
     void OnGameReplaced()
     {
-        if (_session?.Game is { } g) g.Changed += _ => { _dirty = true; UpdateTitle(); };
+        if (_session?.Game is { } g) g.Changed += _ => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); };
         _dirty = false;
+        _autosavedSeq = _changeSeq;
         _savePath = null;
+        _recoveredAutosave = false;
         UpdateUi();
         UpdateTitle();
     }
@@ -372,13 +532,9 @@ sealed class MainForm : Form
             _diag.Activate();
             return;
         }
-        _diag = new DiagnosticsWindow(_session.Log) { MdiParent = this, Size = new Size(760, 320) };
+        _diag = new DiagnosticsWindow(_session.Log);
         _diag.FormClosed += (_, _) => { _diag = null; };
-        var d = _diag;
-        d.FormClosed += (_, _) => SyncTabs(d);
-        _maximizeDocs = true;
-        d.WindowState = FormWindowState.Maximized;
-        d.Show();
+        ShowDoc(_diag, "diag");
     }
 
     // ---------- game commands ----------
@@ -397,13 +553,29 @@ sealed class MainForm : Form
         if (dlg.Selected is { } s) _session.LoadSetup(s); else _session.StartNewGame();
     }
 
-    void OpenGameDialog()
+    void OpenGameDialog() => OpenGameCore(autosaves: false);
+
+    void OpenAutosaveDialog() => OpenGameCore(autosaves: true);
+
+    void OpenGameCore(bool autosaves)
     {
         if (_session == null || Program.Smoke || !ConfirmDiscard()) return;
-        using var dlg = new OpenFileDialog { Filter = "Quartermaster saves (*.qsave)|*.qsave|All files (*.*)|*.*", Title = "Open Game" };
+        using var dlg = new OpenFileDialog
+        {
+            Filter = "Quartermaster saves (*.qsave)|*.qsave|All files (*.*)|*.*",
+            Title = autosaves ? "Open Autosave" : "Open Game",
+        };
+        if (autosaves)
+        {
+            var root = Autosaver.AutosaveRoot(LayoutRoot);
+            var mine = _session.Archive.Sha256 is { Length: > 0 } sha ? Path.Combine(root, sha) : null;
+            dlg.InitialDirectory = mine != null && Directory.Exists(mine) ? mine : Directory.Exists(root) ? root : "";
+        }
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         _session.LoadNative(dlg.FileName);
-        _savePath = dlg.FileName;
+        // A file inside the autosave folder is pruned automatically, so it must never become the target of Save.
+        _recoveredAutosave = Autosaver.IsAutosavePath(dlg.FileName, LayoutRoot);
+        _savePath = _recoveredAutosave ? null : dlg.FileName;
         _dirty = false;
         UpdateTitle();
     }
@@ -418,12 +590,121 @@ sealed class MainForm : Form
             using var dlg = new SaveFileDialog { Filter = "Quartermaster saves (*.qsave)|*.qsave", DefaultExt = "qsave", Title = "Save Game" };
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             path = dlg.FileName;
+            if (Autosaver.IsAutosavePath(path, LayoutRoot))
+            {
+                ShowError("Saves inside the autosave folder are deleted automatically. Choose another folder.");
+                return;
+            }
         }
         _session.SaveNative(path);
         _savePath = path;
+        _recoveredAutosave = false;
         _dirty = false;
+        _autosavedSeq = _changeSeq;
+        _autosaver?.Reset(DateTimeOffset.UtcNow);
         UpdateTitle();
     }
+
+    // ---------- rules packs ----------
+
+    void OnRulesChanged()
+    {
+        if (IsDisposed) return;
+        UpdateUi();
+        UpdateTitle();
+    }
+
+    void LoadRulesFromArgs(ModuleSession s)
+    {
+        if (_opts.RulesPath != null) s.OpenRules(_opts.RulesPath);
+        else if (_opts.NewRulesName != null) s.NewRules(_opts.NewRulesName);
+    }
+
+    /// <summary>Offers to save an edited rules pack. Returns false when the user cancels (or cancels the save).</summary>
+    bool ConfirmRulesSaved()
+    {
+        if (_session is not { RulesDirty: true } || Program.Smoke) return true;
+        var r = MessageBox.Show(this, $"Save changes to the rules pack '{_session.Rules?.Name}'?", "Quartermaster",
+            MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (r == DialogResult.Cancel) return false;
+        if (r == DialogResult.No) return true;
+        try { return SaveRulesPack(false); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            ShowError(ex.Message);
+            return false;
+        }
+    }
+
+    void NewRulesPack()
+    {
+        if (_session == null || Program.Smoke || !ConfirmRulesSaved()) return;
+        var name = InputDialog.Ask(this, "New Rules Pack", "Name of the new rules pack:", "Rules");
+        if (!string.IsNullOrWhiteSpace(name)) _session.NewRules(name.Trim());
+    }
+
+    void OpenRulesDialog()
+    {
+        if (_session == null || Program.Smoke || !ConfirmRulesSaved()) return;
+        using var dlg = new OpenFileDialog { Filter = "Rules packs (*.qrules)|*.qrules|All files (*.*)|*.*", Title = "Open Rules Pack" };
+        if (dlg.ShowDialog(this) == DialogResult.OK) _session.OpenRules(dlg.FileName);
+    }
+
+    /// <summary>Saves the pack; returns false when the user cancelled the file dialog.</summary>
+    bool SaveRulesPack(bool saveAs)
+    {
+        if (_session?.Rules == null) return true;
+        string? path = null;
+        if (saveAs || _session.RulesPath == null)
+        {
+            if (Program.Smoke) return true;
+            using var dlg = new SaveFileDialog { Filter = "Rules packs (*.qrules)|*.qrules", DefaultExt = "qrules", Title = "Save Rules Pack", FileName = _session.Rules.Name };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+            path = dlg.FileName;
+        }
+        _session.SaveRules(path);
+        return true;
+    }
+
+    /// <summary>Opens (or activates) a module document and jumps to a 1-based page.</summary>
+    public void OpenDocumentAtPage(string documentEntry, int page)
+    {
+        if (_session == null) return;
+        var doc = _session.Model.Documents.FirstOrDefault(d => d.EntryName == documentEntry);
+        if (doc == null)
+        {
+            ShowError($"The rule reference points to '{documentEntry}', which is not in this module.");
+            return;
+        }
+        Guard(() =>
+        {
+            OpenChild(_docs, doc.EntryName, () => new PdfWindow(_session, doc, page));
+            if (_docs.TryGetValue(doc.EntryName, out var w) && !w.IsDisposed && w is PdfWindow pdf)
+            {
+                pdf.GoToPage(page);
+                pdf.Activate();
+            }
+        });
+    }
+
+
+    /// <summary>Opens (or activates) the ledger window; needs a loaded rules pack.</summary>
+    void ShowLedger()
+    {
+        if (_session?.Rules == null) return;
+        var s = _session;
+        OpenChild(_ledgers, "ledger", () => new LedgerWindow(s));
+    }
+
+    /// <summary>Opens (or activates) the single rules workbench of this session.</summary>
+    void ShowWorkbench()
+    {
+        if (_session == null) return;
+        var s = _session;
+        OpenChild(_benches, "workbench", () => new WorkbenchWindow(s, () => Guard(NewRulesPack), () => Guard(OpenRulesDialog)));
+    }
+
+
 
     void OnNodeActivated(WindowTreeNode n)
     {
@@ -459,13 +740,43 @@ sealed class MainForm : Form
             return;
         }
         var w = create();
+        open[key] = w;
+        w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); };
+        ShowDoc(w, (ReferenceEquals(open, _charts) ? "chart:" : ReferenceEquals(open, _ledgers) ? "ledger:" : ReferenceEquals(open, _benches) ? "bench:" : "doc:") + key);
+    }
+
+    /// <summary>Shows a new document window: floating at its remembered bounds, otherwise as a maximized MDI tab.</summary>
+    void ShowDoc(Form w, string layoutKey)
+    {
+        _wm.Register(w, layoutKey);
+        if (_wm.Saved(layoutKey) is { Floating: true } sv) { _wm.ShowFloating(w, sv); return; }
+        PrepareDock(w);
+        w.Show();
+    }
+
+    /// <summary>Makes a window an MDI child that fills the document area (browser feel).</summary>
+    public void PrepareDock(Form w)
+    {
         w.MdiParent = this;
         w.Size = new Size(720, 520);
-        open[key] = w;
-        w.FormClosed += (_, _) => { if (open.TryGetValue(key, out var cur) && cur == w) open.Remove(key); SyncTabs(w); };
         _maximizeDocs = true;
         w.WindowState = FormWindowState.Maximized;
-        w.Show();
+    }
+
+    public bool IsActiveDocument(Form w) => ReferenceEquals(ActiveMdiChild, w) || ReferenceEquals(ActiveForm, w);
+
+    void RebuildFloatingMenu()
+    {
+        _floatingMenu.DropDownItems.Clear();
+        foreach (var f in _wm.Floating)
+        {
+            var form = f;
+            var sub = new ToolStripMenuItem(_wm.TitleOf(form));
+            sub.DropDownItems.Add("&Activate", null, (_, _) => { if (!form.IsDisposed) form.Activate(); });
+            sub.DropDownItems.Add("&Dock", null, (_, _) => Guard(() => _wm.Dock(form)));
+            _floatingMenu.DropDownItems.Add(sub);
+        }
+        _floatingMenu.Visible = _floatingMenu.DropDownItems.Count > 0;
     }
 
     // ---------- document tabs ----------
@@ -484,7 +795,7 @@ sealed class MainForm : Form
         if (_maximizeDocs && ActiveMdiChild is { IsDisposed: false, WindowState: not FormWindowState.Maximized } a) a.WindowState = FormWindowState.Maximized;
     }
 
-    void SyncTabs(Form? closing) =>
+    public void SyncTabs(Form? closing) =>
         _tabs.Sync(MdiChildren.Where(c => c != closing && !c.IsDisposed), ActiveMdiChild != closing ? ActiveMdiChild : null);
 
     /// <summary>Closes a tab's window; if it was the active one, activates its neighbour in tab order.</summary>
@@ -517,6 +828,7 @@ sealed class MainForm : Form
                 if (ActiveMdiChild is { } a) CloseTab(a);
                 return true;
         }
+        if (TryDispatchShortcut(keyData, ActiveMdiChild ?? this, Control.FromChildHandle(msg.HWnd))) return true;
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
@@ -525,6 +837,9 @@ sealed class MainForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        _leftFraction = _layoutStore.LoadLeftSplit();
+        _leftSplitReady = true;
+        ApplyLeftSplit();
         if (_opts.SmokeSeconds is { } secs)
         {
             _smokeTimer = new System.Windows.Forms.Timer { Interval = Math.Max(1, secs) * 1000 };
@@ -535,6 +850,7 @@ sealed class MainForm : Form
             };
             _smokeTimer.Start();
         }
+        ReopenLastModuleIfWanted();
         if (_opts.ModulePath != null && !_startupDone)
         {
             _startupDone = true;
@@ -545,82 +861,22 @@ sealed class MainForm : Form
         }
     }
 
-    // ---------- smoke: wait for tiling, optional screenshot ----------
-
-    DateTime? _smokeWaitStart;
-    readonly DateTime _smokeStartedAt = DateTime.UtcNow;
-
-    bool _smokeExtrasOpened;
-
-    /// <summary>Opens the first chart and first text document so the tab strip shows several tabs (no PDF/WebView2 in smoke).</summary>
-    void OpenSmokeDocuments()
-    {
-        if (_session == null) return;
-        if (_session.Model.Charts.FirstOrDefault() is { } c) OnNodeActivated(new WindowTreeNode(c.Name, WindowNodeKind.Chart, c, []));
-        if (_session.Model.Documents.FirstOrDefault(d => d.Kind == DocumentKind.Text) is { } d)
-            OnNodeActivated(new WindowTreeNode(d.Title, WindowNodeKind.Document, d, []));
-        if (_maps.Values.FirstOrDefault(w => !w.IsDisposed) is { } m) m.Activate(); // tab strip shows all tabs, map on top
-        Update();
-        Program.AppLog($"smoke: strip bounds {_tabs.Bounds} visible {_tabs.Visible}; mdi states {string.Join(',', MdiChildren.Select(m => m.WindowState))}");
-        Program.AppLog($"smoke: {_tabs.Tabs.Count} document tab(s): " + string.Join(" | ", _tabs.Tabs.Select(t => t.Text)));
-    }
-
-    void FinishSmoke()
-    {
-        var pending = _maps.Values.Any(w => !w.IsDisposed && !w.TilingDone);
-        _smokeWaitStart ??= DateTime.UtcNow;
-        if (pending && DateTime.UtcNow - _smokeWaitStart < TimeSpan.FromSeconds(60))
-        {
-            _smokeTimer!.Interval = 200;
-            _smokeTimer.Start();
-            return;
-        }
-        if (!_smokeExtrasOpened) { _smokeExtrasOpened = true; Guard(OpenSmokeDocuments); }
-        if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
-        else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
-        Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
-        if (_opts.Screenshot != null) Guard(() => SaveScreenshot(_opts.Screenshot));
-        Close();
-    }
-
-    /// <summary>Main form via DrawToBitmap, with each visible map canvas re-rendered by Skia on top of its screen area.</summary>
-    void SaveScreenshot(string path)
-    {
-        Update();
-        using var shot = new Bitmap(Math.Max(Width, 1), Math.Max(Height, 1));
-        DrawToBitmap(shot, new Rectangle(0, 0, shot.Width, shot.Height));
-        using (var g = Graphics.FromImage(shot))
-        {
-            if (_tabs.Visible)
-            {
-                using var tb = new Bitmap(_tabs.Width, _tabs.Height);
-                _tabs.DrawToBitmap(tb, new Rectangle(Point.Empty, tb.Size));
-                g.DrawImageUnscaled(tb, _tabs.PointToScreen(Point.Empty).X - Bounds.X, _tabs.PointToScreen(Point.Empty).Y - Bounds.Y);
-            }
-            var active = ActiveMdiChild as MapWindow ?? _maps.Values.FirstOrDefault(w => !w.IsDisposed);
-            if (active != null && active.Visible)
-            {
-                using var snap = active.Canvas.Snapshot();
-                using var bmp = SkiaSharp.Views.Desktop.Extensions.ToBitmap(snap);
-                var origin = new Point(active.Canvas.PointToScreen(Point.Empty).X - Bounds.X, active.Canvas.PointToScreen(Point.Empty).Y - Bounds.Y);
-                g.DrawImageUnscaled(bmp, origin);
-            }
-        }
-        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        shot.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-        Program.AppLog("smoke: screenshot saved to " + path);
-    }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (!e.Cancel && !ConfirmDiscard()) e.Cancel = true;
+        if (!e.Cancel && (!ConfirmDiscard() || !ConfirmRulesSaved())) e.Cancel = true;
         base.OnFormClosing(e);
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        if (_floatKeys != null) Application.RemoveMessageFilter(_floatKeys);
         _smokeTimer?.Dispose();
+        _autosaveTimer?.Dispose();
+        _dice?.Dispose();
+        RememberLeftSplit();
+        _layoutStore.SaveLeftSplit(_leftFraction);
+        _wm.SaveMain(new SavedWindow(false, WindowState == FormWindowState.Normal ? Bounds : RestoreBounds, WindowState == FormWindowState.Maximized, DeviceDpi));
         CloseSession();
         base.OnFormClosed(e);
     }

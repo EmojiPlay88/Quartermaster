@@ -13,19 +13,19 @@ public sealed record FormationGroup(IReadOnlyList<string> Ids, PointD Pos, strin
 /// <summary>Decides snap point and stack target for a drop on a map. UI-free.</summary>
 public static class DropResolver
 {
-    public static DropTarget Resolve(GameState s, MapDef map, PointD drop, IReadOnlyCollection<string> draggedIds, ImageSource images)
+    public static DropTarget Resolve(GameState s, MapDef map, PointD drop, IReadOnlyCollection<string> draggedIds, ImageSource images, bool snap = true)
     {
         if (!map.Stacking.Disabled && StackAt(s, map, drop, draggedIds, images) is { } st)
             return new DropTarget(st.Pos, st.Id);
-        return new DropTarget(Snap(map, drop), null);
+        return new DropTarget(snap ? Snap(map, drop) : drop, null); // snap=false: Settings "snap on drop" is off; stacking still applies
     }
 
     /// <summary>
     /// Drag point to target: the grabbed piece's centre (cursor + grab offset) is what gets snapped or stacked onto,
     /// and all dragged pieces land at that single point.
     /// </summary>
-    public static DropTarget ResolveDrag(GameState s, MapDef map, PointD cursor, PointD grabOffset, IReadOnlyCollection<string> draggedIds, ImageSource images) =>
-        Resolve(s, map, new PointD(cursor.X + grabOffset.X, cursor.Y + grabOffset.Y), draggedIds, images);
+    public static DropTarget ResolveDrag(GameState s, MapDef map, PointD cursor, PointD grabOffset, IReadOnlyCollection<string> draggedIds, ImageSource images, bool snap = true) =>
+        Resolve(s, map, new PointD(cursor.X + grabOffset.X, cursor.Y + grabOffset.Y), draggedIds, images, snap);
 
     /// <summary>
     /// How far the dragged formation is shifted while the ghost follows the mouse unsnapped:
@@ -43,14 +43,14 @@ public static class DropResolver
     /// The primary's group comes first. Ids that no longer exist are dropped.
     /// </summary>
     public static IReadOnlyList<FormationGroup> ResolveFormation(GameState s, MapDef map, PointD cursor, PointD grabOffset,
-        string primaryId, IReadOnlyCollection<string> ids, ImageSource images)
+        string primaryId, IReadOnlyCollection<string> ids, ImageSource images, bool snap = true)
     {
         var live = ids.Where(s.Pieces.ContainsKey).Distinct().ToList();
         if (live.Count == 0) return Array.Empty<FormationGroup>();
         if (!s.Pieces.TryGetValue(primaryId, out var primary)) primary = s.Pieces[live[0]];
         if (!live.Contains(primary.Id)) live.Insert(0, primary.Id);
 
-        var target = ResolveDrag(s, map, cursor, grabOffset, live, images);
+        var target = ResolveDrag(s, map, cursor, grabOffset, live, images, snap);
         var delta = new PointD(target.Pos.X - primary.Pos.X, target.Pos.Y - primary.Pos.Y);
 
         // Group by source stack (stack order, bottom to top); stackless pieces are their own group.
@@ -181,9 +181,7 @@ public static class PieceDetails
                 case MarkerDef m:
                 {
                     // VASSAL Marker: the type holds the keys; the values live in the trait state (comma-encoded, myGetState).
-                    var values = SequenceEncoder.Decode(PieceGeometry.StateAt(p, i), ',');
-                    for (var k = 0; k < m.Keys.Count; k++)
-                        props.Add((m.Keys[k], k < values.Count ? values[k] : ""));
+                    props.AddRange(PieceInfo.MarkerValues(m, PieceGeometry.StateAt(p, i)));
                     break;
                 }
                 case DynamicPropertyDef d:
@@ -194,7 +192,7 @@ public static class PieceDetails
                     break;
             }
         }
-        var name = type.Basic.Name;
+        var name = type.Basic.Name; // same value as PieceInfo.Name(p) without reparsing
         return new PieceDetail(p.Id, name.Length > 0 ? name : "piece", props);
     }
 }

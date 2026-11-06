@@ -18,6 +18,8 @@ public sealed record PieceAction(string Label, string Group, Func<GameState, IRe
     public string? DisabledReason { get; init; }
     /// <summary>Prompt text for Group "prompt" actions.</summary>
     public string? PromptText { get; init; }
+    /// <summary>True only for the trait "Delete" action (Replace and similar actions also remove pieces but are not deletions).</summary>
+    public bool IsDelete { get; init; }
 }
 
 public static class PieceActions
@@ -95,7 +97,7 @@ public static class PieceActions
                 break;
 
             case DeleteDef d when d.CommandName.Length > 0:
-                list.Add(new PieceAction(d.CommandName, "piece", s => s.Pieces.ContainsKey(id) ? new GameCommand[] { new RemovePiece(id) } : None));
+                list.Add(new PieceAction(d.CommandName, "piece", s => s.Pieces.ContainsKey(id) ? new GameCommand[] { new RemovePiece(id) } : None) { IsDelete = true });
                 break;
 
             case LayerDef d:

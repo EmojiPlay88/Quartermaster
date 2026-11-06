@@ -54,3 +54,71 @@ Minor findings deferred by task reviews (none block use). Collected from the pie
 - Ruling R14 (amends R6): prototype-derived traits take their initial state from the PrototypeDefinition's own state (split per trait, BasicPiece excluded, nested prototypes recursed), as VASSAL PrototypeDefinition.getPiece + PieceCloner do; "" only when the definition has none — cost if wrong: small, matches VASSAL.
 - Ruling R15: tile cache folder keyed by image (sanitized image name + short hash of image name), lookups by image — pyramid depends only on image.
 - Ruling R16 (supersedes R12, user-directed): multi-piece drag keeps relative offsets (VASSAL PieceMover): primary grabbed piece's drop point = cursor + grab offset → snapped via DropResolver; delta = snapped − primary original pos; every other dragged piece/stack moves by the same delta (no individual snap), stacking only for the primary; one MovePieces per source stack group. Ghost follows cursor unsnapped at mouse rate + faint snap/landing outline; in-window drag uses mouse capture (not OLE DoDragDrop) with cached map snapshot + cached ghost image; OLE drag only when leaving the window.
+
+## Piece 2
+
+Deferred minors and rulings from the piece-2 execution ledger (generic engine notes), collected 2026-11-06.
+
+### Deferred minors
+
+- Change 3: minor (deferred): HashFile sync on UI thread at open; titles captured once at Register (resolved by P2-R11)
+- Change 3: minor (deferred): legacy layout Dpi==0 falls back to host DPI (should be no-scale); TitleBelowBottom test weak/dead clamp
+- Task 1: minor (deferred): SafeName weak (use whitelist); BuildFiles before .tmp create; no size cap on entries; dup zip entry names; enum ints allowed; test gaps (non-zip, unsafe id, dup tables/formulas)
+- Task 1: minor (deferred): Load doesn't apply SafeName whitelist / case-insensitive dupes (load-ok, save-fails asymmetry); format "1"/1.0 message cosmetic
+- Task 2: minor (deferred): trailing backslash message; ASCII-only identifiers; recursive record ToString/equality
+- Task 2: minor (deferred): height bound only for Parser.Parse output (rewritten trees unbounded)
+- Task 3: minor (deferred): WorkingLine hard-cast (VarRef) lookup arg; ctx.Lookup result bypasses finite guard; TextArg null Text; TextLit quote escaping; paren/neg-zero tests missing
+- Task 4: minor (deferred): CSV all-comma rows kept; U+205F/U+3000 not normalised; test gaps (inclusive bounds, NBSP keys, multi-line CSV, Bool value)
+- Task 5: minor (deferred): parse error → spurious "unused binding" warnings; Variables recomputed in lambda; single top-level try/catch aborts all validation on one bad entity (per-entity catch better); Build catch-all hides bugs; nested sub-rows inner-first order; test gaps
+- Task 6: RESOLVED by P2-R6 (was FLAG FOR FINAL): seeder ReadSheet(...).First(...) throws on short/stale sheet state; PieceTypeParser.Parse unguarded in seeder → OpenRules could throw on a malformed piece
+- Task 6: minor (deferred): Describe "manual: " trailing space for null note, "−0" for tiny deltas; LedgerKey.TryParse("p:") empty id
+- Task 7: minor (deferred): Fail drops Variables on error trace; Location test single-board only; test gaps (Set/Add working, Holder/Table-with-vars, has())
+- Task 8: minor (deferred): Replace stamps dirty pack hash; AutoOpenRemembered extra Remember write
+- Task 9: minor (deferred): partial Apply on mid-exception; re-roll button focus loss; CreatePreviewPanel orphan Form disposal (RESOLVED in Task 12); ResultBox font
+- Task 9: minor (deferred, FLAG FOR FINAL): OnUi queued lambdas guard (RESOLVED by P2-R11); rebuilt view after RulesChanged DPI-scaled (RESOLVED); dedupe ignores requesting window; _formulaGroup unused
+- Task 10: minor (deferred): CommitManual no scope check; Reload RowCount reset drops current cell; PropertySheetDialog 3rd ColumnStyle; ASCII vs U+2212 minus inconsistency
+- Task 10: minor (deferred): ParseNumber de-DE "1.234" parses as 1.234 (consistent with display); MapWindow inline format could use LedgerTable.FormatNumber
+- Task 11: minor (deferred): reused RuleRef label shown for new table; malformed OneD multi-column shows several "Value" columns
+- Task 12: minor (deferred): AppliesTo trim mismatch re-commit; picker shows deleted piece; Input min>max not flagged in grid; Dispose doesn't flush pending text
+- Task 12: minor (deferred): _declined never cleared; _dirty off-thread branch effectively dead (RulesChanged is UI-thread); no prompt on window close
+
+### Rulings
+
+- Ruling P2-R1: implement as pop-out (float) documents: MDI child ↔ top-level Form (not owned by MainForm, ShowInTaskbar true), via tab drag-out, tab context menu, Window menu; dock back via window system menu / Window menu / dropping on tab strip; per-module remembered docked/floating state + bounds + maximized, clamped to Screen.AllScreens; Skia surfaces re-render on DpiChanged — cost if wrong: UI rework only.
+- Ruling P2-R2: promote review minors #4 (_lastDpi reset on handle recreate skips zoom rescale) and #5 (pop-out on any release outside strip, no min distance) to Important — user's explicit multi-monitor/mixed-DPI use case; #6 (restore ShowIcon/KeyPreview/MinimizeBox on dock) and #7 (strip BOMs) folded in as cheap — cost if wrong: small extra work.
+- Ruling P2-R3: in Matches, numeric key kinds coerce a Text value via Normalise+TryNum; Number keys also match Text equal to key text (OrdinalIgnoreCase) — Task 7 needs no own coercion. Folded minors: Ordinal StartsWith.
+- Ruling P2-R4: VariableBinding.Property and FormulaOutput.Property hold PropertyDef ids; validator/layout resolve by id; renames safe — spec §14a.4.
+- Ruling P2-R5: roll keys = variable name for Roll bindings, "dice#{i}" (0-based call order in evaluation) for inline dice(); Roll consults FixedRolls[key] first; FormulaTrace gains IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey (feed back into RunRequest.FixedRolls by Task 9); DiceEntry.Purpose = "{formula}: {key}".
+- Ruling P2-R6: Task 8 (OpenRules runs the seeder on the real module) also hardens LedgerSeeder per Task 6 FLAG: per-piece try/catch around Parse/ReadSheet, FirstOrDefault instead of First; failures logged once (Warning/rules) and skipped — cost if wrong: none.
+- Ruling P2-R7: SaveNative stamps Game.RulesSha256 = current pack hash (when a pack is loaded) before writing; UpdateRules re-runs (idempotent) seeding so newly added SheetField properties seed immediately. Folded: mismatch warning via AddOnce after Commit; explicit null-model guard in BuildSeeds.
+- Ruling P2-R8: FormulaDialog modeless (Show(owner)), dedupe per (formula, piece), re-run on Game.Changed, rebuild/close on RulesChanged (close if formula deleted), close if piece removed. Folded minors: clear Roll overrides on PhysicalDice toggle; DPI scaling (AutoScaleMode.Dpi or DeviceDpi-scaled sizes) — user runs multi-monitor.
+- Ruling P2-R9: all UI number display invariant 0.##; Describe fixed at source (single parens). Folded: unsubscribe in OnFormClosed/Dispose; ManagedSheetValue honours AppliesTo; skip manual delta when before==after.
+- Ruling P2-R10: (I1) timer flush commits text but keeps stale bindings with a visible "unused" marker; add a "Remove unused bindings" action; final flush (deferred via BeginInvoke, not inside Leave) asks once. (I2/I3) when !InvokeRequired act directly regardless of handle; tabs reload on VisibleChanged when marked dirty; SetFormula rebuilds directly. (I5) Reload flushes pending text first. (I6) reject empty/duplicate (case-insensitive) names on rename/edit for properties, holders, tables, formulas with a message.
+- Ruling P2-R11 (final-review fix wave): (C1) FormulaDialog Apply executes then Close(); Cancel.Click closes (no-op embedded); smoke asserts Apply closes and records exactly the previewed entries; OnUi guards IsDisposed/_closing. (I1) FormulaDialogModel merges dice pins (only Reroll and the PhysicalDice toggle remove them); FormulaRunner.Fail carries RollsByKey already produced. (I2) workbench New/Open prompt buttons go through Guard. (I3) RulesValidator checks property names referenced by AppliesTo (variables and has()) — unknown is an Error. (M1) LedgerSeeder exits early when no Pieces/Both property has a SheetField and uses PieceInfo.TypeOf cache. (M12) WindowManager follows TextChanged of registered forms.
+
+## Piece 2b (UI tools) — deferred minors and rulings
+
+Generic engine notes only; all items were reviewed and deferred by the controller. Items marked "fixed in Task 11" were closed by the final task.
+
+### Rulings
+
+- Ruling P2b-R1: CommandRegistry (ids, defaults, overrides, conflicts, reserved) lives in Render with string shortcuts; `ShortcutParser.TryParse` lives in App.
+- Ruling P2b-R2: "last moved" reads GameSession.Log (the command list), via `MapViewTools.LastMovedIds`.
+- Ruling P2b-R3: WindowManager must not record the floating " — Quartermaster" suffix as the base title.
+- Ruling P2b-R4/R5: building a game from a setup or import must not produce per-piece log entries; the log is cleared and one system entry is added (`Setup "{name}" loaded: N pieces` / `New game: N pieces`). LoadNative leaves the saved log untouched.
+- Ruling P2b-R6: SnapOnDrop and ConfirmDelete are wired; settings Commit merges onto the store's current values; Autosaver.Reset on manual save.
+- Ruling P2b-R7: floating forms route shortcuts through MainForm.TryDispatchShortcut; editing and navigation keys never dispatch while a text control has focus.
+- Ruling P2b-R8: an open NotesWindow is flushed into the current game before any replacement or close decision.
+- Ruling P2b-R9: smoke SaveScreenshot composites a map canvas only for the screenshot target or the active MDI child; map export has a re-entrancy guard, a unique temp name (`path.<guid>.tmp`) and cancels when the owner window closes (fixed in Task 11).
+
+### Deferred minors
+
+- Game log / commands: RemovePiece logs before detach; no old-command-JSON back-compat test; DeepClone cost grows with the log; `Num()` NaN text; multi-piece move "from" and StackOnto "to" approximations; CentreOnPiece is silent for deleted pieces; `OnGameReplaced` Changed lambda is never removed (pre-existing).
+- Log panel: virtual ListView reselect may raise SelectedIndexChanged; DockLog relies on WindowManager closed-form handling.
+- Dice / turn: multi-roll physical cancel keeps earlier rolls; StepTurn clears the phase (documented choice); unguarded DropDownOpening/Refresh; Next-turn caption refreshes only on dropdown open; filter wiring untested (smoke calls dispatch directly); Action/Func<bool> overload fragility.
+- Trees: splitter fraction drift from SizeChanged; TryPending leaves a stale pending id after 5 passes. The Formulas branch is now exercised by the smoke (an invented table and formula are added to the empty pack made with --new-rules) (fixed in Task 11).
+- Settings: dialog is fixed size (DPI); PieceRenderer.LabelScale is shared; toolbar ids equal captions; linked-folder skip is not logged.
+- Palette: thumbnail cache clears at 2000 (LRU would be better); per-thumbnail BeginInvoke flood; search text overrides the folder selection; palette pop-out not restored on reopen; seed is not undone with a placement; a stale worker may steal one pending item; first prioritisation is wrong before bounds are realised; no BeginUpdate in Apply; the scroll timer ticks while hidden.
+- LOS / overview: LOS drag is stuck if the window pops out mid-drag; OverviewWindow OnTargetClosed BeginInvoke has no handle guard; overview tile image cache is never invalidated; GridFor resolution is duplicated; TryCell expects snapped input (undocumented).
+- Map export: whole-map export ignores hide counters / last moved; cancel is ignored during PNG encode; RefreshLastMoved does work when the option is off; incoming drag preview while hidden. (Concurrent export collision, ".tmp" clobbering and no cancel on owner close were fixed in Task 11.)
+- Inventory / notes: marker keys are recomputed each refresh; group label casing is order-dependent; no notes size cap; the Leave/timer flush can run between GameReplaced and its deferred handler.

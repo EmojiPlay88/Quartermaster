@@ -76,6 +76,9 @@ sealed class MapDragController : IDisposable
         if (wasActive) Aborted?.Invoke();
     }
 
+    /// <summary>Settings: snap dropped pieces to the grid.</summary>
+    public bool Snap { get; set; } = true;
+
     /// <summary>
     /// Enters captured drag mode: snapshots the scene minus the dragged pieces and pre-renders them.
     /// <paramref name="renderBase"/> draws the scene with the given pieces hidden. Returns false when there is nothing to drag
@@ -98,7 +101,7 @@ sealed class MapDragController : IDisposable
             if (snap == null) return false;
             items = MakeSprites(st, info, vp.Zoom);
             var delta = DropResolver.GhostDelta(st, info.PrimaryId, grabPoint, info.GrabOffset);
-            var groups = DropResolver.ResolveFormation(st, _map, grabPoint, info.GrabOffset, info.PrimaryId, info.Ids, _s.Images);
+            var groups = DropResolver.ResolveFormation(st, _map, grabPoint, info.GrabOffset, info.PrimaryId, info.Ids, _s.Images, Snap);
             // Everything succeeded: only now touch the fields.
             _info = info;
             _base = snap;
@@ -171,7 +174,7 @@ sealed class MapDragController : IDisposable
     {
         if (_info is not { } d) return;
         _delta = DropResolver.GhostDelta(st, d.PrimaryId, cursor, d.GrabOffset);
-        _groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images);
+        _groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images, Snap);
     }
 
     /// <summary>Drops at the cursor: one MovePieces per group, each through the owner's error guard. Ends the drag.</summary>
@@ -183,7 +186,7 @@ sealed class MapDragController : IDisposable
         try
         {
             if (d != null && game != null)
-                groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images);
+                groups = DropResolver.ResolveFormation(st, _map, cursor, d.GrabOffset, d.PrimaryId, d.Ids, _s.Images, Snap);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -194,7 +197,7 @@ sealed class MapDragController : IDisposable
         foreach (var g in groups)
         {
             var move = new MovePieces(g.Ids, _map.Id, g.Pos, g.StackOnto);
-            _guard(() => game!.Execute(move));
+            _guard(() => game!.Execute(CommandLog.Prepare(move, game.State, _s.Model)));
         }
     }
 

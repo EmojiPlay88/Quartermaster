@@ -6,7 +6,14 @@ namespace Quartermaster.App;
 /// <summary>Owner-drawn browser-style tab strip for MDI children. Pure view: owns no game logic.</summary>
 sealed class DocumentTabStrip : Control
 {
-    const int MaxTab = 160, MinTab = 80, ArrowW = 17, CloseSize = 11;
+    const int BaseArrowW = 17, BaseCloseSize = 11, BaseHeight = 24;
+    int BaseMaxTab = 160, BaseMinTab = 80; // Settings: tab min/max width at 96 dpi
+    // All pixel sizes scale with the monitor the strip is on (PerMonitorV2).
+    int S(int px) => (int)Math.Round(px * DeviceDpi / 96.0);
+    int MaxTab => S(BaseMaxTab);
+    int MinTab => S(BaseMinTab);
+    int ArrowW => S(BaseArrowW);
+    int CloseSize => S(BaseCloseSize);
     readonly List<Form> _tabs = new();
     readonly ToolTip _tip = new();
     readonly ContextMenuStrip _menu = new();
@@ -15,10 +22,21 @@ sealed class DocumentTabStrip : Control
     int _first;          // first visible tab (overflow scrolling)
     int _hover = -1, _hoverClose = -1, _menuTab = -1;
     string? _tipText;
+    Form? _dragTab;      // tab pressed with the left button (candidate for drag-out)
+    int _lastDpi = 96;
+
+    public void SetWidths(int min, int max)
+    {
+        BaseMinTab = Math.Max(20, min);
+        BaseMaxTab = Math.Max(BaseMinTab, max);
+        Invalidate();
+    }
 
     public event Action<Form>? TabActivated;
     public event Action<Form>? TabCloseRequested;
     public event Action<IReadOnlyList<Form>>? TabsCloseRequested;
+    /// <summary>Pop out requested from the menu (no position) or by dragging the tab out of the strip (cursor position, screen coordinates).</summary>
+    public event Action<Form, Point?>? TabPopOutRequested;
 
     public IReadOnlyList<Form> Tabs => _tabs;
     public Form? ActiveTab => _active;
@@ -27,8 +45,10 @@ sealed class DocumentTabStrip : Control
     {
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
         Dock = DockStyle.Top;
-        Height = 24;
+        Height = BaseHeight;
         Visible = false;
+        _menu.Items.Add("&Pop Out", null, (_, _) => { if (Tab(_menuTab) is { } f) TabPopOutRequested?.Invoke(f, null); });
+        _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add("&Close", null, (_, _) => { if (Tab(_menuTab) is { } f) TabCloseRequested?.Invoke(f); });
         _menu.Items.Add("Close &Others", null, (_, _) => { if (_menuTab >= 0) TabsCloseRequested?.Invoke(TabOrder.Others(_tabs, _menuTab)); });
         _menu.Items.Add("Close &All", null, (_, _) => TabsCloseRequested?.Invoke(_tabs.ToList()));
@@ -61,21 +81,21 @@ sealed class DocumentTabStrip : Control
 
     // ---------- layout ----------
 
-    bool Overflows => _tabs.Count * MinTab > ClientSize.Width - 4;
+    bool Overflows => _tabs.Count * MinTab > ClientSize.Width - S(4);
     int Available => Overflows ? ClientSize.Width - 2 * ArrowW : ClientSize.Width;
-    int TabW => TabOrder.TabWidth(_tabs.Count, Available - 4, MaxTab, MinTab);
-    int VisibleCount => Math.Max(1, (Available - 4) / TabW);
+    int TabW => TabOrder.TabWidth(_tabs.Count, Available - S(4), MaxTab, MinTab);
+    int VisibleCount => Math.Max(1, (Available - S(4)) / TabW);
 
-    Rectangle TabRect(int i) => new(2 + (i - _first) * TabW, 2, TabW, Height - 2);
+    Rectangle TabRect(int i) => new(S(2) + (i - _first) * TabW, S(2), TabW, Height - S(2));
 
     Rectangle CloseRect(int i)
     {
         var r = TabRect(i);
-        return new Rectangle(r.Right - CloseSize - 5, r.Top + (r.Height - CloseSize) / 2 + 1, CloseSize, CloseSize);
+        return new Rectangle(r.Right - CloseSize - S(5), r.Top + (r.Height - CloseSize) / 2 + S(1), CloseSize, CloseSize);
     }
 
-    Rectangle LeftArrow => new(ClientSize.Width - 2 * ArrowW, 3, ArrowW, Height - 5);
-    Rectangle RightArrow => new(ClientSize.Width - ArrowW, 3, ArrowW, Height - 5);
+    Rectangle LeftArrow => new(ClientSize.Width - 2 * ArrowW, S(3), ArrowW, Height - S(5));
+    Rectangle RightArrow => new(ClientSize.Width - ArrowW, S(3), ArrowW, Height - S(5));
 
     void EnsureActiveVisible()
     {
@@ -98,6 +118,20 @@ sealed class DocumentTabStrip : Control
     }
 
     protected override void OnResize(EventArgs e) { base.OnResize(e); EnsureActiveVisible(); }
+
+    protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); ApplyDpi(); }
+
+    protected override void OnDpiChangedAfterParent(EventArgs e) { base.OnDpiChangedAfterParent(e); ApplyDpi(); }
+
+    void ApplyDpi()
+    {
+        if (DeviceDpi == _lastDpi && Height == S(BaseHeight)) return;
+        _lastDpi = DeviceDpi;
+        _bold?.Dispose(); _bold = null;
+        Height = S(BaseHeight);
+        EnsureActiveVisible();
+        Invalidate();
+    }
 
     // ---------- painting ----------
 
@@ -122,7 +156,8 @@ sealed class DocumentTabStrip : Control
     void DrawTab(Graphics g, int i, bool active)
     {
         var r = TabRect(i);
-        r = active ? new Rectangle(r.X - 2, r.Y - 2, r.Width + 4, r.Height + 2) : new Rectangle(r.X, r.Y + 2, r.Width, r.Height - 2);
+        var two = S(2);
+        r = active ? new Rectangle(r.X - two, r.Y - two, r.Width + 2 * two, r.Height + two) : new Rectangle(r.X, r.Y + two, r.Width, r.Height - two);
         if (TabRenderer.IsSupported)
             TabRenderer.DrawTabItem(g, r, "", Font, false, active ? TabItemState.Selected : TabItemState.Normal);
         else
@@ -130,15 +165,16 @@ sealed class DocumentTabStrip : Control
             g.FillRectangle(SystemBrushes.Control, r);
             ControlPaint.DrawBorder3D(g, r, Border3DStyle.Raised, Border3DSide.Left | Border3DSide.Top | Border3DSide.Right);
         }
-        var text = new Rectangle(r.X + 6, r.Y + 2, r.Width - CloseSize - 14, r.Height - 2);
+        var text = new Rectangle(r.X + S(6), r.Y + two, r.Width - CloseSize - S(14), r.Height - two);
         _bold ??= new Font(Font, FontStyle.Bold);
         TextRenderer.DrawText(g, Shorten(_tabs[i].Text), active ? _bold : Font, text, SystemColors.ControlText,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         var c = CloseRect(i);
-        if (i == _hoverClose) ControlPaint.DrawBorder3D(g, Rectangle.Inflate(c, 2, 2), Border3DStyle.RaisedInner);
-        using var pen = new Pen(SystemColors.ControlText, 1.5f);
-        g.DrawLine(pen, c.Left + 2, c.Top + 2, c.Right - 3, c.Bottom - 3);
-        g.DrawLine(pen, c.Right - 3, c.Top + 2, c.Left + 2, c.Bottom - 3);
+        if (i == _hoverClose) ControlPaint.DrawBorder3D(g, Rectangle.Inflate(c, two, two), Border3DStyle.RaisedInner);
+        using var pen = new Pen(SystemColors.ControlText, 1.5f * DeviceDpi / 96f);
+        var three = S(3);
+        g.DrawLine(pen, c.Left + two, c.Top + two, c.Right - three, c.Bottom - three);
+        g.DrawLine(pen, c.Right - three, c.Top + two, c.Left + two, c.Bottom - three);
     }
 
     // ---------- mouse ----------
@@ -146,6 +182,11 @@ sealed class DocumentTabStrip : Control
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        if (_dragTab != null && (e.Button & MouseButtons.Left) != 0 && (e.Y < -Height * 3 / 2 || e.Y > Height + Height * 3 / 2))
+        {
+            PopOutDragged();
+            return;
+        }
         var h = HitTab(e.Location);
         var hc = h >= 0 && CloseRect(h).Contains(e.Location) ? h : -1;
         if (h != _hover || hc != _hoverClose)
@@ -176,7 +217,8 @@ sealed class DocumentTabStrip : Control
         switch (e.Button)
         {
             case MouseButtons.Left:
-                if (CloseRect(i).Contains(e.Location)) TabCloseRequested?.Invoke(f); else TabActivated?.Invoke(f);
+                if (CloseRect(i).Contains(e.Location)) TabCloseRequested?.Invoke(f);
+                else { TabActivated?.Invoke(f); _dragTab = f; }
                 break;
             case MouseButtons.Middle:
                 TabCloseRequested?.Invoke(f);
@@ -187,6 +229,28 @@ sealed class DocumentTabStrip : Control
                 _menu.Show(this, e.Location);
                 break;
         }
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        // released clearly above/below the strip (a small sideways overshoot is not a pop-out)
+        if (_dragTab != null && e.Button == MouseButtons.Left && (e.Y < -Height / 2 || e.Y > Height + Height / 2)) PopOutDragged();
+        _dragTab = null;
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        base.OnMouseCaptureChanged(e);
+        if (!Capture && MouseButtons == MouseButtons.None) _dragTab = null;
+    }
+
+    void PopOutDragged()
+    {
+        var f = _dragTab;
+        _dragTab = null;
+        Capture = false;
+        if (f is { IsDisposed: false }) TabPopOutRequested?.Invoke(f, Cursor.Position);
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)

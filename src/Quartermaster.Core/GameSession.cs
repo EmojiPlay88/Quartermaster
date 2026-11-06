@@ -12,6 +12,8 @@ public sealed class GameSession
 
     public GameState State { get; }
     public string ModuleSha256 { get; }
+    /// <summary>Hash of the rules pack the ledgers were played with; null when none.</summary>
+    public string? RulesSha256 { get; set; }
     public IReadOnlyList<GameCommand> Log => _log;
     public event Action<GameCommand>? Changed;
 

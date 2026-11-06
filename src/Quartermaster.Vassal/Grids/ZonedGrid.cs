@@ -127,6 +127,14 @@ public sealed class ZonedGrid : IMapGrid
         return null;
     }
 
+    /// <summary>The grid that measures between two points: the zone's grid when both lie in the same zone, else the background grid.</summary>
+    public IMapGrid? GridFor(PointD a, PointD b)
+    {
+        var za = FindZone(a);
+        if (za != null && ReferenceEquals(za, FindZone(b))) return za.GridOf(_background);
+        return _background;
+    }
+
     public bool Visible => true;
 
     public RgbColor Color => _background?.Color ?? new RgbColor(0, 0, 0);

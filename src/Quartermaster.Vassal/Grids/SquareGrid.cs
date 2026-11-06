@@ -85,6 +85,16 @@ public sealed class SquareGrid : IMapGrid
         return (OriginX + JavaMath.Round(nx * Dx / 2), OriginY + JavaMath.Round(ny * Dy / 2));
     }
 
+    /// <summary>Cell column/row containing <paramref name="p"/>. False when the grid is degenerate.</summary>
+    public bool TryCell(PointD p, out int col, out int row)
+    {
+        col = row = 0;
+        if (Degenerate) return false;
+        col = JavaMath.Floor((JavaMath.Round(p.X) - OriginX) / Dx + 0.5);
+        row = JavaMath.Floor((JavaMath.Round(p.Y) - OriginY) / Dy + 0.5);
+        return true;
+    }
+
     public string LocationName(PointD p) =>
         _numbering == null ? "" : _numbering.LocationName(JavaMath.Round(p.X), JavaMath.Round(p.Y));
 
