@@ -153,4 +153,33 @@ public class BatchModelTests : IDisposable
         Assert.False(b.ApplyRow(0));
         Assert.Equal(0, b.ApplyAll());
     }
+
+    [Fact]
+    public void ApplyAll_1200Units_FastAndExact()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        var units = Enumerable.Range(0, 1200).Select(i => new PendingUnit("p" + i, "Unit " + i, 0, false)).ToList();
+        s.Game!.Execute(new QueueRuns(new[] { new PendingRun("big", "f-weather", "Weather roll", "start", units, false) }));
+        var b = new BatchModel(s, c, "big");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var applied = b.ApplyAll();
+        sw.Stop();
+        Assert.Equal(1200, applied);
+        Assert.Empty(s.Game.State.Pending);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"ApplyAll took {sw.Elapsed}");
+    }
+
+    [Fact]
+    public void Row_OutOfRange_ReturnsEmptyView_DoesNotThrow()
+    {
+        var (s, c) = Make(Difficulty.Hardcore);
+        var (b, _) = MoveBatch(s, c);
+        var r = b.Row(99);
+        Assert.False(r.CanApply);
+        Assert.False(b.Row(-1).CanApply);
+        Assert.False(b.ApplyRow(99));
+        b.SetCell(99, "Moved", "1");
+        b.CalculateRow(99);
+        Assert.Throws<ArgumentOutOfRangeException>(() => b.ModelFor(99));   // documented: ModelFor needs a valid row
+    }
 }

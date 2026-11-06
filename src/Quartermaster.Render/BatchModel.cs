@@ -23,12 +23,33 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
 
     private PendingRun? Run => s.Game?.State.Pending.FirstOrDefault(r => r != null && r.Id == runId && r.Units != null);
 
-    private FormulaDef? Formula => Run is { } r ? s.Rules?.ById<FormulaDef>(r.FormulaId) : null;
+    private RulesPack? _formulaPack;
+    private string? _formulaId;
+    private FormulaDef? _formula;
+    private IReadOnlyList<string>? _variables;
+
+    /// <summary>Cached per (rules pack, formula id): rules edits and different runs recompute it, row access does not.</summary>
+    private FormulaDef? Formula
+    {
+        get
+        {
+            if (Run is not { } r || s.Rules is not { } pack) return null;
+            if (!ReferenceEquals(_formulaPack, pack) || _formulaId != r.FormulaId)
+            {
+                _formulaPack = pack;
+                _formulaId = r.FormulaId;
+                _formula = pack.ById<FormulaDef>(r.FormulaId);
+                _variables = null;
+            }
+            return _formula;
+        }
+    }
 
     /// <summary>Number of per-row models built so far (tests: laziness).</summary>
     internal int BuiltCount => _models.Count;
 
-    public IReadOnlyList<string> Variables => Formula?.Bindings.Select(b => b.Variable).ToList() ?? new List<string>();
+    public IReadOnlyList<string> Variables =>
+        Formula is { } f ? _variables ??= f.Bindings.Select(b => b.Variable).ToList() : Array.Empty<string>();
 
     public int RowCount => Run != null && Formula != null ? Run.Units.Count : 0;
 
@@ -98,11 +119,12 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
         var vars = Variables;
         var cells = vars.Select(v => dv.Boxes.FirstOrDefault(b => b.Variable == v)?.Text ?? "").ToList();
         var wrong = vars.Select(v => dv.Boxes.FirstOrDefault(b => b.Variable == v)?.Wrong == true).ToList();
-        var ledger = string.Join("; ", dv.Trace.Error != null || dv.Trace.Result == null
-            ? Array.Empty<string>()
-            : dv.Trace.Outputs.Select(o => $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"));
-        return new BatchRowView(u.PieceId, u.Label, cells, wrong, dv.ResultText, ledger, ExceptionsFor(u, dv), false, dv.CanApply);
+        return new BatchRowView(u.PieceId, u.Label, cells, wrong, dv.ResultText, LedgerOf(dv), ExceptionsFor(u, dv), false, dv.CanApply);
     }
+
+    private static string LedgerOf(DialogView dv) => string.Join("; ", dv.Trace.Error != null || dv.Trace.Result == null
+        ? Array.Empty<string>()
+        : dv.Trace.Outputs.Select(o => $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"));
 
     private static string Num(double d) => d.ToString("0.####", CultureInfo.InvariantCulture);
 
@@ -158,26 +180,39 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
     /// <summary>Applies one row if it can apply (every checked cell matches). Returns true when the unit is now applied.</summary>
     public bool ApplyRow(int row)
     {
-        if (s.Game == null || Unit(row) is not { Applied: false } u) return false;
-        var model = ModelFor(row);
-        var trace = model.Run(s.Game.State);
-        if (!model.View(trace).CanApply) return false;
-        var snapshot = Row(row) with { Applied = true, CanApply = false };
-        phases.ApplyFormula(runId, u.PieceId, trace, model.AutoCalculated);
+        var done = ApplyOne(row);
         Invalidate();
-        // A run that finished is gone from the state, which also means this unit was applied.
-        var done = Run is not { } r || (row < r.Units.Count && r.Units[row].Applied);
-        if (done) _appliedSnapshots[row] = snapshot;
         return done;
     }
 
-    /// <summary>Applies every row that can apply (rows with a wrong or missing checked cell are left alone). Returns how many were applied.</summary>
+    private bool ApplyOne(int row)
+    {
+        if (s.Game == null || Unit(row) is not { Applied: false } u) return false;
+        var model = ModelFor(row);
+        var trace = model.Run(s.Game.State);
+        var dv = model.View(trace);
+        if (!dv.CanApply) return false;
+        // Cheap snapshot from the view already computed (no warnings scan, no second evaluation).
+        var vars = Variables;
+        var snapshot = _views.TryGetValue(row, out var cached) ? cached with { Applied = true, CanApply = false }
+            : new BatchRowView(u.PieceId, u.Label, vars.Select(v => dv.Boxes.FirstOrDefault(b => b.Variable == v)?.Text ?? "").ToList(),
+                new bool[vars.Count], dv.ResultText, LedgerOf(dv), "", true, false);
+        phases.ApplyFormula(runId, u.PieceId, trace, model.AutoCalculated);
+        // A run that finished is gone from the state, which also means this unit was applied.
+        var done = Run is not { } r || (row < r.Units.Count && r.Units[row].Applied);
+        if (done) { _appliedSnapshots[row] = snapshot; _views.Remove(row); }
+        return done;
+    }
+
+    /// <summary>Applies every row that can apply (rows with a wrong or missing checked cell are left alone). Returns how many were applied.
+    /// Caches are dropped once at the end, not per row.</summary>
     public int ApplyAll()
     {
         var n = RowCount;
         var applied = 0;
         for (var i = 0; i < n; i++)
-            if (ApplyRow(i)) applied++;
+            if (ApplyOne(i)) applied++;
+        Invalidate();
         return applied;
     }
 }
