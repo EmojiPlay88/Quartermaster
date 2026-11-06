@@ -13,7 +13,7 @@ public static class WorkingLine
         return sb.ToString();
     }
 
-    private static bool Parenthesised(AstExpr e, string src)
+    internal static bool Parenthesised(AstExpr e, string src)
     {
         if (e.Start < 0 || e.Start >= src.Length || src[e.Start] != '(') return false;
         // A Binary naturally starts where its left operand starts; any wider span means grouping parens.
@@ -67,7 +67,7 @@ public static class WorkingLine
         if (paren) sb.Append(')');
     }
 
-    private static string Symbol(string op) => op switch
+    internal static string Symbol(string op) => op switch
     {
         "*" => "×",
         "/" => "÷",
