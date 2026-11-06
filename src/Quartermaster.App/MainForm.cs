@@ -552,9 +552,9 @@ sealed partial class MainForm : Form
     }
 
     /// <summary>Shows the setup chooser (with the difficulty choice), remembers the difficulty, and starts the chosen game.</summary>
-    void ChooseAndStart(ModuleSession s, bool preselectNew)
+    void ChooseAndStart(ModuleSession s, bool preselectNew, SetupDef? preselect = null)
     {
-        using var dlg = new SetupChooserDialog(s.Model, _settings.Current.LastDifficulty, preselectNew);
+        using var dlg = new SetupChooserDialog(s.Model, _settings.Current.LastDifficulty, preselectNew, preselect);
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         if (dlg.SelectedDifficulty != _settings.Current.LastDifficulty) _settings.Save(_settings.Current with { LastDifficulty = dlg.SelectedDifficulty });
         if (dlg.Selected is { } setup) s.LoadSetup(setup, dlg.SelectedDifficulty); else s.StartNewGame(dlg.SelectedDifficulty);
@@ -726,7 +726,9 @@ sealed partial class MainForm : Form
         if (n.Kind == WindowNodeKind.Setup && n.Ref is SetupDef s)
         {
             if (!ConfirmDiscard()) return;
-            Guard(() => _session.LoadSetup(s, _settings.Current.LastDifficulty));
+            // Same difficulty choice as File > Load Setup (default = last used); this setup is preselected.
+            if (Program.Smoke) Guard(() => _session.LoadSetup(s, _opts.Difficulty ?? _settings.Current.LastDifficulty));
+            else Guard(() => ChooseAndStart(_session, preselectNew: false, preselect: s));
             return;
         }
         if (n.Kind is WindowNodeKind.Map or WindowNodeKind.OrgDisplay && n.Ref is MapDef map)

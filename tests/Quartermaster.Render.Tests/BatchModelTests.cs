@@ -199,4 +199,56 @@ public class BatchModelTests : IDisposable
         b.CalculateRow(99);
         Assert.Throws<ArgumentOutOfRangeException>(() => b.ModelFor(99));   // documented: ModelFor needs a valid row
     }
+
+    private static (BatchModel B, string RunId) ManualRun(ModuleSession s, PhaseController c)
+    {
+        var run = new PendingRun("manual", "f-fuel", "Fuel for movement", "move", new List<PendingUnit> { new("r1", "Red 1", 3, false) }, false);
+        s.Game!.Execute(new QueueRuns(new[] { run }));
+        return (new BatchModel(s, c, "manual"), "manual");
+    }
+
+    [Fact]
+    public void DifficultySwitch_FullyAutoToHardcore_OverrideNeverReachesLedger()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto);
+        var (b, _) = ManualRun(s, c);
+        b.SetCell(0, "Moved", "999");   // built in fully automatic: an override feeds the run
+        var fuel = Fuel(s, "r1");
+        var log = s.Game!.State.Log.Count;
+        var raised = 0;
+        c.DifficultyChanged += () => raised++;
+
+        c.SetDifficulty(Difficulty.Hardcore);
+
+        Assert.Equal(1, raised);
+        Assert.False(b.Row(0).CanApply);
+        Assert.False(b.ApplyRow(0));
+        Assert.Equal(0, b.ApplyAll());
+        Assert.Equal(fuel, Fuel(s, "r1"));
+        Assert.Equal(log + 1, s.Game.State.Log.Count);   // only the SetDifficulty line
+        Assert.True(b.ModelFor(0).Checked);
+        Assert.Single(s.Game.State.Pending);             // the run stays pending, now to be done in the new mode
+    }
+
+    [Fact]
+    public void DifficultySwitch_HardcoreToFullyAuto_ModelsUncheckedAgain()
+    {
+        var (s, c) = Make(Difficulty.Hardcore);
+        var (b, _) = ManualRun(s, c);
+        Assert.True(b.ModelFor(0).Checked);
+        c.SetDifficulty(Difficulty.FullyAuto);
+        Assert.False(b.ModelFor(0).Checked);
+    }
+
+    [Fact]
+    public void ChoicesFor_TableKeyInput_ListsKeys_OthersNull()
+    {
+        var (s, c) = Make(Difficulty.Hardcore);
+        var (b, _) = ManualRun(s, c);
+        Assert.Equal(new[] { "Clear", "Sand" }, b.ChoicesFor("Terrain"));
+        Assert.Null(b.ChoicesFor("Moved"));
+        // A typed key still goes through the checked comparison, not the list.
+        b.SetCell(0, "Terrain", "sand");
+        Assert.Equal("sand", b.Row(0).Cells[b.Variables.ToList().IndexOf("Terrain")]);
+    }
 }

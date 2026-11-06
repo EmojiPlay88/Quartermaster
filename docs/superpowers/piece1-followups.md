@@ -1,4 +1,4 @@
-﻿# Piece 1 — deferred follow-ups
+# Piece 1 — deferred follow-ups
 
 Minor findings deferred by task reviews (none block use). Collected from the piece-1 execution ledger on 2026-11-06.
 
@@ -131,7 +131,7 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 
 - Ruling P3-R1 / R2: tasks ran as parallel worktrees, each started as soon as its own dependencies were done; dependent worktrees merged their dependency branches first, and the whole branch was re-tested after each merge.
 - Ruling P3-R3: repeat semantics. Moving within a block keeps the repeat count and increments it on wrap-back to the block start. Entering or leaving a block resets it to 1. (Resetting on every phase change would loop forever.)
-- Ruling P3-R4: the Phases-tab grids validate per keystroke and "Move" no longer refuses when an invalid block exists, so the user can reorder to repair it.
+- Ruling P3-R4 (implemented in the final review fixes): Phases-tab combo and checkbox cells commit at once; text cells commit when the edit ends or about 400 ms after the last keystroke, and validation runs at that commit. "Move" refuses only a move that would invert a block that was valid before it; blocks that are already inverted never prevent a reorder, so the user can repair them.
 - Ruling P3-R5: in checked modes the typed values only gate Apply. When every checked box matches, the commands applied come from the expected (engine) run, so the ledger never sees typed text. The expected run uses the same roll overrides and pins as the actual run. Numbers compare by exact engine value (Calculate fills full-precision invariant text, not the rounded display), text compares through `TableLookup.Normalise` on both sides, and a Location compares as text.
 - Ruling P3-R6: an Input without Choices accepts text when its binding has no Min or Max. With Min or Max set it stays numeric-only.
 - Ruling P3-R7: "1 decision left" is singular and "N decisions left" plural; grammar wins over the spec's illustrative text.
@@ -158,6 +158,13 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - Commands / replay: the replay test lacks Tag/Subject through GameSession; `NativeSave.Validate` keeps null Units entries; `AdvancePhase` with a null To is a silent no-op.
 - Tests: the block-error test uses Contains rather than an exact count; the `UnitsFor` test uses `name() ==` not `startsWith`; no test for a numeric AutoValue against Min/Max; the judgement-call cases of the message formatter are untested.
 - Messages: removing `{unit}` from a warning leaves a double space mid-message.
-- Phases tab: grids commit and validate per keystroke without debouncing; `FormulaIdByName` takes the first match on duplicate names; `GoToIssue` is a no-op for side and block issues; `RemoveSide` skips Flush.
+- Phases tab: `FormulaIdByName` takes the first match on duplicate names; `GoToIssue` is a no-op for side and block issues; `RemoveSide` skips Flush.
 - Smoke: `AppLog` writes to the real `%LOCALAPPDATA%\Quartermaster\app.log` even when `QUARTERMASTER_LAYOUT_ROOT` is set (logging only; layout, autosave and settings do honour the root). The smoke's Weather-style once-per-turn dialog may be partly visible behind the screenshot.
 - Deferred by the spec: stepping back a phase.
+
+### Final review fixes (piece 3)
+
+- Difficulty switch: a change of difficulty (Settings, Game tab) closes every open formula dialog, batch grid and cheat sheet and shows "Difficulty changed — reopen from the phase panel". Pending runs stay pending and reopen in the new mode. As defence in depth the dialog and batch models re-read the current difficulty on every evaluation, so an override typed while fully automatic can never reach the ledger after a switch to a checked mode.
+- Opening a pending run always uses the current difficulty: fully automatic finishes it from the auto values and asks only for missing inputs; hardcore and semi-automatic open the checked dialog or batch grid (cheat sheet in semi-automatic).
+- Batch grid: Input columns that index a table with plain keys are editable dropdowns; axes with range keys stay free text. Values still go through the checked comparison.
+- Starting a setup by double-clicking it in the window tree shows the same difficulty chooser as File > Load Setup (default = last used).

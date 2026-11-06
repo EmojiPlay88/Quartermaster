@@ -55,6 +55,7 @@ sealed partial class MainForm
         var c = new PhaseController(session, (cmd, st) => CommandLog.Prepare(cmd, st, session.Model));
         c.PhaseBoundary += OnPhaseBoundary;
         c.RunsQueued += OnRunsQueued;
+        c.DifficultyChanged += OnDifficultyChanged;
         _phases = c;
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);
         _phaseDock!.Create(new PhasePanel(session, c, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
@@ -67,7 +68,7 @@ sealed partial class MainForm
         _stripWatch?.Dispose();
         _stripWatch = null;
         _phaseDock?.Destroy();
-        if (_phases != null) { _phases.PhaseBoundary -= OnPhaseBoundary; _phases.RunsQueued -= OnRunsQueued; }
+        if (_phases != null) { _phases.PhaseBoundary -= OnPhaseBoundary; _phases.RunsQueued -= OnRunsQueued; _phases.DifficultyChanged -= OnDifficultyChanged; }
         _phases = null;
         _strip.Visible = false;
     }
@@ -195,8 +196,9 @@ sealed partial class MainForm
     }
 
     /// <summary>
-    /// Opens the calculation UI of a pending run. A run that needs input (fully automatic) asks once through the missing-input dialog.
-    /// Otherwise a single unfinished unit opens its formula dialog linked to the run; several units open the batch grid.
+    /// Opens the calculation UI of a pending run in the CURRENT difficulty, whatever mode it was queued in (spec 7.3).
+    /// Fully automatic: the run is finished from the auto values, asking once (missing-input dialog) only for what has no auto value.
+    /// Hardcore / semi-auto: the checked dialog for one unit or the checked batch grid for several (semi-auto adds the cheat sheet).
     /// </summary>
     public void OpenPendingRun(string runId)
     {
@@ -205,26 +207,33 @@ sealed partial class MainForm
         if (run == null) { SetStatus("That calculation is no longer waiting."); return; }
         var open = run.Units.Where(u => !u.Applied).ToList();
         if (open.Count == 0) return;
-        if (run.NeedsInput)
+        if (game.State.Difficulty == Difficulty.FullyAuto)
         {
-            if (Program.Smoke) { Program.AppLog($"smoke: run {run.FormulaName} needs input; dialog skipped in smoke"); return; }
-            using var dlg = new MissingInputDialog(_session, _phases, run);
-            if (dlg.ShowDialog(this) == DialogResult.Retry
-                && _session?.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } fresh   // re-read: the dialog may have applied some units
-                && fresh.Units.Where(u => !u.Applied).ToList() is { Count: > 0 } left)
-                OpenPendingRunAsUnits(fresh, left);   // "Per unit..."
+            OpenPendingRunAutomatic(run);
             return;
         }
-        if (open.Count > 1)
-        {
-            var model = new BatchModel(_session, _phases, runId);
-            OpenChild(_docs, "batch:" + runId, () => new BatchGridWindow(model, _session, runId, row => Guard(() => OpenBatchRow(runId, row))));
-            return;
-        }
-        OpenUnitDialog(run, open[0]);
+        OpenPendingRunAsUnits(run, open);
     }
 
-    /// <summary>"Per unit..." from the missing-input dialog: the batch grid for several units, the unit dialog for one.</summary>
+    void OpenPendingRunAutomatic(PendingRun run)
+    {
+        if (_session == null || _phases == null) return;
+        if (MissingInputs.For(_session, run).Count == 0)
+        {
+            // Nothing to ask (for example a run left over from a manual mode): finish it from the auto values, no window.
+            var (applied, failed) = MissingInputs.ApplyAll(_session, _phases, run, new Dictionary<string, string>());
+            SetStatus($"{run.FormulaName}: {applied} unit(s) calculated automatically" + (failed.Count > 0 ? $", {failed.Count} could not be" : ""));
+            return;
+        }
+        if (Program.Smoke) { Program.AppLog($"smoke: run {run.FormulaName} needs input; dialog skipped in smoke"); return; }
+        using var dlg = new MissingInputDialog(_session, _phases, run);
+        if (dlg.ShowDialog(this) == DialogResult.Retry
+            && _session?.Game?.State.Pending.FirstOrDefault(r => r.Id == run.Id) is { } fresh   // re-read: the dialog may have applied some units
+            && fresh.Units.Where(u => !u.Applied).ToList() is { Count: > 0 } left)
+            OpenPendingRunAsUnits(fresh, left);   // "Per unit..."
+    }
+
+    /// <summary>The checked UI for a run: the batch grid for several units, the unit dialog for one. Also "Per unit..." from the missing-input dialog.</summary>
     void OpenPendingRunAsUnits(PendingRun run, List<PendingUnit> open)
     {
         if (_session == null || _phases == null) return;
@@ -234,6 +243,16 @@ sealed partial class MainForm
             OpenChild(_docs, "batch:" + run.Id, () => new BatchGridWindow(model, _session, run.Id, row => Guard(() => OpenBatchRow(run.Id, row))));
         }
         else OpenUnitDialog(run, open[0]);
+    }
+
+    /// <summary>The difficulty changed: every open formula dialog, batch grid and cheat sheet belongs to the old mode, so they close. Pending runs stay pending.</summary>
+    void OnDifficultyChanged()
+    {
+        if (IsDisposed || _session == null) return;
+        FormulaDialog.CloseAllFor(_session);
+        foreach (var kv in _docs.Where(kv => kv.Key.StartsWith("batch:", StringComparison.Ordinal)).ToList())
+            if (kv.Value is { IsDisposed: false } f) { try { f.Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("closing batch grid: " + ex.Message); } }
+        SetStatus("Difficulty changed — reopen from the phase panel");
     }
 
     /// <summary>Double-click in the batch grid: that unit's formula dialog, linked to the run so applying it counts for the batch.</summary>

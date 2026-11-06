@@ -113,4 +113,30 @@ public class PhaseEditTests
         Assert.Null(ok);
         Assert.Equal("BETA", p3.Sides[1].Name);
     }
+
+    [Fact]
+    public void Move_WithAlreadyInvalidBlock_AllowsRepairingMoves()
+    {
+        // Block c..b is inverted (first after last): reordering must stay possible so the user can fix it.
+        var pack = Pack(new[] { "a", "b", "c", "d" }, new PhaseBlock { FirstPhaseId = "c", LastPhaseId = "b", Count = 2, Label = "x" });
+        var (still, e1) = PhaseEdit.Move(pack, 0, 1);     // unrelated move: block stays inverted, still allowed
+        Assert.Null(e1);
+        Assert.Equal(new[] { "b", "a", "c", "d" }, Ids(still));
+        var (fixedPack, e2) = PhaseEdit.Move(pack, 2, -1); // c moves before b: the block becomes valid
+        Assert.Null(e2);
+        Assert.Equal(new[] { "a", "c", "b", "d" }, Ids(fixedPack));
+    }
+
+    [Fact]
+    public void Move_WithInvalidBlock_StillRefusesBreakingAValidBlock()
+    {
+        var pack = Pack(new[] { "a", "b", "c", "d", "e" },
+            new PhaseBlock { FirstPhaseId = "e", LastPhaseId = "d", Count = 2, Label = "bad" },
+            new PhaseBlock { FirstPhaseId = "a", LastPhaseId = "b", Count = 2, Label = "ok" });
+        var (same, err) = PhaseEdit.Move(pack, 0, 1);      // a after b would break the valid block
+        Assert.Equal(PhaseEdit.BlockBreakMessage, err);
+        Assert.Same(pack, same);
+        var (_, e2) = PhaseEdit.Move(pack, 2, 1);          // c past d: fine
+        Assert.Null(e2);
+    }
 }

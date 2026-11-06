@@ -51,6 +51,10 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
     public IReadOnlyList<string> Variables =>
         Formula is { } f ? _variables ??= f.Bindings.Select(b => b.Variable).ToList() : Array.Empty<string>();
 
+    /// <summary>The dropdown keys of an Input column (its own Choices, or the table keys it indexes). Null: free text (also for range keys).</summary>
+    public IReadOnlyList<string>? ChoicesFor(string variable) =>
+        Formula is { } f && s.Rules is { } pack ? KeyChoices.For(pack, f, variable) : null;
+
     public int RowCount => Run != null && Formula != null ? Run.Units.Count : 0;
 
     public string Title
@@ -86,6 +90,8 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
             };
             _models[row] = model;
         }
+        // Defence in depth: the mode is read again on every access, so a difficulty switch while a grid is open can never leave a row unchecked.
+        model.Checked = s.Game!.State.Difficulty != Difficulty.FullyAuto;
         return model;
     }
 

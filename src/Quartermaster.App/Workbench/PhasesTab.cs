@@ -37,6 +37,7 @@ sealed class PhasesTab : UserControl
     readonly DataGridView _warn = FormulasTab.NewGrid();
     readonly TextBox _issues = new() { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ForeColor = Color.Firebrick, BorderStyle = BorderStyle.None, BackColor = SystemColors.Control };
     readonly System.Windows.Forms.Timer _timer = new() { Interval = 400 };
+    readonly System.Windows.Forms.Timer _cellTimer = new() { Interval = 400 };
     readonly List<string> _sideIds = new();
     readonly List<string> _phaseSideIds = new();
     string? _selectedPhase, _selectedSide;
@@ -168,6 +169,7 @@ sealed class PhasesTab : UserControl
         _name.Leave += (_, _) => Run(() => Flush());
         _instr.Leave += (_, _) => Run(() => Flush());
         _timer.Tick += (_, _) => Run(() => Flush());
+        _cellTimer.Tick += (_, _) => Run(CommitDirtyCells);
         _side.SelectionChangeCommitted += (_, _) => Run(OnSideChosen);
         _link.Click += (_, _) => Run(LinkPage);
         _showRefBtn.Click += (_, _) => Run(ShowRef);
@@ -178,7 +180,17 @@ sealed class PhasesTab : UserControl
 
         foreach (var g in new[] { _start, _move, _warn })
         {
-            g.CurrentCellDirtyStateChanged += (_, _) => { if (g.IsCurrentCellDirty) g.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+            // Combo and checkbox cells commit at once; text cells commit when the edit ends or ~400 ms after the last keystroke (P3-R4).
+            g.CurrentCellDirtyStateChanged += (_, _) =>
+            {
+                if (g.IsCurrentCellDirty && g.CurrentCell is DataGridViewComboBoxCell or DataGridViewCheckBoxCell) g.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            };
+            g.EditingControlShowing += (_, e) =>
+            {
+                if (e.Control is not TextBox tb) return;
+                tb.TextChanged -= OnCellTextChanged;
+                tb.TextChanged += OnCellTextChanged;
+            };
             g.DataError += (_, e) => e.ThrowException = false;
         }
         _start.CellValueChanged += (_, e) => Run(() => OnStartCell(e.RowIndex, e.ColumnIndex));
@@ -219,8 +231,9 @@ sealed class PhasesTab : UserControl
         if (disposing)
         {
             _s.RulesChanged -= OnRulesChanged;
-            if (_timer.Enabled) { try { Flush(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("phases tab flush on close: " + ex.Message); } }
+            if (_timer.Enabled || _cellTimer.Enabled) { try { Flush(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("phases tab flush on close: " + ex.Message); } }
             _timer.Dispose();
+            _cellTimer.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -254,6 +267,22 @@ sealed class PhasesTab : UserControl
     }
 
     void Kick() { _timer.Stop(); _timer.Start(); }
+
+    /// <summary>A keystroke in a grid's text editor: the cell is committed (and so validated) only after the typing pauses.</summary>
+    void OnCellTextChanged(object? sender, EventArgs e)
+    {
+        if (_loading || _rebuilding) return;
+        _cellTimer.Stop();
+        _cellTimer.Start();
+    }
+
+    /// <summary>Commits a text cell that is still being edited in any of the three grids (CellValueChanged then validates and stores it).</summary>
+    void CommitDirtyCells()
+    {
+        _cellTimer.Stop();
+        foreach (var g in new[] { _start, _move, _warn })
+            if (g.IsCurrentCellDirty) g.CommitEdit(DataGridViewDataErrorContexts.Commit);
+    }
 
     PhaseDef? Current => _selectedPhase == null ? null : _s.Rules?.Phases.FirstOrDefault(p => p.Id == _selectedPhase);
 
@@ -444,6 +473,7 @@ sealed class PhasesTab : UserControl
     void Flush()
     {
         _timer.Stop();
+        if (_cellTimer.Enabled) CommitDirtyCells();
         if (_loading || _s.Rules is not { } pack) return;
         if (Current is { } ph)
         {

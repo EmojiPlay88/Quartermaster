@@ -35,6 +35,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>Raised after the phase changed (start, advance), once its OnStart has run.</summary>
     public event Action? PhaseBoundary;
 
+    /// <summary>Raised after the difficulty of the open game changed (windows that were checking in the old mode must close).</summary>
+    public event Action? DifficultyChanged;
+
     private void Exec(GameCommand c)
     {
         if (s.Game is not { } g) return;
@@ -139,6 +142,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         if (s.Game == null || s.Game.State.Difficulty == d) return;
         Exec(new SetDifficulty(d));
+        DifficultyChanged?.Invoke();
     }
 
     public void Tick(int index, bool ticked)

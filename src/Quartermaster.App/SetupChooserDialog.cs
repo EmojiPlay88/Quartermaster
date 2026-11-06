@@ -23,8 +23,9 @@ sealed class SetupChooserDialog : Form
     /// <summary>The difficulty chosen in the dialog (also written back to <see cref="Settings.LastDifficulty"/> by the caller).</summary>
     public Difficulty SelectedDifficulty { get; private set; }
 
+    /// <param name="preselect">Selects this setup (the one double-clicked in the window tree).</param>
     /// <param name="preselectNew">Selects "New game from module" instead of the first setup.</param>
-    public SetupChooserDialog(ModuleModel model, Difficulty defaultDifficulty = Difficulty.SemiAuto, bool preselectNew = false)
+    public SetupChooserDialog(ModuleModel model, Difficulty defaultDifficulty = Difficulty.SemiAuto, bool preselectNew = false, SetupDef? preselect = null)
     {
         SelectedDifficulty = defaultDifficulty;
         Text = "Start Game";
@@ -41,6 +42,7 @@ sealed class SetupChooserDialog : Form
             _list.Items.Add(s.NavPath.Count > 0 ? string.Join(" / ", s.NavPath) + " / " + s.Name : s.Name);
         }
         _list.SelectedIndex = model.Setups.Count > 0 && !preselectNew ? 1 : 0;
+        if (preselect != null && _items.IndexOf(preselect) is var at and > 0) _list.SelectedIndex = at;
 
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Width = 75 };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 75 };

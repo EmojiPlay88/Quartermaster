@@ -54,6 +54,16 @@ sealed class FormulaDialog : Form
         return dlg;
     }
 
+    /// <summary>Closes every open (non-preview) formula dialog of the session, e.g. after a difficulty switch.</summary>
+    public static void CloseAllFor(ModuleSession s)
+    {
+        foreach (var d in Open.Where(d => d._s == s && !d.IsDisposed).ToList())
+        {
+            try { d.Close(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("closing formula dialog: " + ex.Message); }
+        }
+    }
+
     /// <summary>Set before showing so Rule ref can open the document; falls back to the owner chain.</summary>
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public MainForm? Host { get; set; }
@@ -307,6 +317,7 @@ sealed class FormulaDialog : Form
     {
         try
         {
+            SyncMode();
             var v = _model.Evaluate(_s.Game?.State ?? new GameState());
             _last = v;
             _view.Apply(v);
@@ -320,10 +331,23 @@ sealed class FormulaDialog : Form
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            _last = null;   // never leave the previous (applicable) view behind
             _status.Text = "Could not update: " + ex.Message;
             _apply.Enabled = false;
             _s.Log.Add(DiagnosticSeverity.Error, "formula", "Formula dialog failed: " + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Defence in depth: the checking mode follows the game's current difficulty on every evaluation (the host also closes the dialog on a switch),
+    /// so a typed override made while fully automatic can never feed an Apply in Hardcore or Semi-auto.
+    /// </summary>
+    void SyncMode()
+    {
+        if (_previewOnly || _s.Game is not { } g) return;
+        var manual = g.State.Difficulty != Difficulty.FullyAuto;
+        _model.Checked = manual;
+        _calc.Visible = manual;
     }
 
     void RebuildInline(DialogView v)
@@ -342,7 +366,8 @@ sealed class FormulaDialog : Form
 
     void ApplyToLedger()
     {
-        if (_debounce.Enabled) { _debounce.Stop(); Recalc(); }
+        _debounce.Stop();
+        Recalc();   // always re-evaluate against the current game and mode before writing anything
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
         // v.Trace is the engine's own (expected) run: typed values only gate Apply, so a wrong formula can never reach the ledger.
         if (HostForm?.Phases is { } phases)

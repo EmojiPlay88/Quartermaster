@@ -62,6 +62,16 @@ sealed class BatchGridWindow : Form
         _grid.CurrentCellChanged += (_, _) => Safe(UpdateCheat);
         _grid.CellDoubleClick += (_, e) => Safe(() => { if (e.RowIndex >= 0 && e.ColumnIndex == 0) _openRow?.Invoke(e.RowIndex); });
         _grid.DataError += (_, e) => e.ThrowException = false;
+        _grid.EditingControlShowing += (_, e) =>
+        {
+            if (e.Control is ComboBox cb) cb.DropDownStyle = ComboBoxStyle.DropDown;   // key columns stay typeable
+        };
+        _grid.CellValidating += (_, e) => Safe(() =>
+        {
+            if (e.ColumnIndex >= 1 && e.ColumnIndex <= _varCount && _grid.Columns[e.ColumnIndex] is DataGridViewComboBoxColumn combo
+                && e.FormattedValue?.ToString() is { Length: > 0 } text && !combo.Items.Contains(text))
+                combo.Items.Add(text);
+        });
         _calcAll.Click += (_, _) => Safe(CalculateAll);
         _applyAll.Click += (_, _) => Safe(ApplyAll);
         _applyRow.Click += (_, _) => Safe(ApplyRow);
@@ -77,7 +87,21 @@ sealed class BatchGridWindow : Form
         _grid.Columns.Clear();
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Unit", ReadOnly = true, Width = 150, SortMode = DataGridViewColumnSortMode.NotSortable });
         foreach (var v in _model.Variables)
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = v, Width = 80, SortMode = DataGridViewColumnSortMode.NotSortable });
+        {
+            if (_model.ChoicesFor(v) is { Count: > 0 } keys)
+            {
+                // Key columns: a dropdown of the table keys. Typing stays allowed (editing control is a DropDown); the text still goes through the checked comparison.
+                var col = new DataGridViewComboBoxColumn
+                {
+                    HeaderText = v, Width = 90, SortMode = DataGridViewColumnSortMode.NotSortable,
+                    DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox, FlatStyle = FlatStyle.Standard,
+                };
+                col.Items.Add("");
+                foreach (var k in keys) col.Items.Add(k);
+                _grid.Columns.Add(col);
+            }
+            else _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = v, Width = 80, SortMode = DataGridViewColumnSortMode.NotSortable });
+        }
         _varCount = _model.Variables.Count;
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Result", ReadOnly = true, Width = 90, SortMode = DataGridViewColumnSortMode.NotSortable });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Ledger", ReadOnly = true, Width = 200, SortMode = DataGridViewColumnSortMode.NotSortable });
@@ -100,6 +124,9 @@ sealed class BatchGridWindow : Form
         if (e.RowIndex < 0 || e.RowIndex >= _model.RowCount) { e.Value = ""; return; }
         var row = _model.Row(e.RowIndex);
         var c = e.ColumnIndex;
+        if (c >= 1 && c <= _varCount && _grid.Columns[c] is DataGridViewComboBoxColumn combo && c - 1 < row.Cells.Count
+            && row.Cells[c - 1] is { Length: > 0 } typed && !combo.Items.Contains(typed))
+            combo.Items.Add(typed);   // a typed or calculated value that is not one of the listed keys must still display
         e.Value = c == 0 ? row.Label
             : c <= _varCount ? (c - 1 < row.Cells.Count ? row.Cells[c - 1] : "")
             : c == ResultCol ? (row.Applied && row.Result.Length == 0 ? "Applied" : row.Result)

@@ -66,11 +66,15 @@ public static class PhaseEdit
         list.RemoveAt(index);
         list.Insert(to, item);
         var moved = pack with { Phases = list };
+        // Only a block that was valid before the move may not become inverted; blocks that were already broken never block a reorder (the user fixes them this way).
         foreach (var b in pack.Blocks)
         {
+            var f0 = IndexOf(pack, b.FirstPhaseId);
+            var l0 = IndexOf(pack, b.LastPhaseId);
+            if (f0 < 0 || l0 < 0 || f0 > l0) continue;
             var f = IndexOf(moved, b.FirstPhaseId);
             var l = IndexOf(moved, b.LastPhaseId);
-            if (f >= 0 && l >= 0 && f > l) return Fail(pack, BlockBreakMessage);
+            if (f > l) return Fail(pack, BlockBreakMessage);
         }
         return (moved, null);
     }
