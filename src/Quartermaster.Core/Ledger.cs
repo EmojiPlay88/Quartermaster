@@ -61,6 +61,8 @@ public static class LedgerSeeder
     /// </summary>
     public static SeedLedger? BuildSeeds(GameState s, RulesPack pack, Func<PieceInstance, bool> appliesTo, ModuleModel? model = null, DiagnosticLog? log = null)
     {
+        // Nothing to seed: skip every piece (workbench commits re-seed often and a game can hold thousands of pieces).
+        if (!pack.Properties.Any(p => p.Scope != PropertyScope.Holders && !string.IsNullOrWhiteSpace(p.SheetField))) return null;
         var seeds = new List<LedgerSeed>();
         foreach (var piece in s.Pieces.Values)
         {
@@ -78,7 +80,7 @@ public static class LedgerSeeder
     private static void SeedPiece(GameState s, RulesPack pack, PieceInstance piece, ModuleModel? model, List<LedgerSeed> seeds, DiagnosticLog? log)
     {
         var key = LedgerKey.Piece(piece.Id);
-        var traits = PieceTypeParser.Parse(piece.TypeString, new DiagnosticLog(), null).Traits;
+        var traits = PieceInfo.TypeOf(piece).Traits;
         var local = new List<LedgerSeed>();
         foreach (var prop in pack.Properties)
         {

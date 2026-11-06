@@ -99,7 +99,7 @@ public class ValidatorTests
     public void Validate_DuplicateNames_Error()
     {
         var p = Clean();
-        p = p with { Properties = new() { p.Properties[0], p.Properties[1] with { Name = "FUEL" } } };
+        p = p with { Properties = new() { p.Properties[0], p.Properties[1], new PropertyDef { Id = "p3", Name = "FUEL", Scope = PropertyScope.Both } } };
         var i = Assert.Single(RulesValidator.Validate(p));
         Assert.Equal(RulesIssueSeverity.Error, i.Severity);
         Assert.Contains("FUEL", i.Message);
@@ -148,5 +148,24 @@ public class ValidatorTests
         var msgs = RulesValidator.Validate(WithFormula(f)).ToList();
         Assert.Equal(2, msgs.Count);
         Assert.Contains(msgs, m => m.Message.Contains("zz"));
+    }
+
+    [Fact]
+    public void Validate_FormulaAppliesTo_UnknownPropertyRefs_AreErrors()
+    {
+        var f = Fx("A", In("A")) with { Name = "Walk", AppliesTo = "Ghost > 1 and has(\"Gone\") and has(Steps) and Fuel > 0" };
+        var msgs = RulesValidator.Validate(WithFormula(f)).Select(m => m.Message).ToList();
+        Assert.Contains("Formula \"Walk\": applies-to refers to unknown property \"Ghost\"", msgs);
+        Assert.Contains("Formula \"Walk\": applies-to refers to unknown property \"Gone\"", msgs);
+        Assert.Equal(2, msgs.Count);
+    }
+
+    [Fact]
+    public void Validate_PropertyAppliesTo_UnknownPropertyRef_IsError()
+    {
+        var p = Clean();
+        p = p with { Properties = new() { p.Properties[0] with { AppliesTo = "has(Nope)" }, p.Properties[1] } };
+        var msgs = RulesValidator.Validate(p).Select(m => m.Message).ToList();
+        Assert.Contains("Property \"Fuel\": applies-to refers to unknown property \"Nope\"", msgs);
     }
 }

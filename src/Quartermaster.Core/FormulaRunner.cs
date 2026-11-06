@@ -33,28 +33,29 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     {
         var formula = _pack.ById<FormulaDef>(r.FormulaId);
         if (formula == null) return Fail(new FormulaDef { Id = r.FormulaId }, "Formula not found");
+        var produced = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
         try
         {
-            return RunCore(s, r, formula);
+            return RunCore(s, r, formula, produced);
         }
         catch (Exception ex)
         {
-            return Fail(formula, ex is EvalError or ParseError ? ex.Message : "Could not run formula: " + ex.Message);
+            return Fail(formula, ex is EvalError or ParseError ? ex.Message : "Could not run formula: " + ex.Message, produced);
         }
     }
 
-    private static FormulaTrace Fail(FormulaDef f, string error) =>
+    private static FormulaTrace Fail(FormulaDef f, string error, IReadOnlyDictionary<string, IReadOnlyList<int>>? produced = null) =>
         new(f, Array.Empty<VariableState>(), null, "", Array.Empty<OutputPreview>(), error, Array.Empty<DiceEntry>(),
-            new Dictionary<string, IReadOnlyList<int>>());
+            produced == null ? new Dictionary<string, IReadOnlyList<int>>() : new Dictionary<string, IReadOnlyList<int>>(produced));
 
-    private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula)
+    private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula, Dictionary<string, IReadOnlyList<int>> produced)
     {
         AstExpr expr;
         try { expr = Parser.Parse(formula.Text ?? ""); }
-        catch (ParseError pe) { return Fail(formula, pe.Message); }
+        catch (ParseError pe) { return Fail(formula, pe.Message, produced); }
 
         var piece = r.PieceId != null && s.Pieces.TryGetValue(r.PieceId, out var pi) ? pi : null;
-        var run = new RunScope(this, s, r, formula, piece);
+        var run = new RunScope(this, s, r, formula, piece, produced);
 
         // Variables of the text, then any used only inside Table binding row/column expressions.
         var names = new List<string>(Parser.Variables(expr));
@@ -131,7 +132,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     }
 
     /// <summary>Per-run resolution of bindings to values.</summary>
-    private sealed class RunScope(FormulaRunner owner, GameState s, RunRequest r, FormulaDef formula, PieceInstance? piece)
+    private sealed class RunScope(FormulaRunner owner, GameState s, RunRequest r, FormulaDef formula, PieceInstance? piece, Dictionary<string, IReadOnlyList<int>> byKey)
     {
         private readonly Dictionary<string, VariableState> _done = new(StringComparer.Ordinal);
         private readonly HashSet<string> _active = new(StringComparer.Ordinal);
@@ -140,7 +141,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public PieceInstance? Piece => piece;
         public GameState State => s;
         public RulesPack Pack => owner._pack;
-        private readonly Dictionary<string, IReadOnlyList<int>> _byKey = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, IReadOnlyList<int>> _byKey = byKey;
         private int _inlineDice;
         public IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey => _byKey;
 

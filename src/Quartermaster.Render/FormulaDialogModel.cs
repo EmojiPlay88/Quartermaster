@@ -47,7 +47,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         {
             if (_physical == value) return;
             _physical = value;
-            foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll)) _overrides.Remove(b.Variable);
+            foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll)) { _overrides.Remove(b.Variable); _fixedRolls.Remove(b.Variable); }
         }
     }
 
@@ -78,7 +78,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice))
             ov.TryAdd(b.Variable, "");
         var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), ov, _fixedRolls));
-        _fixedRolls = trace.RollsByKey.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        // Merge: pins survive runs that did not produce them (missing input, errors). Only Reroll / the physical-dice toggle drop pins.
+        var merged = new Dictionary<string, IReadOnlyList<int>>(_fixedRolls, StringComparer.Ordinal);
+        foreach (var kv in trace.RollsByKey) merged[kv.Key] = kv.Value;
+        _fixedRolls = merged;
         return trace;
     }
 

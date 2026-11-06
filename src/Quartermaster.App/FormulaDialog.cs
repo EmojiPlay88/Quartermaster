@@ -15,7 +15,7 @@ sealed class FormulaDialog : Form
     readonly Label _working = new() { AutoSize = true, Font = new Font("Consolas", 9f), MaximumSize = new Size(540, 0), Margin = new Padding(0, 2, 0, 2) };
     readonly FlowLayoutPanel _inline = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, MaximumSize = new Size(540, 0), Margin = Padding.Empty };
     readonly Button _apply = new() { Text = "&Apply to ledger", Width = 110, Height = 25, Enabled = false };
-    readonly Button _cancel = new() { Text = "Cancel", Width = 75, Height = 25, DialogResult = DialogResult.Cancel };
+    readonly Button _cancel = new() { Text = "Cancel", Width = 75, Height = 25 };
     readonly Button _ruleRef = new() { Text = "&Rule ref…", Width = 85, Height = 25 };
     readonly CheckBox _physical = new() { Text = "Physical dice", AutoSize = true, Margin = new Padding(12, 5, 0, 0) };
     readonly ToolStripStatusLabel _status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
@@ -91,6 +91,7 @@ sealed class FormulaDialog : Form
 
         _debounce.Tick += (_, _) => { _debounce.Stop(); Recalc(); };
         _apply.Click += (_, _) => Guarded(ApplyToLedger);
+        _cancel.Click += (_, _) => { if (!_embedded) Close(); };
         _ruleRef.Click += (_, _) => Guarded(OpenRuleRef);
         _physical.CheckedChanged += (_, _) => { _model.PhysicalDice = _physical.Checked; Recalc(); };
         _ruleRef.Enabled = formula.RuleRefId != null && rules.ById<RuleRef>(formula.RuleRefId) != null;
@@ -113,7 +114,7 @@ sealed class FormulaDialog : Form
     void OnUi(Action a)
     {
         if (IsDisposed || _closing || !IsHandleCreated) return;
-        if (InvokeRequired) BeginInvoke(a); else a();
+        if (InvokeRequired) BeginInvoke(() => { if (!IsDisposed && !_closing) a(); }); else a();
     }
 
     void OnGameChanged(GameCommand _) => OnUi(CheckPieceThenRefresh);
@@ -293,7 +294,7 @@ sealed class FormulaDialog : Form
         if (_debounce.Enabled) { _debounce.Stop(); Recalc(); }
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
         foreach (var c in runner.Commands(v.Trace, null)) game.Execute(c);
-        DialogResult = DialogResult.OK;
+        if (!_embedded) Close();
     }
 
     void OpenRuleRef()
@@ -322,6 +323,20 @@ sealed class FormulaDialog : Form
             if (b.Background == BoxBackground.Typed && b.Text.Length == 0) _view.Type(b.Variable, "1");
         _debounce.Stop();
         Recalc();
+    }
+
+    /// <summary>Smoke: fills the inputs, clicks Apply and checks that the dialog closed and exactly the previewed commands were recorded. Null when fine, else the problem.</summary>
+    public string? SmokeApply()
+    {
+        SmokeFillInputs();
+        if (_last is not { CanApply: true } v || _s.Game is not { } game) return "Apply is not available for this formula with filled inputs";
+        var ledger = game.State.LedgerHistory.Count;
+        var dice = game.State.DiceHistory.Count;
+        _apply.PerformClick();
+        if (!IsDisposed && Visible) return "dialog stayed open after Apply";
+        if (game.State.LedgerHistory.Count != ledger + v.Trace.Outputs.Count) return $"expected {v.Trace.Outputs.Count} ledger entries, got {game.State.LedgerHistory.Count - ledger}";
+        if (game.State.DiceHistory.Count != dice + v.Trace.Rolls.Count) return $"expected {v.Trace.Rolls.Count} dice entries, got {game.State.DiceHistory.Count - dice}";
+        return null;
     }
 
     /// <summary>Draws the dialog to a PNG (smoke screenshots).</summary>

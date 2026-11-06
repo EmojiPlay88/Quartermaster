@@ -43,6 +43,12 @@ public class FormulaDialogModelTests
                     new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 2, DiceSides = 6 },
                 },
             },
+            new FormulaDef
+            {
+                Id = "f3", Name = "Inline", Text = "dice(1, 6) + MP",
+                Bindings = new() { new VariableBinding { Variable = "MP", Kind = BindingKind.Input } },
+            },
+            new FormulaDef { Id = "f4", Name = "Miss", Text = "dice(1, 6) + lookup(NoSuchTable, 1)" },
         },
     };
 
@@ -164,6 +170,44 @@ public class FormulaDialogModelTests
         m.Reroll("R");
         var c = m.Evaluate(State());
         Assert.Equal("4 (2+2)", c.Boxes.Single(x => x.Variable == "R").Text);
+    }
+
+    [Fact]
+    public void ClearingATypedInputKeepsTheInlineDicePin()
+    {
+        var calls = 0;
+        var m = Make("f3", (n, _) => { calls++; return Enumerable.Repeat(calls, n).ToList(); });
+        m.SetBoxText("MP", "1");
+        Assert.Equal("2", m.Evaluate(State()).ResultText);
+        m.SetBoxText("MP", "");
+        Assert.False(m.Evaluate(State()).CanApply);
+        m.SetBoxText("MP", "5");
+        Assert.Equal("6", m.Evaluate(State()).ResultText);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void ErrorRunKeepsPins()
+    {
+        var calls = 0;
+        var m = Make("f4", (n, _) => { calls++; return Enumerable.Repeat(calls, n).ToList(); });
+        var a = m.Run(State());
+        Assert.NotNull(a.Error);
+        Assert.True(a.RollsByKey.ContainsKey("dice#0"));
+        m.Run(State());
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void RerollStillRemovesItsKey()
+    {
+        var calls = 0;
+        var m = Make("f3", (n, _) => { calls++; return Enumerable.Repeat(calls, n).ToList(); });
+        m.SetBoxText("MP", "1");
+        m.Evaluate(State());
+        m.Reroll("dice#0");
+        Assert.Equal("3", m.Evaluate(State()).ResultText);
+        Assert.Equal(2, calls);
     }
 
     [Fact]

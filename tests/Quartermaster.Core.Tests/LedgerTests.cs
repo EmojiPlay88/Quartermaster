@@ -112,6 +112,24 @@ public class LedgerTests
     }
 
     [Fact]
+    public void Seeder_NoSheetFields_ExitsEarlyWithoutVisitingPieces()
+    {
+        var s = S();
+        s.Pieces["a"] = new PieceInstance { Id = "a", TypeString = "not a real type", TraitStates = new() };
+        var pack = new RulesPack
+        {
+            Properties = new()
+            {
+                new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces },
+                new PropertyDef { Id = "cap", Name = "Cap", Scope = PropertyScope.Holders, SheetField = "Cap" },
+            },
+        };
+        var visits = 0;
+        Assert.Null(LedgerSeeder.BuildSeeds(s, pack, _ => { visits++; return true; }));
+        Assert.Equal(0, visits);
+    }
+
+    [Fact]
     public void Seeder_ShortSheetState_AndBrokenType_SkipsAndCompletes()
     {
         var s = S();

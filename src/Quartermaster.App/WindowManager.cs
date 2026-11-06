@@ -176,8 +176,33 @@ sealed class WindowManager
     {
         _keys[w] = key;
         _titles[w] = w.Text;
+        w.TextChanged += (_, _) => OnTextChanged(w);
         w.FormClosing += (_, e) => { if (!e.Cancel) Record(w); };
         w.FormClosed += (_, _) => OnClosed(w);
+    }
+
+    const string FloatSuffix = " — Quartermaster";
+    bool _retitling;
+
+    /// <summary>A window renamed itself (the workbench does, per rules pack): keep the remembered title and the floating caption current.</summary>
+    void OnTextChanged(Form w)
+    {
+        if (_retitling || !_titles.ContainsKey(w) || w.IsDisposed) return;
+        _retitling = true;
+        try
+        {
+            var text = w.Text;
+            if (_float.ContainsKey(w))
+            {
+                var title = text.EndsWith(FloatSuffix, StringComparison.Ordinal) ? text[..^FloatSuffix.Length] : text;
+                _titles[w] = title;
+                if (title == text) w.Text = title + FloatSuffix;
+                FloatingChanged?.Invoke();
+            }
+            else _titles[w] = text;
+            _host.SyncTabs(null);
+        }
+        finally { _retitling = false; }
     }
 
     void OnClosed(Form w)

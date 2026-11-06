@@ -22,8 +22,14 @@ public static class RulesValidator
             Duplicates(pack.Formulas.Select(p => (p.Id, p.Name)), "Formula", issues);
 
             foreach (var p in pack.Properties)
-                if (!string.IsNullOrWhiteSpace(p.AppliesTo) && ParseProblem(p.AppliesTo!) is { } pe)
-                    Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to {pe}");
+                if (!string.IsNullOrWhiteSpace(p.AppliesTo))
+                {
+                    if (ParseProblem(p.AppliesTo!) is { } pe)
+                        Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to {pe}");
+                    else
+                        foreach (var u in UnknownPropertyRefs(p.AppliesTo!, pack))
+                            Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to refers to unknown property \"{u}\"");
+                }
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
             foreach (var f in pack.Formulas) CheckFormula(pack, f, issues);
         }
@@ -32,6 +38,31 @@ public static class RulesValidator
             Add(issues, RulesIssueSeverity.Error, pack.Id, pack.Name, $"Validation failed unexpectedly: {ex.Message}");
         }
         return issues;
+    }
+
+    /// <summary>Property names an applies-to expression refers to (variables and has() arguments) that no property has.</summary>
+    private static IEnumerable<string> UnknownPropertyRefs(string text, RulesPack pack)
+    {
+        var found = new List<string>();
+        try { Walk(Parser.Parse(text)); }
+        catch (ParseError) { }
+        return found.Distinct(StringComparer.Ordinal);
+
+        void Check(string n) { if (pack.PropertyByName(n) is null) found.Add(n); }
+        void Walk(AstExpr e)
+        {
+            switch (e)
+            {
+                case VarRef v: Check(v.Name); break;
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is TextLit t) Check(t.Value);
+                    else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is VarRef hv) Check(hv.Name);
+                    else foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
     }
 
     private static void Add(List<RulesIssue> l, RulesIssueSeverity s, string id, string name, string msg) =>
@@ -104,8 +135,11 @@ public static class RulesValidator
             CheckLookups(ast, pack, Err);
         }
 
-        if (!string.IsNullOrWhiteSpace(f.AppliesTo) && ParseProblem(f.AppliesTo!) is { } ape)
-            Err($"applies-to {ape}");
+        if (!string.IsNullOrWhiteSpace(f.AppliesTo))
+        {
+            if (ParseProblem(f.AppliesTo!) is { } ape) Err($"applies-to {ape}");
+            else foreach (var u in UnknownPropertyRefs(f.AppliesTo!, pack)) Err($"applies-to refers to unknown property \"{u}\"");
+        }
         if (!string.IsNullOrEmpty(f.RuleRefId) && pack.ById<RuleRef>(f.RuleRefId) is null)
             Err($"rule reference \"{f.RuleRefId}\" does not exist");
 

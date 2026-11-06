@@ -571,7 +571,10 @@ sealed class MainForm : Form
             var again = FormulaDialog.Show(s, f.Id, piece.Id, owner, this);
             Program.AppLog($"smoke: modeless formula dialog owner={live?.Owner?.Text} deduped={ReferenceEquals(live, again)}");
             if (live == null || !ReferenceEquals(live, again)) Program.ExitCode = 1;
-            live?.Close();
+            var problem = live?.SmokeApply();
+            Program.AppLog("smoke: formula apply " + (problem ?? "closed the dialog and recorded exactly the previewed entries"));
+            if (problem != null) Program.ExitCode = 1;
+            if (live is { IsDisposed: false }) live.Close();
             return;
         }
         if (_opts.ScreenshotFormula != null)
@@ -594,7 +597,7 @@ sealed class MainForm : Form
     {
         if (_session == null) return;
         var s = _session;
-        OpenChild(_benches, "workbench", () => new WorkbenchWindow(s, NewRulesPack, OpenRulesDialog));
+        OpenChild(_benches, "workbench", () => new WorkbenchWindow(s, () => Guard(NewRulesPack), () => Guard(OpenRulesDialog)));
     }
 
     /// <summary>Smoke: opens the workbench (Tables tab, first table selected) and saves a screenshot when asked.</summary>
