@@ -1,4 +1,5 @@
 using System.Xml;
+using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -23,6 +24,7 @@ sealed class MainForm : Form
     readonly ToolStripMenuItem _viewTree = new("Module &Tree") { Checked = true, CheckOnClick = true };
     readonly List<ToolStripItem> _needsModule = new();
     readonly List<ToolStripItem> _needsGame = new();
+    readonly List<ToolStripItem> _needsRules = new();
     readonly Dictionary<string, MapWindow> _maps = new();
     readonly Dictionary<string, Form> _charts = new();
     readonly Dictionary<string, Form> _docs = new();
@@ -123,6 +125,11 @@ sealed class MainForm : Form
         Item(file.DropDownItems, "&Save Game", () => SaveGame(false), Keys.Control | Keys.S, needsGame: true);
         Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), Keys.Control | Keys.Shift | Keys.S, needsGame: true);
         file.DropDownItems.Add(new ToolStripSeparator());
+        Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, needsModule: true);
+        Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, needsModule: true);
+        _needsRules.Add(Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false)));
+        _needsRules.Add(Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true)));
+        file.DropDownItems.Add(new ToolStripSeparator());
         Item(file.DropDownItems, "E&xit", Close);
 
         var view = new ToolStripMenuItem("&View");
@@ -221,6 +228,7 @@ sealed class MainForm : Form
     {
         foreach (var i in _needsModule) i.Enabled = _session != null;
         foreach (var i in _needsGame) i.Enabled = _session?.Game != null;
+        foreach (var i in _needsRules) i.Enabled = _session?.Rules != null;
     }
 
     void UpdateTitle()
@@ -234,6 +242,7 @@ sealed class MainForm : Form
                 if (_savePath != null) t += " — " + Path.GetFileNameWithoutExtension(_savePath);
                 if (_dirty) t += "*";
             }
+            if (_session.Rules is { } r) t += $" — rules: {r.Name}{(_session.RulesDirty ? "*" : "")}";
         }
         Text = t;
     }
@@ -250,7 +259,7 @@ sealed class MainForm : Form
     /// <summary>Opens a module and starts a game. Returns false (leaving everything as it was) on failure.</summary>
     bool OpenModule(string path, bool fromArgs)
     {
-        if (!ConfirmDiscard()) return false;
+        if (!ConfirmDiscard() || !ConfirmRulesSaved()) return false;
         ModuleSession next;
         string? moduleHash;
         var prevWait = Application.UseWaitCursor;
@@ -278,6 +287,7 @@ sealed class MainForm : Form
         _dirty = false;
         _session.Log.Added += OnLogAdded;
         _session.GameReplaced += OnGameReplaced;
+        _session.RulesChanged += OnRulesChanged;
         _tree.Load(_session.Model);
         _sbModule.Text = $"{_session.Model.Name} {_session.Model.Version}".Trim();
         _sbLocation.Text = "-";
@@ -287,6 +297,7 @@ sealed class MainForm : Form
         UpdateTitle();
 
         Guard(() => StartGameFor(_session, fromArgs));
+        if (fromArgs) Guard(() => LoadRulesFromArgs(_session));
         OpenMainMap();
         if (_opts.FloatMainMap && Program.Smoke && FirstMap() is { } fm) _wm.PopOut(fm);
         return true;
@@ -349,6 +360,7 @@ sealed class MainForm : Form
         if (_session == null) return;
         _session.Log.Added -= OnLogAdded;
         _session.GameReplaced -= OnGameReplaced;
+        _session.RulesChanged -= OnRulesChanged;
         _session.Dispose();
         _session = null;
         _tree.Clear();
@@ -449,6 +461,111 @@ sealed class MainForm : Form
         _savePath = path;
         _dirty = false;
         UpdateTitle();
+    }
+
+    // ---------- rules packs ----------
+
+    void OnRulesChanged()
+    {
+        if (IsDisposed) return;
+        UpdateUi();
+        UpdateTitle();
+    }
+
+    void LoadRulesFromArgs(ModuleSession s)
+    {
+        if (_opts.RulesPath != null) s.OpenRules(_opts.RulesPath);
+        else if (_opts.NewRulesName != null) s.NewRules(_opts.NewRulesName);
+    }
+
+    /// <summary>Offers to save an edited rules pack. Returns false when the user cancels (or cancels the save).</summary>
+    bool ConfirmRulesSaved()
+    {
+        if (_session is not { RulesDirty: true } || Program.Smoke) return true;
+        var r = MessageBox.Show(this, $"Save changes to the rules pack '{_session.Rules?.Name}'?", "Quartermaster",
+            MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (r == DialogResult.Cancel) return false;
+        if (r == DialogResult.No) return true;
+        try { return SaveRulesPack(false); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            ShowError(ex.Message);
+            return false;
+        }
+    }
+
+    void NewRulesPack()
+    {
+        if (_session == null || Program.Smoke || !ConfirmRulesSaved()) return;
+        var name = InputDialog.Ask(this, "New Rules Pack", "Name of the new rules pack:", "Rules");
+        if (!string.IsNullOrWhiteSpace(name)) _session.NewRules(name.Trim());
+    }
+
+    void OpenRulesDialog()
+    {
+        if (_session == null || Program.Smoke || !ConfirmRulesSaved()) return;
+        using var dlg = new OpenFileDialog { Filter = "Rules packs (*.qrules)|*.qrules|All files (*.*)|*.*", Title = "Open Rules Pack" };
+        if (dlg.ShowDialog(this) == DialogResult.OK) _session.OpenRules(dlg.FileName);
+    }
+
+    /// <summary>Saves the pack; returns false when the user cancelled the file dialog.</summary>
+    bool SaveRulesPack(bool saveAs)
+    {
+        if (_session?.Rules == null) return true;
+        string? path = null;
+        if (saveAs || _session.RulesPath == null)
+        {
+            if (Program.Smoke) return true;
+            using var dlg = new SaveFileDialog { Filter = "Rules packs (*.qrules)|*.qrules", DefaultExt = "qrules", Title = "Save Rules Pack", FileName = _session.Rules.Name };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+            path = dlg.FileName;
+        }
+        _session.SaveRules(path);
+        return true;
+    }
+
+    /// <summary>Opens (or activates) a module document and jumps to a 1-based page.</summary>
+    public void OpenDocumentAtPage(string documentEntry, int page)
+    {
+        if (_session == null) return;
+        var doc = _session.Model.Documents.FirstOrDefault(d => d.EntryName == documentEntry);
+        if (doc == null)
+        {
+            ShowError($"The rule reference points to '{documentEntry}', which is not in this module.");
+            return;
+        }
+        Guard(() =>
+        {
+            OpenChild(_docs, doc.EntryName, () => new PdfWindow(_session, doc, page));
+            if (_docs.TryGetValue(doc.EntryName, out var w) && !w.IsDisposed && w is PdfWindow pdf)
+            {
+                pdf.GoToPage(page);
+                pdf.Activate();
+            }
+        });
+    }
+
+    /// <summary>Smoke: opens the first formula for the first piece it applies to (preview mode), optionally saving a screenshot.</summary>
+    void SmokeFormulaDialog()
+    {
+        if (_session is not { Rules: { } rules, Game: { } game } s) return;
+        foreach (var piece in game.State.Pieces.Values)
+        {
+            var f = PieceFilter.FormulasFor(rules, piece, game.State, s.Model).FirstOrDefault();
+            if (f == null) continue;
+            using var dlg = new FormulaDialog(s, f.Id, piece.Id, previewOnly: true) { Host = this };
+            dlg.Show(this);
+            dlg.Update();
+            Program.AppLog($"smoke: formula dialog '{dlg.Text}' opened");
+            if (_opts.ScreenshotFormula != null) { dlg.SmokeFillInputs(); dlg.SaveScreenshot(_opts.ScreenshotFormula); }
+            dlg.Close();
+            return;
+        }
+        if (_opts.ScreenshotFormula != null)
+        {
+            Program.AppLog("smoke: --screenshot-formula given but no formula applies to any piece.");
+            Program.ExitCode = 1;
+        }
     }
 
     void OnNodeActivated(WindowTreeNode n)
@@ -635,6 +752,7 @@ sealed class MainForm : Form
         if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
         else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
         Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
+        Guard(SmokeFormulaDialog);
         if (_opts.Screenshot != null) Guard(() => SaveScreenshot(this, _opts.Screenshot, true));
         if (_opts.ScreenshotFloat != null)
         {
@@ -702,7 +820,7 @@ sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (!e.Cancel && !ConfirmDiscard()) e.Cancel = true;
+        if (!e.Cancel && (!ConfirmDiscard() || !ConfirmRulesSaved())) e.Cancel = true;
         base.OnFormClosing(e);
     }
 

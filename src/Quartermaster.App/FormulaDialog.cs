@@ -1,0 +1,195 @@
+using Quartermaster.Core;
+using Quartermaster.Render;
+using Quartermaster.Rules;
+using Quartermaster.Vassal;
+
+namespace Quartermaster.App;
+
+/// <summary>Layout-C formula dialog: the formula written out with an input box per variable, a live result and working line, and Apply to the ledger.</summary>
+sealed class FormulaDialog : Form
+{
+    readonly ModuleSession _s;
+    readonly FormulaDialogModel _model;
+    readonly bool _previewOnly;
+    readonly FormulaFormView _view;
+    readonly Label _working = new() { AutoSize = true, Font = new Font("Consolas", 9f), MaximumSize = new Size(540, 0), Margin = new Padding(0, 2, 0, 2) };
+    readonly FlowLayoutPanel _inline = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, MaximumSize = new Size(540, 0), Margin = Padding.Empty };
+    readonly Button _apply = new() { Text = "&Apply to ledger", Width = 110, Height = 25, Enabled = false };
+    readonly Button _cancel = new() { Text = "Cancel", Width = 75, Height = 25, DialogResult = DialogResult.Cancel };
+    readonly Button _ruleRef = new() { Text = "&Rule ref…", Width = 85, Height = 25 };
+    readonly CheckBox _physical = new() { Text = "Physical dice", AutoSize = true, Margin = new Padding(12, 5, 0, 0) };
+    readonly ToolStripStatusLabel _status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+    readonly System.Windows.Forms.Timer _debounce = new() { Interval = 150 };
+    readonly TableLayoutPanel _body = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Padding = new Padding(8, 8, 8, 0) };
+    DialogView? _last;
+
+    /// <summary>Set before showing so Rule ref can open the document; falls back to the owner chain.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public MainForm? Host { get; set; }
+
+    public FormulaDialog(ModuleSession s, string formulaId, string? pieceId, bool previewOnly = false)
+    {
+        _s = s;
+        _previewOnly = previewOnly;
+        var rules = s.Rules ?? throw new InvalidOperationException("No rules pack is loaded.");
+        var runner = s.Runner ?? throw new InvalidOperationException("No rules pack is loaded.");
+        var formula = rules.ById<FormulaDef>(formulaId) ?? new FormulaDef { Id = formulaId, Name = "(missing formula)" };
+        _model = new FormulaDialogModel(runner, formula, pieceId);
+
+        string? piece = null;
+        if (pieceId != null && s.Game?.State.Pieces.TryGetValue(pieceId, out var pi) == true) piece = PieceInfo.Name(pi);
+        Text = piece == null ? formula.Name : $"{formula.Name}: {piece}";
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = MinimizeBox = false;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.CenterParent;
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
+
+        _view = new FormulaFormView(FormulaLayout.Build(formula, rules), OnEdit, key => { _model.Reroll(key); Recalc(); });
+        _view.MinimumSize = new Size(540, 0);
+        _body.Controls.Add(Group("Formula", _view));
+        var wf = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
+        wf.Controls.Add(_working);
+        wf.Controls.Add(_inline);
+        _body.Controls.Add(Group("Working", wf));
+        _body.Controls.Add(Buttons());
+        var strip = new StatusStrip { SizingGrip = false, RenderMode = ToolStripRenderMode.System, Dock = DockStyle.Fill };
+        strip.Items.Add(_status);
+        _body.Controls.Add(strip);
+        Controls.Add(_body);
+
+        _debounce.Tick += (_, _) => { _debounce.Stop(); Recalc(); };
+        _apply.Click += (_, _) => Guarded(ApplyToLedger);
+        _ruleRef.Click += (_, _) => Guarded(OpenRuleRef);
+        _physical.CheckedChanged += (_, _) => { _model.PhysicalDice = _physical.Checked; Recalc(); };
+        _ruleRef.Enabled = formula.RuleRefId != null && rules.ById<RuleRef>(formula.RuleRefId) != null;
+        _apply.Visible = !previewOnly;
+        AcceptButton = _apply;
+        CancelButton = _cancel;
+        Recalc();
+    }
+
+    static GroupBox Group(string title, Control inner)
+    {
+        var g = new GroupBox { Text = title, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 4, 8, 8), Margin = new Padding(0, 0, 0, 6), Dock = DockStyle.Fill };
+        var t = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Dock = DockStyle.Fill };
+        inner.Margin = Padding.Empty;
+        t.Controls.Add(inner);
+        g.Controls.Add(t);
+        return g;
+    }
+
+    Control Buttons()
+    {
+        var row = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Anchor = AnchorStyles.Right, Margin = new Padding(0, 0, 0, 8) };
+        row.Controls.AddRange(new Control[] { _apply, _cancel, _ruleRef, _physical });
+        return row;
+    }
+
+    /// <summary>The body without its window, for embedding in another form (the rules editor preview). Apply is hidden.</summary>
+    public Control CreatePreviewPanel()
+    {
+        Controls.Remove(_body);
+        _apply.Visible = false;
+        return _body;
+    }
+
+    void OnEdit(string variable, string text)
+    {
+        _model.SetBoxText(variable, text);
+        _debounce.Stop();
+        _debounce.Start();
+    }
+
+    /// <summary>Re-runs the formula and pushes the result onto the controls. Never throws.</summary>
+    void Recalc()
+    {
+        try
+        {
+            var v = _model.Evaluate(_s.Game?.State ?? new GameState());
+            _last = v;
+            _view.Apply(v);
+            _working.Text = v.WorkingText;
+            _working.ForeColor = v.WorkingNegative ? Color.Red : SystemColors.ControlText;
+            _status.Text = v.Status;
+            _status.ForeColor = v.Trace.Error != null ? Color.Firebrick : SystemColors.ControlText;
+            _apply.Enabled = v.CanApply && !_previewOnly && _s.Game != null;
+            RebuildInline(v);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _status.Text = "Could not update: " + ex.Message;
+            _apply.Enabled = false;
+            _s.Log.Add(DiagnosticSeverity.Error, "formula", "Formula dialog failed: " + ex.Message);
+        }
+    }
+
+    void RebuildInline(DialogView v)
+    {
+        _inline.SuspendLayout();
+        foreach (var c in _inline.Controls.Cast<Control>().ToList()) { _inline.Controls.Remove(c); c.Dispose(); }
+        foreach (var r in v.InlineRolls)
+        {
+            var key = r.Key;
+            var b = new Button { Text = "↻ " + r.Text, AutoSize = true, Margin = new Padding(0, 2, 6, 0) };
+            b.Click += (_, _) => { _model.Reroll(key); Recalc(); };
+            _inline.Controls.Add(b);
+        }
+        _inline.ResumeLayout();
+    }
+
+    void ApplyToLedger()
+    {
+        if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
+        foreach (var c in runner.Commands(v.Trace, null)) game.Execute(c);
+        DialogResult = DialogResult.OK;
+    }
+
+    void OpenRuleRef()
+    {
+        var rr = _model.Formula.RuleRefId is { } id ? _s.Rules?.ById<RuleRef>(id) : null;
+        var host = Host ?? Owner as MainForm ?? (Owner as MapWindow)?.Host;
+        if (rr == null || host == null) return;
+        host.OpenDocumentAtPage(rr.DocumentEntry, rr.Page);
+    }
+
+    void Guarded(Action a)
+    {
+        try { a(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Program.AppLog("formula dialog action failed: " + ex);
+            _s.Log.Add(DiagnosticSeverity.Error, "formula", "A formula action failed: " + ex.Message);
+            if (!Program.Smoke) MessageBox.Show(this, ex.Message, "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    /// <summary>Smoke only: types "1" into every empty typed box so the screenshot shows a worked example.</summary>
+    public void SmokeFillInputs()
+    {
+        foreach (var b in _last?.Boxes ?? [])
+            if (b.Background == BoxBackground.Typed && b.Text.Length == 0) _view.Type(b.Variable, "1");
+        _debounce.Stop();
+        Recalc();
+    }
+
+    /// <summary>Draws the dialog to a PNG (smoke screenshots).</summary>
+    public void SaveScreenshot(string path)
+    {
+        PerformLayout();
+        Recalc();
+        using var bmp = new Bitmap(Width, Height);
+        DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        Program.AppLog("smoke: formula screenshot saved to " + path);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _debounce.Dispose();
+        base.Dispose(disposing);
+    }
+}

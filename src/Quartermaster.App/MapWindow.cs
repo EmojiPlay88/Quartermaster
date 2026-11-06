@@ -204,7 +204,36 @@ sealed class MapWindow : Form
                 menu.Items.Add(item);
             }
         }
+        AddCalculateMenu(menu, piece, game);
         if (menu.Items.Count == 0) menu.Items.Add(new ToolStripMenuItem("(no commands)") { Enabled = false });
+    }
+
+    /// <summary>"Calculate" submenu: one entry per formula that applies to the piece. Hidden without a rules pack.</summary>
+    void AddCalculateMenu(ContextMenuStrip menu, PieceInstance piece, GameSession game)
+    {
+        if (_s.Rules is not { } rules || _s.Runner == null) return;
+        IReadOnlyList<Quartermaster.Rules.FormulaDef> formulas;
+        try { formulas = PieceFilter.FormulasFor(rules, piece, game.State, _s.Model); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _s.Log.Add(DiagnosticSeverity.Warning, "rules", "Could not list formulas for a piece: " + ex.Message);
+            return;
+        }
+        if (formulas.Count == 0) return;
+        if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
+        var calc = new ToolStripMenuItem("Calculate");
+        foreach (var f in formulas)
+        {
+            var id = f.Id;
+            calc.DropDownItems.Add(new ToolStripMenuItem(f.Name, null, (_, _) => Run(() => ShowFormula(id, piece.Id))));
+        }
+        menu.Items.Add(calc);
+    }
+
+    void ShowFormula(string formulaId, string pieceId)
+    {
+        using var dlg = new FormulaDialog(_s, formulaId, pieceId) { Host = Host };
+        dlg.ShowDialog(this);
     }
 
     void BuildMapMenu(ContextMenuStrip menu, GameSession game)
