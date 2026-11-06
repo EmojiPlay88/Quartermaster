@@ -187,4 +187,50 @@ public class ModuleSessionRulesTests : IDisposable
         Assert.Contains(s.Log.Items, d => d.Severity == DiagnosticSeverity.Warning && d.Category == "rules"
             && d.Message == "Save was made with a different version of the rules pack");
     }
+
+    [Fact]
+    public void UpdateRules_AddedSheetProperty_SeedsWithoutReopen()
+    {
+        using var fx = Fixture();
+        using var s = Open(fx);
+        s.LoadSetup(s.Model.Setups[0]);
+        s.NewRules("A");
+        Assert.Null(Ledger.Get(s.Game!.State, "p:p1", "fuel"));
+        s.UpdateRules(p =>
+        {
+            p.Properties.Add(new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, SheetField = "Fuel" });
+            return p;
+        });
+        Assert.Equal(40, Ledger.Get(s.Game!.State, "p:p1", "fuel"));
+    }
+
+    [Fact]
+    public void SaveNative_AfterEdit_StampsCurrentRulesHash()
+    {
+        using var fx = Fixture();
+        using var s = Open(fx);
+        s.LoadSetup(s.Model.Setups[0]);
+        s.NewRules("A");
+        s.SaveRules(Path.Combine(_tmp, "h.qrules"));
+        s.UpdateRules(p => p with { Name = "Edited" });
+        var save = Path.Combine(_tmp, "h.qsave");
+        s.SaveNative(save);
+        Assert.Equal(RulesPackIo.ComputeSha256(s.Rules!), NativeSave.Read(save).RulesSha256);
+    }
+
+    [Fact]
+    public void LoadNative_SeedsMissingValues_WhenPackOpen()
+    {
+        using var fx = Fixture();
+        using var s = Open(fx);
+        s.LoadSetup(s.Model.Setups[0]);
+        var save = Path.Combine(_tmp, "l.qsave");
+        s.SaveNative(save); // no ledger values yet
+        var path = Path.Combine(_tmp, "l.qrules");
+        RulesPackIo.Save(FuelPack(s.Archive.Sha256), path);
+        s.StartNewGame();
+        s.OpenRules(path);
+        s.LoadNative(save);
+        Assert.Equal(40, Ledger.Get(s.Game!.State, "p:p1", "fuel"));
+    }
 }

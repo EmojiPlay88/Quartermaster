@@ -103,6 +103,7 @@ public sealed class ModuleSession : IDisposable
     public void SaveNative(string path)
     {
         if (Game == null) throw new InvalidOperationException("There is no game to save.");
+        if (Rules != null) Game.RulesSha256 = SafeHash(Rules) ?? Game.RulesSha256;
         NativeSave.Write(path, Game);
     }
 
@@ -115,9 +116,9 @@ public sealed class ModuleSession : IDisposable
     public void OpenRules(string path)
     {
         var pack = RulesPackIo.Load(path);
-        if (!string.Equals(pack.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
-            Log.Add(DiagnosticSeverity.Warning, "rules", "Rules pack was made for a different module", path);
         Commit(pack, path, dirty: false);
+        if (!string.Equals(pack.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
+            Log.AddOnce("rules-module-mismatch:" + path, DiagnosticSeverity.Warning, "rules", "Rules pack was made for a different module", path);
         Remember(path);
     }
 
@@ -148,6 +149,7 @@ public sealed class ModuleSession : IDisposable
         Rules = next;
         Runner = runner;
         RulesDirty = true;
+        SeedLedgers();
         RulesChanged?.Invoke();
     }
 

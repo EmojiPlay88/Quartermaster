@@ -112,19 +112,42 @@ public class LedgerTests
     }
 
     [Fact]
-    public void Seeder_ShortSheetState_AndMalformedType_SkipsAndCompletes()
+    public void Seeder_ShortSheetState_AndBrokenType_SkipsAndCompletes()
     {
         var s = S();
         var sheet = PieceTypeParser.EncodeState(new[] { "propertysheet;0Name~0Fuel;Sheet;", "piece;;;unit.svg;Unit" });
         s.Apply(new AddPiece("short", sheet, "", "m1", new PointD(0, 0), null));
-        s.Apply(new AddPiece("bad", ";;;;;(((", "", "m1", new PointD(0, 0), null));
+        // PieceTypeParser.Parse tolerates garbage and ReadSheet tolerates short state, so null trait states is what forces a read failure.
+        s.Apply(new AddPiece("bad", sheet, "", "m1", new PointD(0, 0), null));
+        s.Pieces["bad"].TraitStates = null!; // ReadSheet throws on this piece
         s.Apply(new AddPiece("ok", sheet, "", "m1", new PointD(0, 0), null));
         s.Apply(new SetTraitState("ok", 0, "Tank~7"));
         var pack = new RulesPack { Properties = { new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, SheetField = "Fuel" } } };
         var log = new DiagnosticLog();
         var seed = LedgerSeeder.BuildSeeds(s, pack, _ => true, null, log);
-        Assert.Contains(("p:ok", "fuel", 7.0), seed!.Seeds.Select(x => (x.Key, x.PropertyId, x.Value)));
+        Assert.Equal([("p:ok", "fuel", 7.0)], seed!.Seeds.Select(x => (x.Key, x.PropertyId, x.Value)).ToArray());
+        var warns = log.Items.Where(d => d.Severity == DiagnosticSeverity.Warning && d.Category == "rules").ToList();
+        Assert.Contains(warns, d => d.Message.Contains("'bad'"));
+        // ReadSheet tolerates short state (missing rows read as empty), so 'short' is skipped without a warning.
         Assert.DoesNotContain(seed.Seeds, x => x.Key == "p:short");
+    }
+
+    [Fact]
+    public void Seeder_PropertyAppliesTo_ExcludesNonMatchingPiece()
+    {
+        var s = S();
+        var sheet = PieceTypeParser.EncodeState(new[] { "propertysheet;0Fuel;Sheet;", "piece;;;unit.svg;Unit" });
+        s.Apply(new AddPiece("a", sheet, "", "m1", new PointD(0, 0), null));
+        var sheetB = PieceTypeParser.EncodeState(new[] { "propertysheet;0Fuel;Sheet;", "piece;;;unit.svg;Other" });
+        s.Apply(new AddPiece("b", sheetB, "", "m1", new PointD(0, 0), null));
+        s.Apply(new SetTraitState("a", 0, "5"));
+        s.Apply(new SetTraitState("b", 0, "6"));
+        var pack = new RulesPack { Properties = { new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, SheetField = "Fuel", AppliesTo = "name() == \"Nope\"" } } };
+        Assert.Null(LedgerSeeder.BuildSeeds(s, pack, _ => true, RunnerFx.Model, new DiagnosticLog()));
+        // model unavailable with a non-empty filter: treated as no match
+        Assert.Null(LedgerSeeder.BuildSeeds(s, pack, _ => true, null, new DiagnosticLog()));
+        var any = new RulesPack { Properties = { new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, SheetField = "Fuel", AppliesTo = "name() == \"Unit\"" } } };
+        Assert.Equal(["p:a"], LedgerSeeder.BuildSeeds(s, any, _ => true, RunnerFx.Model, new DiagnosticLog())!.Seeds.Select(x => x.Key).ToArray());
     }
 
     [Fact]

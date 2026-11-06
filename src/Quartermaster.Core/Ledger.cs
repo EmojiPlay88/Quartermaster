@@ -65,7 +65,7 @@ public static class LedgerSeeder
         foreach (var piece in s.Pieces.Values)
         {
             if (!appliesTo(piece)) continue;
-            try { SeedPiece(s, pack, piece, model, seeds); }
+            try { SeedPiece(s, pack, piece, model, seeds, log); }
             catch (Exception ex)
             {
                 log?.AddOnce("seed:" + piece.Id, DiagnosticSeverity.Warning, "rules",
@@ -75,7 +75,7 @@ public static class LedgerSeeder
         return seeds.Count == 0 ? null : new SeedLedger(seeds);
     }
 
-    private static void SeedPiece(GameState s, RulesPack pack, PieceInstance piece, ModuleModel? model, List<LedgerSeed> seeds)
+    private static void SeedPiece(GameState s, RulesPack pack, PieceInstance piece, ModuleModel? model, List<LedgerSeed> seeds, DiagnosticLog? log)
     {
         var key = LedgerKey.Piece(piece.Id);
         var traits = PieceTypeParser.Parse(piece.TypeString, new DiagnosticLog(), null).Traits;
@@ -84,7 +84,16 @@ public static class LedgerSeeder
         {
             if (prop.Scope == PropertyScope.Holders || string.IsNullOrWhiteSpace(prop.SheetField)) continue;
             if (Ledger.Get(s, key, prop.Id) != null) continue;
-            if (!string.IsNullOrWhiteSpace(prop.AppliesTo) && !PieceFilter.Matches(prop.AppliesTo, piece, s, model!, pack)) continue;
+            if (!string.IsNullOrWhiteSpace(prop.AppliesTo))
+            {
+                if (model == null)
+                {
+                    log?.AddOnce("seed-nomodel:" + prop.Id, DiagnosticSeverity.Warning, "rules",
+                        $"Property '{prop.Name}' has an 'applies to' filter that cannot be checked here; it was not seeded.");
+                    continue;
+                }
+                if (!PieceFilter.Matches(prop.AppliesTo, piece, s, model, pack)) continue;
+            }
             for (var i = 0; i < traits.Count; i++)
             {
                 if (traits[i] is not PropertySheetDef def
