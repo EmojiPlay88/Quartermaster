@@ -38,6 +38,18 @@ public class TableTests
         Assert.Equal(3, TableLookup.Lookup(t, Value.Of(9), Value.Of("ignored")).Number);
     }
 
+    [Fact] public void Locate_ReturnsMatchedIndices()
+    {
+        var t = new TableDef { Name = "Terrain", Kind = TableKind.TwoD,
+            RowKeys = new() { "1-3", "4+" }, ColumnKeys = new() { "Foot", "Horse" },
+            Cells = new() { new() { "1", "2" }, new() { "3", "4" } } };
+        Assert.Equal((1, 1), TableLookup.Locate(t, Value.Of(5), Value.Of("horse")));
+        Assert.Equal((0, 0), TableLookup.Locate(t, Value.Of(2), Value.Of("Foot")));
+        var o = OneD("T", new[] { "1-2", "3+" }, new[] { "a", "b" });
+        Assert.Equal((1, 0), TableLookup.Locate(o, Value.Of(9), null));
+        Assert.Throws<EvalError>(() => TableLookup.Locate(t, Value.Of(5), null));
+    }
+
     [Fact] public void Lookup_TwoD_TextColumn()
     {
         var t = new TableDef { Name = "Terrain", Kind = TableKind.TwoD,
