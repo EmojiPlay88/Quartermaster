@@ -2,15 +2,17 @@ using System.Text.Json;
 
 namespace Quartermaster.Core;
 
-/// <summary>Native .qsave format: JSON { format, moduleSha256, snapshot, log }.</summary>
+/// <summary>Native .qsave format: JSON { format, moduleSha256, rulesSha256?, snapshot, log }.</summary>
 public static class NativeSave
 {
-    public const int FormatVersion = 1;
+    public const int FormatVersion = 2;
+    const int MinFormat = 1;
 
     sealed class SaveFile
     {
         public int Format { get; set; }
         public string ModuleSha256 { get; set; } = "";
+        public string? RulesSha256 { get; set; }
         public GameState Snapshot { get; set; } = new();
         public List<GameCommand> Log { get; set; } = new();
     }
@@ -19,7 +21,7 @@ public static class NativeSave
     {
         var file = new SaveFile
         {
-            Format = FormatVersion, ModuleSha256 = s.ModuleSha256, Snapshot = s.State, Log = s.Log.ToList(),
+            Format = FormatVersion, ModuleSha256 = s.ModuleSha256, RulesSha256 = s.RulesSha256, Snapshot = s.State, Log = s.Log.ToList(),
         };
         File.WriteAllText(path, JsonSerializer.Serialize(file, QuartermasterJson.Options));
     }
@@ -34,6 +36,10 @@ public static class NativeSave
         Need(snap.Pieces != null && snap.Stacks != null && snap.MapOrder != null, "snapshot content");
         foreach (var p in snap.Pieces!.Values)
             Need(p != null && p.TraitStates != null && p.Trail != null && p.TypeString != null && p.Id != null && p.MapId != null, "piece data");
+        Need(snap.Ledgers != null && snap.LedgerHistory != null && snap.DiceHistory != null, "ledger data");
+        foreach (var l in snap.Ledgers!.Values) Need(l != null, "ledger data");
+        Need(snap.LedgerHistory!.All(e => e != null && e.Key != null && e.PropertyId != null && e.Source != null), "ledger history");
+        Need(snap.DiceHistory!.All(e => e != null && e.Purpose != null && e.Results != null), "dice history");
         foreach (var st in snap.Stacks!.Values)
             Need(st != null && st.PieceIds != null && st.Id != null && st.MapId != null, "stack data");
         Need(f.Log!.All(c => c != null), "log entry");
@@ -52,10 +58,10 @@ public static class NativeSave
             throw new InvalidDataException("Malformed save file: " + ex.Message, ex);
         }
         if (f == null) throw new InvalidDataException("Empty save file.");
-        if (f.Format != FormatVersion)
-            throw new InvalidDataException($"Unsupported save format version {f.Format} (expected {FormatVersion}).");
+        if (f.Format < MinFormat || f.Format > FormatVersion)
+            throw new InvalidDataException($"Unsupported save format version {f.Format} (expected {MinFormat} or {FormatVersion}).");
         Validate(f);
-        var session = new GameSession(f.Snapshot, f.ModuleSha256);
+        var session = new GameSession(f.Snapshot, f.ModuleSha256) { RulesSha256 = f.RulesSha256 };
         session.RestoreLog(f.Log);
         return session;
     }

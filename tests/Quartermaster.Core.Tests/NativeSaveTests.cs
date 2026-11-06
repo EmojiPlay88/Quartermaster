@@ -44,9 +44,9 @@ public class NativeSaveTests
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
         try
         {
-            File.WriteAllText(path, "{\"format\":2,\"moduleSha256\":\"x\",\"snapshot\":{},\"log\":[]}");
+            File.WriteAllText(path, "{\"format\":3,\"moduleSha256\":\"x\",\"snapshot\":{},\"log\":[]}");
             var ex = Assert.Throws<InvalidDataException>(() => NativeSave.Read(path));
-            Assert.Contains("2", ex.Message);
+            Assert.Contains("3", ex.Message);
             File.WriteAllText(path, "{not json");
             Assert.IsType<JsonException>(Assert.Throws<InvalidDataException>(() => NativeSave.Read(path)).InnerException);
         }

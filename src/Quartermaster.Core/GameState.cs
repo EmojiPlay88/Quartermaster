@@ -37,6 +37,10 @@ public sealed class GameState
     public OrderedDictionary<string, StackInstance> Stacks { get; set; } = new();
     public List<string> MapOrder { get; set; } = new();
     public long NextStackSeq { get; set; }
+    /// <summary>Ledger key (see LedgerKey) -> property id -> value.</summary>
+    public OrderedDictionary<string, OrderedDictionary<string, double>> Ledgers { get; set; } = new();
+    public List<LedgerEntry> LedgerHistory { get; set; } = new();
+    public List<DiceEntry> DiceHistory { get; set; } = new();
 
     public IEnumerable<StackInstance> StacksOn(string mapId) =>
         Stacks.Values.Where(s => s.MapId == mapId);
@@ -56,6 +60,7 @@ public sealed class GameState
                 {
                     DetachFromStack(rp);
                     Pieces.Remove(r.PieceId);
+                    Ledgers.Remove(LedgerKey.Piece(r.PieceId));
                     PruneEmpty();
                 }
                 break;
@@ -73,9 +78,40 @@ public sealed class GameState
                 foreach (var p in Pieces.Values)
                     if (p.MapId == cm.MapId) p.Moved = false;
                 break;
+            case LedgerDelta ld: DoLedgerDelta(ld); break;
+            case SeedLedger sl: DoSeed(sl); break;
+            case RollDice rd:
+                DiceHistory.Add(new DiceEntry(DiceHistory.Count + 1, rd.Purpose ?? "", rd.Count, rd.Sides, (rd.Results ?? Array.Empty<int>()).ToList()));
+                break;
             case ToggleTrail tt:
                 if (Pieces.TryGetValue(tt.PieceId, out var trp)) trp.TrailVisible = !trp.TrailVisible;
                 break;
+        }
+    }
+
+    void SetLedger(string key, string propertyId, double value)
+    {
+        if (!Ledgers.TryGetValue(key, out var inner)) Ledgers[key] = inner = new();
+        inner[propertyId] = value;
+    }
+
+    void DoLedgerDelta(LedgerDelta d)
+    {
+        if (d.Key == null || d.PropertyId == null || !double.IsFinite(d.After)) return;
+        SetLedger(d.Key, d.PropertyId, d.After);
+        LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, d.Key, d.PropertyId, double.IsFinite(d.Before) ? d.Before : 0,
+            d.After, d.Source ?? "manual", d.FormulaId, d.RuleRefId, d.Note, d.Working));
+    }
+
+    void DoSeed(SeedLedger sl)
+    {
+        if (sl.Seeds == null) return;
+        foreach (var s in sl.Seeds)
+        {
+            if (s == null || s.Key == null || s.PropertyId == null || !double.IsFinite(s.Value)) continue;
+            if (Ledgers.TryGetValue(s.Key, out var inner) && inner.ContainsKey(s.PropertyId)) continue;
+            SetLedger(s.Key, s.PropertyId, s.Value);
+            LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, s.Key, s.PropertyId, 0, s.Value, "seed", null, null, null, null));
         }
     }
 
