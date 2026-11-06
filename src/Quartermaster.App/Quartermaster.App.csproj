@@ -17,6 +17,8 @@
     <NoWarn>$(NoWarn);NU1701</NoWarn>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationDefaultFont>Tahoma, 8.25pt</ApplicationDefaultFont>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
