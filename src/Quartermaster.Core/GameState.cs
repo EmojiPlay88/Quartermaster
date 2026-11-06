@@ -44,6 +44,12 @@ public sealed class GameState
     public List<LogEntry> Log { get; set; } = new();
     public string Notes { get; set; } = "";
     public TurnState Turn { get; set; } = new(1, null);
+    /// <summary>Null = before turn 1.</summary>
+    public PhasePosition? Position { get; set; }
+    public Difficulty Difficulty { get; set; } = Difficulty.SemiAuto;
+    public List<int> Ticked { get; set; } = new();
+    public List<int> Acknowledged { get; set; } = new();
+    public List<PendingRun> Pending { get; set; } = new();
 
     public IEnumerable<StackInstance> StacksOn(string mapId) =>
         Stacks.Values.Where(s => s.MapId == mapId);
@@ -96,10 +102,82 @@ public sealed class GameState
                 Turn = new TurnState(st.Turn, st.Phase);
                 Log.Add(LogBuilder.Turn(this, st));
                 break;
+            case AdvancePhase ap: DoAdvance(ap); break;
+            case SetDifficulty sd:
+                Difficulty = sd.Difficulty;
+                Log.Add(LogBuilder.Line(this, LogKind.System, $"Difficulty changed to {DifficultyText.Display(sd.Difficulty)}", sd.Who, sd.At));
+                break;
+            case TickChecklist tc:
+                Ticked ??= new();
+                if (tc.Ticked) { if (!Ticked.Contains(tc.Index)) Ticked.Add(tc.Index); }
+                else Ticked.RemoveAll(i => i == tc.Index);
+                Log.Add(LogBuilder.Line(this, LogKind.Turn, (tc.Ticked ? "Done: " : "Not done: ") + tc.Item, tc.Who, tc.At));
+                break;
+            case AcknowledgeWarning aw:
+                Acknowledged ??= new();
+                if (!Acknowledged.Contains(aw.Index)) Acknowledged.Add(aw.Index);
+                Log.Add(LogBuilder.Line(this, LogKind.Turn, "Acknowledged: " + aw.Message, aw.Who, aw.At));
+                break;
+            case QueueRuns qr:
+                Pending ??= new();
+                foreach (var r in qr.Runs ?? Array.Empty<PendingRun>())
+                    if (r != null && r.Units != null) Pending.Add(r);
+                break;
+            case ResolveRun rr: DoResolve(rr); break;
+            case AddLogLine al:
+                Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId));
+                break;
             case ToggleTrail tt:
                 if (Pieces.TryGetValue(tt.PieceId, out var trp)) trp.TrailVisible = !trp.TrailVisible;
                 break;
         }
+    }
+
+    void BatchSummary(PendingRun r, IReadOnlyList<PendingUnit> units, string? who, DateTimeOffset? at)
+    {
+        if (units.Count > 1)
+            Log.Add(LogBuilder.Line(this, LogKind.Calc, $"{r.FormulaName}: {units.Count} units, {units.Count(u => u?.Applied == true)} applied", who, at));
+    }
+
+    void DoAdvance(AdvancePhase a)
+    {
+        if (a.To == null) return;
+        foreach (var r in Pending ?? new())
+        {
+            if (r?.Units == null) continue;
+            var open = r.Units.Where(u => u != null && !u.Applied).ToList();
+            if (open.Count > 0)
+            {
+                var labels = string.Join(", ", open.Take(3).Select(u => u.Label));
+                if (open.Count > 3) labels += $" +{open.Count - 3} more";
+                Log.Add(LogBuilder.Line(this, LogKind.Calc, $"skipped: {r.FormulaName}, {labels}", a.Who, a.At));
+            }
+            BatchSummary(r, r.Units, a.Who, a.At);
+        }
+        Position = a.To;
+        Turn = new TurnState(a.To.Turn, a.ToName);
+        Ticked = new(); Acknowledged = new(); Pending = new();
+        if (!string.IsNullOrEmpty(a.Reason))
+            Log.Add(LogBuilder.Line(this, LogKind.System, a.Reason, a.Who, a.At));
+        else
+            Log.Add(LogBuilder.Line(this, LogKind.Turn,
+                a.From == null ? $"Turn {a.To.Turn} · {a.ToName}" : $"Turn {a.To.Turn} · {a.FromName} → {a.ToName}", a.Who, a.At));
+    }
+
+    void DoResolve(ResolveRun rr)
+    {
+        Pending ??= new();
+        var idx = Pending.FindIndex(r => r != null && r.Id == rr.RunId);
+        if (idx < 0) return;
+        var run = Pending[idx];
+        var ids = new HashSet<string?>(rr.PieceIds ?? Array.Empty<string?>());
+        var units = (run.Units ?? Array.Empty<PendingUnit>()).Where(u => u != null).Select(u => !u.Applied && ids.Contains(u.PieceId) ? u with { Applied = true } : u).ToList();
+        if (units.All(u => u.Applied))
+        {
+            Pending.RemoveAt(idx);
+            BatchSummary(run, units, rr.Who, rr.At);
+        }
+        else Pending[idx] = run with { Units = units };
     }
 
     void SetLedger(string key, string propertyId, double value)

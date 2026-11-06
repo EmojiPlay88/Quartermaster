@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Quartermaster.Core;
 
 /// <summary>One line of the human-readable game log. Kind is a <see cref="LogKind"/> value; unknown kinds are shown as system.</summary>
-public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At);
+public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At, int? Turn = null, string? Phase = null);
 
 public static class LogKind
 {
@@ -16,6 +16,7 @@ public static class LogKind
     public const string Note = "note";
     public const string Turn = "turn";
     public const string System = "system";
+    public const string Calc = "calc";
 }
 
 public sealed record TurnState(int Turn, string? Phase);
@@ -26,7 +27,7 @@ static class LogBuilder
     static string Num(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
     static LogEntry Make(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? mapId = null) =>
-        new(s.Log.Count + 1, kind, text, who, pieceId, mapId, at ?? DateTimeOffset.UnixEpoch);
+        new(s.Log.Count + 1, kind, text, who, pieceId, mapId, at ?? DateTimeOffset.UnixEpoch, s.Position?.Turn, s.Position == null ? null : s.Turn.Phase);
 
     public static LogEntry Place(GameState s, AddPiece a) =>
         Make(s, LogKind.Place, a.LogText ?? $"piece {a.PieceId} placed", a.Who, a.At, a.PieceId, a.MapId);
@@ -61,8 +62,15 @@ static class LogBuilder
     {
         var text = d.Working ?? $"{d.PropertyId} {Num(d.Before)} → {Num(d.After)}";
         if (d.Source == "manual" && !string.IsNullOrEmpty(d.Note)) text += $" (note: {d.Note})";
-        return Make(s, d.Source == "formula" ? LogKind.Formula : LogKind.Ledger, text, d.Who, d.At);
+        if (!string.IsNullOrEmpty(d.Subject)) text = $"{d.Subject}: {text}";
+        if (!string.IsNullOrEmpty(d.Tag)) text += $" ({d.Tag})";
+        var kind = d.Tag != null ? LogKind.Calc : d.Source == "formula" ? LogKind.Formula : LogKind.Ledger;
+        string? pieceId = LedgerKey.TryParse(d.Key, out var isPiece, out var id) && isPiece ? id : null;
+        return Make(s, kind, text, d.Who, d.At, pieceId);
     }
+
+    public static LogEntry Line(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null) =>
+        Make(s, kind, text, who, at, pieceId);
 
     public static LogEntry Notes(GameState s, SetNotes n) => Make(s, LogKind.Note, "notes updated", n.Who, n.At);
 

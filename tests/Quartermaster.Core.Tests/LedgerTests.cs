@@ -179,7 +179,7 @@ public class LedgerTests
         try
         {
             NativeSave.Write(path, sess);
-            Assert.Contains("\"format\":3", File.ReadAllText(path).Replace(" ", ""));
+            Assert.Contains("\"format\":4", File.ReadAllText(path).Replace(" ", ""));
             var back = NativeSave.Read(path);
             Assert.Equal("rules1", back.RulesSha256);
             Assert.Equal(12.5, Ledger.Get(back.State, "h:global", "fuel"));
