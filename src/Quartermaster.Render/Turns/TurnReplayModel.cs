@@ -118,16 +118,18 @@ public sealed class TurnReplayModel
             return;
         }
         int logBefore = _game.State.Log.Count;
+        GameCommand c;
         try
         {
             TurnFiles.Step(_game, _t, Step);
+            c = _t.Commands[Step];
         }
-        catch (InvalidDataException ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Fail(ex.Message);
+            // Whatever went wrong with a step, the user's previous game comes back (never a half-replayed one).
+            Fail(ex is InvalidDataException ? ex.Message : $"Step {Step + 1} could not be replayed ({ex.Message}).");
             return;
         }
-        var c = _t.Commands[Step];
         Step++;
         CurrentLine = _game.State.Log.Count > logBefore ? _game.State.Log[^1].Text : c.GetType().Name;
         if (Step >= Count) Finish();

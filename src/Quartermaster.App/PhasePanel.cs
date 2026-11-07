@@ -133,8 +133,11 @@ sealed class PhasePanel : UserControl
             _none.Visible = !show;
             foreach (Control ctl in Controls) if (ctl is TableLayoutPanel tl) tl.Visible = show;
             // Hot-seat: during another side's phase only that side's player may advance.
-            _nextButton.Enabled = show && (v.BeforeStart || v.NextName != null) && v.PlayingText == null;
-            _nextTipText = show ? v.PlayingText : null;
+            // A received turn replaying: nothing here may change the game until it is done.
+            var replaying = _s.IsReplaying;
+            _nextButton.Enabled = show && (v.BeforeStart || v.NextName != null) && v.PlayingText == null && !replaying;
+            _nextTipText = show ? (replaying ? ModuleSession.ReplayingText : v.PlayingText) : null;
+            _checklist.Enabled = !replaying;
             _nextTip.SetToolTip(_nextButton, _nextTipText ?? "");
             if (!show)
             {
@@ -217,7 +220,7 @@ sealed class PhasePanel : UserControl
 
     WarningHit? SelectedWarning() => (_warnings.SelectedNode is { } n ? (n.Parent ?? n) : null)?.Tag as WarningHit;
 
-    void UpdateAckEnabled() => _ack.Enabled = SelectedWarning() is { IsDecision: true, Acknowledged: false };
+    void UpdateAckEnabled() => _ack.Enabled = !_s.IsReplaying && SelectedWarning() is { IsDecision: true, Acknowledged: false };
 
     void AckSelected()
     {

@@ -15,22 +15,22 @@ sealed class ReplayBar : Panel
     readonly Button _stop = new() { Text = "Stop", AutoSize = true, MinimumSize = new Size(70, 24), Name = "replay.stop" };
     readonly Label _title = new() { AutoSize = true, Font = new Font("Tahoma", 8.25f, FontStyle.Bold), Margin = new Padding(8, 7, 3, 3), UseMnemonic = false };
     readonly Label _step = new() { AutoSize = true, Margin = new Padding(8, 7, 3, 3) };
-    readonly OneLineLabel _line = new() { Dock = DockStyle.Fill };
+    readonly OneLineLabel _line = new() { Dock = DockStyle.Bottom, Height = 22 };
     readonly System.Windows.Forms.Timer _timer = new() { Interval = PlayIntervalMs };
     TurnReplayModel? _model;
 
     public ReplayBar()
     {
         Dock = DockStyle.Bottom;
-        Height = 34;
+        Height = 56;   // buttons on the first row; the line just replayed on its own row below
         Visible = false;
         Name = "ReplayBar";
         BackColor = Color.FromArgb(225, 236, 250);
         foreach (var b in new[] { _next, _playAll, _stop }) { b.BackColor = SystemColors.Control; b.UseVisualStyleBackColor = true; }
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Left, AutoSize = true, WrapContents = false, Padding = new Padding(4, 3, 4, 3) };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(4, 3, 4, 0) };
         flow.Controls.AddRange(new Control[] { _title, _next, _playAll, _stop, _step });
-        Controls.Add(_line);   // fills what the buttons leave (one line, ellipsis)
         Controls.Add(flow);
+        Controls.Add(_line);   // its own row: one line, ellipsis, full text in the tooltip
         _next.Click += (_, _) => Act(() => { _timer.Stop(); _model?.Next(); });
         _playAll.Click += (_, _) => Act(() => { if (_model is { Done: false }) _timer.Start(); Sync(); });
         _stop.Click += (_, _) => Act(() => { _timer.Stop(); _model?.Stop(); Sync(); });

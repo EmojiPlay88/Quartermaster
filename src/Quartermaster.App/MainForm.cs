@@ -359,7 +359,14 @@ sealed partial class MainForm : Form
     {
         FlushNotes(); // pending note text becomes a command first, so the dirty check below counts it
         if (_session?.IsGuest == true) return true;   // a guest's game is the host's: nothing here to save or lose
-        if (_session is { Game: not null, CanSave: false }) return true;   // a viewer copy or a half-replayed turn: never saved, nothing to ask
+        if (_session?.IsReplaying == true)
+        {
+            // A half-replayed turn is never saved; leaving it abandons the replay (the turn file or mailbox item can be opened again).
+            if (Program.Smoke) return true;
+            return MessageBox.Show(this, "Abandon this replay?", "Quartermaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+        }
+        if (_session is { Game: not null, CanSave: false }) return true;   // a viewer copy: never saved, nothing to ask
         if (!_dirty || Program.Smoke) return true;
         return MessageBox.Show(this, "The current game has unsaved changes. Discard them?", "Quartermaster",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
@@ -501,7 +508,13 @@ sealed partial class MainForm : Form
                 StartOnline(() => BeginHostingAsync(s, host), guest: false);
                 break;
             case LaunchKind.OpenTurn when !string.IsNullOrEmpty(launch.SavePath):
-                OpenTurnFile(launch.SavePath);   // no game yet: the turn's start becomes the game once the player says who they are
+                // No game yet: the turn's start becomes the game once the player says who they are. Cancelled or unreadable: back to
+                // the launcher (never an empty window), after this open has finished.
+                if (!OpenTurnFile(launch.SavePath) && s.Game == null)
+                {
+                    if (Program.LauncherHook != null && !Program.Smoke) BeginInvoke(() => { if (!IsDisposed) BackToLauncher(); });
+                    else if (!Program.Smoke) ChooseAndStart(s, preselectNew: false);
+                }
                 break;
             case LaunchKind.JoinOnline when launch.Online is { } guest:
                 StartOnline(() => BeginGuestAsync(s, guest), guest: true);   // no game of our own: the host's snapshot becomes the game

@@ -68,6 +68,24 @@ public class HotSeatTests : IDisposable
     }
 
     [Fact]
+    public void Adopt_KeepsThePlayerAtTheScreen_NoHandover_ViewUntouched()
+    {
+        var (s, c, _, hs) = Make(true);
+        c.Start(); c.Advance();                              // Supply (red)
+        hs.TakeOver(Bob);
+        hs.Detach();
+        var again = new HotSeat(s, c);                       // remade over the same game
+        var raised = Track(again);
+        again.Adopt(Bob);
+        Assert.Empty(raised);
+        Assert.Equal(Bob.Id, again.Current?.Id);
+        Assert.Null(again.Pending);
+        Assert.Equal(new[] { "blue" }, s.ViewSides!.ToArray());
+        again.Adopt(new PlayerDef("gone", "Gone", new[] { "red" }));
+        Assert.Equal(Bob.Id, again.Current?.Id);
+    }
+
+    [Fact]
     public void BeginOpenGame_TwoPlayers_RaisesHandoverAsALoadWould()
     {
         var (s, c, _, _) = Make(true);

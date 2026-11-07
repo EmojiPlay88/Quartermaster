@@ -100,6 +100,7 @@ sealed partial class MainForm
 
     void RefreshStrip()
     {
+        _strip.StartEnabled = _session?.IsReplaying != true;
         if (_phases != null) _strip.SetView(_phases.View());
     }
 

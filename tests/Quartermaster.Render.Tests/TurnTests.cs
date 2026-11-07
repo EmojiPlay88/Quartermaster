@@ -244,6 +244,35 @@ public class TurnTests : IDisposable
         Assert.Equal(TurnReplayModel.NotAPlayerText, m2.ViewNotice);
     }
 
+    /// <summary>Commands whose <paramref name="failAt"/>-th read throws a plain (non-data) exception.</summary>
+    private sealed class ThrowingCommands(IReadOnlyList<GameCommand> inner, int failAt) : IReadOnlyList<GameCommand>
+    {
+        private int _reads;
+        public GameCommand this[int index] =>
+            ++_reads == failAt ? throw new InvalidOperationException("boom") : inner[index];
+        public int Count => inner.Count;
+        public IEnumerator<GameCommand> GetEnumerator() => inner.GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    [Fact]
+    public void Replay_UnexpectedStepException_RestoresPreviousGame()
+    {
+        var (_, t) = AliceTurn();
+        var bob = Open();
+        bob.LoadSetup(bob.Model.Setups[0], Difficulty.FullyAuto, new[] { Alice, Bob });
+        var mine = bob.Game!;
+        var mineHash = StateHash.Of(mine.State);
+        var bad = t with { Commands = new ThrowingCommands(t.Commands, 2) };   // the step runs, then the model's own read throws
+        var model = bob.OpenTurn(bad, Bob.Id, Identity("bob", t.GameId));
+        model.Next();
+        Assert.True(model.Done);
+        Assert.Contains("boom", model.Error);
+        Assert.False(bob.IsReplaying);
+        Assert.Same(mine, bob.Game);
+        Assert.Equal(mineHash, StateHash.Of(bob.Game!.State));
+    }
+
     [Fact]
     public void Replay_MalformedStep_RestoresPreviousGame()
     {

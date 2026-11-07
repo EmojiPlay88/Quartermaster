@@ -25,12 +25,11 @@ sealed partial class MainForm
     ReplayContext? _replayCtx;
     /// <summary>The open game's identity when it is a play-by-email game (null for solo, hot-seat and online games).</summary>
     TurnIdentity? _turnIdentity;
-    TurnIdentity? _watchIdentity;
     string? _watchKey;
     (TurnFile Turn, string ItemId)? _waiting;
 
     /// <summary>What to put back when a replay fails (the previous game returns): its save target and dirty state.</summary>
-    sealed record ReplayContext(TurnIdentity Identity, string? ItemId, string? SavePath, bool Dirty, bool Recovered, string? GameId);
+    sealed record ReplayContext(TurnIdentity Identity, string? ItemId, string? SavePath, bool Dirty, bool Recovered, string? GameId, PlayerDef? HotSeatCurrent);
 
     /// <summary>The replay running now (null when none).</summary>
     public TurnReplayModel? TurnReplay => _replay;
@@ -63,7 +62,8 @@ sealed partial class MainForm
         FollowOpenGame(beginHotSeat: _replay is not { Done: true, Error: not null });
     }
 
-    void FollowOpenGame(bool beginHotSeat)
+    /// <param name="watch">False when the caller restarts the mailbox watch itself (after deleting a replayed item).</param>
+    void FollowOpenGame(bool beginHotSeat, bool watch = true)
     {
         var s = _session;
         var g = s?.Game;
@@ -86,10 +86,12 @@ sealed partial class MainForm
             {
                 CreateHotSeat(s, _phases, _history);
                 if (beginHotSeat) _hotSeat?.BeginOpenGame();
+                else _hotSeat?.Adopt(_replayCtx?.HotSeatCurrent);   // the same game came back: the same player is still at the screen
+                UpdatePlayerButton();
             }
         }
         if (_waiting is { } w && !string.Equals(w.Turn.GameId, g?.State.GameId, StringComparison.OrdinalIgnoreCase)) ClearWaiting();
-        UpdateMailboxWatch();
+        if (watch) UpdateMailboxWatch();
         UpdateTurnUi();
     }
 
@@ -169,9 +171,19 @@ sealed partial class MainForm
     TurnFile SendTurnCore(TurnIdentity id, string toPlayerId, string path, bool mailbox, string relay, string password)
     {
         var s = _session ?? throw new InvalidOperationException("There is no game to send.");
-        ApplyMailbox(id, mailbox, relay, password);
+        var g0 = s.Game ?? throw new InvalidOperationException("There is no game to send.");
+        var before = g0.Log.Count;
+        var pass = before == g0.TurnBase;   // Build logs "{name} passed." as its own action
         var t = TurnSender.Build(s, toPlayerId, id);
-        TurnFiles.Write(path, t);   // a failure leaves the turn base alone, so the same turn can be sent again
+        try { TurnFiles.Write(path, t); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            // Nothing was sent: the pass line goes again, and the identity, mailbox and Settings stay as they were.
+            if (pass && ReferenceEquals(s.Game, g0) && g0.Log.Count == before + 1 && g0.CanUndo) g0.Undo();
+            throw new IOException($"Could not write the turn file '{path}':\n{ex.Message}", ex);
+        }
+        // Written: only now do this computer's choices for the game change.
+        ApplyMailbox(id, mailbox, relay, password);
         TurnSender.AfterSend(s);
         SaveIdentity(id);
         _turnIdentity = id;
@@ -292,7 +304,7 @@ sealed partial class MainForm
             if (!AskWhoAreYou(t, players, id)) return false;
         }
         var local = id.LocalPlayerId ?? "";
-        var ctx = new ReplayContext(id, itemId, _savePath, _dirty, _recoveredAutosave, s.Game?.State.GameId);
+        var ctx = new ReplayContext(id, itemId, _savePath, _dirty, _recoveredAutosave, s.Game?.State.GameId, _hotSeat?.Current);
         if (_waiting is { } w && (w.ItemId == itemId || w.Turn.StartHash == t.StartHash)) ClearWaiting();   // this very turn is being opened
         // The rules stay as they are while the turn replays: an open workbench closes (it reopens from Tools once the replay is over).
         if (_benches.TryGetValue("workbench", out var bench) && !bench.IsDisposed) bench.Close();
@@ -302,8 +314,8 @@ sealed partial class MainForm
         try { m = s.OpenTurn(t, local, id); }
         catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException)
         {
+            FollowOpenGame(beginHotSeat: false);   // nothing was replaced: hot-seat comes back with the same player
             _replayCtx = null;
-            FollowOpenGame(beginHotSeat: false);   // nothing was replaced
             ShowError("Could not open the turn:\n" + ex.Message);
             return false;
         }
@@ -373,17 +385,15 @@ sealed partial class MainForm
             _recoveredAutosave = ctx.Recovered;
         }
         _dirty = true;
-        if (ctx != null && _session?.Game is { } g && TurnUiModel.IsTurnGame(g.State, ctx.Identity))
-        {
-            _turnIdentity = ctx.Identity;
-            UpdateMailboxWatch();
-        }
-        else FollowOpenGame(beginHotSeat: true);
+        if (ctx != null && _session?.Game is { } g && TurnUiModel.IsTurnGame(g.State, ctx.Identity)) _turnIdentity = ctx.Identity;
+        else FollowOpenGame(beginHotSeat: true, watch: false);
+        // The replayed item leaves the mailbox first; only then may the watch restart (a restart would cancel the delete).
+        if (ctx?.ItemId is { } item && _mailbox != null) DeleteThenWatch(item);
+        else UpdateMailboxWatch();
         UpdateUi();
         UpdateTitle();
         RefreshPhaseViews();
         Program.AppLog($"turns: replayed {m.Count} step(s) from {m.Turn.FromName}; end {(m.EndMatches ? "matches" : "DIFFERS")}");
-        if (ctx?.ItemId is { } item && _mailbox != null) _ = _mailbox.DeleteAsync(item);
         SetStatus(m.ViewNotice ?? $"{m.Turn.FromName}'s turn is replayed. Your turn.");
         if (!m.EndMatches) ShowError(TurnReplayModel.EndMismatchText);
     }
@@ -413,19 +423,24 @@ sealed partial class MainForm
             password = PasswordFor(id);
             key = string.Join("\n", g.State.GameId, id.Relay, id.LocalPlayerId, password);
         }
-        if (key == _watchKey && ReferenceEquals(id, _watchIdentity)) return;
+        if (key == _watchKey) return;   // same game, relay, player and password: the running watch goes on
         _watchKey = key;
-        _watchIdentity = key == null ? null : id;
         if (key == null) { _mailbox.Stop(); return; }
         _mailbox.Watch(g!.State.GameId, id!, password);
         Program.AppLog("turns: watching the turn mailbox on " + id!.Relay);
+    }
+
+    async void DeleteThenWatch(string itemId)
+    {
+        try { await _mailbox!.DeleteAsync(itemId); }   // never throws; failures reach the status bar
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("turns: " + ex.Message); }
+        if (!IsDisposed) OnlineGuard(UpdateMailboxWatch);
     }
 
     void StopMailbox()
     {
         _mailbox?.Stop();
         _watchKey = null;
-        _watchIdentity = null;
         ClearWaiting();
     }
 
@@ -509,6 +524,12 @@ sealed partial class MainForm
             && _sendTurn?.Enabled == false && _editUndo?.Enabled == false && _replayBlocked.All(i => !i.Enabled),
             "replay started (public view, no hot-seat, sending, undo and rules edits off)");
         if (m == null) return;
+        var logCount = s.Game!.State.Log.Count;
+        var rolled = _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll");
+        Check(!rolled && s.Game.State.Log.Count == logCount && _sbMessage.Text == ModuleSession.ReplayingText
+            && _toolbar.Items["dice.1d6"]?.Enabled == false && _toolbar.Items["turn.next"]?.Enabled == false, "dice and turn refused mid-replay");
+        RefreshPhaseViews();
+        Check(!_strip.StartEnabled && _phaseDock?.Panel?.NextButtonEnabled != true, "phase buttons off mid-replay");
         m.Next();
         Pump(10);
         Check(_replayBar.StepText == TurnUiModel.StepText(1, m.Count) && !string.IsNullOrEmpty(_replayBar.LineText), $"first step ('{_replayBar.StepText}': {_replayBar.LineText})");

@@ -51,6 +51,7 @@ sealed class DiceTools : IDisposable
         dd.DropDownItems.Add("(no game)").Enabled = false;
         toolbar.Items.Add(dd);
         needsGame.Add(dd);
+        _items.Add(dd);
         AddButton(toolbar, "turn.next", "Next turn", () => StepTurn(1), needsGame);
 
         toolsMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -59,6 +60,7 @@ sealed class DiceTools : IDisposable
         dice.DropDownItems.Add("(no game)").Enabled = false;
         toolsMenu.DropDownItems.Add(dice);
         needsGame.Add(dice);
+        _items.Add(dice);
 
         var turn = new ToolStripMenuItem("&Turn");
         var next = new ToolStripMenuItem("&Next turn");
@@ -71,6 +73,22 @@ sealed class DiceTools : IDisposable
         turn.DropDownOpening += (_, _) => _guard(() => _prev.Enabled = CurrentTurn.Turn > 1);
         toolsMenu.DropDownItems.Add(turn);
         needsGame.Add(turn);
+        _items.Add(turn);
+    }
+
+    /// <summary>Every dice and turn item (toolbar and Tools menu): off while the game may not change.</summary>
+    readonly List<ToolStripItem> _items = new();
+
+    /// <summary>Why nothing may be rolled or stepped now (a received turn is replaying; a viewer copy is read-only), else null.</summary>
+    static string? BlockedText(ModuleSession? s) =>
+        s == null ? null : s.IsReplaying ? ModuleSession.ReplayingText : s.IsViewerCopy ? ModuleSession.ViewerCopyText : null;
+
+    /// <summary>True (and says why in the status bar) when the game may not change; no roll is made or shown then.</summary>
+    bool Refused()
+    {
+        if (BlockedText(_session()) is not { } why) return false;
+        ShowResult(why);
+        return true;
     }
 
     void AddButton(ToolStrip bar, string id, string text, Action act, List<ToolStripItem> needsGame)
@@ -79,6 +97,7 @@ sealed class DiceTools : IDisposable
         b.Click += (_, _) => _guard(act);
         bar.Items.Add(b);
         needsGame.Add(b);
+        _items.Add(b);
     }
 
     TurnState CurrentTurn => _session()?.Game?.State.Turn ?? new TurnState(1, null);
@@ -97,6 +116,12 @@ sealed class DiceTools : IDisposable
     {
         if (_disposed) return;
         var game = _session()?.Game;
+        var blocked = BlockedText(_session());
+        foreach (var i in _items)
+        {
+            if (blocked != null) { i.Enabled = false; i.ToolTipText = blocked; }
+            else if (i.ToolTipText is ModuleSession.ReplayingText or ModuleSession.ViewerCopyText) i.ToolTipText = null;
+        }
         TurnLabel.Visible = game != null;
         if (game == null) return;
         TurnLabel.Text = TurnText(game.State.Turn);
@@ -152,7 +177,7 @@ sealed class DiceTools : IDisposable
     /// <summary>Rolls (or asks for physical results) and records one RollDice command. Returns false when cancelled or impossible.</summary>
     public bool RollSpec(DiceSpec spec, string purpose, bool quiet = false)
     {
-        if (_session() is not { Game: { } game } s) return false;
+        if (_session() is not { Game: { } game } s || Refused()) return false;
         var results = Results(s, spec.Count, spec.Sides);
         if (results == null) return false;
         Record(game, new RollDice(purpose, spec.Count, spec.Sides, results, DiceExpr.Format(spec), null, spec.Modifier));
@@ -162,7 +187,7 @@ sealed class DiceTools : IDisposable
 
     public bool RollSpecial(DieDef die)
     {
-        if (_session() is not { Game: { } game } s || die.Faces.Count < 2) return false;
+        if (_session() is not { Game: { } game } s || die.Faces.Count < 2 || Refused()) return false;
         var results = Results(s, 1, die.Faces.Count);
         if (results == null) return false;
         var face = die.Faces[results[0] - 1];
@@ -228,7 +253,7 @@ sealed class DiceTools : IDisposable
 
     public void StepTurn(int delta)
     {
-        if (_session()?.Game is not { } game) return;
+        if (_session()?.Game is not { } game || Refused()) return;
         var cur = game.State.Turn;
         var n = Math.Max(1, cur.Turn + delta);
         if (n == cur.Turn) return;
@@ -237,7 +262,7 @@ sealed class DiceTools : IDisposable
 
     void SetTurnDialog()
     {
-        if (_session()?.Game is not { } game) return;
+        if (_session()?.Game is not { } game || Refused()) return;
         if (TurnDialog.Ask(_owner, game.State.Turn) is not { } r) return;
         ChangeTurn(game, r.Turn, string.IsNullOrWhiteSpace(r.Phase) ? null : r.Phase.Trim());
     }

@@ -40,6 +40,14 @@ sealed class PhaseStrip : Panel
 
     public event Action? StartRequested;
 
+    /// <summary>False while the game may not change (a received turn replaying): Start game is shown greyed.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool StartEnabled
+    {
+        get => _start.Enabled;
+        set => _start.Enabled = value;
+    }
+
     public PhaseView? ViewForSmoke => _view;
 
     /// <summary>Texts of the laid-out items, for smoke checks.</summary>

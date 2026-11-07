@@ -239,6 +239,19 @@ public sealed class HotSeat
         OnGameReplaced();
     }
 
+    /// <summary>
+    /// For a controller remade over the same game (a failed turn replay brought it back): the player who was at the screen is still
+    /// there. No handover is raised and the view is left as it is; nothing happens for a solo game or a player no longer in the list.
+    /// </summary>
+    public void Adopt(PlayerDef? current)
+    {
+        if (_detached || current == null || !Active || _s.Game is not { } g) return;
+        if (Players.Effective(g.State, _s.Rules).FirstOrDefault(p => p.Id == current.Id) is not { } fresh) return;
+        Current = fresh;
+        Pending = null;
+        CurrentChanged?.Invoke();
+    }
+
     private void OnGameReplaced()
     {
         // Events captured before a Detach may still arrive once: a detached controller never touches the game or the view again.
