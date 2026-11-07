@@ -63,7 +63,6 @@ public sealed class GameState
     public GameState DeepClone() =>
         JsonSerializer.Deserialize<GameState>(JsonSerializer.Serialize(this, QuartermasterJson.Options), QuartermasterJson.Options)!;
 
-    /// <summary>Deterministic reducer. Never throws on unknown ids.</summary>
     /// <summary>
     /// Highest trait-state index <see cref="SetTraitState"/> may pad up to. An index past both this and the piece's current states is ignored,
     /// so a hostile save or turn file cannot grow a piece without bound.
