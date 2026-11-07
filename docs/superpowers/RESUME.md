@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-07, after piece 4 was built (on branch `piece4-undo`, to be merged into `master`; push only when the user asks). A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-07, after piece 4 was merged into `master` (not yet pushed; push only when the user asks). A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -32,7 +32,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
 - Tests: xUnit under `tests/`. 846 tests are green after piece 4 (169 Rules, 116 Vassal, 182 Core, 379 Render).
-- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 3 is **pushed**; piece 4 is on branch `piece4-undo`, to be merged into `master`. Push only when the user asks.
+- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 3 is **pushed**; piece 4 is merged into local `master` but **not pushed**. Push only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
 - Commit messages end with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
