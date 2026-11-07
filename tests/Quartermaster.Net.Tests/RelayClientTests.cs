@@ -234,4 +234,157 @@ public class RelayClientTests : IDisposable
         await c.ConnectAsync(new Uri("wss://127.0.0.1:1/qm"), _ => true, CancellationToken.None);
         await Until(() => reason != null);
     }
+
+    [Fact]
+    public async Task UpdateListing_Refused_LinkStaysUp_EventRaised()
+    {
+        await using var relay = new TestRelay(TestRelay.MakeCert());
+        await relay.StartAsync();
+        relay.RefuseUpdates = true;
+        await using var c = new RelayClient(Pins(), new[] { TimeSpan.FromHours(1) });
+        string? refused = null, dropped = null;
+        c.RequestRefused += r => refused = r;
+        c.Disconnected += r => dropped = r;
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await c.CreateRoomAsync("ABC234", "v", L);
+        await c.UpdateListingAsync(L);
+        await Until(() => refused != null);
+        Assert.Equal("Slow down", refused);
+        Assert.Null(dropped);
+        Assert.Equal("ABC234", await Within(c.ReserveCodeAsync()));
+    }
+
+    [Fact]
+    public async Task Hello_IsAlwaysTheFirstMessage_UnderConcurrentPosts()
+    {
+        await using var relay = new TestRelay(TestRelay.MakeCert());
+        await relay.StartAsync();
+        await using var c = new RelayClient(Pins(), Fast);
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await Task.WhenAll(Enumerable.Range(0, 20).Select(i => Task.Run(() => c.SendAsync("m", new[] { (byte)i }))));
+        await Until(() => relay.Received.Count(m => m is Send) == 20);
+        Assert.IsType<Hello>(relay.Received.First());
+        Assert.Single(relay.Received.OfType<Hello>());
+    }
+
+    private async Task<(TestRelay relay2, RelayClient client, Func<int> reconnects)> GuestThenRestart(int joinDelay, int nextId)
+    {
+        var cert = TestRelay.MakeCert();
+        var relay = new TestRelay(cert);
+        await relay.StartAsync();
+        var c = new RelayClient(Pins(), Fast);
+        int reconnects = 0, disconnects = 0;
+        c.Reconnected += () => Interlocked.Increment(ref reconnects);
+        c.Disconnected += _ => Interlocked.Increment(ref disconnects);
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await Within(c.JoinRoomAsync("ABC234", "ok-verifier"));
+        await relay.StopAsync();
+        await Until(() => disconnects >= 1);
+        var relay2 = new TestRelay(cert, relay.Port) { JoinDelayMs = joinDelay, Ids = nextId };
+        relay2.Listings.Add(L);
+        await relay2.StartAsync();
+        return (relay2, c, () => reconnects);
+    }
+
+    [Fact]
+    public async Task Send_DuringRejoin_WaitsForRejoinAnswer()
+    {
+        var (relay2, c, reconnects) = await GuestThenRestart(400, 0);
+        await using var _r = relay2; await using var _c = c;
+        while (true)
+        {
+            try { await c.SendAsync("m2", new byte[] { 1 }); break; }
+            catch (RelayException) { await Task.Delay(5); }
+        }
+        await Until(() => relay2.Received.Any(m => m is Send));
+        var order = relay2.Received.Select(m => m.GetType()).ToList();
+        Assert.Equal(new[] { typeof(Hello), typeof(JoinRoom), typeof(Send) }, order.Take(3));
+        await Until(() => reconnects() == 1);
+    }
+
+    [Fact]
+    public async Task Request_DuringRejoin_IsNotMisroutedByRejoinReply()
+    {
+        var (relay2, c, reconnects) = await GuestThenRestart(400, 0);
+        await using var _r = relay2; await using var _c = c;
+        IReadOnlyList<LobbyListing> list;
+        while (true)
+        {
+            try { list = await Within(c.ListLobbiesAsync("sha")); break; }
+            catch (RelayException) { await Task.Delay(5); }
+        }
+        Assert.Single(list);
+        await Until(() => reconnects() == 1);
+        Assert.Equal("ABC234", await Within(c.ReserveCodeAsync()));
+    }
+
+    [Fact]
+    public async Task MemberId_Exposed_AndUpdatedOnRejoin()
+    {
+        var (relay2, c, reconnects) = await GuestThenRestart(0, 4);
+        await using var _r = relay2; await using var _c = c;
+        await Until(() => reconnects() == 1);
+        Assert.Equal("m5", c.MemberId);
+    }
+
+    [Fact]
+    public async Task InFlightRequest_FailsWhenLinkDrops_ThenWorksAfterReconnect()
+    {
+        var cert = TestRelay.MakeCert();
+        var relay = new TestRelay(cert);
+        await relay.StartAsync();
+        await using var c = new RelayClient(Pins(), Fast);
+        int reconnects = 0;
+        c.Reconnected += () => Interlocked.Increment(ref reconnects);
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await relay.StopAsync();
+        await Assert.ThrowsAsync<RelayException>(() => c.ReserveCodeAsync());
+        await using var relay2 = new TestRelay(cert, relay.Port);
+        await relay2.StartAsync();
+        await Until(() => reconnects == 1);
+        Assert.Equal("ABC234", await Within(c.ReserveCodeAsync()));
+    }
+
+    [Fact]
+    public async Task Role_BrowserThenHost_ReconnectsAsHost_AndRejoinUsesLatestListing()
+    {
+        var cert = TestRelay.MakeCert();
+        var relay = new TestRelay(cert);
+        await relay.StartAsync();
+        await using var c = new RelayClient(Pins(), Fast);
+        int reconnects = 0, disconnects = 0;
+        c.Reconnected += () => Interlocked.Increment(ref reconnects);
+        c.Disconnected += _ => Interlocked.Increment(ref disconnects);
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await Within(c.ListLobbiesAsync("sha"));
+        await c.CreateRoomAsync("ABC234", "v", L);
+        await c.UpdateListingAsync(L with { Players = 2 });
+        await relay.StopAsync();
+        await Until(() => disconnects >= 1);
+        await using var relay2 = new TestRelay(cert, relay.Port);
+        await relay2.StartAsync();
+        await Until(() => reconnects == 1);
+        Assert.Contains(relay2.Received, m => m is Hello { Role: "host" });
+        Assert.Contains(relay2.Received, m => m is CreateRoom { Draft.Players: 2 });
+    }
+
+    [Fact]
+    public async Task Disposal_Behaviour()
+    {
+        await using var relay = new TestRelay(TestRelay.MakeCert());
+        await relay.StartAsync();
+        var c = new RelayClient(Pins(), Fast);
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await Assert.ThrowsAsync<RelayException>(() => c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None));
+        await c.DisposeAsync();
+        await Assert.ThrowsAsync<RelayException>(() => c.ReserveCodeAsync());
+        await Assert.ThrowsAsync<RelayException>(() => c.SendAsync(null, new byte[1]));
+        await c.DisposeAsync();
+
+        var c2 = new RelayClient(Pins(), Fast);
+        var connecting = c2.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await c2.DisposeAsync();
+        await connecting;
+        await Assert.ThrowsAsync<RelayException>(() => c2.ReserveCodeAsync());
+    }
 }

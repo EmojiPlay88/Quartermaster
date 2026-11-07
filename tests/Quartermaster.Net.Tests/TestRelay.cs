@@ -38,6 +38,9 @@ public sealed class TestRelay : IAsyncDisposable
     public ConcurrentQueue<RelayMessage> Received { get; } = new();
     public List<LobbyListing> Listings { get; } = new();
     public string Password = "ok-verifier";
+    public bool RefuseUpdates;
+    public int JoinDelayMs;
+    public int Ids;
 
     public Uri Uri => new($"wss://127.0.0.1:{Port}/qm");
 
@@ -95,12 +98,14 @@ public sealed class TestRelay : IAsyncDisposable
             } while (!r.EndOfMessage);
             var msg = Framing.Decode<RelayMessage>(ms.ToArray());
             Received.Enqueue(msg);
+            if (msg is JoinRoom or CreateRoom && JoinDelayMs > 0) await Task.Delay(JoinDelayMs);
             RelayMessage? reply = msg switch
             {
                 ReserveCode => new CodeReserved("ABC234"),
                 CreateRoom c => new RoomCreated(c.Code),
                 ListLobbies q => new Lobbies(Listings.Where(x => x.ModuleSha256 == q.ModuleSha256).ToList()),
-                JoinRoom j => j.AuthVerifier == Password ? new Joined("m1") : new Refused("Wrong code or password"),
+                UpdateListing when RefuseUpdates => new Refused("Slow down"),
+                JoinRoom j => j.AuthVerifier == Password ? new Joined("m" + Interlocked.Increment(ref Ids)) : new Refused("Wrong code or password"),
                 Ping => new Pong(),
                 _ => null,
             };

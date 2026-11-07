@@ -4,15 +4,22 @@ namespace Quartermaster.Net.Tests;
 
 public class Task3FixTests
 {
-    private sealed record Holder(DateTime When, DateTimeOffset At, decimal Amount, TimeSpan Span, IReadOnlyList<string> Names);
+    [Fact]
+    public void RejectNullElements_DoesNotRecurseIntoNonProtocolTypes()
+    {
+        // The old reflection walk recursed forever through DateTime.Date etc.
+        Framing.RejectNullElements(DateTime.UtcNow);
+        Framing.RejectNullElements(DateTimeOffset.UtcNow);
+        Framing.RejectNullElements(1.5m);
+        Framing.RejectNullElements(TimeSpan.FromSeconds(3));
+        Framing.RejectNullElements(new List<object?> { DateTime.UtcNow, new[] { "a" } });
+    }
 
     [Fact]
-    public void Decode_NonProtocolTypes_AreLeaves_NoRecursion()
+    public void RejectNullElements_StillWalksProtocolTypes()
     {
-        var json = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
-            new Holder(DateTime.UtcNow, DateTimeOffset.UtcNow, 1.5m, TimeSpan.FromSeconds(3), new[] { "a" }));
-        var h = Framing.Decode<Holder>(json);
-        Assert.Equal(1.5m, h.Amount);
+        var bad = new LobbyListing("A", "N", "H", "s", "T", new[] { "x" }, new string[] { null! }, 1, 2, false, 1);
+        Assert.Throws<ProtocolException>(() => Framing.RejectNullElements(new UpdateListing(bad)));
     }
 
     [Fact]

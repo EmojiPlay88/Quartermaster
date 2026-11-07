@@ -21,6 +21,7 @@ public sealed class RelayClient : IAsyncDisposable
         { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10) };
 
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
+    private static readonly string VersionRefusalPrefix = Protocol.MismatchMessage(0).Split('(')[0];
 
     private readonly PinStore _pins;
     private readonly TimeSpan[] _backoff;
@@ -31,11 +32,20 @@ public sealed class RelayClient : IAsyncDisposable
     private Uri _relay = null!;
     private Func<CertificateCheck, bool> _onCert = _ => false;
     private ClientWebSocket? _ws;
-    private bool _helloSent, _certRejected, _down, _disposed, _awaitingRejoin;
+    private volatile bool _certRejected, _down, _disposed;
+    private bool _helloSent, _awaitingRejoin;
+    private int _connectStarted;
     private string? _role;
+    private volatile string? _memberId;
     private RelayMessage? _rejoin;
     private TaskCompletionSource<RelayMessage>? _pending;
+    private TaskCompletionSource? _rejoinDone;
     private Task _pump = Task.CompletedTask;
+
+    /// <summary>The guest's member id from the latest (re)join; null before joining.</summary>
+    public string? MemberId => _memberId;
+    /// <summary>A request the relay refused that nobody was waiting on (e.g. a rate-limited listing update). The link stays up.</summary>
+    public event Action<string>? RequestRefused;
 
     public event Action<string, byte[]>? Delivered;
     public event Action<string>? MemberLeft;
@@ -50,12 +60,19 @@ public sealed class RelayClient : IAsyncDisposable
         _backoff = backoff is { Count: > 0 } ? backoff.ToArray() : DefaultBackoff;
     }
 
-    /// <summary>Connects; never throws on network errors (raises Disconnected and keeps retrying, except after a refused certificate or version).</summary>
+    /// <summary>
+    /// Connects; never throws on network errors (raises Disconnected and keeps retrying, except after a refused certificate or version).
+    /// The certificate callback runs on a thread-pool thread (during the TLS handshake), so UI code must marshal to its own thread.
+    /// Throws <see cref="RelayException"/> if called twice or after disposal.
+    /// </summary>
     public async Task ConnectAsync(Uri relay, Func<CertificateCheck, bool> onUnknownOrChangedCert, CancellationToken ct)
     {
+        if (_disposed) throw new RelayException("The relay client was closed.");
+        if (Interlocked.Exchange(ref _connectStarted, 1) != 0) throw new RelayException("Already connected.");
         _relay = relay.AbsolutePath is "/" or "" ? new UriBuilder(relay) { Path = "/qm" }.Uri : relay;
         _onCert = onUnknownOrChangedCert;
         var (ws, reason) = await TryConnect(ct);
+        if (_disposed) { ws?.Dispose(); return; }
         if (ws == null)
         {
             _down = true;
@@ -63,7 +80,11 @@ public sealed class RelayClient : IAsyncDisposable
             if (_certRejected) return;
         }
         else lock (_gate) { _ws = ws; _helloSent = false; }
-        _pump = Task.Run(() => Pump(ws));
+        lock (_gate)
+        {
+            if (_disposed) { ws?.Dispose(); _ws = null; return; }
+            _pump = Task.Run(() => Pump(ws));
+        }
     }
 
     // ---- requests ----
@@ -78,7 +99,11 @@ public sealed class RelayClient : IAsyncDisposable
         lock (_gate) _rejoin = msg;
     }
 
-    public async Task UpdateListingAsync(LobbyListing listing) => await Post("host", new UpdateListing(listing));
+    public async Task UpdateListingAsync(LobbyListing listing)
+    {
+        await Post("host", new UpdateListing(listing));
+        lock (_gate) if (_rejoin is CreateRoom c) _rejoin = c with { Draft = listing };
+    }
 
     public async Task<IReadOnlyList<LobbyListing>> ListLobbiesAsync(string moduleSha) =>
         ((Lobbies)Expect(await Request("browser", new ListLobbies(moduleSha), typeof(Lobbies)))).Listings;
@@ -88,6 +113,7 @@ public sealed class RelayClient : IAsyncDisposable
         var msg = new JoinRoom(code, verifier);
         var id = ((Joined)Expect(await Request("guest", msg, typeof(Joined)))).MemberId;
         lock (_gate) _rejoin = msg;
+        _memberId = id;
         return id;
     }
 
@@ -97,12 +123,15 @@ public sealed class RelayClient : IAsyncDisposable
 
     private async Task Post(string role, RelayMessage msg)
     {
+        if (_disposed) throw new RelayException("The relay client was closed.");
         if (!await SendMsg(role, msg)) throw new RelayException("Not connected to the relay.");
     }
 
     private async Task<RelayMessage> Request(string role, RelayMessage msg, Type expected)
     {
-        await _requestLock.WaitAsync(_stop.Token).ConfigureAwait(false);
+        if (_disposed) throw new RelayException("The relay client was closed.");
+        try { await _requestLock.WaitAsync(_stop.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw new RelayException("The relay client was closed."); }
         try
         {
             var tcs = new TaskCompletionSource<RelayMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -123,28 +152,44 @@ public sealed class RelayClient : IAsyncDisposable
         finally { _requestLock.Release(); }
     }
 
-    private async Task<bool> SendMsg(string role, RelayMessage msg)
+    private static string Upgrade(string? current, string wanted) =>
+        current == null || (current == "browser" && wanted != "browser") ? wanted : current;
+
+    /// <summary>Sends msg (preceded by Hello on a fresh connection). App sends wait for an in-progress rejoin to be answered.</summary>
+    private async Task<bool> SendMsg(string role, RelayMessage msg, bool isRejoin = false)
     {
-        ClientWebSocket? ws;
-        bool hello;
-        lock (_gate)
-        {
-            ws = _ws;
-            hello = !_helloSent;
-            _role ??= role;
-            if (ws == null || ws.State != WebSocketState.Open) return false;
-            _helloSent = true;
-        }
         try
         {
+            if (!isRejoin)
+            {
+                Task? wait;
+                lock (_gate) wait = _awaitingRejoin ? _rejoinDone?.Task : null;
+                if (wait != null)
+                    await Task.WhenAny(wait, Task.Delay(RequestTimeout, _stop.Token)).ConfigureAwait(false);
+            }
             await _sendLock.WaitAsync(_stop.Token).ConfigureAwait(false);
             try
             {
-                if (hello) await SendRaw(ws, new Hello(Protocol.ProtocolVersion, _role!));
+                ClientWebSocket? ws;
+                bool hello;
+                string effective;
+                lock (_gate)
+                {
+                    ws = _ws;
+                    hello = !_helloSent;
+                    effective = Upgrade(_role, role);
+                }
+                if (ws == null || ws.State != WebSocketState.Open) return false;
+                if (hello)
+                {
+                    await SendRaw(ws, new Hello(Protocol.ProtocolVersion, effective));
+                    lock (_gate) _helloSent = true;
+                }
                 await SendRaw(ws, msg);
+                lock (_gate) _role = effective;
+                return true;
             }
             finally { _sendLock.Release(); }
-            return true;
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or IOException)
         {
@@ -227,13 +272,22 @@ public sealed class RelayClient : IAsyncDisposable
                     }
                     ws = w;
                     RelayMessage? rejoin;
-                    lock (_gate) { _ws = ws; _helloSent = false; rejoin = _rejoin; _awaitingRejoin = rejoin != null; }
-                    if (rejoin != null) { if (!await SendMsg(_role ?? "guest", rejoin)) { ws = Drop(ws); continue; } }
+                    lock (_gate)
+                    {
+                        _ws = ws; _helloSent = false; rejoin = _rejoin; _awaitingRejoin = rejoin != null;
+                        if (rejoin != null) _rejoinDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    }
+                    if (rejoin != null)
+                    {
+                        if (!await SendMsg(rejoin is CreateRoom ? "host" : "guest", rejoin, isRejoin: true))
+                        { EndRejoin(); ws = Drop(ws); continue; }
+                    }
                     else { attempt = 0; _down = false; try { Reconnected?.Invoke(); } catch (Exception) { } }
                 }
 
                 var end = await ReceiveLoop(ws, ct).ConfigureAwait(false);
-                lock (_gate) { _ws = null; _awaitingRejoin = false; }
+                lock (_gate) { _ws = null; }
+                EndRejoin();
                 FailPending(end.Reason);
                 ws.Dispose();
                 ws = null;
@@ -244,6 +298,16 @@ public sealed class RelayClient : IAsyncDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception e) when (!_disposed) { Raise($"Relay link failed: {Describe(e)}"); }
+    }
+
+    /// <summary>Marks the rejoin answered (or abandoned) and releases app sends waiting on it.</summary>
+    private bool EndRejoin()
+    {
+        TaskCompletionSource? done;
+        bool was;
+        lock (_gate) { was = _awaitingRejoin; _awaitingRejoin = false; done = _rejoinDone; _rejoinDone = null; }
+        done?.TrySetResult();
+        return was;
     }
 
     private ClientWebSocket? Drop(ClientWebSocket ws)
@@ -308,17 +372,25 @@ public sealed class RelayClient : IAsyncDisposable
                 break;
             case Refused r:
             {
-                bool rejoin;
-                lock (_gate) { rejoin = _awaitingRejoin && _pending == null; if (rejoin) _awaitingRejoin = false; }
-                if (rejoin) return $"Could not re-join the game after reconnecting: {r.Reason}";
-                if (!Complete(msg)) return r.Reason;
+                // Fatal only when it answers Hello (version) or the rejoin; anything else keeps the link.
+                if (r.Reason.StartsWith(VersionRefusalPrefix, StringComparison.Ordinal))
+                {
+                    Complete(msg);
+                    return r.Reason;
+                }
+                if (EndRejoin()) return $"Could not re-join the game after reconnecting: {r.Reason}";
+                if (!Complete(msg)) Try(() => RequestRefused?.Invoke(r.Reason));
                 break;
             }
             case Joined or RoomCreated:
             {
-                bool rejoin;
-                lock (_gate) { rejoin = _awaitingRejoin && _pending == null; if (rejoin) _awaitingRejoin = false; }
-                if (rejoin) { _down = false; Try(() => Reconnected?.Invoke()); }
+                // The rejoin has its own completion; its answer never completes an app request.
+                if (EndRejoin())
+                {
+                    if (msg is Joined j) _memberId = j.MemberId;
+                    _down = false;
+                    Try(() => Reconnected?.Invoke());
+                }
                 else Complete(msg);
                 break;
             }
@@ -345,10 +417,12 @@ public sealed class RelayClient : IAsyncDisposable
         _disposed = true;
         _stop.Cancel();
         ClientWebSocket? ws;
-        lock (_gate) { ws = _ws; _ws = null; }
+        Task pump;
+        lock (_gate) { ws = _ws; _ws = null; pump = _pump; }
         try { ws?.Abort(); } catch (Exception) { }
-        try { await _pump.ConfigureAwait(false); } catch (Exception) { }
+        try { await pump.ConfigureAwait(false); } catch (Exception) { }
+        EndRejoin();
         FailPending("Disposed.");
-        _stop.Dispose();
+        // _stop is deliberately not disposed: late callers still observe its cancelled token.
     }
 }

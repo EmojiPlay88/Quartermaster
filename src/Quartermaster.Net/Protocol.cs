@@ -111,7 +111,7 @@ public static class Framing
         return bytes;
     }
 
-    private static void RejectNullElements(object? v)
+    internal static void RejectNullElements(object? v)
     {
         if (v is null or string or byte[]) return;
         if (v is System.Collections.IEnumerable items)
