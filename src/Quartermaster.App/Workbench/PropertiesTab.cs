@@ -78,6 +78,7 @@ sealed class PropertiesTab : UserControl
         VisibleChanged += (_, _) => { if (Visible && _dirty) Run(Rebuild); };
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
+        _sidesWatch = new SidesWatch(this, s, () => Run(() => { _fields = null; Rebuild(); }), () => { _fields = null; _dirty = true; });   // hot-seat: fields from the new player's view
         Rebuild();
     }
 
@@ -110,6 +111,7 @@ sealed class PropertiesTab : UserControl
         {
             _s.RulesChanged -= OnRulesChanged;
             _s.GameReplaced -= OnGameReplaced;
+            _sidesWatch.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -139,6 +141,8 @@ sealed class PropertiesTab : UserControl
     void OnRulesChanged() => OnUi(() => { if (!_selfEdit) Rebuild(); });
 
     void OnGameReplaced() => OnUi(() => { _fields = null; Rebuild(); });
+
+    readonly SidesWatch _sidesWatch;
 
     void OnUi(Action a)
     {

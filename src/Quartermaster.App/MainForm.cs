@@ -79,6 +79,7 @@ sealed partial class MainForm : Form
         InitAlertBar();
         RegisterCommands();
         InitLos();
+        InitHotSeat();
         _cmdItems["view.log"] = _viewLog;
         BuildMenu();
         BuildToolbar();
@@ -279,7 +280,7 @@ sealed partial class MainForm : Form
         {
             if (_problemCount > 0) ShowDiagnostics();
         };
-        _status.Items.AddRange(new ToolStripItem[] { _sbModule, _sbMessage, _sbTiling, _dice!.TurnLabel, _sbLocation, _sbZoom });
+        _status.Items.AddRange(new ToolStripItem[] { _sbModule, _sbMessage, _sbTiling, _sbPlayer, _dice!.TurnLabel, _sbLocation, _sbZoom });
     }
 
     // ---------- public hooks for map windows (Task 12) ----------
@@ -339,6 +340,7 @@ sealed partial class MainForm : Form
         _dice?.Refresh();
         UpdatePhaseUi();
         RefreshHistoryUi();
+        UpdatePlayerButton();
     }
 
     void UpdateTitle()
@@ -576,10 +578,12 @@ sealed partial class MainForm : Form
     /// <summary>Shows the setup chooser (with the difficulty choice), remembers the difficulty, and starts the chosen game.</summary>
     void ChooseAndStart(ModuleSession s, bool preselectNew, SetupDef? preselect = null)
     {
-        using var dlg = new SetupChooserDialog(s.Model, _settings.Current.LastDifficulty, preselectNew, preselect);
+        using var dlg = new SetupChooserDialog(s.Model, _settings.Current.LastDifficulty, preselectNew, preselect, s.Rules);
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         if (dlg.SelectedDifficulty != _settings.Current.LastDifficulty) _settings.Save(_settings.Current with { LastDifficulty = dlg.SelectedDifficulty });
         if (dlg.Selected is { } setup) s.LoadSetup(setup, dlg.SelectedDifficulty); else s.StartNewGame(dlg.SelectedDifficulty);
+        // Two or more players: the first handover screen follows at once (hot-seat).
+        if (dlg.SelectedPlayers.Count >= 2) SetGamePlayers(dlg.SelectedPlayers);
     }
 
     void LoadSetupDialog()
@@ -644,8 +648,8 @@ sealed partial class MainForm : Form
     void OnViewChanged()
     {
         if (IsDisposed || !IsHandleCreated) return;
-        if (InvokeRequired) BeginInvoke(() => { if (!IsDisposed) Guard(_tree.RefreshVisibility); });
-        else Guard(_tree.RefreshVisibility);
+        if (InvokeRequired) BeginInvoke(() => { if (!IsDisposed) { Guard(_tree.RefreshVisibility); UpdatePlayerButton(); } });
+        else { Guard(_tree.RefreshVisibility); UpdatePlayerButton(); }
     }
 
     // ---------- rules packs ----------
@@ -916,9 +920,11 @@ sealed partial class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _shuttingDown = true;   // the handover screen goes without bringing hidden windows back
         if (_floatKeys != null) Application.RemoveMessageFilter(_floatKeys);
         _smokeTimer?.Dispose();
         _autosaveTimer?.Dispose();
+        _handoverRetry?.Dispose();
         _dice?.Dispose();
         RememberLeftSplit();
         _layoutStore.SaveLeftSplit(_leftFraction);

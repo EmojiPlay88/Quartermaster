@@ -114,7 +114,9 @@ sealed partial class MainForm
         () => _session?.CacheDir,
         m => Info(m, "Settings"), _commands,
         () => _session?.Game?.State.Difficulty,
-        d => { try { _phases?.SetDifficulty(d); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("set difficulty: " + ex.Message); } });
+        d => { try { _phases?.SetDifficulty(d); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("set difficulty: " + ex.Message); } },
+        GamePlayers,
+        p => { try { SetGamePlayers(p); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("set players: " + ex.Message); } });
 
     void ShowSettings()
     {

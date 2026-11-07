@@ -177,6 +177,7 @@ sealed partial class MainForm
         if (_opts.ScreenshotSettings != null) Guard(SmokeSettings);
         Guard(SmokeOverview);
         Guard(SmokeInventoryNotes);
+        if (_opts.ScreenshotHandover != null) Guard(SmokeHandover);
         if (_opts.ScreenshotExport != null) Guard(SmokeExport);
         Close();
     }

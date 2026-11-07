@@ -69,6 +69,7 @@ sealed partial class MainForm
         _phases = c;
         _history = new HistoryController(session, c, (cmd, st) => CommandLog.Prepare(cmd, st, session.Model));
         _history.Rewound += OnHistoryRewound;
+        CreateHotSeat(session, c, _history);
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);
         _phaseDock!.Create(new PhasePanel(session, c, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
         CreateAlerts(session);
@@ -78,6 +79,7 @@ sealed partial class MainForm
 
     void DestroyPhases()
     {
+        DestroyHotSeat();
         _stripWatch?.Dispose();
         _stripWatch = null;
         _phaseDock?.Destroy();
@@ -159,6 +161,7 @@ sealed partial class MainForm
         if (_phases == null || _session?.Game == null) return;
         var v = _phases.View();
         if (v.NoPhases) return;
+        if (v.PlayingText is { } playing) { SetStatus(playing); return; }   // hot-seat: another side's phase
         if (v.BeforeStart)
         {
             _phases.Start();
@@ -209,6 +212,8 @@ sealed partial class MainForm
         {
             if (IsDisposed) return;
             SetStatus($"{runs.Count} calculation(s) waiting in the phase panel");
+            // Hot-seat: the phase belongs to the next player; their calculations open once they are at the screen.
+            if (_handoverFor != null || _hotSeat?.Pending != null) { _runsAfterHandover.AddRange(runs); return; }
             foreach (var r in runs) Guard(() => OpenPendingRun(r.Id));
         }
         if (IsHandleCreated) BeginInvoke(Open);   // never inside Advance / ExecuteMove: the autosave and drag end finish first
@@ -612,19 +617,33 @@ sealed partial class MainForm
     void SmokeSetupDialog()
     {
         if (_session == null) return;
-        using var dlg = new SetupChooserDialog(_session.Model, _settings.Current.LastDifficulty, preselectNew: true);
+        using var dlg = new SetupChooserDialog(_session.Model, _settings.Current.LastDifficulty, preselectNew: true, pack: _session.Rules);
         dlg.StartPosition = FormStartPosition.Manual;
         dlg.Location = new Point(-20000, -20000);
         dlg.Show();
         Application.DoEvents();
-        using var bmp = new Bitmap(dlg.Width, dlg.Height);
-        dlg.DrawToBitmap(bmp, new Rectangle(Point.Empty, bmp.Size));
-        dlg.Hide();
         var path = _opts.ScreenshotSetup!;
         var dir = Path.GetDirectoryName(Path.GetFullPath(path));
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        void Shot(string to)
+        {
+            using var bmp = new Bitmap(dlg.Width, dlg.Height);
+            dlg.DrawToBitmap(bmp, new Rectangle(Point.Empty, bmp.Size));
+            bmp.Save(to, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        Shot(path);
         Program.AppLog("smoke: setup chooser screenshot saved to " + path);
+        // The Players page: one player holding every side by default; two players splitting the sides must validate.
+        dlg.ShowPlayersPage();
+        var ed = dlg.PlayersForSmoke;
+        var defaultOk = ed.RowCount == 1 && ed.Result.Count == 0 && ed.Problem == null;
+        ed.SmokeTwoPlayers();
+        Application.DoEvents();
+        var twoOk = !ed.CanHaveSeveral || (ed.Result.Count == 2 && ed.Problem == null);
+        Program.AppLog($"smoke: setup Players page {(defaultOk && twoOk ? "ok" : "FAILED")} (default solo {defaultOk}, two players valid {twoOk})");
+        if (!defaultOk || !twoOk) Program.ExitCode = 1;
+        Shot(Path.ChangeExtension(path, null) + "-players.png");
+        dlg.Hide();
     }
 
     /// <summary>Smoke: renders the Next Phase dialog with three invented decisions (no ShowDialog) to a PNG.</summary>

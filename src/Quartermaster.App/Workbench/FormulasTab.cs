@@ -118,6 +118,7 @@ sealed partial class FormulasTab : UserControl
         };
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
+        _sidesWatch = new SidesWatch(this, s, () => Run(OnSidesChanged), () => _dirty = true);   // hot-seat: a new player's units only
         Reload();
     }
 
@@ -127,6 +128,7 @@ sealed partial class FormulasTab : UserControl
         {
             _s.RulesChanged -= OnRulesChanged;
             _s.GameReplaced -= OnGameReplaced;
+            _sidesWatch.Dispose();
             if (_timer.Enabled) { try { FlushPending(final: false); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("formulas tab flush on close: " + ex.Message); } }
             _timer.Dispose();
         }
@@ -175,6 +177,15 @@ sealed partial class FormulasTab : UserControl
 
     void OnGameReplaced() => OnUi(() => { _pieceId = null; RefreshPieces(); OnPieceChosen(); });
 
+    readonly SidesWatch _sidesWatch;
+
+    /// <summary>Hot-seat handover: the unit list and the preview follow the new player's view (another side's unit is dropped).</summary>
+    void OnSidesChanged()
+    {
+        RefreshPieces();
+        _preview?.SetPiece(_pieceId);
+    }
+
     void OnUi(Action a)
     {
         if (IsDisposed) return;
@@ -191,6 +202,7 @@ sealed partial class FormulasTab : UserControl
         if (_timer.Enabled) FlushPending(final: false); // typed text is never overwritten by an outside change
         var pack = _s.Rules;
         var previous = _selected;
+        var pieceBefore = _pieceId;
         _loadingUi = true;
         try
         {
@@ -208,6 +220,7 @@ sealed partial class FormulasTab : UserControl
         RebuildOutputs();
         RefreshPieces();
         UpdatePreview();
+        if (_pieceId != pieceBefore) _preview?.SetPiece(_pieceId);   // the unit left this player's view while the tab was hidden
     }
 
     void OnListSelection()

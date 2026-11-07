@@ -34,7 +34,7 @@ sealed partial class MainForm
     /// <summary>Starts the tour on the first visible step. Does nothing while a tour is already open or no game is open.</summary>
     void ShowTour()
     {
-        if (_tour is { IsDisposed: false } || _session?.Game == null) return;
+        if (_tour is { IsDisposed: false } || _session?.Game == null || _handoverFor != null) return;   // never over the handover screen
         var steps = TourOverlay.VisibleSteps(ResolveTourTarget);
         if (steps.Count == 0) return;
         var tour = new TourOverlay(steps, ResolveTourTarget, _ => MarkTourShown());

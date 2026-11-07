@@ -20,6 +20,9 @@ sealed class PhasePanel : UserControl
     readonly PhaseWatcher _watch;
 
     readonly ToolTip _notesTip = new() { ShowAlways = true, UseAnimation = false, UseFading = false, AutoPopDelay = 30000 };
+    readonly ToolTip _nextTip = new() { ShowAlways = true, UseAnimation = false, UseFading = false };
+    string? _nextTipText;
+    bool _nextTipShown;
     readonly Label _title = new() { Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft };
     readonly TextBox _instructions = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BackColor = SystemColors.Window };
     readonly LinkLabel _ref = new() { Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft, Visible = false };
@@ -70,6 +73,14 @@ sealed class PhasePanel : UserControl
         foot.Controls.Add(_pop);
         Controls.Add(t);
         Controls.Add(foot);
+        // A disabled button gets no mouse messages, so its tooltip is shown from the panel underneath.
+        t.MouseMove += (_, e) =>
+        {
+            var over = !_nextButton.Enabled && _nextTipText != null && _nextButton.Bounds.Contains(e.Location);
+            if (over && !_nextTipShown) { _nextTip.Show(_nextTipText!, t, e.Location.X + 12, e.Location.Y + 18, 5000); _nextTipShown = true; }
+            else if (!over && _nextTipShown) { _nextTip.Hide(t); _nextTipShown = false; }
+        };
+        t.MouseLeave += (_, _) => { if (_nextTipShown) { _nextTip.Hide(t); _nextTipShown = false; } };
         Controls.Add(_none);
         _none.BringToFront();
 
@@ -101,6 +112,9 @@ sealed class PhasePanel : UserControl
     }
 
     public string NextButtonText => _nextButton.Text;
+    public bool NextButtonEnabled => _nextButton.Enabled;
+    public string? NextButtonTip => _nextTipText;
+    public string InstructionsText => _instructions.Text;
     public string CountText => _count.Text;
     public Color CountColor => _count.ForeColor;
     public int WarningNodesForSmoke => _warnings.Nodes.Count;
@@ -117,7 +131,10 @@ sealed class PhasePanel : UserControl
             var show = !v.NoPhases;
             _none.Visible = !show;
             foreach (Control ctl in Controls) if (ctl is TableLayoutPanel tl) tl.Visible = show;
-            _nextButton.Enabled = show && (v.BeforeStart || v.NextName != null);
+            // Hot-seat: during another side's phase only that side's player may advance.
+            _nextButton.Enabled = show && (v.BeforeStart || v.NextName != null) && v.PlayingText == null;
+            _nextTipText = show ? v.PlayingText : null;
+            _nextTip.SetToolTip(_nextButton, _nextTipText ?? "");
             if (!show)
             {
                 _count.Text = "";
@@ -126,8 +143,10 @@ sealed class PhasePanel : UserControl
             }
             _title.Text = v.BeforeStart ? "Before turn 1" : v.PlayingText is { } playing ? playing : v.Current is { } cur
                 ? (v.SideName != null ? $"{v.SideName} player — {cur.Name}" : cur.Name) : "";
-            _instructions.Text = (v.Current?.Instructions ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n");
-            _notesTip.SetToolTip(_title, v.Current?.Notes ?? "");
+            // Hot-seat: another side's phase shows none of its instructions, notes or rule reference.
+            var mine = v.PlayingText == null;
+            _instructions.Text = mine ? (v.Current?.Instructions ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n") : "";
+            _notesTip.SetToolTip(_title, mine ? v.Current?.Notes ?? "" : "");
             ShowRef(v);
             ShowWarnings(v);
             ShowDecisions(v);
@@ -143,7 +162,7 @@ sealed class PhasePanel : UserControl
     void ShowRef(PhaseView v)
     {
         _refTarget = null;
-        if (v.Current?.RuleRefId is { Length: > 0 } id && _s.Rules?.ById<RuleRef>(id) is { } r)
+        if (v.PlayingText == null && v.Current?.RuleRefId is { Length: > 0 } id && _s.Rules?.ById<RuleRef>(id) is { } r)
         {
             _refTarget = r;
             _ref.Text = r.Page > 0 ? $"Rule: {r.Label} (p. {r.Page})" : $"Rule: {r.Label}";
@@ -248,7 +267,7 @@ sealed class PhasePanel : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _watch.Dispose(); _title.Font.Dispose(); _notesTip.Dispose(); }
+        if (disposing) { _watch.Dispose(); _title.Font.Dispose(); _notesTip.Dispose(); _nextTip.Dispose(); }
         base.Dispose(disposing);
     }
 }

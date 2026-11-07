@@ -12,8 +12,11 @@ namespace Quartermaster.App;
 /// <param name="Commands">Commands whose shortcuts the Keyboard page edits.</param>
 /// <param name="GameDifficulty">Difficulty of the open game, or null when no game is open.</param>
 /// <param name="SetGameDifficulty">Switches the open game's difficulty (a logged command; takes effect from the next run).</param>
+/// <param name="GamePlayers">The open game's rules pack and player list (empty = solo), or null when no game is open.</param>
+/// <param name="SetGamePlayers">Replaces the open game's player list (a logged SetPlayers command; empty = solo).</param>
 sealed record SettingsContext(IReadOnlyList<(string Id, string Text)> ToolbarItems, string CacheRoot, Func<string?> OpenModuleCache, Action<string> Notify, CommandRegistry? Commands = null,
-    Func<Difficulty?>? GameDifficulty = null, Action<Difficulty>? SetGameDifficulty = null);
+    Func<Difficulty?>? GameDifficulty = null, Action<Difficulty>? SetGameDifficulty = null,
+    Func<(Quartermaster.Rules.RulesPack? Pack, IReadOnlyList<PlayerDef> Players)?>? GamePlayers = null, Action<IReadOnlyList<PlayerDef>>? SetGamePlayers = null);
 
 /// <summary>One page of the settings window: builds its controls, shows a <see cref="Settings"/> and writes its fields back into one.</summary>
 abstract class SettingsTab
@@ -91,7 +94,7 @@ sealed class GeneralTab : SettingsTab
     };
 }
 
-/// <summary>Settings -> Game: the difficulty of the open game (switchable mid-game) and the one new games start with.</summary>
+/// <summary>Settings -> Game: the difficulty of the open game (switchable mid-game) and the one new games start with, and the open game's Players.</summary>
 sealed class GameTab(SettingsContext ctx) : SettingsTab
 {
     static readonly (Difficulty D, string Name)[] Modes =
@@ -100,6 +103,9 @@ sealed class GameTab(SettingsContext ctx) : SettingsTab
     };
     readonly ComboBox _difficulty = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     readonly Label _hint = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 6, 3, 6) };
+    readonly GroupBox _playersBox = new() { Text = "Players", Width = 440, Height = 210, Padding = new Padding(6) };
+    readonly Label _noGame = new() { Text = "Open a game first", AutoSize = true, ForeColor = SystemColors.GrayText, Dock = DockStyle.Top };
+    PlayersEditor? _players;
 
     public override string Title => "Game";
 
@@ -109,6 +115,7 @@ sealed class GameTab(SettingsContext ctx) : SettingsTab
         var t = Table();
         Row(t, "Difficulty:", _difficulty);
         Full(t, _hint);
+        Full(t, _playersBox);
         return t;
     }
 
@@ -118,7 +125,23 @@ sealed class GameTab(SettingsContext ctx) : SettingsTab
         Select(open ?? s.LastDifficulty);
         _difficulty.Enabled = open != null;
         _hint.Text = open != null ? "A change takes effect from the next calculation." : "Open a game first";
+        LoadPlayers();
     }
+
+    void LoadPlayers()
+    {
+        _playersBox.Controls.Clear();
+        _players?.Dispose();
+        _players = null;
+        if (ctx.GamePlayers?.Invoke() is not { } game) { _playersBox.Controls.Add(_noGame); return; }
+        _players = new PlayersEditor(game.Pack, game.Players) { Dock = DockStyle.Fill };
+        _playersBox.Controls.Add(_players);
+    }
+
+    public override string? Validate() => _players?.Problem;
+
+    /// <summary>Smoke: the editor of the Players section (null without a game).</summary>
+    public PlayersEditor? PlayersForSmoke => _players;
 
     void Select(Difficulty d) => _difficulty.SelectedIndex = Math.Max(0, Array.FindIndex(Modes, m => m.D == d));
 
@@ -130,6 +153,8 @@ sealed class GameTab(SettingsContext ctx) : SettingsTab
     public void AfterApply()
     {
         if (_difficulty.Enabled && ctx.GameDifficulty?.Invoke() != null) ctx.SetGameDifficulty?.Invoke(Chosen);
+        if (_players != null && ctx.GamePlayers?.Invoke() is { } game && !PlayersEditor.Same(game.Players, _players.Result))
+            ctx.SetGamePlayers?.Invoke(_players.Result);
     }
 }
 

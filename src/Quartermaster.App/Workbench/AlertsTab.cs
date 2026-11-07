@@ -125,6 +125,7 @@ sealed class AlertsTab : UserControl
         };
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
+        _sidesWatch = new SidesWatch(this, s, () => Run(ShowStatus), () => _dirty = true);   // hot-seat: counts follow the new player
         Reload();
     }
 
@@ -134,6 +135,7 @@ sealed class AlertsTab : UserControl
         {
             _s.RulesChanged -= OnRulesChanged;
             _s.GameReplaced -= OnGameReplaced;
+            _sidesWatch.Dispose();
             if (_timer.Enabled) { try { Flush(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("alerts tab flush on close: " + ex.Message); } }
             _timer.Dispose();
         }
@@ -163,6 +165,8 @@ sealed class AlertsTab : UserControl
     void OnRulesChanged() => OnUi(() => { if (!_selfEdit) Reload(); });
 
     void OnGameReplaced() => OnUi(ShowStatus);
+
+    readonly SidesWatch _sidesWatch;
 
     void OnUi(Action a)
     {
