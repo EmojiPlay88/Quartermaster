@@ -13,7 +13,6 @@ namespace Quartermaster.App;
 sealed partial class MainForm
 {
     const int AlertDebounceMs = 250;
-    const int MenuMatches = 15;
 
     readonly AlertBar _alertBar = new();
     PhaseWatcher? _alertWatch;
@@ -30,6 +29,7 @@ sealed partial class MainForm
     {
         _alertBar.BannerClicked += () => Guard(() => _phaseDock?.Reveal());
         _alertBar.ChipClicked += h => Guard(() => GoToAlert(h));
+        _alertBar.OverflowClicked += (hs, at) => Guard(() => ShowOverflowMenu(hs, at));
         _alertBar.ChipContext += (h, at) => Guard(() => ShowAlertMenu(h, at));
     }
 
@@ -94,23 +94,51 @@ sealed partial class MainForm
         }
     }
 
+    /// <summary>Lists every match (the menu scrolls when taller than the screen) and the Hide item.</summary>
     void ShowAlertMenu(AlertHit h, Point at)
     {
-        var menu = new ContextMenuStrip();
-        menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
-        foreach (var m in h.Matches.Take(MenuMatches))
+        var menu = NewAlertMenu();
+        foreach (var m in h.Matches)
         {
             var mm = m;
-            var item = new ToolStripMenuItem(m.Text) { Enabled = m.PieceId != null || m.HolderId != null };
+            var item = new ToolStripMenuItem(m.Text.Replace("&", "&&")) { Enabled = m.PieceId != null || m.HolderId != null };
             item.Click += (_, _) => Guard(() => GoToMatch(mm));
             menu.Items.Add(item);
         }
-        if (h.Matches.Count > MenuMatches) menu.Items.Add(new ToolStripMenuItem($"… and {h.Matches.Count - MenuMatches} more") { Enabled = false });
         if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(HideItem(h));
+        menu.Show(_alertBar, new Point(at.X, _alertBar.Height));
+    }
+
+    /// <summary>The "+N" chip: one entry per alert that did not fit, each with its own go-to and Hide items.</summary>
+    void ShowOverflowMenu(IReadOnlyList<AlertHit> hits, Point at)
+    {
+        var menu = NewAlertMenu();
+        foreach (var h in hits)
+        {
+            var hh = h;
+            var sub = new ToolStripMenuItem((h.Matches.Count > 1 ? $"{h.Name} ({h.Matches.Count})" : h.Name).Replace("&", "&&"));
+            var go = new ToolStripMenuItem("Go to next match") { Enabled = h.Matches.Any(m => m.PieceId != null || m.HolderId != null) };
+            go.Click += (_, _) => Guard(() => GoToAlert(hh));
+            sub.DropDownItems.Add(go);
+            sub.DropDownItems.Add(HideItem(h));
+            menu.Items.Add(sub);
+        }
+        menu.Show(_alertBar, new Point(at.X, _alertBar.Height));
+    }
+
+    ContextMenuStrip NewAlertMenu()
+    {
+        var menu = new ContextMenuStrip { MaximumSize = new Size(0, Math.Max(200, Screen.FromControl(this).WorkingArea.Height * 2 / 3)) };
+        menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
+        return menu;
+    }
+
+    ToolStripMenuItem HideItem(AlertHit h)
+    {
         var hide = new ToolStripMenuItem("Hide this alert until next turn");
         hide.Click += (_, _) => Guard(() => HideAlert(h.Id));
-        menu.Items.Add(hide);
-        menu.Show(_alertBar, new Point(at.X, _alertBar.Height));
+        return hide;
     }
 
     void HideAlert(string alertId)

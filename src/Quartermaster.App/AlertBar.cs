@@ -1,5 +1,6 @@
 using System.Globalization;
 using Quartermaster.Core;
+using Quartermaster.Render;
 using Quartermaster.Rules;
 
 namespace Quartermaster.App;
@@ -10,7 +11,7 @@ namespace Quartermaster.App;
 /// </summary>
 sealed class AlertBar : Panel
 {
-    const int ChipGap = 4, PadX = 7, MinBanner = 140;
+    const int ChipGap = 4, PadX = 7, MinBanner = 140; // logical pixels; the bar height scales with DPI, chip widths come from the font
 
     sealed record Chip(AlertHit? Hit, string Text, Rectangle Bounds);
 
@@ -27,7 +28,7 @@ sealed class AlertBar : Panel
     public AlertBar()
     {
         Dock = DockStyle.Top;
-        Height = 24;
+        Height = LogicalToDeviceUnits(24);
         DoubleBuffered = true;
         ResizeRedraw = true;
         Visible = false;
@@ -38,6 +39,8 @@ sealed class AlertBar : Panel
     public event Action? BannerClicked;
     public event Action<AlertHit>? ChipClicked;
     public event Action<AlertHit, Point>? ChipContext;
+    /// <summary>The "+N" chip was clicked: the alerts that did not fit, and where.</summary>
+    public event Action<IReadOnlyList<AlertHit>, Point>? OverflowClicked;
 
     /// <summary>Chip texts currently drawn (the last may be "+N"), for smoke checks.</summary>
     public IReadOnlyList<string> ChipTexts => _chips.Select(c => c.Text).ToList();
@@ -75,28 +78,21 @@ sealed class AlertBar : Panel
         _overflow = 0;
         if (Width <= 0) return;
         var h = Height - 6;
-        var x = Width - 4;
+        var widths = _hits.Select(x => Measure(Label(x))).ToList();
+        var wMore = Measure("+00");
+        var r = ChipLayout.Place(widths, wMore, Width - 4, ChipGap, MinBanner);
         var placed = new List<Chip>();
-        foreach (var hit in _hits)
-        {
-            var text = Label(hit);
-            var w = Measure(text);
-            if (x - w - ChipGap < MinBanner) break;
-            x -= w;
-            placed.Add(new Chip(hit, text, new Rectangle(x, 3, w, h)));
-            x -= ChipGap;
-        }
-        if (placed.Count < _hits.Count)
-        {
-            var wMore = Measure("+00");
-            while (placed.Count > 0 && x - wMore < MinBanner) { x = placed[^1].Bounds.Right + ChipGap; placed.RemoveAt(placed.Count - 1); }
-            _overflow = _hits.Count - placed.Count;
-            x -= wMore;
-            placed.Add(new Chip(null, "+" + _overflow.ToString(CultureInfo.InvariantCulture), new Rectangle(x, 3, wMore, h)));
-            x -= ChipGap;
-        }
+        for (var i = 0; i < r.Xs.Count; i++) placed.Add(new Chip(_hits[i], Label(_hits[i]), new Rectangle(r.Xs[i], 3, widths[i], h)));
+        _overflow = r.Overflow;
+        if (r.Overflow > 0) placed.Add(new Chip(null, "+" + r.Overflow.ToString(CultureInfo.InvariantCulture), new Rectangle(r.OverflowX, 3, wMore, h)));
         _chips = placed;
-        _bannerRect = new Rectangle(4, 0, Math.Max(0, x - 4), Height);
+        _bannerRect = new Rectangle(4, 0, Math.Max(0, r.BannerRight - 4), Height);
+    }
+
+    protected override void OnDpiChangedAfterParent(EventArgs e)
+    {
+        base.OnDpiChangedAfterParent(e);
+        Height = LogicalToDeviceUnits(24);
     }
 
     protected override void OnResize(EventArgs e)
@@ -169,6 +165,7 @@ sealed class AlertBar : Panel
             if (e.Button == MouseButtons.Left) ChipClicked?.Invoke(h);
             else if (e.Button == MouseButtons.Right) ChipContext?.Invoke(h, e.Location);
         }
+        else if (o is Chip { Hit: null } && e.Button == MouseButtons.Left) OverflowClicked?.Invoke(_hits.Skip(_hits.Count - _overflow).ToList(), e.Location);
         else if (o is AlertBar && e.Button == MouseButtons.Left) BannerClicked?.Invoke();
     }
 
