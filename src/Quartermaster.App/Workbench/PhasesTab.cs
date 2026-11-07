@@ -28,6 +28,7 @@ sealed class PhasesTab : UserControl
     readonly TextBox _name = new() { Dock = DockStyle.Fill };
     readonly ComboBox _side = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
     readonly TextBox _instr = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, WordWrap = true };
+    readonly TextBox _notes = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, WordWrap = true };
     readonly Label _refLabel = new() { AutoSize = true, Padding = new Padding(0, 5, 8, 0) };
     readonly Button _link = new() { Text = "Link to current page", AutoSize = true };
     readonly Button _showRefBtn = new() { Text = "Show", AutoSize = true };
@@ -117,6 +118,10 @@ sealed class PhasesTab : UserControl
         instrBox.Controls.Add(_instr);
         AddRow(instrBox, 110);
 
+        var notesBox = new GroupBox { Text = "Notes (shown as a tooltip on the phase)", Padding = new Padding(4) };
+        notesBox.Controls.Add(_notes);
+        AddRow(notesBox, 60);
+
         var refRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
         refRow.Controls.Add(new Label { Text = "Rule ref:", AutoSize = true, Padding = new Padding(0, 5, 2, 0) });
         refRow.Controls.AddRange(new Control[] { _refLabel, _link, _showRefBtn });
@@ -166,6 +171,8 @@ sealed class PhasesTab : UserControl
 
         _name.TextChanged += (_, _) => { if (!_loading) Kick(); };
         _instr.TextChanged += (_, _) => { if (!_loading) Kick(); };
+        _notes.TextChanged += (_, _) => { if (!_loading) Kick(); };
+        _notes.Leave += (_, _) => Run(() => Flush());
         _name.Leave += (_, _) => Run(() => Flush());
         _instr.Leave += (_, _) => Run(() => Flush());
         _timer.Tick += (_, _) => Run(() => Flush());
@@ -410,6 +417,7 @@ sealed class PhasesTab : UserControl
             _right.Enabled = ph != null;
             _name.Text = ph?.Name ?? "";
             _instr.Text = ph?.Instructions ?? "";
+            _notes.Text = ph?.Notes ?? "";
             _side.Items.Clear();
             _phaseSideIds.Clear();
             _side.Items.Add(None);
@@ -478,10 +486,11 @@ sealed class PhasesTab : UserControl
         if (Current is { } ph)
         {
             var name = _name.Text;
-            if (ph.Name != name || ph.Instructions != _instr.Text)
+            if (ph.Name != name || ph.Instructions != _instr.Text || (ph.Notes ?? "") != _notes.Text)
             {
                 var text = _instr.Text;
-                CommitPack(p => PhaseEdit.UpdatePhase(p, ph.Id, x => x with { Name = name, Instructions = text }));
+                var notes = _notes.Text;
+                CommitPack(p => PhaseEdit.UpdatePhase(p, ph.Id, x => x with { Name = name, Instructions = text, Notes = notes.Length == 0 ? null : notes }));
                 RefreshList();
                 ShowIssues();
             }

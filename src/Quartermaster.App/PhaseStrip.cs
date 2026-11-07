@@ -13,10 +13,12 @@ sealed class PhaseStrip : Panel
     const int MaxRows = 3, PadX = 6, Gap = 4, Margin0 = 4;
 
     enum Kind { Label, Done, Current, Upcoming }
-    sealed record Item(string Text, Kind Kind, Rectangle Bounds);
+    sealed record Item(string Text, Kind Kind, Rectangle Bounds, string? Notes = null);
 
     readonly Button _start = new() { Text = "Start game ▶", AutoSize = true, FlatStyle = FlatStyle.System, Visible = false };
     readonly Font _bold;
+    readonly ToolTip _tip = new() { ShowAlways = true, UseAnimation = false, UseFading = false, AutoPopDelay = 30000 };
+    string? _tipText;
     PhaseView? _view;
     List<Item> _items = new();
     int _laidWidth = -1;
@@ -57,20 +59,20 @@ sealed class PhaseStrip : Panel
         if (_view != null && ClientSize.Width != _laidWidth) Relayout();
     }
 
-    List<(string Text, Kind Kind)> Build(PhaseView v)
+    List<(string Text, Kind Kind, string? Notes)> Build(PhaseView v)
     {
-        var l = new List<(string, Kind)>();
-        if (v.NoPhases) { l.Add((NoPhasesText, Kind.Label)); return l; }
-        if (v.BeforeStart) l.Add(("Before turn 1", Kind.Label));
+        var l = new List<(string, Kind, string?)>();
+        if (v.NoPhases) { l.Add((NoPhasesText, Kind.Label, null)); return l; }
+        if (v.BeforeStart) l.Add(("Before turn 1", Kind.Label, null));
         else
         {
-            l.Add(($"Turn {v.Turn}", Kind.Label));
-            if (!string.IsNullOrWhiteSpace(v.StageText)) l.Add((v.StageText!, Kind.Label));
+            l.Add(($"Turn {v.Turn}", Kind.Label, null));
+            if (!string.IsNullOrWhiteSpace(v.StageText)) l.Add((v.StageText!, Kind.Label, null));
         }
         foreach (var c in v.Chips)
         {
             var text = c.State == ChipState.Current && !string.IsNullOrEmpty(v.SideName) ? $"{v.SideName} player — {c.Name}" : c.Name;
-            l.Add((text, c.State switch { ChipState.Done => Kind.Done, ChipState.Current => Kind.Current, _ => Kind.Upcoming }));
+            l.Add((text, c.State switch { ChipState.Done => Kind.Done, ChipState.Current => Kind.Current, _ => Kind.Upcoming }, c.Notes));
         }
         return l;
     }
@@ -95,12 +97,12 @@ sealed class PhaseStrip : Panel
             if (startW > 0) x += startW;
             for (var i = 0; i < specs.Count; i++)
             {
-                var (text, kind) = specs[i];
+                var (text, kind, notes) = specs[i];
                 var f = kind == Kind.Current ? _bold : Font;
                 var w = TextRenderer.MeasureText(text, f).Width + (kind == Kind.Label ? Gap : 2 * PadX);
                 var reserve = row == 0 ? noticeW : 0;
                 if (wrap && x + w > wrapWidth - reserve && x > Margin0) { row++; x = Margin0; }
-                res.Add(new Item(text, kind, new Rectangle(x, 2 + row * rowH, w, rowH - 2)));
+                res.Add(new Item(text, kind, new Rectangle(x, 2 + row * rowH, w, rowH - 2), notes));
                 x += w + Gap;
                 maxX = Math.Max(maxX, x);
             }
@@ -131,6 +133,32 @@ sealed class PhaseStrip : Panel
         ResumeLayout(false);
         Invalidate();
     }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        try
+        {
+            var p = new Point(e.X - AutoScrollPosition.X, e.Y - AutoScrollPosition.Y);
+            var text = _items.FirstOrDefault(i => i.Bounds.Contains(p))?.Notes;
+            if (string.IsNullOrWhiteSpace(text)) text = null;
+            if (text == _tipText) return;
+            _tipText = text;
+            if (text == null) _tip.Hide(this);
+            else _tip.Show(text, this, e.X + 12, e.Y + 18);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { }
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        _tipText = null;
+        try { _tip.Hide(this); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+    }
+
+    /// <summary>Notes tooltip text of the chip with this name, for smoke checks.</summary>
+    public string? NotesForSmoke(string chipText) => _items.FirstOrDefault(i => i.Text == chipText || i.Text.EndsWith(" — " + chipText, StringComparison.Ordinal))?.Notes;
 
     protected override void OnScroll(ScrollEventArgs se)
     {
@@ -174,7 +202,7 @@ sealed class PhaseStrip : Panel
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _bold.Dispose();
+        if (disposing) { _bold.Dispose(); _tip.Dispose(); }
         base.Dispose(disposing);
     }
 }

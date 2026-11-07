@@ -10,7 +10,7 @@ public sealed record MoveRecord(string PieceId, string FromMap, PointD From);
 
 public enum ChipState { Done, Current, Upcoming }
 
-public sealed record PhaseChip(string Id, string Name, ChipState State);
+public sealed record PhaseChip(string Id, string Name, ChipState State, string? Notes = null);
 
 /// <summary>Everything the tracker strip and phase panel show. Built fresh by <see cref="PhaseController.View"/>.</summary>
 public sealed record PhaseView(bool NoPhases, bool BeforeStart, int Turn, string? StageText, string? SideName,
@@ -75,12 +75,12 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var st = s.Game!.State;
         if (Resolved(out _) is not { } pos)
         {
-            var chips0 = pack.Phases.Select(p => new PhaseChip(p.Id, p.Name, ChipState.Upcoming)).ToList();
+            var chips0 = pack.Phases.Select(p => new PhaseChip(p.Id, p.Name, ChipState.Upcoming, p.Notes)).ToList();
             return new PhaseView(false, true, 1, null, null, chips0, null, pack.Phases[0].Name, none, Array.Empty<WarningHit>(), _notice);
         }
         var cur = pack.Phases[pos.PhaseIndex];
         var chips = pack.Phases.Select((p, i) => new PhaseChip(p.Id, p.Name,
-            i < pos.PhaseIndex ? ChipState.Done : i == pos.PhaseIndex ? ChipState.Current : ChipState.Upcoming)).ToList();
+            i < pos.PhaseIndex ? ChipState.Done : i == pos.PhaseIndex ? ChipState.Current : ChipState.Upcoming, p.Notes)).ToList();
         var next = Sequencer.Next(pack, pos);
         var side = Sequencer.ActingSide(pack, cur);
         return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur,

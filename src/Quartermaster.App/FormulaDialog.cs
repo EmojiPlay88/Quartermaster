@@ -22,6 +22,7 @@ sealed class FormulaDialog : Form
     readonly Button _cancel = new() { Text = "Cancel", Width = 75, Height = 25 };
     readonly Button _ruleRef = new() { Text = "&Rule ref…", Width = 85, Height = 25 };
     readonly CheckBox _physical = new() { Text = "Physical dice", AutoSize = true, Margin = new Padding(12, 5, 0, 0) };
+    readonly ToolTip _notesTip = new() { ShowAlways = true, UseAnimation = false, UseFading = false, AutoPopDelay = 30000 };
     readonly ToolStripStatusLabel _status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 150 };
     readonly TableLayoutPanel _body = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Padding = new Padding(8, 8, 8, 0) };
@@ -100,6 +101,7 @@ sealed class FormulaDialog : Form
         _view.MinimumSize = new Size(540, 0);
         _formulaGroup = Group("Formula", _view);
         _body.Controls.Add(_formulaGroup);
+        _notesTip.SetToolTip(_formulaGroup, formula.Notes ?? "");
         var wf = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
         wf.Controls.Add(_working);
         wf.Controls.Add(_inline);
@@ -177,6 +179,7 @@ sealed class FormulaDialog : Form
             _body.Visible = true;
             _model.Rebind(runner, f);
             ReplaceView(f);
+            _notesTip.SetToolTip(_formulaGroup, f.Notes ?? "");
             _ruleRef.Enabled = f.RuleRefId != null && _s.Rules.ById<RuleRef>(f.RuleRefId) != null;
             _debounce.Stop();
             Recalc();
@@ -463,6 +466,7 @@ sealed class FormulaDialog : Form
         {
             Unhook();
             _debounce.Dispose();
+            _notesTip.Dispose();
             _cheat?.Dispose();
         }
         base.Dispose(disposing);

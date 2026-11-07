@@ -126,7 +126,8 @@ sealed class TablesTreePanel : Panel
                 var cols = t.Cells.Count == 0 ? 0 : t.Cells.Max(r => r.Count);
                 var n = tables.Nodes.Add(t.Name);
                 n.Tag = (TablesKey, t.Id);
-                n.ToolTipText = string.Create(CultureInfo.InvariantCulture, $"{t.Kind}, {rows}\u00d7{cols}");
+                var info = string.Create(CultureInfo.InvariantCulture, $"{t.Kind}, {rows}\u00d7{cols}");
+                n.ToolTipText = string.IsNullOrWhiteSpace(t.Notes) ? info : t.Notes + "\n" + info;
             }
             var formulas = _tree.Nodes.Add("Formulas");
             formulas.Tag = FormulasKey;
@@ -134,6 +135,7 @@ sealed class TablesTreePanel : Panel
             {
                 var n = formulas.Nodes.Add(f.Name);
                 n.Tag = (FormulasKey, f.Id);
+                if (!string.IsNullOrWhiteSpace(f.Notes)) n.ToolTipText = f.Notes;
             }
             if (_tablesOpen) tables.Expand();
             if (_formulasOpen) formulas.Expand();

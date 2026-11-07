@@ -20,6 +20,7 @@ sealed partial class FormulasTab : UserControl
     readonly Label _err = new() { AutoSize = true, ForeColor = Color.Firebrick, Padding = new Padding(0, 3, 6, 0) };
     readonly LinkLabel _goto = new() { Text = "Go to error", AutoSize = true, Visible = false, Padding = new Padding(0, 3, 0, 0) };
     readonly TextBox _applies = new() { Width = 260 };
+    readonly TextBox _notes = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, WordWrap = true };
     readonly Label _appliesErr = new() { AutoSize = true, ForeColor = Color.Firebrick, Padding = new Padding(6, 5, 0, 0) };
     readonly Label _refLabel = new() { AutoSize = true, Padding = new Padding(0, 5, 8, 0) };
     readonly Button _link = new() { Text = "Link to current page", AutoSize = true };
@@ -68,9 +69,10 @@ sealed partial class FormulasTab : UserControl
         previewBox.Controls.Add(_previewHost);
         previewBox.Controls.Add(pickRow);
 
-        var rows = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7 };
+        var rows = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8 };
         rows.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
         for (var i = 0; i < 3; i++) rows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        rows.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         rows.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
         rows.RowStyles.Add(new RowStyle(SizeType.Percent, 22));
         rows.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
@@ -78,11 +80,14 @@ sealed partial class FormulasTab : UserControl
         rows.Controls.Add(errRow, 0, 1);
         rows.Controls.Add(appliesRow, 0, 2);
         rows.Controls.Add(refRow, 0, 3);
-        rows.Controls.Add(BuildBindingsBox(), 0, 4);
-        rows.Controls.Add(BuildOutputsBox(), 0, 5);
-        rows.Controls.Add(previewBox, 0, 6);
+        var notesBox = new GroupBox { Text = "Notes (shown as a tooltip on the formula title)", Dock = DockStyle.Fill, Padding = new Padding(4) };
+        notesBox.Controls.Add(_notes);
+        rows.Controls.Add(notesBox, 0, 4);
+        rows.Controls.Add(BuildBindingsBox(), 0, 5);
+        rows.Controls.Add(BuildOutputsBox(), 0, 6);
+        rows.Controls.Add(previewBox, 0, 7);
 
-        var right = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(520, 640) };
+        var right = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(520, 700) };
         right.Controls.Add(rows);
         Controls.Add(right);
         Controls.Add(new Splitter { Dock = DockStyle.Left, Width = 4 });
@@ -96,6 +101,8 @@ sealed partial class FormulasTab : UserControl
         _applies.TextChanged += (_, _) => { if (_loadingUi) return; _appliesErr.Text = FormulaEdit.SyntaxProblem(_applies.Text) ?? ""; _timer.Stop(); _timer.Start(); };
         _text.Leave += (_, _) => Run(() => FlushPending(final: true));
         _applies.Leave += (_, _) => Run(() => FlushPending(final: true));
+        _notes.TextChanged += (_, _) => { if (_loadingUi) return; _timer.Stop(); _timer.Start(); };
+        _notes.Leave += (_, _) => Run(() => FlushPending(final: true));
         _timer.Tick += (_, _) => Run(() => FlushPending(final: false));
         _goto.LinkClicked += (_, _) => GoToError();
         _link.Click += (_, _) => Run(LinkPage);
@@ -254,10 +261,11 @@ sealed partial class FormulasTab : UserControl
         {
             var f = Current;
             var on = f != null;
-            _text.Enabled = _applies.Enabled = _link.Enabled = _piece.Enabled = on;
+            _text.Enabled = _applies.Enabled = _notes.Enabled = _link.Enabled = _piece.Enabled = on;
             if (_text.Text != (f?.Text ?? "")) _text.Text = f?.Text ?? "";
             if (_applies.Text != (f?.AppliesTo ?? "")) _applies.Text = f?.AppliesTo ?? "";
             _appliesErr.Text = FormulaEdit.SyntaxProblem(_applies.Text) ?? "";
+            if (_notes.Text != (f?.Notes ?? "")) _notes.Text = f?.Notes ?? "";
             ShowRefLabel(f);
         }
         finally { _loadingUi = false; }
@@ -293,6 +301,8 @@ sealed partial class FormulasTab : UserControl
         var text = _text.Text;
         var apply = _applies.Text;
         var textChanged = f.Text != text;
+        var notes = _notes.Text;
+        if ((f.Notes ?? "") != notes) Commit(x => x with { Notes = notes.Length == 0 ? null : notes });
         if (textChanged || (f.AppliesTo ?? "") != apply.Trim())
         {
             var analysis = FormulaEdit.Analyze(text);
