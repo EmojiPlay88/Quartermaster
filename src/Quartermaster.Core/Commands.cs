@@ -17,6 +17,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(SetNotes), "setNotes")]
 [JsonDerivedType(typeof(SetTurn), "setTurn")]
 [JsonDerivedType(typeof(AdvancePhase), "advancePhase")]
+[JsonDerivedType(typeof(SetPlayers), "setPlayers")]
 [JsonDerivedType(typeof(SetDifficulty), "setDifficulty")]
 [JsonDerivedType(typeof(TickChecklist), "tickChecklist")]
 [JsonDerivedType(typeof(AcknowledgeWarning), "acknowledgeWarning")]
@@ -42,6 +43,7 @@ public sealed record SeedLedger(IReadOnlyList<LedgerSeed> Seeds) : GameCommand;
 public sealed record RollDice(string Purpose, int Count, int Sides, IReadOnlyList<int> Results, string? Expression = null, IReadOnlyList<string>? FaceTexts = null, int Modifier = 0, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetNotes(string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetTurn(int Turn, string? Phase, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+public sealed record SetPlayers(IReadOnlyList<PlayerDef> Players, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record AdvancePhase(PhasePosition? From, PhasePosition To, string FromName, string ToName, string? Reason = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetDifficulty(Difficulty Difficulty, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTimeOffset? At = null, string? Who = null) : GameCommand;

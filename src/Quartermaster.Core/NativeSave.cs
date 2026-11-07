@@ -5,7 +5,7 @@ namespace Quartermaster.Core;
 /// <summary>Native .qsave format: JSON { format, moduleSha256, rulesSha256?, snapshot, log }.</summary>
 public static class NativeSave
 {
-    public const int FormatVersion = 6;
+    public const int FormatVersion = 7;
     const int MinFormat = 1;
 
     sealed class SaveFile
@@ -63,6 +63,8 @@ public static class NativeSave
         snap.HiddenAlerts = (snap.HiddenAlerts ?? new()).Where(a => a != null).ToList();
         snap.Pending = (snap.Pending ?? new()).Where(r => r != null && r.Units != null).ToList();
         snap.Turn ??= new TurnState(1, null);
+        snap.Players = Core.Players.Clean(snap.Players);
+        snap.GameId ??= "";
     }
 
     public static GameSession Read(string path)
@@ -87,14 +89,22 @@ public static class NativeSave
         {
             session.Rebase();
             session.RebasedOnLoad = true;
+            LegacyId(f, session);
             return session;
         }
-        if (TryRestoreHistory(f, session, out var why)) return session;
+        if (TryRestoreHistory(f, session, out var why)) { LegacyId(f, session); return session; }
         session.LoadDiagnostic = why;
         session.Rebase();
         session.RebasedOnLoad = true;
         session.LoadNotice = RebaseNotice;
+        LegacyId(f, session);
         return session;
+    }
+
+    /// <summary>A save without a GameId (any format) gets one, after the replay check so genesis and state still match.</summary>
+    static void LegacyId(SaveFile f, GameSession session)
+    {
+        if (string.IsNullOrEmpty(session.State.GameId)) session.AssignGameId(Guid.NewGuid().ToString("N"));
     }
 
     /// <summary>Validates the format-5 history and checks that replaying it reproduces the snapshot.</summary>

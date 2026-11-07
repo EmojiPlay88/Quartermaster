@@ -30,6 +30,7 @@ static class CommandLog
             LedgerDelta l => l with { At = l.At ?? at, Who = l.Who ?? LocalUser },
             SetNotes n => n with { At = n.At ?? at, Who = n.Who ?? LocalUser },
             SetTurn t => t with { At = t.At ?? at, Who = t.Who ?? LocalUser },
+            SetPlayers sp => sp with { At = sp.At ?? at, Who = sp.Who ?? LocalUser },
             AdvancePhase a => a with { At = a.At ?? at, Who = a.Who ?? LocalUser },
             SetDifficulty d => d with { At = d.At ?? at, Who = d.Who ?? LocalUser },
             TickChecklist t => t with { At = t.At ?? at, Who = t.Who ?? LocalUser },

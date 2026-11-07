@@ -9,7 +9,7 @@ public class NativeSaveTests
     [Fact]
     public void NativeSave_RoundTrip_PreservesStateAndLog()
     {
-        var st = new GameState(); st.MapOrder.Add("m1");
+        var st = new GameState { GameId = "g" }; st.MapOrder.Add("m1");
         var sess = new GameSession(st, "abc123");
         int fired = 0; sess.Changed += _ => fired++;
         sess.Execute(new AddPiece("z", "t", "", "m1", new PointD(1.5, 2), null));
@@ -44,7 +44,7 @@ public class NativeSaveTests
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
         try
         {
-            File.WriteAllText(path, "{\"format\":7,\"moduleSha256\":\"x\",\"snapshot\":{},\"log\":[]}");
+            File.WriteAllText(path, "{\"format\":8,\"moduleSha256\":\"x\",\"snapshot\":{},\"log\":[]}");
             var ex = Assert.Throws<InvalidDataException>(() => NativeSave.Read(path));
             Assert.Contains("7", ex.Message);
             File.WriteAllText(path, "{not json");
@@ -56,7 +56,7 @@ public class NativeSaveTests
     [Fact]
     public void NativeSave_Format3_RoundTrip()
     {
-        var st = new GameState(); st.MapOrder.Add("m1");
+        var st = new GameState { GameId = "g" }; st.MapOrder.Add("m1");
         var sess = new GameSession(st, "h");
         var at = new DateTimeOffset(2026, 3, 4, 5, 6, 7, TimeSpan.FromHours(1));
         sess.Execute(new AddPiece("a", "t", "", "m1", new PointD(1, 2), null, null, at, "Ann"));
@@ -66,7 +66,7 @@ public class NativeSaveTests
         try
         {
             NativeSave.Write(path, sess);
-            Assert.Equal(6, NativeSave.FormatVersion);
+            Assert.Equal(7, NativeSave.FormatVersion);
             var back = NativeSave.Read(path);
             Assert.Equal(3, back.State.Log.Count);
             Assert.Equal(sess.State.Log, back.State.Log);
@@ -102,7 +102,7 @@ public class NativeSaveTests
     public void NativeSave_RoundTrip_NestedTraitStates()
     {
         var (type, state, expected) = GameStateTests.NestedPiece();
-        var st = new GameState(); st.MapOrder.Add("m1");
+        var st = new GameState { GameId = "g" }; st.MapOrder.Add("m1");
         var sess = new GameSession(st, "h");
         sess.Execute(new AddPiece("a", type, state, "m1", new PointD(0, 0), null));
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
@@ -146,7 +146,7 @@ public class NativeSaveTests
 
     static GameSession Played()
     {
-        var st = new GameState(); st.MapOrder.Add("m1");
+        var st = new GameState { GameId = "g" }; st.MapOrder.Add("m1");
         var g = new GameSession(st, "sha");
         using (g.BeginAction()) g.Execute(new AddPiece("a", "piece;;;a.png;a", "", "m1", new PointD(1, 2), null));
         using (g.BeginAction())
@@ -194,7 +194,7 @@ public class NativeSaveTests
             var loaded = Json(s.State);
             s.Execute(new AddPiece("a", "piece;;;a.png;a", "", "m1", new PointD(1, 2), null));
             NativeSave.Write(path, s);
-            Assert.Contains("\"format\":6", File.ReadAllText(path).Replace(" ", ""));
+            Assert.Contains("\"format\":7", File.ReadAllText(path).Replace(" ", ""));
             var back = NativeSave.Read(path);
             Assert.Single(back.Log);
             Assert.Equal(loaded, Json(back.Genesis));

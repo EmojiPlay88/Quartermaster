@@ -178,7 +178,7 @@ public class PhaseStateTests
     [Fact]
     public void NativeSave_Format4_RoundTrip()
     {
-        var sess = new GameSession(new GameState(), "h");
+        var sess = new GameSession(new GameState { GameId = "g" }, "h");
         sess.Execute(new AdvancePhase(null, P(2, "a", 0, 2), "", "A", null, At));
         sess.Execute(new SetDifficulty(Difficulty.Hardcore, At));
         sess.Execute(new QueueRuns([Run("r", "F", 2)]));
@@ -187,7 +187,7 @@ public class PhaseStateTests
         try
         {
             NativeSave.Write(path, sess);
-            Assert.Equal(6, NativeSave.FormatVersion);
+            Assert.Equal(7, NativeSave.FormatVersion);
             var back = NativeSave.Read(path);
             Assert.Equal(P(2, "a", 0, 2), back.State.Position);
             Assert.Equal(Difficulty.Hardcore, back.State.Difficulty);
