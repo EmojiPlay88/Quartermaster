@@ -53,11 +53,11 @@ public static class NativeSave
 
     /// <summary>
     /// Checks a state read from outside (a save, an online snapshot) for missing parts and fills optional ones with defaults.
-    /// Throws InvalidDataException when something required is missing.
+    /// Throws InvalidDataException ("Malformed {source}: ...") when something required is missing.
     /// </summary>
-    public static void ValidateState(GameState snap)
+    public static void ValidateState(GameState snap, string source = "save file")
     {
-        static void Need(bool ok, string what) { if (!ok) throw new InvalidDataException("Malformed save file: " + what + " is missing."); }
+        void Need(bool ok, string what) { if (!ok) throw new InvalidDataException("Malformed " + source + ": " + what + " is missing."); }
         Need(snap.Pieces != null && snap.Stacks != null && snap.MapOrder != null, "snapshot content");
         foreach (var p in snap.Pieces!.Values)
             Need(p != null && p.TraitStates != null && p.Trail != null && p.TypeString != null && p.Id != null && p.MapId != null, "piece data");

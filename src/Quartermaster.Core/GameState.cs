@@ -64,6 +64,13 @@ public sealed class GameState
         JsonSerializer.Deserialize<GameState>(JsonSerializer.Serialize(this, QuartermasterJson.Options), QuartermasterJson.Options)!;
 
     /// <summary>Deterministic reducer. Never throws on unknown ids.</summary>
+    /// <summary>
+    /// Highest trait-state index <see cref="SetTraitState"/> may pad up to. An index past both this and the piece's current states is ignored,
+    /// so a hostile save or turn file cannot grow a piece without bound.
+    /// </summary>
+    public const int MaxTraitStates = 256;
+
+    /// <summary>Applies one command. Never throws on unknown or missing (null) ids: such commands are ignored.</summary>
     public void Apply(GameCommand c)
     {
         switch (c)
@@ -71,7 +78,7 @@ public sealed class GameState
             case AddPiece a: DoAdd(a); break;
             case MovePieces m: DoMove(m); break;
             case RemovePiece r:
-                if (Pieces.TryGetValue(r.PieceId, out var rp))
+                if (r.PieceId != null && Pieces.TryGetValue(r.PieceId, out var rp))
                 {
                     Log.Add(LogBuilder.Delete(this, r, rp.MapId));
                     DetachFromStack(rp);
@@ -81,14 +88,15 @@ public sealed class GameState
                 }
                 break;
             case SetTraitState t:
-                if (Pieces.TryGetValue(t.PieceId, out var tp) && t.StateIndex >= 0)
+                if (t.PieceId != null && Pieces.TryGetValue(t.PieceId, out var tp) && t.StateIndex >= 0
+                    && (t.StateIndex < tp.TraitStates.Count || t.StateIndex < MaxTraitStates))
                 {
                     while (tp.TraitStates.Count <= t.StateIndex) tp.TraitStates.Add("");
-                    tp.TraitStates[t.StateIndex] = t.NewState;
+                    tp.TraitStates[t.StateIndex] = t.NewState ?? "";
                 }
                 break;
             case SetStackExpanded e:
-                if (Stacks.TryGetValue(e.StackId, out var es)) es.Expanded = e.Expanded;
+                if (e.StackId != null && Stacks.TryGetValue(e.StackId, out var es)) es.Expanded = e.Expanded;
                 break;
             case ClearMoved cm:
                 foreach (var p in Pieces.Values)
@@ -149,7 +157,7 @@ public sealed class GameState
                 break;
             case SteppedBack sb: Log.Add(LogBuilder.SteppedBack(this, sb)); break;
             case ToggleTrail tt:
-                if (Pieces.TryGetValue(tt.PieceId, out var trp)) trp.TrailVisible = !trp.TrailVisible;
+                if (tt.PieceId != null && Pieces.TryGetValue(tt.PieceId, out var trp)) trp.TrailVisible = !trp.TrailVisible;
                 break;
         }
     }
@@ -232,11 +240,11 @@ public sealed class GameState
 
     void DoAdd(AddPiece a)
     {
-        if (Pieces.ContainsKey(a.PieceId)) return;
+        if (a.PieceId == null || a.TypeString == null || a.MapId == null || Pieces.ContainsKey(a.PieceId)) return;
         var p = new PieceInstance
         {
             Id = a.PieceId, TypeString = a.TypeString, MapId = a.MapId, Pos = a.Pos,
-            TraitStates = DecodeState(a.TypeString, a.StateString),
+            TraitStates = DecodeState(a.TypeString, a.StateString ?? ""),
         };
         Pieces[a.PieceId] = p;
         Place(new[] { p }, a.MapId, a.Pos, a.StackOnto);
@@ -260,9 +268,10 @@ public sealed class GameState
 
     void DoMove(MovePieces m)
     {
+        if (m.MapId == null) return;
         var moved = new List<PieceInstance>();
         foreach (var id in m.PieceIds ?? Array.Empty<string>())
-            if (Pieces.TryGetValue(id, out var p) && !moved.Contains(p)) moved.Add(p);
+            if (id != null && Pieces.TryGetValue(id, out var p) && !moved.Contains(p)) moved.Add(p);
         if (moved.Count == 0) return;
         foreach (var p in moved) DetachFromStack(p);
         Place(moved, m.MapId, m.Pos, m.StackOnto);

@@ -45,6 +45,9 @@ public sealed class GameSession
     /// <summary>
     /// Log index where the local player's current turn began (turn files send <c>Log[TurnBase..]</c>). Always between 0 (the undo
     /// floor) and <see cref="Log"/>.Count: an undo below it pulls it down, and <see cref="Rebase"/> resets it to 0.
+    /// Redo does not raise a lowered turn base again: the next turn file then starts earlier than the receiver's game, and the receiver
+    /// sees "This turn starts from an older position than your game". Turn files compare states by <see cref="StateHash"/>, which depends
+    /// on the GameState JSON shape of the build, so both players need builds with the same state shape.
     /// </summary>
     public int TurnBase { get; private set; }
     /// <summary>Starts the local player's next turn here (after sending or receiving a turn).</summary>

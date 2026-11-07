@@ -38,9 +38,11 @@ public static class TurnFiles
     public static byte[] ToBytes(TurnFile t)
     {
         ArgumentNullException.ThrowIfNull(t);
+        var plain = JsonSerializer.SerializeToUtf8Bytes(t, QuartermasterJson.Options);
+        if (plain.LongLength > MaxPlain) throw new InvalidOperationException("This turn is too large to send.");
         using var ms = new MemoryStream();
         using (var gz = new GZipStream(ms, CompressionLevel.Optimal, leaveOpen: true))
-            JsonSerializer.Serialize(gz, t, QuartermasterJson.Options);
+            gz.Write(plain, 0, plain.Length);
         return ms.ToArray();
     }
 
@@ -84,10 +86,24 @@ public static class TurnFiles
         Need(t.StartHash != null && t.EndHash != null, "hash");
         Need(t.Commands != null, "commands");
         if (t.Commands!.Count > MaxCommands) throw new InvalidDataException("This turn file has too many steps.");
-        Need(t.Commands.All(c => c != null), "command");
-        NativeSave.ValidateState(t.Start!);
+        Need(t.Commands.All(IsWellFormed), "command data");
+        NativeSave.ValidateState(t.Start!, "turn file");
         return t;
     }
+
+    /// <summary>False for a null command or one missing an id or other field the reducer needs.</summary>
+    static bool IsWellFormed(GameCommand? c) => c switch
+    {
+        null => false,
+        AddPiece a => a.PieceId != null && a.TypeString != null && a.MapId != null,
+        MovePieces m => m.PieceIds != null && m.PieceIds.All(id => id != null) && m.MapId != null,
+        RemovePiece r => r.PieceId != null,
+        SetTraitState s => s.PieceId != null && s.NewState != null,
+        SetStackExpanded e => e.StackId != null,
+        ClearMoved cm => cm.MapId != null,
+        ToggleTrail tt => tt.PieceId != null,
+        _ => true,
+    };
 
     static byte[] Gunzip(byte[] gz)
     {
@@ -113,7 +129,7 @@ public static class TurnFiles
     /// <summary>
     /// Replays the sender's turn on a fresh session whose genesis is <see cref="TurnFile.Start"/>: each command runs in its own action,
     /// <paramref name="step"/> is called after each with its index; then history is rebased (the receiver cannot undo the sender's turn)
-    /// and the receiver's turn base is marked.
+    /// and the receiver's turn base is marked. A command that fails to apply throws <see cref="InvalidDataException"/>.
     /// </summary>
     public static GameSession Replay(TurnFile t, string moduleSha, Action<GameCommand, int>? step = null)
     {
@@ -122,7 +138,14 @@ public static class TurnFiles
         for (int i = 0; i < t.Commands.Count; i++)
         {
             var c = t.Commands[i];
-            using (g.BeginAction()) g.Execute(c);
+            try
+            {
+                using (g.BeginAction()) g.Execute(c);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                throw new InvalidDataException($"Malformed turn file: step {i + 1} could not be replayed ({ex.Message}).", ex);
+            }
             step?.Invoke(c, i);
         }
         g.Rebase();

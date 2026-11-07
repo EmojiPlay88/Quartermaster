@@ -190,8 +190,8 @@ public class TurnFileTests
 
         var noStart = good.DeepClone().AsObject(); noStart.Remove("start");
         Assert.Throws<InvalidDataException>(() => TurnFiles.FromBytes(Gzip(noStart.ToJsonString())));
-        var badStart = good.DeepClone().AsObject(); badStart["start"]!.AsObject()["pieces"] = null;
-        Assert.Throws<InvalidDataException>(() => TurnFiles.FromBytes(Gzip(badStart.ToJsonString())));
+        var badStart = good.DeepClone().AsObject(); badStart["start"]!.AsObject()["stacks"] = null;
+        Assert.StartsWith("Malformed turn file:", Assert.Throws<InvalidDataException>(() => TurnFiles.FromBytes(Gzip(badStart.ToJsonString()))).Message);
         var nullCmd = good.DeepClone().AsObject(); nullCmd["commands"]!.AsArray().Add(null);
         Assert.Throws<InvalidDataException>(() => TurnFiles.FromBytes(Gzip(nullCmd.ToJsonString())));
         var unknownCmd = good.DeepClone().AsObject(); unknownCmd["commands"]!.AsArray().Add(JsonNode.Parse("{\"$t\":\"nope\"}"));
@@ -242,6 +242,86 @@ public class TurnFileTests
             Assert.Equal(0, NativeSave.Read(path).TurnBase);
         }
         finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("{\"$t\":\"removePiece\",\"pieceId\":null}")]
+    [InlineData("{\"$t\":\"removePiece\"}")]
+    [InlineData("{\"$t\":\"movePieces\",\"pieceIds\":[\"r1\",null],\"mapId\":\"m1\",\"pos\":{\"x\":1,\"y\":1}}")]
+    [InlineData("{\"$t\":\"movePieces\",\"pieceIds\":null,\"mapId\":\"m1\",\"pos\":{\"x\":1,\"y\":1}}")]
+    [InlineData("{\"$t\":\"movePieces\",\"pieceIds\":[\"r1\"],\"pos\":{\"x\":1,\"y\":1}}")]
+    [InlineData("{\"$t\":\"addPiece\",\"typeString\":\"t\",\"stateString\":\"\",\"mapId\":\"m1\",\"pos\":{\"x\":1,\"y\":1}}")]
+    [InlineData("{\"$t\":\"addPiece\",\"pieceId\":\"x\",\"stateString\":\"\",\"mapId\":\"m1\",\"pos\":{\"x\":1,\"y\":1}}")]
+    [InlineData("{\"$t\":\"setTraitState\",\"stateIndex\":0,\"newState\":\"s\"}")]
+    [InlineData("{\"$t\":\"setStackExpanded\",\"expanded\":true}")]
+    [InlineData("{\"$t\":\"toggleTrail\"}")]
+    public void Read_CommandWithNullId_Throws_InvalidData(string command)
+    {
+        var good = JsonNode.Parse(Gunzip(TurnFiles.ToBytes(TurnFiles.Create(TwoTurns(), "red", "Ann", "blue"))))!.AsObject();
+        good["commands"]!.AsArray().Add(JsonNode.Parse(command));
+        Assert.StartsWith("Malformed turn file:", Assert.Throws<InvalidDataException>(() => TurnFiles.FromBytes(Gzip(good.ToJsonString()))).Message);
+    }
+
+    [Fact]
+    public void Reducer_NullIds_AreIgnored_NotThrown()
+    {
+        var g = TwoTurns();
+        var before = Json(g.State);
+        var s = g.State;
+        s.Apply(new RemovePiece(null!));
+        s.Apply(new MovePieces(["r1", null!], null!, new PointD(9, 9), null));
+        s.Apply(new MovePieces(null!, "m1", new PointD(9, 9), null));
+        s.Apply(new AddPiece(null!, "t", "", "m1", new PointD(0, 0), null));
+        s.Apply(new AddPiece("x", null!, "", "m1", new PointD(0, 0), null));
+        s.Apply(new AddPiece("x", "t", "", null!, new PointD(0, 0), null));
+        s.Apply(new SetTraitState(null!, 0, "s"));
+        s.Apply(new SetStackExpanded(null!, true));
+        s.Apply(new ToggleTrail(null!));
+        Assert.Equal(before, Json(s));
+        s.Apply(new MovePieces(["r1", null!], "m1", new PointD(9, 9), null));
+        Assert.Equal(new PointD(9, 9), s.Pieces["r1"].Pos);
+    }
+
+    [Fact]
+    public void HugeStateIndex_IsIgnored_InReducerAndReplay()
+    {
+        var g = NewGame();
+        g.Execute(new AddPiece("r1", "t", "", "m1", new PointD(1, 1), null));
+        g.Execute(new SetTraitState("r1", GameState.MaxTraitStates - 1, "ok"));
+        Assert.Equal(GameState.MaxTraitStates, g.State.Pieces["r1"].TraitStates.Count);
+        g.Execute(new SetTraitState("r1", 3, "still ok"));
+        Assert.Equal("still ok", g.State.Pieces["r1"].TraitStates[3]);
+        g.Execute(new SetTraitState("r1", GameState.MaxTraitStates, "no"));
+        g.Execute(new SetTraitState("r1", int.MaxValue, "no"));
+        Assert.Equal(GameState.MaxTraitStates, g.State.Pieces["r1"].TraitStates.Count);
+
+        g.MarkTurnBase();
+        g.Execute(new SetTraitState("r1", int.MaxValue - 1, "hostile"));
+        var t = TurnFiles.FromBytes(TurnFiles.ToBytes(TurnFiles.Create(g, "red", "Ann", "blue")));
+        var r = TurnFiles.Replay(t, "mod");
+        Assert.Equal(GameState.MaxTraitStates, r.State.Pieces["r1"].TraitStates.Count);
+        Assert.Equal(t.EndHash, StateHash.Of(r.State));
+    }
+
+    [Fact]
+    public void Replay_CommandThatThrows_Is_InvalidData()
+    {
+        // A start state that skipped validation (a piece without trait states) makes the reducer throw on SetTraitState.
+        var g = NewGame();
+        g.Execute(new AddPiece("r1", "t", "", "m1", new PointD(1, 1), null));
+        var t = TurnFiles.Create(g, "red", "Ann", "blue");
+        var start = g.State.DeepClone();
+        start.Pieces["r1"].TraitStates = null!;
+        var bad = t with { Start = start, Commands = [new SetTraitState("r1", 0, "s")] };
+        var ex = Assert.Throws<InvalidDataException>(() => TurnFiles.Replay(bad, "mod"));
+        Assert.StartsWith("Malformed turn file:", ex.Message);
+    }
+
+    [Fact]
+    public void ToBytes_TooLarge_Refuses()
+    {
+        var t = TurnFiles.Create(TwoTurns(), "red", "Ann", "blue") with { Commands = [new SetNotes(new string('a', (int)TurnFiles.MaxPlain))] };
+        Assert.Equal("This turn is too large to send.", Assert.Throws<InvalidOperationException>(() => TurnFiles.ToBytes(t)).Message);
     }
 
     [Fact]
