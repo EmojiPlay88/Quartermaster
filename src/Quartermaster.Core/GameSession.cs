@@ -145,7 +145,9 @@ public sealed class GameSession
         int firstRemoved = removedMarks.Count > 0 ? removedMarks[0].Start : _log.Count;
         var undone = new List<UndoneAction>();
         // A cut through the middle of an action: its tail is redone first, as its own entry.
-        if (prev != null && firstRemoved > logIndex)
+        // A tail of only folding commands (SteppedBack, SeedLedger, view state) is dropped, not redoable.
+        if (prev != null && firstRemoved > logIndex
+            && !_log.Skip(logIndex).Take(firstRemoved - logIndex).All(IsFolding))
             undone.Add(new UndoneAction(prev.Label, _log.GetRange(logIndex, firstRemoved - logIndex)));
         for (int k = 0; k < removedMarks.Count; k++)
         {

@@ -226,6 +226,33 @@ public class CheckpointTests
     }
 
     [Fact]
+    public void Preview_AtCheckpointFollowedOnlyBySteppedBack_IsZeroActions()
+    {
+        var g = NewSession();
+        g.Execute(Adv("One"));
+        g.Execute(Add("a"));
+        g.RewindTo(1);
+        g.Execute(new SteppedBack(1, 1, 0, "One"));
+        Assert.Equal(0, g.Preview(1).Actions);
+    }
+
+    [Fact]
+    public void RewindTo_AtCheckpointFollowedOnlyByFolding_PushesNoRedoEntry()
+    {
+        var g = NewSession();
+        g.Execute(Adv("One"));
+        g.Execute(Add("a"));
+        g.RewindTo(1);
+        g.Execute(new SteppedBack(1, 1, 0, "One"));
+        var removed = g.RewindTo(1);
+        Assert.Empty(removed);
+        Assert.Single(g.Log);
+        g.Redo(); // only the earlier undone "add a" action
+        Assert.Equal(2, g.Log.Count);
+        Assert.False(g.CanRedo);
+    }
+
+    [Fact]
     public void Rewind_WhileScopeOpen_Throws()
     {
         var g = NewSession();
