@@ -219,6 +219,23 @@ public class ModuleSessionRulesTests : IDisposable
     }
 
     [Fact]
+    public void NewGames_GetDistinctGameIds_OnStateAndGenesis()
+    {
+        using var fx = Fixture();
+        using var s = Open(fx);
+        s.StartNewGame();
+        var a = s.Game!.State.GameId;
+        Assert.Equal(32, a.Length);
+        Assert.True(Guid.TryParseExact(a, "N", out _));
+        Assert.Equal(a, s.Game.Genesis.GameId);
+        s.LoadSetup(s.Model.Setups[0]);
+        var b = s.Game!.State.GameId;
+        Assert.Equal(32, b.Length);
+        Assert.Equal(b, s.Game.Genesis.GameId);
+        Assert.NotEqual(a, b);
+    }
+
+    [Fact]
     public void LoadNative_SeedsMissingValues_WhenPackOpen()
     {
         using var fx = Fixture();

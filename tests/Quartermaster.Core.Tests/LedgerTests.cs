@@ -7,7 +7,7 @@ namespace Quartermaster.Core.Tests;
 
 public class LedgerTests
 {
-    static GameState S() { var s = new GameState(); s.MapOrder.Add("m1"); return s; }
+    static GameState S() { var s = new GameState { GameId = "g" }; s.MapOrder.Add("m1"); return s; }
     static LedgerDelta D(string key, string prop, double b, double a, string src = "manual", string? f = null, string? note = null) =>
         new(key, prop, b, a, src, f, null, note, null);
 

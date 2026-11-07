@@ -111,7 +111,7 @@ public sealed class GameState
                 break;
             case AdvancePhase ap: DoAdvance(ap); break;
             case SetPlayers sp:
-                Players = (sp.Players ?? Array.Empty<PlayerDef>()).Select(p => p with { Sides = p.Sides.ToList() }).ToList();
+                Players = Core.Players.Clean(sp.Players);
                 Log.Add(LogBuilder.Line(this, LogKind.System, LogBuilder.PlayersText(Players), sp.Who, sp.At));
                 break;
             case SetDifficulty sd:

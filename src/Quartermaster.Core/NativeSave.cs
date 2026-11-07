@@ -63,7 +63,7 @@ public static class NativeSave
         snap.HiddenAlerts = (snap.HiddenAlerts ?? new()).Where(a => a != null).ToList();
         snap.Pending = (snap.Pending ?? new()).Where(r => r != null && r.Units != null).ToList();
         snap.Turn ??= new TurnState(1, null);
-        snap.Players = (snap.Players ?? new()).Where(p => p != null && p.Name != null && p.Id != null).Select(p => p with { Sides = p.Sides ?? new List<string>() }).ToList();
+        snap.Players = Core.Players.Clean(snap.Players);
         snap.GameId ??= "";
     }
 
@@ -101,10 +101,10 @@ public static class NativeSave
         return session;
     }
 
-    /// <summary>Formats before 7 had no GameId: assign one after the replay check so genesis and state still match.</summary>
+    /// <summary>A save without a GameId (any format) gets one, after the replay check so genesis and state still match.</summary>
     static void LegacyId(SaveFile f, GameSession session)
     {
-        if (f.Format < 7 && string.IsNullOrEmpty(session.State.GameId)) session.AssignGameId(Guid.NewGuid().ToString("N"));
+        if (string.IsNullOrEmpty(session.State.GameId)) session.AssignGameId(Guid.NewGuid().ToString("N"));
     }
 
     /// <summary>Validates the format-5 history and checks that replaying it reproduces the snapshot.</summary>

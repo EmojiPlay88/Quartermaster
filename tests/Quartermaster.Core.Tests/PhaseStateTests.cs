@@ -178,7 +178,7 @@ public class PhaseStateTests
     [Fact]
     public void NativeSave_Format4_RoundTrip()
     {
-        var sess = new GameSession(new GameState(), "h");
+        var sess = new GameSession(new GameState { GameId = "g" }, "h");
         sess.Execute(new AdvancePhase(null, P(2, "a", 0, 2), "", "A", null, At));
         sess.Execute(new SetDifficulty(Difficulty.Hardcore, At));
         sess.Execute(new QueueRuns([Run("r", "F", 2)]));

@@ -18,7 +18,7 @@ public class LedgerBreakdownTests
         RuleRefs = { new RuleRef { Id = "r1", Label = "Rule 4.2" } },
     };
 
-    static GameState S() { var s = new GameState(); s.MapOrder.Add("m1"); return s; }
+    static GameState S() { var s = new GameState { GameId = "g" }; s.MapOrder.Add("m1"); return s; }
     static LedgerDelta D(string key, double b, double a, string src = "manual", string? f = null, string? rule = null, string? note = null) =>
         new(key, "fuel", b, a, src, f, rule, note, null);
 
@@ -172,12 +172,15 @@ public class LedgerBreakdownTests
             NativeSave.Write(path, Played());
             var root = JsonNode.Parse(File.ReadAllText(path))!;
             root["format"] = 5;
+            root["snapshot"]!.AsObject().Remove("gameId"); root["genesis"]!.AsObject().Remove("gameId");
             foreach (var e in root["snapshot"]!["ledgerHistory"]!.AsArray()) { e!.AsObject().Remove("turn"); e.AsObject().Remove("phase"); }
             File.WriteAllText(path, root.ToJsonString());
             var back = NativeSave.Read(path);
             Assert.True(back.CanUndo);
             Assert.False(back.RebasedOnLoad);
             Assert.All(back.State.LedgerHistory, e => Assert.Equal(2, e.Turn));
+            Assert.Equal(32, back.State.GameId.Length);
+            Assert.Equal(back.State.GameId, back.Genesis.GameId);
         }
         finally { File.Delete(path); }
     }

@@ -66,9 +66,12 @@ public class PlayersTests
         Assert.Null(Players.Validate([], pack));
         Assert.Null(Players.Validate([P("p1", "Ann", "red")], pack));   // solo-ish: not checked
         Assert.Null(Players.Validate([P("p1", "Ann", "red"), P("p2", "Bob", "blue")], pack));
-        Assert.Null(Players.Validate([P("p1", "Ann", "red", "blue"), P("p2", "Bob")], pack));
 
-        Assert.Contains("Blue", Players.Validate([P("p1", "Ann", "red"), P("p2", "Bob")], pack));            // unheld side
+        Assert.Equal("Bob holds no side.", Players.Validate([P("p1", "Ann", "red", "blue"), P("p2", "Bob")], pack));
+        Assert.Contains("same id", Players.Validate([P("p1", "Ann", "red"), P("p1", "Bob", "blue")], pack));
+        Assert.Contains("green", Players.Validate([P("p1", "Ann", "red", "green"), P("p2", "Bob", "blue")], pack));
+        var three = Pack() with { Sides = new() { new SideDef { Id = "red", Name = "Red" }, new SideDef { Id = "blue", Name = "Blue" }, new SideDef { Id = "green", Name = "Green" } } };
+        Assert.Contains("Green", Players.Validate([P("p1", "Ann", "red"), P("p2", "Bob", "blue")], three));   // unheld side
         Assert.Contains("Red", Players.Validate([P("p1", "Ann", "red", "blue"), P("p2", "Bob", "red")], pack)); // double-held
         Assert.Contains("unique", Players.Validate([P("p1", "Ann", "red"), P("p2", "ann", "blue")], pack));  // duplicate names
         Assert.NotNull(Players.Validate([P("p1", "", "red"), P("p2", "Bob", "blue")], pack));              // empty name
@@ -77,11 +80,13 @@ public class PlayersTests
     }
 
     [Fact]
-    public void NewGame_HasGameId()
+    public void SetPlayers_NullEntries_NeverThrow()
     {
-        var g = new GameState { GameId = Guid.NewGuid().ToString("N") };
-        Assert.Equal(32, g.GameId.Length);
-        Assert.Equal("", new GameState().GameId);   // bare states carry no id until a game is created
+        var s = new GameState();
+        s.Apply(new SetPlayers([P("p1", "Ann", "red"), null!, new PlayerDef("p2", "Bob", null!), P("p3", "Cy", "blue", null!)]));
+        Assert.Equal(3, s.Players.Count);
+        Assert.Empty(s.Players[1].Sides);
+        Assert.Equal(["blue"], s.Players[2].Sides);
     }
 
     [Fact]
