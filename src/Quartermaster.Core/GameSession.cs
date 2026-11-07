@@ -265,6 +265,8 @@ public sealed class GameSession
     /// <summary>Set by <c>NativeSave.Read</c> when it rebased an inconsistent format-5 save.</summary>
     public string? LoadNotice { get; internal set; }
     /// <summary>True when <c>NativeSave.Read</c> rebased history (old format or inconsistent save).</summary>
+    /// <summary>Why the history check failed (diagnostics only).</summary>
+    internal string? LoadDiagnostic { get; set; }
     public bool RebasedOnLoad { get; internal set; }
 
     /// <summary>Restores genesis, actions and (already validated) checkpoints; null checkpoints keep just "game start".</summary>

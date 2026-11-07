@@ -88,7 +88,8 @@ public static class NativeSave
             session.RebasedOnLoad = true;
             return session;
         }
-        if (TryRestoreHistory(f, session)) return session;
+        if (TryRestoreHistory(f, session, out var why)) return session;
+        session.LoadDiagnostic = why;
         session.Rebase();
         session.RebasedOnLoad = true;
         session.LoadNotice = RebaseNotice;
@@ -96,8 +97,9 @@ public static class NativeSave
     }
 
     /// <summary>Validates the format-5 history and checks that replaying it reproduces the snapshot.</summary>
-    static bool TryRestoreHistory(SaveFile f, GameSession session)
+    static bool TryRestoreHistory(SaveFile f, GameSession session, out string? why)
     {
+        why = null;
         try
         {
             var genesis = f.Genesis!;
@@ -107,27 +109,27 @@ public static class NativeSave
             int prev = -1;
             foreach (var a in actions)
             {
-                if (a == null || a.Label == null || a.Start <= prev || a.Start >= n) return false;
+                if (a == null || a.Label == null || a.Start <= prev || a.Start >= n) { why = "structure"; return false; }
                 prev = a.Start;
             }
             List<Checkpoint>? cps = f.Checkpoints;
             if (cps != null)
             {
-                if (cps.Count == 0 || cps[0] == null || cps[0].LogIndex != 0) return false;
+                if (cps.Count == 0 || cps[0] == null || cps[0].LogIndex != 0) { why = "structure"; return false; }
                 int last = 0;
                 foreach (var c in cps)
                 {
-                    if (c == null || c.Label == null || c.LogIndex < last || c.LogIndex > n) return false;
+                    if (c == null || c.Label == null || c.LogIndex < last || c.LogIndex > n) { why = "structure"; return false; }
                     last = c.LogIndex;
                 }
             }
             var replay = genesis.DeepClone();
             foreach (var c in f.Log) replay.Apply(c);
             if (JsonSerializer.Serialize(replay, QuartermasterJson.Options) != JsonSerializer.Serialize(f.Snapshot, QuartermasterJson.Options))
-                return false;
+            { why = "replay mismatch"; return false; }
             session.RestoreHistory(genesis, actions, cps);
             return true;
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { why = ex.GetType().Name + ": " + ex.Message; return false; }
     }
 }

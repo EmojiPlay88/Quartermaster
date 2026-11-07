@@ -194,6 +194,7 @@ public class NativeSaveTests
             var loaded = Json(s.State);
             s.Execute(new AddPiece("a", "piece;;;a.png;a", "", "m1", new PointD(1, 2), null));
             NativeSave.Write(path, s);
+            Assert.Contains("\"format\":5", File.ReadAllText(path).Replace(" ", ""));
             var back = NativeSave.Read(path);
             Assert.Single(back.Log);
             Assert.Equal(loaded, Json(back.Genesis));
@@ -221,7 +222,7 @@ public class NativeSaveTests
     }
 
     [Fact]
-    public void TamperedLog_RebasesWithNotice()
+    public void TamperedLog_RemovedEntry_RebasesWithNotice()
     {
         var g = Played(); var path = Tmp();
         try
@@ -229,6 +230,25 @@ public class NativeSaveTests
             NativeSave.Write(path, g);
             Tamper(path, o => o["log"]!.AsArray().RemoveAt(0));
             AssertRebased(path, g);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ReplayMismatch_PassesStructure_RebasesWithNotice()
+    {
+        var g = Played(); var path = Tmp();
+        try
+        {
+            NativeSave.Write(path, g);
+            // Structure intact (marks, checkpoints, genesis) but the stored snapshot no longer equals genesis + log.
+            Tamper(path, o => o["snapshot"]!["notes"] = "tampered");
+            var s = NativeSave.Read(path);
+            Assert.False(s.CanUndo);
+            Assert.True(s.RebasedOnLoad);
+            Assert.Equal("Undo history in this save did not match the game; undo starts from here.", s.LoadNotice);
+            Assert.Equal("replay mismatch", s.LoadDiagnostic);
+            Assert.Equal("tampered", s.State.Notes);
         }
         finally { File.Delete(path); }
     }
