@@ -12,6 +12,7 @@ namespace Quartermaster.Render.Tests;
 /// Formula input masking (spec 8a.2): hidden inputs in the formula dialog, the batch grid and the cheat sheet, for hot-seat, an online
 /// guest and solo. Invented Red/Blue sides on the PhaseFixture module only.
 /// </summary>
+[Collection(AppDataRootEnv.Name)]
 public class FormulaMaskingTests : IDisposable
 {
     private readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-mask-" + Guid.NewGuid().ToString("N"));

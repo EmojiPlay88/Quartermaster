@@ -35,6 +35,7 @@ public sealed class ModuleSession : IDisposable
         private set
         {
             if (ReferenceEquals(_game, value)) return;
+            IsReplaying = false;   // any other game replacing the replayed one ends the replay; the turn path sets it again afterwards
             if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnGameRewound; }
             _game = value;
             if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnGameRewound; }
@@ -565,6 +566,60 @@ public sealed class ModuleSession : IDisposable
         if (Game is not { } g) throw new InvalidOperationException("There is no game to export yet.");
         var copy = new GameSession(g.State.DeepClone(), Archive.Sha256) { ViewerCopy = true, RulesSha256 = g.RulesSha256 };
         NativeSave.Write(path, copy);
+    }
+
+    // ---- turn files (spec 6) ----
+
+    /// <summary>Why an action was refused while a received turn is being replayed.</summary>
+    public const string ReplayingText = "Finish the replay first.";
+
+    /// <summary>Exact copy: a turn file made with another module.</summary>
+    public const string DifferentModuleTurnText = "This turn file belongs to a different module";
+
+    /// <summary>
+    /// True while a received turn is being replayed step by step (<see cref="TurnReplayModel"/>): every action through
+    /// <see cref="LocalActions"/> is refused with <see cref="ReplayingText"/>. Autosave stays allowed (the game is consistent after each
+    /// step). Cleared when the replay finishes or fails, and whenever another game replaces the replayed one.
+    /// </summary>
+    public bool IsReplaying { get; private set; }
+
+    /// <summary>Opens a received turn for step replay: the open game is replaced (as when opening a save) by the turn's start.</summary>
+    public TurnReplayModel OpenTurn(TurnFile turn, string localPlayerId, TurnIdentity? identity = null) =>
+        new(this, turn, localPlayerId, identity);
+
+    /// <summary>
+    /// Replaces the game by a turn's start session (the same replace path as <see cref="LoadNative"/>, without seeding: the receiver's
+    /// game must stay exactly the sender's) and marks the session as replaying.
+    /// </summary>
+    internal void BeginTurnReplay(GameSession start)
+    {
+        ArgumentNullException.ThrowIfNull(start);
+        RequireNotGuest();
+        if (IsViewerCopy) throw new InvalidOperationException(ViewerCopyText);
+        if (IsReplaying) throw new InvalidOperationException(ReplayingText);
+        if (!string.Equals(start.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(DifferentModuleTurnText);
+        Game = start;
+        IsReplaying = true;
+        WarnIfSaveRulesDiffer(start);
+        AfterGameReplaced();
+    }
+
+    /// <summary>The replay finished: actions are allowed again and the view narrows to <paramref name="sides"/> (null = everything).</summary>
+    internal void EndTurnReplay(GameSession replayed, IReadOnlySet<string>? sides)
+    {
+        if (!ReferenceEquals(_game, replayed)) return;
+        IsReplaying = false;
+        SetViewSides(sides);
+    }
+
+    /// <summary>A replay failed: the game the user had before opening the turn comes back, with its view.</summary>
+    internal void RestoreAfterFailedReplay(GameSession replayed, GameSession? before, IReadOnlySet<string>? sides)
+    {
+        if (!ReferenceEquals(_game, replayed)) return;
+        Game = before;   // also clears IsReplaying
+        AfterGameReplaced();
+        if (before != null) SetViewSides(sides);
     }
 
     public bool Disposed { get; private set; }

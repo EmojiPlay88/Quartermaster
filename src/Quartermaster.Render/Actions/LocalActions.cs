@@ -14,8 +14,10 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
 
     public bool IsRemote => false;
 
-    /// <summary>A viewer copy is read-only: every action is blocked (nothing else is ever blocked here).</summary>
-    private bool Blocked => s.IsViewerCopy;
+    /// <summary>A viewer copy is read-only and a turn being replayed is not the player's yet: every action is blocked then.</summary>
+    private bool Blocked => s.IsViewerCopy || s.IsReplaying;
+
+    private string BlockedText => s.IsReplaying ? ModuleSession.ReplayingText : ModuleSession.ViewerCopyText;
 
     private void Exec(GameSession g, GameCommand cmd) => g.Execute(_prepare(cmd, g.State));
 
@@ -57,7 +59,7 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
     }
 
     public FormulaVerdict ApplyFormula(FormulaIntent intent) =>
-        Blocked ? FormulaVerdict.Refused(ModuleSession.ViewerCopyText) : FormulaIntentRunner.Run(s, c, s.ViewSides, intent, guest: false);
+        Blocked ? FormulaVerdict.Refused(BlockedText) : FormulaIntentRunner.Run(s, c, s.ViewSides, intent, guest: false);
 
     public Task<FormulaVerdict> ApplyFormulaAsync(FormulaIntent intent) => Task.FromResult(ApplyFormula(intent));
 
@@ -65,7 +67,7 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
         !Blocked && c.ApplyFormula(runId, pieceId, trace, calculated);
 
     public (int Applied, IReadOnlyList<string> Failed) ApplyMissingInputs(PendingRun run, IReadOnlyDictionary<string, string> values) =>
-        Blocked ? (0, new[] { ModuleSession.ViewerCopyText }) : MissingInputs.ApplyAll(s, c, run, values);
+        Blocked ? (0, new[] { BlockedText }) : MissingInputs.ApplyAll(s, c, run, values);
 
     public void EditLedger(string key, string propertyId, double after, string note)
     {
