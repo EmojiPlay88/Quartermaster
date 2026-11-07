@@ -167,6 +167,23 @@ public class PlayerViewTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void EmptyHeldSet_HidesEveryPrivateValue()
+    {
+        var pack = Pack();
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Add(s, "b1", "Lancer", "Blue");
+        Delta(s, LedgerKey.Piece("r1"), "fuel", 0, 4242);
+        Delta(s, LedgerKey.Piece("b1"), "fuel", 0, 3131);
+        RunFormula(s, pack, "f-secret", "r1", 8461, null);
+        var v = PlayerView.For(s, pack, Model, new HashSet<string>());
+        var json = Json(v);
+        Assert.DoesNotContain("4242", json);
+        Assert.DoesNotContain("3131", json);
+        Assert.DoesNotContain("8461", json);
+    }
+
+    [Fact]
     public void OutOfPhase_UnitlessRun_FollowsSideStamp()
     {
         var pack = Pack();

@@ -48,6 +48,8 @@ public class HotSeatTests : IDisposable
         return (s, phases, history, hs);
     }
 
+    private static string? PhaseName(PhaseController c) => c.View().Current?.Name;
+
     private static List<string> Track(HotSeat hs)
     {
         var l = new List<string>();
@@ -118,14 +120,17 @@ public class HotSeatTests : IDisposable
     public void Rewind_IntoOtherSidesPhase_RequiresHandover()
     {
         var (_, c, h, hs) = Make(true);
-        c.Start(); c.Advance(); c.Advance(); c.Advance();   // Combat (blue)
+        c.Start(); c.Advance(); c.Advance(); c.Advance();   // Combat (blue), round 1
         hs.TakeOver(Bob);
-        c.Advance();                                         // End (no side)
+        c.Advance();                                         // Movement (red), round 2
+        hs.TakeOver(Alice);
         var raised = Track(hs);
-        h.Undo();                                            // back into Combat: Bob still current
-        Assert.Empty(raised);
-        h.Undo(); h.Undo();                                  // back into Movement (red)
-        Assert.Equal(new[] { "p1" }, raised.Distinct().ToArray());
+        h.Undo();                                            // back into Combat (blue)
+        Assert.Equal(new[] { "p2" }, raised);
+        Assert.Equal("Combat", PhaseName(c));
+        hs.TakeOver(Bob);
+        h.Undo();                                            // back into Movement (red)
+        Assert.Equal(new[] { "p2", "p1" }, raised);
         Assert.Equal("p1", hs.HandoverDue()?.Id);
     }
 
@@ -146,11 +151,62 @@ public class HotSeatTests : IDisposable
 
         Assert.Equal(new[] { "p1" }, raised);
         Assert.Null(hs2.Current);
-        Assert.Equal(new[] { "red" }, s2.ViewSides!.ToArray());
+        Assert.Empty(s2.ViewSides!);
         Assert.DoesNotContain("gone-side", s2.ViewSides!);
         var seen = Assert.Single(seenInReplaced);
         Assert.NotNull(seen);
         Assert.NotSame(s2.Game!.State, seen);
+    }
+
+    [Fact]
+    public void EarlyGameReplacedHandler_SeesPublicOnlyView()
+    {
+        var (s, c, _, _) = Make(true);
+        c.Start();
+        var path = Path.Combine(_tmp, "e.qmsave");
+        s.SaveNative(path);
+        var (s2, _, _, _) = Make(false);   // previous game solo: raw view before the load
+        var fx = PhaseFixture.Module();
+        var seen = new List<GameState?>();
+        // A second session whose handler is registered BEFORE HotSeat exists.
+        _fixtures.Add(fx);
+        var s3 = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "c-early"), Path.Combine(_tmp, "r-early"));
+        _sessions.Add(s3);
+        s3.LoadSetup(s3.Model.Setups[0], Difficulty.FullyAuto);
+        s3.NewRules("t");
+        s3.UpdateRules(_ => PhaseFixture.Pack(s3.Archive.Sha256));
+        s3.GameReplaced += () => seen.Add(s3.View);
+        _ = new HotSeat(s3, new PhaseController(s3, (cmd, _) => cmd));
+        s3.LoadNative(path);
+        var v = Assert.Single(seen);
+        Assert.NotNull(v);
+        Assert.NotSame(s3.Game!.State, v);
+        Assert.Empty(s3.ViewSides!);
+    }
+
+    [Fact]
+    public void TakeOver_NonDuePlayer_SetsTheirSides_NoHandover()
+    {
+        var (s, c, _, hs) = Make(true);
+        c.Start(); c.Advance();           // Supply (red): Alice due
+        var raised = Track(hs);
+        hs.TakeOver(Bob);                 // deliberate swap
+        Assert.Empty(raised);
+        Assert.Equal(new[] { "blue" }, s.ViewSides!.ToArray());
+    }
+
+    [Fact]
+    public void ManyUndoSteps_SameDuePlayer_RaiseOnce_AndViewEmptyUntilTakeOver()
+    {
+        var (s, c, h, hs) = Make(true);
+        c.Start(); c.Advance(); c.Advance(); c.Advance();
+        hs.TakeOver(Bob);
+        var raised = Track(hs);
+        h.Undo(); h.Undo(); h.Undo();
+        Assert.Equal(new[] { "p1" }, raised);
+        Assert.Empty(s.ViewSides!);
+        hs.TakeOver(Alice);
+        Assert.Equal(new[] { "red" }, s.ViewSides!.ToArray());
     }
 
     [Fact]

@@ -51,7 +51,8 @@ public sealed class ModuleSession : IDisposable
 
     private void AfterGameReplaced()
     {
-        if (_game != null && Players.IsSolo(_game.State)) _viewSides = null;
+        // Session-owned so subscriber order never matters: a multi-player game starts public-only until a player takes over.
+        if (_game != null) _viewSides = Players.IsSolo(_game.State) ? null : new HashSet<string>();
         ResetView();
         GameReplaced?.Invoke();
         ViewChanged?.Invoke();

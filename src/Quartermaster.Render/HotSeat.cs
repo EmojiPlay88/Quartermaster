@@ -42,6 +42,7 @@ public sealed class HotSeat
     public void TakeOver(PlayerDef p)
     {
         Current = p;
+        _lastRaised = null;
         var solo = _s.Game == null || Players.IsSolo(_s.Game.State);
         _s.SetViewSides(solo ? null : new HashSet<string>(p.Sides));
         CurrentChanged?.Invoke();
@@ -56,21 +57,28 @@ public sealed class HotSeat
         return side == null ? null : Players.Holding(st, pack, side.Id);
     }
 
+    private string? _lastRaised;
+
     private void CheckHandover()
     {
-        if (HandoverDue() is { } due) HandoverRequired?.Invoke(due);
+        if (HandoverDue() is not { } due) return;
+        _s.SetViewSides(new HashSet<string>());   // the leaving player's data goes behind the screen too
+        if (due.Id == _lastRaised) return;
+        _lastRaised = due.Id;
+        HandoverRequired?.Invoke(due);
     }
 
     private void OnGameReplaced()
     {
         // A new game: nobody is at the screen yet, and no side id from the old game may linger in the view.
         Current = null;
+        _lastRaised = null;
         if (Active && HandoverDue() is { } due)
         {
-            _s.SetViewSides(new HashSet<string>(due.Sides));   // filtered until the handover is accepted
+            _lastRaised = due.Id;   // the session already set ViewSides to the empty set
             CurrentChanged?.Invoke();
             HandoverRequired?.Invoke(due);
         }
-        else CurrentChanged?.Invoke();   // solo: the session already cleared ViewSides
+        else CurrentChanged?.Invoke();
     }
 }
