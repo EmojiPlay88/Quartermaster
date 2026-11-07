@@ -50,6 +50,8 @@ public sealed class GameState
     public List<int> Ticked { get; set; } = new();
     public List<int> Acknowledged { get; set; } = new();
     public List<PendingRun> Pending { get; set; } = new();
+    /// <summary>Alert ids hidden until the turn number changes.</summary>
+    public List<string> HiddenAlerts { get; set; } = new();
 
     public IEnumerable<StackInstance> StacksOn(string mapId) =>
         Stacks.Values.Where(s => s.MapId == mapId);
@@ -99,6 +101,7 @@ public sealed class GameState
                 Log.Add(LogBuilder.Notes(this, sn));
                 break;
             case SetTurn st:
+                if (st.Turn != Turn.Turn) HiddenAlerts = new();
                 Turn = new TurnState(st.Turn, st.Phase);
                 Log.Add(LogBuilder.Turn(this, st));
                 break;
@@ -126,6 +129,14 @@ public sealed class GameState
             case ResolveRun rr: DoResolve(rr); break;
             case AddLogLine al:
                 Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId));
+                break;
+            case HideAlert ha:
+                HiddenAlerts ??= new();
+                if (!string.IsNullOrEmpty(ha.AlertId) && !HiddenAlerts.Contains(ha.AlertId))
+                {
+                    HiddenAlerts.Add(ha.AlertId);
+                    Log.Add(LogBuilder.Line(this, LogKind.System, "Alert hidden until next turn: " + ha.AlertId, ha.Who, ha.At));
+                }
                 break;
             case SteppedBack sb: Log.Add(LogBuilder.SteppedBack(this, sb)); break;
             case ToggleTrail tt:
@@ -155,6 +166,7 @@ public sealed class GameState
             }
             BatchSummary(r, r.Units, a.Who, a.At);
         }
+        if (a.To.Turn != Turn.Turn) HiddenAlerts = new();
         Position = a.To;
         Turn = new TurnState(a.To.Turn, a.ToName);
         Ticked = new(); Acknowledged = new(); Pending = new();

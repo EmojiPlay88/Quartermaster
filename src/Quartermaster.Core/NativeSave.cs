@@ -60,6 +60,7 @@ public static class NativeSave
         snap.Notes ??= "";
         snap.Ticked ??= new();
         snap.Acknowledged ??= new();
+        snap.HiddenAlerts = (snap.HiddenAlerts ?? new()).Where(a => a != null).ToList();
         snap.Pending = (snap.Pending ?? new()).Where(r => r != null && r.Units != null).ToList();
         snap.Turn ??= new TurnState(1, null);
     }

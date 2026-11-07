@@ -24,6 +24,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(ResolveRun), "resolveRun")]
 [JsonDerivedType(typeof(AddLogLine), "addLogLine")]
 [JsonDerivedType(typeof(SteppedBack), "steppedBack")]
+[JsonDerivedType(typeof(HideAlert), "hideAlert")]
 public abstract record GameCommand;
 
 public sealed record AddPiece(string PieceId, string TypeString, string StateString, string MapId, PointD Pos, string? StackOnto, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
@@ -51,3 +52,6 @@ public sealed record AddLogLine(string Kind, string Text, string? PieceId = null
 
 /// <summary>Log line recorded after stepping back to a checkpoint. Folding: never an undoable action of its own.</summary>
 public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone, string Target, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+
+/// <summary>Hides an alert (by alert id) until the turn number changes. An ordinary undoable action.</summary>
+public sealed record HideAlert(string AlertId, DateTimeOffset? At = null, string? Who = null) : GameCommand;
