@@ -291,4 +291,47 @@ sealed partial class MainForm
         Program.AppLog($"smoke: back to solo {(okSolo ? "ok" : "FAILED")}");
         if (!okSolo) Program.ExitCode = 1;
     }
+
+    /// <summary>
+    /// Smoke (--screenshot-playerview): two players; a piece gets a private Fuel change with a marker value; the player who does not own
+    /// the piece takes over. Checks that their view does not hold the marker and the owner's does, then saves the ledger and the main window.
+    /// </summary>
+    void SmokePlayerView()
+    {
+        var shot = _opts.ScreenshotPlayerView!;
+        if (_session?.Game is not { } g || _session.Rules is not { } pack || _hotSeat is not { } hs) { Program.AppLog("smoke: playerview skipped (no game, rules pack or hot-seat)"); return; }
+        var sides = pack.Sides.Where(s => s != null && !string.IsNullOrEmpty(s.Id)).Select(s => s.Id).ToList();
+        var first = pack.Properties.FirstOrDefault(p => p.Scope == Quartermaster.Rules.PropertyScope.Pieces);
+        if (first != null && first.Visibility != Quartermaster.Rules.Visibility.Private)
+        {
+            // Older packs load every property Public; make one private in memory (never saved by the smoke).
+            _session.UpdateRules(p => p with { Properties = p.Properties.Select(x => x.Id == first.Id ? x with { Visibility = Quartermaster.Rules.Visibility.Private } : x).ToList() });
+            pack = _session.Rules!;
+        }
+        var fuel = pack.Properties.FirstOrDefault(p => p.Scope == Quartermaster.Rules.PropertyScope.Pieces && p.Visibility == Quartermaster.Rules.Visibility.Private);
+        var piece = g.State.Pieces.Values.FirstOrDefault(p => p.StackId != null);
+        if (sides.Count < 2 || fuel == null || piece == null) { Program.AppLog("smoke: playerview skipped (needs two sides, a private piece property and a piece)"); return; }
+        var a = new PlayerDef("p1", "Player 1", new[] { sides[0] });
+        var b = new PlayerDef("p2", "Player 2", new[] { sides[1] });
+        SetGamePlayers(new[] { a, b });
+        var key = LedgerKey.Piece(piece.Id);
+        g.Execute(new LedgerDelta(key, fuel.Id, Ledger.Get(g.State, key, fuel.Id) ?? 0, 7731, "manual", null, null, "smoke", null, null, "Smoke", null, null, piece.Id, null));
+        string Json(string side) => System.Text.Json.JsonSerializer.Serialize(
+            PlayerView.For(g.State, pack, _session.Model, new HashSet<string> { side }), QuartermasterJson.Options);
+        var seeing = sides.Take(2).Where(s => Json(s).Contains("7731", StringComparison.Ordinal)).ToList();
+        var viewer = seeing.Count == 1 ? (seeing[0] == sides[0] ? b : a) : b;
+        hs.TakeOver(viewer);
+        if (_handover != null) DismissHandover();
+        Application.DoEvents();
+        var leaked = _session.View is { } v && System.Text.Json.JsonSerializer.Serialize(v, QuartermasterJson.Options).Contains("7731", StringComparison.Ordinal);
+        var ok = seeing.Count == 1 && !leaked && _session.ViewSides is { } vs && vs.SetEquals(viewer.Sides);
+        Program.AppLog($"smoke: playerview {(ok ? "ok" : "FAILED")} (owners seeing the marker: {seeing.Count}, {viewer.Name}'s view leaks: {leaked})");
+        if (!ok) Program.ExitCode = 1;
+        ShowLedger();
+        for (var i = 0; i < 12; i++) { Thread.Sleep(50); Application.DoEvents(); } // let the debounced view refresh run
+        if (_ledgers.TryGetValue("ledger", out var w) && !w.IsDisposed && w is LedgerWindow lw) lw.SaveScreenshot(Path.ChangeExtension(shot, null) + "-ledger.png");
+        SaveScreenshot(this, shot, true);
+        SetGamePlayers(Array.Empty<PlayerDef>());
+        Application.DoEvents();
+    }
 }

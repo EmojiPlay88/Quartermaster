@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-07, after piece 5 was finished on its branch. A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-07, after piece 6a (hot-seat) was finished on its branch. A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -31,14 +31,14 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Core`: command-log game state and deterministic replay.
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
-- Tests: xUnit under `tests/`. 898 tests are green after piece 5 (173 Rules, 116 Vassal, 207 Core, 402 Render).
-- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. Push again only when the user asks.
+- Tests: xUnit under `tests/`. 1000 tests are green after piece 6a (178 Rules, 116 Vassal, 234 Core, 472 Render).
+- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. Piece 6a is on branch `piece6a-hotseat`, to be merged into master; push only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
 - Commit messages end with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Never commit `startapp.cmd`.** It is untracked, names a private file path, and the repo is public. `.claude/` is excluded locally via `.git/info/exclude`.
 
-## Done so far (pieces 1-5 merged to master)
+## Done so far (pieces 1-5 merged to master; 6a on its branch)
 
 | Piece | What | Docs |
 |---|---|---|
@@ -49,7 +49,16 @@ The engine ships **no content from any real game**: no rules text, tables, formu
 | 4 | Undo / Redo and Step Back by truncate-and-replay of the command log (below) | `specs/2026-11-07-piece4-undo-design.md`, `plans/…piece4…` |
 | 5 | Accessibility layer: breakdown tooltips, alert bar, what-now line, outliner, interface tour, notes (below) | `specs/2026-11-07-piece5-accessibility-design.md`, `plans/…piece5…` |
 
+| 6a | Multiplayer base: players, rules-pack visibility, player view filter, hot-seat (below) | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6a-hotseat.md` |
+
 All rulings and deferred minors for every piece are in `docs/superpowers/piece1-followups.md`.
+
+### Piece 6a in one paragraph
+A game can have players, each holding one or more sides (part of the game's start, saved with it, with a game id). The rules pack marks properties, organisation displays, maps and formulas' dice as private to a side (Workbench Visibility tab). A derived, never-stored filter (`PlayerView`) builds what one player may see: no private values, no private dice results, no pieces on another side's map, and a redacted log ("Red ledger changed", "Red rolled dice"). Hot-seat uses it: when the acting side changes, or a step back lands in another side's phase, a handover screen ("Pass to Anna (Red)", Continue) hides every window and the game shows public information only until the next player takes over. Players are edited on the setup page and in Settings → Game → Players; the status bar shows the current player and switches it.
+- **Formats:** rules pack format 4 (older packs load with every property Public), save format 7 (older saves load as solo with a new game id).
+- **Solo play is unchanged:** one player holding every side is the default.
+- **Smokes:** `--screenshot-handover` and `--screenshot-playerview`.
+- **Acceptance ruling:** formula dialogs evaluate against the full state for the player's own units, so hidden inputs of a held unit are visible in hot-seat. Input masking is part of 6b.
 
 ### Piece 5 in one paragraph
 Numbers explain themselves, using only history (nothing previews a formula result, so Hardcore stays hard).
@@ -118,7 +127,11 @@ How the formula window behaves:
 
    Fix whatever they find.
 2. The README Status line and Roadmap are current as of piece 5. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
-3. **Next piece: multiplayer** (master spec section 11): hot-seat, live online with chat in the log, and play by turn files. After that, OCR for scanned rulebooks (section 8.3). Brainstorm, spec, plan, build, using the superpowers skills.
+3. **Piece 6a (hot-seat) is on branch `piece6a-hotseat`, to be merged into master; push only when the user asks.** Next:
+   1. The user hands-on tests hot-seat: two players on the setup page, play through a phase change and the handover screen, mark a property private in the Workbench Visibility tab, step back across a side change, save and load.
+   2. Piece 6b: live online play (a relay on the user's Ubuntu VPS). It includes the input masking for formula dialogs left open by 6a.
+   3. Piece 6c: play by turn files.
+   After that, OCR for scanned rulebooks (section 8.3). Brainstorm, spec, plan, build, using the superpowers skills.
 4. Residual piece-3 minors are listed at the end of `piece1-followups.md`.
 
 ## How the user likes to work

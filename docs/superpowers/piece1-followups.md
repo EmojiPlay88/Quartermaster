@@ -226,3 +226,27 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - Alert bar: a stale hover reference; severity is shown by colour and name only; chip gap and padding are not DPI-scaled; the overflow menu is untested.
 - Notes and headers: header and strip tooltips go stale after an automatic pop-out; alert match status is recomputed on every keystroke without debounce; the Formulas tab commits twice per flush; test breadth is thin.
 - Tour: cancelling the setup chooser means no automatic tour; the arrow clamp is repeated; the handle check is strict.
+
+## Piece 6a (players, visibility, hot-seat) — rulings and deferred minors
+
+### Rulings made during execution
+- Private-roll and private-ledger attribution is explicit: every formula run stamps the acting side and unit on its ledger lines and dice rolls, and the log lines keep that stamp. Guessing from neighbouring lines may only hide more, never show more. A phase's side is used as a fallback only when the phase name maps to a single side. Cost: in edge cases a log line is hidden that could have been shown.
+- Log lines of deleted pieces are hidden from everyone (fail closed), with a diagnostic. The validator warns when a side has an empty unit filter and there are two or more sides.
+- Trail points on a map the viewer cannot see are not filtered, because that needs a reducer change that would alter how existing saves replay. Cost: a visible piece's trail can show earlier coordinates on a hidden map.
+- Every path that applies a formula (Next Phase, automatic runs, the formula dialog, the batch grid, missing inputs) stamps the current player's side. Automatic phase-start runs stamp the phase's acting side, not the outgoing player's. When both a stamp and a unit side exist, the viewer must hold both to see the line.
+- Undo labels are plain (no names or numbers) when the action touched hidden pieces. Cost: less descriptive labels in hot-seat.
+- Until Continue is pressed after a handover, or after loading a multi-player game, the game shows public information only (a briefly empty view behind the handover screen). Only taking over sets a player's sides. A repeated handover for the same player is raised once.
+- Rewinding back into the current player's phase cancels the pending handover and restores their view. Changing the player list from solo to several players mid-game raises a handover for the acting player.
+- The players on the setup page are part of the game's start (genesis), not an undoable command.
+- Next Phase is disabled, with a tooltip, while the acting side is not held by the current player. Phase instructions are hidden then too. The Formulas, Alerts and Properties tabs refresh when the view changes.
+- The player-view speed test allows 500 ms (it was flaky under a parallel test run). Cost: a weaker guard on speed.
+- **Acceptance ruling:** the formula dialog and the batch grid evaluate against the full game state for the player's own units, so a hidden input a formula reads is visible there. Hot-seat is honour-based in 6a. Masking inputs belongs to piece 6b.
+
+### Deferred minors
+- Rules pack loading: formats below 4 do not clear owner fields that were edited by hand; an empty holder side and a map owner can disagree; only the map loop is guarded; the app does not pass the known map ids to the loader.
+- Visibility tab: no reload after a failed commit; an owner is matched by name with IndexOf; the issue filter matches message text; duplicate rows for items not in the module; some test gaps.
+- Player view: building the view costs about 80 ms on a large game (it deep-copies the state); pairing of ledger lines to holders has an edge case; a deleted piece's lines are over-hidden for its own side.
+- View cache: a duplicate view-changed event per rules update or command (the UI coalesces them); a stale-publish race across threads; the reset of view sides on a rules change has no test.
+- Rewind and stamps: the undo label stays plain for a player's own removed pieces; a queued-refresh flag has a small race; no tests for move stamps.
+- Phase strip: hovering a chip shows the notes of another side's phase (rules content, not game state).
+- Smokes: `--screenshot-playerview` makes one property private in memory when the pack has none (older packs load everything Public); it never saves the pack.

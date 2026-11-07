@@ -2,7 +2,7 @@
 
 Quartermaster is a desktop engine for playing tabletop wargames, a small alternative to [VASSAL](https://vassalengine.org) aimed at the heaviest board games. It opens the VASSAL modules you already have and then takes the paperwork off your hands. It runs the game's procedures for you, does the arithmetic, rolls the dice, and keeps count of everything a big game asks you to track, from fuel and ammunition to whose turn it is. Go ahead and close that spreadsheet. It's been open since the last campaign and it deserves a rest.
 
-> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes, undo and step back, and the readable-at-a-glance tools below work. Multiplayer and the rest of the [Roadmap](#roadmap) are not built yet.
+> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes, undo and step back, and the readable-at-a-glance tools below work. Hot-seat play with several players works; online play and the rest of the [Roadmap](#roadmap) are not built yet.
 
 ## What it does
 
@@ -39,6 +39,13 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
 - An outliner lists units by map or organisation display with totals for the properties you choose (sum, minimum or average), and marks units that have alerts.
 - A short interface tour starts the first time you open a game, and is always available from Help.
 - Notes can be attached to properties, formulas, tables, phases and alerts, and show as tooltips: on column headers, the formula dialog's title area, phase chips and the phase panel heading.
+
+**Play with others**
+- *Hot-seat, available now:* two or more players share one computer. Set the players and which sides each one holds on the new-game page, or later in Settings → Game → Players.
+- When the turn passes to another player, a handover screen hides every window ("Pass to Anna (Red)") until they press Continue. Until then the game shows only public information.
+- Each player sees only their own side's secrets. In the Rules Workbench's Visibility tab you mark which properties are private, which organisation displays and maps belong to a side, and which formulas roll their dice in private. Other players see "Red ledger changed" or "Red rolled dice" in the log, never the numbers.
+- Hot-seat is honour-based: the game hides things on screen, but everything is still in memory, and formula dialogs can show a held unit's inputs in full.
+- *Coming next:* live online play over the internet, then play by turn files.
 
 **Tabletop tools**
 - Dice: 1d6, 2d6, custom expressions (`3d6+2`), special dice and multi-rolls. Every roll goes into the log.
@@ -107,7 +114,7 @@ Design documents and implementation plans are in [`docs/superpowers`](docs/super
 ## Roadmap
 
 - OCR for scanned rulebooks in the workbench.
-- Hot-seat, live online multiplayer (host-authoritative, with chat in the log) and play by turn files.
+- Live online multiplayer (host-authoritative, with chat in the log) and play by turn files.
 
 ## License
 
