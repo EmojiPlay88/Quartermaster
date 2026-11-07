@@ -86,7 +86,8 @@ public sealed record Pong : RelayMessage;
 [JsonDerivedType(typeof(Paused), "Paused")]
 public abstract record GamePayload;
 
-public sealed record JoinRequest(string Name, string? RejoinToken, string ModuleSha256) : GamePayload;
+/// <summary>ProtocolVersion: the guest's network version (the host refuses another with <see cref="Protocol.MismatchMessage"/>).</summary>
+public sealed record JoinRequest(string Name, string? RejoinToken, string ModuleSha256, int ProtocolVersion = Protocol.ProtocolVersion) : GamePayload;
 public sealed record Welcome(string PlayerId, string RejoinToken, byte[] RulesPack, IReadOnlyList<string> FreeSides) : GamePayload;
 public sealed record ChooseSides(IReadOnlyList<string> Sides) : GamePayload;
 /// <summary>StateJsonGz: gzip of the UTF-8 JSON of the guest's filtered view.</summary>

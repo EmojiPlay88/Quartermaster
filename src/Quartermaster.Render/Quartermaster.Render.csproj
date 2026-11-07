@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Quartermaster.Core\Quartermaster.Core.csproj" />
+    <ProjectReference Include="..\Quartermaster.Net\Quartermaster.Net.csproj" />
   </ItemGroup>
 
   <ItemGroup>

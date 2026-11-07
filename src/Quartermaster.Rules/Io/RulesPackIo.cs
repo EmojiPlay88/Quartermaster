@@ -44,12 +44,46 @@ public static class RulesPackIo
             return Assemble(ReadDir, ListDir(path));
         }
         if (!File.Exists(path)) throw new FileNotFoundException("Rules pack not found", path);
+        using var fs = File.OpenRead(path);
+        return LoadZip(fs, Path.GetFileName(path));
+    }
 
+    /// <summary>A pack from zip bytes (as written by <see cref="ToBytes"/>); throws InvalidDataException like <see cref="Load"/>.</summary>
+    public static RulesPack FromBytes(byte[] zipBytes)
+    {
+        ArgumentNullException.ThrowIfNull(zipBytes);
+        using var ms = new MemoryStream(zipBytes, writable: false);
+        return LoadZip(ms, "rules pack");
+    }
+
+    /// <summary>The pack as zip bytes, exactly as <see cref="Save"/> writes the file (validates first).</summary>
+    public static byte[] ToBytes(RulesPack pack)
+    {
+        var files = BuildFiles(pack);
+        using var ms = new MemoryStream();
+        WriteZip(ms, files);
+        return ms.ToArray();
+    }
+
+    private static void WriteZip(Stream target, List<(string Path, byte[] Bytes)> files)
+    {
+        using var zip = new ZipArchive(target, ZipArchiveMode.Create, leaveOpen: true);
+        foreach (var (p, b) in files)
+        {
+            var e = zip.CreateEntry(p, CompressionLevel.Optimal);
+            e.LastWriteTime = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            using var s = e.Open();
+            s.Write(b);
+        }
+    }
+
+    private static RulesPack LoadZip(Stream stream, string name)
+    {
         ZipArchive zip;
-        try { zip = ZipFile.OpenRead(path); }
+        try { zip = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true); }
         catch (InvalidDataException ex)
         {
-            throw new InvalidDataException($"{Path.GetFileName(path)}: not a valid zip ({ex.Message})", ex);
+            throw new InvalidDataException($"{name}: not a valid zip ({ex.Message})", ex);
         }
         using (zip)
         {
@@ -300,16 +334,7 @@ public static class RulesPackIo
         try
         {
             using (var fs = File.Create(tmp))
-            using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
-            {
-                foreach (var (p, b) in files)
-                {
-                    var e = zip.CreateEntry(p, CompressionLevel.Optimal);
-                    e.LastWriteTime = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
-                    using var s = e.Open();
-                    s.Write(b);
-                }
-            }
+                WriteZip(fs, files);
             File.Move(tmp, zipPath, overwrite: true);
         }
         catch
