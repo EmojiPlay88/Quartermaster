@@ -243,6 +243,7 @@ sealed partial class MainForm : Form
         window.DropDownOpening += (_, _) => _popOutActive.Enabled = ActiveMdiChild is { IsDisposed: false };
 
         var help = new ToolStripMenuItem("&Help");
+        Item(help.DropDownItems, "Interface &Tour", ShowTour, null, needsGame: true);
         Item(help.DropDownItems, "&About", () => Info("Quartermaster\nA VASSAL module reader and engine.", "About Quartermaster"));
 
         _menu.Items.AddRange(new ToolStripItem[] { file, editMenu, view, tools, window, help });
@@ -418,6 +419,7 @@ sealed partial class MainForm : Form
         if (fromArgs) Guard(() => LoadRulesFromArgs(_session));
         OpenMainMap();
         if (_opts.FloatMainMap && Program.Smoke && FirstMap() is { } fm) _wm.PopOut(fm);
+        MaybeAutoTour();
         RememberModule(path);
         return true;
     }
