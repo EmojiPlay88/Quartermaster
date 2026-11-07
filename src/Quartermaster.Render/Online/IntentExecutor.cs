@@ -354,10 +354,18 @@ internal static class FormulaIntentRunner
             var accept = b != null && (b.Kind == BindingKind.Input || (model.Checked && IsCheckedKind(b.Kind)));
             if (accept) model.SetBoxText(variable, text ?? "");
         }
-        // The dice of this sender's last preview of the same formula on the same unit/run: re-shown by a new preview, used by Apply.
-        var pinKey = new FormulaPins.Key(who ?? "", f.Id, i.PieceId, i.RunId);
-        var pin = pins?.Find(pinKey, g, pack);
-        if (pin != null) model.PinRolls(pin.Rolls);
+        // Every die of a guest's run is pinned per (sender, formula, unit) and dice configuration before anything is answered: a preview,
+        // a refused Apply and a retry all see the same roll, so nothing can be re-rolled by asking again.
+        var pinKey = new FormulaPins.Key(who ?? "", f.Id, i.PieceId);
+        FormulaPins.Scope? scope = null;
+        if (pins != null)
+        {
+            scope = pins.Open(pinKey, g, pack, FormulaPins.MayRoll(f));
+            if (scope == null) return FormulaVerdict.Refused(FormulaPins.FullText);
+            var roller = s.Roll;
+            var sc = scope;
+            model.DiceSource = (key, n, sides) => sc.Roll(key, n, sides, roller);
+        }
         if (i.Calculate) model.Calculate(full);
         var dv = model.Evaluate(full);
         var boxes = dv.Boxes.Select(b => new FormulaBox(b.Variable,
@@ -365,8 +373,7 @@ internal static class FormulaIntentRunner
         if (i.Preview)
         {
             // Nothing is executed. The visible values and the dice go back; the dice stay pinned for this sender's Apply.
-            // A full pin table refuses new previews (never evicts a live pin: that would re-open fishing). Nothing was shown yet.
-            if (pins != null && !pins.Put(pinKey, g, pack, model.PinnedRolls, pin?.Created)) return FormulaVerdict.Refused(FormulaPins.FullText);
+            if (scope != null) scope.Previewed = true;
             var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var v in source.Variables)
@@ -374,9 +381,10 @@ internal static class FormulaIntentRunner
             return new FormulaVerdict(false, boxes, dv.CanApply ? null : SafeStatus(dv, hidden), values,
                 model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal));
         }
-        if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));   // the pin stays for a corrected Apply
-        if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated || pin != null)) return new FormulaVerdict(false, boxes, NotWaitingText);
-        pins?.Remove(pinKey);   // single use
+        if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));   // the dice stay pinned for a corrected Apply
+        if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated || scope?.Previewed == true))
+            return new FormulaVerdict(false, boxes, NotWaitingText);
+        pins?.Remove(pinKey);   // consumed
         return new FormulaVerdict(true, boxes, null);
     }
 
@@ -428,68 +436,80 @@ internal static class FormulaIntentRunner
 }
 
 /// <summary>
-/// Dice of guest formula previews, pinned per (sender, formula, unit, run) so pressing Calculate again shows the same roll and the next
-/// Apply uses it: no fishing for a better roll. A pin is used once (a successful Apply removes it), expires after <see cref="Lifetime"/>
-/// (counted from the first preview, so re-previewing does not extend it), and is dropped when the game or the rules pack is replaced or the
-/// run is no longer waiting (the runner refuses those first). At most <see cref="MaxPerSender"/> live pins per sender: a live pin is never
-/// evicted (that would let a sender drop a roll it dislikes); when full, a new preview with dice is refused with <see cref="FullText"/>
-/// while existing pins keep re-showing their rolls.
+/// The dice of guests' formula runs on the host (spec 8a.1: the host rolls). Every die rolled for a guest's run (preview, refused Apply,
+/// any refusal after the run) is pinned before the answer goes back, per scope (sender, formula, unit; the run id is not part of it, so
+/// an ad-hoc run and the pending run share their dice) and per dice configuration (<c>key|count|sides</c>). Pins are append-only: an
+/// existing configuration is never rolled again, so asking again, retrying a wrong Apply or toggling an input that changes the dice
+/// all come back to the first roll. A scope lives until a successful Apply consumes it, the phase position (turn/phase) changes, or the
+/// game session or rules pack is replaced; there is no wall-clock expiry. A live scope is never evicted: with
+/// <see cref="MaxPerSender"/> scopes a sender's run that may roll dice in a new scope is refused with <see cref="FullText"/>.
 /// </summary>
 internal sealed class FormulaPins
 {
     public const int MaxPerSender = 512;
     public const string FullText = "Apply or wait before previewing more.";
-    public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
 
-    public readonly record struct Key(string Who, string FormulaId, string? PieceId, string? RunId);
+    public readonly record struct Key(string Who, string FormulaId, string? PieceId);
 
-    public sealed record Pin(Key Key, GameSession Game, RulesPack Pack, DateTime Created, IReadOnlyDictionary<string, IReadOnlyList<int>> Rolls);
-
-    private readonly Dictionary<string, List<Pin>> _bySender = new(StringComparer.Ordinal);
-
-    /// <summary>Test hook: the clock (UTC).</summary>
-    public Func<DateTime> Clock { get; set; } = () => DateTime.UtcNow;
-
-    private bool Valid(Pin p, GameSession g, RulesPack pack) =>
-        ReferenceEquals(p.Game, g) && ReferenceEquals(p.Pack, pack) && Clock() - p.Created < Lifetime;
-
-    /// <summary>The live pin for this key (an expired or stale one is dropped), or null.</summary>
-    public Pin? Find(Key key, GameSession g, RulesPack pack)
+    /// <summary>One scope's dice by configuration, valid for one game session, rules pack and phase position.</summary>
+    public sealed class Scope(GameSession game, RulesPack pack, PhasePosition? position)
     {
-        if (!_bySender.TryGetValue(key.Who, out var list)) return null;
-        var pin = list.FirstOrDefault(p => p.Key == key);
-        if (pin == null) return null;
-        if (Valid(pin, g, pack)) return pin;
-        list.Remove(pin);
-        return null;
+        private readonly Dictionary<string, IReadOnlyList<int>> _dice = new(StringComparer.Ordinal);
+        public GameSession Game { get; } = game;
+        public RulesPack Pack { get; } = pack;
+        public PhasePosition? Position { get; } = position;
+
+        /// <summary>True once a preview showed these dice (an Apply after it counts as calculated).</summary>
+        public bool Previewed { get; set; }
+
+        public int Count => _dice.Count;
+
+        /// <summary>The pinned dice of this configuration, or a new roll that is pinned first (append-only).</summary>
+        public IReadOnlyList<int> Roll(string key, int n, int sides, Func<int, int, IReadOnlyList<int>> roller)
+        {
+            var config = ConfigKey(key, n, sides);
+            if (_dice.TryGetValue(config, out var pinned)) return pinned;
+            var rolled = roller(n, sides).ToList();
+            _dice[config] = rolled;
+            return rolled;
+        }
     }
 
+    private readonly Dictionary<string, Dictionary<Key, Scope>> _bySender = new(StringComparer.Ordinal);
+
+    public static string ConfigKey(string key, int n, int sides) => $"{key}|{n}|{sides}";
+
+    /// <summary>True when the formula may roll dice (a Roll binding or an inline dice() call); only those take a pinned scope.</summary>
+    public static bool MayRoll(FormulaDef f) =>
+        (f.Bindings ?? new List<VariableBinding>()).Any(b => b is { Kind: BindingKind.Roll })
+        || (f.Text ?? "").Contains("dice", StringComparison.OrdinalIgnoreCase)
+        || (f.Bindings ?? new List<VariableBinding>()).Any(b => (b?.RowExpr ?? "").Contains("dice", StringComparison.OrdinalIgnoreCase)
+            || (b?.ColExpr ?? "").Contains("dice", StringComparison.OrdinalIgnoreCase));
+
+    private static bool Valid(Scope sc, GameSession g, RulesPack pack) =>
+        ReferenceEquals(sc.Game, g) && ReferenceEquals(sc.Pack, pack) && Equals(sc.Position, g.State.Position);
+
     /// <summary>
-    /// Pins (or re-pins) a preview's dice. <paramref name="created"/> keeps the first preview's time. False (nothing changed) when this
-    /// would be a new pin and the sender already holds <see cref="MaxPerSender"/> live ones.
+    /// The live scope for this key, or a new one (registered when <paramref name="mayRoll"/>; a run without dice pins nothing). Null when the
+    /// sender already holds <see cref="MaxPerSender"/> live scopes and this one would be new: the caller refuses before rolling anything.
     /// </summary>
-    public bool Put(Key key, GameSession g, RulesPack pack, IReadOnlyDictionary<string, IReadOnlyList<int>> rolls, DateTime? created)
+    public Scope? Open(Key key, GameSession g, RulesPack pack, bool mayRoll)
     {
-        if (!_bySender.TryGetValue(key.Who, out var list)) _bySender[key.Who] = list = new();
-        list.RemoveAll(p => !Valid(p, g, pack));   // only expired or stale pins ever go
-        var at = list.FindIndex(p => p.Key == key);
-        if (rolls.Count == 0)
-        {
-            if (at >= 0) list.RemoveAt(at);
-            return true;
-        }
-        var pin = new Pin(key, g, pack, created ?? Clock(), new Dictionary<string, IReadOnlyList<int>>(rolls, StringComparer.Ordinal));
-        if (at >= 0) { list[at] = pin; return true; }
-        if (list.Count >= MaxPerSender) return false;
-        list.Add(pin);
-        return true;
+        if (!_bySender.TryGetValue(key.Who, out var scopes)) _bySender[key.Who] = scopes = new();
+        foreach (var stale in scopes.Where(kv => !Valid(kv.Value, g, pack)).Select(kv => kv.Key).ToList()) scopes.Remove(stale);
+        if (scopes.TryGetValue(key, out var live)) return live;
+        var scope = new Scope(g, pack, g.State.Position);
+        if (!mayRoll) return scope;
+        if (scopes.Count >= MaxPerSender) return null;
+        scopes[key] = scope;
+        return scope;
     }
 
     public void Remove(Key key)
     {
-        if (_bySender.TryGetValue(key.Who, out var list)) list.RemoveAll(p => p.Key == key);
+        if (_bySender.TryGetValue(key.Who, out var scopes)) scopes.Remove(key);
     }
 
-    /// <summary>Pins held for a sender (tests).</summary>
-    public int Count(string who) => _bySender.TryGetValue(who, out var list) ? list.Count : 0;
+    /// <summary>Live and stale scopes held for a sender (tests).</summary>
+    public int Count(string who) => _bySender.TryGetValue(who, out var scopes) ? scopes.Count : 0;
 }

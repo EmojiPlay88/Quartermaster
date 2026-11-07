@@ -18,8 +18,11 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
     IReadOnlyList<OutputPreview> Outputs, string? Error, IReadOnlyList<DiceEntry> Rolls,
     IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey, string? PieceId = null);
 
+/// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
+/// roller. The online host uses it so every die of a guest's run is pinned per dice configuration.</param>
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
-    IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false);
+    IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false,
+    Func<string, int, int, IReadOnlyList<int>>? Dice = null);
 
 /// <summary>Binds a formula's variables to game data, evaluates it and previews/produces the ledger commands. Run never throws.</summary>
 public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, int, IReadOnlyList<int>> roller)
@@ -161,7 +164,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             IReadOnlyList<int> res;
             if (r.FixedRolls.TryGetValue(key, out var pin) && pin != null && pin.Count == n && pin.All(x => x >= 1 && x <= sides)) res = pin;
-            else res = owner._roller(n, sides);
+            else res = r.Dice?.Invoke(key, n, sides) ?? owner._roller(n, sides);
             _rolls.Add(new DiceEntry(0, $"{formula.Name}: {key}", n, sides, res));
             _byKey[key] = res;
             return res;

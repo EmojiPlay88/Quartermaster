@@ -84,6 +84,22 @@ public class FormulaMaskingTests : IDisposable
                 },
                 new FormulaDef
                 {
+                    Id = "f-tab", Name = "Terrain roll", Text = "R + T",
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 },
+                        new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t-cost", RowExpr = "\"Clear\"" },
+                    },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Add } },
+                },
+                new FormulaDef
+                {
+                    Id = "f-n", Name = "Variable dice", Text = "dice(N, 6)",
+                    Bindings = new() { new VariableBinding { Variable = "N", Kind = BindingKind.Input, Min = 1, Max = 3 } },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
                     // Writes Blue's private depot below zero: Red's dialog must not mark it negative.
                     Id = "f-drain", Name = "Drain", Text = "W - 1000000",
                     Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" } },
@@ -385,23 +401,42 @@ public class FormulaMaskingTests : IDisposable
         Assert.Equal(0, executor.Pins.Count("p2"));
     }
 
+    /// <summary>A host for Bob's intents whose roller never repeats a value in a row and records every die it rolled.</summary>
+    private (ModuleSession S, PhaseController C, IntentExecutor X, List<int> Rolled) DiceHost(Func<RulesPack, RulesPack>? tweak = null)
+    {
+        var (host, hc) = Open(Difficulty.Hardcore, new[] { Alice, Bob });
+        if (tweak != null) host.UpdateRules(tweak);
+        var rolled = new List<int>();
+        var next = 0;
+        host.SetRoller((n, _) =>
+        {
+            var dice = Enumerable.Range(0, n).Select(_ => next++ % 6 + 1).ToList();
+            rolled.AddRange(dice);
+            return dice;
+        });
+        return (host, hc, new IntentExecutor(host, hc), rolled);
+    }
+
+    private static FormulaVerdict Send(IntentExecutor x, string formulaId, IReadOnlyDictionary<string, string>? typed, bool calculate, bool preview,
+        string? runId = null) =>
+        x.Execute("p2", Blue, new FormulaIntent(formulaId, PhaseFixture.BlueOne, runId, typed ?? new Dictionary<string, string>(), calculate, preview)).Verdict!;
+
+    private static IReadOnlyList<int> PreviewRoll(IntentExecutor x, string formulaId, string key, IReadOnlyDictionary<string, string>? typed = null) =>
+        Send(x, formulaId, typed, calculate: true, preview: true).Rolls![key];
+
     [Fact]
     public async Task Pins_Full_NoEviction_SameRoll_NewPreviewRefused()
     {
-        var (host, hc) = Open(Difficulty.Hardcore, new[] { Alice, Bob });
-        var next = 0;
-        host.SetRoller((n, _) => Enumerable.Range(0, n).Select(_ => next++ % 6 + 1).ToList());
-        var executor = new IntentExecutor(host, hc);
+        var (host, _, executor, _) = DiceHost();
         var guest = Guest(host);
         var port = PortTo(executor);
         var a = Dialog(guest, "f-dice", PhaseFixture.BlueOne, check: true);
         var roll = Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]);
-        // Fill the table with other previews (as 511 other units would).
-        var other = new Dictionary<string, IReadOnlyList<int>> { ["R"] = new[] { 1 } };
+        // Fill the table with other scopes (as 511 other units would).
         for (var i = 1; i < FormulaPins.MaxPerSender; i++)
-            Assert.True(executor.Pins.Put(new FormulaPins.Key("p2", "f-dice", "x" + i, null), host.Game!, host.Rules!, other, null));
+            Assert.NotNull(executor.Pins.Open(new FormulaPins.Key("p2", "f-dice", "x" + i), host.Game!, host.Rules!, mayRoll: true));
         Assert.Equal(FormulaPins.MaxPerSender, executor.Pins.Count("p2"));
-        // A still re-shows its same roll; a new preview is refused, nothing evicted, nothing executed.
+        // A still re-shows its same roll; a new preview is refused before rolling, nothing evicted, nothing executed.
         Assert.Equal(roll, Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]));
         var before = Json(host.Game!.State);
         var b = Dialog(guest, "f-dice2", PhaseFixture.BlueOne, check: true);
@@ -412,34 +447,85 @@ public class FormulaMaskingTests : IDisposable
         Assert.Equal(before, Json(host.Game!.State));
         Assert.Equal(FormulaPins.MaxPerSender, executor.Pins.Count("p2"));
         Assert.Equal(roll, Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]));
+        // A formula without dice needs no pin, so it still previews.
+        Assert.NotEqual(FormulaPins.FullText, Send(executor, "f-mix", null, calculate: true, preview: true).Message);
     }
 
     [Fact]
-    public void Pins_Expire_AreCapped_AndFollowTheRules()
+    public void Pins_RefusedApply_WrongTableValue_RetrySameRoll()
     {
-        var (s, _) = Open(Difficulty.Hardcore);
-        var pins = new FormulaPins();
-        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
-        pins.Clock = () => now;
-        var rolls = new Dictionary<string, IReadOnlyList<int>> { ["R"] = new[] { 5 } };
-        for (var i = 0; i < FormulaPins.MaxPerSender; i++)
-            Assert.True(pins.Put(new FormulaPins.Key("p2", "f-dice", "u" + i, null), s.Game!, s.Rules!, rolls, null));
-        Assert.False(pins.Put(new FormulaPins.Key("p2", "f-dice", "new", null), s.Game!, s.Rules!, rolls, null));   // full: refused
-        Assert.Equal(FormulaPins.MaxPerSender, pins.Count("p2"));
-        Assert.NotNull(pins.Find(new FormulaPins.Key("p2", "f-dice", "u0", null), s.Game!, s.Rules!));   // never evicted
-        Assert.True(pins.Put(new FormulaPins.Key("p2", "f-dice", "u0", null), s.Game!, s.Rules!, rolls, null));   // re-pin still fine
-        var key = new FormulaPins.Key("p2", "f-dice", "u1", null);
-        Assert.NotNull(pins.Find(key, s.Game!, s.Rules!));
-        Assert.Null(pins.Find(new FormulaPins.Key("p3", "f-dice", "u1", null), s.Game!, s.Rules!));   // per sender
-        s.UpdateRules(p => p with { Name = "Edited" });
-        Assert.Null(pins.Find(key, s.Game!, s.Rules!));   // the rules changed
-        var key2 = new FormulaPins.Key("p2", "f-dice", "u2", null);
-        var pack = s.Rules!;
-        pins.Put(key2, s.Game!, pack, rolls, null);
-        now += TimeSpan.FromMinutes(9);
-        pins.Put(key2, s.Game!, pack, rolls, pins.Find(key2, s.Game!, pack)!.Created);   // re-preview does not extend
-        now += TimeSpan.FromMinutes(2);
-        Assert.Null(pins.Find(key2, s.Game!, pack));
+        var (host, _, x, rolled) = DiceHost();
+        var wrong = Send(x, "f-tab", new Dictionary<string, string> { ["T"] = "9" }, calculate: false, preview: false);
+        Assert.False(wrong.Applied);
+        Assert.Equal(FormulaBox.Wrong, wrong.Boxes.Single(b => b.Var == "T").State);
+        var first = rolled.ToList();
+        Assert.Single(first);   // the refused Apply rolled once, and that die is pinned
+        for (var i = 0; i < 3; i++) Assert.False(Send(x, "f-tab", new Dictionary<string, string> { ["T"] = "8" }, false, false).Applied);
+        var ok = Send(x, "f-tab", new Dictionary<string, string> { ["T"] = "2" }, calculate: false, preview: false);
+        Assert.True(ok.Applied, ok.Message);
+        Assert.Equal(first, rolled);   // never rolled again
+        Assert.Equal(first, host.Game!.State.DiceHistory.Last().Results);
+        Assert.Equal(10 + first[0] + 2, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+        Assert.Equal(0, x.Pins.Count("p2"));   // consumed by the Apply
+    }
+
+    [Fact]
+    public void Pins_PerDiceConfig_InputToggleReturnsFirstRoll()
+    {
+        var (_, _, x, _) = DiceHost();
+        var one = PreviewRoll(x, "f-n", "dice#0", new Dictionary<string, string> { ["N"] = "1" });
+        var two = PreviewRoll(x, "f-n", "dice#0", new Dictionary<string, string> { ["N"] = "2" });
+        Assert.Single(one);
+        Assert.Equal(2, two.Count);
+        Assert.Equal(one, PreviewRoll(x, "f-n", "dice#0", new Dictionary<string, string> { ["N"] = "1" }));
+        Assert.Equal(two, PreviewRoll(x, "f-n", "dice#0", new Dictionary<string, string> { ["N"] = "2" }));
+    }
+
+    [Fact]
+    public void Pins_AdHocPreview_ThenPendingRunApply_SameRoll()
+    {
+        var blue = new PhaseDef
+        {
+            Id = "ph-blue", Name = "Blue roll", SideId = "blue",
+            OnStart = new() { new StartEntry { FormulaId = "f-dice2", ForEach = ForEachMode.Units } },
+        };
+        var (host, hc, x, _) = DiceHost(p => p with { Phases = new[] { blue }.Concat(p.Phases).ToList() });
+        hc.Start();
+        var run = host.Game!.State.Pending.Single(r => r.FormulaId == "f-dice2" && r.Units.Any(u => u.PieceId == PhaseFixture.BlueOne));
+        var roll = Assert.Single(PreviewRoll(x, "f-dice2", "R"));   // ad hoc (no run id)
+        var ok = Send(x, "f-dice2", new Dictionary<string, string> { ["W"] = "10" }, calculate: false, preview: false, runId: run.Id);
+        Assert.True(ok.Applied, ok.Message);
+        Assert.Equal(new[] { roll }, host.Game!.State.DiceHistory.Last().Results);
+        Assert.Equal(10 + roll, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+
+    [Fact]
+    public void Pins_PhaseAdvance_DropsPins()
+    {
+        var (host, hc, x, _) = DiceHost();
+        hc.Start();
+        var roll = PreviewRoll(x, "f-dice2", "R");
+        Assert.Equal(roll, PreviewRoll(x, "f-dice2", "R"));
+        hc.Advance();
+        Assert.NotEqual(roll, PreviewRoll(x, "f-dice2", "R"));   // a new phase position: new dice
+        Assert.Equal(1, x.Pins.Count("p2"));
+        host.UpdateRules(p => p with { Name = "Edited" });
+        Assert.NotNull(PreviewRoll(x, "f-dice2", "R"));
+        Assert.Equal(1, x.Pins.Count("p2"));   // the old pack's scope was dropped
+    }
+
+    [Fact]
+    public void Pins_NoTimeExpiry_SurviveUnrelatedChanges()
+    {
+        var (host, hc, x, _) = DiceHost();
+        Assert.Null(typeof(FormulaPins).GetProperty("Clock", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static));   // no wall clock at all
+        hc.Start();
+        var roll = PreviewRoll(x, "f-dice2", "R");
+        // Other things happen in the same phase: another formula, ledger edits, the host's own moves.
+        Send(x, "f-mix", new Dictionary<string, string> { ["W"] = "10" }, calculate: false, preview: false);
+        host.Game!.Execute(new LedgerDelta(LedgerKey.Holder("reddepot"), "supply", RedSecret, 1, "manual", null, null, null, null));
+        Assert.Equal(roll, PreviewRoll(x, "f-dice2", "R"));
     }
 
     [Fact]

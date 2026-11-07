@@ -149,6 +149,13 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         _fixedRolls = merged;
     }
 
+    /// <summary>Rolls dice the pins don't cover (key, count, sides); null = the runner's roller. Set by the online host for a guest's run.</summary>
+    public Func<string, int, int, IReadOnlyList<int>>? DiceSource { get; set; }
+
+    /// <summary>True when the run's dice for this key are the host's (same key and same dice; another count means the guest changed an input).</summary>
+    private bool HostRolled(string key, FormulaTrace t) =>
+        _hostRolls.Contains(key) && _fixedRolls.TryGetValue(key, out var pin) && t.RollsByKey.TryGetValue(key, out var used) && pin.SequenceEqual(used);
+
     /// <summary>Roll keys whose dice came from the host (guest). Until then a guest's dice boxes say the host rolls.</summary>
     private readonly HashSet<string> _hostRolls = new(StringComparer.Ordinal);
 
@@ -190,7 +197,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         }
         foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice))
             ov.TryAdd(b.Variable, "");
-        var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false));
+        var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource));
         MergePins(trace);
         if (!Checked) return trace;
         // Checked: this is the EXPECTED engine run, the only source of ledger commands. Until every box matches it carries no result.
@@ -202,7 +209,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     public void Calculate(GameState state)
     {
         var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed),
-            PhysicalRollOverrides(), _fixedRolls, Moved, true));
+            PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource));
         MergePins(trace);
         foreach (var v in trace.Variables)
         {
@@ -221,10 +228,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         var vars = t.Variables;
         var boxes = vars.Select(v => Box(v, t)).ToList();
-        var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || _hostRolls.Contains(kv.Key)))
+        var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || HostRolled(kv.Key, t)))
             .Select(kv => new InlineRollView(kv.Key, DiceText(kv.Value))).ToList();
         // A guest's local run rolls its own dice; until the host's are in, no result built on them is shown.
-        var localDice = HostCalculates && t.RollsByKey.Keys.Any(k => !_hostRolls.Contains(k));
+        var localDice = HostCalculates && t.RollsByKey.Keys.Any(k => !HostRolled(k, t));
         var masked = _hidden.Count > 0;
         var missing = vars.Where(v => v.MissingReason != null && !IsHidden(v.Variable)).Select(v => v.Variable).ToList();
         var wrong = boxes.Where(b => b.Wrong).Select(b => b.Variable).ToList();
@@ -267,7 +274,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
                 false, choices);
         var text = v.Value?.Display() ?? "";
         string? reroll = null;
-        if (binding?.Kind == BindingKind.Roll && HostCalculates && !_hostRolls.Contains(v.Variable))
+        if (binding?.Kind == BindingKind.Roll && HostCalculates && !HostRolled(v.Variable, t))
             return new BoxView(v.Variable, HostRollsText, BoxBackground.Auto, "", false, null, null);
         if (binding?.Kind == BindingKind.Roll && t.RollsByKey.TryGetValue(v.Variable, out var dice))
         {
