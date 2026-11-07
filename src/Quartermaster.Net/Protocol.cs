@@ -94,6 +94,7 @@ public static class Framing
     private static readonly JsonSerializerOptions Options = new()
     {
         RespectNullableAnnotations = true,
+        RespectRequiredConstructorParameters = true,
     };
 
     private static Type Root(Type t) =>
@@ -110,16 +111,19 @@ public static class Framing
         return bytes;
     }
 
-    /// <summary>Missing non-nullable members (absent from the JSON) make the frame malformed.</summary>
-    private static void RequireFields(object value)
+    private static void RejectNullElements(object? v)
     {
-        var ctx = new System.Reflection.NullabilityInfoContext();
-        foreach (var p in value.GetType().GetProperties())
+        if (v is null or string or byte[]) return;
+        if (v is System.Collections.IEnumerable items)
         {
-            if (p.PropertyType.IsValueType || p.GetIndexParameters().Length > 0) continue;
-            if (ctx.Create(p).WriteState == System.Reflection.NullabilityState.NotNull && p.GetValue(value) is null)
-                throw new ProtocolException($"Malformed message: {p.Name} is missing.");
+            foreach (var item in items)
+                if (item is null) throw new ProtocolException("Malformed message: null list entry.");
+                else RejectNullElements(item);
+            return;
         }
+        if (v.GetType().IsPrimitive || v.GetType().IsEnum || v is Guid) return;
+        foreach (var p in v.GetType().GetProperties())
+            if (p.GetIndexParameters().Length == 0) RejectNullElements(p.GetValue(v));
     }
 
     public static T Decode<T>(ReadOnlySpan<byte> frame)
@@ -130,7 +134,7 @@ public static class Framing
         {
             var value = JsonSerializer.Deserialize<T>(frame, Options)
                 ?? throw new ProtocolException("Empty message.");
-            RequireFields(value);
+            RejectNullElements(value);
             return value;
         }
         catch (Exception e) when (e is JsonException or NotSupportedException or InvalidOperationException or FormatException)
