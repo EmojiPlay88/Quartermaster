@@ -50,8 +50,10 @@ sealed class MapWindow : Form
     void Attach()
     {
         if (_attached != null) _attached.Changed -= OnGameChanged;
+        if (_attached != null) _attached.Rewound -= OnRewound;
         _attached = _s.Game;
         if (_attached != null) _attached.Changed += OnGameChanged;
+        if (_attached != null) _attached.Rewound += OnRewound;
     }
 
     void OnGameReplaced()
@@ -61,6 +63,7 @@ sealed class MapWindow : Form
     }
 
     void OnGameChanged(GameCommand _) => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
+    void OnRewound() => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
 
     void OnUi(Action a)
     {
@@ -172,6 +175,7 @@ sealed class MapWindow : Form
         _cts.Cancel();
         _s.GameReplaced -= OnGameReplaced;
         if (_attached != null) _attached.Changed -= OnGameChanged;
+        if (_attached != null) _attached.Rewound -= OnRewound;
         if (Host is { } mf)
         {
             mf.GridVisibleChanged -= OnGridVisibleChanged;
@@ -333,6 +337,7 @@ sealed class MapWindow : Form
             gesture.Clear();
             phases!.ExecuteMove(moves);
         }
+        using var scope = game.BeginAction();   // one undoable action per call; label comes from the first command
         foreach (var c in commands)
         {
             // Move commands (Send to, keyboard moves) are move gestures: consecutive ones go through the phase controller as one call.

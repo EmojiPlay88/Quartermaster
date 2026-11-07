@@ -49,11 +49,14 @@ sealed class NotesWindow : Form
     void HookGame()
     {
         if (_game != null) _game.Changed -= OnGameChanged;
+        if (_game != null) _game.Rewound -= OnRewound;
         _game = _s.Game;
         if (_game != null) _game.Changed += OnGameChanged;
+        if (_game != null) _game.Rewound += OnRewound;
     }
 
     void OnGameChanged(GameCommand _) => OnUi(() => { if (NotesSync.ShouldReload(_box.Focused, Pending)) Run(Reload); });
+    void OnRewound() => OnUi(() => { if (NotesSync.ShouldReload(_box.Focused, Pending)) Run(Reload); });
     // Pending text was already flushed into the old game by MainForm (FlushNow) before the replacement; this only reloads.
     void OnGameReplaced() => OnUi(() => { _commitTimer.Stop(); HookGame(); Run(Reload); });
 
@@ -98,6 +101,7 @@ sealed class NotesWindow : Form
         _commitTimer.Stop();
         _s.GameReplaced -= OnGameReplaced;
         if (_game != null) _game.Changed -= OnGameChanged;
+        if (_game != null) _game.Rewound -= OnRewound;
         _game = null;
     }
 

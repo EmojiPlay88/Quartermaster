@@ -93,11 +93,14 @@ sealed class LedgerWindow : Form
     void HookGame()
     {
         if (_game != null) _game.Changed -= OnGameChanged;
+        if (_game != null) _game.Rewound -= OnRewound;
         _game = _s.Game;
         if (_game != null) _game.Changed += OnGameChanged;
+        if (_game != null) _game.Rewound += OnRewound;
     }
 
     void OnGameChanged(GameCommand _) => OnUi(Kick);
+    void OnRewound() => OnUi(Kick);
     void OnGameReplaced() => OnUi(() => { HookGame(); Kick(); });
     void OnRulesChanged() => OnUi(Kick);
 
@@ -114,6 +117,7 @@ sealed class LedgerWindow : Form
         _s.RulesChanged -= OnRulesChanged;
         _s.GameReplaced -= OnGameReplaced;
         if (_game != null) _game.Changed -= OnGameChanged;
+        if (_game != null) _game.Rewound -= OnRewound;
         _game = null;
     }
 

@@ -379,7 +379,13 @@ sealed class FormulaDialog : Form
                 return;
             }
         }
-        else foreach (var c in runner.Commands(v.Trace, null)) game.Execute(CommandLog.Stamp(c));
+        else
+        {
+            var fname = _s.Rules?.ById<FormulaDef>(_formulaId)?.Name ?? "Formula";
+            var unit = _pieceId != null && game.State.Pieces.TryGetValue(_pieceId, out var up) ? PieceInfo.Name(up) : null;
+            using var scope = game.BeginAction(string.IsNullOrWhiteSpace(unit) ? fname : $"{fname} on {unit}");
+            foreach (var c in runner.Commands(v.Trace, null)) game.Execute(CommandLog.Stamp(c));
+        }
         if (!_embedded) Close();
     }
 

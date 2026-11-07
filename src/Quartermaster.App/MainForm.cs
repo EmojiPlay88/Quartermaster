@@ -494,7 +494,11 @@ sealed partial class MainForm : Form
 
     void OnGameReplaced()
     {
-        if (_session?.Game is { } g) g.Changed += _ => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); };
+        if (_session?.Game is { } g)
+        {
+            g.Changed += _ => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); };
+            g.Rewound += () => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); };
+        }
         _dirty = false;
         _autosavedSeq = _changeSeq;
         _savePath = null;

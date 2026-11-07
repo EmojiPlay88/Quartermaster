@@ -34,12 +34,15 @@ sealed class PhaseWatcher : IDisposable
     void Attach()
     {
         if (_attached != null) _attached.Changed -= OnChanged;
+        if (_attached != null) _attached.Rewound -= OnRewound;
         _attached = _s.Game;
         if (_attached != null) _attached.Changed += OnChanged;
+        if (_attached != null) _attached.Rewound += OnRewound;
     }
 
     void OnReplaced() { Attach(); Request(); }
     void OnChanged(Quartermaster.Core.GameCommand _) => Request();
+    void OnRewound() => Request();
 
     /// <summary>Schedules a refresh (events may arrive from any thread).</summary>
     public void Request()
@@ -71,6 +74,7 @@ sealed class PhaseWatcher : IDisposable
         _s.GameReplaced -= OnReplaced;
         _s.RulesChanged -= Request;
         if (_attached != null) _attached.Changed -= OnChanged;
+        if (_attached != null) _attached.Rewound -= OnRewound;
         _debounce.Dispose();
     }
 }

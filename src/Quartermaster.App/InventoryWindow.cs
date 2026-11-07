@@ -82,11 +82,14 @@ sealed class InventoryWindow : Form
     void HookGame()
     {
         if (_game != null) _game.Changed -= OnGameChanged;
+        if (_game != null) _game.Rewound -= OnRewound;
         _game = _s.Game;
         if (_game != null) _game.Changed += OnGameChanged;
+        if (_game != null) _game.Rewound += OnRewound;
     }
 
     void OnGameChanged(GameCommand _) => OnUi(Kick);
+    void OnRewound() => OnUi(Kick);
     void OnGameReplaced() => OnUi(() => { HookGame(); _cycle.Clear(); Kick(); });
     void OnRulesChanged() => OnUi(Kick);
 
@@ -103,6 +106,7 @@ sealed class InventoryWindow : Form
         _s.RulesChanged -= OnRulesChanged;
         _s.GameReplaced -= OnGameReplaced;
         if (_game != null) _game.Changed -= OnGameChanged;
+        if (_game != null) _game.Rewound -= OnRewound;
         _game = null;
     }
 

@@ -197,10 +197,12 @@ sealed class MapDragController : IDisposable
         if (groups.Count == 0) return;
         var moves = groups.Select(g => new MovePieces(g.Ids, _map.Id, g.Pos, g.StackOnto)).ToList();
         // Every group of one drop is one move gesture: the phase controller executes them and fires the phase's OnMove formulas.
+        // One scope per gesture so a multi-group drop undoes as a single action.
+        using var scope = game!.BeginAction();
         if (Phases?.Invoke() is { } phases) _guard(() => phases.ExecuteMove(moves));
         else
             foreach (var move in moves)
-                _guard(() => game!.Execute(CommandLog.Prepare(move, game.State, _s.Model)));
+                _guard(() => game.Execute(CommandLog.Prepare(move, game.State, _s.Model)));
     }
 
     /// <summary>The main window's phase controller, when there is one; move gestures go through it.</summary>

@@ -88,12 +88,15 @@ sealed class LogPanel : UserControl
     void Attach()
     {
         if (_attached != null) _attached.Changed -= OnGameChanged;
+        if (_attached != null) _attached.Rewound -= OnRewound;
         _attached = _s.Game;
         if (_attached != null) _attached.Changed += OnGameChanged;
+        if (_attached != null) _attached.Rewound += OnRewound;
     }
 
     void OnGameReplaced() { Attach(); Refresh_(); }
     void OnGameChanged(GameCommand _) => Refresh_();
+    void OnRewound() => Refresh_();
 
     /// <summary>Schedules a debounced reload on the UI thread (events may arrive from any thread).</summary>
     void Refresh_()
@@ -207,6 +210,7 @@ sealed class LogPanel : UserControl
         {
             _s.GameReplaced -= OnGameReplaced;
             if (_attached != null) _attached.Changed -= OnGameChanged;
+            if (_attached != null) _attached.Rewound -= OnRewound;
             _debounce.Dispose();
         }
         base.Dispose(disposing);
