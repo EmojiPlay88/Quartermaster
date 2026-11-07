@@ -128,6 +128,19 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
         return new BatchRowView(u.PieceId, u.Label, cells, wrong, dv.ResultText, LedgerOf(dv), ExceptionsFor(u, dv), false, dv.CanApply);
     }
 
+    /// <summary>The (ledger key, property id) pairs a pending row would write; empty for an applied row or a failed run.</summary>
+    public IReadOnlyList<(string Key, string PropertyId)> OutputsOf(int row)
+    {
+        if (Unit(row) is not { Applied: false } || s.Game == null) return Array.Empty<(string, string)>();
+        try
+        {
+            var dv = ModelFor(row).Evaluate(s.Game.State);
+            return dv.Trace.Error != null || dv.Trace.Result == null ? Array.Empty<(string, string)>()
+                : dv.Trace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return Array.Empty<(string, string)>(); }
+    }
+
     private static string LedgerOf(DialogView dv) => string.Join("; ", dv.Trace.Error != null || dv.Trace.Result == null
         ? Array.Empty<string>()
         : dv.Trace.Outputs.Select(o => $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"));

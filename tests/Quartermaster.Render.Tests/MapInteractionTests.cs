@@ -345,4 +345,29 @@ public class PieceDetailTests
         Assert.Contains(("Rank", "3,5"), d.Properties);
         Assert.Contains(d.Properties, x => x.Value == "7");
     }
+
+    [Fact]
+    public void PieceDetails_IncludesLedgerValues()
+    {
+        var typeStr = SequenceEncoder.Encode(new[] { "PROP;Strength;;;;;;;;;;;", "piece;;;unit.svg;Rifle" }, '	');
+        var t = PieceTypeParser.Parse(typeStr, new DiagnosticLog(), null);
+        var p = new PieceInstance { Id = "p1", TypeString = typeStr, TraitStates = new() { "7", "" } };
+        var st = new GameState();
+        st.Pieces["p1"] = p;
+        st.Ledgers["p:p1"] = new() { ["fuel"] = 12, ["hidden"] = 5, ["nobody"] = 1, ["hold"] = 3 };
+        var pack = new Quartermaster.Rules.RulesPack
+        {
+            Properties =
+            {
+                new Quartermaster.Rules.PropertyDef { Id = "fuel", Name = "Fuel", Scope = Quartermaster.Rules.PropertyScope.Pieces },
+                new Quartermaster.Rules.PropertyDef { Id = "ammo", Name = "Ammo", Scope = Quartermaster.Rules.PropertyScope.Both },   // no value
+                new Quartermaster.Rules.PropertyDef { Id = "hidden", Name = "Hidden", Scope = Quartermaster.Rules.PropertyScope.Pieces, AppliesTo = "1 > 2" },
+                new Quartermaster.Rules.PropertyDef { Id = "hold", Name = "Hold", Scope = Quartermaster.Rules.PropertyScope.Holders },
+            },
+        };
+        var d = PieceDetails.For(p, t, st, pack);
+        Assert.Equal([("fuel", "Fuel", 12d)], d.Ledger);
+        Assert.Empty(PieceDetails.For(p, t).Ledger);
+        Assert.Empty(PieceDetails.For(p, t, st, null).Ledger);
+    }
 }

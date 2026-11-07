@@ -13,6 +13,7 @@ sealed partial class MapCanvas : SKControl
     readonly MapRenderer _renderer;
     readonly PieceRenderer _pieces;
     readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = 600 };
+    readonly System.Windows.Forms.Timer _graceTimer = new() { Interval = 450 }; // lets the pointer travel from a piece to a hoverable popup
     double _zoomStep = 1.2;
     int _dragThreshold = 4;
     SKColor? _highlight;
@@ -49,6 +50,7 @@ sealed partial class MapCanvas : SKControl
         DoubleBuffered = true;
         BackColor = SystemColors.AppWorkspace;
         _hoverTimer.Tick += (_, _) => ShowPopup();
+        _graceTimer.Tick += (_, _) => HidePopup();
     }
 
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -619,8 +621,9 @@ sealed partial class MapCanvas : SKControl
         if (PieceAt(p) is { } id && State is { } st && st.Pieces.TryGetValue(id, out var pc)) stackId = pc.StackId;
         if (stackId == _hoverStack) return;
         _hoverStack = stackId;
-        HidePopup();
         _hoverTimer.Stop();
+        if (stackId == null && _popup is { Interactive: true }) _graceTimer.Start(); // keep it up briefly so the pointer can reach it
+        else HidePopup();
         if (stackId != null) _hoverTimer.Start();
         Invalidate();
     }
@@ -631,12 +634,15 @@ sealed partial class MapCanvas : SKControl
         if (_hoverStack == null || _panning || _bandActive || State is not { } st || !st.Stacks.TryGetValue(_hoverStack, out var stack)) return;
         HidePopup();
         _popup = CounterDetailPopup.Create(_s, st, stack, _pieces, DeviceDpi / 96f);
+        _popup.PointerEntered += _graceTimer.Stop;
+        _popup.PointerLeft += () => { if (!IsDisposed) BeginInvoke(HidePopup); };
         _popup.ShowAt(Cursor.Position);
     }
 
     public void HidePopup()
     {
         _hoverTimer.Stop();
+        _graceTimer.Stop();
         _popup?.Close();
         _popup?.Dispose();
         _popup = null;
@@ -649,6 +655,7 @@ sealed partial class MapCanvas : SKControl
             HidePopup();
             _drag.Dispose();
             _hoverTimer.Dispose();
+            _graceTimer.Dispose();
         }
         base.Dispose(disposing);
     }

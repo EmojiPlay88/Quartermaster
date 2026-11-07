@@ -22,6 +22,7 @@ sealed class InventoryWindow : Form
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 300 };
     readonly Dictionary<string, int> _cycle = new(StringComparer.OrdinalIgnoreCase);
     List<InventoryRow> _rows = new();
+    readonly BreakdownTip _tip = new();
     GameSession? _game;
     bool _closing;
     bool _loadingCombos;
@@ -50,6 +51,8 @@ sealed class InventoryWindow : Form
         _key.SelectedIndexChanged += (_, _) => Run(() => { _cycle.Clear(); FillKeyNames(); Reload(); });
         _keyName.SelectedIndexChanged += (_, _) => Run(() => { if (!_loadingCombos) { _cycle.Clear(); Reload(); } });
         _filter.TextChanged += (_, _) => { _cycle.Clear(); Kick(); };
+        _list.MouseMove += (_, e) => Run(() => TotalTip(e.Location));
+        _list.MouseLeave += (_, _) => _tip.Hide();
         _list.DoubleClick += (_, _) => Run(CycleSelected);
         _debounce.Tick += (_, _) => { _debounce.Stop(); Run(() => { FillKeyNames(); Reload(); }); };
 
@@ -112,7 +115,7 @@ sealed class InventoryWindow : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { Unhook(); _debounce.Dispose(); }
+        if (disposing) { Unhook(); _debounce.Dispose(); _tip.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -159,6 +162,32 @@ sealed class InventoryWindow : Form
             if (sel != null && string.Equals(sel, r.Group, StringComparison.OrdinalIgnoreCase)) it.Selected = true;
         }
         _list.EndUpdate();
+    }
+
+    string? _tipGroup;
+
+    /// <summary>Hovering a Total cell lists the pieces that add up to it.</summary>
+    void TotalTip(Point at)
+    {
+        var hit = _list.HitTest(at);
+        var group = hit.Item != null && hit.SubItem != null && hit.Item.SubItems.IndexOf(hit.SubItem) == 2 ? hit.Item.Text : null;
+        if (group == _tipGroup) return;
+        _tipGroup = group;
+        _tip.Hide();
+        if (group == null || CurrentKey != InventoryKey.LedgerProperty || _s.Game is not { } game || _s.Rules is not { } pack) return;
+        var row = _rows.FirstOrDefault(r => string.Equals(r.Group, group, StringComparison.OrdinalIgnoreCase));
+        var prop = pack.PropertyByName((_keyName.SelectedItem as string ?? "").Trim());
+        if (row?.Total is not { } total || prop == null) return;
+        var parts = new List<(string, double)>();
+        foreach (var id in row.PieceIds)
+        {
+            if (!game.State.Pieces.TryGetValue(id, out var p) || Ledger.Get(game.State, LedgerKey.Piece(id), prop.Id) is not { } v) continue;
+            string name;
+            try { name = PieceInfo.Name(p); } catch (Exception ex) when (ex is not OutOfMemoryException) { name = ""; }
+            parts.Add((string.IsNullOrWhiteSpace(name) ? id : name, v));
+        }
+        var title = $"{prop.Name} {LedgerTable.FormatNumber(total)}  ({row.Group}, {row.Count} {(row.Count == 1 ? "piece" : "pieces")})";
+        _tip.Show(_list, new Point(at.X + 12, at.Y + 18), LedgerBreakdown.ForTotal(title, parts));
     }
 
     void CycleSelected()
