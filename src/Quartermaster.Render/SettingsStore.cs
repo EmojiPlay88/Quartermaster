@@ -17,6 +17,9 @@ public sealed class SettingsStore(string root)
     /// <summary>%LOCALAPPDATA%\Quartermaster, redirected by QUARTERMASTER_LAYOUT_ROOT.</summary>
     public static string DefaultRoot => RulesMemory.DefaultRoot;
 
+    /// <summary>The folder holding <c>settings.json</c> (and, beside it, the rules index and autosaves).</summary>
+    public string Root => root;
+
     string FilePath => Path.Combine(root, "settings.json");
 
     /// <summary>The settings last loaded or saved (defaults until then).</summary>
@@ -107,8 +110,42 @@ public sealed class SettingsStore(string root)
             ShortcutOverrides = r.Map<string>("ShortcutOverrides", (JsonNode? n, out string s) => { s = ""; return n is JsonValue v && v.TryGetValue(out s!) && s != null; }),
             LeftSplitterDistance = r.Double("LeftSplitterDistance", d.LeftSplitterDistance, 0.2, 0.8),
             LastModulePath = r.NullableStr("LastModulePath"),
+            Modules = r.List<ModuleEntry>("Modules", ReadModule) is { Count: > 0 } mods ? mods : d.Modules,
+            RecentSaves = r.Map<IReadOnlyList<string>>("RecentSaves", (JsonNode? n, out IReadOnlyList<string> l) =>
+            {
+                l = Array.Empty<string>();
+                if (n is not JsonArray arr) return false;
+                l = arr.Select(x => x is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null).OfType<string>().Take(10).ToList();
+                return true;
+            }) is { Count: > 0 } recent ? recent : d.RecentSaves,
         };
     }
+
+    static bool ReadModule(JsonNode? n, out ModuleEntry e)
+    {
+        e = null!;
+        if (n is not JsonObject o) return false;
+        static string? S(JsonObject o, string k) => o[k] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+        var path = S(o, "Path");
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        long size = o["Size"] is JsonValue sv && sv.TryGetValue<long>(out var sz) && sz >= 0 ? sz : 0;
+        var written = DateTime.TryParse(S(o, "LastWriteUtc"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var w) ? w.ToUniversalTime() : DateTime.MinValue;
+        DateTimeOffset? played = DateTimeOffset.TryParse(S(o, "LastPlayed"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var p) ? p : null;
+        var sha = S(o, "Sha256");
+        e = new ModuleEntry(path, string.IsNullOrEmpty(sha) ? null : sha, size, written, S(o, "Title") ?? Path.GetFileNameWithoutExtension(path), S(o, "Version") ?? "", played);
+        return true;
+    }
+
+    static JsonObject ModuleJson(ModuleEntry m) => new()
+    {
+        ["Path"] = m.Path,
+        ["Sha256"] = m.Sha256,
+        ["Size"] = m.Size,
+        ["LastWriteUtc"] = m.LastWriteUtc.ToString("o", CultureInfo.InvariantCulture),
+        ["Title"] = m.Title,
+        ["Version"] = m.Version,
+        ["LastPlayed"] = m.LastPlayed?.ToString("o", CultureInfo.InvariantCulture),
+    };
 
     public static bool IsValidTimeFormat(string? s) => s != null && ValidTimeFormat(s) != null;
 
@@ -191,6 +228,24 @@ public sealed class SettingsStore(string root)
 
         public delegate bool TryRead<T>(JsonNode? node, out T value);
 
+        public IReadOnlyList<T> List<T>(string field, TryRead<T> read)
+        {
+            var result = new List<T>();
+            if (!TryGet(field, out var n)) return result;
+            if (n is not JsonArray arr)
+            {
+                Warn(log, field, "must be a list");
+                return result;
+            }
+            var bad = false;
+            foreach (var v in arr)
+            {
+                if (read(v, out var x)) result.Add(x); else bad = true;
+            }
+            if (bad) Warn(log, field, "has entries of the wrong type (skipped)");
+            return result;
+        }
+
         public IReadOnlyDictionary<string, T> Map<T>(string field, TryRead<T> read)
         {
             var result = new Dictionary<string, T>();
@@ -264,5 +319,7 @@ public sealed class SettingsStore(string root)
         ["ShortcutOverrides"] = new JsonObject(s.ShortcutOverrides.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)JsonValue.Create(p.Value)))),
         ["LeftSplitterDistance"] = s.LeftSplitterDistance,
         ["LastModulePath"] = s.LastModulePath,
+        ["Modules"] = new JsonArray(s.Modules.Select(m => (JsonNode?)ModuleJson(m)).ToArray()),
+        ["RecentSaves"] = new JsonObject(s.RecentSaves.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)new JsonArray(p.Value.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray())))),
     };
 }

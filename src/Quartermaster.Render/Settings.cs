@@ -11,8 +11,12 @@ public sealed record Settings
     static readonly IReadOnlyDictionary<string, bool> NoToolbar = new Dictionary<string, bool>();
     static readonly IReadOnlyDictionary<string, string> NoShortcuts = new Dictionary<string, string>();
 
+    static readonly IReadOnlyList<ModuleEntry> NoModules = Array.Empty<ModuleEntry>();
+    static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> NoRecent = new Dictionary<string, IReadOnlyList<string>>();
+
     // General
-    public bool ReopenLastModule { get; init; }
+    /// <summary>"Select the last module in the launcher" (never skips the launcher).</summary>
+    public bool ReopenLastModule { get; init; } = true;
     public int AutosaveMinutes { get; init; } = 5;
     public bool ConfirmDelete { get; init; } = true;
     public bool GameMasterMode { get; init; }
@@ -58,6 +62,12 @@ public sealed record Settings
     /// <summary>Fraction of the left panel given to the module tree.</summary>
     public double LeftSplitterDistance { get; init; } = 0.6;
     public string? LastModulePath { get; init; }
+
+    // Launcher
+    /// <summary>The launcher's module list.</summary>
+    public IReadOnlyList<ModuleEntry> Modules { get; init; } = NoModules;
+    /// <summary>Per module SHA-256, recently opened or saved game files, newest first (max 10).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> RecentSaves { get; init; } = NoRecent;
 
     public bool IsToolbarVisible(string id) => !ToolbarVisible.TryGetValue(id, out var v) || v;
 

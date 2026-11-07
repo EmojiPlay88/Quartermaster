@@ -34,13 +34,22 @@ public sealed class VmodArchive : IDisposable
 
     public static string ImagePath(string imageName) => "images/" + imageName;
 
+    static string Sha256Of(Stream s) => Convert.ToHexString(SHA256.HashData(s)).ToLowerInvariant();
+
+    /// <summary>The module hash <see cref="Sha256"/> would have, without opening the archive. Throws on I/O errors.</summary>
+    public static string ComputeSha256(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return Sha256Of(fs);
+    }
+
     /// <summary>Opens a module. Throws <see cref="InvalidDataException"/> if it is not a zip or has no buildFile.</summary>
     public static VmodArchive Open(string path)
     {
         var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         try
         {
-            var sha = Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant();
+            var sha = Sha256Of(fs);
             fs.Position = 0;
             var zip = new ZipArchive(fs, ZipArchiveMode.Read, leaveOpen: true);
             try
