@@ -53,7 +53,9 @@ public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTime
 public sealed record AcknowledgeWarning(int Index, string Message, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record QueueRuns(IReadOnlyList<PendingRun> Runs, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record ResolveRun(string RunId, IReadOnlyList<string?> PieceIds, DateTimeOffset? At = null, string? Who = null) : GameCommand;
-public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null, string? SideId = null) : GameCommand;
+/// <summary>FormulaId: set on a calc line that shows a formula's working (see <see cref="LogEntry.FormulaId"/>).</summary>
+public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null, string? SideId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null) : GameCommand;
 
 /// <summary>Log line recorded after stepping back to a checkpoint. Folding: never an undoable action of its own.</summary>
 public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone, string Target, DateTimeOffset? At = null, string? Who = null) : GameCommand;

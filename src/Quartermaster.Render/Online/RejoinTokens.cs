@@ -41,8 +41,15 @@ public sealed class RejoinTokens(string root)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var tmp = path + ".tmp";
-            File.WriteAllText(tmp, token);
-            File.Move(tmp, path, overwrite: true);
+            try
+            {
+                File.WriteAllText(tmp, token);
+                File.Move(tmp, path, overwrite: true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                try { File.Delete(tmp); } catch (Exception d) when (d is IOException or UnauthorizedAccessException) { }
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }

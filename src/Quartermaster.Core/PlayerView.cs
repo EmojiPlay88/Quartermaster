@@ -307,9 +307,14 @@ public static class PlayerView
             {
                 var (o, text) = outcomes[i];
                 if (o == Outcome.Keep)
-                    lines.Add(entryOfLine[i] is { } e && HidesInput(e) && log[i].Text is { } t
-                        ? log[i] with { Text = t.Replace(e.Working!, $"{e.PropertyId} {Num(e.Before)} → {Num(e.After)}", StringComparison.Ordinal) }
-                        : log[i]);
+                {
+                    var line = log[i];
+                    if (entryOfLine[i] is { } e && HidesInput(e) && line.Text is { } t)
+                        line = line with { Text = t.Replace(e.Working!, $"{e.PropertyId} {Num(e.Before)} → {Num(e.After)}", StringComparison.Ordinal) };
+                    else if (entryOfLine[i] == null && line.FormulaId != null && FormulaHidesInput(line.FormulaId))
+                        line = line with { Text = HiddenWorkingText(line.FormulaId) };   // an output-less run's working line
+                    lines.Add(line);
+                }
                 else if (o == Outcome.Redact) lines.Add(log[i] with { Text = text!, PieceId = null });
             }
             v.Log = lines;
@@ -332,9 +337,21 @@ public static class PlayerView
             v.Pending = runs;
         }
 
-        /// <summary>A formula entry whose working shows an input this viewer may not see (the result itself stays visible).</summary>
-        private bool HidesInput(LedgerEntry e) =>
-            e.Working != null && e.FormulaId != null && _hiddenInputFormulas.Contains(e.FormulaId);
+        /// <summary>
+        /// True when a working of this formula may show an input the viewer can't see. Fails closed: no id, or a formula no longer in the
+        /// pack (its bindings are unknown), counts as hiding.
+        /// </summary>
+        private bool FormulaHidesInput(string? formulaId) =>
+            string.IsNullOrEmpty(formulaId) || _hiddenInputFormulas.Contains(formulaId)
+            || !(_pack.Formulas ?? new()).Any(f => f != null && f.Id == formulaId);
+
+        /// <summary>A formula entry whose working may show an input this viewer may not see (the result itself stays visible).</summary>
+        private bool HidesInput(LedgerEntry e) => e.Working != null && FormulaHidesInput(e.FormulaId);
+
+        /// <summary>The text shown in place of a calc line's working that may hold a hidden input.</summary>
+        private string HiddenWorkingText(string? formulaId) =>
+            ((_pack.Formulas ?? new()).FirstOrDefault(f => f != null && f.Id == formulaId)?.Name is { Length: > 0 } n ? n : "Formula")
+            + ": calculated (inputs hidden)";
 
         /// <summary>Removed or masked pieces and private or unknown holders lose every value; other keys are filtered per property.</summary>
         private bool WholeKeyHidden(string key)

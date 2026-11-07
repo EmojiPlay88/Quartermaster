@@ -4,7 +4,9 @@ namespace Quartermaster.Core;
 
 /// <summary>One line of the human-readable game log. Kind is a <see cref="LogKind"/> value; unknown kinds are shown as system.</summary>
 /// <summary>SideId: the side the entry was explicitly made for (formula runs, stamped by the caller); null when not stamped.</summary>
-public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At, int? Turn = null, string? Phase = null, string? SideId = null);
+/// <summary>FormulaId: the formula whose working a calc line shows (so <see cref="PlayerView"/> can hide working with hidden inputs); null otherwise.</summary>
+public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At, int? Turn = null, string? Phase = null, string? SideId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null);
 
 public static class LogKind
 {
@@ -29,9 +31,10 @@ static class LogBuilder
 {
     static string Num(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
-    static LogEntry Make(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? mapId = null, string? sideId = null) =>
+    static LogEntry Make(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? mapId = null, string? sideId = null,
+        string? formulaId = null) =>
         new(s.Log.Count + 1, kind, text, who, pieceId, mapId, at ?? DateTimeOffset.UnixEpoch, s.Position?.Turn, s.Position == null ? null : s.Turn.Phase,
-            string.IsNullOrWhiteSpace(sideId) ? null : sideId);
+            string.IsNullOrWhiteSpace(sideId) ? null : sideId, string.IsNullOrWhiteSpace(formulaId) ? null : formulaId);
 
     public static LogEntry Place(GameState s, AddPiece a) =>
         Make(s, LogKind.Place, a.LogText ?? $"piece {a.PieceId} placed", a.Who, a.At, a.PieceId, a.MapId);
@@ -73,8 +76,9 @@ static class LogBuilder
         return Make(s, kind, text, d.Who, d.At, pieceId, sideId: d.SideId);
     }
 
-    public static LogEntry Line(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? sideId = null) =>
-        Make(s, kind, text, who, at, pieceId, sideId: sideId);
+    public static LogEntry Line(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? sideId = null,
+        string? formulaId = null) =>
+        Make(s, kind, text, who, at, pieceId, sideId: sideId, formulaId: formulaId);
 
     public static LogEntry Notes(GameState s, SetNotes n) => Make(s, LogKind.Note, "notes updated", n.Who, n.At);
 

@@ -83,7 +83,8 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         }
     }
 
-    private void Calc(string text, string? pieceId = null) => Exec(new AddLogLine(LogKind.Calc, text, pieceId, SideId: Stamp()));
+    private void Calc(string text, string? pieceId = null, string? formulaId = null) =>
+        Exec(new AddLogLine(LogKind.Calc, text, pieceId, SideId: Stamp(), FormulaId: formulaId));
 
     // Hot-seat stamps. Player-driven applies are run for the player at the table (ModuleSession.ActorSide). Automatic triggers
     // (OnStart, OnMove) are run for the phase: its acting side when it has one, held or not; else the player at the table.
@@ -266,7 +267,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private void LogWorking(FormulaTrace trace, string unit, string? tag)
     {
         if (trace.Outputs.Count > 0 || string.IsNullOrWhiteSpace(trace.Working)) return;
-        Calc($"{unit}: {trace.Working}" + (tag == null ? "" : $" ({tag})"), trace.PieceId);
+        Calc($"{unit}: {trace.Working}" + (tag == null ? "" : $" ({tag})"), trace.PieceId, trace.Formula.Id);
     }
 
     private string? UnitName(string? pieceId) =>

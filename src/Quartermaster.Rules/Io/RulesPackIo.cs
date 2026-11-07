@@ -56,6 +56,42 @@ public static class RulesPackIo
         return LoadZip(ms, "rules pack");
     }
 
+    /// <summary>Most entries a pack received from someone else may hold (<see cref="FromBytes(byte[], long, int)"/>).</summary>
+    public const int MaxReceivedEntries = 256;
+
+    /// <summary>
+    /// A pack from untrusted zip bytes (sent by another player): at most <paramref name="maxEntries"/> entries and
+    /// <paramref name="maxUncompressed"/> bytes inflated in all, counted while reading (header sizes can lie). Throws InvalidDataException
+    /// beyond either limit, or like <see cref="Load"/>.
+    /// </summary>
+    public static RulesPack FromBytes(byte[] zipBytes, long maxUncompressed, int maxEntries = MaxReceivedEntries)
+    {
+        ArgumentNullException.ThrowIfNull(zipBytes);
+        using var ms = new MemoryStream(zipBytes, writable: false);
+        return LoadZip(ms, "rules pack", new Budget(maxUncompressed, maxEntries));
+    }
+
+    /// <summary>Limits for reading an untrusted zip; <see cref="Left"/> is shared by every entry read.</summary>
+    private sealed class Budget(long maxBytes, int maxEntries)
+    {
+        public int MaxEntries { get; } = maxEntries;
+        public long Left { get; set; } = maxBytes;
+    }
+
+    private static string ReadBounded(Stream s, Budget budget, string entry)
+    {
+        using var output = new MemoryStream();
+        var buf = new byte[81920];
+        int n;
+        while ((n = s.Read(buf, 0, buf.Length)) > 0)
+        {
+            budget.Left -= n;
+            if (budget.Left < 0) throw new InvalidDataException($"{entry}: the rules pack is too large.");
+            output.Write(buf, 0, n);
+        }
+        return new UTF8Encoding(false).GetString(output.GetBuffer(), 0, (int)output.Length).TrimStart('\uFEFF');
+    }
+
     /// <summary>The pack as zip bytes, exactly as <see cref="Save"/> writes the file (validates first).</summary>
     public static byte[] ToBytes(RulesPack pack)
     {
@@ -77,7 +113,7 @@ public static class RulesPackIo
         }
     }
 
-    private static RulesPack LoadZip(Stream stream, string name)
+    private static RulesPack LoadZip(Stream stream, string name, Budget? budget = null)
     {
         ZipArchive zip;
         try { zip = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true); }
@@ -87,12 +123,19 @@ public static class RulesPackIo
         }
         using (zip)
         {
+            if (budget != null && zip.Entries.Count > budget.MaxEntries)
+                throw new InvalidDataException($"{name}: too many entries ({zip.Entries.Count}).");
             string? ReadZip(string entry)
             {
                 var e = zip.GetEntry(entry);
                 if (e == null) return null;
                 try
                 {
+                    if (budget != null)
+                    {
+                        using var s = e.Open();
+                        return ReadBounded(s, budget, entry);
+                    }
                     using var r = new StreamReader(e.Open(), Encoding.UTF8);
                     return r.ReadToEnd();
                 }

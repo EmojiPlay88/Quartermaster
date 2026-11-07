@@ -57,6 +57,7 @@ public sealed class GuestSession : IDisposable
     private readonly Dictionary<string, bool> _expanded = new(StringComparer.Ordinal);
     private string? _token;
     private IReadOnlySet<string> _sides = new HashSet<string>();
+    private string? _packSha;
     private long _lastVersion;
     private bool _disposed;
 
@@ -252,11 +253,25 @@ public sealed class GuestSession : IDisposable
         }
     }
 
-    private static RulesPack? ReadPack(byte[]? bytes)
+    /// <summary>Most bytes a received rules pack may inflate to, in all entries together.</summary>
+    public const long MaxPackBytes = Framing.MaxFrame * 4L;
+
+    /// <summary>The pack and its hash, or null when it can't be read (bounded: entry count and inflated size, see <see cref="MaxPackBytes"/>).</summary>
+    private static (RulesPack Pack, string Sha)? ReadPack(byte[]? bytes)
     {
         if (bytes == null || bytes.Length == 0 || bytes.Length > Framing.MaxFrame) return null;
-        try { return RulesPackIo.FromBytes(bytes); }
+        try
+        {
+            var pack = RulesPackIo.FromBytes(bytes, MaxPackBytes);
+            return (pack, RulesPackIo.ComputeSha256(pack));
+        }
         catch (Exception e) when (e is not OutOfMemoryException) { return null; }
+    }
+
+    private void LoadPack((RulesPack Pack, string Sha) p)
+    {
+        _packSha = p.Sha;
+        _s.LoadGuestRules(p.Pack);
     }
 
     private void Welcomed(Welcome w)
@@ -276,14 +291,15 @@ public sealed class GuestSession : IDisposable
         FreeSides = (w.FreeSides ?? Array.Empty<string>()).ToList();
         _lastVersion = 0;   // a re-attached host numbers its snapshots afresh; everything after a welcome is new
         _sides = new HashSet<string>();   // a seat that holds sides gets its snapshot right after the welcome
-        _s.LoadGuestRules(pack);
+        LoadPack(pack);
         SetState(GuestState.ChoosingSide, null);
     }
 
     private void NewRules(byte[]? bytes)
     {
         if (ReadPack(bytes) is not { } pack) { Malformed++; return; }
-        _s.LoadGuestRules(pack);
+        if (pack.Sha == _packSha) return;   // the same pack again: nothing changes
+        LoadPack(pack);
     }
 
     private void Show(Snapshot snap)
@@ -298,28 +314,36 @@ public sealed class GuestSession : IDisposable
             NativeSave.ValidateState(state);
         }
         catch (Exception e) when (e is CryptographicException or JsonException or NotSupportedException or InvalidOperationException
-            or InvalidDataException or ArgumentException or FormatException or NullReferenceException)
+            or InvalidDataException or ArgumentException or FormatException)
         {
             Malformed++;
             return;
         }
-        _lastVersion = snap.Version;
         ApplyOverlay(state);
         var held = (state.Players ?? new List<PlayerDef>()).FirstOrDefault(p => p.Id == PlayerId)?.Sides;
-        _sides = held is { Count: > 0 } ? held.ToHashSet() : new HashSet<string>();
-        _s.ApplySnapshot(state, _sides.Count > 0 ? _sides : null);
+        var sides = held is { Count: > 0 } ? held.ToHashSet() : new HashSet<string>();
+        _s.ApplySnapshot(state, sides.Count > 0 ? sides : null);
+        // Committed only once the snapshot is shown.
+        _lastVersion = snap.Version;
+        _sides = sides;
+        PruneOverlay(state);
         SetState(_sides.Count > 0 ? GuestState.Playing : GuestState.ChoosingSide, null);
     }
 
-    /// <summary>Reapplies the guest's own view toggles; entries for pieces or stacks that no longer exist are dropped.</summary>
+    /// <summary>Reapplies the guest's own view toggles to a new snapshot (before it is shown).</summary>
     private void ApplyOverlay(GameState state)
     {
-        foreach (var (id, on) in _trails.ToList())
+        foreach (var (id, on) in _trails)
             if (state.Pieces.TryGetValue(id, out var p)) p.TrailVisible = on;
-            else _trails.Remove(id);
-        foreach (var (id, on) in _expanded.ToList())
+        foreach (var (id, on) in _expanded)
             if (state.Stacks.TryGetValue(id, out var st)) st.Expanded = on;
-            else _expanded.Remove(id);
+    }
+
+    /// <summary>Forgets toggles of pieces and stacks the shown snapshot no longer has.</summary>
+    private void PruneOverlay(GameState state)
+    {
+        foreach (var id in _trails.Keys.Where(id => !state.Pieces.ContainsKey(id)).ToList()) _trails.Remove(id);
+        foreach (var id in _expanded.Keys.Where(id => !state.Stacks.ContainsKey(id)).ToList()) _expanded.Remove(id);
     }
 
     private void Result(NetIntentResult r)

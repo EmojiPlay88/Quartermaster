@@ -71,6 +71,12 @@ public class GuestSessionTests : IDisposable
                     },
                     Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
                 },
+                new FormulaDef
+                {
+                    // No outputs: its working is logged as a calc line (PhaseController.LogWorking).
+                    Id = "f-peek", Name = "Depot check", Text = "S * 1",
+                    Bindings = new() { new VariableBinding { Variable = "S", Kind = BindingKind.Holder, HolderId = "reddepot", Property = "supply" } },
+                },
             }).ToList(),
         };
     }
@@ -192,6 +198,11 @@ public class GuestSessionTests : IDisposable
         var verdict = Await(r, bob.A.ApplyFormulaAsync(new FormulaIntent("f-mix", PhaseFixture.BlueOne, null,
             new Dictionary<string, string> { ["W"] = "7", ["S"] = "1" }, false)));
         Assert.Equal(FormulaBox.Hidden, verdict.Boxes.Single(b => b.Var == "S").State);
+        Assert.DoesNotContain(SecretStock.ToString(), (verdict.Message ?? "") + JsonSerializer.Serialize(verdict, QuartermasterJson.Options));
+        var peek = Await(r, bob.A.ApplyFormulaAsync(new FormulaIntent("f-peek", null, null, new Dictionary<string, string>(), true)));
+        Assert.True(peek.Applied, peek.Message);
+        Assert.DoesNotContain(SecretStock.ToString(), (peek.Message ?? "") + JsonSerializer.Serialize(peek, QuartermasterJson.Options));
+        Assert.Contains(r.Host.Game!.State.Log, l => l.FormulaId == "f-peek" && l.Text.Contains(SecretStock.ToString()));   // the host logged the working
         // Another side's unit and a hidden one: refused, nothing about them comes back.
         bob.A.EditLedger(LedgerKey.Piece(PhaseFixture.RedOne), "fuel", 1, "drain");
         bob.A.Move(new[] { new MovePieces(new[] { "secret1" }, "Main Map", new PointD(1, 1), null) });
@@ -238,6 +249,47 @@ public class GuestSessionTests : IDisposable
         Assert.Contains(blueView.LedgerHistory, e => e.FormulaId == "f-mix" && e.Working == null && e.After == 424252);
         var red = Json(PlayerView.For(g.State, s.Rules, s.Model, new HashSet<string> { "red", "blue" }));
         Assert.Contains("424242", red);                                  // a viewer holding the depot sees the working
+    }
+
+    [Fact]
+    public void PlayerView_FormulaDeletedFromPack_OldWorkingStillRedacted()
+    {
+        var r = Open();
+        var s = r.Host;
+        var g = s.Game!;
+        var trace = s.Runner!.Run(g.State, new RunRequest("f-mix", PhaseFixture.BlueOne, new Dictionary<string, string>(),
+            new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+        foreach (var cmd in s.Runner.Commands(trace, null, sideId: "blue")) g.Execute(cmd);
+        s.UpdateRules(p => p with { Formulas = p.Formulas.Where(f => f.Id != "f-mix").ToList() });
+        Assert.Contains("424242", Json(g.State));
+        var blueView = PlayerView.For(g.State, s.Rules, s.Model, new HashSet<string> { "blue" });
+        Assert.DoesNotContain("424242", Json(blueView));
+        Assert.Contains(blueView.LedgerHistory, e => e.FormulaId == "f-mix" && e.Working == null && e.After == 424252);
+
+        // An entry with working but no formula id at all fails closed too.
+        g.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.BlueOne), "water", 424252, 3, "formula", null, null, null, "W - 424242 = 3"));
+        Assert.DoesNotContain("424242 =", Json(PlayerView.For(g.State, s.Rules, s.Model, new HashSet<string> { "blue" })));
+    }
+
+    [Fact]
+    public void PlayerView_OutputlessFormula_HiddenInput_HotSeatViewRedacted()
+    {
+        var r = Open();
+        var s = r.Host;
+        var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        s.SetViewSides(new HashSet<string> { "blue" });   // hot-seat: Blue at the table runs it, so the line is stamped Blue
+        var trace = s.Runner!.Run(s.Game!.State, new RunRequest("f-peek", null, new Dictionary<string, string>(),
+            new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.Null(trace.Error);
+        Assert.True(c.ApplyFormula(null, null, trace, true));
+        var line = Assert.Single(s.Game!.State.Log, l => l.FormulaId == "f-peek");
+        Assert.Contains("424242", line.Text);
+        Assert.Equal("blue", line.SideId);
+        var blueView = PlayerView.For(s.Game!.State, s.Rules, s.Model, new HashSet<string> { "blue" });
+        Assert.DoesNotContain("424242", Json(blueView));
+        Assert.Contains(blueView.Log, l => l.FormulaId == "f-peek" && l.Text == "Depot check: calculated (inputs hidden)");
+        // Hot-seat: the screen's filtered view says the same.
+        Assert.DoesNotContain("424242", Json(s.View));
     }
 
     // ---- guest mode ----
@@ -467,16 +519,85 @@ public class GuestSessionTests : IDisposable
         // A gzip bomb: inflates past the frame cap.
         bob.T.InjectPlain(Framing.Encode<GamePayload>(new Snapshot(version + 4, Gzip.Compress(new byte[Framing.MaxFrame + 1024]))));
         bob.T.InjectPlain(Framing.Encode<GamePayload>(new RulesChanged(new byte[] { 9, 9, 9 })));
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new RulesChanged(ZipBomb(r.Host.Rules!))));
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new RulesChanged(ManyEntries(r.Host.Rules!))));
         bob.T.InjectPlain(Framing.Encode<GamePayload>(new NetResult(Guid.NewGuid(), true, null, null)));   // unknown id
         r.D.Pump();
 
         Assert.Equal(3, bob.T.DroppedSealed);   // random bytes, another key, an empty payload
         Assert.Equal(dropped + 4, bob.G.Dropped);
-        Assert.Equal(malformed + 5, bob.G.Malformed);
+        Assert.Equal(malformed + 7, bob.G.Malformed);
         Assert.Equal(version, bob.G.SnapshotVersion);
         Assert.Equal(view, Json(bob.S.Game!.State));
         Assert.Equal(GuestState.Playing, bob.G.State);
         Assert.Equal(r.Host.Rules!.Id, bob.S.Rules!.Id);
+    }
+
+    /// <summary>A real pack plus one entry that inflates to 40 MB (a few KB on the wire).</summary>
+    private static byte[] ZipBomb(RulesPack pack) => WithEntries(pack, 1, 40 * 1024 * 1024);
+
+    /// <summary>A real pack plus 300 tiny entries.</summary>
+    private static byte[] ManyEntries(RulesPack pack) => WithEntries(pack, 300, 2);
+
+    private static byte[] WithEntries(RulesPack pack, int count, int size)
+    {
+        var ms = new MemoryStream();
+        ms.Write(RulesPackIo.ToBytes(pack));
+        using (var z = new ZipArchive(ms, ZipArchiveMode.Update, leaveOpen: true))
+            for (var i = 0; i < count; i++)
+            {
+                using var e = z.CreateEntry($"formulas/x{i}.json", CompressionLevel.Optimal).Open();
+                var chunk = new byte[1024 * 1024];
+                Array.Fill(chunk, (byte)' ');
+                for (var left = size; left > 0; left -= chunk.Length) e.Write(chunk, 0, Math.Min(left, chunk.Length));
+            }
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void RulesPack_FromBytes_Bounded()
+    {
+        var pack = Pack(new string('a', 64));
+        var bytes = RulesPackIo.ToBytes(pack);
+        Assert.Equal(pack.Id, RulesPackIo.FromBytes(bytes, GuestSession.MaxPackBytes).Id);
+        var bomb = ZipBomb(pack);
+        Assert.True(bomb.Length < Framing.MaxFrame);
+        Assert.Throws<InvalidDataException>(() => RulesPackIo.FromBytes(bomb, GuestSession.MaxPackBytes));
+        Assert.Throws<InvalidDataException>(() => RulesPackIo.FromBytes(ManyEntries(pack), GuestSession.MaxPackBytes));
+        Assert.Throws<InvalidDataException>(() => RulesPackIo.FromBytes(bytes, 10));   // the cap counts what is inflated
+    }
+
+    [Fact]
+    public void Welcome_ZipBombPack_Refused_NoCrash()
+    {
+        var r = Open();
+        var s = Session(r.ModulePath, "bombed");
+        var raw = r.Relay.Guest("m8");
+        var t = new SealingTransport(raw, r.Key);
+        var g = new GuestSession(s, t, "QQQ222", "Zoe", r.D.Post, new RejoinTokens(Path.Combine(_tmp, "tokens-bomb")));
+        _online.Add(g);
+        t.InjectPlain(Framing.Encode<GamePayload>(new Welcome("p9", "00aa", ZipBomb(r.Host.Rules!), new[] { "blue" })));
+        r.D.Pump();
+        Assert.Equal(GuestState.Refused, g.State);
+        Assert.Equal(GuestSession.BadPackText, g.StatusText);
+        Assert.Null(s.Rules);
+    }
+
+    [Fact]
+    public void RulesChanged_SamePack_Skipped()
+    {
+        var r = Open();
+        var bob = Join(r);
+        Pick(r, bob);
+        var changes = 0;
+        bob.S.RulesChanged += () => changes++;
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new RulesChanged(RulesPackIo.ToBytes(r.Host.Rules!))));
+        r.D.Pump();
+        Assert.Equal(0, changes);
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new RulesChanged(RulesPackIo.ToBytes(r.Host.Rules! with { Name = "Other" }))));
+        r.D.Pump();
+        Assert.Equal(1, changes);
+        Assert.Equal("Other", bob.S.Rules!.Name);
     }
 
     [Fact]
