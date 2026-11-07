@@ -5,7 +5,7 @@ namespace Quartermaster.Core;
 /// <summary>Native .qsave format: JSON { format, moduleSha256, rulesSha256?, snapshot, log }.</summary>
 public static class NativeSave
 {
-    public const int FormatVersion = 5;
+    public const int FormatVersion = 6;
     const int MinFormat = 1;
 
     sealed class SaveFile
@@ -126,10 +126,21 @@ public static class NativeSave
             var replay = genesis.DeepClone();
             foreach (var c in f.Log) replay.Apply(c);
             if (JsonSerializer.Serialize(replay, QuartermasterJson.Options) != JsonSerializer.Serialize(f.Snapshot, QuartermasterJson.Options))
-            { why = "replay mismatch"; return false; }
+            {
+                // Format-5 saves predate LedgerEntry.Turn/Phase: tolerate that difference only, and keep the replayed state.
+                if (f.Format >= 6 || StripTurns(replay) != StripTurns(f.Snapshot)) { why = "replay mismatch"; return false; }
+                session.ReplaceState(replay);
+            }
             session.RestoreHistory(genesis, actions, cps);
             return true;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { why = ex.GetType().Name + ": " + ex.Message; return false; }
+    }
+
+    static string StripTurns(GameState s)
+    {
+        var copy = s.DeepClone();
+        copy.LedgerHistory = copy.LedgerHistory.Select(e => e with { Turn = null, Phase = null }).ToList();
+        return JsonSerializer.Serialize(copy, QuartermasterJson.Options);
     }
 }

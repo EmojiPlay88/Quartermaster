@@ -302,6 +302,8 @@ public sealed class GameSession
         }
     }
 
+    internal void ReplaceState(GameState state) => State = state;
+
     internal void RestoreLog(IEnumerable<GameCommand> log) => _log.AddRange(log);
 
     /// <summary>Log indices with a cached snapshot (tests).</summary>

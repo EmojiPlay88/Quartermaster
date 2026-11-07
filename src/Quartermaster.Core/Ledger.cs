@@ -5,7 +5,7 @@ using Quartermaster.Vassal;
 namespace Quartermaster.Core;
 
 /// <summary>One change to a ledger value. Source is "formula", "manual" or "seed".</summary>
-public sealed record LedgerEntry(long Seq, string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working);
+public sealed record LedgerEntry(long Seq, string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, int? Turn = null, string? Phase = null);
 
 public sealed record DiceEntry(long Seq, string Purpose, int Count, int Sides, IReadOnlyList<int> Results);
 
