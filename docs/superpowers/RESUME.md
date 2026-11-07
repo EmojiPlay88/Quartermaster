@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-07, after piece 6a (hot-seat) and the launcher were finished on their branches. A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-07, after piece 6a (hot-seat) and the launcher were merged into master (launcher not yet pushed). A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -129,7 +129,7 @@ How the formula window behaves:
 2. The README Status line and Roadmap are current as of piece 5. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
 3. **Piece 6a (hot-seat) is merged and pushed (user tested OK).** Next:
    1. The user hands-on tests hot-seat: two players on the setup page, play through a phase change and the handover screen, mark a property private in the Workbench Visibility tab, step back across a side change, save and load.
-   2. The launcher is built (all five tasks are on its branch; the user's hands-on check is pending). Next: **revise the 6b plan for lobbies** (the launcher's Online lobby button and the setup dialog's online mode are already stubbed), then **build 6b**: live online play through a relay server. It includes the input masking for formula dialogs left open by 6a.
+   2. The launcher is merged into master and the user tested it OK (not yet pushed). Next: **revise the 6b plan for lobbies** (the launcher's Online lobby button and the setup dialog's online mode are already stubbed), then **build 6b**: live online play through a relay server. It includes the input masking for formula dialogs left open by 6a.
    3. Piece 6c: play by turn files.
    After that, OCR for scanned rulebooks (section 8.3). Brainstorm, spec, plan, build, using the superpowers skills.
 4. Residual piece-3 minors are listed at the end of `piece1-followups.md`.
