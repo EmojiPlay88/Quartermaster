@@ -31,7 +31,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Core`: command-log game state and deterministic replay.
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
-- Tests: xUnit under `tests/`. All green after 6b (see the 6b row; counts were 1011 after 6a).
+- Tests: xUnit under `tests/`. All green after 6b: 1266 tests.
 - Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. everything through piece 6a is pushed; push again only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
@@ -49,7 +49,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
 | 4 | Undo / Redo and Step Back by truncate-and-replay of the command log (below) | `specs/2026-11-07-piece4-undo-design.md`, `plans/…piece4…` |
 | 5 | Accessibility layer: breakdown tooltips, alert bar, what-now line, outliner, interface tour, notes (below) | `specs/2026-11-07-piece5-accessibility-design.md`, `plans/…piece5…` |
 | 6a | Multiplayer base: players, rules-pack visibility, player view filter, hot-seat (below) | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6a-hotseat.md` |
-| 6b | Live online play: relay server (Docker), lobbies per module, host-authoritative sessions, guests get only their sides' view, chat, input masking, rejoin. On branch `piece6b-online`, not yet merged to master | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6b-online.md`, `docs/relay-setup.md` |
+| 6b | Live online play: relay server (Docker), lobbies per module, host-authoritative sessions, guests get only their sides' view, chat, input masking, rejoin. Merged to master (not pushed) | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6b-online.md`, `docs/relay-setup.md` |
 | Launcher | VASSAL-style launcher: module list (Add/Remove, rules pack per module), Play offline (Continue, recent saves, New game…, Open saved game…), shared New game setup dialog, launcher <-> game window loop with File → Back to launcher; Online lobby opened by 6b. Smokes: `--screenshot-launcher`, `--screenshot-offline`, `--smoke-launcher <module>` (with `--smoke N`) | `specs/2026-11-07-launcher-design.md`, `plans/2026-11-07-launcher.md` |
 
 All rulings and deferred minors for every piece are in `docs/superpowers/piece1-followups.md`.
@@ -131,7 +131,7 @@ How the formula window behaves:
 3. **Piece 6a (hot-seat) is merged and pushed (user tested OK).** Next:
    1. The user hands-on tests hot-seat: two players on the setup page, play through a phase change and the handover screen, mark a property private in the Workbench Visibility tab, step back across a side change, save and load.
    2. The launcher is merged, pushed and user-tested.
-   3. **Piece 6b (live online play) is built and done** on branch `piece6b-online` (not yet merged to master; the controller merges). It includes the relay server (`src/Quartermaster.Relay`, Docker, `docs/relay-setup.md`), lobbies, host-authoritative sessions, per-side views for guests, chat and formula input masking. An end-to-end test with two guests runs over an in-process relay. Hands-on test by the user is still to do; parked items are in `piece1-followups.md` (section "Piece 6b").
+   3. **Piece 6b (live online play) is built and merged to master** (not pushed yet). It includes the relay server (`src/Quartermaster.Relay`, Docker, `docs/relay-setup.md`), lobbies, host-authoritative sessions, per-side views for guests, chat and formula input masking. An end-to-end test with two guests runs over an in-process relay. Hands-on test by the user is still to do; parked items are in `piece1-followups.md` (section "Piece 6b").
    4. Next: **piece 6c, play by turn files with a mailbox on the VPS relay**; then OCR for scanned rulebooks.
    After that, OCR for scanned rulebooks (section 8.3). Brainstorm, spec, plan, build, using the superpowers skills.
 4. Residual piece-3 minors are listed at the end of `piece1-followups.md`.
