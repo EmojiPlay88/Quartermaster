@@ -42,6 +42,15 @@ public sealed class GameSession
     /// </summary>
     public bool ViewerCopy { get; init; }
     public IReadOnlyList<GameCommand> Log => _log;
+    /// <summary>
+    /// Log index where the local player's current turn began (turn files send <c>Log[TurnBase..]</c>). Always between 0 (the undo
+    /// floor) and <see cref="Log"/>.Count: an undo below it pulls it down, and <see cref="Rebase"/> resets it to 0.
+    /// </summary>
+    public int TurnBase { get; private set; }
+    /// <summary>Starts the local player's next turn here (after sending or receiving a turn).</summary>
+    public void MarkTurnBase() => TurnBase = _log.Count;
+    /// <summary>Restores a saved turn base, clamped to the log.</summary>
+    internal void RestoreTurnBase(int value) => TurnBase = Math.Clamp(value, 0, _log.Count);
     public IReadOnlyList<ActionMark> Actions => _actions;
     /// <summary>Phase/turn boundaries that can be stepped back to. [0] is always game start (or the load point, see <see cref="StartLabel"/>).</summary>
     public IReadOnlyList<Checkpoint> Checkpoints => _checkpoints;
@@ -231,15 +240,24 @@ public sealed class GameSession
     void Truncate(int logIndex)
     {
         // Rebuild state from the nearest snapshot at or before the target.
-        int baseIdx = _cache.Keys.Where(k => k <= logIndex).Max();
-        var state = _cache[baseIdx].DeepClone();
-        for (int i = baseIdx; i < logIndex; i++) state.Apply(_log[i]);
+        var state = StateAt(logIndex);
 
         _log.RemoveRange(logIndex, _log.Count - logIndex);
         _actions.RemoveAll(a => a.Start >= logIndex);
         _checkpoints.RemoveAll(c => c.LogIndex > logIndex);
         foreach (var k in _cacheOrder.Where(k => k > logIndex).ToList()) { _cache.Remove(k); _cacheOrder.Remove(k); }
+        if (TurnBase > logIndex) TurnBase = logIndex;
         State = state;
+    }
+
+    /// <summary>A fresh copy of the state at <paramref name="logIndex"/>, rebuilt from the nearest snapshot; the session is not changed.</summary>
+    public GameState StateAt(int logIndex)
+    {
+        if (logIndex < 0 || logIndex > _log.Count) throw new ArgumentOutOfRangeException(nameof(logIndex));
+        int baseIdx = _cache.Keys.Where(k => k <= logIndex).Max();
+        var state = _cache[baseIdx].DeepClone();
+        for (int i = baseIdx; i < logIndex; i++) state.Apply(_log[i]);
+        return state;
     }
 
     /// <summary>Removes the last logged command (e.g. a trailing <see cref="SteppedBack"/> before Redo) without touching the redo stack.</summary>
@@ -293,6 +311,7 @@ public sealed class GameSession
         _log.Clear();
         _actions.Clear();
         _redo.Clear();
+        TurnBase = 0;
         ResetCache();
         ResetCheckpoints();
     }

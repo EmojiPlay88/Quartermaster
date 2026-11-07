@@ -21,6 +21,9 @@ public static class NativeSave
         /// <summary>True for an online guest's viewer copy (read-only); absent in ordinary saves, so the format stays 7.</summary>
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public bool? ViewerCopy { get; set; }
+        /// <summary>Log index where the local player's turn began (turn files); omitted when 0, so ordinary saves are unchanged.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int TurnBase { get; set; }
     }
 
     const string RebaseNotice = "Undo history in this save did not match the game; undo starts from here.";
@@ -31,7 +34,7 @@ public static class NativeSave
         {
             Format = FormatVersion, ModuleSha256 = s.ModuleSha256, RulesSha256 = s.RulesSha256, Snapshot = s.State, Log = s.Log.ToList(),
             Genesis = s.Genesis, Actions = s.Actions.ToList(), Checkpoints = s.Checkpoints.ToList(),
-            ViewerCopy = s.ViewerCopy ? true : null,
+            ViewerCopy = s.ViewerCopy ? true : null, TurnBase = s.TurnBase,
         };
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(file, QuartermasterJson.Options));
@@ -100,7 +103,7 @@ public static class NativeSave
             LegacyId(f, session);
             return session;
         }
-        if (TryRestoreHistory(f, session, out var why)) { LegacyId(f, session); return session; }
+        if (TryRestoreHistory(f, session, out var why)) { session.RestoreTurnBase(f.TurnBase); LegacyId(f, session); return session; }
         session.LoadDiagnostic = why;
         session.Rebase();
         session.RebasedOnLoad = true;
