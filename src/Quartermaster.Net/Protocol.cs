@@ -121,7 +121,8 @@ public static class Framing
                 else RejectNullElements(item);
             return;
         }
-        if (v.GetType().IsPrimitive || v.GetType().IsEnum || v is Guid) return;
+        // Only protocol types are walked; DateTime, decimal, TimeSpan etc. are leaves.
+        if (v.GetType().Assembly != typeof(RelayMessage).Assembly) return;
         foreach (var p in v.GetType().GetProperties())
             if (p.GetIndexParameters().Length == 0) RejectNullElements(p.GetValue(v));
     }

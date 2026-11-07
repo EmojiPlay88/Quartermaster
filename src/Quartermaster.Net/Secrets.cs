@@ -28,8 +28,9 @@ public static class Secrets
         Convert.ToHexString(Derive(password, $"qm-auth:{GameCode.Normalize(code)}")).ToLowerInvariant();
 
     /// <summary>Constant-time comparison of two hex verifiers (case-insensitive). False if either is not valid hex.</summary>
-    public static bool VerifierEquals(string a, string b)
+    public static bool VerifierEquals(string? a, string? b)
     {
+        if (a is null || b is null) return false;
         try { return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(a), Convert.FromHexString(b)); }
         catch (FormatException) { return false; }
     }
