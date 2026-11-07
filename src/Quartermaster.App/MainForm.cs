@@ -205,6 +205,8 @@ sealed partial class MainForm : Form
         file.DropDownItems.Add(new ToolStripSeparator());
         Item(file.DropDownItems, "E&xit", Close);
 
+        var editMenu = BuildEditMenu();
+
         var view = new ToolStripMenuItem("&View");
         view.DropDownItems.Add(_viewTree);
         Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, "view.diagnostics", needsModule: true);
@@ -238,7 +240,7 @@ sealed partial class MainForm : Form
         var help = new ToolStripMenuItem("&Help");
         Item(help.DropDownItems, "&About", () => Info("Quartermaster\nA VASSAL module reader and engine.", "About Quartermaster"));
 
-        _menu.Items.AddRange(new ToolStripItem[] { file, view, tools, window, help });
+        _menu.Items.AddRange(new ToolStripItem[] { file, editMenu, view, tools, window, help });
         _menu.MdiWindowListItem = window;
     }
 
@@ -256,6 +258,7 @@ sealed partial class MainForm : Form
         Tool("tool.inventory", "Inventory", ShowInventory, needsGame: true);
         Tool("tool.palette", "Palette", TogglePalette, needsGame: true); // shown in game master mode only (ApplySettings)
         Tool("tool.los", "LOS", () => { if (_handlers.TryGetValue("tool.los", out var h)) h(); }, needsGame: true);
+        BuildHistoryToolbar();
         _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
         SetCommandHandler("dice.1d6", () => _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll"));
         SetCommandHandler("dice.2d6", () => _dice!.RollSpec(new DiceSpec(2, 6, 0), "Roll"));
@@ -329,6 +332,7 @@ sealed partial class MainForm : Form
         foreach (var i in _needsRules) i.Enabled = _session?.Rules != null;
         _dice?.Refresh();
         UpdatePhaseUi();
+        RefreshHistoryUi();
     }
 
     void UpdateTitle()
@@ -496,8 +500,8 @@ sealed partial class MainForm : Form
     {
         if (_session?.Game is { } g)
         {
-            g.Changed += _ => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); };
-            g.Rewound += () => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); };
+            g.Changed += _ => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); RequestHistoryRefresh(); };
+            g.Rewound += () => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); RequestHistoryRefresh(); };
         }
         _dirty = false;
         _autosavedSeq = _changeSeq;

@@ -57,6 +57,8 @@ sealed partial class MainForm
         c.RunsQueued += OnRunsQueued;
         c.DifficultyChanged += OnDifficultyChanged;
         _phases = c;
+        _history = new HistoryController(session, c, (cmd, st) => CommandLog.Prepare(cmd, st, session.Model));
+        _history.Rewound += OnHistoryRewound;
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);
         _phaseDock!.Create(new PhasePanel(session, c, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
         RefreshStrip();
@@ -70,6 +72,9 @@ sealed partial class MainForm
         _phaseDock?.Destroy();
         if (_phases != null) { _phases.PhaseBoundary -= OnPhaseBoundary; _phases.RunsQueued -= OnRunsQueued; _phases.DifficultyChanged -= OnDifficultyChanged; }
         _phases = null;
+        if (_history != null) _history.Rewound -= OnHistoryRewound;
+        _history = null;
+        RefreshHistoryUi();
         _strip.Visible = false;
     }
 
@@ -249,10 +254,7 @@ sealed partial class MainForm
     void OnDifficultyChanged()
     {
         if (IsDisposed || _session == null) return;
-        FormulaDialog.CloseAllFor(_session);
-        foreach (var kv in _docs.Where(kv => kv.Key.StartsWith("batch:", StringComparison.Ordinal)).ToList())
-            if (kv.Value is { IsDisposed: false } f) { try { f.Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("closing batch grid: " + ex.Message); } }
-        SetStatus("Difficulty changed — reopen from the phase panel");
+        CloseFormulaWindows("Difficulty changed — reopen from the phase panel");
     }
 
     /// <summary>Double-click in the batch grid: that unit's formula dialog, linked to the run so applying it counts for the batch.</summary>

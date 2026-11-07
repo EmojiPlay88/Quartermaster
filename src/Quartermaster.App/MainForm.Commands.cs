@@ -17,16 +17,7 @@ sealed partial class MainForm
     /// <summary>Registers every command id with its label and default shortcut. Later features attach handlers with <see cref="SetCommandHandler"/>.</summary>
     void RegisterCommands()
     {
-        foreach (var (id, label, key) in new[]
-        {
-            ("file.openModule", "Open module", "Ctrl+O"), ("file.newGame", "New game", "Ctrl+N"), ("file.openGame", "Open game", "Ctrl+G"),
-            ("file.saveGame", "Save game", "Ctrl+S"), ("file.saveGameAs", "Save game as", "Ctrl+Shift+S"),
-            ("view.diagnostics", "Diagnostics", "Ctrl+D"), ("view.ledger", "Ledger", "Ctrl+L"), ("view.log", "Log panel", "Ctrl+Shift+L"),
-            ("view.hideCounters", "Hide counters", "H"), ("tool.los", "Line of sight", "L"),
-            ("tools.workbench", "Rules workbench", "Ctrl+Shift+W"), ("tools.settings", "Settings", "Ctrl+,"),
-            ("dice.1d6", "Roll 1d6", "F5"), ("dice.2d6", "Roll 2d6", "F6"), ("turn.next", "Next turn", "Ctrl+Right"),
-        })
-            _commands.Register(new CommandDef(id, label, key));
+        foreach (var d in CommandDefaults.All) _commands.Register(d);
         // Features that arrive in later tasks: replaced via SetCommandHandler.
         _handlers["tool.los"] = () => false;
         _handlers["view.hideCounters"] = () => false;

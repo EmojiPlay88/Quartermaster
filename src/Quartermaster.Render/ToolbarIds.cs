@@ -8,7 +8,8 @@ public static class ToolbarIds
     {
         ("tool.openModule", "Open Module"), ("tool.newGame", "New Game"), ("tool.loadSetup", "Load Setup"), ("tool.openGame", "Open Game"),
         ("tool.saveGame", "Save Game"), ("tool.diagnostics", "Diagnostics"), ("tool.notes", "Notes"), ("tool.overview", "Overview"),
-        ("tool.inventory", "Inventory"), ("turn.next", "Next turn"), ("tool.palette", "Counter palette (game master mode)"),
+        ("tool.inventory", "Inventory"),
+        ("edit.undo", "Undo"), ("edit.redo", "Redo"), ("phase.stepBack", "Step back to start of phase"), ("turn.next", "Next turn"), ("tool.palette", "Counter palette (game master mode)"),
         ("dice.1d6", "Roll 1d6"), ("dice.2d6", "Roll 2d6"), ("dice.menu", "Dice menu"), ("tool.los", "Line of sight"),
     };
 
