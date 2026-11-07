@@ -52,11 +52,12 @@ public static class LedgerBreakdown
             if (current.Count > MaxLines)
             {
                 var hidden = current.Count - MaxLines;
-                lines.Add(new BreakdownLine("", $"{Ellipsis} {hidden} more changes", null));
+                var hiddenNet = current.Take(hidden).Sum(e => e.After - e.Before);
+                lines.Add(new BreakdownLine(Signed(hiddenNet), $"{Ellipsis} {hidden} more changes", null));
                 shown = current.Skip(hidden).ToList();
             }
             foreach (var e in shown)
-                lines.Add(new BreakdownLine(Signed(e.After - e.Before), SourceLabel(e, pack), Where(e)));
+                lines.Add(new BreakdownLine(Signed(e.After - e.Before), Ledger.SourceLabel(e, pack), Where(e)));
         }
         return new Breakdown(title, lines);
     }
@@ -83,20 +84,6 @@ public static class LedgerBreakdown
 
     static string Where(LedgerEntry e) =>
         e.Turn == null ? "" : string.IsNullOrEmpty(e.Phase) ? $"Turn {e.Turn}" : $"Turn {e.Turn}{Dot}{e.Phase}";
-
-    static string SourceLabel(LedgerEntry e, RulesPack? pack)
-    {
-        switch (e.Source)
-        {
-            case "manual": return "manual: " + e.Note;
-            case "seed": return "seeded";
-            case "formula":
-                var name = (e.FormulaId == null ? null : pack?.ById<FormulaDef>(e.FormulaId)?.Name) ?? "deleted formula";
-                var rule = e.RuleRefId == null ? null : pack?.ById<RuleRef>(e.RuleRefId)?.Label;
-                return string.IsNullOrEmpty(rule) ? name : name + Dot + rule;
-            default: return e.Source;
-        }
-    }
 
     static string OwnerName(GameState s, RulesPack? pack, string key)
     {

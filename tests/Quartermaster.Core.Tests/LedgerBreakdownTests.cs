@@ -83,7 +83,29 @@ public class LedgerBreakdownTests
         Assert.Equal(1 + 1 + 12, b.Lines.Count);
         Assert.Equal("Start of turn 1", b.Lines[0].Label);
         Assert.Equal("… 3 more changes", b.Lines[1].Label);
+        Assert.Equal("+3", b.Lines[1].Amount);
         Assert.Equal("+1", b.Lines[2].Amount);
+    }
+
+    [Fact]
+    public void Breakdown_MoreThan12_HiddenNetIsSignedAndSumsUp()
+    {
+        var s = S();
+        for (int i = 0; i < 14; i++) s.Apply(D("h:global", i * 10, i * 10 - 5)); // each -5
+        var b = LedgerBreakdown.For(s, Pack(), null, "h:global", "fuel");
+        Assert.Equal(M + "10", b.Lines[1].Amount);
+    }
+
+    [Fact]
+    public void ManualWithoutNote_RendersJustManual()
+    {
+        var s = S();
+        s.Apply(D("h:depot", 0, 2, note: null));
+        s.Apply(D("h:depot", 2, 3, note: ""));
+        var b = LedgerBreakdown.For(s, Pack(), null, "h:depot", "fuel");
+        Assert.Equal(["Start of turn 1", "manual", "manual"], b.Lines.Select(l => l.Label));
+        Assert.Equal("+2 Fuel (manual)", Ledger.Describe(s.LedgerHistory[0], Pack()));
+        Assert.Equal("manual", Ledger.SourceLabel(s.LedgerHistory[1], Pack()));
     }
 
     [Fact]

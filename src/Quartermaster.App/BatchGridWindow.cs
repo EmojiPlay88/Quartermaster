@@ -15,6 +15,7 @@ sealed class BatchGridWindow : Form
     readonly ModuleSession _s;
     readonly string _runId;
     readonly Action<int>? _openRow;
+    readonly BreakdownTip _tip = new();
     readonly DataGridView _grid = new()
     {
         Dock = DockStyle.Fill, VirtualMode = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false,
@@ -59,6 +60,8 @@ sealed class BatchGridWindow : Form
         _grid.CellValuePushed += (_, e) => Safe(() => OnValuePushed(e));
         _grid.CellFormatting += (_, e) => Safe(() => OnFormatting(e));
         _grid.CellToolTipTextNeeded += (_, e) => Safe(() => OnToolTip(e));
+        _tip.Track(_grid, LedgerTip);
+        _grid.ShowCellToolTips = true; // native tips stay on for the "doesn't match" hint; OnToolTip returns nothing for the Ledger column, so they never overlap the breakdown
         _grid.CurrentCellChanged += (_, _) => Safe(UpdateCheat);
         _grid.CellDoubleClick += (_, e) => Safe(() => { if (e.RowIndex >= 0 && e.ColumnIndex == 0) _openRow?.Invoke(e.RowIndex); });
         _grid.DataError += (_, e) => e.ThrowException = false;
@@ -152,6 +155,14 @@ sealed class BatchGridWindow : Form
         else if (row.Applied)
             e.CellStyle!.ForeColor = SystemColors.GrayText;
         if (c == ResultCol + 2 && row.Exceptions.Length > 0 && !row.Applied) e.CellStyle!.ForeColor = Color.Firebrick;
+    }
+
+    /// <summary>History of the first ledger value this row would change (what happened before, never the pending result).</summary>
+    Breakdown? LedgerTip(int row, int col)
+    {
+        if (col != ResultCol + 1 || row >= _model.RowCount || _s.Game == null) return null;
+        var o = _model.OutputsOf(row);
+        return o.Count == 0 ? null : LedgerBreakdown.For(_s.Game.State, _s.Rules, _s.Model, o[0].Key, o[0].PropertyId);
     }
 
     void OnToolTip(DataGridViewCellToolTipTextNeededEventArgs e)
@@ -274,6 +285,7 @@ sealed class BatchGridWindow : Form
             _s.GameReplaced -= OnGameReplaced;
             if (_attached != null) _attached.Changed -= OnGameChanged;
             _debounce.Dispose();
+            _tip.Dispose();
         }
         base.Dispose(disposing);
     }

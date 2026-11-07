@@ -166,12 +166,16 @@ public static class FitView
 }
 
 /// <summary>What the hover detail viewer shows for one piece.</summary>
-public sealed record PieceDetail(string PieceId, string Name, IReadOnlyList<(string Key, string Value)> Properties);
+public sealed record PieceDetail(string PieceId, string Name, IReadOnlyList<(string Key, string Value)> Properties)
+{
+    /// <summary>Ledger properties that apply to this piece and have a recorded value.</summary>
+    public IReadOnlyList<(string PropertyId, string Name, double Value)> Ledger { get; init; } = Array.Empty<(string, string, double)>();
+}
 
 public static class PieceDetails
 {
     /// <summary>The piece's name plus its mark (static), PROP (dynamic) and label properties.</summary>
-    public static PieceDetail For(PieceInstance p, PieceType type)
+    public static PieceDetail For(PieceInstance p, PieceType type, GameState? state = null, Quartermaster.Rules.RulesPack? pack = null)
     {
         var props = new List<(string, string)>();
         for (var i = 0; i < type.Traits.Count; i++)
@@ -193,6 +197,25 @@ public static class PieceDetails
             }
         }
         var name = type.Basic.Name; // same value as PieceInfo.Name(p) without reparsing
-        return new PieceDetail(p.Id, name.Length > 0 ? name : "piece", props);
+        return new PieceDetail(p.Id, name.Length > 0 ? name : "piece", props) { Ledger = LedgerLines(p, state, pack) };
+    }
+
+    static IReadOnlyList<(string, string, double)> LedgerLines(PieceInstance p, GameState? state, Quartermaster.Rules.RulesPack? pack)
+    {
+        var lines = new List<(string, string, double)>();
+        if (state == null || pack == null) return lines;
+        try
+        {
+            var key = LedgerKey.Piece(p.Id);
+            foreach (var prop in pack.Properties)
+            {
+                if (prop.Scope == Quartermaster.Rules.PropertyScope.Holders) continue;
+                if (Ledger.Get(state, key, prop.Id) is not { } v) continue;
+                if (!PieceFilter.Compile(prop.AppliesTo, state, pack)(p)) continue;
+                lines.Add((prop.Id, prop.Name, v));
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { lines.Clear(); }
+        return lines;
     }
 }

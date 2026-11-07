@@ -18,6 +18,7 @@ sealed class LedgerWindow : Form
     readonly ToolStripButton _showEmpty = new("Show units without values") { DisplayStyle = ToolStripItemDisplayStyle.Text, CheckOnClick = true };
     readonly ToolStripButton _refresh = new("Refresh") { DisplayStyle = ToolStripItemDisplayStyle.Text };
     readonly DataGridView _grid = new();
+    readonly BreakdownTip _tip = new();
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 200 };
     IReadOnlyList<PropertyDef> _cols = Array.Empty<PropertyDef>();
     List<LedgerRow> _rows = new();
@@ -49,11 +50,10 @@ sealed class LedgerWindow : Form
         _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
         _grid.BackgroundColor = SystemColors.AppWorkspace;
-        _grid.ShowCellToolTips = true;
         _grid.CellValueNeeded += OnCellValueNeeded;
         _grid.CellValuePushed += OnCellValuePushed;
         _grid.CellFormatting += OnCellFormatting;
-        _grid.CellToolTipTextNeeded += OnToolTip;
+        _tip.Track(_grid, BreakdownFor);
         _grid.ColumnHeaderMouseClick += (_, e) => Run(() => SortBy(e.ColumnIndex));
         _grid.DataError += (_, e) => e.ThrowException = false;
 
@@ -123,7 +123,7 @@ sealed class LedgerWindow : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { Unhook(); _debounce.Dispose(); }
+        if (disposing) { Unhook(); _debounce.Dispose(); _tip.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -257,21 +257,11 @@ sealed class LedgerWindow : Form
         }
     }
 
-    void OnToolTip(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
+    Breakdown? BreakdownFor(int rowIndex, int colIndex)
     {
-        try
-        {
-            if (e.RowIndex < 0 || e.RowIndex >= _rows.Count || e.ColumnIndex < FixedCols || e.ColumnIndex - FixedCols >= _cols.Count) return;
-            if (_s.Game is not { } game) return;
-            var row = _rows[e.RowIndex];
-            var prop = _cols[e.ColumnIndex - FixedCols];
-            var sb = new StringBuilder($"{row.Name} — {prop.Name}");
-            var history = Ledger.History(game.State, row.Key, prop.Id);
-            if (history.Count == 0) sb.Append("\n(no history)");
-            foreach (var h in history.Reverse().Take(10)) sb.Append('\n').Append(Ledger.Describe(h, _s.Rules));
-            e.ToolTipText = sb.ToString();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { e.ToolTipText = ""; }
+        if (rowIndex >= _rows.Count || colIndex < FixedCols || colIndex - FixedCols >= _cols.Count) return null;
+        if (_s.Game is not { } game) return null;
+        return LedgerBreakdown.For(game.State, _s.Rules, _s.Model, _rows[rowIndex].Key, _cols[colIndex - FixedCols].Id);
     }
 
     // ---------- manual edit ----------

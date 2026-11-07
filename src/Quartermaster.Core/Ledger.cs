@@ -36,19 +36,28 @@ public static class Ledger
     public static IReadOnlyList<LedgerEntry> History(GameState s, string key, string propertyId) =>
         s.LedgerHistory.Where(e => e.Key == key && e.PropertyId == propertyId).ToList();
 
+    /// <summary>Where a change came from: "manual: note", "seeded", "Formula · Rule", ...</summary>
+    public static string SourceLabel(LedgerEntry e, RulesPack? pack)
+    {
+        switch (e.Source)
+        {
+            case "manual": return string.IsNullOrEmpty(e.Note) ? "manual" : "manual: " + e.Note;
+            case "seed": return "seeded";
+            case "formula":
+                var name = (e.FormulaId == null ? null : pack?.ById<FormulaDef>(e.FormulaId)?.Name) ?? "deleted formula";
+                var rule = e.RuleRefId == null ? null : pack?.ById<RuleRef>(e.RuleRefId)?.Label;
+                return string.IsNullOrEmpty(rule) ? name : name + " · " + rule;
+            default: return e.Source;
+        }
+    }
+
     /// <summary>E.g. "−27 Fuel (Fuel Use)".</summary>
     public static string Describe(LedgerEntry e, RulesPack? pack)
     {
         var delta = e.After - e.Before;
         var sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
         var prop = pack?.ById<PropertyDef>(e.PropertyId)?.Name ?? "(deleted property)";
-        string who = e.Source switch
-        {
-            "formula" => (e.FormulaId == null ? null : pack?.ById<FormulaDef>(e.FormulaId)?.Name) ?? "deleted formula",
-            "manual" => "manual: " + e.Note,
-            "seed" => "seed",
-            _ => e.Source,
-        };
+        var who = e.Source == "seed" ? "seed" : SourceLabel(e, pack);
         return $"{sign}{Math.Abs(delta).ToString("0.##", CultureInfo.InvariantCulture)} {prop} ({who})";
     }
 }
