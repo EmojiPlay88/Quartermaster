@@ -126,6 +126,7 @@ sealed class PlayOfflineForm : Form
     void Finish(LaunchKind kind, NewGameRequest? ng, string? savePath)
     {
         var rules = Safe(() => _library.RulesPackFor(_row.Entry), null);
+        _finishing = true;
         Result = new LaunchRequest(_row.Entry.Path, string.IsNullOrEmpty(rules) ? null : rules, kind, ng, savePath);
         DialogResult = DialogResult.OK;
         Close();
@@ -155,8 +156,18 @@ sealed class PlayOfflineForm : Form
     }
 
     /// <summary>Disables the action buttons while a module loads or the setup dialog is open (no second click can start another run).</summary>
+    bool _busy, _finishing;
+
+    /// <summary>Closing is refused while a module loads or the setup dialog is open (the choice would be lost).</summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (_busy && !_finishing) e.Cancel = true;
+        base.OnFormClosing(e);
+    }
+
     void SetBusy(bool busy)
     {
+        _busy = busy;
         if (IsDisposed) return;
         _new.Enabled = _open.Enabled = _back.Enabled = !busy;
         _continueBtn.Enabled = !busy && _continue != null;
@@ -208,7 +219,7 @@ sealed class PlayOfflineForm : Form
         }
         using (session!)
         {
-            if (IsDisposed) return;
+            if (IsDisposed || !Visible) return;
             using var dlg = new SetupChooserDialog(session!.Model, GameMode.Offline, _store.Current.LastDifficulty, session.Rules, preselectNew: false);
             if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Request is not { } req) return;
             _store.Update(cur => cur with { LastDifficulty = req.Difficulty });

@@ -26,6 +26,7 @@ static class LauncherShots
     /// <summary>Screenshot fixture: lists the given module plus a copy that is then deleted (shown as missing); for the offline window also writes an autosave and a recent save.</summary>
     static void Seed(SettingsStore store, string root, string modulePath, bool withGames)
     {
+        RequireScratchRoot();
         var lib = new ModuleLibrary(store);
         lib.Add(modulePath);
         var gone = Path.Combine(root, "gone", "Vanished Module.vmod");
@@ -50,6 +51,7 @@ static class LauncherShots
     /// <summary>--smoke-launcher: the first launcher visit starts a blank new game on the module, the second one checks that it lists a last-played time and ends the app.</summary>
     public static Func<LaunchRequest?> SmokeHook(string modulePath)
     {
+        RequireScratchRoot();
         var visits = 0;
         return () =>
         {
@@ -77,6 +79,13 @@ static class LauncherShots
             form.Hide();
             return null;
         };
+    }
+
+    /// <summary>These runs write a library, saves and settings: refuse unless the layout root was redirected, so the real one is never touched.</summary>
+    static void RequireScratchRoot()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT")))
+            throw new InvalidOperationException("QUARTERMASTER_LAYOUT_ROOT must be set for launcher smokes and screenshots.");
     }
 
     static void Pump(Func<bool> done, int maxMs = 15000)
