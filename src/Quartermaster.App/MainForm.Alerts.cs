@@ -67,7 +67,9 @@ sealed partial class MainForm
         var pack = _session.Rules;
         var view = _phases.View();
         var acting = pack != null && view.Current != null ? Sequencer.ActingSide(pack, view.Current)?.Id : null;
-        _alertHits = AlertEngine.Evaluate(game.State, pack, _session.Model, view.Current, acting);
+        // Alerts are computed from what this player may see (the game itself in solo).
+        _alertHits = AlertEngine.Evaluate(_session.View ?? game.State, pack, _session.Model, view.Current, acting);
+        _alertBar.VisibleOnly = _session.ViewFiltered;
         var (text, tip) = Banner.For(view);
         _alertBar.SetBanner(text, tip);
         _alertBar.SetHits(_alertHits);

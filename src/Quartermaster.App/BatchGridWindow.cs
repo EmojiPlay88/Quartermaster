@@ -81,6 +81,7 @@ sealed class BatchGridWindow : Form
         _debounce.Tick += (_, _) => { _debounce.Stop(); Safe(Refresh_); };
 
         _s.GameReplaced += OnGameReplaced;
+        _s.ViewChanged += QueueRefresh;   // a new viewer: other sides' rows turn hidden
         Attach();
         Refresh_();
     }
@@ -162,7 +163,7 @@ sealed class BatchGridWindow : Form
     {
         if (col != ResultCol + 1 || row >= _model.RowCount || _s.Game == null) return null;
         var o = _model.OutputsOf(row);
-        return o.Count == 0 ? null : LedgerBreakdown.For(_s.Game.State, _s.Rules, _s.Model, o[0].Key, o[0].PropertyId);
+        return o.Count == 0 ? null : LedgerBreakdown.For(_s.View ?? _s.Game.State, _s.Rules, _s.Model, o[0].Key, o[0].PropertyId);
     }
 
     void OnToolTip(DataGridViewCellToolTipTextNeededEventArgs e)
@@ -283,6 +284,7 @@ sealed class BatchGridWindow : Form
         if (disposing)
         {
             _s.GameReplaced -= OnGameReplaced;
+            _s.ViewChanged -= QueueRefresh;
             if (_attached != null) _attached.Changed -= OnGameChanged;
             _debounce.Dispose();
             _tip.Dispose();

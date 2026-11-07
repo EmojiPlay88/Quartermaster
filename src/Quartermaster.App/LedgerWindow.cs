@@ -74,6 +74,7 @@ sealed class LedgerWindow : Form
 
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
+        s.ViewChanged += OnViewChanged;
         HookGame();
         Run(Reload);
     }
@@ -109,6 +110,7 @@ sealed class LedgerWindow : Form
     void OnRewound() => OnUi(Kick);
     void OnGameReplaced() => OnUi(() => { HookGame(); Kick(); });
     void OnRulesChanged() => OnUi(Kick);
+    void OnViewChanged() => OnUi(Kick);   // debounced: a burst of changes reloads once
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
@@ -122,6 +124,7 @@ sealed class LedgerWindow : Form
         _debounce.Stop();
         _s.RulesChanged -= OnRulesChanged;
         _s.GameReplaced -= OnGameReplaced;
+        _s.ViewChanged -= OnViewChanged;
         if (_game != null) _game.Changed -= OnGameChanged;
         if (_game != null) _game.Rewound -= OnRewound;
         _game = null;
@@ -147,7 +150,7 @@ sealed class LedgerWindow : Form
         var sig = string.Join("|", _cols.Select(c => c.Id + "\u0001" + c.Name));
         if (sig != _colSignature) { _colSignature = sig; RebuildColumns(); }
 
-        _rows = pack == null || game == null ? new() : LedgerTable.Rows(game.State, pack, _s.Model, _filter.Text, _showEmpty.Checked).ToList();
+        _rows = pack == null || game == null || _s.View is not { } view ? new() : LedgerTable.Rows(view, pack, _s.Model, _filter.Text, _showEmpty.Checked).ToList();
         ApplySort();
         _grid.RowCount = 0;
         _grid.RowCount = _rows.Count;
@@ -295,7 +298,7 @@ sealed class LedgerWindow : Form
     {
         if (rowIndex >= _rows.Count || colIndex < FixedCols || colIndex - FixedCols >= _cols.Count) return null;
         if (_s.Game is not { } game) return null;
-        return LedgerBreakdown.For(game.State, _s.Rules, _s.Model, _rows[rowIndex].Key, _cols[colIndex - FixedCols].Id);
+        return LedgerBreakdown.For(_s.View ?? game.State, _s.Rules, _s.Model, _rows[rowIndex].Key, _cols[colIndex - FixedCols].Id);
     }
 
     // ---------- manual edit ----------
@@ -327,6 +330,7 @@ sealed class LedgerWindow : Form
             return;
         }
         if (_s.Game is not { } game) return;
+        if (!_s.CanEditLedger(key)) { Warn("That value " + ModuleSession.OtherSideText + "."); Reload(); return; }
         if (Ledger.Get(game.State, key, prop.Id) is { } cur && cur == after) { Reload(); return; } // unchanged: no history entry
         var note = InputDialog.Ask(this, "Manual change", $"Why is {prop.Name} being set to {Fmt(after)}? (required)");
         if (string.IsNullOrWhiteSpace(note)) { Reload(); return; }

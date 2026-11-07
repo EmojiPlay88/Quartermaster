@@ -177,7 +177,7 @@ sealed class OutlinerPanel : UserControl
             Rebuild();
             return;
         }
-        var state = game.State;
+        var state = _s.View ?? game.State;   // what this player may see
         PhaseView? view = null;
         try { view = _phases()?.View(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("outliner: " + ex.Message); }
         try { _tree = OutlinerModel.Build(state, _s.Rules, _s.Model, _mode, _alerts); }
@@ -360,12 +360,12 @@ sealed class OutlinerPanel : UserControl
         var column = _tree.Columns[ci];
         if (ci >= node.Values.Count || node.Values[ci] == null) return null;
         if (node.Kind == OutlinerNodeKind.Piece && node.PieceId != null)
-            return LedgerBreakdown.For(game.State, _s.Rules, _s.Model, LedgerKey.Piece(node.PieceId), column.PropertyId);
+            return LedgerBreakdown.For(_s.View ?? game.State, _s.Rules, _s.Model, LedgerKey.Piece(node.PieceId), column.PropertyId);
         var parts = new List<(string, double)>();
         foreach (var leaf in Flatten(new[] { node }).Where(x => x.Kind == OutlinerNodeKind.Piece))
             if (ci < leaf.Values.Count && leaf.Values[ci] is { } v) parts.Add((leaf.Name, v));
         var how = column.Aggregate switch { OutlinerAggregate.Min => "lowest", OutlinerAggregate.Average => "average", _ => "total" };
-        return LedgerBreakdown.ForTotal($"{column.Name} {how} {node.Values[ci]!.Value.ToString("0.##", CultureInfo.InvariantCulture)}  ({node.Name})", parts);
+        return LedgerBreakdown.ForTotal(_s.VisibleOnly($"{column.Name} {how} {node.Values[ci]!.Value.ToString("0.##", CultureInfo.InvariantCulture)}  ({node.Name})"), parts);
     }
 
     void OnHeaderHover(object? sender, DataGridViewCellMouseEventArgs e)

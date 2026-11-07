@@ -25,6 +25,10 @@ sealed class AlertBar : Panel
     Rectangle _bannerRect;
     object? _hover;
 
+    /// <summary>Hot-seat: the alerts were evaluated on a filtered view, so chip tooltips say they cover visible units only.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool VisibleOnly { get; set; }
+
     public AlertBar()
     {
         Dock = DockStyle.Top;
@@ -128,7 +132,8 @@ sealed class AlertBar : Panel
 
     string? TipFor(object? o) => o switch
     {
-        Chip { Hit: { } h } => AlertEngine.Tooltip(h) + (string.IsNullOrWhiteSpace(h.Notes) ? "" : "\n\n" + h.Notes),
+        Chip { Hit: { } h } => AlertEngine.Tooltip(h) + (VisibleOnly ? "\n(" + ModuleSession.VisibleOnlyText + ")" : "")
+            + (string.IsNullOrWhiteSpace(h.Notes) ? "" : "\n\n" + h.Notes),
         Chip => string.Join(", ", _hits.Skip(_hits.Count - _overflow).Select(Label)),
         AlertBar => _bannerTip,
         _ => null,

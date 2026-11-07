@@ -42,6 +42,13 @@ sealed class FormulaDialog : Form
     public static FormulaDialog? Show(ModuleSession s, string formulaId, string? pieceId, Form owner, MainForm? host, RunLink? link = null)
     {
         Open.RemoveAll(d => d.IsDisposed);
+        if (!s.CanAct(pieceId))
+        {
+            var msg = "That unit " + ModuleSession.OtherSideText + ".";
+            if (host != null) host.SetStatus(msg);
+            else Program.AppLog("formula dialog refused: " + msg);
+            return null;
+        }
         var existing = Open.FirstOrDefault(d => d._s == s && d._formulaId == formulaId && d._pieceId == pieceId && d._link?.RunId == link?.RunId);
         if (existing != null)
         {
@@ -125,6 +132,7 @@ sealed class FormulaDialog : Form
         CancelButton = _cancel;
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
+        s.ViewChanged += OnViewChanged;
         HookGame();
         Recalc();
     }
@@ -145,6 +153,25 @@ sealed class FormulaDialog : Form
     void OnGameChanged(GameCommand _) => OnUi(CheckPieceThenRefresh);
 
     void OnGameReplaced() => OnUi(() => { HookGame(); CheckPieceThenRefresh(); });
+
+    /// <summary>Hot-seat: once the unit belongs to a side the new viewer does not hold, its dialog closes (nothing of it stays on screen).</summary>
+    void OnViewChanged()
+    {
+        if (_previewOnly || _embedded || _s.ViewSides == null || _viewQueued || IsDisposed || _closing || !IsHandleCreated) return;   // solo: nothing to do
+        _viewQueued = true;   // coalesced: one check per burst of changes
+        try
+        {
+            BeginInvoke(() =>
+            {
+                _viewQueued = false;
+                if (IsDisposed || _closing) return;
+                Guarded(() => { if (!_s.CanAct(_pieceId)) Close(); });
+            });
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { _viewQueued = false; }
+    }
+
+    bool _viewQueued;
 
     void CheckPieceThenRefresh()
     {
@@ -219,6 +246,7 @@ sealed class FormulaDialog : Form
         _closing = true;
         _s.RulesChanged -= OnRulesChanged;
         _s.GameReplaced -= OnGameReplaced;
+        _s.ViewChanged -= OnViewChanged;
         if (_game != null) _game.Changed -= OnGameChanged;
         _game = null;
         _debounce.Stop();
@@ -379,6 +407,8 @@ sealed class FormulaDialog : Form
         _debounce.Stop();
         Recalc();   // always re-evaluate against the current game and mode before writing anything
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
+        // Hot-seat: the viewer may have changed while the dialog was open; another side's unit is refused.
+        if (!_s.CanAct(_pieceId)) { _status.Text = "This unit " + ModuleSession.OtherSideText + "."; _apply.Enabled = false; return; }
         // v.Trace is the engine's own (expected) run: typed values only gate Apply, so a wrong formula can never reach the ledger.
         if (HostForm?.Phases is { } phases)
         {
@@ -394,7 +424,7 @@ sealed class FormulaDialog : Form
             var fname = _s.Rules?.ById<FormulaDef>(_formulaId)?.Name ?? "Formula";
             var unit = _pieceId != null && game.State.Pieces.TryGetValue(_pieceId, out var up) ? PieceInfo.Name(up) : null;
             using var scope = game.BeginAction(string.IsNullOrWhiteSpace(unit) ? fname : $"{fname} on {unit}");
-            foreach (var c in runner.Commands(v.Trace, null)) game.Execute(CommandLog.Stamp(c));
+            foreach (var c in runner.Commands(v.Trace, null, sideId: _s.ActorSide())) game.Execute(CommandLog.Stamp(c));
         }
         if (!_embedded) Close();
     }

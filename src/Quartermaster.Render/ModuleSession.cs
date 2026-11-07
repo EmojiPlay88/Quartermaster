@@ -104,6 +104,76 @@ public sealed class ModuleSession : IDisposable
         return v != null && pieceId != null && v.Pieces.ContainsKey(pieceId);
     }
 
+    /// <summary>
+    /// The side a formula applied now is run for (its log lines and rolls are stamped with it): null in solo; else the current phase's
+    /// acting side when held, else the first held side in pack order.
+    /// </summary>
+    public string? ActorSide()
+    {
+        var sides = _viewSides;
+        if (sides == null || sides.Count == 0) return null;
+        var pack = Rules;
+        if (pack != null && _game?.State is { } st && Sequencer.Current(pack, st) is { } phase
+            && Sequencer.ActingSide(pack, phase)?.Id is { Length: > 0 } acting && sides.Contains(acting))
+            return acting;
+        foreach (var sd in pack?.Sides ?? new List<SideDef>())
+            if (sd != null && sd.Id != null && sides.Contains(sd.Id)) return sd.Id;
+        return sides.OrderBy(x => x, StringComparer.Ordinal).First();
+    }
+
+    /// <summary>Shown in place of a value the current viewer may not see.</summary>
+    public const string HiddenText = "hidden";
+
+    /// <summary>Why a formula on another side's unit was refused.</summary>
+    public const string OtherSideText = "belongs to a side you don't hold";
+
+    /// <summary>
+    /// True when the current viewer may run and apply formulas on this unit: always in solo; for a unit-less run (null); else only for a
+    /// visible unit that belongs to a held side or to no side.
+    /// </summary>
+    public bool CanAct(string? pieceId)
+    {
+        var sides = _viewSides;
+        if (sides == null || pieceId == null) return true;
+        if (_game?.State is not { } st || !st.Pieces.TryGetValue(pieceId, out var p) || p == null || !CanSee(pieceId)) return false;
+        if (Rules is not { } pack) return true;
+        var side = Ownership.SideOfPiece(p, st, pack);
+        return side == null || sides.Contains(side);
+    }
+
+    /// <summary>True when the current viewer may change this ledger key by hand: always in solo; else a unit they may act on, the global
+    /// holder or a holder of a held side or of no side.</summary>
+    public bool CanEditLedger(string key)
+    {
+        var sides = _viewSides;
+        if (sides == null) return true;
+        if (key == null || !LedgerKey.TryParse(key, out var isPiece, out var id)) return false;
+        if (isPiece) return CanAct(id);
+        if (id == HolderDef.GlobalId) return true;
+        if ((Rules?.Holders ?? new List<HolderDef>()).FirstOrDefault(h => h != null && h.Id == id) is not { } holder) return false;
+        return Ownership.SideOfHolder(holder.Id, Rules!) is not { } side || sides.Contains(side);
+    }
+
+    /// <summary>Tooltip suffix of totals that cover only what the viewer may see.</summary>
+    public const string VisibleOnlyText = "visible units only";
+
+    /// <summary>True when the view leaves out or masks something of the game (a piece, a mask or a ledger value).</summary>
+    public bool ViewFiltered
+    {
+        get
+        {
+            if (_viewSides == null || _game?.State is not { } full || View is not { } v || ReferenceEquals(v, full)) return false;
+            if (v.Pieces.Count != full.Pieces.Count) return true;
+            foreach (var (id, p) in v.Pieces)
+                if (!full.Pieces.TryGetValue(id, out var f) || f?.TypeString != p?.TypeString) return true;
+            static int Values(GameState st) => st.Ledgers.Values.Sum(inner => inner?.Count ?? 0);
+            return Values(v) != Values(full);
+        }
+    }
+
+    /// <summary>The text with " — visible units only" added when <see cref="ViewFiltered"/>.</summary>
+    public string VisibleOnly(string text) => ViewFiltered ? text + " — " + VisibleOnlyText : text;
+
     public bool CanSeeMap(string mapId)
     {
         if (_viewSides == null || Rules == null) return true;

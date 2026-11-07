@@ -65,6 +65,7 @@ sealed class LogPanel : UserControl
         Controls.Add(_bar);
         Name = "LogPanel";
         _s.GameReplaced += OnGameReplaced;
+        _s.ViewChanged += Refresh_;   // debounced; also a new viewer
         Attach();
         Reload();
     }
@@ -119,7 +120,7 @@ sealed class LogPanel : UserControl
     /// <summary>Recomputes the visible rows now (also used by smoke so the screenshot does not wait for the debounce).</summary>
     public void Reload()
     {
-        var log = _s.Game?.State.Log ?? (IReadOnlyList<LogEntry>)Array.Empty<LogEntry>();
+        var log = _s.View?.Log ?? (IReadOnlyList<LogEntry>)Array.Empty<LogEntry>();   // the player's view: other sides' private lines redacted
         var follow = IsAtBottom();
         // Selection is by row index, which changes when the rows do: re-select by Seq so Copy / double-click act on what is highlighted.
         var selected = _list.SelectedIndices.Cast<int>().Where(i => i < _rows.Count).Select(i => _rows[i].Seq).ToHashSet();
@@ -209,6 +210,7 @@ sealed class LogPanel : UserControl
         if (disposing)
         {
             _s.GameReplaced -= OnGameReplaced;
+            _s.ViewChanged -= Refresh_;
             if (_attached != null) _attached.Changed -= OnGameChanged;
             if (_attached != null) _attached.Rewound -= OnRewound;
             _debounce.Dispose();

@@ -48,6 +48,27 @@ public class BatchModelTests : IDisposable
     private static double Fuel(ModuleSession s, string id) => Ledger.Get(s.Game!.State, LedgerKey.Piece(id), "fuel") ?? double.NaN;
 
     [Fact]
+    public void Rows_OfSidesNotHeld_ShowHidden_AndNeverApply()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        var (b, _) = MoveBatch(s, c);
+        s.SetViewSides(new HashSet<string> { "blue" });
+        b.Invalidate();
+        var r = b.Row(0);
+        Assert.False(r.CanApply);
+        Assert.All(r.Cells, cell => Assert.Equal(ModuleSession.HiddenText, cell));
+        Assert.Equal(ModuleSession.HiddenText, r.Result);
+        Assert.Equal("", r.LedgerText);
+        b.CalculateAll();
+        Assert.Equal(0, b.ApplyAll());
+        Assert.False(b.ApplyRow(1));
+        Assert.Equal(40, Fuel(s, "r1"));
+        s.SetViewSides(null);
+        b.Invalidate();
+        Assert.NotEqual(ModuleSession.HiddenText, b.Row(0).Result);
+    }
+
+    [Fact]
     public void Rows_HardcoreCellsEmpty_CannotApply()
     {
         var (s, c) = Make(Difficulty.Hardcore);

@@ -15,7 +15,7 @@ public sealed record PhaseChip(string Id, string Name, ChipState State, string? 
 /// <summary>Everything the tracker strip and phase panel show. Built fresh by <see cref="PhaseController.View"/>.</summary>
 public sealed record PhaseView(bool NoPhases, bool BeforeStart, int Turn, string? StageText, string? SideName,
     IReadOnlyList<PhaseChip> Chips, PhaseDef? Current, string? NextName, IReadOnlyList<Decision> Decisions,
-    IReadOnlyList<WarningHit> Warnings, string? Notice);
+    IReadOnlyList<WarningHit> Warnings, string? Notice, string? PlayingText = null);
 
 /// <summary>
 /// Drives the turn sequence: advancing, OnStart / OnMove formula triggers per difficulty mode, checklist ticks and warning
@@ -44,7 +44,27 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         g.Execute(prepare(c, g.State));
     }
 
-    private void Calc(string text, string? pieceId = null) => Exec(new AddLogLine(LogKind.Calc, text, pieceId));
+    private void Calc(string text, string? pieceId = null) => Exec(new AddLogLine(LogKind.Calc, text, pieceId, SideId: Stamp()));
+
+    // Hot-seat stamps. Player-driven applies are run for the player at the table (ModuleSession.ActorSide). Automatic triggers
+    // (OnStart, OnMove) are run for the phase: its acting side when it has one, held or not; else the player at the table.
+    private bool _inTrigger;
+    private string? _triggerSide;
+
+    private string? Stamp() => _inTrigger ? _triggerSide : s.ActorSide();
+
+    private string? TriggerSide(PhaseDef phase) =>
+        s.ViewSides == null || s.Rules is not { } pack ? null : Sequencer.ActingSide(pack, phase)?.Id ?? s.ActorSide();
+
+    /// <summary>Runs an automatic trigger with the phase's stamp (nested calls keep the outer one).</summary>
+    private T AsTrigger<T>(PhaseDef phase, Func<T> run)
+    {
+        if (_inTrigger) return run();
+        _triggerSide = TriggerSide(phase);
+        _inTrigger = true;
+        try { return run(); }
+        finally { _inTrigger = false; _triggerSide = null; }
+    }
 
     private bool HasPhases => s.Game != null && s.Rules is { Phases.Count: > 0 };
 
@@ -83,9 +103,14 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             i < pos.PhaseIndex ? ChipState.Done : i == pos.PhaseIndex ? ChipState.Current : ChipState.Upcoming, p.Notes)).ToList();
         var next = Sequencer.Next(pack, pos);
         var side = Sequencer.ActingSide(pack, cur);
-        return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur,
-            next == null ? null : pack.Phases.ElementAtOrDefault(next.PhaseIndex)?.Name,
-            Decisions.Compute(pack, st), Decisions.Warnings(pack, st, cur), _notice);
+        var nextName = next == null ? null : pack.Phases.ElementAtOrDefault(next.PhaseIndex)?.Name;
+        // Hot-seat: another side's phase shows who is playing and none of their decisions.
+        if (s.ViewSides is { } held && side != null && !held.Contains(side.Id))
+            return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
+                Array.Empty<WarningHit>(), _notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
+        var seen = s.View ?? st;   // decisions and warnings over what this player may see
+        return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
+            Decisions.Compute(pack, seen), Decisions.Warnings(pack, seen, cur), _notice);
     }
 
     // ---- advancing ----
@@ -183,11 +208,12 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (trace.Error != null || trace.Result == null) return false;   // a failed trace changes nothing and keeps the run pending
         // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
         if (runId != null && !IsPending(runId, pieceId)) return false;
+        if (!s.CanAct(pieceId)) return false;   // hot-seat: only the units of the sides held (or of no side)
         var name = UnitName(pieceId);
         var unit = name ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
         using var action = s.Game.BeginAction(string.IsNullOrWhiteSpace(name) ? trace.Formula.Name : $"{trace.Formula.Name} on {name}");
-        foreach (var c in s.Runner.Commands(trace, null, tag, unit)) Exec(c);
+        foreach (var c in s.Runner.Commands(trace, null, tag, unit, Stamp())) Exec(c);
         LogWorking(trace, unit, tag);
         if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }));
         return true;
@@ -210,7 +236,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     // ---- triggers ----
 
     /// <returns>The runs queued (the caller raises <see cref="RunsQueued"/> once its action has closed).</returns>
-    private List<PendingRun> OnEnter(PhaseDef phase)
+    private List<PendingRun> OnEnter(PhaseDef phase) => AsTrigger(phase, () => OnEnterCore(phase));
+
+    private List<PendingRun> OnEnterCore(PhaseDef phase)
     {
         var queued = new List<PendingRun>();
         if (s.Game == null || s.Rules is not { } pack) return queued;
@@ -248,6 +276,11 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         foreach (var m in moves) Exec(m);
 
         if (s.Rules is not { } pack || s.Runner == null || CurrentPhase() is not { } phase || phase.OnMove is not { Count: > 0 }) return queued;
+        return AsTrigger(phase, () => OnMoveCore(g, pack, phase, records, queued));
+    }
+
+    private List<PendingRun> OnMoveCore(GameSession g, RulesPack pack, PhaseDef phase, Dictionary<string, MoveRecord> records, List<PendingRun> queued)
+    {
         var distances = new Dictionary<string, double>();
         foreach (var e in phase.OnMove)
         {
@@ -318,7 +351,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             var trace = s.Runner.Run(s.Game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
             if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId); continue; }
             if (trace.Result == null) { needInput.Add(u); continue; }
-            foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label)) Exec(c);
+            foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, Stamp())) Exec(c);
             LogWorking(trace, u.Label, "auto");
             applied++;
         }

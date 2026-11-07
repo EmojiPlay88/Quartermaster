@@ -100,7 +100,9 @@ sealed partial class MapCanvas : SKControl
     /// <summary>Right click: the piece under the cursor (or null) and the client point.</summary>
     public event Action<string?, Point>? ContextRequested;
 
-    GameState? State => _s.Game?.State;
+    /// <summary>What this player may see (the game state itself in solo). Drawing, hit-testing, hover and drags read it; commands still go
+    /// to the game.</summary>
+    GameState? State => _s.View;
 
     /// <summary>Stores tiles under <see cref="BoardTiler.TileKey"/>.</summary>
     public void SetTiles(string tileKey, TileSet ts)
@@ -206,6 +208,12 @@ sealed partial class MapCanvas : SKControl
             {
                 c.Clear(new SKColor(SystemColors.AppWorkspace.R, SystemColors.AppWorkspace.G, SystemColors.AppWorkspace.B));
                 Message(c, size, "No game in progress");
+                return;
+            }
+            if (!_s.CanSeeMap(Map.Id))
+            {
+                c.Clear(new SKColor(SystemColors.AppWorkspace.R, SystemColors.AppWorkspace.G, SystemColors.AppWorkspace.B));
+                Message(c, size, "This map belongs to another side");
                 return;
             }
             if (_drag.IsStale(View, size))

@@ -71,7 +71,8 @@ sealed class PhaseStrip : Panel
         }
         foreach (var c in v.Chips)
         {
-            var text = c.State == ChipState.Current && !string.IsNullOrEmpty(v.SideName) ? $"{v.SideName} player — {c.Name}" : c.Name;
+            var text = c.State == ChipState.Current && v.PlayingText is { Length: > 0 } playing ? playing   // hot-seat: another side's phase
+                : c.State == ChipState.Current && !string.IsNullOrEmpty(v.SideName) ? $"{v.SideName} player — {c.Name}" : c.Name;
             l.Add((text, c.State switch { ChipState.Done => Kind.Done, ChipState.Current => Kind.Current, _ => Kind.Upcoming }, c.Notes));
         }
         return l;

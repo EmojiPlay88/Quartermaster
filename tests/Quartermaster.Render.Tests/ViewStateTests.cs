@@ -137,6 +137,85 @@ public class ViewStateTests : IDisposable
     }
 
     [Fact]
+    public void CanAct_HeldOrUnownedUnitsOnly()
+    {
+        var s = Make();
+        Assert.True(s.CanAct("b1"));
+        Assert.True(s.CanAct(null));
+        s.SetViewSides(Red);
+        Assert.True(s.CanAct("r1"));
+        Assert.False(s.CanAct("b1"));
+        Assert.False(s.CanAct("gone"));
+        Assert.True(s.CanAct(null));             // unit-less runs are stamped with the actor side
+        s.UpdateRules(p => p with { Sides = p.Sides.Take(1).ToList() });   // Blue 1 no longer belongs to any side
+        Assert.True(s.CanAct("b1"));
+    }
+
+    [Fact]
+    public void CanEditLedger_HeldOrPublicOwnersOnly()
+    {
+        var s = Make();
+        s.UpdateRules(p => p with { Holders = new() { new HolderDef { Id = "bluedepot", Name = "Blue Depot", SideId = "blue" }, new HolderDef { Id = "pool", Name = "Pool" } } });
+        Assert.True(s.CanEditLedger(LedgerKey.Piece("b1")));
+        Assert.True(s.CanEditLedger(LedgerKey.Holder("bluedepot")));
+        s.SetViewSides(Red);
+        Assert.True(s.CanEditLedger(LedgerKey.Piece("r1")));
+        Assert.False(s.CanEditLedger(LedgerKey.Piece("b1")));
+        Assert.False(s.CanEditLedger(LedgerKey.Holder("bluedepot")));
+        Assert.True(s.CanEditLedger(LedgerKey.Holder("pool")));
+        Assert.True(s.CanEditLedger(LedgerKey.Holder(HolderDef.GlobalId)));
+        Assert.False(s.CanEditLedger("garbage"));
+    }
+
+    [Fact]
+    public void ViewFiltered_OnlyWhenSomethingIsHidden()
+    {
+        var s = Make();
+        s.UpdateRules(p => p with { Properties = p.Properties.Select(x => x with { Visibility = Visibility.Public }).ToList() });
+        Assert.False(s.ViewFiltered);
+        Assert.Equal("Fuel 80", s.VisibleOnly("Fuel 80"));
+        s.SetViewSides(Red);
+        Assert.False(s.ViewFiltered);            // nothing private, no owned map: the view hides nothing
+        Assert.Equal("Fuel 80", s.VisibleOnly("Fuel 80"));
+        s.UpdateRules(p => p with { MapOwners = new() { new MapOwner { MapId = "Main Map", SideId = "blue" } } });
+        Assert.True(s.ViewFiltered);
+        Assert.Equal("Fuel 80 — visible units only", s.VisibleOnly("Fuel 80"));
+    }
+
+    [Fact]
+    public void ViewFiltered_PrivateLedgerValueHidden()
+    {
+        var s = Make();
+        s.UpdateRules(p => p with
+        {
+            Format = 4,
+            Properties = p.Properties.Select(x => x.Id == "water" ? x with { Visibility = Visibility.Private } : x).ToList(),
+        });
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Piece("b1"), "water", 10, 7, "manual", null, null, "test", null));
+        s.SetViewSides(Red);
+        Assert.True(s.ViewFiltered);
+    }
+
+    [Fact]
+    public void HistoryLabels_HiddenPieces_ShowPlainUndoRedo()
+    {
+        var s = Make(blueOwnsMap: true);
+        var h = new HistoryController(s, new PhaseController(s, (c, _) => c), (c, _) => c);
+        using (s.Game!.BeginAction("move of Blue 1")) s.Game.Execute(new MovePieces(new[] { "b1" }, "Main Map", new PointD(80, 50), null));
+        Assert.Equal("Undo move of Blue 1", h.UndoText);
+        s.SetViewSides(Red);
+        Assert.Equal("Undo", h.UndoText);
+        h.Undo();
+        Assert.Equal("Redo", h.RedoText);
+        s.SetViewSides(null);
+        Assert.Equal("Redo move of Blue 1", h.RedoText);
+        h.Redo();
+        using (s.Game.BeginAction("Turn 3")) s.Game.Execute(new SetTurn(3, null));
+        s.SetViewSides(Red);
+        Assert.Equal("Undo Turn 3", h.UndoText);   // touches no piece
+    }
+
+    [Fact]
     public void SetViewSides_CopiesTheSet()
     {
         var s = Make();

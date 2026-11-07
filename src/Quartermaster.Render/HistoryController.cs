@@ -42,8 +42,46 @@ public sealed class HistoryController
 
     public bool CanUndo => _s.Game is { } g && LastAction(g) != null;
     public bool CanRedo => _s.Game?.CanRedo == true;
-    public string UndoText => _s.Game is { } g && LastAction(g) is { } a ? "Undo " + a.Label : "Undo";
-    public string RedoText => _s.Game?.RedoLabel is { } l ? "Redo " + l : "Redo";
+    public string UndoText => _s.Game is { } g && LastAction(g) is { } a && LabelShown(CommandsOf(g, a)) ? "Undo " + a.Label : "Undo";
+    public string RedoText => _s.Game is { } g && g.RedoActions.FirstOrDefault() is { } r && LabelShown(r.Commands) ? "Redo " + r.Label : "Redo";
+
+    /// <summary>The commands of a recorded action: from its start to the next action's start (or the end of the log).</summary>
+    private static IEnumerable<GameCommand> CommandsOf(GameSession g, ActionMark a)
+    {
+        var end = g.Log.Count;
+        foreach (var other in g.Actions)
+            if (other.Start > a.Start && other.Start < end) end = other.Start;
+        for (var i = Math.Max(0, a.Start); i < end && i < g.Log.Count; i++) yield return g.Log[i];
+    }
+
+    /// <summary>Hot-seat: an action's label (it may name units) is shown only when the viewer can see every piece the action touched.</summary>
+    private bool LabelShown(IEnumerable<GameCommand> commands)
+    {
+        if (_s.ViewSides == null) return true;
+        try { return commands.SelectMany(PiecesOf).All(id => _s.CanSee(id)); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
+
+    /// <summary>The piece ids a command touches.</summary>
+    internal static IEnumerable<string> PiecesOf(GameCommand c)
+    {
+        IEnumerable<string?> ids = c switch
+        {
+            AddPiece a => new[] { a.PieceId },
+            MovePieces m => m.PieceIds ?? Array.Empty<string>(),
+            RemovePiece r => new[] { r.PieceId },
+            SetTraitState t => new[] { t.PieceId },
+            ToggleTrail t => new[] { t.PieceId },
+            LedgerDelta d => new[] { d.PieceId, d.Key != null && LedgerKey.TryParse(d.Key, out var isPiece, out var id) && isPiece ? id : null },
+            SeedLedger sl => (sl.Seeds ?? Array.Empty<LedgerSeed>()).Select(x => x?.Key != null && LedgerKey.TryParse(x.Key, out var p, out var i) && p ? i : null),
+            RollDice r => new[] { r.PieceId },
+            QueueRuns q => (q.Runs ?? Array.Empty<PendingRun>()).SelectMany(r => r?.Units ?? Array.Empty<PendingUnit>()).Select(u => u?.PieceId),
+            ResolveRun r => r.PieceIds ?? Array.Empty<string?>(),
+            AddLogLine l => new[] { l.PieceId },
+            _ => Array.Empty<string?>(),
+        };
+        return ids.Where(x => !string.IsNullOrEmpty(x))!;
+    }
     /// <summary>True when undo stops at the load point of an old (or inconsistent) save.</summary>
     public bool AtFloorFromOldSave => _s.Game is { } g && g.RebasedOnLoad && !CanUndo;
 

@@ -263,7 +263,7 @@ sealed class AlertsTab : UserControl
     {
         if (_s.Rules is not { } pack || Current is not { } a) { _status.Text = ""; return; }
         var probe = a with { Condition = _condition.Text };
-        _status.Text = AlertEdit.MatchStatus(probe, _s.Game?.State, pack);
+        _status.Text = AlertEdit.MatchStatus(probe, _s.View, pack);   // counts only what this player may see
         _status.ForeColor = _status.Text.StartsWith("Does not parse", StringComparison.Ordinal) ? Color.Firebrick : SystemColors.ControlText;
     }
 

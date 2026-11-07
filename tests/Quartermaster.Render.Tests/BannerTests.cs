@@ -26,6 +26,14 @@ public class BannerTests
     }
 
     [Fact]
+    public void Banner_OtherSidePlaying_NoInstructionsOrDecisions()
+    {
+        var (text, tip) = Banner.For(View(side: "Blue") with { PlayingText = "Blue is playing Supply" });
+        Assert.Equal("Now: Blue is playing Supply", text);
+        Assert.Null(tip);
+    }
+
+    [Fact]
     public void Banner_NoSide()
     {
         Assert.Equal("Now: Supply: Check fuel.", Banner.For(View()).Text);

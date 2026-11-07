@@ -11,7 +11,7 @@ static class MapExport
 
     /// <summary>Smoke/helper overload: snapshots the canvas map's game and renders it.</summary>
     public static string? RunWhole(ModuleSession s, MapCanvas canvas, double zoom, string path, IProgress<double>? progress, CancellationToken ct)
-        => RunWhole(s, canvas.Map, canvas.Tiles, s.Game?.State.DeepClone(), zoom, path, progress, ct);
+        => RunWhole(s, canvas.Map, canvas.Tiles, s.View?.DeepClone(), zoom, path, progress, ct);
 
     /// <summary>
     /// Renders the whole map from a snapshot of the game and writes the PNG atomically. Safe off the UI thread. Returns null on success,
@@ -76,7 +76,7 @@ static class MapExport
             return;
         }
 
-        var snapshot = s.Game.State.DeepClone();
+        var snapshot = (s.View ?? s.Game.State).DeepClone();   // what this player may see
         var tiles = canvas.Tiles;
         var map = canvas.Map;
         using var cts = new CancellationTokenSource();

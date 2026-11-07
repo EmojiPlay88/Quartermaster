@@ -188,7 +188,7 @@ sealed class PropertiesTab : UserControl
 
     IReadOnlyList<string> SafeFields()
     {
-        try { return SheetFieldCatalog.Collect(_s.Model, _s.Game?.State); }
+        try { return SheetFieldCatalog.Collect(_s.Model, _s.View); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Program.AppLog("sheet field scan failed: " + ex);
