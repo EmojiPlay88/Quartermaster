@@ -7,44 +7,50 @@ namespace Quartermaster.Relay;
 /// <summary>
 /// The turn mailbox (spec §7): encrypted blobs in boxes named by an opaque 64-hex id, under
 /// <c>{DataDir}/mailbox/{box}/{itemId}.bin</c> with a small <c>index.json</c> per box. The relay never reads the blobs.
-/// Limits: <see cref="MailboxLimits.MaxItemsPerBox"/> items per box, <see cref="RelayOptions.MailboxMaxBytes"/> in total,
-/// <see cref="MailboxLimits.UploadsPerHour"/> uploads per hour per address; items expire after
+/// Limits: <see cref="MailboxLimits.MaxItemsPerBox"/> items per box; <see cref="RelayOptions.MailboxMaxItems"/> items and
+/// <see cref="RelayOptions.MailboxMaxBytes"/> charged bytes in total (each item counts at least
+/// <see cref="MinItemCharge"/>, each box <see cref="BoxCharge"/> more, so many tiny items cannot exhaust disk, inodes or memory);
+/// per address <see cref="MailboxLimits.UploadsPerHour"/> uploads per hour (refused attempts count too) and
+/// <see cref="MailboxLimits.UploadBytesPerDay"/> stored bytes per 24 hours. Items expire after
 /// <see cref="RelayOptions.MailboxExpiryDays"/> days (swept hourly). Box ids, contents and per-box sizes are never logged.
 /// </summary>
 public sealed class Mailbox : IDisposable
 {
     public static readonly TimeSpan SweepEvery = TimeSpan.FromHours(1);
-    private static readonly TimeSpan UploadWindow = TimeSpan.FromHours(1);
+    /// <summary>Least an item counts against <see cref="RelayOptions.MailboxMaxBytes"/> (one disk block).</summary>
+    public const long MinItemCharge = 4096;
+    /// <summary>What a box's folder and index count against <see cref="RelayOptions.MailboxMaxBytes"/>.</summary>
+    public const long BoxCharge = 8192;
+    private static readonly TimeSpan UploadWindow = TimeSpan.FromHours(1), UploadBytesWindow = TimeSpan.FromHours(24);
     private const string IndexName = "index.json", ItemExt = ".bin", TmpExt = ".tmp";
-    private const string StoreFailed = "The mailbox could not store the item.";
 
     internal sealed record Entry(string ItemId, long Size, DateTime StoredUtc);
 
     private readonly object _lock = new();
     private readonly string _root;
     private readonly long _maxBytes;
+    private readonly int _maxItems;
     private readonly TimeSpan _expiry;
     private readonly TimeProvider _time;
     private readonly ILogger<Mailbox> _log;
     private readonly Dictionary<string, List<Entry>> _boxes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Queue<DateTimeOffset>> _uploads = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Queue<(DateTimeOffset At, long Bytes)>> _uploadBytes = new(StringComparer.Ordinal);
     private readonly ITimer _sweeper;
-    private long _totalBytes;
+    private long _charged;
+    private int _items;
 
     public Mailbox(RelayOptions options, TimeProvider time, ILogger<Mailbox> log)
     {
         _root = Path.Combine(options.DataDir, "mailbox");
         _maxBytes = Math.Max(0, options.MailboxMaxBytes);
+        _maxItems = Math.Max(0, options.MailboxMaxItems);
         _expiry = TimeSpan.FromDays(Math.Max(1, options.MailboxExpiryDays));
         _time = time;
         _log = log;
         lock (_lock)
         {
-            try { LoadLocked(); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                _log.LogWarning("The mailbox folder could not be read ({Error}); starting empty.", e.GetType().Name);
-            }
+            LoadLocked();
             ExpireLocked();
         }
         _log.LogInformation("Mailbox ready ({Count} waiting).", Count);
@@ -53,13 +59,15 @@ public sealed class Mailbox : IDisposable
 
     public void Dispose() => _sweeper.Dispose();
 
-    /// <summary>Total stored bytes (all boxes).</summary>
-    public long TotalBytes { get { lock (_lock) return _totalBytes; } }
+    /// <summary>Bytes charged against <see cref="RelayOptions.MailboxMaxBytes"/> (all boxes).</summary>
+    public long ChargedBytes { get { lock (_lock) return _charged; } }
 
     /// <summary>Number of stored items (all boxes).</summary>
-    public int Count { get { lock (_lock) return _boxes.Values.Sum(b => b.Count); } }
+    public int Count { get { lock (_lock) return _items; } }
 
     private DateTime Now => _time.GetUtcNow().UtcDateTime;
+
+    private static long Charge(long size) => Math.Max(size, MinItemCharge);
 
     /// <summary>Answers one mailbox request from a connection in the address bucket (reply or <see cref="Refused"/>).</summary>
     public RelayMessage Handle(string bucket, RelayMessage request)
@@ -83,17 +91,35 @@ public sealed class Mailbox : IDisposable
     {
         if (!MailboxLimits.IsBoxId(box)) return new Refused(MailboxLimits.BadBox);
         if (sealed_.Length == 0 || sealed_.Length > MailboxLimits.MaxSealedBytes) return new Refused(MailboxLimits.BadItem);
+        long size = sealed_.Length;
 
+        // Per address: attempts per hour (refused attempts count too) and stored bytes per 24 h.
         var now = _time.GetUtcNow();
-        if (!_uploads.TryGetValue(bucket, out var recent)) _uploads[bucket] = recent = new Queue<DateTimeOffset>();
-        while (recent.Count > 0 && now - recent.Peek() >= UploadWindow) recent.Dequeue();
-        if (recent.Count >= MailboxLimits.UploadsPerHour) return new Refused(MailboxLimits.TooManyUploads);
+        var recent = Recent(bucket, now);
+        var bytes = RecentBytes(bucket, now);
+        if (recent.Count >= MailboxLimits.UploadsPerHour || bytes.Sum(b => b.Bytes) + size > MailboxLimits.UploadBytesPerDay)
+            return new Refused(MailboxLimits.TooManyUploads);
         recent.Enqueue(now);
 
-        long size = sealed_.Length;
-        if (_totalBytes + size > _maxBytes) ExpireLocked(); // expired items make room first
         _boxes.TryGetValue(box, out var entries);
-        if ((entries?.Count ?? 0) >= MailboxLimits.MaxItemsPerBox || _totalBytes + size > _maxBytes)
+        if (entries is not null)
+        {
+            // This box's own stale items never block it.
+            var old = entries.Where(e => Expired(e, Now)).ToList();
+            if (old.Count > 0)
+            {
+                RemoveLocked(box, old);
+                _boxes.TryGetValue(box, out entries);
+            }
+        }
+        long cost = Charge(size) + (entries is null ? BoxCharge : 0);
+        if (_charged + cost > _maxBytes || _items + 1 > _maxItems)
+        {
+            ExpireLocked(); // expired items make room first
+            _boxes.TryGetValue(box, out entries);
+            cost = Charge(size) + (entries is null ? BoxCharge : 0);
+        }
+        if ((entries?.Count ?? 0) >= MailboxLimits.MaxItemsPerBox || _charged + cost > _maxBytes || _items + 1 > _maxItems)
             return new Refused(MailboxLimits.Full);
 
         var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
@@ -113,11 +139,27 @@ public sealed class Mailbox : IDisposable
             _log.LogWarning("A mailbox item could not be stored ({Error}).", e.GetType().Name);
             TryDelete(path);
             if (entries is null) TryDeleteDir(dir);
-            return new Refused(StoreFailed);
+            return new Refused(MailboxLimits.StoreFailed);
         }
         _boxes[box] = updated;
-        _totalBytes += size;
+        _charged += cost;
+        _items++;
+        bytes.Enqueue((now, size));
         return new MailboxStored(id);
+    }
+
+    private Queue<DateTimeOffset> Recent(string bucket, DateTimeOffset now)
+    {
+        if (!_uploads.TryGetValue(bucket, out var q)) _uploads[bucket] = q = new Queue<DateTimeOffset>();
+        while (q.Count > 0 && now - q.Peek() >= UploadWindow) q.Dequeue();
+        return q;
+    }
+
+    private Queue<(DateTimeOffset At, long Bytes)> RecentBytes(string bucket, DateTimeOffset now)
+    {
+        if (!_uploadBytes.TryGetValue(bucket, out var q)) _uploadBytes[bucket] = q = new Queue<(DateTimeOffset, long)>();
+        while (q.Count > 0 && now - q.Peek().At >= UploadBytesWindow) q.Dequeue();
+        return q;
     }
 
     private RelayMessage List(IReadOnlyList<string> boxes)
@@ -145,6 +187,7 @@ public sealed class Mailbox : IDisposable
             RemoveLocked(box, [entry]);
             return new Refused(MailboxLimits.NoSuchItem);
         }
+        if (bytes.Length == 0 || bytes.Length > MailboxLimits.MaxSealedBytes) return new Refused(MailboxLimits.ReadFailed);
         return new MailboxItem(box, entry.ItemId, bytes);
     }
 
@@ -172,11 +215,10 @@ public sealed class Mailbox : IDisposable
         {
             int removed = ExpireLocked();
             var now = _time.GetUtcNow();
-            foreach (var (bucket, q) in _uploads.ToList())
-            {
-                while (q.Count > 0 && now - q.Peek() >= UploadWindow) q.Dequeue();
-                if (q.Count == 0) _uploads.Remove(bucket);
-            }
+            foreach (var bucket in _uploads.Keys.ToList())
+                if (Recent(bucket, now).Count == 0) _uploads.Remove(bucket);
+            foreach (var bucket in _uploadBytes.Keys.ToList())
+                if (RecentBytes(bucket, now).Count == 0) _uploadBytes.Remove(bucket);
             if (removed > 0) _log.LogInformation("Mailbox: {Count} expired items removed.", removed);
         }
     }
@@ -200,8 +242,11 @@ public sealed class Mailbox : IDisposable
     {
         if (!_boxes.TryGetValue(box, out var entries)) return;
         var ids = gone.Select(g => g.ItemId).ToHashSet(StringComparer.Ordinal);
+        var removed = entries.Where(e => ids.Contains(e.ItemId)).ToList();
         var kept = entries.Where(e => !ids.Contains(e.ItemId)).ToList();
-        _totalBytes -= entries.Where(e => ids.Contains(e.ItemId)).Sum(e => e.Size);
+        _charged -= removed.Sum(e => Charge(e.Size));
+        _items -= removed.Count;
+        if (kept.Count == 0) _charged -= BoxCharge;
         try
         {
             if (kept.Count == 0) _boxes.Remove(box);
@@ -224,48 +269,79 @@ public sealed class Mailbox : IDisposable
     private string BoxDir(string box) => Path.Combine(_root, box);
     private string ItemPath(string box, string id) => Path.Combine(_root, box, id + ItemExt);
 
-    /// <summary>Rebuilds the store from disk: index entries need their file; stray files and temp files are removed.</summary>
+    /// <summary>
+    /// Rebuilds the store from disk: index entries need their file; stray, temp, empty and over-large files are removed.
+    /// Folders that are not box ids are left alone. A box that cannot be read is skipped (its files stay on disk).
+    /// </summary>
     private void LoadLocked()
     {
-        if (!Directory.Exists(_root)) return;
-        foreach (var dir in Directory.GetDirectories(_root))
+        string[] dirs;
+        try
+        {
+            if (!Directory.Exists(_root)) return;
+            dirs = Directory.GetDirectories(_root);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _log.LogWarning("The mailbox folder could not be read ({Error}); the mailbox starts empty.", e.GetType().Name);
+            return;
+        }
+        int skipped = 0;
+        foreach (var dir in dirs)
         {
             var box = Path.GetFileName(dir);
             if (!MailboxLimits.IsBoxId(box)) continue;
-            foreach (var tmp in Directory.GetFiles(dir, "*" + TmpExt)) TryDelete(tmp);
-
-            var files = Directory.GetFiles(dir, "*" + ItemExt)
-                .Select(f => (Id: Path.GetFileNameWithoutExtension(f), Path: f))
-                .Where(f => MailboxLimits.IsItemId(f.Id))
-                .ToDictionary(f => f.Id, f => f.Path, StringComparer.Ordinal);
-            var index = ReadIndex(Path.Combine(dir, IndexName));
-            var entries = new List<Entry>();
-            if (index is not null)
+            try { LoadBox(box, dir); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
             {
-                foreach (var e in index)
-                    if (e is not null && MailboxLimits.IsItemId(e.ItemId) && files.TryGetValue(e.ItemId, out var f)
-                        && entries.All(x => x.ItemId != e.ItemId))
-                        entries.Add(new Entry(e.ItemId, new FileInfo(f).Length, DateTime.SpecifyKind(e.StoredUtc, DateTimeKind.Utc)));
+                skipped++;
+                _log.LogWarning("A mailbox box could not be read ({Error}); it was skipped.", e.GetType().Name);
             }
-            else
-            {
-                // Lost or damaged index: keep the files, dated by their write time.
-                foreach (var (id, f) in files)
-                    entries.Add(new Entry(id, new FileInfo(f).Length, File.GetLastWriteTimeUtc(f)));
-            }
-            entries = entries.OrderBy(e => e.StoredUtc).TakeLast(MailboxLimits.MaxItemsPerBox).ToList();
-            var keep = entries.Select(e => e.ItemId).ToHashSet(StringComparer.Ordinal);
-            foreach (var (id, f) in files)
-                if (!keep.Contains(id)) TryDelete(f);
-            if (entries.Count == 0)
-            {
-                TryDeleteDir(dir);
-                continue;
-            }
-            if (index is null || index.Count != entries.Count) SaveIndex(box, entries);
-            _boxes[box] = entries;
-            _totalBytes += entries.Sum(e => e.Size);
         }
+        if (skipped > 0) _log.LogWarning("Mailbox: {Count} boxes skipped at start-up.", skipped);
+    }
+
+    private void LoadBox(string box, string dir)
+    {
+        foreach (var tmp in Directory.GetFiles(dir, "*" + TmpExt)) TryDelete(tmp);
+
+        var files = new Dictionary<string, (string Path, long Size)>(StringComparer.Ordinal);
+        foreach (var f in Directory.GetFiles(dir, "*" + ItemExt))
+        {
+            var id = Path.GetFileNameWithoutExtension(f);
+            if (!MailboxLimits.IsItemId(id)) continue;
+            var size = new FileInfo(f).Length;
+            if (size == 0 || size > MailboxLimits.MaxSealedBytes) { TryDelete(f); continue; } // cannot be sent back
+            files[id] = (f, size);
+        }
+        var index = ReadIndex(Path.Combine(dir, IndexName));
+        var entries = new List<Entry>();
+        if (index is not null)
+        {
+            foreach (var e in index)
+                if (e is not null && MailboxLimits.IsItemId(e.ItemId) && files.TryGetValue(e.ItemId, out var f)
+                    && entries.All(x => x.ItemId != e.ItemId))
+                    entries.Add(new Entry(e.ItemId, f.Size, DateTime.SpecifyKind(e.StoredUtc, DateTimeKind.Utc)));
+        }
+        else
+        {
+            // Lost or damaged index: keep the files, dated by their write time.
+            foreach (var (id, f) in files)
+                entries.Add(new Entry(id, f.Size, File.GetLastWriteTimeUtc(f.Path)));
+        }
+        entries = entries.OrderBy(e => e.StoredUtc).TakeLast(MailboxLimits.MaxItemsPerBox).ToList();
+        var keep = entries.Select(e => e.ItemId).ToHashSet(StringComparer.Ordinal);
+        foreach (var (id, f) in files)
+            if (!keep.Contains(id)) TryDelete(f.Path);
+        if (entries.Count == 0)
+        {
+            TryDeleteDir(dir);
+            return;
+        }
+        if (index is null || index.Count != entries.Count) SaveIndex(box, entries);
+        _boxes[box] = entries;
+        _charged += BoxCharge + entries.Sum(e => Charge(e.Size));
+        _items += entries.Count;
     }
 
     private static List<Entry>? ReadIndex(string path)

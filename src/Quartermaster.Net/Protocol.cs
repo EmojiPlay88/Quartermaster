@@ -100,7 +100,10 @@ public static class MailboxLimits
 {
     public const int MaxBoxesPerList = 32;
     public const int MaxItemsPerBox = 50;
+    /// <summary>Upload attempts per hour per address (refused attempts count too).</summary>
     public const int UploadsPerHour = 30;
+    /// <summary>Bytes an address may store per 24 hours.</summary>
+    public const long UploadBytesPerDay = 100L * 1024 * 1024;
     public const int ExpiryDays = 30;
     /// <summary>Room left in a frame for the JSON around the Sealed bytes of a <see cref="MailboxItem"/>.</summary>
     private const int Envelope = 1024;
@@ -112,6 +115,8 @@ public static class MailboxLimits
     public const string NoSuchItem = "No such item.";
     public const string BadBox = "Bad mailbox id.";
     public const string BadItem = "The mailbox item is empty or too large.";
+    public const string StoreFailed = "The mailbox could not store the item.";
+    public const string ReadFailed = "The mailbox item could not be read.";
 
     /// <summary>Exactly 64 lower-case hex characters.</summary>
     public static bool IsBoxId(string? s) => IsLowerHex(s, 64);

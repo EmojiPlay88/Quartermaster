@@ -219,7 +219,7 @@ public sealed class Rooms : IDisposable
             // The mailbox has its own lock (it touches the disk) and never involves rooms.
             var reply = _mailbox.Handle(c.Ip, message);
             try { c.Post(reply); }
-            catch (ProtocolException) { c.Post(new Refused(MailboxLimits.NoSuchItem)); }
+            catch (ProtocolException) { c.Post(new Refused(MailboxLimits.ReadFailed)); }
             return;
         }
 

@@ -151,7 +151,7 @@ no .NET installed on the server. Copy the `relay-out` folder to the server, e.g.
 Settings are read from `appsettings.json` next to the program, or from environment variables
 (`Relay__Port`, `Relay__DataDir`, `Relay__CertificatePath`, `Relay__CertificateKeyPath`,
 `Relay__CertificatePassword`, `Relay__MaxConnections`, `Relay__HostMessagesPerSecond`, `Relay__HostBurst`,
-`Relay__MailboxMaxBytes`, `Relay__MailboxExpiryDays`). The same variables work in `docker-compose.yml` under `environment:`.
+`Relay__MailboxMaxBytes`, `Relay__MailboxMaxItems`, `Relay__MailboxExpiryDays`). The same variables work in `docker-compose.yml` under `environment:`.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -164,6 +164,7 @@ Settings are read from `appsettings.json` next to the program, or from environme
 | `HostMessagesPerSecond` | `400` | Message rate of a room's host connection (never below the 50 guests get) |
 | `HostBurst` | `1000` | Burst size of a room's host connection (never below 200) |
 | `MailboxMaxBytes` | `1073741824` (1 GiB) | Most bytes the turn mailbox keeps, all games together; when full, new turns are refused |
+| `MailboxMaxItems` | `10000` | Most turns the mailbox keeps, all games together; when reached, new turns are refused |
 | `MailboxExpiryDays` | `30` | Days a turn waits in the mailbox before it is deleted |
 
 Outside Docker, set `DataDir` to a real folder, e.g. `/var/lib/quartermaster-relay`.
@@ -287,11 +288,18 @@ player's Quartermaster picks it up, instead of sending it by e-mail or chat.
   - one turn must fit in one relay message (about 6 MB once encrypted); a larger one is refused by the game
     before it is sent;
   - 50 waiting turns per box;
-  - 30 uploads per hour per address (IPv6 by /64);
-  - `MailboxMaxBytes` in total (default 1 GiB). Expired turns are cleared first; if it is still full, new
-    turns are refused with "The mailbox is full.";
-  - turns are deleted after `MailboxExpiryDays` days (default 30), checked every hour, or as soon as the
-    receiver has fetched and deleted them.
+  - per address (IPv6 by /64): 30 upload attempts per hour — refused attempts count too — and 100 MB of
+    stored turns per 24 hours; beyond that, "Too many uploads; try again later.";
+  - `MailboxMaxBytes` in total (default 1 GiB) and `MailboxMaxItems` turns in total (default 10,000). For the
+    byte total every turn counts at least 4 KB, and each box 8 KB more, so many tiny uploads cannot fill
+    the disk or the relay's memory. Expired turns are cleared first; if it is still full, new turns are
+    refused with "The mailbox is full.";
+  - turns are deleted after `MailboxExpiryDays` days (default 30), checked every hour, or when the
+    receiving player's copy deletes them after opening.
+- **Size it to your server.** The per-address limits slow a stranger down but do not stop a few addresses
+  from filling the mailbox and keeping it full until their uploads expire. Set `MailboxMaxBytes` to what
+  the disk can spare, and run the relay for people you know. Players' copies delete turns once they have
+  been played, so normal use keeps the mailbox small.
 - The relay log never names boxes or sizes per box; it only reports how many turns are kept and how many
   expired.
 - To empty the mailbox, stop the relay and delete `DataDir/mailbox`.

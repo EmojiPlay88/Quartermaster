@@ -150,16 +150,87 @@ public class MailboxTests
     [Fact]
     public async Task TotalBytes_Cap_Refused_MailboxFull()
     {
-        await using var relay = await Start(new Dictionary<string, string?> { ["Relay:MailboxMaxBytes"] = "1000" });
+        // Charges: an item max(size, 4096), plus 8192 for the box it opens.
+        await using var relay = await Start(new Dictionary<string, string?> { ["Relay:MailboxMaxBytes"] = "30000" });
         var c = await relay.Connect("mailbox");
-        await Put(c, BoxA, Blob(600));
-        Assert.Equal(MailboxLimits.Full, await Refused(c, new MailboxPut(BoxB, Blob(401))));
-        await Put(c, BoxB, Blob(400)); // exactly at the cap
+        await Put(c, BoxA, Blob(10000));                                                      // 18192
+        Assert.Equal(MailboxLimits.Full, await Refused(c, new MailboxPut(BoxB, Blob(3000)))); // +12288 = 30480
+        await Put(c, BoxA, Blob(3000));                                                       // +4096 = 22288
+        await Put(c, BoxA, Blob(7712));                                                       // exactly at the cap
+        Assert.Equal(MailboxLimits.Full, await Refused(c, new MailboxPut(BoxA, Blob(1))));
 
         // Expired items make room first.
         relay.Time.Advance(TimeSpan.FromDays(30));
-        await Put(c, BoxB, Blob(600));
-        Assert.Equal(MailboxLimits.Full, await Refused(c, new MailboxPut(BoxA, Blob(401))));
+        await Put(c, BoxB, Blob(10000));
+        Assert.Equal(MailboxLimits.Full, await Refused(c, new MailboxPut(BoxA, Blob(9000))));
+    }
+
+    [Fact]
+    public async Task TinyItems_ManyBoxes_HitFull()
+    {
+        // 1-byte items cannot slip past the cap: each costs a block plus its box.
+        await using var relay = await Start(new Dictionary<string, string?> { ["Relay:MailboxMaxBytes"] = (10 * (8192 + 4096)).ToString() });
+        var c = await relay.Connect("mailbox");
+        for (int i = 0; i < 10; i++) await Put(c, Box($"tiny{i}"), [1]);
+        Assert.Equal(MailboxLimits.Full, await Refused(c, new MailboxPut(Box("tiny10"), [1])));
+        Assert.Equal(MailboxLimits.Full, await Refused(c, new MailboxPut(Box("tiny0"), [1])));
+    }
+
+    [Fact]
+    public async Task ItemCap_Refused_MailboxFull()
+    {
+        await using var relay = await Start(new Dictionary<string, string?> { ["Relay:MailboxMaxItems"] = "3" });
+        var c = await relay.Connect("mailbox");
+        for (int i = 0; i < 3; i++) await Put(c, Box($"item{i}"), [1]);
+        Assert.Equal(MailboxLimits.Full, await Refused(c, new MailboxPut(Box("item3"), [1])));
+        var first = (await List(c, Box("item0")))[0].ItemId;
+        await c.Send(new MailboxDelete(Box("item0"), first));
+        await c.Receive<MailboxDeleted>();
+        await Put(c, Box("item3"), [1]);
+    }
+
+    [Fact]
+    public async Task UploadBytes_100MBPerDayPerAddress()
+    {
+        await using var relay = await Start();
+        var c = await relay.Connect("mailbox", "2001:db8:5:6::1");
+        var big = Blob(MailboxLimits.MaxSealedBytes);
+        int fit = (int)(MailboxLimits.UploadBytesPerDay / MailboxLimits.MaxSealedBytes);
+        for (int i = 0; i < fit; i++)
+        {
+            await Put(c, BoxA, big);
+            relay.Time.Advance(TimeSpan.FromMinutes(10)); // spread over hours: the hourly count is not what stops it
+        }
+        Assert.Equal(MailboxLimits.TooManyUploads, await Refused(c, new MailboxPut(BoxA, big)));
+        Assert.Equal(MailboxLimits.TooManyUploads, await Refused(c, new MailboxPut(BoxA, big)));
+        // The same /64 shares the budget; another address does not.
+        var neighbour = await relay.Connect("mailbox", "2001:db8:5:6::2");
+        Assert.Equal(MailboxLimits.TooManyUploads, await Refused(neighbour, new MailboxPut(BoxB, big)));
+        var other = await relay.Connect("mailbox", "2001:db8:5:7::1");
+        await Put(other, BoxB, big);
+        // Smaller items that still fit the remaining budget are taken.
+        await Put(c, BoxA, Blob(1000));
+        // 24 hours after the first upload, its bytes count no more.
+        relay.Time.Advance(TimeSpan.FromHours(24) - TimeSpan.FromMinutes(10 * fit));
+        await Put(c, BoxA, big);
+    }
+
+    [Fact]
+    public async Task StaleItems_DoNotBlockTheirBox()
+    {
+        await using var relay = await Start();
+        relay.Time.Advance(TimeSpan.FromMinutes(30)); // items expire half an hour before the next hourly sweep
+        var a = await relay.Connect("mailbox", "203.0.113.1");
+        var b = await relay.Connect("mailbox", "203.0.113.2");
+        for (int i = 0; i < MailboxLimits.MaxItemsPerBox; i++) await Put(i % 2 == 0 ? a : b, BoxA, [(byte)i]);
+        // Small steps: the fake clock runs a due timer at the end of a step, so every step stops short of the
+        // expiry (T+30d+30m) except the last, which crosses it between two hourly sweeps (T+30d and T+30d+1h).
+        for (int h = 0; h < 30 * 24 - 1; h++) relay.Time.Advance(TimeSpan.FromHours(1)); // T+29d23h30m
+        relay.Time.Advance(TimeSpan.FromMinutes(40)); // T+30d+10m: the T+30d sweep runs, nothing expired yet
+        relay.Time.Advance(TimeSpan.FromMinutes(25)); // T+30d+35m: expired, no sweep due
+        Assert.Equal(MailboxLimits.MaxItemsPerBox, Directory.GetFiles(BoxDir(relay, BoxA), "*.bin").Length); // not swept yet
+        await Put(a, BoxA, [1]);
+        Assert.Single(await List(a, BoxA));
     }
 
     [Fact]
@@ -261,6 +332,52 @@ public class MailboxTests
             // The total survives too: the expiry still counts from the original upload.
             relay.Time.Advance(TimeSpan.FromDays(29));
             Assert.Empty(await List(c, BoxA));
+        }
+        finally { try { Directory.Delete(dir, true); } catch (IOException) { } }
+    }
+
+    [Fact]
+    public async Task Restart_TamperedIndex_And_ForeignFolders_Ignored()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "qm-relay-tests", Guid.NewGuid().ToString("N"));
+        string good;
+        await using (var relay = await Start(dataDir: dir))
+        {
+            relay.KeepData = true;
+            var c = await relay.Connect("mailbox");
+            good = await Put(c, BoxA, [1, 2]);
+        }
+        var mailbox = Path.Combine(dir, "mailbox");
+        var boxA = Path.Combine(mailbox, BoxA);
+        var upper = new string('A', 32);
+        File.WriteAllBytes(Path.Combine(boxA, upper + ".bin"), [3]);
+        var tooBig = new string('3', 32);
+        File.WriteAllBytes(Path.Combine(boxA, tooBig + ".bin"), new byte[MailboxLimits.MaxSealedBytes + 1]);
+        var when = "2026-11-07T12:00:00Z";
+        File.WriteAllText(Path.Combine(boxA, "index.json"),
+            $$"""[{"ItemId":"{{good}}","Size":2,"StoredUtc":"{{when}}"},{"ItemId":"../../outside","Size":1,"StoredUtc":"{{when}}"},""" +
+            $$"""{"ItemId":"{{upper}}","Size":1,"StoredUtc":"{{when}}"},{"ItemId":"{{tooBig}}","Size":1,"StoredUtc":"{{when}}"}]""");
+        File.WriteAllBytes(Path.Combine(dir, "outside.bin"), [9]);
+        var foreign = Path.Combine(mailbox, "not-a-box");
+        Directory.CreateDirectory(foreign);
+        File.WriteAllBytes(Path.Combine(foreign, new string('4', 32) + ".bin"), [4]);
+        // A box with an unreadable index is rebuilt from its files, not fatal.
+        var boxB = Path.Combine(mailbox, BoxB);
+        Directory.CreateDirectory(boxB);
+        File.WriteAllText(Path.Combine(boxB, "index.json"), "{ not json");
+
+        try
+        {
+            await using var relay = await Start(dataDir: dir);
+            var c = await relay.Connect("mailbox");
+            Assert.Equal([good], (await List(c, BoxA)).Select(i => i.ItemId).ToArray());
+            Assert.Equal(MailboxLimits.NoSuchItem, await Refused(c, new MailboxGet(BoxA, upper)));
+            Assert.False(File.Exists(Path.Combine(boxA, tooBig + ".bin")));
+            Assert.True(File.Exists(Path.Combine(dir, "outside.bin")));       // never touched
+            Assert.True(Directory.Exists(foreign));                            // not a box: left alone
+            Assert.Empty(await List(c, BoxB));
+            Assert.False(Directory.Exists(boxB));                              // empty box removed
+            Assert.Contains("Mailbox ready (1 waiting)", relay.Logs.All);
         }
         finally { try { Directory.Delete(dir, true); } catch (IOException) { } }
     }
