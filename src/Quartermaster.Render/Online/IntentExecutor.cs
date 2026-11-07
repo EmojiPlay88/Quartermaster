@@ -365,7 +365,7 @@ internal static class FormulaIntentRunner
         FormulaPins.Scope? scope = null;
         if (pins != null)
         {
-            scope = pins.Open(pinKey, g, pack, FormulaPins.MayRoll(f));
+            scope = pins.Open(pinKey, g, pack, pins.MayRollHint(f));
             if (scope == null) return FormulaVerdict.Refused(FormulaPins.FullText);
             var roller = s.Roll;
             var sc = scope;
@@ -373,6 +373,8 @@ internal static class FormulaIntentRunner
         }
         if (i.Calculate) model.Calculate(full);
         var dv = model.Evaluate(full);
+        // A run that rolled where the static guess saw no dice could not pin them (the sender's table was full): nothing goes back.
+        if (scope is { Unpinned: true }) return FormulaVerdict.Refused(FormulaPins.FullText);
         var boxes = dv.Boxes.Select(b => new FormulaBox(b.Variable,
             hidden.Contains(b.Variable) ? FormulaBox.Hidden : b.Wrong ? FormulaBox.Wrong : FormulaBox.Ok)).ToList();
         if (i.Preview)
@@ -467,11 +469,30 @@ internal sealed class FormulaPins
         /// <summary>True once a preview showed these dice (an Apply after it counts as calculated).</summary>
         public bool Previewed { get; set; }
 
+        /// <summary>Registers an unregistered scope on its first real roll (false = the sender's table is full); null once registered.</summary>
+        internal Func<bool>? Register { get; set; }
+
+        /// <summary>
+        /// True when a die was asked for but the scope could not be registered: those dice were never rolled or pinned and the run must be
+        /// refused (fail closed).
+        /// </summary>
+        public bool Unpinned { get; private set; }
+
         public int Count => _dice.Count;
 
         /// <summary>The pinned dice of this configuration, or a new roll that is pinned first (append-only).</summary>
         public IReadOnlyList<int> Roll(string key, int n, int sides, Func<int, int, IReadOnlyList<int>> roller)
         {
+            if (Register is { } register)
+            {
+                if (!register())
+                {
+                    // Not rolled: the run is refused, so nothing may depend on these placeholder dice.
+                    Unpinned = true;
+                    return Enumerable.Repeat(1, Math.Max(0, n)).ToList();
+                }
+                Register = null;
+            }
             var config = ConfigKey(key, n, sides);
             if (_dice.TryGetValue(config, out var pinned)) return pinned;
             var rolled = roller(n, sides).ToList();
@@ -479,6 +500,9 @@ internal sealed class FormulaPins
             return rolled;
         }
     }
+
+    /// <summary>The static guess whether a formula rolls (<see cref="MayRoll"/>); a test hook can make it miss. A miss is caught on the first roll.</summary>
+    internal Func<FormulaDef, bool> MayRollHint { get; set; } = MayRoll;
 
     private readonly Dictionary<string, Dictionary<Key, Scope>> _bySender = new(StringComparer.Ordinal);
 
@@ -504,8 +528,10 @@ internal sealed class FormulaPins
         ReferenceEquals(sc.Game, g) && ReferenceEquals(sc.Pack, pack) && Equals(sc.Position, g.State.Position);
 
     /// <summary>
-    /// The live scope for this key, or a new one (registered when <paramref name="mayRoll"/>; a run without dice pins nothing). Null when the
-    /// sender already holds <see cref="MaxPerSender"/> live scopes and this one would be new: the caller refuses before rolling anything.
+    /// The live scope for this key, or a new one. A new scope is registered now when <paramref name="mayRoll"/> (the static guess), else
+    /// lazily on its first actual roll: whatever the guess, every die rolled for a guest is pinned. Null when the sender already holds
+    /// <see cref="MaxPerSender"/> live scopes and this one would be new and may roll: the caller refuses before rolling anything. A lazy
+    /// scope that finds the table full on its first roll rolls nothing and is marked <see cref="Scope.Unpinned"/> (the caller refuses).
     /// </summary>
     public Scope? Open(Key key, GameSession g, RulesPack pack, bool mayRoll)
     {
@@ -513,7 +539,17 @@ internal sealed class FormulaPins
         foreach (var stale in scopes.Where(kv => !Valid(kv.Value, g, pack)).Select(kv => kv.Key).ToList()) scopes.Remove(stale);
         if (scopes.TryGetValue(key, out var live)) return live;
         var scope = new Scope(g, pack, g.State.Position);
-        if (!mayRoll) return scope;
+        if (!mayRoll)
+        {
+            scope.Register = () =>
+            {
+                if (scopes.TryGetValue(key, out var other)) return ReferenceEquals(other, scope);
+                if (scopes.Count >= MaxPerSender) return false;
+                scopes[key] = scope;
+                return true;
+            };
+            return scope;
+        }
         if (scopes.Count >= MaxPerSender) return null;
         scopes[key] = scope;
         return scope;

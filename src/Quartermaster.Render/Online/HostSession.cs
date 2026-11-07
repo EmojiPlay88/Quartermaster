@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Quartermaster.Core;
 using Quartermaster.Net;
@@ -34,6 +35,7 @@ public sealed class HostSession : IDisposable
     public const string ChooseSideFirstText = "Choose your side first.";
     public const string SignedInElsewhereText = "Signed in elsewhere.";
     public const string SeatFreedText = "The host freed your seat.";
+    public const string TooLargeText = "The game is too large to send.";
     public static string NameTakenText(string name) => $"A player named {name} is already in this game.";
 
     public static readonly TimeSpan SnapshotDelay = TimeSpan.FromMilliseconds(100);
@@ -42,6 +44,9 @@ public sealed class HostSession : IDisposable
     public static readonly TimeSpan SlowDownInterval = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan ListingInterval = TimeSpan.FromSeconds(30);
     private const int MaxJoinMemory = 256;
+    /// <summary>How many recent intent ids per seat are remembered: a replayed <see cref="IntentMsg"/> is ignored (no reply).</summary>
+    public const int IntentIdMemory = 256;
+    private static readonly long ClockOrigin = Stopwatch.GetTimestamp();
 
     private readonly ModuleSession _s;
     private readonly IntentExecutor _exec;
@@ -51,7 +56,7 @@ public sealed class HostSession : IDisposable
     private readonly bool _locked;
     private readonly Timer _snapshotTimer;
     private readonly Timer _listingTimer;
-    private readonly Dictionary<string, DateTime> _lastJoin = new();
+    private readonly Dictionary<string, TimeSpan> _lastJoin = new();
     private bool _snapshotDue;
     private bool _disposed;
     private long _version;
@@ -106,8 +111,14 @@ public sealed class HostSession : IDisposable
     /// <summary>The public listing for the current seats (what the next publish sends).</summary>
     public LobbyListing Listing => BuildListing();
 
-    /// <summary>Test hook: the clock used for rate limits and snapshot spacing.</summary>
-    internal Func<DateTime> Now { get; set; } = () => DateTime.UtcNow;
+    /// <summary>A monotonic timestamp (time since a fixed point in this process); never jumps with the wall clock.</summary>
+    internal static TimeSpan MonotonicNow() => Stopwatch.GetElapsedTime(ClockOrigin);
+
+    /// <summary>Test hook: the monotonic clock used for rate limits and snapshot spacing.</summary>
+    internal Func<TimeSpan> Now { get; set; } = MonotonicNow;
+
+    /// <summary>Test hook: the largest view JSON sent to a guest (a larger one is refused with <see cref="TooLargeText"/>).</summary>
+    internal int MaxSnapshotJson { get; set; } = Secrets.MaxPlain;
 
     // ---- host-side actions (owning thread) ----
 
@@ -233,7 +244,23 @@ public sealed class HostSession : IDisposable
     private void OnDisconnected(string _) => Post(() => { RelayConnected = false; ConnectionChanged?.Invoke(); });
     private void OnReconnected() => Post(() => { RelayConnected = true; ConnectionChanged?.Invoke(); PublishListing(); });
 
-    private void OnViewChanged() => ScheduleSnapshots();
+    private void OnViewChanged()
+    {
+        ScheduleSnapshots();
+        Post(ResyncPlayers);
+    }
+
+    /// <summary>
+    /// Seats are the truth online. When the game's player list no longer matches them (the host undid or stepped back over a SetPlayers),
+    /// a new SetPlayers puts it back, but only outside an action and once the host is no longer walking back through history (nothing
+    /// to redo): undoing further stays possible, and the next forward change (which clears redo anyway) restores the list. Guests are
+    /// unaffected meanwhile: their views carry the seats' player list (<see cref="SendSnapshot"/>).
+    /// </summary>
+    private void ResyncPlayers()
+    {
+        if (_s.Game is not { } g || g.InAction || g.CanRedo) return;
+        if (!Same(Seats.ToPlayers(), g.State.Players)) SyncPlayers();
+    }
 
     private void OnGameReplaced() => Post(SyncPlayers);
 
@@ -293,14 +320,15 @@ public sealed class HostSession : IDisposable
     private void Join(string from, JoinRequest j)
     {
         if (!JoinAllowed(from)) { _dropped++; return; }
-        if (j.ProtocolVersion != Protocol.ProtocolVersion) { Send(from, new Kicked(Protocol.MismatchMessage(j.ProtocolVersion))); return; }
+        // The guest is told this host's version (the one it differs from).
+        if (j.ProtocolVersion != Protocol.ProtocolVersion) { Send(from, new Kicked(Protocol.MismatchMessage(Protocol.ProtocolVersion))); return; }
         if (!string.Equals(j.ModuleSha256, _s.Archive.Sha256, StringComparison.OrdinalIgnoreCase)) { Send(from, new Kicked(DifferentModuleText)); return; }
         if (PackBytes() is not { } pack) { Send(from, new Kicked(NoRulesText)); return; }
 
         if (Seats.ByToken(j.RejoinToken) is { } mine)
         {
             Bind(mine, from);
-            Send(from, new Welcome(mine.PlayerId, j.RejoinToken!, pack, Seats.FreeSides(_s.Rules)));
+            Send(from, new Welcome(mine.PlayerId, j.RejoinToken!, pack, Seats.FreeSides(_s.Rules), mine.Sides.ToList()));
             SendSnapshot(mine);
             AfterSeatChange(sync: false);
             return;
@@ -327,6 +355,7 @@ public sealed class HostSession : IDisposable
         if (seat.MemberId is { } old && old != memberId) Send(old, new Kicked(SignedInElsewhereText));
         seat.MemberId = memberId;
         seat.LastSnapshot = null;
+        seat.TooLarge = false;
     }
 
     /// <summary>"Slow down." at most once per seat per <see cref="SlowDownInterval"/>; further over-limit requests get no reply.</summary>
@@ -356,7 +385,9 @@ public sealed class HostSession : IDisposable
     private void Intent(string from, IntentMsg m)
     {
         if (Seats.ByMember(from) is not { IsHost: false } seat) { _dropped++; return; }
+        if (seat.SeenIntent(m.Id)) { _dropped++; return; }   // a replay: already answered once
         if (!seat.Intents.TryTake(Now())) { SlowDown(seat, from, m.Id); return; }
+        seat.RememberIntent(m.Id);
         GameIntent? intent;
         try { intent = JsonSerializer.Deserialize<GameIntent>(m.IntentJson, QuartermasterJson.Options); }
         catch (Exception e) when (e is JsonException or NotSupportedException or InvalidOperationException or ArgumentException)
@@ -369,6 +400,10 @@ public sealed class HostSession : IDisposable
         if (r.Ok) ScheduleSnapshots();
     }
 
+    /// <summary>
+    /// The <see cref="Net.Chat"/> payload is reserved: this version's guests chat through a <see cref="ChatIntent"/>. One that arrives is
+    /// treated like that intent (same limits and log line; its From is ignored, the seat's name is used).
+    /// </summary>
     private void ChatPayload(string from, Net.Chat c)
     {
         if (Seats.ByMember(from) is not { IsHost: false } seat) { _dropped++; return; }
@@ -476,15 +511,49 @@ public sealed class HostSession : IDisposable
     }
 
     /// <summary>The guest's filtered view, if it is connected and holds a side (never without a rules pack: no pack means no filter).</summary>
+    /// <remarks>
+    /// The view's player list is the seats' (public, and the truth online even while the host's own list differs after an undo). A view
+    /// too large to send (over <see cref="MaxSnapshotJson"/>, over a frame once packed, or refused by the transport as too large) is not
+    /// sent: the guest is told <see cref="TooLargeText"/> (<see cref="Paused"/>) and a warning without content is logged.
+    /// </remarks>
     private void SendSnapshot(Seat seat)
     {
         seat.SnapshotDue = false;
         if (seat.IsHost || seat.MemberId is not { } to || seat.Sides.Count == 0) return;
         if (_s.Game?.State is not { } full || _s.Rules is not { } pack) return;
         var view = PlayerView.For(full, pack, _s.Model, seat.Sides.ToHashSet());
+        view.Players = Seats.ToPlayers();
         var json = JsonSerializer.SerializeToUtf8Bytes(view, QuartermasterJson.Options);
         seat.LastSnapshot = Now();
-        Send(to, new Snapshot(++_version, Gzip.Compress(json)));
+        var size = json.Length;
+        if (size > MaxSnapshotJson) { TooLarge(seat, to, size); return; }
+        byte[] bytes;
+        try { bytes = Framing.Encode<GamePayload>(new Snapshot(++_version, Gzip.Compress(json))); }
+        catch (ProtocolException) { TooLarge(seat, to, size); return; }
+        seat.TooLarge = false;
+        try
+        {
+            _t.Send(to, bytes).ContinueWith(t =>
+            {
+                if (t.Exception?.InnerException is ProtocolException) Post(() => { if (seat.MemberId == to) TooLarge(seat, to, size); });
+                else _ = t.Exception;
+            }, TaskContinuationOptions.OnlyOnFaulted);
+        }
+        catch (Exception) { }
+    }
+
+    /// <summary>Once per seat until a view goes through again (or it reconnects): a warning without content, and the guest is paused.</summary>
+    private void TooLarge(Seat seat, string to, long jsonBytes)
+    {
+        if (seat.TooLarge) return;
+        seat.TooLarge = true;
+        try
+        {
+            _s.Log.Add(DiagnosticSeverity.Warning, "online",
+                $"A guest's view of the game is too large to send online (about {Math.Max(1, jsonBytes / (1024 * 1024))} MB); that guest is paused.");
+        }
+        catch (Exception) { }
+        Send(to, new Paused(TooLargeText));
     }
 
     private void Reply(string to, Guid id, IntentResult r) =>

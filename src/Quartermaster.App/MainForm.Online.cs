@@ -163,6 +163,7 @@ sealed partial class MainForm
     void OnlineFailed(string why, bool guest = false)
     {
         if (IsDisposed) return;
+        why = OnlineLobbyModel.CleanText(why, GuestSession.MaxHostText);   // may be relay text: cleaned and clipped before it is shown
         OnlineError = why;
         Program.AppLog("online: could not go online: " + why);
         EndOnline(notifyGuests: false);
@@ -245,6 +246,18 @@ sealed partial class MainForm
                     OnlineGuard(AskSide);
                 };
                 _sideTimer.Start();
+                break;
+            case GuestState.Paused when g.NoAnswer:
+                // The join was never answered: offer to leave (staying keeps waiting; a host or relay coming back tries again).
+                Program.AppLog("online: the host did not answer the join");
+                if (Program.Smoke) return;
+                BeginInvoke(() =>
+                {
+                    if (IsDisposed || _guest != g || !g.NoAnswer) return;
+                    if (MessageBox.Show(this, GuestSession.NoAnswerText + ".\n\nLeave the online game and go back to the launcher?", "Online game",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes && _guest == g)
+                        LeaveAsGuest();
+                });
                 break;
             case GuestState.Refused:
                 var why = g.StatusText ?? "The host removed you from the game.";
@@ -410,7 +423,7 @@ sealed partial class MainForm
         if (_host != null)
         {
             var r = _host.Chat(text);
-            if (!r.Ok && r.Message != null) SetStatus(r.Message);
+            if (!r.Ok && r.Message != null) SetStatus(OnlineLobbyModel.CleanText(r.Message, GuestSession.MaxHostText));
         }
         else _remote?.Chat(text);
     }

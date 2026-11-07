@@ -229,7 +229,7 @@ sealed class OnlineLobbyForm : Form
         catch (RelayException ex)
         {
             _lastOk = false;
-            SetState(_lastTrouble ?? ex.Message);
+            SetState(OnlineLobbyModel.CleanText(_lastTrouble ?? ex.Message, GuestSession.MaxHostText));   // relay text is untrusted
         }
         finally { SetBusy(false); }
     }
@@ -330,11 +330,13 @@ sealed class OnlineLobbyForm : Form
             return new LaunchRequest(_row.Entry.Path, null, LaunchKind.JoinOnline, null, null,
                 new OnlineLaunch(uri, playerName, password ?? "", null, null, code, listing, client, trust));
         }
-        catch (RelayException ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // Any failure (the relay's refusal, a broken connection, anything else): the client is closed here, nobody else holds it.
             client.Disconnected -= OnDown;
-            await client.DisposeAsync();
-            var msg = OnlineLobbyModel.CleanText(down != null && ex.Message == "Not connected to the relay." ? down : ex.Message, 300);   // relay text is untrusted too
+            try { await client.DisposeAsync(); } catch (Exception) { }
+            var msg = OnlineLobbyModel.CleanText(ex is RelayException && down != null && ex.Message == "Not connected to the relay." ? down : ex.Message,
+                GuestSession.MaxHostText);   // relay text is untrusted too
             SetState(msg);
             Problem("Could not join " + name + ":\n" + msg);
             return null;
@@ -382,7 +384,7 @@ sealed class OnlineLobbyForm : Form
             if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Request is not { } req || req.Players is not { Count: 1 } players) return;
             var host = players[0];
             _store.Update(s => s with { LastDifficulty = req.Difficulty, PlayerName = host.Name });
-            Finish(new LaunchRequest(_row.Entry.Path, hp.Path, LaunchKind.HostOnline, req with { Players = null }, null,
+            Finish(new LaunchRequest(_row.Entry.Path, hp.Path, LaunchKind.HostOnline, req.WithoutPassword() with { Players = null }, null,
                 new OnlineLaunch(uri, host.Name, req.Password ?? "", req.LobbyName, host.Sides.ToList())));
         }
     }

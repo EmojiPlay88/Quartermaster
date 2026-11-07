@@ -31,19 +31,35 @@ public sealed class Seat
     internal byte[]? TokenHash { get; }
     internal RateWindow Intents { get; } = new(Seats.MaxIntentsPerSecond);
     internal RateWindow Chats { get; } = new(Seats.MaxChatsPerSecond);
-    internal DateTime? LastSlowDown { get; set; }
-    internal DateTime? LastSnapshot { get; set; }
+    /// <summary>Monotonic timestamps (<see cref="HostSession.MonotonicNow"/>).</summary>
+    internal TimeSpan? LastSlowDown { get; set; }
+    internal TimeSpan? LastSnapshot { get; set; }
     internal bool SnapshotDue { get; set; }
+    /// <summary>The last view was too large to send (the guest was told once).</summary>
+    internal bool TooLarge { get; set; }
+
+    private readonly HashSet<Guid> _intentIds = new();
+    private readonly Queue<Guid> _intentOrder = new();
+
+    /// <summary>True when this intent id is one of the last <see cref="HostSession.IntentIdMemory"/> taken from this seat.</summary>
+    internal bool SeenIntent(Guid id) => _intentIds.Contains(id);
+
+    internal void RememberIntent(Guid id)
+    {
+        if (!_intentIds.Add(id)) return;
+        _intentOrder.Enqueue(id);
+        while (_intentOrder.Count > HostSession.IntentIdMemory) _intentIds.Remove(_intentOrder.Dequeue());
+    }
 
     internal PlayerDef ToPlayer() => new(PlayerId, Name, Sides.ToList());
 }
 
-/// <summary>At most N events in any one-second window (sliding).</summary>
+/// <summary>At most N events in any one-second window (sliding), on monotonic timestamps.</summary>
 internal sealed class RateWindow(int max)
 {
-    private readonly Queue<DateTime> _times = new();
+    private readonly Queue<TimeSpan> _times = new();
 
-    public bool TryTake(DateTime now)
+    public bool TryTake(TimeSpan now)
     {
         while (_times.Count > 0 && now - _times.Peek() >= TimeSpan.FromSeconds(1)) _times.Dequeue();
         if (_times.Count >= max) return false;

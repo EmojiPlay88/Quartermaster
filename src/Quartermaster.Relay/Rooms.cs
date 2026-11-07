@@ -37,7 +37,7 @@ public static class Limits
 /// <summary>One WebSocket client. Outgoing frames are queued and written by the connection's writer loop.</summary>
 public sealed class Connection
 {
-    private readonly Channel<byte[]> _out = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<byte[]> _out = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = false });   // the send loop and Abort's drain both read
     private readonly CancellationTokenSource _abort = new();
     private readonly TimeProvider _time;
     private long _queuedBytes;

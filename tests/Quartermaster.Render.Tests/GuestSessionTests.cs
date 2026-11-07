@@ -133,7 +133,7 @@ public class GuestSessionTests : IDisposable
         _online.Add(h);
         d.Pump();
         var rig = new Rig { Host = s, H = h, Relay = relay, D = d, Key = key, ModulePath = path, HostT = hostT };
-        h.Now = () => DateTime.UtcNow + rig.Offset;
+        h.Now = () => HostSession.MonotonicNow() + rig.Offset;
         return rig;
     }
 
@@ -563,7 +563,7 @@ public class GuestSessionTests : IDisposable
         bob.T.InjectPlain(Framing.Encode<GamePayload>(new Snapshot(version + 2, Gzip.Compress(Encoding.UTF8.GetBytes("[1,2]")))));
         bob.T.InjectPlain(Framing.Encode<GamePayload>(new Snapshot(version + 3, Gzip.Compress(Encoding.UTF8.GetBytes("{\"pieces\":null}")))));
         // A gzip bomb: inflates past the frame cap.
-        bob.T.InjectPlain(Framing.Encode<GamePayload>(new Snapshot(version + 4, Gzip.Compress(new byte[Framing.MaxFrame + 1024]))));
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new Snapshot(version + 4, Gzip.Compress(new byte[Secrets.MaxPlain + 1024]))));
         bob.T.InjectPlain(Framing.Encode<GamePayload>(new RulesChanged(new byte[] { 9, 9, 9 })));
         bob.T.InjectPlain(Framing.Encode<GamePayload>(new RulesChanged(ZipBomb(r.Host.Rules!))));
         bob.T.InjectPlain(Framing.Encode<GamePayload>(new RulesChanged(ManyEntries(r.Host.Rules!))));
@@ -582,8 +582,8 @@ public class GuestSessionTests : IDisposable
     /// <summary>A real pack plus one entry that inflates to 40 MB (a few KB on the wire).</summary>
     private static byte[] ZipBomb(RulesPack pack) => WithEntries(pack, 1, 40 * 1024 * 1024);
 
-    /// <summary>A real pack plus 300 tiny entries.</summary>
-    private static byte[] ManyEntries(RulesPack pack) => WithEntries(pack, 300, 2);
+    /// <summary>A real pack plus more tiny entries than a received pack may hold.</summary>
+    private static byte[] ManyEntries(RulesPack pack) => WithEntries(pack, RulesPackIo.MaxReceivedEntries + 1, 2);
 
     private static byte[] WithEntries(RulesPack pack, int count, int size)
     {
@@ -593,7 +593,7 @@ public class GuestSessionTests : IDisposable
             for (var i = 0; i < count; i++)
             {
                 using var e = z.CreateEntry($"formulas/x{i}.json", CompressionLevel.Optimal).Open();
-                var chunk = new byte[1024 * 1024];
+                var chunk = new byte[Math.Min(size, 1024 * 1024)];
                 Array.Fill(chunk, (byte)' ');
                 for (var left = size; left > 0; left -= chunk.Length) e.Write(chunk, 0, Math.Min(left, chunk.Length));
             }
@@ -670,7 +670,7 @@ public class GuestSessionTests : IDisposable
         sealedNewer.Send(null, Framing.Encode<GamePayload>(new JoinRequest("Zed", null, r.Host.Archive.Sha256, 2)));
         r.D.Pump();
         var kicked = Assert.IsType<Kicked>(Framing.Decode<GamePayload>(Assert.Single(sealedNewer.Opened)));
-        Assert.Equal(Protocol.MismatchMessage(2), kicked.Reason);
+        Assert.Equal(Protocol.MismatchMessage(Protocol.ProtocolVersion), kicked.Reason);
 
         // This guest, told it is refused, shows the reason and never retries.
         var bob = Join(r);
@@ -796,6 +796,184 @@ public class GuestSessionTests : IDisposable
         t.Forget("ABC234");
         Assert.Null(t.Get("ABC234"));
     }
+
+    // ---- final review fixes ----
+
+    [Fact]
+    public void LargeGame_ViewOverOneFrameUnpacked_ReachesGuest()
+    {
+        var r = Open();
+        var bob = Join(r);
+        Pick(r, bob);
+        // A long game, synthetically: thousands of invented public log lines (more than 8 MB of view JSON, compressing well).
+        var g = r.Host.Game!;
+        var filler = string.Join(" ", Enumerable.Range(0, 60).Select(i => "Blue patrol sighted near marker " + i));
+        const int lines = 5000;
+        for (var i = 0; i < lines; i++)
+            g.State.Log.Add(new LogEntry(1_000_000 + i, LogKind.System, $"#{i} {filler}", null, null, null, DateTimeOffset.UnixEpoch));
+        var malformed = bob.G.Malformed;
+        r.H.FlushSnapshots();
+        r.D.Pump();
+
+        var snap = bob.T.Opened.Select(b => Framing.Decode<GamePayload>(b)).OfType<Snapshot>().Last();
+        var json = Gzip.DecompressBounded(snap.StateJsonGz, Secrets.MaxPlain);
+        Assert.True(json.Length > Framing.MaxFrame, $"view JSON is {json.Length} bytes");
+        Assert.Equal(malformed, bob.G.Malformed);
+        Assert.Equal(GuestState.Playing, bob.G.State);
+        Assert.Equal(snap.Version, bob.G.SnapshotVersion);
+        Assert.Contains(bob.S.Game!.State.Log, l => l.Text.StartsWith($"#{lines - 1} ", StringComparison.Ordinal));
+        Assert.Empty(bob.T.Opened.Select(b => Framing.Decode<GamePayload>(b)).OfType<Paused>());
+    }
+
+    [Fact]
+    public void Snapshot_Malformed_NoticeOnce_UntilAGoodOne()
+    {
+        var r = Open();
+        var bob = Join(r);
+        Pick(r, bob);
+        var v = bob.G.SnapshotVersion;
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new Snapshot(v + 10, new byte[] { 1, 2, 3 })));
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new Snapshot(v + 11, Gzip.Compress(Encoding.UTF8.GetBytes("[1]")))));
+        r.D.Pump();
+        Assert.Single(bob.Notices, n => n == GuestSession.BadSnapshotText);
+        r.Host.Game!.Execute(new AddLogLine(LogKind.System, "fresh"));
+        r.H.FlushSnapshots();
+        r.D.Pump();
+        Assert.Contains(bob.S.Game!.State.Log, l => l.Text == "fresh");
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new Snapshot(bob.G.SnapshotVersion + 1, new byte[] { 4 })));
+        r.D.Pump();
+        Assert.Equal(2, bob.Notices.Count(n => n == GuestSession.BadSnapshotText));
+        Assert.Equal(GuestState.Playing, bob.G.State);
+    }
+
+    [Fact]
+    public void HostText_CleanedAndClipped()
+    {
+        var r = Open();
+        var bob = Join(r);
+        Pick(r, bob);
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new NetResult(Guid.Empty, false, "\u0007bell\r\n" + new string('x', 2000), null)));
+        r.D.Pump();
+        var notice = bob.Notices.Last();
+        Assert.True(notice.Length <= GuestSession.MaxHostText);
+        Assert.DoesNotContain(notice, char.IsControl);
+        bob.T.InjectPlain(Framing.Encode<GamePayload>(new Kicked("go\u001b[2J away " + new string('y', 2000))));
+        r.D.Pump();
+        Assert.Equal(GuestState.Refused, bob.G.State);
+        Assert.True(bob.G.StatusText!.Length <= GuestSession.MaxHostText);
+        Assert.DoesNotContain(bob.G.StatusText, char.IsControl);
+    }
+
+    [Fact]
+    public void Welcome_WithHeldSides_PlaysWithoutChoosing()
+    {
+        var r = Open();
+        var s = Session(r.ModulePath, "held");
+        var raw = new MemoryRelay().Guest("m7");   // no host behind it: only the welcome below arrives
+        var t = new SealingTransport(raw, r.Key);
+        var g = new GuestSession(s, t, "QQQ333", "Zoe", r.D.Post, new RejoinTokens(Path.Combine(_tmp, "tokens-held")));
+        _online.Add(g);
+        var states = new List<GuestState>();
+        g.StateChanged += () => states.Add(g.State);
+        t.InjectPlain(Framing.Encode<GamePayload>(new Welcome("p9", new string('a', 64), RulesPackIo.ToBytes(r.Host.Rules!), Array.Empty<string>(),
+            new[] { "blue" })));
+        r.D.Pump();
+        Assert.Equal(GuestState.Playing, g.State);
+        Assert.DoesNotContain(GuestState.ChoosingSide, states);   // no side dialog flash
+        Assert.Equal(new[] { "blue" }, g.Sides.ToArray());
+    }
+
+    [Fact]
+    public void Join_FirstRequestLost_Resent_Seated()
+    {
+        var r = Open();
+        var s = Session(r.ModulePath, "late");
+        var t = new LossyTransport(new SealingTransport(r.Relay.Guest("m1"), r.Key), dropFirst: 1);
+        var g = new GuestSession(s, t, Code, "Bob", r.D.Post, new RejoinTokens(Path.Combine(_tmp, "tokens-late")));
+        _online.Add(g);
+        g.JoinRetry = TimeSpan.FromMilliseconds(30);
+        r.D.Pump();   // the first wait starts on the owning thread
+        Assert.Equal(GuestState.Joining, g.State);
+        Assert.Single(r.H.Seats.All);
+        var end = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (g.State == GuestState.Joining && DateTime.UtcNow < end) r.D.WaitAndPump(TimeSpan.FromMilliseconds(200));
+        Assert.Equal(GuestState.ChoosingSide, g.State);
+        Assert.Equal(2, t.Sends);
+        Assert.Equal(2, r.H.Seats.All.Count);
+        Assert.False(g.NoAnswer);
+    }
+
+    [Fact]
+    public void Join_NeverAnswered_FourTries_ThenNoAnswer_LeaveOffered()
+    {
+        var r = Open();
+        var s = Session(r.ModulePath, "lost");
+        var t = new LossyTransport(new SealingTransport(r.Relay.Guest("m1"), r.Key), dropFirst: int.MaxValue);
+        var g = new GuestSession(s, t, Code, "Bob", r.D.Post, new RejoinTokens(Path.Combine(_tmp, "tokens-lost")));
+        _online.Add(g);
+        var notices = new List<string>();
+        g.Notice += notices.Add;
+        g.JoinRetry = TimeSpan.FromMilliseconds(20);
+        r.D.Pump();
+        var end = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!g.NoAnswer && DateTime.UtcNow < end) r.D.WaitAndPump(TimeSpan.FromMilliseconds(200));
+        Assert.True(g.NoAnswer);
+        Assert.Equal(GuestSession.MaxJoinTries, t.Sends);
+        Assert.Equal(GuestState.Paused, g.State);
+        Assert.Equal(GuestSession.NoAnswerText, g.StatusText);
+        Assert.Contains(GuestSession.NoAnswerText, notices);
+        Thread.Sleep(100);
+        r.D.Pump();
+        Assert.Equal(GuestSession.MaxJoinTries, t.Sends);   // no more tries by itself
+
+        // The host coming back starts a new round.
+        t.Inner.RaiseHostBack();
+        r.D.Pump();
+        Assert.False(g.NoAnswer);
+        Assert.Equal(GuestState.Joining, g.State);
+        Assert.Equal(GuestSession.MaxJoinTries + 1, t.Sends);
+    }
+}
+
+/// <summary>An <see cref="ITransport"/> that loses the first N payloads it is asked to send (a host that never saw them).</summary>
+internal sealed class LossyTransport : ITransport
+{
+    private int _toDrop;
+
+    public LossyTransport(SealingTransport inner, int dropFirst)
+    {
+        Inner = inner;
+        _toDrop = dropFirst;
+        inner.Received += (f, p) => Received?.Invoke(f, p);
+        inner.MemberLeft += id => MemberLeft?.Invoke(id);
+        inner.Disconnected += why => Disconnected?.Invoke(why);
+        inner.Reconnected += () => Reconnected?.Invoke();
+        inner.MembersListed += ids => MembersListed?.Invoke(ids);
+        inner.HostLeft += () => HostLeft?.Invoke();
+        inner.HostBack += () => HostBack?.Invoke();
+    }
+
+    public SealingTransport Inner { get; }
+
+    /// <summary>Payloads asked to be sent (lost or not).</summary>
+    public int Sends { get; private set; }
+
+    public Task Send(string? to, byte[] payload)
+    {
+        Sends++;
+        if (_toDrop > 0) { _toDrop--; return Task.CompletedTask; }
+        return Inner.Send(to, payload);
+    }
+
+    public Task UpdateListing(LobbyListing listing) => Inner.UpdateListing(listing);
+
+    public event Action<string, byte[]>? Received;
+    public event Action<string>? MemberLeft;
+    public event Action<string>? Disconnected;
+    public event Action? Reconnected;
+    public event Action<IReadOnlyList<string>>? MembersListed;
+    public event Action? HostLeft;
+    public event Action? HostBack;
 }
 
 /// <summary>

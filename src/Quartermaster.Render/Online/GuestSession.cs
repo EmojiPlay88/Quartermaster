@@ -42,8 +42,14 @@ public sealed class GuestSession : IDisposable
     public const string BadPackText = "The host's rules pack could not be read.";
     public const string NotPlayingText = "The game is paused.";
     public const string ChooseSideText = HostSession.ChooseSideFirstText;
+    public const string BadSnapshotText = "An update from the host could not be read.";
+    /// <summary>Most characters of host- or relay-supplied text (refusals, reasons) shown to the player.</summary>
+    public const int MaxHostText = 300;
 
     public static readonly TimeSpan DefaultIntentTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>While joining, the join request goes out again this often, <see cref="MaxJoinTries"/> times in all.</summary>
+    public static readonly TimeSpan DefaultJoinRetry = TimeSpan.FromSeconds(5);
+    public const int MaxJoinTries = 4;
     private const int MaxPending = 256;
 
     private readonly ModuleSession _s;
@@ -60,6 +66,9 @@ public sealed class GuestSession : IDisposable
     private string? _packSha;
     private long _lastVersion;
     private bool _disposed;
+    private int _joinTries;
+    private int _joinRound;
+    private bool _badSnapshotShown;
 
     private sealed record Pending(TaskCompletionSource<NetIntentResult?> Done, bool Notify);
 
@@ -82,7 +91,7 @@ public sealed class GuestSession : IDisposable
         _t.HostBack += OnHostBack;
         _t.Disconnected += OnDisconnected;
         _t.Reconnected += OnReconnected;
-        SendJoin();
+        StartJoining();
     }
 
     public GuestState State { get; private set; } = GuestState.Joining;
@@ -114,8 +123,17 @@ public sealed class GuestSession : IDisposable
     /// <summary>A message for the player (a refused action, a refused side choice, a host that didn't answer). Owning thread.</summary>
     public event Action<string>? Notice;
 
+    /// <summary>
+    /// True when the host never answered the join (<see cref="MaxJoinTries"/> requests, <see cref="NoAnswerText"/>): the game is paused and
+    /// the player should be offered to leave. Cleared when the host or the relay comes back (another round of tries).
+    /// </summary>
+    public bool NoAnswer { get; private set; }
+
     /// <summary>Test hook: how long an intent waits for the host's answer.</summary>
     internal TimeSpan IntentTimeout { get; set; } = DefaultIntentTimeout;
+
+    /// <summary>Test hook: the spacing of join requests (read when each wait starts; the first one starts on the owning thread).</summary>
+    internal TimeSpan JoinRetry { get; set; } = DefaultJoinRetry;
 
     // ---- guest actions (owning thread) ----
 
@@ -228,10 +246,45 @@ public sealed class GuestSession : IDisposable
     {
         if (State == GuestState.Refused) return;   // refused: no retry loop
         SetState(GuestState.Joining, RejoiningText);
-        SendJoin();
+        StartJoining();
     }
 
-    private void SendJoin() => Send(new JoinRequest(_name, _token, _s.Archive.Sha256));
+    /// <summary>A round of join requests: one now, then again every <see cref="JoinRetry"/> while still joining, <see cref="MaxJoinTries"/> in all.</summary>
+    private void StartJoining()
+    {
+        NoAnswer = false;
+        _joinTries = 0;
+        var round = ++_joinRound;
+        SendJoin();
+        Post(() => ArmJoinCheck(round));   // on the owning thread, so the spacing is read after construction
+    }
+
+    private void SendJoin()
+    {
+        _joinTries++;
+        Send(new JoinRequest(_name, _token, _s.Archive.Sha256));
+    }
+
+    private void ArmJoinCheck(int round)
+    {
+        if (round != _joinRound || State != GuestState.Joining) return;
+        _ = Task.Delay(JoinRetry).ContinueWith(_ => Post(() => JoinCheck(round)), TaskScheduler.Default);
+    }
+
+    private void JoinCheck(int round)
+    {
+        if (round != _joinRound || State != GuestState.Joining) return;
+        if (_joinTries < MaxJoinTries)
+        {
+            SendJoin();
+            ArmJoinCheck(round);
+            return;
+        }
+        // Nobody answered: paused, and the player is offered to leave (NoAnswer). A host or relay coming back starts a new round.
+        NoAnswer = true;
+        SetState(GuestState.Paused, NoAnswerText);
+        Notice?.Invoke(NoAnswerText);
+    }
 
     // ---- payloads ----
 
@@ -247,7 +300,7 @@ public sealed class GuestSession : IDisposable
             case Snapshot snap: Show(snap); break;
             case NetIntentResult r: Result(r); break;
             case Kicked k: Kick(k.Reason); break;
-            case Paused p: Pause(string.IsNullOrWhiteSpace(p.Reason) ? NotPlayingText : p.Reason); break;
+            case Paused p: Pause(HostText(p.Reason) ?? NotPlayingText); break;
             case RulesChanged rc: NewRules(rc.RulesPack); break;
             default: Dropped++; break;   // guest-to-host messages are never accepted from the host side
         }
@@ -290,9 +343,11 @@ public sealed class GuestSession : IDisposable
         }
         FreeSides = (w.FreeSides ?? Array.Empty<string>()).ToList();
         _lastVersion = 0;   // a re-attached host numbers its snapshots afresh; everything after a welcome is new
-        _sides = new HashSet<string>();   // a seat that holds sides gets its snapshot right after the welcome
+        // A seat that already holds sides (a rejoin) says so in the welcome and gets its snapshot right after: no side choice.
+        var held = (w.Sides ?? Array.Empty<string>()).Where(x => !string.IsNullOrEmpty(x)).ToHashSet();
+        _sides = held;
         LoadPack(pack);
-        SetState(GuestState.ChoosingSide, null);
+        SetState(held.Count > 0 ? GuestState.Playing : GuestState.ChoosingSide, null);
     }
 
     private void NewRules(byte[]? bytes)
@@ -308,17 +363,19 @@ public sealed class GuestSession : IDisposable
         GameState? state;
         try
         {
-            var json = Gzip.DecompressBounded(snap.StateJsonGz ?? Array.Empty<byte>(), Framing.MaxFrame);
+            // A long game's view inflates well past one frame; the cap is the same as for any sealed payload.
+            var json = Gzip.DecompressBounded(snap.StateJsonGz ?? Array.Empty<byte>(), Secrets.MaxPlain);
             state = JsonSerializer.Deserialize<GameState>(json, QuartermasterJson.Options);
-            if (state == null) { Malformed++; return; }
+            if (state == null) { BadSnapshot(); return; }
             NativeSave.ValidateState(state);
         }
         catch (Exception e) when (e is CryptographicException or JsonException or NotSupportedException or InvalidOperationException
             or InvalidDataException or ArgumentException or FormatException)
         {
-            Malformed++;
+            BadSnapshot();
             return;
         }
+        _badSnapshotShown = false;
         ApplyOverlay(state);
         var held = (state.Players ?? new List<PlayerDef>()).FirstOrDefault(p => p.Id == PlayerId)?.Sides;
         var sides = held is { Count: > 0 } ? held.ToHashSet() : new HashSet<string>();
@@ -329,6 +386,18 @@ public sealed class GuestSession : IDisposable
         PruneOverlay(state);
         SetState(_sides.Count > 0 ? GuestState.Playing : GuestState.ChoosingSide, null);
     }
+
+    /// <summary>Counted, and the player is told once (until a snapshot reads again): the screen keeps the last good view.</summary>
+    private void BadSnapshot()
+    {
+        Malformed++;
+        if (_badSnapshotShown) return;
+        _badSnapshotShown = true;
+        Notice?.Invoke(BadSnapshotText);
+    }
+
+    /// <summary>Text the host or the relay sent, cleaned and clipped for display; null when nothing is left.</summary>
+    internal static string? HostText(string? s) => OnlineLobbyModel.CleanText(s, MaxHostText) is { Length: > 0 } t ? t : null;
 
     /// <summary>Reapplies the guest's own view toggles to a new snapshot (before it is shown).</summary>
     private void ApplyOverlay(GameState state)
@@ -351,17 +420,18 @@ public sealed class GuestSession : IDisposable
         if (r.Id == Guid.Empty)
         {
             // A side choice or a chat payload the host refused (accepted choices are followed by a snapshot).
-            if (!r.Ok && !string.IsNullOrWhiteSpace(r.Message)) Notice?.Invoke(r.Message!);
+            if (!r.Ok && HostText(r.Message) is { } m) Notice?.Invoke(m);
             return;
         }
         if (!_pending.Remove(r.Id, out var p)) { Dropped++; return; }   // late (timed out) or unknown
-        if (!r.Ok && p.Notify && !string.IsNullOrWhiteSpace(r.Message)) Notice?.Invoke(r.Message!);
+        r = r with { Message = HostText(r.Message) };   // shown by whoever awaits it
+        if (!r.Ok && p.Notify && r.Message is { } shown) Notice?.Invoke(shown);
         p.Done.TrySetResult(r);
     }
 
     private void Kick(string? reason)
     {
-        var why = string.IsNullOrWhiteSpace(reason) ? "The host removed you from the game." : reason!;
+        var why = HostText(reason) ?? "The host removed you from the game.";
         if (why == HostSession.SeatFreedText) { _token = null; _tokens.Forget(_code); }
         SetState(GuestState.Refused, why);
         FailPending();

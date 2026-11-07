@@ -57,7 +57,8 @@ public static class RulesPackIo
     }
 
     /// <summary>Most entries a pack received from someone else may hold (<see cref="FromBytes(byte[], long, int)"/>).</summary>
-    public const int MaxReceivedEntries = 256;
+    /// <remarks>Each table and formula is an entry: real packs reach hundreds or thousands. The byte budget is the real bound.</remarks>
+    public const int MaxReceivedEntries = 8192;
 
     /// <summary>
     /// A pack from untrusted zip bytes (sent by another player): at most <paramref name="maxEntries"/> entries and

@@ -233,11 +233,21 @@ New-NetFirewallRule -DisplayName "Quartermaster relay" -Direction Inbound -Proto
 - All guests of a game share one game key. Each guest still receives only the view of their own
   sides from the host, but a guest-to-guest message is only kept private by the relay routing it
   honestly. Run your own relay and you control that.
+- Plainly: **a guest who also runs the relay can read the other guests' views** (they hold the shared
+  game key and see every message pass). Only play with a relay run by the host or by someone none of
+  the guests is.
+- Messages are compressed before they are encrypted, and the game log the host sends contains both
+  chat (which players type) and private data. Someone who can chat in the game *and* watch the size of
+  the encrypted messages on the relay could, in theory, learn a little about the private data from how
+  well it compresses. This is a theoretical side channel, not a practical one; a relay you trust (or run
+  yourself) closes it.
 - The relay stores a hash of the password check value, never the password. The host's copy also
   holds a private **host key** (random, never shown); only the copy with that key can take the host's
   place again after a dropped connection, so a guest who knows the password cannot take over the game.
 - Limits:
-  - messages up to 8 MB (4 KB before a connection has introduced itself), 50 messages per second per
+  - messages up to 8 MB (4 KB before a connection has introduced itself; a guest's view of the game is
+    compressed and may unpack to up to 64 MB as long as it fits in one message; a larger one pauses that
+    guest with "The game is too large to send."), 50 messages per second per
     connection (bursts of 200). A room's host gets a larger budget because it sends a snapshot to
     every guest: 400 per second, bursts of 1000 (`HostMessagesPerSecond`, `HostBurst`). Anyone who
     creates a room gets the host budget, not only the game's real host; a relay you run for friends

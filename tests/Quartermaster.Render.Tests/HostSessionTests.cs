@@ -78,7 +78,7 @@ public class HostSessionTests : IDisposable
         /// <summary>Moves the host's clock (rate limits, snapshot spacing) forward; real time keeps flowing underneath.</summary>
         public void Advance(TimeSpan by) => _offset += by;
 
-        public void UseOffsetClock() => H.Now = () => DateTime.UtcNow + _offset;
+        public void UseOffsetClock() => H.Now = () => HostSession.MonotonicNow() + _offset;
     }
 
     private Rig Open(IReadOnlyList<PlayerDef>? players = null, Difficulty difficulty = Difficulty.FullyAuto, string hostName = "Alice")
@@ -164,7 +164,8 @@ public class HostSessionTests : IDisposable
         var r = Open();
         var bob = r.Relay.Guest("m1");
         Send(r, bob, new JoinRequest("Bob", null, r.S.Archive.Sha256, 2));
-        Assert.Equal(Protocol.MismatchMessage(2), Assert.Single(bob.Of<Kicked>()).Reason);
+        // The guest is told the HOST's version (the one it has to match), not its own.
+        Assert.Equal(Protocol.MismatchMessage(Protocol.ProtocolVersion), Assert.Single(bob.Of<Kicked>()).Reason);
         Assert.Single(r.H.Seats.All);
     }
 
@@ -555,7 +556,7 @@ public class HostSessionTests : IDisposable
     public void RateLimit_ExcessRefused_NoDisconnect()
     {
         var r = Open();
-        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        var now = TimeSpan.FromHours(1);
         r.H.Now = () => now;
         var bob = r.Relay.Guest("m1");
         var w = JoinAs(r, bob, "Bob");
@@ -574,7 +575,7 @@ public class HostSessionTests : IDisposable
         Assert.True(r.H.Seats.ByPlayer(w.PlayerId)!.Connected);
         Assert.Empty(bob.Of<Kicked>());
 
-        now = now.AddSeconds(1.1);   // the window slides: accepted again
+        now += TimeSpan.FromSeconds(1.1);   // the window slides: accepted again
         Send(r, bob, new IntentMsg(Guid.NewGuid(), Intent(new ChatIntent("later"))));
         Assert.True(bob.Of<NetResult>().Last().Ok);
     }
@@ -583,7 +584,7 @@ public class HostSessionTests : IDisposable
     public void Flood_BoundedHostSends()
     {
         var r = Open();
-        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        var now = TimeSpan.FromHours(1);
         r.H.Now = () => now;
         // An unseated member spamming joins: one answer per 2 s.
         var spam = r.Relay.Guest("m5");
@@ -608,7 +609,7 @@ public class HostSessionTests : IDisposable
     public void Snapshots_SpacedPerGuest()
     {
         var r = Open();
-        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        var now = TimeSpan.FromHours(1);
         r.H.Now = () => now;
         var bob = r.Relay.Guest("m1");
         JoinAs(r, bob, "Bob");
@@ -617,10 +618,10 @@ public class HostSessionTests : IDisposable
         r.S.Game!.Execute(new AddLogLine(LogKind.System, "one"));
         r.H.FlushDue();
         Assert.Equal(n, bob.Of<Snapshot>().Count());       // within 200 ms of the last one: waits
-        now = now.AddMilliseconds(150);
+        now += TimeSpan.FromMilliseconds(150);
         r.H.FlushDue();
         Assert.Equal(n, bob.Of<Snapshot>().Count());
-        now = now.AddMilliseconds(60);
+        now += TimeSpan.FromMilliseconds(60);
         r.H.FlushDue();
         Assert.Equal(n + 1, bob.Of<Snapshot>().Count());
         r.H.FlushDue();                                     // nothing new: nothing sent
@@ -792,5 +793,119 @@ public class HostSessionTests : IDisposable
         var back = RulesPackIo.FromBytes(RulesPackIo.ToBytes(pack));
         Assert.Equal(RulesPackIo.ComputeSha256(pack), RulesPackIo.ComputeSha256(back));
         Assert.Throws<InvalidDataException>(() => RulesPackIo.FromBytes(new byte[] { 1, 2, 3 }));
+    }
+
+    // ---- final review fixes ----
+
+    [Fact]
+    public void HostUndoesSetPlayers_GuestKeepsSides_CanAct_ListRestoredOnNextChange()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        var w = JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        var g = r.S.Game!;
+        Assert.Contains(g.State.Players, p => p.Id == w.PlayerId);
+
+        g.Undo();   // the host undoes the SetPlayers that seated Bob
+        r.D.Pump();
+        Assert.DoesNotContain(g.State.Players, p => p.Id == w.PlayerId);
+        Assert.True(g.CanRedo);   // still walking back: nothing appended, the redo stays
+        r.H.FlushSnapshots();
+        var view = JsonSerializer.Deserialize<GameState>(SnapshotJson(bob.Of<Snapshot>().Last()), QuartermasterJson.Options)!;
+        Assert.Equal(new[] { "blue" }, view.Players.Single(p => p.Id == w.PlayerId).Sides);   // the seats are the truth for guests
+
+        var id = Guid.NewGuid();
+        Send(r, bob, new IntentMsg(id, Intent(new LedgerEditIntent(LedgerKey.Piece(PhaseFixture.BlueOne), "water", 4, "filled"))));
+        var res = bob.Of<NetResult>().Last();
+        Assert.Equal(id, res.Id);
+        Assert.True(res.Ok, res.Message);
+        r.D.Pump();
+        // The forward change cleared redo; the game's player list follows the seats again (a new SetPlayers).
+        Assert.Equal(new[] { "blue" }, g.State.Players.Single(p => p.Id == w.PlayerId).Sides);
+        Assert.False(g.InAction);
+    }
+
+    [Fact]
+    public void Intent_Replayed_IgnoredWithoutReply()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        var id = Guid.NewGuid();
+        var msg = new IntentMsg(id, Intent(new ChatIntent("once")));
+        Send(r, bob, msg);
+        var answers = bob.Of<NetResult>().Count();
+        var dropped = r.H.Dropped;
+        Send(r, bob, msg);   // a replay of the same message
+        Send(r, bob, msg);
+        Assert.Equal(answers, bob.Of<NetResult>().Count());
+        Assert.Equal(dropped + 2, r.H.Dropped);
+        Assert.Equal(1, r.S.Game!.State.Log.Count(l => l.Text?.Contains("once") == true));
+        // The memory is bounded: after 256 other ids the first is forgotten (and would run again).
+        var seat = r.H.Seats.Guests.Single();
+        for (var i = 0; i < HostSession.IntentIdMemory; i++) seat.RememberIntent(Guid.NewGuid());
+        Assert.False(seat.SeenIntent(id));
+    }
+
+    [Fact]
+    public void Snapshot_TooLarge_GuestPaused_WarningWithoutContent()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        r.H.MaxSnapshotJson = 1000;   // any real view is larger
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        Assert.Empty(bob.Of<Snapshot>());
+        Assert.Equal(HostSession.TooLargeText, Assert.Single(bob.Of<Paused>()).Reason);
+        var warning = Assert.Single(r.S.Log.Items, e => e.Category == "online" && e.Message.Contains("too large", StringComparison.Ordinal));
+        Assert.Equal(Quartermaster.Vassal.DiagnosticSeverity.Warning, warning.Severity);
+        Assert.DoesNotContain(SecretWater, warning.Message);
+        r.H.FlushSnapshots();
+        Assert.Single(bob.Of<Paused>());   // told once until a view goes through
+        r.H.MaxSnapshotJson = Secrets.MaxPlain;
+        r.H.FlushSnapshots();
+        Assert.Single(bob.Of<Snapshot>());
+    }
+
+    [Fact]
+    public void Rejoin_WelcomeCarriesHeldSides_NewSeatNone()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        var w = JoinAs(r, bob, "Bob");
+        Assert.Empty(w.Sides ?? Array.Empty<string>());
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        r.Relay.Drop("m1");
+        r.D.Pump();
+        var back = r.Relay.Guest("m9");
+        var w2 = JoinAs(r, back, "Bob", w.RejoinToken);
+        Assert.Equal(new[] { "blue" }, w2.Sides);
+    }
+
+    [Fact]
+    public void RelayTransport_TooLargeToSeal_FaultsWithProtocolException()
+    {
+        Assert.True(RelayTransport.FitsRelayFrame("m1", 1000));
+        Assert.False(RelayTransport.FitsRelayFrame("m1", Framing.MaxFrame));
+        Assert.False(RelayTransport.FitsRelayFrame("m1", Framing.MaxFrame / 4 * 3));   // base64 would pass the frame
+        using var t = new RelayTransport(new RelayClient(new PinStore(Path.Combine(_tmp, "pins.json"))), RandomNumberGenerator.GetBytes(32));
+        // Random bytes do not compress: sealed, this is just under a frame, and base64 makes it larger than one.
+        var task = t.Send("m1", RandomNumberGenerator.GetBytes(Framing.MaxFrame - 64 * 1024));
+        Assert.True(task.IsFaulted);
+        Assert.IsType<ProtocolException>(task.Exception!.InnerException);
+        Assert.Equal(1, t.SendFailures);
+    }
+
+    [Fact]
+    public void NewGameRequest_PasswordHidden_AndDroppedOnward()
+    {
+        var req = new NewGameRequest(GameMode.Online, null, Difficulty.SemiAuto, null, "Lobby", "hunter2-secret");
+        Assert.DoesNotContain("hunter2-secret", req.ToString());
+        Assert.Contains("(hidden)", req.ToString());
+        var onward = req.WithoutPassword();
+        Assert.Null(onward.Password);
+        Assert.Equal("Lobby", onward.LobbyName);
     }
 }

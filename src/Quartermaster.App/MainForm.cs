@@ -395,7 +395,13 @@ sealed partial class MainForm : Form
     /// <summary>Opens a module and starts a game. Returns false (leaving everything as it was) on failure.</summary>
     bool OpenModule(string path, bool fromArgs, LaunchRequest? launch = null)
     {
-        if (!ConfirmDiscard() || !ConfirmRulesSaved()) return false;
+        // A joined relay connection handed over by the lobby window is ours to close when no game takes it.
+        bool Fail()
+        {
+            if (launch?.Online?.Client is { } joined) _ = DisposeLater(joined, TimeSpan.Zero);
+            return false;
+        }
+        if (!ConfirmDiscard() || !ConfirmRulesSaved()) return Fail();
         ModuleSession next;
         string? moduleHash;
         var prevWait = Application.UseWaitCursor;
@@ -409,7 +415,7 @@ sealed partial class MainForm : Form
         catch (Exception ex) when (ex is InvalidDataException or XmlException or IOException or UnauthorizedAccessException)
         {
             ShowError($"Could not open '{path}':\n{ex.Message}");
-            return false;
+            return Fail();
         }
         finally
         {

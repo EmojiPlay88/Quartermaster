@@ -594,6 +594,36 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
+    public void Pins_StaticGuessMisses_ScopeRegisteredOnFirstRoll_FullRefusedFailClosed()
+    {
+        var (host, hc, x, rolled) = DiceHost();
+        x.Pins.MayRollHint = _ => false;   // as if the formula rolled through a path the static check does not see
+        hc.Start();
+        // Still pinned: registered lazily on the first real roll, so asking again shows the same dice.
+        var roll = PreviewRoll(x, "f-dice2", "R");
+        Assert.Equal(1, x.Pins.Count("p2"));
+        Assert.Equal(roll, PreviewRoll(x, "f-dice2", "R"));
+        Assert.Single(rolled);
+
+        // The sender's table is full: the first roll of a new scope cannot be pinned, so the run is refused and nothing is rolled.
+        for (var i = 1; i < FormulaPins.MaxPerSender; i++)
+            Assert.NotNull(x.Pins.Open(new FormulaPins.Key("p2", "f-dice", "x" + i), host.Game!, host.Rules!, mayRoll: true));
+        var before = Json(host.Game!.State);
+        var refused = Send(x, "f-dice", null, calculate: true, preview: true);
+        Assert.False(refused.Applied);
+        Assert.Equal(FormulaPins.FullText, refused.Message);
+        Assert.Null(refused.Rolls);
+        Assert.Null(refused.Values);
+        var applyRefused = Send(x, "f-dice", null, calculate: true, preview: false);
+        Assert.Equal(FormulaPins.FullText, applyRefused.Message);
+        Assert.Equal(before, Json(host.Game!.State));
+        Assert.Single(rolled);   // no die was rolled for the refused runs
+        Assert.Equal(FormulaPins.MaxPerSender, x.Pins.Count("p2"));
+        // A formula without dice never registers, so it still runs.
+        Assert.NotEqual(FormulaPins.FullText, Send(x, "f-mix", null, calculate: true, preview: true).Message);
+    }
+
+    [Fact]
     public void HotSeat_BatchGrid_AppliedRows_HiddenAfterViewerSwitch()
     {
         var (s, c) = Open(Difficulty.SemiAuto);

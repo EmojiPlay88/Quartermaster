@@ -7,7 +7,19 @@ namespace Quartermaster.Render;
 public enum GameMode { Offline, Online }
 
 /// <summary>What the New game dialog collects. <see cref="Setup"/> null = blank game; <see cref="Players"/> null/empty = solo.</summary>
-public sealed record NewGameRequest(GameMode Mode, SetupDef? Setup, Difficulty Difficulty, IReadOnlyList<PlayerDef>? Players, string? LobbyName, string? Password);
+/// <remarks>The password never appears in <see cref="ToString"/>; once handed to the online launch it is cleared here (<see cref="WithoutPassword"/>).</remarks>
+public sealed record NewGameRequest(GameMode Mode, SetupDef? Setup, Difficulty Difficulty, IReadOnlyList<PlayerDef>? Players, string? LobbyName, string? Password)
+{
+    /// <summary>The same request with no password (what goes onward once the online launch carries it).</summary>
+    public NewGameRequest WithoutPassword() => this with { Password = null };
+
+    private bool PrintMembers(System.Text.StringBuilder b)
+    {
+        b.Append($"Mode = {Mode}, Setup = {Setup?.Name}, Difficulty = {Difficulty}, Players = {Players?.Count ?? 0}, LobbyName = {LobbyName}, ");
+        b.Append(Password == null ? "Password = (none)" : "Password = (hidden)");
+        return true;
+    }
+}
 
 public static class NewGameRules
 {

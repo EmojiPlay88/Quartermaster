@@ -398,4 +398,25 @@ public class RulesPackIoTests : IDisposable
         Assert.Equal("Dist * 2", b.AutoValue);
         Assert.Equal(7, (int)BindingKind.Moved);
     }
+
+    [Fact]
+    public void FromBytes_Received_ThousandEntryPack_Loads_TooManyRefused()
+    {
+        // Every formula and table is its own entry: a big real pack has hundreds or thousands.
+        var p = RulesPackIo.CreateEmpty("Big", "abc123") with
+        {
+            Formulas = Enumerable.Range(0, 1000).Select(i => new FormulaDef { Id = "f" + i, Name = "Invented " + i, Text = "1 + " + i }).ToList(),
+        };
+        var bytes = RulesPackIo.ToBytes(p);
+        var back = RulesPackIo.FromBytes(bytes, 32L * 1024 * 1024);
+        Assert.Equal(1000, back.Formulas.Count);
+        Assert.Equal(RulesPackIo.ComputeSha256(p), RulesPackIo.ComputeSha256(back));
+
+        var many = RulesPackIo.CreateEmpty("Many", "abc123") with
+        {
+            Formulas = Enumerable.Range(0, RulesPackIo.MaxReceivedEntries).Select(i => new FormulaDef { Id = "f" + i, Name = "F", Text = "1" }).ToList(),
+        };
+        var ex = Assert.Throws<InvalidDataException>(() => RulesPackIo.FromBytes(RulesPackIo.ToBytes(many), 32L * 1024 * 1024));
+        Assert.Contains("too many entries", ex.Message);
+    }
 }

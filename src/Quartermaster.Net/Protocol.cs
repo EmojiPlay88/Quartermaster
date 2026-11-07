@@ -89,7 +89,9 @@ public abstract record GamePayload;
 
 /// <summary>ProtocolVersion: the guest's network version (the host refuses another with <see cref="Protocol.MismatchMessage"/>).</summary>
 public sealed record JoinRequest(string Name, string? RejoinToken, string ModuleSha256, int ProtocolVersion = Protocol.ProtocolVersion) : GamePayload;
-public sealed record Welcome(string PlayerId, string RejoinToken, byte[] RulesPack, IReadOnlyList<string> FreeSides) : GamePayload;
+/// <summary>Sides: what the seat already holds (a rejoin); empty or missing for a new seat, which then chooses.</summary>
+public sealed record Welcome(string PlayerId, string RejoinToken, byte[] RulesPack, IReadOnlyList<string> FreeSides,
+    IReadOnlyList<string>? Sides = null) : GamePayload;
 public sealed record ChooseSides(IReadOnlyList<string> Sides) : GamePayload;
 /// <summary>StateJsonGz: gzip of the UTF-8 JSON of the guest's filtered view.</summary>
 public sealed record Snapshot(long Version, byte[] StateJsonGz) : GamePayload;

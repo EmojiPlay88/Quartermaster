@@ -166,7 +166,7 @@ static class OnlineSmoke
 
         // ---- host ----
         var hostLaunch = new LaunchRequest(module, rules, LaunchKind.HostOnline,
-            new NewGameRequest(GameMode.Online, null, Difficulty.SemiAuto, null, LobbyName, Password), null,
+            new NewGameRequest(GameMode.Online, null, Difficulty.SemiAuto, null, LobbyName, null), null,
             new OnlineLaunch(uri, "Red host", Password, LobbyName, new[] { "red" }));
         using var host = new MainForm(formOpts, hostLaunch);
         host.Show();

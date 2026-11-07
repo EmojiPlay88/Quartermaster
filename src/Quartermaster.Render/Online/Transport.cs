@@ -10,7 +10,10 @@ namespace Quartermaster.Render;
 /// </summary>
 public interface ITransport
 {
-    /// <summary>To a member id; null = to the host (guests).</summary>
+    /// <summary>
+    /// To a member id; null = to the host (guests). Never throws; the task faults (<see cref="ProtocolException"/>) only when the payload
+    /// is too large to send, other failures are dropped.
+    /// </summary>
     Task Send(string? to, byte[] payload);
 
     /// <summary>Host only: publish the public lobby listing.</summary>
@@ -71,19 +74,38 @@ public sealed class RelayTransport : ITransport, IDisposable
     public event Action? HostLeft;
     public event Action? HostBack;
 
+    /// <summary>
+    /// Never throws. The returned task faults (with a <see cref="ProtocolException"/>) only when the payload is too large to go through the
+    /// relay, sealed or not; every other failure (the relay unreachable) is counted and dropped.
+    /// </summary>
     public async Task Send(string? to, byte[] payload)
     {
+        if (_disposed || payload == null) return;
+        byte[] sealed_;
         try
         {
-            if (_disposed) return;
-            if (payload == null || payload.Length > Framing.MaxFrame) { Interlocked.Increment(ref _sendFailures); return; }
-            await _client.SendAsync(to, Secrets.Seal(_key, payload)).ConfigureAwait(false);
+            if (payload.Length > Framing.MaxFrame) throw new ProtocolException("Message is too large.");
+            sealed_ = Secrets.Seal(_key, payload);
+            if (!FitsRelayFrame(to, sealed_.Length)) throw new ProtocolException("Message is too large.");
         }
+        catch (ProtocolException)
+        {
+            Interlocked.Increment(ref _sendFailures);
+            throw;
+        }
+        try { await _client.SendAsync(to, sealed_).ConfigureAwait(false); }
         catch (Exception)
         {
             Interlocked.Increment(ref _sendFailures);
         }
     }
+
+    /// <summary>
+    /// Whether a <see cref="Net.Send"/> (and the matching <see cref="Deliver"/>) carrying this many sealed bytes stays within
+    /// <see cref="Framing.MaxFrame"/>: base64 of the bytes, the member id (escaped at worst) and the JSON around them.
+    /// </summary>
+    internal static bool FitsRelayFrame(string? to, int sealedLength) =>
+        4L * ((sealedLength + 2L) / 3) + 6L * (to?.Length ?? 0) + 256 <= Framing.MaxFrame;
 
     public async Task UpdateListing(LobbyListing listing)
     {
