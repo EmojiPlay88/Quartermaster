@@ -1,4 +1,3 @@
-using System.Globalization;
 using Quartermaster.Core;
 using Quartermaster.Rules;
 using Quartermaster.Rules.Expr;
@@ -338,8 +337,9 @@ internal static class FormulaIntentRunner
         else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))
             return FormulaVerdict.Refused("That formula does not apply to this unit.");
 
-        var hidden = HiddenVariables(s, pack, f, full, i.PieceId, sides);
-        var model = new FormulaDialogModel(runner, f, i.PieceId) { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved };
+        // The same masking as the sender's own dialog: hidden boxes are filled by the engine and never typed (FormulaMasking).
+        var hidden = FormulaMasking.HiddenVariables(pack, s.Model, full, f, i.PieceId, sides);
+        var model = new FormulaDialogModel(runner, f, i.PieceId) { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden };
         foreach (var (variable, text) in i.Typed ?? new Dictionary<string, string>())
         {
             if (variable == null || hidden.Contains(variable)) continue;
@@ -349,13 +349,6 @@ internal static class FormulaIntentRunner
             if (accept) model.SetBoxText(variable, text ?? "");
         }
         if (i.Calculate) model.Calculate(full);
-        else if (model.Checked && hidden.Count > 0)
-        {
-            // The sender cannot type what it cannot see: the engine's expected value fills those boxes (dice stay pinned between the runs).
-            model.Run(full);
-            foreach (var v in model.LastExpected?.Variables ?? Array.Empty<VariableState>())
-                if (hidden.Contains(v.Variable) && v.Value is { } val) model.SetBoxText(v.Variable, Exact(val));
-        }
         var dv = model.Evaluate(full);
         var boxes = dv.Boxes.Select(b => new FormulaBox(b.Variable,
             hidden.Contains(b.Variable) ? FormulaBox.Hidden : b.Wrong ? FormulaBox.Wrong : FormulaBox.Ok)).ToList();
@@ -408,37 +401,5 @@ internal static class FormulaIntentRunner
             return dv.Status;
         if (hidden.Count == 0 && dv.Trace.Error is { Length: > 0 } err) return err;
         return "The formula could not be calculated.";
-    }
-
-    private static string Exact(Value v) =>
-        v.Kind == ValueKind.Number ? v.Number.ToString("R", CultureInfo.InvariantCulture) : v.Display();
-
-    /// <summary>
-    /// The variables whose value comes from ledger data the sender's view does not hold (a private unit, holder or global value). A table
-    /// lookup counts as hidden when any other input is, since its keys may be computed from them. Empty in solo (null sides).
-    /// </summary>
-    internal static HashSet<string> HiddenVariables(ModuleSession s, RulesPack pack, FormulaDef f, GameState full, string? pieceId, IReadOnlySet<string>? sides)
-    {
-        var hidden = new HashSet<string>(StringComparer.Ordinal);
-        if (sides == null) return hidden;
-        var view = PlayerView.For(full, pack, s.Model, sides);
-        bool Missing(string key, string? prop) =>
-            prop != null && Ledger.Get(full, key, prop) != null && Ledger.Get(view, key, prop) == null;
-        foreach (var b in f.Bindings ?? new List<VariableBinding>())
-        {
-            if (b == null) continue;
-            var isHidden = b.Kind switch
-            {
-                BindingKind.Unit => pieceId != null && Missing(LedgerKey.Piece(pieceId), b.Property),
-                BindingKind.Global => Missing(LedgerKey.Holder(HolderDef.GlobalId), b.Property),
-                BindingKind.Holder => b.HolderId != null && Missing(LedgerKey.Holder(b.HolderId), b.Property),
-                _ => false,
-            };
-            if (isHidden) hidden.Add(b.Variable);
-        }
-        if (hidden.Count > 0)
-            foreach (var b in f.Bindings!)
-                if (b is { Kind: BindingKind.Table }) hidden.Add(b.Variable);
-        return hidden;
     }
 }

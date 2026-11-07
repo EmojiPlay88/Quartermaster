@@ -180,6 +180,7 @@ sealed class BatchGridWindow : Form
     void CalculateAll()
     {
         if (!_grid.EndEdit()) return;
+        if (_model.HostCalculates) { SendToHost(_model.OpenRows(), calculate: true); return; }
         using (WaitCursor())
         {
             _model.CalculateAll();
@@ -192,6 +193,7 @@ sealed class BatchGridWindow : Form
     void ApplyAll()
     {
         if (!_grid.EndEdit()) return;
+        if (_model.HostCalculates) { SendToHost(_model.OpenRows(), calculate: false); return; }
         var before = _model.RowCount;
         int n;
         using (WaitCursor()) n = _model.ApplyAll();
@@ -207,10 +209,39 @@ sealed class BatchGridWindow : Form
         if (!_grid.EndEdit()) return;
         var r = _grid.CurrentCell?.RowIndex ?? -1;
         if (r < 0 || r >= _model.RowCount) { _status.Text = "Select a row first."; return; }
+        if (_model.HostCalculates) { SendToHost(new[] { r }, calculate: false); return; }
         var ok = _model.ApplyRow(r);
         _status.Text = ok ? "Row applied." : "That row does not match yet: fix the red cells or press Calculate all.";
         _debounce.Stop();
         Refresh_();
+    }
+
+    bool _sending;
+
+    /// <summary>Online guest: the rows go to the host as formula intents, awaited without blocking the UI; the grid shows its verdicts.</summary>
+    async void SendToHost(IReadOnlyList<int> rows, bool calculate)
+    {
+        if (_sending || IsDisposed) return;
+        _sending = true;
+        _calcAll.Enabled = _applyAll.Enabled = _applyRow.Enabled = false;
+        _status.Text = "Asking the host…";
+        try
+        {
+            var (applied, message) = await _model.SendRowsAsync(rows, calculate);
+            if (IsDisposed) return;
+            _status.Text = $"The host applied {applied} of {rows.Count} row(s)." + (message != null ? " " + message : "");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Program.AppLog("batch grid: formula intents failed: " + ex.Message);
+            if (!IsDisposed) _status.Text = GuestSession.NoAnswerText;
+        }
+        finally
+        {
+            _sending = false;
+            if (!IsDisposed) _calcAll.Enabled = _applyAll.Enabled = _applyRow.Enabled = true;
+        }
+        if (!IsDisposed) { _debounce.Stop(); Safe(Refresh_); }
     }
 
     static IDisposable WaitCursor()
@@ -266,7 +297,8 @@ sealed class BatchGridWindow : Form
         var r = _grid.CurrentCell?.RowIndex ?? -1;
         if (r < 0 || r >= _model.RowCount || _s.Rules is not { } rules) { _cheat.Render(Array.Empty<CheatRow>()); return; }
         _model.Row(r); // makes sure the row has been evaluated (LastExpected)
-        _cheat.Render(_model.ModelFor(r).LastExpected is { } exp ? CheatSheetModel.Build(exp, rules) : Array.Empty<CheatRow>());
+        var m = _model.ModelFor(r);
+        _cheat.Render(m.LastExpected is { } exp ? CheatSheetModel.Build(exp, rules, m.Hidden) : Array.Empty<CheatRow>());
     }
 
     void Safe(Action a)

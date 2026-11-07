@@ -9,11 +9,13 @@ public sealed record CheatRow(string Variable, string Source, string ValueText, 
 /// <summary>UI-free model of the manual-mode cheat sheet, built from the expected (engine-only) run.</summary>
 public static class CheatSheetModel
 {
-    public static IReadOnlyList<CheatRow> Build(FormulaTrace expected, RulesPack pack)
+    /// <param name="hidden">Inputs the viewer may not see (<see cref="FormulaDialogModel.Hidden"/>): left out entirely, not even a row.</param>
+    public static IReadOnlyList<CheatRow> Build(FormulaTrace expected, RulesPack pack, IReadOnlySet<string>? hidden = null)
     {
         var rows = new List<CheatRow>();
         foreach (var v in expected.Variables)
         {
+            if (hidden != null && hidden.Contains(v.Variable)) continue;
             var b = expected.Formula.Bindings.FirstOrDefault(x => x.Variable == v.Variable);
             var source = v.Source ?? "";
             if (b?.Kind == BindingKind.Roll)

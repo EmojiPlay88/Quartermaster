@@ -274,13 +274,14 @@ sealed class FormulaDialog : Form
     void RenderCheat()
     {
         if (_cheat == null || _cheat.IsDisposed || _model.LastExpected is not { } exp || _s.Rules is not { } rules) return;
-        _cheat.Render(CheatSheetModel.Build(exp, rules));
+        _cheat.Render(CheatSheetModel.Build(exp, rules, _model.Hidden));
     }
 
     /// <summary>The Calculate button: fills every box with the engine's value (rolling any dice); the boxes stay editable.</summary>
     void CalculateAll()
     {
         _debounce.Stop();
+        if (_s.IsGuest) { SendToHost(calculate: true); return; }   // the host calculates: a guest has no hidden data
         _model.Calculate(_s.Game?.State ?? new GameState());
         Recalc();
     }
@@ -356,6 +357,7 @@ sealed class FormulaDialog : Form
         try
         {
             SyncMode();
+            FormulaMasking.Configure(_model, _s);   // the viewer may have changed (hot-seat) or a snapshot arrived (guest)
             var v = _model.Evaluate(_s.Game?.State ?? new GameState());
             _last = v;
             _view.Apply(v);
@@ -363,7 +365,9 @@ sealed class FormulaDialog : Form
             _working.ForeColor = v.WorkingNegative ? Color.Red : SystemColors.ControlText;
             _status.Text = v.Status;
             _status.ForeColor = v.Trace.Error != null ? Color.Firebrick : SystemColors.ControlText;
-            _apply.Enabled = v.CanApply && !_previewOnly && _s.Game != null;
+            // A guest's Apply asks the host, which checks the boxes with the full game; the local check can't (hidden values are absent).
+            _apply.Enabled = (_s.IsGuest ? !_sending : v.CanApply) && !_previewOnly && _s.Game != null;
+            _calc.Enabled = !_sending;
             RebuildInline(v);
             RenderCheat();
         }
@@ -405,6 +409,7 @@ sealed class FormulaDialog : Form
     void ApplyToLedger()
     {
         _debounce.Stop();
+        if (_s.IsGuest) { SendToHost(calculate: false); return; }
         Recalc();   // always re-evaluate against the current game and mode before writing anything
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
         // Hot-seat: the viewer may have changed while the dialog was open; another side's unit is refused.
@@ -427,6 +432,33 @@ sealed class FormulaDialog : Form
             foreach (var c in runner.Commands(v.Trace, null, sideId: _s.ActorSide())) game.Execute(CommandLog.Stamp(c));
         }
         if (!_embedded) Close();
+    }
+
+    bool _sending;
+
+    /// <summary>
+    /// Online guest: Calculate / Apply go to the host as a formula intent. Awaited on the UI thread without blocking it; the boxes then
+    /// show the host's verdict (states only). Closes when the host applied it; a host that doesn't answer is reported in the status line.
+    /// </summary>
+    async void SendToHost(bool calculate)
+    {
+        if (_sending || _previewOnly || IsDisposed || _closing) return;
+        if (HostForm?.Actions is not { IsRemote: true } port) { _status.Text = RemoteActions.LocalOnlyText; return; }
+        _sending = true;
+        _apply.Enabled = _calc.Enabled = false;
+        _status.Text = "Asking the host…";
+        FormulaVerdict v;
+        try { v = await FormulaMasking.SendAsync(port, _model, _link?.RunId, calculate); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Program.AppLog("formula intent failed: " + ex.Message);
+            v = FormulaVerdict.Refused(GuestSession.NoAnswerText);
+            _model.ApplyVerdict(v);
+        }
+        finally { _sending = false; }
+        if (IsDisposed || _closing) return;
+        if (v.Applied && !_embedded) { Close(); return; }
+        Recalc();
     }
 
     MainForm? HostForm => Host ?? Owner as MainForm ?? (Owner as MapWindow)?.Host;

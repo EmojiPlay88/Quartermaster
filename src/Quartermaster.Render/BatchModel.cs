@@ -18,7 +18,19 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
 {
     public BatchModel(ModuleSession s, PhaseController phases, string runId) : this(s, phases.ApplyFormula, runId) { }
 
-    public BatchModel(ModuleSession s, IActionPort actions, string runId) : this(s, actions.ApplyTrace, runId) { }
+    public BatchModel(ModuleSession s, IActionPort actions, string runId) : this(s, actions.ApplyTrace, runId) { _port = actions; }
+
+    private readonly IActionPort? _port;
+
+    /// <summary>
+    /// True for an online guest's grid: rows are sent to the host as formula intents (<see cref="SendRowsAsync"/>) and hidden cells read
+    /// <see cref="FormulaMasking.HostCalculatesText"/>. The local Calculate / Apply members then do nothing useful (a guest has no
+    /// hidden data and cannot write the ledger).
+    /// </summary>
+    public bool HostCalculates => _port?.IsRemote == true;
+
+    /// <summary>The viewer the row models were masked for (reference compare: a new view set means a new viewer).</summary>
+    private object? _maskedFor;
 
     private readonly Dictionary<int, FormulaDialogModel> _models = new();
     private readonly Dictionary<int, BatchRowView> _views = new();
@@ -82,7 +94,11 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         {
             // The rules pack changed: keep what was typed, run the new runner and formula.
             _runner = s.Runner;
-            foreach (var m in _models.Values) m.Rebind(s.Runner, s.Runner.Pack.ById<FormulaDef>(f.Id) ?? f);
+            foreach (var m in _models.Values)
+            {
+                m.Rebind(s.Runner, s.Runner.Pack.ById<FormulaDef>(f.Id) ?? f);
+                FormulaMasking.Configure(m, s);
+            }
             _views.Clear();
             _warningsByPiece = null;
         }
@@ -93,7 +109,15 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
                 Checked = s.Game!.State.Difficulty != Difficulty.FullyAuto,
                 Moved = u.Moved,
             };
+            FormulaMasking.Configure(model, s);
             _models[row] = model;
+        }
+        // Hot-seat: another viewer (or a rules change, handled above) masks every row again; hidden boxes drop what was typed into them.
+        var viewer = (object?)FormulaMasking.ViewerSides(s);
+        if (!ReferenceEquals(viewer, _maskedFor))
+        {
+            _maskedFor = viewer;
+            foreach (var m in _models.Values) FormulaMasking.Configure(m, s);
         }
         // Defence in depth: the mode is read again on every access, so a difficulty switch while a grid is open can never leave a row unchecked.
         model.Checked = s.Game!.State.Difficulty != Difficulty.FullyAuto;
@@ -138,7 +162,8 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         var vars = Variables;
         var cells = vars.Select(v => dv.Boxes.FirstOrDefault(b => b.Variable == v)?.Text ?? "").ToList();
         var wrong = vars.Select(v => dv.Boxes.FirstOrDefault(b => b.Variable == v)?.Wrong == true).ToList();
-        return new BatchRowView(u.PieceId, u.Label, cells, wrong, dv.ResultText, LedgerOf(dv), ExceptionsFor(u, dv), false, dv.CanApply);
+        return new BatchRowView(u.PieceId, u.Label, cells, wrong, dv.ResultText, LedgerOf(dv), ExceptionsFor(u, dv), false,
+            dv.CanApply || (HostCalculates && model.Hidden.Count > 0));
     }
 
     /// <summary>The (ledger key, property id) pairs a pending row would write; empty for an applied row or a failed run.</summary>
@@ -154,9 +179,15 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         catch (Exception ex) when (ex is not OutOfMemoryException) { return Array.Empty<(string, string)>(); }
     }
 
-    private static string LedgerOf(DialogView dv) => string.Join("; ", dv.Trace.Error != null || dv.Trace.Result == null
-        ? Array.Empty<string>()
-        : dv.Trace.Outputs.Select(o => $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"));
+    /// <summary>What the row would write. A value the viewer may not see (another side's holder) shows only its name.</summary>
+    private string LedgerOf(DialogView dv)
+    {
+        if (dv.Trace.Error != null || dv.Trace.Result == null) return "";
+        var sides = FormulaMasking.ViewerSides(s);
+        return string.Join("; ", dv.Trace.Outputs.Select(o => sides == null || s.CanEditLedgerFor(o.Key, sides)
+            ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
+            : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
+    }
 
     private static string Num(double d) => d.ToString("0.####", CultureInfo.InvariantCulture);
 
@@ -235,6 +266,32 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         _views.Remove(row);
         return true;
     }
+
+    /// <summary>
+    /// Online guest: sends each open row the guest may act on to the host as a formula intent (typed cells, or Calculate) and shows the
+    /// host's verdict on the row. Returns how many the host applied and the last refusal message (null when none).
+    /// </summary>
+    public async Task<(int Applied, string? Message)> SendRowsAsync(IReadOnlyList<int> rows, bool calculate)
+    {
+        if (_port == null || rows == null) return (0, null);
+        var applied = 0;
+        string? message = null;
+        foreach (var row in rows)
+        {
+            if (s.Game == null || Unit(row) is not { Applied: false } u || !s.CanAct(u.PieceId)) continue;
+            var v = await FormulaMasking.SendAsync(_port, ModelFor(row), runId, calculate).ConfigureAwait(true);
+            _views.Remove(row);
+            if (v.Applied) applied++;
+            else if (v.Message != null) message = v.Message;
+            if (v.Message == GuestSession.NoAnswerText) break;   // the host is gone: don't wait again for every row
+        }
+        Invalidate();
+        return (applied, message);
+    }
+
+    /// <summary>The rows <see cref="SendRowsAsync"/> would send for "all": every open row.</summary>
+    public IReadOnlyList<int> OpenRows() =>
+        Enumerable.Range(0, RowCount).Where(i => Unit(i) is { Applied: false }).ToList();
 
     /// <summary>Undo label of an "apply to every unit" action: "{formula} on {n} units".</summary>
     internal static string ActionLabel(string formulaName, int units) => $"{formulaName} on {units} {(units == 1 ? "unit" : "units")}";

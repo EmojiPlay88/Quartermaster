@@ -31,6 +31,34 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     public FormulaDef Formula => formula;
 
+    private static readonly IReadOnlySet<string> NoneHidden = new HashSet<string>();
+    private IReadOnlySet<string> _hidden = NoneHidden;
+    private readonly Dictionary<string, string> _verdict = new(StringComparer.Ordinal);
+    private string? _verdictMessage;
+
+    /// <summary>
+    /// Inputs whose value comes from data the viewer may not see (<see cref="FormulaMasking"/>; empty in solo). Their boxes show
+    /// <see cref="HiddenBoxText"/> and cannot be typed into; no text of the view (boxes, tooltips, working, status) carries their value.
+    /// The run still reads them (the host is this PC); in the manual modes the engine's value stands in for the box.
+    /// </summary>
+    public IReadOnlySet<string> Hidden
+    {
+        get => _hidden;
+        set
+        {
+            _hidden = value == null || value.Count == 0 ? NoneHidden : new HashSet<string>(value, StringComparer.Ordinal);
+            foreach (var v in _hidden) { _typed.Remove(v); _overrides.Remove(v); }
+        }
+    }
+
+    /// <summary>True on an online guest's screen: hidden boxes say the host calculates them, and the host's verdict is shown.</summary>
+    public bool HostCalculates { get; set; }
+
+    /// <summary>The text of a hidden box.</summary>
+    public string HiddenBoxText => HostCalculates ? FormulaMasking.HostCalculatesText : FormulaMasking.HiddenText;
+
+    private bool IsHidden(string v) => _hidden.Contains(v);
+
     /// <summary>Manual modes: the engine's values are hidden; the user types them and each box is compared with the engine.</summary>
     public bool Checked
     {
@@ -93,7 +121,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     public void SetBoxText(string variable, string text)
     {
         var b = Binding(variable);
-        if (b == null) return;
+        if (b == null || IsHidden(variable)) return;
+        _verdict.Remove(variable);
+        _verdictMessage = null;
         if (b.Kind == BindingKind.Input) { _typed[variable] = text; return; }
         if (IsPhysicalRoll(variable) || IsCheckedBox(variable)) { _overrides[variable] = text; return; }
         if (string.IsNullOrWhiteSpace(text)) _overrides.Remove(variable);
@@ -126,7 +156,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         // Physical roll boxes always carry an override (blank = still waiting), so the runner never rolls for them.
         var ov = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var kv in _overrides)
+        {
+            if (IsHidden(kv.Key)) continue;   // a hidden input is never overridden: the engine reads it
             if (!Checked || Binding(kv.Key)?.Kind == BindingKind.Roll) ov[kv.Key] = kv.Value; // checked: typed text only gates, never feeds the run
+        }
         foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice))
             ov.TryAdd(b.Variable, "");
         var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false));
@@ -145,7 +178,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         MergePins(trace);
         foreach (var v in trace.Variables)
         {
-            if (v.Value is not { } val) continue;
+            if (v.Value is not { } val || IsHidden(v.Variable)) continue;   // a hidden value is never copied into a box
             var b = Binding(v.Variable);
             if (b == null) continue;
             if (b.Kind == BindingKind.Input) _typed[v.Variable] = Exact(val);
@@ -162,12 +195,13 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var boxes = vars.Select(v => Box(v, t)).ToList();
         var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal))
             .Select(kv => new InlineRollView(kv.Key, DiceText(kv.Value))).ToList();
-        var missing = vars.Where(v => v.MissingReason != null).Select(v => v.Variable).ToList();
+        var masked = _hidden.Count > 0;
+        var missing = vars.Where(v => v.MissingReason != null && !IsHidden(v.Variable)).Select(v => v.Variable).ToList();
         var wrong = boxes.Where(b => b.Wrong).Select(b => b.Variable).ToList();
         var canApply = t.Result != null && t.Error == null;
         if (Checked)
         {
-            var empty = boxes.Where(b => IsCheckedBox(b.Variable) && b.Text.Trim().Length == 0).Select(b => b.Variable).ToList();
+            var empty = boxes.Where(b => IsCheckedBox(b.Variable) && !IsHidden(b.Variable) && b.Text.Trim().Length == 0).Select(b => b.Variable).ToList();
             missing = vars.Select(v => v.Variable).Where(n => missing.Contains(n) || empty.Contains(n)).ToList();
             // A wrong formula must never reach the ledger: every manual box needs an engine value to be checked against.
             var verifiable = _lastExpected is { Error: null } exp
@@ -176,14 +210,21 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         }
         var negative = t.Error == null && t.Outputs.Any(o => o.After < 0);
         var status = wrong.Count > 0 ? "Doesn't match: " + string.Join(", ", wrong)
-            : t.Error ?? (missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing) : "All inputs filled");
-        return new DialogView(boxes, inline, t.Result?.Display() ?? "", t.Working + (negative ? " (negative)" : ""), negative, status,
+            : t.Error != null ? (masked ? FormulaMasking.ErrorHiddenText : t.Error)
+            : missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing)
+            : masked && t.Result == null ? (HostCalculates ? HostWaitText : HiddenWaitText)
+            : "All inputs filled";
+        if (_verdictMessage != null) status = _verdictMessage;
+        // The working line shows every input's value: with a hidden input it is replaced (the logged working is redacted by PlayerView).
+        var working = masked ? (t.Result != null ? FormulaMasking.WorkingHiddenText : "") : t.Working;
+        return new DialogView(boxes, inline, t.Result?.Display() ?? "", working + (negative ? " (negative)" : ""), negative, status,
             canApply, t);
     }
 
     private BoxView Box(VariableState v, FormulaTrace t)
     {
         var binding = Binding(v.Variable);
+        if (IsHidden(v.Variable)) return new BoxView(v.Variable, HiddenBoxText, BoxBackground.Auto, "", false, null, null);
         if (IsCheckedBox(v.Variable)) return CheckedBox(v);
         var typedBox = binding?.Kind == BindingKind.Input || IsPhysicalRoll(v.Variable);
         var choices = binding?.Kind == BindingKind.Input ? KeyChoices.For(runner.Pack, formula, v.Variable) : null;
@@ -218,8 +259,52 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             wrong = true;
             tip = notNumber ? "Not a number" : $"Doesn't match ({exp.Source ?? v.Variable})";
         }
+        if (!wrong && _verdict.GetValueOrDefault(v.Variable) == FormulaBox.Wrong)
+        {
+            wrong = true;
+            tip = HostWrongText;
+        }
         return new BoxView(v.Variable, text, BoxBackground.Typed, "", true, tip, null, wrong);
     }
+
+    /// <summary>Status of a hot-seat run whose hidden inputs gave no result (which input is not said: that would tell whether it is set).</summary>
+    public const string HiddenWaitText = "Some inputs are hidden and could not be calculated.";
+
+    /// <summary>Status of a guest's dialog before the host answered: the hidden inputs are filled in on the host.</summary>
+    public const string HostWaitText = "Some inputs are hidden: Calculate or Apply asks the host.";
+
+    /// <summary>Tooltip of a box the host found wrong.</summary>
+    public const string HostWrongText = "Doesn't match (checked by the host)";
+
+    /// <summary>
+    /// What an online guest sends for this dialog: the typed Input boxes, and in the manual modes the typed checked boxes (never a hidden
+    /// box, an override of the fully automatic mode or a dice value). The host runs it with the full game.
+    /// </summary>
+    public FormulaIntent Intent(string? runId, bool calculate)
+    {
+        var typed = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var b in formula.Bindings)
+        {
+            if (b?.Variable == null || IsHidden(b.Variable)) continue;
+            if (b.Kind == BindingKind.Input && _typed.TryGetValue(b.Variable, out var t)) typed[b.Variable] = t;
+            else if (Checked && IsCheckedKind(b.Kind) && _overrides.TryGetValue(b.Variable, out var o)) typed[b.Variable] = o;
+        }
+        return new FormulaIntent(formula.Id, pieceId, runId, typed, calculate);
+    }
+
+    /// <summary>The host's verdict: its wrong boxes are marked (until edited) and its message becomes the status. States only, never values.</summary>
+    public void ApplyVerdict(FormulaVerdict verdict)
+    {
+        _verdict.Clear();
+        _verdictMessage = null;
+        if (verdict == null) return;
+        foreach (var b in verdict.Boxes ?? Array.Empty<FormulaBox>())
+            if (b?.Var != null && b.State != null && !IsHidden(b.Var)) _verdict[b.Var] = b.State;
+        _verdictMessage = verdict.Applied ? null : verdict.Message ?? (_verdict.ContainsValue(FormulaBox.Wrong) ? null : FormulaMasking.ErrorHiddenText);
+    }
+
+    /// <summary>The host's state of a box from the last verdict (<see cref="FormulaBox.Ok"/> or <see cref="FormulaBox.Wrong"/>), or null.</summary>
+    public string? VerdictState(string variable) => _verdict.GetValueOrDefault(variable);
 
     /// <summary>Full-precision invariant text for a value, so a Calculate-then-Apply compares exactly.</summary>
     private static string Exact(Value v) =>
