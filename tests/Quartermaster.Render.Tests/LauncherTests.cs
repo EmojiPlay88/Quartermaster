@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -161,22 +162,82 @@ public class LauncherTests : IDisposable
         Assert.Null(c2.Phase);
     }
 
+    [Fact]
+    public void Continue_ReadsRealNativeSave()
+    {
+        var store = NewStore();
+        var dir = Path.Combine(_tmp, "root", "autosave", "realsha");
+        Directory.CreateDirectory(dir);
+        var session = new GameSession(new GameState { Turn = new TurnState(2, "X") }, "realsha");
+        NativeSave.Write(Path.Combine(dir, "autosave-20260101-000000000-t2.qsave"), session);
+        var c = new RecentGames(store, store.Root).Continue("realsha")!;
+        Assert.Equal(2, c.Turn);
+        Assert.Equal("X", c.Phase);
+    }
+
+    [Fact]
+    public void Continue_ReadsTurnPastBufferBoundary()
+    {
+        var store = NewStore();
+        var dir = Path.Combine(_tmp, "root", "autosave", "big");
+        Directory.CreateDirectory(dir);
+        var pad = new string('x', 100_000);
+        File.WriteAllText(Path.Combine(dir, "autosave-1.qsave"), "{\"format\":7,\"notes\":\"" + pad + "\",\"snapshot\":{\"turn\":{\"turn\":9,\"phase\":\"Z\"}}}");
+        var c = new RecentGames(store, store.Root).Continue("big")!;
+        Assert.Equal(9, c.Turn);
+        Assert.Equal("Z", c.Phase);
+    }
+
+    [Fact]
+    public void RecentGames_NullSha_Empty_AndKeysCaseInsensitive()
+    {
+        var store = NewStore();
+        var recent = new RecentGames(store, store.Root);
+        Assert.Empty(recent.For(null));
+        Assert.Empty(recent.For(""));
+        recent.Add("ABCD", "a.qsave");
+        recent.Add("abcd", "b.qsave");
+        Assert.Equal(2, recent.For("AbCd").Count);
+        Assert.Single(store.Current.RecentSaves);
+    }
+
+    [Fact]
+    public async Task ConcurrentUpdates_LoseNothing()
+    {
+        var store = NewStore();
+        var recent = new RecentGames(store, store.Root);
+        var lib = new ModuleLibrary(store);
+        var tasks = Enumerable.Range(0, 8).Select(t => Task.Run(() =>
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                recent.Add("sha" + t, $"t{t}-{i}.qsave");
+                lib.Add(Module($"m{t}_{i}"));
+            }
+        })).ToArray();
+        await Task.WhenAll(tasks);
+        Assert.Equal(80, lib.Rows.Count);
+        for (var t = 0; t < 8; t++) Assert.Equal(10, recent.For("sha" + t).Count);
+        var back = LoadedStore();
+        Assert.Equal(80, back.Current.Modules.Count);
+        Assert.Equal(8, back.Current.RecentSaves.Count);
+    }
+
     sealed class SyncProgress<T>(Action<T> a) : IProgress<T> { public void Report(T v) => a(v); }
 
     [Fact]
     public async Task Library_HashesOffThread_ReportsProgress()
     {
         var lib = new ModuleLibrary(NewStore());
-        var threads = new List<int>();
-        lib.Hasher = p => { lock (threads) threads.Add(Environment.CurrentManagedThreadId); return Sha(p); };
+        var pool = new List<bool>();
+        lib.Hasher = p => { lock (pool) pool.Add(Thread.CurrentThread.IsThreadPoolThread); return Sha(p); };
         lib.Add(Module("a")); lib.Add(Module("b"));
         var rows = new List<ModuleRow>();
-        var caller = Environment.CurrentManagedThreadId;
         await lib.RefreshAsync(new SyncProgress<ModuleRow>(rows.Add), CancellationToken.None);
         Assert.Equal(2, rows.Count);
         Assert.All(rows, r => Assert.NotNull(r.Entry.Sha256));
-        Assert.Equal(2, threads.Count);
-        Assert.DoesNotContain(caller, threads);
+        Assert.Equal(2, pool.Count);
+        Assert.All(pool, Assert.True);
         var cts = new CancellationTokenSource();
         cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lib.RefreshAsync(null, cts.Token));

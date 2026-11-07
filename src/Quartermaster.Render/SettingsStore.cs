@@ -45,7 +45,7 @@ public sealed class SettingsStore(string root)
 
     public Settings Load(DiagnosticLog? log)
     {
-        Current = ReadFile(log);
+        lock (_gate) Current = ReadFile(log);
         return Current;
     }
 
@@ -129,7 +129,7 @@ public sealed class SettingsStore(string root)
         var path = S(o, "Path");
         if (string.IsNullOrWhiteSpace(path)) return false;
         long size = o["Size"] is JsonValue sv && sv.TryGetValue<long>(out var sz) && sz >= 0 ? sz : 0;
-        var written = DateTime.TryParse(S(o, "LastWriteUtc"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var w) ? w.ToUniversalTime() : DateTime.MinValue;
+        var written = DateTime.TryParse(S(o, "LastWriteUtc"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var w) ? w : DateTime.MinValue;
         DateTimeOffset? played = DateTimeOffset.TryParse(S(o, "LastPlayed"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var p) ? p : null;
         var sha = S(o, "Sha256");
         e = new ModuleEntry(path, string.IsNullOrEmpty(sha) ? null : sha, size, written, S(o, "Title") ?? Path.GetFileNameWithoutExtension(path), S(o, "Version") ?? "", played);
@@ -267,22 +267,51 @@ public sealed class SettingsStore(string root)
 
     // ---------- save ----------
 
-    /// <summary>Makes <paramref name="s"/> current, writes it atomically (failure is recorded in <see cref="LastSaveError"/>, never thrown) and raises <see cref="Changed"/>.</summary>
+    readonly object _gate = new();
+
+    /// <summary>Makes <paramref name="s"/> current, writes it atomically (failure is recorded in <see cref="LastSaveError"/>, never thrown) and raises <see cref="Changed"/>.
+    /// Thread-safe; <see cref="Changed"/> is raised on the calling thread (UI subscribers must marshal).</summary>
     public void Save(Settings s)
+    {
+        lock (_gate) Write(s);
+        Raise(s);
+    }
+
+    /// <summary>Atomically reads <see cref="Current"/>, applies <paramref name="change"/>, saves the result and raises <see cref="Changed"/> (on the calling thread, outside the lock). Concurrent updates never lose each other.</summary>
+    public void Update(Func<Settings, Settings> change)
+    {
+        Settings next;
+        lock (_gate)
+        {
+            next = change(Current);
+            Write(next);
+        }
+        Raise(next);
+    }
+
+    void Write(Settings s)
     {
         Current = s;
         try
         {
             Directory.CreateDirectory(root);
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, ToJson(s).ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(tmp, FilePath, overwrite: true);
+            var tmp = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(tmp, ToJson(s).ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                File.Move(tmp, FilePath, overwrite: true);
+            }
+            finally { try { File.Delete(tmp); } catch (Exception) { } }
             LastSaveError = null;
         }
         catch (Exception ex)
         {
             LastSaveError = ex.Message;
         }
+    }
+
+    void Raise(Settings s)
+    {
         if (Changed == null) return;
         foreach (var h in Changed.GetInvocationList().Cast<Action<Settings>>())
         {

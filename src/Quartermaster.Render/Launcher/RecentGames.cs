@@ -13,22 +13,27 @@ public sealed class RecentGames(SettingsStore store, string layoutRoot)
 {
     public const int Max = 10;
 
-    /// <summary>Puts <paramref name="savePath"/> first for this module, dropping a duplicate and anything beyond ten.</summary>
+    /// <summary>Puts <paramref name="savePath"/> first for this module, dropping a duplicate and anything beyond ten. Keys are matched ignoring case.</summary>
     public void Add(string sha, string savePath)
     {
         if (string.IsNullOrEmpty(sha) || string.IsNullOrWhiteSpace(savePath)) return;
-        var s = store.Current;
-        var map = s.RecentSaves.ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
-        var list = (map.TryGetValue(sha, out var old) ? old : Array.Empty<string>())
-            .Where(p => !string.Equals(p, savePath, StringComparison.OrdinalIgnoreCase)).Prepend(savePath).Take(Max).ToList();
-        map[sha] = list;
-        store.Save(s with { RecentSaves = map.ToDictionary(p => p.Key, p => p.Value) });
+        store.Update(s =>
+        {
+            var map = s.RecentSaves.ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
+            var list = (map.TryGetValue(sha, out var old) ? old : Array.Empty<string>())
+                .Where(p => !string.Equals(p, savePath, StringComparison.OrdinalIgnoreCase)).Prepend(savePath).Take(Max).ToList();
+            map.Remove(sha);
+            map[sha.ToLowerInvariant()] = list;
+            return s with { RecentSaves = map.ToDictionary(p => p.Key, p => p.Value) };
+        });
     }
 
-    public IReadOnlyList<RecentSave> For(string sha)
+    public IReadOnlyList<RecentSave> For(string? sha)
     {
-        if (!store.Current.RecentSaves.TryGetValue(sha, out var list)) return Array.Empty<RecentSave>();
-        return list.Select(p =>
+        if (string.IsNullOrEmpty(sha)) return Array.Empty<RecentSave>();
+        var found = store.Current.RecentSaves.FirstOrDefault(p => string.Equals(p.Key, sha, StringComparison.OrdinalIgnoreCase)).Value;
+        if (found == null) return Array.Empty<RecentSave>();
+        return found.Select(p =>
         {
             try
             {
@@ -56,20 +61,75 @@ public sealed class RecentGames(SettingsStore store, string layoutRoot)
         catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
     }
 
+    /// <summary>Forward-only scan for snapshot.turn.{turn,phase} that stops as soon as that object ends. Any failure gives (0, null).</summary>
     static (int, string?) ReadTurn(string path)
     {
         try
         {
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var doc = JsonDocument.Parse(fs);
-            if (doc.RootElement.TryGetProperty("snapshot", out var snap) && snap.TryGetProperty("turn", out var t)
-                && t.TryGetProperty("turn", out var n) && n.TryGetInt32(out var turn))
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 16384);
+            var buf = new byte[16384];
+            var len = 0;
+            var state = new JsonReaderState();
+            var eof = false;
+            var depth = 0; // container depth: 1 = root, 2 = snapshot, 3 = turn
+            var inSnapshot = false;
+            var inTurn = false;
+            var turn = -1;
+            string? phase = null;
+            string? prop = null;
+            while (true)
             {
-                string? phase = t.TryGetProperty("phase", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
-                return (turn, string.IsNullOrEmpty(phase) ? null : phase);
+                if (!eof)
+                {
+                    if (len == buf.Length) Array.Resize(ref buf, buf.Length * 2);
+                    var n = fs.Read(buf, len, buf.Length - len);
+                    if (n == 0) eof = true; else len += n;
+                }
+                var reader = new Utf8JsonReader(buf.AsSpan(0, len), eof, state);
+                var done = false;
+                while (reader.Read())
+                {
+                    switch (reader.TokenType)
+                    {
+                        case JsonTokenType.PropertyName:
+                            prop = reader.GetString();
+                            break;
+                        case JsonTokenType.StartObject:
+                            depth++;
+                            if (depth == 2 && Is(prop, "snapshot")) inSnapshot = true;
+                            else if (depth == 3 && inSnapshot && Is(prop, "turn")) inTurn = true;
+                            break;
+                        case JsonTokenType.StartArray:
+                            depth++;
+                            break;
+                        case JsonTokenType.EndArray:
+                            depth--;
+                            break;
+                        case JsonTokenType.EndObject:
+                            if (inTurn && depth == 3) done = true;
+                            depth--;
+                            break;
+                        default:
+                            if (inTurn && depth == 3)
+                            {
+                                if (Is(prop, "turn") && reader.TokenType == JsonTokenType.Number) turn = reader.GetInt32();
+                                else if (Is(prop, "phase") && reader.TokenType == JsonTokenType.String) phase = reader.GetString();
+                            }
+                            break;
+                    }
+                    if (done) break;
+                }
+                if (done) return turn < 0 ? (0, null) : (turn, string.IsNullOrEmpty(phase) ? null : phase);
+                if (eof) break;
+                state = reader.CurrentState;
+                var consumed = (int)reader.BytesConsumed;
+                len -= consumed;
+                Buffer.BlockCopy(buf, consumed, buf, 0, len);
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { }
         return (0, null);
     }
+
+    static bool Is(string? a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 }

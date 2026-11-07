@@ -14,8 +14,6 @@ public sealed record ModuleRow(ModuleEntry Entry, bool Missing);
 /// </summary>
 public sealed class ModuleLibrary(SettingsStore store)
 {
-    readonly object _gate = new();
-
     /// <summary>Computes a module's SHA-256; replaceable for tests.</summary>
     public Func<string, string> Hasher { get; set; } = VmodArchive.ComputeSha256;
 
@@ -25,7 +23,7 @@ public sealed class ModuleLibrary(SettingsStore store)
         get
         {
             ModuleEntry[] list;
-            lock (_gate) list = store.Current.Modules.ToArray();
+            list = store.Current.Modules.ToArray();
             return list.OrderByDescending(e => e.LastPlayed ?? DateTimeOffset.MinValue)
                 .ThenBy(e => e.Title, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(e => e.Path, StringComparer.OrdinalIgnoreCase)
@@ -46,13 +44,7 @@ public sealed class ModuleLibrary(SettingsStore store)
     static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
     void Mutate(Func<List<ModuleEntry>, List<ModuleEntry>> change)
-    {
-        lock (_gate)
-        {
-            var next = change(store.Current.Modules.ToList());
-            store.Save(store.Current with { Modules = next });
-        }
-    }
+        => store.Update(cur => cur with { Modules = change(cur.Modules.ToList()) });
 
     /// <summary>Adds a module (no-op when already listed). Reads its title and version; hashing happens in <see cref="RefreshAsync"/>.</summary>
     public void Add(string path)
@@ -68,7 +60,7 @@ public sealed class ModuleLibrary(SettingsStore store)
             if (fi.Exists) { size = fi.Length; written = fi.LastWriteTimeUtc; }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { }
-        Mutate(l => { l.Add(new ModuleEntry(path, null, size, written, info.Title, info.Version, null)); return l; });
+        Mutate(l => { if (!l.Any(m => Same(m.Path, path))) l.Add(new ModuleEntry(path, null, size, written, info.Title, info.Version, null)); return l; });
     }
 
     /// <summary>Takes the module off the list; the file is left alone.</summary>
@@ -88,7 +80,7 @@ public sealed class ModuleLibrary(SettingsStore store)
     public async Task RefreshAsync(IProgress<ModuleRow>? progress, CancellationToken ct)
     {
         ModuleEntry[] snapshot;
-        lock (_gate) snapshot = store.Current.Modules.ToArray();
+        snapshot = store.Current.Modules.ToArray();
         var results = await Task.Run(() =>
         {
             var done = new List<(ModuleEntry Old, ModuleEntry New)>();
@@ -106,7 +98,7 @@ public sealed class ModuleLibrary(SettingsStore store)
         {
             foreach (var (old, now) in results)
             {
-                var i = l.FindIndex(m => m == old);
+                var i = l.FindIndex(m => Same(m.Path, old.Path));
                 if (i >= 0) l[i] = now with { LastPlayed = l[i].LastPlayed };
             }
             return l;
