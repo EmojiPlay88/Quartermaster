@@ -46,7 +46,7 @@ sealed partial class MainForm
 
     void MarkTourShown()
     {
-        if (!_settings.Current.TourShown) _settings.Save(_settings.Current with { TourShown = true });
+        if (!_settings.Current.TourShown) _settings.Update(s => s with { TourShown = true });
     }
 
     /// <summary>First game open ever (setting not yet true) starts the tour once the window has settled; never during smoke runs.</summary>
@@ -83,7 +83,7 @@ sealed partial class MainForm
             tour.Go(steps.Count - 1);
             Application.DoEvents();
             ShotWithBalloon(Path.ChangeExtension(path, null) + "-last.png");
-            if (saved) _settings.Save(_settings.Current with { TourShown = false }); // repeatable regardless of prior state
+            if (saved) _settings.Update(s => s with { TourShown = false }); // repeatable regardless of prior state
             tour.Close();
             Application.DoEvents();
             var ok = _settings.Current.TourShown;
@@ -92,7 +92,7 @@ sealed partial class MainForm
         }
         finally
         {
-            if (_settings.Current.TourShown != saved) _settings.Save(_settings.Current with { TourShown = saved }); // a smoke run must not change the real first-run state
+            if (_settings.Current.TourShown != saved) _settings.Update(s => s with { TourShown = saved }); // a smoke run must not change the real first-run state
         }
     }
 

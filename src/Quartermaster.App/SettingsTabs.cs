@@ -63,7 +63,7 @@ abstract class SettingsTab
 
 sealed class GeneralTab : SettingsTab
 {
-    readonly CheckBox _reopen = Check("Reopen the last module when Quartermaster starts");
+    readonly CheckBox _reopen = Check("Select the last module in the launcher");
     readonly NumericUpDown _autosave = Num(0, 240);
     readonly CheckBox _confirmDelete = Check("Ask before deleting pieces");
     readonly CheckBox _gm = Check("Game master mode (shows the counter palette)");

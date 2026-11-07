@@ -7,6 +7,10 @@ namespace Quartermaster.App;
 sealed partial class MainForm
 {
     readonly SettingsStore _settings = new(LayoutRoot);
+    ModuleLibrary? _libraryField;
+    RecentGames? _recentField;
+    ModuleLibrary _library => _libraryField ??= new ModuleLibrary(_settings);
+    RecentGames _recent => _recentField ??= new RecentGames(_settings, LayoutRoot);
     readonly DiagnosticLog _settingsDiag = new();
     Autosaver? _autosaver;
     System.Windows.Forms.Timer? _autosaveTimer;
@@ -130,7 +134,7 @@ sealed partial class MainForm
     void ReopenLastModuleIfWanted()
     {
         var s = _settings.Current;
-        if (Program.Smoke || _opts.ModulePath != null || !s.ReopenLastModule || string.IsNullOrEmpty(s.LastModulePath) || !File.Exists(s.LastModulePath)) return;
+        if (Program.Smoke || _launch != null || Program.LauncherHook != null || Program.Relaunched || _opts.ModulePath != null || !s.ReopenLastModule || string.IsNullOrEmpty(s.LastModulePath) || !File.Exists(s.LastModulePath)) return;
         var path = s.LastModulePath;
         BeginInvoke(() => { if (!IsDisposed) Guard(() => OpenModule(path, fromArgs: false)); });
     }
@@ -138,7 +142,7 @@ sealed partial class MainForm
     void RememberModule(string path)
     {
         if (Program.Smoke || string.Equals(_settings.Current.LastModulePath, path, StringComparison.OrdinalIgnoreCase)) return;
-        _settings.Save(_settings.Current with { LastModulePath = path });
+        _settings.Update(s => s with { LastModulePath = path });
     }
 
     // ---------- smoke ----------
