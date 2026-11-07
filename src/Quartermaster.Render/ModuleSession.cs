@@ -62,7 +62,9 @@ public sealed class ModuleSession : IDisposable
         ViewChanged?.Invoke();
     }
 
-    private static IReadOnlySet<string>? ViewSidesFor(GameSession game) => Players.IsSolo(game.State) ? null : new HashSet<string>();
+    /// <summary>A guest's snapshot and a viewer copy are already filtered: they are shown whole (null).</summary>
+    private IReadOnlySet<string>? ViewSidesFor(GameSession game) =>
+        IsGuest || game.ViewerCopy || Players.IsSolo(game.State) ? null : new HashSet<string>();
 
     private void ResetView() { _cache = null; _access = null; }
 
@@ -100,6 +102,7 @@ public sealed class ModuleSession : IDisposable
 
     public void SetViewSides(IReadOnlySet<string>? sides)
     {
+        if (IsGuest || IsViewerCopy) sides = null;   // already filtered: filtering again would hide the player's own sides
         _viewSides = sides == null ? null : new HashSet<string>(sides);
         InvalidateView();
     }
@@ -272,6 +275,7 @@ public sealed class ModuleSession : IDisposable
     /// <param name="players">The player list the game starts with (part of its start, not an undoable command); null or one player = solo.</param>
     public void StartNewGame(Difficulty? difficulty = null, IReadOnlyList<PlayerDef>? players = null)
     {
+        RequireNotGuest();
         var state = NewGameBuilder.FromSetupStacks(Model, Log);
         if (difficulty is { } d) state.Difficulty = d;
         SetStartPlayers(state, players);
@@ -287,6 +291,7 @@ public sealed class ModuleSession : IDisposable
     /// <param name="players">The player list the game starts with (part of its start, not an undoable command); null or one player = solo.</param>
     public void LoadSetup(SetupDef s, Difficulty? difficulty = null, IReadOnlyList<PlayerDef>? players = null)
     {
+        RequireNotGuest();
         if (s.FileEntry == null) { StartNewGame(difficulty, players); return; }
         if (!Archive.HasEntry(s.FileEntry))
             throw new InvalidDataException($"Setup '{s.Name}' refers to '{s.FileEntry}', which is not in the module.");
@@ -300,6 +305,7 @@ public sealed class ModuleSession : IDisposable
 
     public void LoadNative(string path)
     {
+        RequireNotGuest();
         var loaded = NativeSave.Read(path);
         if (!string.Equals(loaded.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("This save was made with a different module and cannot be loaded here.");
@@ -313,6 +319,8 @@ public sealed class ModuleSession : IDisposable
     public void SaveNative(string path)
     {
         if (Game == null) throw new InvalidOperationException("There is no game to save.");
+        if (IsGuest) throw new InvalidOperationException(GuestSaveText);
+        if (IsViewerCopy) throw new InvalidOperationException(ViewerCopyText);
         if (Rules != null) Game.RulesSha256 = SafeHash(Rules) ?? Game.RulesSha256;
         NativeSave.Write(path, Game);
     }
@@ -390,7 +398,8 @@ public sealed class ModuleSession : IDisposable
 
     private void Remember(string path)
     {
-        if (_rulesRoot != null) RulesMemory.Remember(_rulesRoot, Archive.Sha256, path);
+        // A pack received from a host (guest mode) is never remembered for this module.
+        if (_rulesRoot != null && !IsGuest) RulesMemory.Remember(_rulesRoot, Archive.Sha256, path);
     }
 
     private void AutoOpenRemembered()
@@ -425,7 +434,7 @@ public sealed class ModuleSession : IDisposable
     /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
     public void SeedLedgers()
     {
-        if (Game == null || Rules == null) return;
+        if (Game == null || Rules == null || IsGuest || IsViewerCopy) return;   // guests never execute commands; a viewer copy is read-only
         try
         {
             var seed = LedgerSeeder.BuildSeeds(Game.State, Rules, _ => true, Model, Log);
@@ -448,6 +457,100 @@ public sealed class ModuleSession : IDisposable
         SeedLedgers();
         Game.Rebase();   // the start seed is part of genesis, not an undoable action
         AfterGameReplaced();
+    }
+
+    // ---- online guest mode and viewer copies (spec 5, 8a.3) ----
+
+    public const string GuestSaveText = "Only the host can save the online game. Use Export viewer copy… to keep your view.";
+    public const string GuestUndoText = "Only the host can undo";
+    public const string ViewerCopyText = "Viewer copy — a player's view of an online game. It is read-only and cannot be continued.";
+    public const string GuestBusyText = "Leave the online game first.";
+
+    /// <summary>
+    /// True while this session shows an online game as a guest: <see cref="Game"/> is the host's latest filtered snapshot (no history,
+    /// so nothing to undo), <see cref="ViewSides"/> is null (already filtered), nothing is seeded or saved, and actions go to the host.
+    /// </summary>
+    public bool IsGuest { get; private set; }
+
+    /// <summary>The sides the guest holds (from the latest snapshot's player list); null outside guest mode or before a side is held.</summary>
+    public IReadOnlySet<string>? GuestSides { get; private set; }
+
+    /// <summary>True when the open game is a viewer copy (read-only; every action is blocked).</summary>
+    public bool IsViewerCopy => _game?.ViewerCopy == true;
+
+    /// <summary>False for a guest and for a viewer copy.</summary>
+    public bool CanSave => Game != null && !IsGuest && !IsViewerCopy;
+
+    /// <summary>The banner shown over a viewer copy; null for any other game.</summary>
+    public string? ViewerBanner => IsViewerCopy ? ViewerCopyText : null;
+
+    private void RequireNotGuest()
+    {
+        if (IsGuest) throw new InvalidOperationException(GuestBusyText);
+    }
+
+    /// <summary>Switches this session to guest mode: the open game (if any) is closed until the host's first snapshot arrives.</summary>
+    public void EnterGuestMode()
+    {
+        if (IsGuest) return;
+        IsGuest = true;
+        GuestSides = null;
+        _viewSides = null;
+        if (Game == null) { ResetView(); ViewChanged?.Invoke(); return; }
+        Game = null;
+        AfterGameReplaced();
+    }
+
+    /// <summary>
+    /// Guest mode: shows the host's filtered snapshot. The first one replaces the game (<see cref="GameReplaced"/>); later ones replace
+    /// its state in place (a rewind-like refresh: <see cref="GameSession.Rewound"/>, then <see cref="ViewChanged"/>). No command runs.
+    /// </summary>
+    /// <param name="sides">The sides this guest holds (null = none yet).</param>
+    public void ApplySnapshot(GameState filtered, IReadOnlySet<string>? sides = null)
+    {
+        ArgumentNullException.ThrowIfNull(filtered);
+        if (!IsGuest) throw new InvalidOperationException("Not an online guest.");
+        GuestSides = sides == null ? null : new HashSet<string>(sides);
+        if (Game is { } g)
+        {
+            g.ReplaceWithSnapshot(filtered);   // Rewound → view invalidated
+            return;
+        }
+        var session = new GameSession(filtered, Archive.Sha256);
+        if (Rules != null) session.RulesSha256 = SafeHash(Rules);
+        Game = session;
+        AfterGameReplaced();
+    }
+
+    /// <summary>
+    /// Guest mode: the rules pack the host sent, held in memory only (no path, so a plain save asks where; never remembered, never
+    /// seeded into the snapshot). Raises <see cref="RulesChanged"/> and <see cref="ViewChanged"/>; not <see cref="RulesApplied"/>.
+    /// </summary>
+    public void LoadGuestRules(RulesPack pack)
+    {
+        ArgumentNullException.ThrowIfNull(pack);
+        if (!IsGuest) throw new InvalidOperationException("Not an online guest.");
+        var runner = new FormulaRunner(pack, Model, _roller);
+        Rules = pack;
+        RulesPath = null;
+        RulesDirty = false;
+        Runner = runner;
+        if (Game != null) Game.RulesSha256 = SafeHash(pack);
+        ResetView();
+        RulesChanged?.Invoke();
+        ViewChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Guest mode: writes the current filtered snapshot as a read-only save (a viewer copy). It holds only what this guest was sent,
+    /// has no history and opens with a banner, all actions blocked.
+    /// </summary>
+    public void ExportViewerCopy(string path)
+    {
+        if (!IsGuest) throw new InvalidOperationException("Only an online guest exports a viewer copy.");
+        if (Game is not { } g) throw new InvalidOperationException("There is no game to export yet.");
+        var copy = new GameSession(g.State.DeepClone(), Archive.Sha256) { ViewerCopy = true, RulesSha256 = g.RulesSha256 };
+        NativeSave.Write(path, copy);
     }
 
     public bool Disposed { get; private set; }

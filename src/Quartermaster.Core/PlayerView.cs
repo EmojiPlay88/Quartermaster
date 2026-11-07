@@ -92,6 +92,8 @@ public static class PlayerView
         /// <summary>Piece name -> first side not held among pieces with that name (null when all are held or public).</summary>
         private readonly Dictionary<string, string?> _subjects = new(StringComparer.Ordinal);
         private readonly List<string> _privatePrefixes;
+        /// <summary>Formulas reading a holder value this viewer may not see: their working (which shows that value) is never shown.</summary>
+        private readonly HashSet<string> _hiddenInputFormulas = new(StringComparer.Ordinal);
         private readonly Regex? _names;
 
         public Filter(GameState full, RulesPack pack, ModuleModel? model, IReadOnlySet<string> held)
@@ -106,6 +108,10 @@ public static class PlayerView
                 set.Add(string.IsNullOrWhiteSpace(ph.SideId) ? "" : ph.SideId);
             }
             _privatePrefixes = (pack.Formulas ?? new()).Where(f => f is { PrivateRolls: true }).Select(f => (f.Name ?? "") + ": ").Distinct().ToList();
+            foreach (var f in pack.Formulas ?? new())
+                if (f?.Id != null && (f.Bindings ?? new()).Any(b => b is { Kind: BindingKind.Holder }
+                        && ValueHidden(LedgerKey.Holder(b.HolderId ?? ""), b.Property, out _)))
+                    _hiddenInputFormulas.Add(f.Id);
 
             foreach (var p in full.Pieces.Values)
             {
@@ -290,7 +296,7 @@ public static class PlayerView
                 var e = history[k];
                 if (e == null || ValueHidden(e.Key, e.PropertyId, out _) || NameHit(e.Note) || NameHit(e.Working)) continue;
                 var shown = lineOfEntry[k] >= 0 && outcomes[lineOfEntry[k]].Outcome == Outcome.Keep;
-                kept.Add(e.Working != null && e.Source == "formula" && !shown ? e with { Working = null } : e);
+                kept.Add(e.Working != null && e.Source == "formula" && (!shown || HidesInput(e)) ? e with { Working = null } : e);
             }
             v.LedgerHistory = kept;
 
@@ -300,7 +306,10 @@ public static class PlayerView
             for (var i = 0; i < log.Count; i++)
             {
                 var (o, text) = outcomes[i];
-                if (o == Outcome.Keep) lines.Add(log[i]);
+                if (o == Outcome.Keep)
+                    lines.Add(entryOfLine[i] is { } e && HidesInput(e) && log[i].Text is { } t
+                        ? log[i] with { Text = t.Replace(e.Working!, $"{e.PropertyId} {Num(e.Before)} → {Num(e.After)}", StringComparison.Ordinal) }
+                        : log[i]);
                 else if (o == Outcome.Redact) lines.Add(log[i] with { Text = text!, PieceId = null });
             }
             v.Log = lines;
@@ -322,6 +331,10 @@ public static class PlayerView
             }
             v.Pending = runs;
         }
+
+        /// <summary>A formula entry whose working shows an input this viewer may not see (the result itself stays visible).</summary>
+        private bool HidesInput(LedgerEntry e) =>
+            e.Working != null && e.FormulaId != null && _hiddenInputFormulas.Contains(e.FormulaId);
 
         /// <summary>Removed or masked pieces and private or unknown holders lose every value; other keys are filtered per property.</summary>
         private bool WholeKeyHidden(string key)

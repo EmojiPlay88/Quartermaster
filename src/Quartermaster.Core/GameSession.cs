@@ -37,6 +37,10 @@ public sealed class GameSession
     public string ModuleSha256 { get; }
     /// <summary>Hash of the rules pack the ledgers were played with; null when none.</summary>
     public string? RulesSha256 { get; set; }
+    /// <summary>
+    /// True for an online guest's exported filtered view (a "viewer copy"): it opens read-only and cannot be continued. Saved in the file.
+    /// </summary>
+    public bool ViewerCopy { get; init; }
     public IReadOnlyList<GameCommand> Log => _log;
     public IReadOnlyList<ActionMark> Actions => _actions;
     /// <summary>Phase/turn boundaries that can be stepped back to. [0] is always game start (or the load point, see <see cref="StartLabel"/>).</summary>
@@ -269,6 +273,17 @@ public sealed class GameSession
                 foreach (var c in a.Commands) Execute(c);
         }
         finally { _redoing = false; }
+    }
+
+    /// <summary>
+    /// Replaces the whole state with <paramref name="state"/> (an online guest's snapshot) and discards history, then raises
+    /// <see cref="Rewound"/> so views refresh as after a rewind. No command runs.
+    /// </summary>
+    public void ReplaceWithSnapshot(GameState state)
+    {
+        State = state ?? throw new ArgumentNullException(nameof(state));
+        Rebase();
+        Rewound?.Invoke();
     }
 
     /// <summary>Makes the current state the new genesis; history is discarded.</summary>

@@ -62,8 +62,12 @@ internal sealed class MemoryTransport : ITransport
 
     public IEnumerable<T> Of<T>() where T : GamePayload => Messages.OfType<T>();
 
+    /// <summary>How many payloads this endpoint sent.</summary>
+    public int SentCount { get; private set; }
+
     public Task Send(string? to, byte[] payload)
     {
+        SentCount++;
         _relay.Route(this, to, payload);
         return Task.CompletedTask;
     }

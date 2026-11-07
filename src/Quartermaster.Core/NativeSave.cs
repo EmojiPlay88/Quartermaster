@@ -18,6 +18,9 @@ public static class NativeSave
         public GameState? Genesis { get; set; }
         public List<ActionMark>? Actions { get; set; }
         public List<Checkpoint>? Checkpoints { get; set; }
+        /// <summary>True for an online guest's viewer copy (read-only); absent in ordinary saves, so the format stays 7.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? ViewerCopy { get; set; }
     }
 
     const string RebaseNotice = "Undo history in this save did not match the game; undo starts from here.";
@@ -28,6 +31,7 @@ public static class NativeSave
         {
             Format = FormatVersion, ModuleSha256 = s.ModuleSha256, RulesSha256 = s.RulesSha256, Snapshot = s.State, Log = s.Log.ToList(),
             Genesis = s.Genesis, Actions = s.Actions.ToList(), Checkpoints = s.Checkpoints.ToList(),
+            ViewerCopy = s.ViewerCopy ? true : null,
         };
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(file, QuartermasterJson.Options));
@@ -44,7 +48,11 @@ public static class NativeSave
         ValidateState(f.Snapshot!);
     }
 
-    private static void ValidateState(GameState snap)
+    /// <summary>
+    /// Checks a state read from outside (a save, an online snapshot) for missing parts and fills optional ones with defaults.
+    /// Throws InvalidDataException when something required is missing.
+    /// </summary>
+    public static void ValidateState(GameState snap)
     {
         static void Need(bool ok, string what) { if (!ok) throw new InvalidDataException("Malformed save file: " + what + " is missing."); }
         Need(snap.Pieces != null && snap.Stacks != null && snap.MapOrder != null, "snapshot content");
@@ -83,7 +91,7 @@ public static class NativeSave
         if (f.Format < MinFormat || f.Format > FormatVersion)
             throw new InvalidDataException($"Unsupported save format version {f.Format} (expected {MinFormat} to {FormatVersion}).");
         Validate(f);
-        var session = new GameSession(f.Snapshot, f.ModuleSha256) { RulesSha256 = f.RulesSha256 };
+        var session = new GameSession(f.Snapshot, f.ModuleSha256) { RulesSha256 = f.RulesSha256, ViewerCopy = f.ViewerCopy == true };
         session.RestoreLog(f.Log);
         if (f.Format < 5 || f.Genesis == null)
         {
