@@ -5,7 +5,7 @@ using Quartermaster.Vassal;
 namespace Quartermaster.App;
 
 /// <summary>
-/// "Play offline" for one module: Continue (newest autosave), recent saves, New game… and Open saved game…. <see cref="Result"/> is the
+/// "Play offline" for one module: Continue (newest autosave), recent saves, New game…, Open saved game… and Open turn file…. <see cref="Result"/> is the
 /// launch request when the dialog closed with OK; Back returns to the launcher.
 /// </summary>
 sealed class PlayOfflineForm : Form
@@ -20,6 +20,7 @@ sealed class PlayOfflineForm : Form
     readonly ListView _recent = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false };
     readonly Button _new = new() { Text = "New game…", AutoSize = true, MinimumSize = new Size(100, 26) };
     readonly Button _open = new() { Text = "Open saved game…", AutoSize = true, MinimumSize = new Size(120, 26) };
+    readonly Button _openTurn = new() { Text = "Open turn file…", AutoSize = true, MinimumSize = new Size(110, 26) };
     readonly Button _openSel = new() { Text = "Open selected", AutoSize = true, MinimumSize = new Size(100, 26), Enabled = false };
     readonly Button _back = new() { Text = "Back", DialogResult = DialogResult.Cancel, MinimumSize = new Size(75, 26) };
 
@@ -67,6 +68,7 @@ sealed class PlayOfflineForm : Form
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(8), FlowDirection = FlowDirection.LeftToRight };
         buttons.Controls.Add(_new);
         buttons.Controls.Add(_open);
+        buttons.Controls.Add(_openTurn);
         buttons.Controls.Add(_openSel);
         buttons.Controls.Add(_back);
 
@@ -78,6 +80,7 @@ sealed class PlayOfflineForm : Form
         _continueBtn.Click += (_, _) => Guarded(() => Finish(LaunchKind.Continue, null, _continue?.Path));
         _new.Click += async (_, _) => await GuardedAsync(NewGame);
         _open.Click += (_, _) => Guarded(OpenDialog);
+        _openTurn.Click += (_, _) => Guarded(OpenTurnDialog);
         _openSel.Click += (_, _) => Guarded(OpenSelected);
         _recent.DoubleClick += (_, _) => Guarded(OpenSelected);
         _recent.SelectedIndexChanged += (_, _) => Guarded(() => _openSel.Enabled = SelectedSave is { Missing: false });
@@ -155,6 +158,13 @@ sealed class PlayOfflineForm : Form
         if (dlg.ShowDialog(this) == DialogResult.OK) Finish(LaunchKind.OpenSave, null, dlg.FileName);
     }
 
+    /// <summary>A received turn: the game window opens the module, asks who you are and replays it (launcher spec 3.2).</summary>
+    void OpenTurnDialog()
+    {
+        using var dlg = new OpenFileDialog { Filter = TurnUiModel.FileFilter, Title = "Open turn file" };
+        if (dlg.ShowDialog(this) == DialogResult.OK) Finish(LaunchKind.OpenTurn, null, dlg.FileName);
+    }
+
     /// <summary>Disables the action buttons while a module loads or the setup dialog is open (no second click can start another run).</summary>
     bool _busy, _finishing;
 
@@ -169,7 +179,7 @@ sealed class PlayOfflineForm : Form
     {
         _busy = busy;
         if (IsDisposed) return;
-        _new.Enabled = _open.Enabled = _back.Enabled = !busy;
+        _new.Enabled = _open.Enabled = _openTurn.Enabled = _back.Enabled = !busy;
         _continueBtn.Enabled = !busy && _continue != null;
         _openSel.Enabled = !busy && SelectedSave is { Missing: false };
     }

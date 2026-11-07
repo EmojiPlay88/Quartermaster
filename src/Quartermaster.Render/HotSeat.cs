@@ -100,6 +100,7 @@ public sealed class HotSeat
 
     private void CheckHandover()
     {
+        if (_detached) return;
         if (HandoverDue() is not { } due)
         {
             // Rewound back into the current player's own phase: the screen goes away and their view comes back. (Rewound to where no
@@ -116,7 +117,10 @@ public sealed class HotSeat
         HandoverRequired?.Invoke(due);
     }
 
-    private void OnRewound() => Reconcile();
+    private void OnRewound()
+    {
+        if (!_detached) Reconcile();
+    }
 
     /// <summary>After a player-list change or a rewind: re-checks the handover, and dismisses a pending one that is no longer due.</summary>
     private void Reconcile()
@@ -141,6 +145,7 @@ public sealed class HotSeat
 
     private void OnCommand(GameCommand c)
     {
+        if (_detached) return;
         if (c is SetPlayers) Reconcile();
         // A phase relocation after a rules change or a load (not one inside "Next Phase" or a rewind, which re-check when they end).
         else if (c is AdvancePhase { Reason: not null } && _s.Game is { InAction: false }) Reconcile();
@@ -149,11 +154,15 @@ public sealed class HotSeat
     /// <summary>An edited pack may change who acts now (a phase's side, the sides, the players' effective sides): re-check.</summary>
     private void OnRulesApplied()
     {
+        if (_detached) return;
         Hook();
         Reconcile();
     }
 
-    private void OnGameRewound() => PlayersChanged();
+    private void OnGameRewound()
+    {
+        if (!_detached) PlayersChanged();
+    }
 
     /// <summary>Reconciles after the player list may have changed. True when it handled a solo/multi switch.</summary>
     private bool PlayersChanged()
@@ -219,8 +228,21 @@ public sealed class HotSeat
 
     private static bool Same(PlayerDef a, PlayerDef b) => a.Name == b.Name && a.Sides.SequenceEqual(b.Sides);
 
+    /// <summary>
+    /// For a controller made while a game is already open (hot-seat coming back after a play-by-email game was replaced): does what the
+    /// game's load would have done — nobody is at the screen yet, and a multi-player game raises the handover for whoever acts now.
+    /// </summary>
+    public void BeginOpenGame()
+    {
+        if (_detached) return;
+        _s.SetViewSides(Active ? new HashSet<string>() : null);
+        OnGameReplaced();
+    }
+
     private void OnGameReplaced()
     {
+        // Events captured before a Detach may still arrive once: a detached controller never touches the game or the view again.
+        if (_detached) return;
         // A new game: nobody is at the screen yet, and no side id from the old game may linger in the view.
         Hook();
         var hadPending = Pending != null;

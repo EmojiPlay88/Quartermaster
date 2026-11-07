@@ -53,23 +53,24 @@ sealed partial class MainForm
         {
             // An online guest has no history at all (spec 8a.3): everything stays off and says why.
             var guest = _session?.IsGuest == true;
-            var h = guest ? null : _history;
+            var replaying = _session?.IsReplaying == true;   // the sender's turn cannot be undone; nothing may change it mid-replay
+            var h = guest || replaying ? null : _history;
             var undo = h?.CanUndo == true;
             var redo = h?.CanRedo == true;
             var start = h?.StartOfPhase();
             var any = h != null && h.Checkpoints().Count > 0;
             var floor = h?.AtFloorFromOldSave == true;
-            var why = guest ? ModuleSession.GuestUndoText : floor ? FloorTip : null;
+            var why = guest ? ModuleSession.GuestUndoText : replaying ? ModuleSession.ReplayingText : floor ? FloorTip : null;
 
             var undoText = h?.UndoText ?? "Undo";
             var redoText = h?.RedoText ?? "Redo";
             Set(_editUndo, "&" + Mnemonic(undoText), undo, "edit.undo", !undo ? why : null);
-            Set(_editRedo, "&" + Mnemonic(redoText), redo, "edit.redo", guest ? why : null);
+            Set(_editRedo, "&" + Mnemonic(redoText), redo, "edit.redo", guest || replaying ? why : null);
             Set(_editStepBack, "Step &Back to Start of Phase", start != null, "phase.stepBack", start == null ? why : null);
             Set(_editStepBackTo, "Step Back &To...", any, "phase.stepBackTo", !any ? why : null);
 
             SetButton(_tbUndo, undo, Tip(undoText, "edit.undo"), !undo ? why : null);
-            SetButton(_tbRedo, redo, Tip(redoText, "edit.redo"), guest ? why : null);
+            SetButton(_tbRedo, redo, Tip(redoText, "edit.redo"), guest || replaying ? why : null);
             SetButton(_tbStepBack, start != null, Tip("Step back to start of phase", "phase.stepBack"), start == null ? why : null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -110,6 +111,7 @@ sealed partial class MainForm
     /// <summary>True (and says so) for an online guest: only the host can undo or step back.</summary>
     bool GuestCannotUndo()
     {
+        if (_session?.IsReplaying == true) { SetStatus(ModuleSession.ReplayingText); return true; }
         if (_session?.IsGuest != true) return false;
         SetStatus(ModuleSession.GuestUndoText);
         return true;

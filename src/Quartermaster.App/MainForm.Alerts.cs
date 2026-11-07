@@ -53,7 +53,8 @@ sealed partial class MainForm
     /// <summary>Shown whenever a game is open (Settings permitting), also without a rules pack: the banner then says it is free play.</summary>
     void UpdateAlertBarVisible()
     {
-        _alertBar.Visible = _settings.Current.AlertBarVisible && _session?.Game != null && _phases != null;
+        // A waiting turn shows even when the alert bar is switched off in Settings.
+        _alertBar.Visible = _session?.Game != null && _phases != null && (_settings.Current.AlertBarVisible || _alertBar.NoticeText != null);
     }
 
     void RecomputeAlerts()

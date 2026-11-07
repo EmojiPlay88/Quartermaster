@@ -50,6 +50,37 @@ public class HotSeatTests : IDisposable
 
     private static string? PhaseName(PhaseController c) => c.View().Current?.Name;
 
+    [Fact]
+    public void Detached_IgnoresLoadsAndPhaseChanges()
+    {
+        var (s, c, _, _) = Make(true);
+        c.Start(); c.Advance();
+        var path = Path.Combine(_tmp, "detached.qmsave");
+        s.SaveNative(path);
+        var (s2, c2, _, hs2) = Make(false);
+        var raised = Track(hs2);
+        hs2.Detach();
+        s2.LoadNative(path);
+        s2.SetViewSides(new HashSet<string> { "blue" });   // a play-by-email game's own view
+        c2.Advance();
+        Assert.Empty(raised);
+        Assert.Equal(new[] { "blue" }, s2.ViewSides!.ToArray());
+    }
+
+    [Fact]
+    public void BeginOpenGame_TwoPlayers_RaisesHandoverAsALoadWould()
+    {
+        var (s, c, _, _) = Make(true);
+        c.Start(); c.Advance();                              // Supply (red)
+        var hs = new HotSeat(s, c);                          // made after the game was opened
+        var raised = Track(hs);
+        s.SetViewSides(new HashSet<string> { "blue" });
+        hs.BeginOpenGame();
+        Assert.Equal(new[] { "p1" }, raised);
+        Assert.Empty(s.ViewSides!);
+        Assert.Null(hs.Current);
+    }
+
     private static List<string> Track(HotSeat hs)
     {
         var l = new List<string>();

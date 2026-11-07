@@ -50,13 +50,18 @@ sealed partial class MainForm
         _onlineBanner.Controls.Add(_onlineBannerText);
     }
 
-    /// <summary>Game menu (shown while online): Players… and Leave Online Game.</summary>
+    /// <summary>Game menu (shown while a game is open): Send Turn…; while online also Players… and Leave Online Game.</summary>
     ToolStripMenuItem BuildGameMenu()
     {
         var game = _gameMenu = new ToolStripMenuItem("&Game") { Visible = false };
+        _sendTurn = Item(game.DropDownItems, "Send &Turn…", SendTurn);
+        _gameOnlineSep = new ToolStripSeparator { Visible = false };
+        game.DropDownItems.Add(_gameOnlineSep);
         _gamePlayers = Item(game.DropDownItems, "&Players…", ShowPlayersDialog);
+        _gamePlayers.Visible = false;
         game.DropDownItems.Add(new ToolStripSeparator());
         _gameLeave = Item(game.DropDownItems, "&Leave Online Game", LeaveOnlineGame);
+        _gameLeave.Visible = false;
         return game;
     }
 
@@ -442,8 +447,11 @@ sealed partial class MainForm
         try
         {
             var online = IsOnline;
-            if (_gameMenu != null) _gameMenu.Visible = online || _onlineStarting;
-            if (_gameLeave != null) _gameLeave.Enabled = online || _onlineStarting;
+            if (_gameMenu != null) _gameMenu.Visible = online || _onlineStarting || _session?.Game != null;
+            // Players… and Leave Online Game belong to a live session; Send Turn… (first) to a local game.
+            if (_gameOnlineSep != null) _gameOnlineSep.Visible = online || _onlineStarting;
+            if (_gameLeave != null) { _gameLeave.Visible = online || _onlineStarting; _gameLeave.Enabled = online || _onlineStarting; }
+            if (_gamePlayers != null) _gamePlayers.Visible = online || _onlineStarting;
             if (_gamePlayers != null)
             {
                 _gamePlayers.Enabled = _host != null || _guest is { State: GuestState.ChoosingSide };
@@ -515,6 +523,7 @@ sealed partial class MainForm
             _exportViewer.Visible = guest;
             _exportViewer.Enabled = guest && _session?.Game != null;
         }
+        UpdateTurnUi();
     }
 
     /// <summary>File → Export Viewer Copy… (guests): the filtered view as a read-only save.</summary>

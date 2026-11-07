@@ -245,6 +245,7 @@ sealed partial class MainForm
     {
         if (_session?.Game is not { } g) return;
         if (PlayersEditor.Same(g.State.Players, players)) return;
+        if (_session.IsReplaying) { ShowError(ModuleSession.ReplayingText); return; }
         if (IsOnline || _session.IsGuest)
         {
             // Spec 8a.10: during a live session only the host's Players dialog changes who holds what.

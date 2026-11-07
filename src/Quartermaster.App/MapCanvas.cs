@@ -407,7 +407,7 @@ sealed partial class MapCanvas : SKControl
     protected override void OnMouseDoubleClick(MouseEventArgs e)
     {
         base.OnMouseDoubleClick(e);
-        if (e.Button != MouseButtons.Left || State is not { } st) return;
+        if (e.Button != MouseButtons.Left || State is not { } st || _s.IsReplaying) return;   // a replayed turn stays exactly the sender's
         var hit = PieceAt(e.Location);
         if (hit == null || !st.Pieces.TryGetValue(hit, out var p) || p.StackId == null || !st.Stacks.TryGetValue(p.StackId, out var stack)) return;
         var game = _s.Game;

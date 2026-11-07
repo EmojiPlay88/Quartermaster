@@ -11,9 +11,10 @@ public static class StartupDecision
 
 /// <summary>
 /// <see cref="HostOnline"/>: start <see cref="LaunchRequest.NewGame"/> (or load <see cref="LaunchRequest.SavePath"/>) and host it online;
-/// <see cref="JoinOnline"/>: open the module and play as a guest of the room in <see cref="LaunchRequest.Online"/>.
+/// <see cref="JoinOnline"/>: open the module and play as a guest of the room in <see cref="LaunchRequest.Online"/>;
+/// <see cref="OpenTurn"/>: open the module and replay the turn file at <see cref="LaunchRequest.SavePath"/>.
 /// </summary>
-public enum LaunchKind { NewGame, OpenSave, Continue, HostOnline, JoinOnline }
+public enum LaunchKind { NewGame, OpenSave, Continue, HostOnline, JoinOnline, OpenTurn }
 
 /// <summary>What the launcher asks the game window to do. <see cref="Online"/> is set for the two online kinds only.</summary>
 public sealed record LaunchRequest(string ModulePath, string? RulesPath, LaunchKind Kind, NewGameRequest? NewGame, string? SavePath, OnlineLaunch? Online = null);

@@ -180,6 +180,7 @@ sealed partial class MainForm
         if (_opts.ScreenshotHandover != null) Guard(SmokeHandover);
         if (_opts.ScreenshotPlayerView != null) Guard(SmokePlayerView);
         if (_opts.ScreenshotExport != null) Guard(SmokeExport);
+        if (_opts.SmokeTurns || _opts.ScreenshotTurns != null) Guard(SmokeTurns);
         if (_opts.SmokeLauncher) BackToLauncher(); else Close();
     }
 

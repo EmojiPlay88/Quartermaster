@@ -93,6 +93,7 @@ sealed partial class MainForm : Form
         InitLos();
         InitHotSeat();
         InitOnline();
+        InitTurns();
         _cmdItems["view.log"] = _viewLog;
         BuildMenu();
         BuildToolbar();
@@ -102,6 +103,7 @@ sealed partial class MainForm : Form
         Controls.Add(_tabs); // added first so it docks after the tree and spans only the MDI area
         Controls.Add(_logSplitter); // the log docks at the bottom of the MDI area, beside the tree
         Controls.Add(_logHost);
+        Controls.Add(_replayBar); // a received turn's replay bar: placed directly above the log by PlaceReplayBar
         BuildRightStack(); // phase panel on top, counter palette (game master mode) below, in one right-hand column
         Controls.Add(_rightSplitter);
         Controls.Add(_rightHost);
@@ -117,6 +119,7 @@ sealed partial class MainForm : Form
         Controls.Add(_menu);
         // Explicit z-order (highest index docks first): menu, toolbar, then the phase strip, so the strip sits under the toolbar.
         FixTopOrder();
+        PlaceReplayBar();
         MainMenuStrip = _menu;
 
         _tree.NodeActivated += OnNodeActivated;
@@ -210,14 +213,15 @@ sealed partial class MainForm : Form
         _guestBlocked.Add(Item(file.DropDownItems, "Load &Setup...", LoadSetupDialog, needsModule: true));
         _guestBlocked.Add(Item(file.DropDownItems, "Open &Game...", OpenGameDialog, "file.openGame", needsModule: true));
         _guestBlocked.Add(Item(file.DropDownItems, "Open Auto&save...", OpenAutosaveDialog, needsModule: true));
+        _guestBlocked.Add(_openTurn = Item(file.DropDownItems, "Open &Turn File…", OpenTurnFileDialog, needsModule: true));
         file.DropDownItems.Add(new ToolStripSeparator());
         _needsSave.Add(Item(file.DropDownItems, "&Save Game", () => SaveGame(false), "file.saveGame", needsGame: true));
         _needsSave.Add(Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), "file.saveGameAs", needsGame: true));
         _exportViewer = Item(file.DropDownItems, "&Export Viewer Copy…", ExportViewerCopy);
         _exportViewer.Visible = false;
         file.DropDownItems.Add(new ToolStripSeparator());
-        _guestBlocked.Add(Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, needsModule: true));
-        _guestBlocked.Add(Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, needsModule: true));
+        _guestBlocked.Add(Blocked(Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, needsModule: true)));
+        _guestBlocked.Add(Blocked(Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, needsModule: true)));
         var saveRules = Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false));
         var saveRulesAs = Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true));
         _needsRules.Add(saveRules);
@@ -246,7 +250,7 @@ sealed partial class MainForm : Form
         view.DropDownItems.Add(_viewPalette);
 
         var tools = _toolsMenu = new ToolStripMenuItem("&Tools");
-        Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", needsModule: true);
+        Blocked(Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", needsModule: true));
         Item(tools.DropDownItems, "&Inventory", ShowInventory, needsGame: true);
         Item(tools.DropDownItems, "&Notes", ShowNotes, needsGame: true);
 
@@ -268,6 +272,13 @@ sealed partial class MainForm : Form
 
         _menu.Items.AddRange(new ToolStripItem[] { file, editMenu, BuildGameMenu(), view, tools, window, help });
         _menu.MdiWindowListItem = window;
+    }
+
+    /// <summary>Registers an item that changes the game or its rules: it is off while a received turn replays.</summary>
+    ToolStripMenuItem Blocked(ToolStripMenuItem mi)
+    {
+        _replayBlocked.Add(mi);
+        return mi;
     }
 
     void BuildToolbar()
@@ -348,6 +359,7 @@ sealed partial class MainForm : Form
     {
         FlushNotes(); // pending note text becomes a command first, so the dirty check below counts it
         if (_session?.IsGuest == true) return true;   // a guest's game is the host's: nothing here to save or lose
+        if (_session is { Game: not null, CanSave: false }) return true;   // a viewer copy or a half-replayed turn: never saved, nothing to ask
         if (!_dirty || Program.Smoke) return true;
         return MessageBox.Show(this, "The current game has unsaved changes. Discard them?", "Quartermaster",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
@@ -488,6 +500,9 @@ sealed partial class MainForm : Form
                 }
                 StartOnline(() => BeginHostingAsync(s, host), guest: false);
                 break;
+            case LaunchKind.OpenTurn when !string.IsNullOrEmpty(launch.SavePath):
+                OpenTurnFile(launch.SavePath);   // no game yet: the turn's start becomes the game once the player says who they are
+                break;
             case LaunchKind.JoinOnline when launch.Online is { } guest:
                 StartOnline(() => BeginGuestAsync(s, guest), guest: true);   // no game of our own: the host's snapshot becomes the game
                 break;
@@ -569,6 +584,9 @@ sealed partial class MainForm : Form
     void CloseSession()
     {
         EndOnline(notifyGuests: true);
+        EndReplayUi();
+        StopMailbox();
+        _turnIdentity = null;
         _tour?.Close();
         _wm.EndModule(); // layout is written before the windows go away
         _logDock.Destroy();
@@ -621,6 +639,7 @@ sealed partial class MainForm : Form
         UpdateTitle();
         ReconcilePhases();
         UpdateOnlineUi();
+        OnTurnGameReplaced();
     }
 
     // Log.Added can fire from any thread, and an exception here would propagate into the logger.
@@ -712,6 +731,11 @@ sealed partial class MainForm : Form
     void SaveGame(bool saveAs)
     {
         if (_session?.Game == null) return;
+        if (!_session.CanSave)
+        {
+            if (_session.IsReplaying) SetStatus(ModuleSession.ReplayingText);
+            return;
+        }
         var path = _savePath;
         if (saveAs || path == null)
         {
@@ -839,6 +863,7 @@ sealed partial class MainForm : Form
     void ShowWorkbench()
     {
         if (_session == null) return;
+        if (_session.IsReplaying) { SetStatus(ModuleSession.ReplayingText); return; }   // no rules edits while a received turn replays
         var s = _session;
         OpenChild(_benches, "workbench", () => new WorkbenchWindow(s, () => Guard(NewRulesPack), () => Guard(OpenRulesDialog)));
     }
@@ -1027,6 +1052,7 @@ sealed partial class MainForm : Form
         _autosaveTimer?.Dispose();
         _handoverRetry?.Dispose();
         _dice?.Dispose();
+        _mailbox?.Dispose();
         RememberLeftSplit();
         _layoutStore.SaveLeftSplit(_leftFraction);
         _wm.SaveMain(new SavedWindow(false, WindowState == FormWindowState.Normal ? Bounds : RestoreBounds, WindowState == FormWindowState.Maximized, DeviceDpi));

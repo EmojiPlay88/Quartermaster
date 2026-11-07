@@ -166,6 +166,7 @@ sealed partial class MainForm
     void NextPhase()
     {
         if (_phases == null || _session?.Game == null) return;
+        if (_session.IsReplaying) { SetStatus(ModuleSession.ReplayingText); return; }   // the sender's turn replays as sent
         var v = _phases.View();
         if (v.NoPhases) return;
         if (v.PlayingText is { } playing) { SetStatus(playing); return; }   // hot-seat: another side's phase
