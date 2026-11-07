@@ -306,3 +306,19 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - All guests of a game share one game key. Guest-to-guest privacy relies on the relay routing messages honestly, so run your own relay. Any room creator gets the larger host message budget on the relay.
 - The host holds a side too (a game needs every side held). A host who only moderates must hold an extra side with no pieces.
 - The end-to-end test (`Piece6bEndToEndTests`) covers two guests over a real in-process relay; the Docker image is checked by hand (see the task 9 report), not by tests.
+
+## Piece 6c (turn files and mailbox): parked items
+
+- A trait type with more than 256 traits and empty initial states ignores a high trait-state change when a turn is replayed. Very unlikely.
+- One test builds a very large turn file to check the size limit, so it is heavy to run.
+- The relay's mailbox does its disk work while holding its lock, so a slow disk slows other mailbox requests.
+- If the relay fails to save a box's index right after a stray file was deleted, some files can go uncounted against the mailbox total.
+- The relay setup guide and the code now say MiB for sizes; older notes may still say MB.
+- When fetching a waiting turn keeps failing, the same status message is repeated on each poll.
+- A single poll does not cap how many items it handles, and does not check item ids first.
+- A turn from another game in the same box shows "This turn belongs to another game." instead of being quietly skipped.
+- The mailbox poll's cancellation source is not disposed; the tests do not cover stopping mid-poll, a wrong game or trust prompts.
+- Undoing a pass does not clear the redo list.
+- Sending a turn catches write errors broadly except out of memory; a narrower list may be better.
+- The list of already-played turns is kept per game identity and can go stale while the game is open.
+- The replay bar height is not scaled for high-DPI screens.

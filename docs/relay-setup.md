@@ -163,7 +163,7 @@ Settings are read from `appsettings.json` next to the program, or from environme
 | `MaxConnections` | `2000` | Most connections at once, from all addresses together |
 | `HostMessagesPerSecond` | `400` | Message rate of a room's host connection (never below the 50 guests get) |
 | `HostBurst` | `1000` | Burst size of a room's host connection (never below 200) |
-| `MailboxMaxBytes` | `1073741824` (1 GiB) | Most bytes the turn mailbox keeps, all games together; when full, new turns are refused |
+| `MailboxMaxBytes` | `1073741824` (1 GiB) | Most bytes the turn mailbox keeps, all games together (a turn counts at least 4 KB and each box 8 KB more); when full, new turns are refused |
 | `MailboxMaxItems` | `10000` | Most turns the mailbox keeps, all games together; when reached, new turns are refused |
 | `MailboxExpiryDays` | `30` | Days a turn waits in the mailbox before it is deleted |
 
@@ -285,10 +285,10 @@ player's Quartermaster picks it up, instead of sending it by e-mail or chat.
   `index.json`. On Linux the folders are created readable by the relay's user only (0700) and the files
   0600. The mailbox survives restarts; back up or move `./data` to keep it.
 - **Limits:**
-  - one turn must fit in one relay message (about 6 MB once encrypted); a larger one is refused by the game
+  - one turn must fit in one relay message (about 6 MiB once encrypted); a larger one is refused by the game
     before it is sent;
   - 50 waiting turns per box;
-  - per address (IPv6 by /64): 30 upload attempts per hour — refused attempts count too — and 100 MB of
+  - per address (IPv6 by /64): 30 upload attempts per hour — refused attempts count too — and 100 MiB of
     stored turns per 24 hours; beyond that, "Too many uploads; try again later.";
   - `MailboxMaxBytes` in total (default 1 GiB) and `MailboxMaxItems` turns in total (default 10,000). For the
     byte total every turn counts at least 4 KB, and each box 8 KB more, so many tiny uploads cannot fill

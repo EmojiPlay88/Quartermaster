@@ -48,7 +48,9 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
 - *Live online play, available now:* open **Online lobby ▶** in the launcher. **Join…** takes a game from the list (or a code), **Create lobby…** starts a new game for others to join, and **Host a saved game…** continues one of your saves online. Games go through a relay that you run yourself, in Docker on any server you control; see [docs/relay-setup.md](docs/relay-setup.md).
 - Give the lobby a password and the game is end-to-end encrypted, so the relay cannot read it. An open lobby (no password) can be read by the relay.
 - The host's copy runs the game. Guests send what they want to do and receive only what their own sides may see, never another side's private values. Only the host can undo, step back and save; a guest can use File → Export Viewer Copy… to keep a copy of their view. If a guest drops, their seat is kept and they rejoin where they left off. Chat appears in the log.
-- *Coming next:* play by turn files.
+- *Play by turn files, available now:* for players who are not online at the same time. **Game → Send Turn…** saves your turn as a `.qturn` file for the other player; they open it with **File → Open Turn File…** (or **Open turn file…** in the launcher's Play offline page) and step through it with **Next**, **Play all** and **Stop**, so they see what you did before they take over. Dice results are in the file, so nothing is rerolled.
+- Optionally the turn goes through a mailbox on your own relay instead of e-mail or chat. Pick the relay (and, if you like, a password) in the Send Turn dialog; the file is encrypted before it leaves your computer, so the relay only stores unreadable data for up to 30 days. Quartermaster checks the mailbox when you open a game and every five minutes, and shows "New turn waiting from {player}". See the mailbox section of [docs/relay-setup.md](docs/relay-setup.md).
+- Turn files carry the whole game, so hidden information is only hidden on screen: anyone with the file could extract it. Use them with people you trust.
 
 **Tabletop tools**
 - Dice: 1d6, 2d6, custom expressions (`3d6+2`), special dice and multi-rolls. Every roll goes into the log.
@@ -126,7 +128,6 @@ Design documents and implementation plans are in [`docs/superpowers`](docs/super
 ## Roadmap
 
 - OCR for scanned rulebooks in the workbench.
-- Play by turn files, with a mailbox on your relay.
 
 ## License
 
