@@ -20,7 +20,7 @@ public sealed class PinStore(string path)
 
     public string? Get(string hostPort)
     {
-        lock (_gate) return Load().TryGetValue(hostPort, out var f) ? f : null;
+        lock (_gate) return Load().TryGetValue(hostPort, out var f) ? f.ToUpperInvariant() : null;
     }
 
     public void Set(string hostPort, string fingerprint)
@@ -28,7 +28,7 @@ public sealed class PinStore(string path)
         lock (_gate)
         {
             var map = Load();
-            map[hostPort] = fingerprint;
+            map[hostPort] = fingerprint.ToUpperInvariant();
             try
             {
                 var dir = Path.GetDirectoryName(Path.GetFullPath(path));

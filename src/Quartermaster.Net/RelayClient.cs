@@ -51,6 +51,10 @@ public sealed class RelayClient : IAsyncDisposable
     public event Action<string, byte[]>? Delivered;
     public event Action<string>? MemberLeft;
     public event Action? HostLeft;
+    /// <summary>Guest: the host re-attached to the room.</summary>
+    public event Action? HostBack;
+    /// <summary>Host: the members present, sent by the relay right after the host re-attaches.</summary>
+    public event Action<IReadOnlyList<string>>? MembersListed;
     public event Action<string>? Disconnected;
     /// <summary>Raised after a reconnect has re-joined the room (or, with no room yet, re-established the link).</summary>
     public event Action? Reconnected;
@@ -99,9 +103,13 @@ public sealed class RelayClient : IAsyncDisposable
     public async Task<string> ReserveCodeAsync() =>
         ((CodeReserved)Expect(await Request("host", new ReserveCode(), typeof(CodeReserved)).ConfigureAwait(false))).Code;
 
-    public async Task CreateRoomAsync(string code, string verifier, LobbyListing draft)
+    /// <summary>The host key of the hosted room (generated once per room, resent on every host rejoin); persist it to resume the room after a restart.</summary>
+    public string? HostKey { get { lock (_gate) return (_rejoin as CreateRoom)?.HostKey; } }
+
+    /// <param name="hostKey">Pass the persisted key to re-attach to an existing room; null generates a fresh one.</param>
+    public async Task CreateRoomAsync(string code, string verifier, LobbyListing draft, string? hostKey = null)
     {
-        var msg = new CreateRoom(code, verifier, draft);
+        var msg = new CreateRoom(code, verifier, hostKey ?? Secrets.NewHostKey(), draft);
         Expect(await Request("host", msg, typeof(RoomCreated)).ConfigureAwait(false));
         lock (_gate) _rejoin = msg;
     }
@@ -322,6 +330,7 @@ public sealed class RelayClient : IAsyncDisposable
                     {
                         lock (_gate)
                         {
+                            if (_disposed) return; // Dispose landed first; the finally below disposes the socket
                             _ws = ws; _helloSent = false; rejoin = _rejoin; _awaitingRejoin = rejoin != null;
                             if (rejoin != null) _rejoinDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                         }
@@ -332,7 +341,7 @@ public sealed class RelayClient : IAsyncDisposable
                         }
                     }
                     finally { _sendLock.Release(); }
-                    if (!sent) { EndRejoin(); ws = Drop(ws); continue; }
+                    if (!sent) { var dead = ws; ws = Drop(dead); EndRejoin(); continue; }
                     if (rejoin == null) { attempt = 0; _down = false; try { Reconnected?.Invoke(); } catch (Exception) { } }
                 }
 
@@ -349,6 +358,7 @@ public sealed class RelayClient : IAsyncDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception e) when (!_disposed) { Raise($"Relay link failed: {Describe(e)}"); }
+        finally { try { ws?.Dispose(); } catch (Exception) { } }
     }
 
     /// <summary>Marks the rejoin answered (or abandoned) and releases app sends waiting on it.</summary>
@@ -421,6 +431,8 @@ public sealed class RelayClient : IAsyncDisposable
             case Deliver d: Try(() => Delivered?.Invoke(d.FromMemberId, d.Sealed)); break;
             case Quartermaster.Net.MemberLeft m: Try(() => MemberLeft?.Invoke(m.MemberId)); break;
             case Quartermaster.Net.HostLeft: Try(() => HostLeft?.Invoke()); break;
+            case Quartermaster.Net.HostBack: Try(() => HostBack?.Invoke()); break;
+            case Quartermaster.Net.Members mm: Try(() => MembersListed?.Invoke(mm.MemberIds)); break;
             case Ping:
                 try { await _sendLock.WaitAsync(_stop.Token).ConfigureAwait(false); try { await SendRaw(ws, new Pong()).ConfigureAwait(false); } finally { _sendLock.Release(); } }
                 catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException) { }

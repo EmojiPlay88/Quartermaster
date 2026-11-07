@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quartermaster.Net\Quartermaster.Net.csproj" />
+    <ProjectReference Include="..\..\src\Quartermaster.Relay\Quartermaster.Relay.csproj" />
   </ItemGroup>
 
 </Project>
