@@ -6,6 +6,12 @@ public sealed record ActionMark(int Start, string Label);
 /// <summary>An action removed by a rewind, kept so it can be redone.</summary>
 public sealed record UndoneAction(string Label, IReadOnlyList<GameCommand> Commands);
 
+/// <summary>A phase or turn boundary the game can be stepped back to.</summary>
+public sealed record Checkpoint(int LogIndex, int Turn, PhasePosition? Position, string Label, DateTimeOffset? At);
+
+/// <summary>What a rewind would undo. Ledger is in first-seen order; Units is distinct ledger keys per property.</summary>
+public sealed record RewindPreview(int Actions, int DiceRolls, IReadOnlyList<(string PropertyId, int Units)> Ledger, int PiecesMoved, int PiecesAdded, int PiecesRemoved);
+
 public static class ActionLabels
 {
     public static string For(GameCommand first, int commandCount)
@@ -15,7 +21,7 @@ public static class ActionLabels
             case MovePieces m:
                 if (m.LogText is { } t && t.IndexOf(" moved", StringComparison.Ordinal) is var i and > 0)
                     return "move of " + t[..i];
-                return $"move of {m.PieceIds.Count} pieces";
+                return m.PieceIds.Count == 1 ? "move of 1 piece" : $"move of {m.PieceIds.Count} pieces";
             case RollDice r: return "roll " + r.Purpose;
             case LedgerDelta l: return l.PropertyId + " change";
             case AdvancePhase: return "Next Phase";

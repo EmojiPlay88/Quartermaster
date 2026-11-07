@@ -127,6 +127,7 @@ public sealed class GameState
             case AddLogLine al:
                 Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId));
                 break;
+            case SteppedBack sb: Log.Add(LogBuilder.SteppedBack(this, sb)); break;
             case ToggleTrail tt:
                 if (Pieces.TryGetValue(tt.PieceId, out var trp)) trp.TrailVisible = !trp.TrailVisible;
                 break;

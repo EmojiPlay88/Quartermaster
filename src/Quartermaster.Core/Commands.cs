@@ -23,6 +23,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(QueueRuns), "queueRuns")]
 [JsonDerivedType(typeof(ResolveRun), "resolveRun")]
 [JsonDerivedType(typeof(AddLogLine), "addLogLine")]
+[JsonDerivedType(typeof(SteppedBack), "steppedBack")]
 public abstract record GameCommand;
 
 public sealed record AddPiece(string PieceId, string TypeString, string StateString, string MapId, PointD Pos, string? StackOnto, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
@@ -47,3 +48,6 @@ public sealed record AcknowledgeWarning(int Index, string Message, DateTimeOffse
 public sealed record QueueRuns(IReadOnlyList<PendingRun> Runs, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record ResolveRun(string RunId, IReadOnlyList<string?> PieceIds, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+
+/// <summary>Log line recorded after stepping back to a checkpoint. Folding: never an undoable action of its own.</summary>
+public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone, string Target, DateTimeOffset? At = null, string? Who = null) : GameCommand;

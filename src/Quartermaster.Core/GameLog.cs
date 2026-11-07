@@ -76,4 +76,11 @@ static class LogBuilder
 
     public static LogEntry Turn(GameState s, SetTurn t) =>
         Make(s, LogKind.Turn, $"Turn {t.Turn}" + (string.IsNullOrEmpty(t.Phase) ? "" : " · " + t.Phase), t.Who, t.At);
+
+    public static LogEntry SteppedBack(GameState s, SteppedBack c)
+    {
+        var text = $"Stepped back to {c.Target}. Undid {c.ActionsUndone} {(c.ActionsUndone == 1 ? "action" : "actions")}";
+        if (c.DiceUndone > 0) text += $", {c.DiceUndone} dice {(c.DiceUndone == 1 ? "roll" : "rolls")}";
+        return Make(s, LogKind.System, text + ".", c.Who, c.At);
+    }
 }

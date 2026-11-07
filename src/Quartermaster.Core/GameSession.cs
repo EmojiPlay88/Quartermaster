@@ -13,6 +13,10 @@ public sealed class GameSession
     string? _scopeLabel;
     bool _scopeActionOpen;
     bool _redoing;
+    readonly List<Checkpoint> _checkpoints = new();
+    bool _cpPending;
+    string? _cpAdvanceName;
+    DateTimeOffset? _cpAt;
 
     public GameSession(GameState initial, string moduleSha256)
     {
@@ -20,6 +24,7 @@ public sealed class GameSession
         Genesis = initial.DeepClone();
         _cache[0] = Genesis;
         ModuleSha256 = moduleSha256;
+        ResetCheckpoints();
     }
 
     /// <summary>The live state. The object is replaced on rewind, so never hold it across calls.</summary>
@@ -31,6 +36,8 @@ public sealed class GameSession
     public string? RulesSha256 { get; set; }
     public IReadOnlyList<GameCommand> Log => _log;
     public IReadOnlyList<ActionMark> Actions => _actions;
+    /// <summary>Phase/turn boundaries that can be stepped back to. [0] is always game start.</summary>
+    public IReadOnlyList<Checkpoint> Checkpoints => _checkpoints;
     public event Action<GameCommand>? Changed;
     public event Action? Rewound;
 
@@ -44,13 +51,14 @@ public sealed class GameSession
     {
         SetStackExpanded => true,
         SeedLedger => true,
+        SteppedBack => true,
         _ => false,
     };
 
     /// <summary>Groups the commands executed inside the scope into one action. Nested scopes join the outermost.</summary>
     public IDisposable BeginAction(string? label = null)
     {
-        if (_scopeDepth++ == 0) { _scopeLabel = label; _scopeActionOpen = false; }
+        if (_scopeDepth++ == 0) { _scopeLabel = label; _scopeActionOpen = false; ClearPendingCheckpoint(); }
         return new Scope(this);
     }
 
@@ -68,12 +76,7 @@ public sealed class GameSession
     void EndScope()
     {
         if (--_scopeDepth > 0) return;
-        if (_scopeActionOpen && _scopeLabel == null && _actions.Count > 0)
-        {
-            var m = _actions[^1];
-            var n = _log.Count - m.Start;
-            if (n > 1) _actions[^1] = m with { Label = ActionLabels.For(_log[m.Start], n) };
-        }
+        if (_scopeActionOpen) CloseAction();
         _scopeLabel = null;
         _scopeActionOpen = false;
     }
@@ -81,17 +84,51 @@ public sealed class GameSession
     /// <summary>The single entry point for changing game state.</summary>
     public void Execute(GameCommand c)
     {
+        bool oneShot = false;
         if (_scopeDepth > 0)
         {
             if (!_scopeActionOpen) { NewAction(_scopeLabel ?? ActionLabels.For(c, 1)); _scopeActionOpen = true; }
         }
         else if (!IsFolding(c))
+        {
             NewAction(ActionLabels.For(c, 1));
+            ClearPendingCheckpoint();
+            oneShot = true;
+        }
         // folding outside a scope: joins the last action, or is an orphan at the head
 
         State.Apply(c);
         _log.Add(c);
+        NoteCheckpoint(c);
+        if (oneShot) CloseAction();
         Changed?.Invoke(c);
+    }
+
+    void ClearPendingCheckpoint() { _cpPending = false; _cpAdvanceName = null; _cpAt = null; }
+
+    void NoteCheckpoint(GameCommand c)
+    {
+        switch (c)
+        {
+            case AdvancePhase { Reason: null } ap: _cpPending = true; _cpAdvanceName = ap.ToName; _cpAt = ap.At; break;
+            case SetTurn st: _cpPending = true; _cpAt = st.At; break;
+        }
+    }
+
+    /// <summary>Called when an action ends: records a checkpoint if it contained a phase advance or turn change.</summary>
+    void CloseAction()
+    {
+        if (!_cpPending) return;
+        var label = _cpAdvanceName ?? $"Turn {State.Turn.Turn}";
+        _checkpoints.Add(new Checkpoint(_log.Count, State.Turn.Turn, State.Position, label, _cpAt));
+        ClearPendingCheckpoint();
+        CacheSnapshot(_log.Count);
+    }
+
+    void ResetCheckpoints()
+    {
+        _checkpoints.Clear();
+        _checkpoints.Add(new Checkpoint(0, Genesis.Turn.Turn, Genesis.Position, "game start", null));
     }
 
     void NewAction(string label)
@@ -100,20 +137,59 @@ public sealed class GameSession
         if (!_redoing) _redo.Clear();
     }
 
-    /// <summary>Truncates the log to <paramref name="logIndex"/> and rebuilds state; removed actions become redoable.</summary>
-    public IReadOnlyList<UndoneAction> RewindTo(int logIndex)
+    /// <summary>Splits the commands from <paramref name="logIndex"/> onward into redoable actions.</summary>
+    List<UndoneAction> SplitFrom(int logIndex)
     {
-        if (logIndex < 0 || logIndex > _log.Count) throw new ArgumentOutOfRangeException(nameof(logIndex));
-
         var removedMarks = _actions.Where(a => a.Start >= logIndex).ToList();
+        var prev = _actions.LastOrDefault(a => a.Start < logIndex);
+        int firstRemoved = removedMarks.Count > 0 ? removedMarks[0].Start : _log.Count;
         var undone = new List<UndoneAction>();
+        // A cut through the middle of an action: its tail is redone first, as its own entry.
+        if (prev != null && firstRemoved > logIndex)
+            undone.Add(new UndoneAction(prev.Label, _log.GetRange(logIndex, firstRemoved - logIndex)));
         for (int k = 0; k < removedMarks.Count; k++)
         {
-            // The first removed action also takes any folded/orphan commands before it down to logIndex.
-            int from = k == 0 ? logIndex : removedMarks[k].Start;
+            // With no earlier action, orphan folded commands before the first removed action go down with it.
+            int from = k == 0 && prev == null ? logIndex : removedMarks[k].Start;
             int to = k + 1 < removedMarks.Count ? removedMarks[k + 1].Start : _log.Count;
             undone.Add(new UndoneAction(removedMarks[k].Label, _log.GetRange(from, to - from)));
         }
+        return undone;
+    }
+
+    /// <summary>What <see cref="RewindTo"/> would undo.</summary>
+    public RewindPreview Preview(int logIndex)
+    {
+        if (logIndex < 0 || logIndex > _log.Count) throw new ArgumentOutOfRangeException(nameof(logIndex));
+        int dice = 0;
+        var ledger = new List<(string PropertyId, HashSet<string> Keys)>();
+        var moved = new HashSet<string>(); var added = new HashSet<string>(); var removed = new HashSet<string>();
+        for (int i = logIndex; i < _log.Count; i++)
+        {
+            switch (_log[i])
+            {
+                case RollDice: dice++; break;
+                case LedgerDelta d:
+                    var e = ledger.FindIndex(x => x.PropertyId == d.PropertyId);
+                    if (e < 0) { ledger.Add((d.PropertyId, new HashSet<string>())); e = ledger.Count - 1; }
+                    ledger[e].Keys.Add(d.Key);
+                    break;
+                case MovePieces m: foreach (var id in m.PieceIds) moved.Add(id); break;
+                case AddPiece a: added.Add(a.PieceId); break;
+                case RemovePiece r: removed.Add(r.PieceId); break;
+            }
+        }
+        return new RewindPreview(SplitFrom(logIndex).Count, dice,
+            ledger.Select(x => (x.PropertyId, x.Keys.Count)).ToList(), moved.Count, added.Count, removed.Count);
+    }
+
+    /// <summary>Truncates the log to <paramref name="logIndex"/> and rebuilds state; removed actions become redoable.</summary>
+    public IReadOnlyList<UndoneAction> RewindTo(int logIndex)
+    {
+        if (_scopeDepth > 0) throw new InvalidOperationException("Cannot rewind while an action scope is open.");
+        if (logIndex < 0 || logIndex > _log.Count) throw new ArgumentOutOfRangeException(nameof(logIndex));
+
+        var undone = SplitFrom(logIndex);
 
         // Rebuild state from the nearest snapshot at or before the target.
         int baseIdx = _cache.Keys.Where(k => k <= logIndex).Max();
@@ -122,6 +198,7 @@ public sealed class GameSession
 
         _log.RemoveRange(logIndex, _log.Count - logIndex);
         _actions.RemoveAll(a => a.Start >= logIndex);
+        _checkpoints.RemoveAll(c => c.LogIndex > logIndex);
         foreach (var k in _cacheOrder.Where(k => k > logIndex).ToList()) { _cache.Remove(k); _cacheOrder.Remove(k); }
         for (int i = undone.Count - 1; i >= 0; i--) _redo.Push(undone[i]);
 
@@ -132,6 +209,7 @@ public sealed class GameSession
 
     public void Undo()
     {
+        if (_scopeDepth > 0) throw new InvalidOperationException("Cannot undo while an action scope is open.");
         if (_actions.Count == 0) return;
         RewindTo(_actions[^1].Start);
     }
@@ -157,6 +235,7 @@ public sealed class GameSession
         _actions.Clear();
         _redo.Clear();
         ResetCache();
+        ResetCheckpoints();
     }
 
     void ResetCache()
@@ -188,5 +267,6 @@ public sealed class GameSession
         _actions.AddRange(actions);
         _redo.Clear();
         ResetCache();
+        ResetCheckpoints();
     }
 }
