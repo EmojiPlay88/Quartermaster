@@ -3,6 +3,8 @@ namespace Quartermaster.Core;
 public sealed class GameSession
 {
     const int MaxCached = 40;
+    /// <summary>Besides checkpoints, a snapshot is cached whenever an action crosses a multiple of this many commands.</summary>
+    internal const int SnapshotEvery = 500;
 
     readonly List<GameCommand> _log = new();
     readonly List<ActionMark> _actions = new();
@@ -37,7 +39,7 @@ public sealed class GameSession
     public string? RulesSha256 { get; set; }
     public IReadOnlyList<GameCommand> Log => _log;
     public IReadOnlyList<ActionMark> Actions => _actions;
-    /// <summary>Phase/turn boundaries that can be stepped back to. [0] is always game start.</summary>
+    /// <summary>Phase/turn boundaries that can be stepped back to. [0] is always game start (or the load point, see <see cref="StartLabel"/>).</summary>
     public IReadOnlyList<Checkpoint> Checkpoints => _checkpoints;
     public event Action<GameCommand>? Changed;
     public event Action? Rewound;
@@ -133,17 +135,25 @@ public sealed class GameSession
     /// <summary>Called when an action ends: records a checkpoint if it contained a phase advance or turn change.</summary>
     void CloseAction()
     {
-        if (!_cpPending) return;
-        var label = _cpAdvanceName ?? $"Turn {State.Turn.Turn}";
-        _checkpoints.Add(new Checkpoint(_log.Count, State.Turn.Turn, State.Position, label, _cpAt));
-        ClearPendingCheckpoint();
-        CacheSnapshot(_log.Count);
+        if (_cpPending)
+        {
+            var label = _cpAdvanceName ?? $"Turn {State.Turn.Turn}";
+            _checkpoints.Add(new Checkpoint(_log.Count, State.Turn.Turn, State.Position, label, _cpAt));
+            ClearPendingCheckpoint();
+            CacheSnapshot(_log.Count);
+        }
+        // A game with no phase or turn changes still gets a snapshot every SnapshotEvery commands, so undo never replays from genesis.
+        else if (_actions.Count > 0 && _actions[^1].Start / SnapshotEvery < _log.Count / SnapshotEvery)
+            CacheSnapshot(_log.Count);
     }
+
+    /// <summary>Label of checkpoint 0: "load point" when an old save's history was discarded on load, else "game start".</summary>
+    public string StartLabel => RebasedOnLoad ? "load point" : "game start";
 
     void ResetCheckpoints()
     {
         _checkpoints.Clear();
-        _checkpoints.Add(new Checkpoint(0, Genesis.Turn.Turn, Genesis.Position, "game start", null));
+        _checkpoints.Add(new Checkpoint(0, Genesis.Turn.Turn, Genesis.Position, StartLabel, null));
     }
 
     void NewAction(string label, bool keepRedo = false)
@@ -294,12 +304,25 @@ public sealed class GameSession
 
     internal void RestoreLog(IEnumerable<GameCommand> log) => _log.AddRange(log);
 
+    /// <summary>Log indices with a cached snapshot (tests).</summary>
+    internal IReadOnlyCollection<int> CachedIndices => _cache.Keys;
+
     /// <summary>Set by <c>NativeSave.Read</c> when it rebased an inconsistent format-5 save.</summary>
     public string? LoadNotice { get; internal set; }
-    /// <summary>True when <c>NativeSave.Read</c> rebased history (old format or inconsistent save).</summary>
     /// <summary>Why the history check failed (diagnostics only).</summary>
     internal string? LoadDiagnostic { get; set; }
-    public bool RebasedOnLoad { get; internal set; }
+
+    /// <summary>True when <c>NativeSave.Read</c> rebased history (old format or inconsistent save). Checkpoint 0 is then the "load point".</summary>
+    public bool RebasedOnLoad
+    {
+        get => _rebasedOnLoad;
+        internal set
+        {
+            _rebasedOnLoad = value;
+            if (_checkpoints.Count > 0 && _checkpoints[0].LogIndex == 0) _checkpoints[0] = _checkpoints[0] with { Label = StartLabel };
+        }
+    }
+    bool _rebasedOnLoad;
 
     /// <summary>Restores genesis, actions and (already validated) checkpoints; null checkpoints keep just "game start".</summary>
     internal void RestoreHistory(GameState genesis, IEnumerable<ActionMark> actions, IEnumerable<Checkpoint>? checkpoints = null)

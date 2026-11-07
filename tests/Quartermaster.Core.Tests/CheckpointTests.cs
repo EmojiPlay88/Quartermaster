@@ -265,4 +265,49 @@ public class CheckpointTests
         }
         Assert.Equal(2, g.Log.Count);
     }
+
+    [Fact]
+    public void Relocation_IsLabelledPhaseRelocation()
+    {
+        Assert.Equal("phase relocation", ActionLabels.For(Adv("Beta", "phase removed"), 1));
+        Assert.Equal("Next Phase", ActionLabels.For(Adv("Beta"), 1));
+        var g = NewSession();
+        g.Execute(Adv("Beta", "phase removed"));
+        Assert.Equal("phase relocation", g.UndoLabel);
+    }
+
+    [Fact]
+    public void RebasedOnLoad_CheckpointZeroIsLoadPoint()
+    {
+        var g = NewSession();
+        Assert.Equal("game start", g.StartLabel);
+        g.RebasedOnLoad = true;
+        Assert.Equal("load point", g.StartLabel);
+        Assert.Equal("load point", Assert.Single(g.Checkpoints).Label);
+        g.Execute(Adv("Beta"));
+        g.Undo();
+        Assert.Equal("load point", g.Checkpoints[0].Label);
+    }
+
+    [Fact]
+    public void LongGameWithoutCheckpoints_UndoUsesNearbySnapshot()
+    {
+        var g = NewSession();
+        g.Execute(Add("p1"));
+        var states = new List<string> { Json(g.State) };
+        for (int i = 1; i < 1200; i++)
+        {
+            g.Execute(Move("p1", i));
+            states.Add(Json(g.State));
+        }
+        Assert.Single(g.Checkpoints);
+        Assert.Contains(g.CachedIndices, k => k >= 1000);
+        Assert.True(g.CachedIndices.Count <= 41);
+
+        g.Undo();
+
+        Assert.Equal(1199, g.Log.Count);
+        Assert.Equal(states[1198], Json(g.State));
+        Assert.Contains(g.CachedIndices, k => k >= 1000 && k <= 1199);
+    }
 }

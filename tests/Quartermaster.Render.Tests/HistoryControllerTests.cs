@@ -169,9 +169,18 @@ public class HistoryControllerTests : IDisposable
 
     private static void AssertRedoAllRestores(ModuleSession s, HistoryController h, string played)
     {
-        h.Redo();
+        // Each Redo re-logs one line covering only what is still undone; the last one leaves none.
+        for (var i = 0; i < 40 && h.CanRedo; i++)
+        {
+            h.Redo();
+            var redo = s.Game!.RedoActions;
+            if (redo.Count == 0) break;
+            var line = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+            Assert.Equal(redo.Count, line.ActionsUndone);
+            Assert.Equal(redo.Sum(a => a.Commands.Count(x => x is RollDice)), line.DiceUndone);
+        }
+        Assert.False(h.CanRedo);
         Assert.DoesNotContain(s.Game!.Log, x => x is SteppedBack);
-        for (var i = 0; i < 40 && h.CanRedo; i++) h.Redo();
         Assert.Equal(played, Json(s.Game.State));
     }
 
@@ -455,5 +464,126 @@ public class HistoryControllerTests : IDisposable
 
         Assert.NotNull(s.Game!.LoadNotice);
         Assert.Contains(s.Log.Items, d => d.Category == "save" && d.Message == s.Game.LoadNotice);
+    }
+
+    // ---- final review fixes ----
+
+    private static void AddSeededProperty(ModuleSession s) => s.UpdateRules(p => p with
+    {
+        Properties = p.Properties.Append(new PropertyDef { Id = "fuel2", Name = "Fuel two", Scope = PropertyScope.Pieces, SheetField = "Fuel" }).ToList(),
+    });
+
+    [Fact]
+    public void RulesChangeAfterStepBack_ThenUndo_KeepsLineWithItsDice()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        PlayIntoTurnTwo(s, c);
+        // Supply is deleted, so the step back to it relocates: the relocation is an action after the "Stepped back" line.
+        s.UpdateRules(p => p with { Phases = p.Phases.Where(x => x.Id != "ph-supply").ToList() });
+        var log = s.Game!.Log.ToList();
+        var marks = s.Game.Actions.ToList();
+        var row = Row(h, "Supply", 1);
+        var (_, dice) = After(log, marks, row.LogIndex);
+        Assert.True(dice > 0);
+        h.StepBack(row);
+        var line = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+        Assert.Equal(dice, line.DiceUndone);
+
+        AddSeededProperty(s);   // clears redo: the line is now the only record of the discarded dice
+        h.Undo();
+
+        Assert.Equal(line, Assert.Single(s.Game.Log.OfType<SteppedBack>()));
+    }
+
+    [Fact]
+    public void RulesChangeAfterStepBack_ThenUndoOfEarlierAction_LineGoesToRedoIntact()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        PlayIntoTurnTwo(s, c);
+        h.StepBack(Row(h, "End", 1));
+        var line = Assert.Single(s.Game!.Log.OfType<SteppedBack>());
+        Assert.True(line.DiceUndone > 0);
+
+        AddSeededProperty(s);
+        h.Undo();   // the line folds into the action before it and goes down with it, unchanged (not re-counted)
+
+        Assert.DoesNotContain(s.Game.Log, x => x is SteppedBack);
+        Assert.Equal(line, Assert.Single(s.Game.RedoActions.SelectMany(a => a.Commands).OfType<SteppedBack>()));
+    }
+
+    [Fact]
+    public void PartialRedoAfterStepBack_RelogsLineForWhatRemains()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        c.Start();
+        for (var i = 0; i < 30 && s.Game!.State.Position!.Turn < 2; i++) c.Advance();   // rolls the turn-2 Weather die
+        for (var i = 0; i < 30 && s.Game!.State.Position!.Turn < 3; i++) c.Advance();   // rolls the turn-3 Weather die
+        var played = Json(s.Game!.State);
+        var end1 = Row(h, "End", 1);
+        var log = s.Game.Log.ToList();
+        var marks = s.Game.Actions.ToList();
+        Assert.Equal(2, After(log, marks, end1.LogIndex).Dice);
+
+        h.StepBack(end1);
+        Assert.Equal(2, Assert.Single(s.Game.Log.OfType<SteppedBack>()).DiceUndone);
+
+        h.Redo();   // the first undone action: the turn-2 roll
+        var line = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+        Assert.Equal(1, line.DiceUndone);
+        Assert.Equal(s.Game.RedoActions.Count, line.ActionsUndone);
+        Assert.Equal(1, s.Game.State.Log.Count(l => l.Text.StartsWith("Stepped back to", StringComparison.Ordinal)));
+
+        while (s.Game.RedoActions.Count > 1)
+        {
+            h.Redo();
+            line = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+            Assert.Equal(s.Game.RedoActions.Count, line.ActionsUndone);
+            Assert.Equal(s.Game.RedoActions.Sum(a => a.Commands.Count(x => x is RollDice)), line.DiceUndone);
+        }
+        h.Redo();   // the last one: no trace of the step back remains
+
+        Assert.False(h.CanRedo);
+        Assert.DoesNotContain(s.Game.Log, x => x is SteppedBack);
+        Assert.DoesNotContain(s.Game.State.Log, l => l.Text.StartsWith("Stepped back to", StringComparison.Ordinal));
+        Assert.Equal(played, Json(s.Game.State));
+    }
+
+    [Fact]
+    public void PartialRedoAfterStepBack_ThenNewAction_KeepsDiceTrace()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        PlayIntoTurnTwo(s, c);
+        h.StepBack(Row(h, "Supply", 1));
+        var dice = Assert.Single(s.Game!.Log.OfType<SteppedBack>()).DiceUndone;
+        Assert.True(dice > 0);
+
+        h.Redo();
+        c.ExecuteMove(new[] { Move("b1", 120) });   // a new action clears what is left to redo
+
+        Assert.False(h.CanRedo);
+        Assert.Equal(dice, Assert.Single(s.Game.Log.OfType<SteppedBack>()).DiceUndone);
+    }
+
+    [Fact]
+    public void OldSave_StepBackToLoadPoint_SaysLoadPoint()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        c.Start();
+        var path = Path.Combine(_tmp, "old.qsave");
+        s.SaveNative(path);
+        var doc = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        doc["snapshot"]!["notes"] = "tampered";   // the history check fails: rebased at the load point
+        File.WriteAllText(path, doc.ToJsonString());
+        s.LoadNative(path);
+        Assert.True(s.Game!.RebasedOnLoad);
+
+        c.Advance();
+        var row = h.Checkpoints().Last();
+        Assert.Equal(0, row.LogIndex);
+        Assert.Equal("load point", row.Phase);
+        h.StepBack(row);
+
+        Assert.Contains(s.Game.State.Log, l => l.Text.StartsWith("Stepped back to load point.", StringComparison.Ordinal));
+        Assert.DoesNotContain(s.Game.State.Log, l => l.Text.Contains("game start", StringComparison.Ordinal));
     }
 }

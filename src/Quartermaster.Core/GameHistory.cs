@@ -24,6 +24,7 @@ public static class ActionLabels
                 return m.PieceIds.Count == 1 ? "move of 1 piece" : $"move of {m.PieceIds.Count} pieces";
             case RollDice r: return "roll " + r.Purpose;
             case LedgerDelta l: return l.PropertyId + " change";
+            case AdvancePhase { Reason: not null }: return "phase relocation";   // automatic move off a phase the rules no longer have
             case AdvancePhase: return "Next Phase";
             case AddPiece: return "add piece";
             case RemovePiece: return "remove piece";

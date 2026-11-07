@@ -31,7 +31,8 @@ public sealed class HistoryController
         _phases = phases;
         _prepare = prepare;
         // Spec 7: a rules-pack change that reseeds / reconciles makes the undone actions unsafe to replay (a plain save does not).
-        s.RulesApplied += () => _s.Game?.ClearRedo();
+        // The last rewind's tail is kept as history too: its "Stepped back" line is the only record of the dice just discarded.
+        s.RulesApplied += () => { _s.Game?.ClearRedo(); ClearTail(); };
         s.GameReplaced += Hook;
         Hook();
     }
@@ -70,9 +71,13 @@ public sealed class HistoryController
         _busy = true;
         try
         {
-            // Spec 7: the "Stepped back" line (and what the rewind settled after it) goes when the first undone action is redone.
-            if (!Try("redo", () => { DropRewindTail(g); g.Redo(); })) return;
-            After("redo", () => _s.SeedLedgers());   // keys seeded after the rewind and dropped with its tail come back
+            // Spec 7: the "Stepped back" line (and what the rewind settled after it) goes when an undone action is redone. While the
+            // redo stack still holds undone actions it is re-logged to cover just those, so a new action cannot drop their dice
+            // without a trace; once everything is redone no line remains.
+            var hadLine = false;
+            if (!Try("redo", () => { hadLine = DropRewindTail(g); g.Redo(); })) return;
+            if (hadLine && g.CanRedo) Finish(g, PositionText(g), -1);
+            else After("redo", () => _s.SeedLedgers());   // keys seeded after the rewind and dropped with its tail come back
         }
         finally { _busy = false; }
         Rewound?.Invoke();
@@ -154,7 +159,7 @@ public sealed class HistoryController
                 target = Math.Min(target, g.Log.Count);
                 g.RewindTo(target);
             })) return;
-            Finish(g, TargetText(row), target);
+            Finish(g, TargetText(g, row), target);
         }
         finally { _busy = false; }
         Rewound?.Invoke();
@@ -267,12 +272,12 @@ public sealed class HistoryController
     {
         if (g.State.Position is { } pos)
             return $"Turn {pos.Turn} · " + (_s.Rules?.Phases.FirstOrDefault(p => p.Id == pos.PhaseId)?.Name ?? pos.PhaseId);
-        return g.CanUndo ? $"Turn {g.State.Turn.Turn}" : "game start";
+        return g.CanUndo ? $"Turn {g.State.Turn.Turn}" : g.StartLabel;
     }
 
-    private static string TargetText(CheckpointRow row)
+    private static string TargetText(GameSession g, CheckpointRow row)
     {
-        if (row.LogIndex == 0 || row.Phase == "game start") return "game start";
+        if (row.LogIndex == 0 || row.Phase == g.StartLabel) return g.StartLabel;
         return row.Phase == $"Turn {row.Turn}" ? row.Phase : $"Turn {row.Turn} · {row.Phase}";
     }
 

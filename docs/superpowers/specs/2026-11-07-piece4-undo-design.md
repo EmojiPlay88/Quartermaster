@@ -81,7 +81,7 @@ Rules-pack edits are not in the command log and are **not** undone. Commands car
 
 - Redo re-applies the undone actions exactly as recorded: same dice results, same ledger values, same timestamps.
 - The redo stack is **in memory only** and is cleared by any new action, by loading or starting a game, and by a rules-pack change that triggers a reseed or reconcile.
-- After a Step Back, Redo replays the stepped-back actions one at a time and the `SteppedBack` log line is removed when the first one is redone (call: so a step back that is fully redone leaves no trace).
+- After a Step Back, Redo replays the stepped-back actions one at a time. Each Redo replaces the `SteppedBack` log line with one covering only what is still on the redo stack (so a new action cannot drop undone dice rolls without a trace); when the last one is redone no line remains (call: a step back that is fully redone leaves no trace).
 
 ## 8. Undo floor and saves
 
