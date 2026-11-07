@@ -190,6 +190,24 @@ public class AlertEngineTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void HideAlert_LogsUserFacingName_AndRoundTrips()
+    {
+        var g = new GameSession(new GameState(), "sha");
+        g.Execute(new HideAlert("custom:low", Name: "Low fuel"));
+        Assert.Contains("custom:low", g.State.HiddenAlerts);
+        Assert.Contains(g.State.Log, e => e.Kind == LogKind.System && e.Text == "Alert hidden until next turn: Low fuel");
+        g.Execute(new HideAlert("custom:other", Name: " "));
+        Assert.Contains(g.State.Log, e => e.Text == "Alert hidden until next turn: custom:other");
+
+        var json = JsonSerializer.Serialize(new HideAlert("custom:low", Name: "Low fuel"), typeof(GameCommand), QuartermasterJson.Options);
+        var back = Assert.IsType<HideAlert>(JsonSerializer.Deserialize<GameCommand>(json, QuartermasterJson.Options));
+        Assert.Equal("Low fuel", back.Name);
+        var old = Assert.IsType<HideAlert>(JsonSerializer.Deserialize<GameCommand>("{\"$t\":\"hideAlert\",\"alertId\":\"x\"}", QuartermasterJson.Options));
+        Assert.Null(old.Name);
+        Assert.Equal("x", old.AlertId);
+    }
+
+    [Fact]
     public void HideAlert_Undo_Unhides()
     {
         var g = new GameSession(new GameState(), "sha");

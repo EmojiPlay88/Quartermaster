@@ -7,8 +7,8 @@ namespace Quartermaster.App;
 /// <summary>
 /// The alert bar wiring. <see cref="AlertsUpdated"/> is the shared hub: after every game change, rewind, rules change or game replacement
 /// (debounced 250 ms, on the UI thread, never on the drag path since a drag only raises Changed on drop) the alerts are evaluated once and
-/// published here. Other windows that need the active alerts (the outliner) subscribe instead of running their own evaluation; <see cref="AlertHits"/>
-/// holds the latest result.
+/// published here. The outliner subscribes (MainForm.Outliner.cs) and refreshes from it instead of running its own evaluation, so there is
+/// one alert evaluation per change; <see cref="AlertHits"/> holds the latest result.
 /// </summary>
 sealed partial class MainForm
 {
@@ -50,9 +50,10 @@ sealed partial class MainForm
         AlertsUpdated?.Invoke(_alertHits);
     }
 
+    /// <summary>Shown whenever a game is open (Settings permitting), also without a rules pack: the banner then says it is free play.</summary>
     void UpdateAlertBarVisible()
     {
-        _alertBar.Visible = _settings.Current.AlertBarVisible && _session?.Game != null && _session.Rules != null && _phases != null;
+        _alertBar.Visible = _settings.Current.AlertBarVisible && _session?.Game != null && _phases != null;
     }
 
     void RecomputeAlerts()
@@ -101,7 +102,7 @@ sealed partial class MainForm
         foreach (var m in h.Matches)
         {
             var mm = m;
-            var item = new ToolStripMenuItem(m.Text.Replace("&", "&&")) { Enabled = m.PieceId != null || m.HolderId != null };
+            var item = new ToolStripMenuItem((m.Text ?? "").Replace("&", "&&")) { Enabled = m.PieceId != null || m.HolderId != null };
             item.Click += (_, _) => Guard(() => GoToMatch(mm));
             menu.Items.Add(item);
         }
@@ -117,7 +118,7 @@ sealed partial class MainForm
         foreach (var h in hits)
         {
             var hh = h;
-            var sub = new ToolStripMenuItem((h.Matches.Count > 1 ? $"{h.Name} ({h.Matches.Count})" : h.Name).Replace("&", "&&"));
+            var sub = new ToolStripMenuItem((h.Matches.Count > 1 ? $"{h.Name} ({h.Matches.Count})" : h.Name ?? "").Replace("&", "&&"));
             var go = new ToolStripMenuItem("Go to next match") { Enabled = h.Matches.Any(m => m.PieceId != null || m.HolderId != null) };
             go.Click += (_, _) => Guard(() => GoToAlert(hh));
             sub.DropDownItems.Add(go);
@@ -137,14 +138,14 @@ sealed partial class MainForm
     ToolStripMenuItem HideItem(AlertHit h)
     {
         var hide = new ToolStripMenuItem("Hide this alert until next turn");
-        hide.Click += (_, _) => Guard(() => HideAlert(h.Id));
+        hide.Click += (_, _) => Guard(() => HideAlert(h.Id, h.Name));
         return hide;
     }
 
-    void HideAlert(string alertId)
+    void HideAlert(string alertId, string? name)
     {
         if (_session?.Game is not { } game) return;
-        var cmd = CommandLog.Prepare(new HideAlert(alertId), game.State, _session.Model);
+        var cmd = CommandLog.Prepare(new HideAlert(alertId, Name: string.IsNullOrWhiteSpace(name) ? null : name), game.State, _session.Model);
         game.Execute(cmd);
         _alertWatch?.Flush();
     }

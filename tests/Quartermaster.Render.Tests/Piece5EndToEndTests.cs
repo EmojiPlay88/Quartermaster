@@ -90,12 +90,15 @@ public class Piece5EndToEndTests : IDisposable
         Assert.Contains(g.Log, x => x is SteppedBack);
         var back = Look(s);
         Assert.NotEqual(json, System.Text.Json.JsonSerializer.Serialize(g.State, QuartermasterJson.Options));
-        Assert.True(back.Hits <= 1);
-        Assert.NotNull(back.FuelSum);
-        Assert.True(g.State.Position == null || g.State.Position.Turn <= 2);
-        var expectedBack = LedgerBreakdown.Format(LedgerBreakdown.For(g.State, s.Rules, s.Model, LedgerKey.Piece(PhaseFixture.RedOne), "fuel"));
-        Assert.Equal(expectedBack, back.Breakdown);
-        if (g.State.Position?.Turn < 2) Assert.DoesNotContain("Start of turn 2", back.Breakdown);
+        // Rewound to the start of turn 2's movement phase, before Red One's move: same alert and total (the move cost no fuel),
+        // but the breakdown has lost the turn-2 movement entry and its "Start of turn 2" header.
+        Assert.Equal(new PhasePosition(2, 1, "ph-move", 2), g.State.Position);
+        Assert.Equal(1, back.Hits);
+        Assert.Equal(3, back.Matches);
+        Assert.Equal(118, back.FuelSum);
+        Assert.Equal(new[] { "Fuel 38  (Red 1)", "  Earlier turns: net +38" }, back.Breakdown.Split('\n'));
+        Assert.Equal(new[] { "Fuel 38  (Red 1)", "    Earlier turns: net +38", "38  Start of turn 2", "0   Fuel for movement  Turn 2 · Movement" },
+            played.Breakdown.Split('\n'));
 
         // Redo restores the played view exactly.
         for (var i = 0; i < 500 && h.CanRedo; i++) h.Redo();

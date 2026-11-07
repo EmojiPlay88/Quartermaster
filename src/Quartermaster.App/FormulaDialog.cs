@@ -101,7 +101,7 @@ sealed class FormulaDialog : Form
         _view.MinimumSize = new Size(540, 0);
         _formulaGroup = Group("Formula", _view);
         _body.Controls.Add(_formulaGroup);
-        _notesTip.SetToolTip(_formulaGroup, formula.Notes ?? "");
+        SetNotesTip(formula.Notes);
         var wf = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
         wf.Controls.Add(_working);
         wf.Controls.Add(_inline);
@@ -179,7 +179,7 @@ sealed class FormulaDialog : Form
             _body.Visible = true;
             _model.Rebind(runner, f);
             ReplaceView(f);
-            _notesTip.SetToolTip(_formulaGroup, f.Notes ?? "");
+            SetNotesTip(f.Notes);
             _ruleRef.Enabled = f.RuleRefId != null && _s.Rules.ById<RuleRef>(f.RuleRefId) != null;
             _debounce.Stop();
             Recalc();
@@ -188,6 +188,13 @@ sealed class FormulaDialog : Form
         {
             _status.Text = "Could not update: " + ex.Message;
         }
+    }
+
+    /// <summary>The formula's notes as a tooltip over the whole Formula group: its caption and border and the view's rows and text (not the boxes).</summary>
+    void SetNotesTip(string? notes)
+    {
+        _notesTip.SetToolTip(_formulaGroup, notes ?? "");
+        foreach (var c in _view.NoteTargets()) _notesTip.SetToolTip(c, notes ?? "");
     }
 
     /// <summary>Builds the form view for the formula and swaps it in; a view made after the window was scaled is scaled to match.</summary>

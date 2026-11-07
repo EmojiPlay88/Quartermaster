@@ -33,12 +33,12 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
 - Autosave keeps the last 20 snapshots per module, plus the first autosave of each turn. A save made before this feature loads normally; undo just starts at the point you loaded.
 
 **Readable at a glance**
-- Hover any number in a ledger, the inventory or a unit popup to see where it came from: the value at the start of the turn, then each change with its formula, rule reference and phase. It only ever shows history, so Hardcore stays hard.
+- Hover any number in a ledger, the inventory, a unit popup, the outliner or a batch grid to see where it came from: the value at the start of the turn, then each change with its formula, rule reference and phase. It only ever shows history, so Hardcore stays hard.
 - An alert bar under the toolbar shows what needs attention, as red, amber and blue chips. Built-in alerts cover negative values, missing inputs, pending calculations and phase warnings. You can write your own in the Rules Workbench, for example `Fuel < 50`. Click a chip to select the pieces it points at, right-click to hide it for the turn.
 - A "what now" line says what the current phase expects of you.
 - An outliner lists units by map or organisation display with totals for the properties you choose (sum, minimum or average), and marks units that have alerts.
 - A short interface tour starts the first time you open a game, and is always available from Help.
-- Notes can be attached to properties, formulas, tables and alerts, and show as tooltips.
+- Notes can be attached to properties, formulas, tables, phases and alerts, and show as tooltips: on column headers, the formula dialog's title area, phase chips and the phase panel heading.
 
 **Tabletop tools**
 - Dice: 1d6, 2d6, custom expressions (`3d6+2`), special dice and multi-rolls. Every roll goes into the log.

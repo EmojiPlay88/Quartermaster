@@ -19,7 +19,7 @@ public static class TourSteps
         new("alertBar", "AlertBar", "Alert bar",
             "Alerts from your rules pack appear here as coloured chips: red is critical, amber a warning, blue information. Click a chip to jump to the piece."),
         new("outliner", "OutlinerPanel", "Outliner",
-            "The outliner lists the pieces on the map with their ledger values. Choose how it groups them, and click a row to find the piece."),
+            "The outliner lists the pieces on every map and org display with their ledger values. Choose how it groups them, and double-click a row to find the piece."),
         new("ledger", "LedgerMenu", "Ledger",
             "The ledger records every tracked value and why it changed. Open it from the View menu; the formula dialog's colours and options are in Settings."),
         new("undo", "EditMenu", "Undo and Step Back",

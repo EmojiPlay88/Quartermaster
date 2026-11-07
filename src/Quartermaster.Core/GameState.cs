@@ -135,7 +135,8 @@ public sealed class GameState
                 if (!string.IsNullOrEmpty(ha.AlertId) && !HiddenAlerts.Contains(ha.AlertId))
                 {
                     HiddenAlerts.Add(ha.AlertId);
-                    Log.Add(LogBuilder.Line(this, LogKind.System, "Alert hidden until next turn: " + ha.AlertId, ha.Who, ha.At));
+                    Log.Add(LogBuilder.Line(this, LogKind.System, "Alert hidden until next turn: " + (string.IsNullOrWhiteSpace(ha.Name) ? ha.AlertId : ha.Name),
+                        ha.Who, ha.At));
                 }
                 break;
             case SteppedBack sb: Log.Add(LogBuilder.SteppedBack(this, sb)); break;

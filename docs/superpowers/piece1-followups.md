@@ -210,7 +210,10 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - The "more changes" line shows the net amount of the hidden entries. A manual change with no note has no trailing space. The ledger and the breakdown share one source label.
 - An alert limited to one side is hidden unless that side is acting, whenever phases exist (strict reading of the spec). Side alerts are therefore invisible in neutral phases such as a weather phase.
 - A tooltip's first line uses the alert name when the message contains the `{unit}` token.
-- The outliner keeps its own 250 ms debounce rather than listening to the alert bar's refresh, at the cost of a second timer.
+- The outliner does not evaluate alerts: it refreshes from the main window's `AlertsUpdated` hub (one debounced evaluation per change, shared with the alert bar). Its grid is virtual and its columns are rebuilt only when the set of outliner properties changes, so user column widths survive refreshes.
+- The alert bar shows whenever a game is open (Settings permitting), also without a rules pack; its banner then reads "No phases defined — free play."
+- The unit popup is never placed under the cursor (it flips left and/or up near a screen edge) and is click-through except over its ledger lines.
+- `HideAlert` carries an optional `Name` (the alert's user-facing name) for its log line; older commands without it log the id.
 - The tour smoke reads the saved first-run setting before opening the tour and restores it in a `finally` block, so a smoke run never changes it. The tour also closes when the session closes or the game is replaced.
 - The command-line doc comment now lists the new smoke flags.
 
@@ -219,7 +222,7 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - Breakdown: the Where column is ragged; a deleted formula is labelled "deleted formula"; an unused model parameter; the format-5 test does not check undo, re-save or the load notice; entries from future turns count as earlier.
 - Alert engine: an unused model parameter; a warning with no pieces yields no hit; swallowed errors are silent; warnings with no current phase are untested.
 - Tooltips: the tip can overlap a popup's lines and can land under the cursor near a screen edge; the tip text is slightly brown on yellow; a batch grid tip covers only the first output; the " · " separator is not a shared constant; a test contains a literal tab character.
-- Outliner: the set of excluded sides is per side; the collector re-walks the pieces; arrays are shared between nodes; an empty side filter swallows the rest; the Decisions text can read "Weather roll — Weather roll" when a unit label equals the formula name (fixture data); "1 decisions left" keeps the piece 3 wording; a callback runs inline off the UI thread before the handle exists; Flush does nothing while the panel is hidden.
+- Outliner: BySide grouping uses rest.Except(mine) per side (O(sides × pieces)); a HashSet of assigned pieces would be cheaper; the collector re-walks the pieces; arrays are shared between nodes; an empty side filter swallows the rest; the Decisions text can read "Weather roll — Weather roll" when a unit label equals the formula name (fixture data); "1 decisions left" keeps the piece 3 wording; Flush does nothing while the panel is hidden.
 - Alert bar: a stale hover reference; severity is shown by colour and name only; chip gap and padding are not DPI-scaled; the overflow menu is untested.
-- Notes and headers: header and strip tooltips go stale after an automatic pop-out; the formula dialog's notes tooltip shows only on the group box border; alert match status is recomputed on every keystroke without debounce; the Formulas tab commits twice per flush; test breadth is thin.
+- Notes and headers: header and strip tooltips go stale after an automatic pop-out; alert match status is recomputed on every keystroke without debounce; the Formulas tab commits twice per flush; test breadth is thin.
 - Tour: cancelling the setup chooser means no automatic tour; the arrow clamp is repeated; the handle check is strict.

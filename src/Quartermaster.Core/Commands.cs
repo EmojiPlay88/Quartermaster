@@ -53,5 +53,8 @@ public sealed record AddLogLine(string Kind, string Text, string? PieceId = null
 /// <summary>Log line recorded after stepping back to a checkpoint. Folding: never an undoable action of its own.</summary>
 public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone, string Target, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 
-/// <summary>Hides an alert (by alert id) until the turn number changes. An ordinary undoable action.</summary>
-public sealed record HideAlert(string AlertId, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+/// <summary>
+/// Hides an alert (by alert id) until the turn number changes. An ordinary undoable action. <paramref name="Name"/> is the alert's user-facing
+/// name at the time, used only for the log line (the id is logged when it is missing).
+/// </summary>
+public sealed record HideAlert(string AlertId, DateTimeOffset? At = null, string? Who = null, string? Name = null) : GameCommand;

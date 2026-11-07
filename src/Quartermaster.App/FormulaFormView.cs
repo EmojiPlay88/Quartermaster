@@ -22,6 +22,7 @@ sealed class FormulaFormView : FlowLayoutPanel
     readonly Dictionary<string, Slot> _slots = new(StringComparer.Ordinal);
     readonly Dictionary<string, List<Label>> _mirrors = new(StringComparer.Ordinal);
     readonly ToolTip _tip = new();
+    readonly List<Control> _plain = new();
     readonly Action<string, string> _onEdit;
     readonly Action<string> _onReroll;
     bool _updating;
@@ -65,7 +66,9 @@ sealed class FormulaFormView : FlowLayoutPanel
             switch (item)
             {
                 case TextItem t:
-                    row.Controls.Add(new Label { Text = t.Text, AutoSize = true, Margin = new Padding(0, 5, 0, 0) });
+                    var text = new Label { Text = t.Text, AutoSize = true, Margin = new Padding(0, 5, 0, 0) };
+                    _plain.Add(text);
+                    row.Controls.Add(text);
                     break;
                 case BoxItem b:
                     row.Controls.Add(MakeBox(b));
@@ -78,8 +81,12 @@ sealed class FormulaFormView : FlowLayoutPanel
                     break;
             }
         }
+        _plain.Add(row);
         return row;
     }
+
+    /// <summary>The view and its plain parts (rows, static text) that carry no tooltip of their own: the formula's notes go on these.</summary>
+    public IEnumerable<Control> NoteTargets() => new Control[] { this }.Concat(_plain);
 
     Control MakeBox(BoxItem b)
     {
