@@ -29,7 +29,7 @@ public sealed class TurnReplayModel
     private bool _stopRequested;
 
     /// <param name="identity">The game's identity (played start hashes); null = <see cref="TurnIdentity.Load(string)"/> of the turn's game id.</param>
-    /// <exception cref="InvalidOperationException">Another module, a guest session, a viewer copy or a replay already running; nothing changes.</exception>
+    /// <exception cref="InvalidOperationException">Another module, a guest session or a replay already running; nothing changes (a viewer copy is replaced).</exception>
     /// <exception cref="InvalidDataException">The turn's game id is not a valid id; nothing changes.</exception>
     public TurnReplayModel(ModuleSession s, TurnFile t, string localPlayerId, TurnIdentity? identity = null)
     {
@@ -85,6 +85,21 @@ public sealed class TurnReplayModel
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Play all's timed step: runs steps until one writes a log line (or the turn ends), so commands that show nothing take no time
+    /// of their own. One <see cref="Changed"/> at the end.
+    /// </summary>
+    public void NextShown()
+    {
+        Stopped = false;
+        do RunOne();
+        while (!Done && !LastStepLogged);
+        Changed?.Invoke();
+    }
+
+    /// <summary>True when the last step run wrote a log line.</summary>
+    public bool LastStepLogged { get; private set; }
+
     /// <summary>Runs the remaining steps; a <see cref="Stop"/> from a <see cref="Changed"/> handler pauses after the current step.</summary>
     public void PlayAll()
     {
@@ -131,7 +146,8 @@ public sealed class TurnReplayModel
             return;
         }
         Step++;
-        CurrentLine = _game.State.Log.Count > logBefore ? _game.State.Log[^1].Text : c.GetType().Name;
+        LastStepLogged = _game.State.Log.Count > logBefore;
+        CurrentLine = LastStepLogged ? _game.State.Log[^1].Text : c.GetType().Name;
         if (Step >= Count) Finish();
     }
 

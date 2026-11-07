@@ -600,13 +600,13 @@ public sealed class ModuleSession : IDisposable
 
     /// <summary>
     /// Replaces the game by a turn's start session (the same replace path as <see cref="LoadNative"/>, without seeding: the receiver's
-    /// game must stay exactly the sender's) and marks the session as replaying.
+    /// game must stay exactly the sender's) and marks the session as replaying. An open viewer copy is replaced like any other game
+    /// (it is read-only, not locked in).
     /// </summary>
     internal void BeginTurnReplay(GameSession start)
     {
         ArgumentNullException.ThrowIfNull(start);
         RequireNotGuest();
-        if (IsViewerCopy) throw new InvalidOperationException(ViewerCopyText);
         if (IsReplaying) throw new InvalidOperationException(ReplayingText);
         if (!string.Equals(start.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(DifferentModuleTurnText);

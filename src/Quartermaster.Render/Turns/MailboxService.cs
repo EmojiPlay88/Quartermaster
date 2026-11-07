@@ -69,7 +69,11 @@ public sealed class MailboxService : IDisposable
     /// note) when refused: no recipient, no relay, too large (<see cref="TooLargeText"/>, before connecting), or a relay or network failure.
     /// Never throws for those; the work runs off the calling thread.
     /// </summary>
-    public Task<bool> SendAsync(TurnIdentity id, TurnFile t, string password)
+    public async Task<bool> SendAsync(TurnIdentity id, TurnFile t, string password) =>
+        await TrySendAsync(id, t, password).ConfigureAwait(false) == null;
+
+    /// <summary>As <see cref="SendAsync"/>, giving why the send was refused (null = stored in the recipient's box).</summary>
+    public Task<string?> TrySendAsync(TurnIdentity id, TurnFile t, string password)
     {
         ArgumentNullException.ThrowIfNull(id);
         ArgumentNullException.ThrowIfNull(t);
@@ -88,14 +92,15 @@ public sealed class MailboxService : IDisposable
                 byte[] plain;
                 try { plain = TurnFiles.ToBytes(t); }
                 catch (InvalidOperationException) { return Refuse(TooLargeText); }
-                var sealed_ = Secrets.Seal(Secrets.MailboxSealKey(pw, gameId), plain);
-                if (sealed_.Length > MailboxLimits.MaxSealedBytes) return Refuse(TooLargeText);
                 var box = Secrets.MailboxBoxId(Secrets.MailboxBoxKey(pw, gameId), t.ToPlayerId);
+                // The box id is the associated data: the item opens only in the box it was sent to.
+                var sealed_ = Secrets.Seal(Secrets.MailboxSealKey(pw, gameId), plain, box);
+                if (sealed_.Length > MailboxLimits.MaxSealedBytes) return Refuse(TooLargeText);
                 var (ok, problem) = await WithClient(relay!, uri, null, CancellationToken.None,
                     c => c.MailboxPutAsync(box, sealed_)).ConfigureAwait(false);
-                if (!ok) return Refuse(problem!.Text);
+                if (!ok) return Refuse(problem?.Text ?? "Turn mailbox: the send was cancelled.");
                 Succeeded();
-                return true;
+                return null;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -104,10 +109,10 @@ public sealed class MailboxService : IDisposable
         });
     }
 
-    private bool Refuse(string text)
+    private string Refuse(string text)
     {
         Post(() => Status?.Invoke(text));
-        return false;
+        return text;
     }
 
     // ---- watch ----
@@ -153,11 +158,23 @@ public sealed class MailboxService : IDisposable
         }
         try { w.Timer?.Dispose(); } catch (Exception) { }
         try { w.Cts.Cancel(); } catch (Exception) { }
+        try { w.Cts.Dispose(); } catch (Exception) { }   // a poll still running reads the token only before this, or fails quietly (stopped)
         foreach (var c in _watchClients.Keys)
             if (_watchClients.TryRemove(c, out _)) _ = c.DisposeAsync().AsTask();
     }
 
     public void Dispose() => Stop();
+
+    /// <summary>
+    /// The watched game's identity changed (a turn was replayed and its start recorded as played): the watch reads the new one, so a
+    /// played turn still in the box is deleted rather than raised again. Ignored for another game.
+    /// </summary>
+    public void SetIdentity(TurnIdentity id)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        lock (_gate)
+            if (_watch is { } w && string.Equals(w.GameId, id.GameId, StringComparison.OrdinalIgnoreCase)) w.Identity = id;
+    }
 
     /// <summary>
     /// Removes a raised item from the watched box (after its turn was replayed). Never throws; failures go to <see cref="Status"/>.
@@ -206,15 +223,18 @@ public sealed class MailboxService : IDisposable
         try
         {
             var box = w.Box();
+            var unreadable = false;
             var (ok, failure) = await WithClient(w.Relay, w.Uri, w, w.Cts.Token, async c =>
             {
                 var items = await c.MailboxListAsync([box]).ConfigureAwait(false);
                 if (w.Stopped) return 0;
-                Succeeded();
+                var fetched = 0;
                 foreach (var item in items)
                 {
                     if (w.Stopped) return 0;
-                    if (item.Box != box || !w.Seen.Add(item.ItemId)) continue;
+                    if (fetched >= MaxItemsPerPoll) break;   // the rest waits for the next poll
+                    if (item is null || item.Box != box || !MailboxLimits.IsItemId(item.ItemId) || !w.Seen.Add(item.ItemId)) continue;
+                    fetched++;
                     byte[] sealed_;
                     try { sealed_ = await c.MailboxGetAsync(box, item.ItemId).ConfigureAwait(false); }
                     catch (RelayException ex) when (ex.Message == MailboxLimits.NoSuchItem)
@@ -227,11 +247,9 @@ public sealed class MailboxService : IDisposable
                         w.Seen.Remove(item.ItemId); // try again next poll
                         throw;
                     }
-                    if (Read(w, sealed_) is not { } t)
-                    {
-                        Report(Failure.Unreadable, UnreadableText);
-                        continue;
-                    }
+                    var (t, readable) = Read(w, box, sealed_);
+                    if (!readable) { unreadable = true; continue; }
+                    if (t == null) continue;   // another game's turn, one not for this player, or this player's own: skipped quietly
                     var itemId = item.ItemId;
                     Post(() =>
                     {
@@ -243,7 +261,10 @@ public sealed class MailboxService : IDisposable
                 }
                 return 0;
             }).ConfigureAwait(false);
-            if (!ok && !w.Stopped) Report(failure!.Kind, failure.Text);
+            if (w.Stopped) return;
+            if (!ok) { Report(failure!.Kind, failure.Text); return; }
+            Succeeded();   // only a whole poll that worked lets failures be reported again
+            if (unreadable) Report(Failure.Unreadable, UnreadableText);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -255,19 +276,27 @@ public sealed class MailboxService : IDisposable
         }
     }
 
-    /// <summary>The turn in a sealed item, or null when it cannot be opened or is not a turn of this game.</summary>
-    private static TurnFile? Read(WatchState w, byte[] sealed_)
+    /// <summary>
+    /// The turn in a sealed item (opened with the box id as associated data). Readable false: it cannot be opened (wrong password,
+    /// moved from another box, garbage). Turn null but readable: another game's turn, one for another player or the local player's
+    /// own, all skipped without a word.
+    /// </summary>
+    private static (TurnFile? Turn, bool Readable) Read(WatchState w, string box, byte[] sealed_)
     {
-        try
-        {
-            var t = TurnFiles.FromBytes(Secrets.Open(w.SealKey(), sealed_, (int)TurnFiles.MaxPlain));
-            return string.Equals(t.GameId, w.GameId, StringComparison.OrdinalIgnoreCase) ? t : null;
-        }
+        TurnFile t;
+        try { t = TurnFiles.FromBytes(Secrets.Open(w.SealKey(), sealed_, (int)TurnFiles.MaxPlain, box)); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return null;
+            return (null, false);
         }
+        if (!string.Equals(t.GameId, w.GameId, StringComparison.OrdinalIgnoreCase)) return (null, true);
+        if (!string.Equals(t.ToPlayerId, w.PlayerId, StringComparison.Ordinal) || string.Equals(t.FromPlayerId, w.PlayerId, StringComparison.Ordinal))
+            return (null, true);
+        return (t, true);
     }
+
+    /// <summary>At most this many items are fetched by one poll (a box holds at most <see cref="MailboxLimits.MaxItemsPerBox"/>).</summary>
+    public const int MaxItemsPerPoll = 50;
 
     // ---- plumbing ----
 
@@ -339,8 +368,12 @@ public sealed class MailboxService : IDisposable
         private byte[]? _sealKey;
         private string? _box;
 
+        private volatile TurnIdentity _identity = identity;
+
         public string GameId { get; } = gameId;
-        public TurnIdentity Identity { get; } = identity;
+        public string PlayerId { get; } = playerId;
+        /// <summary>Read on the app's thread; replaced by <see cref="MailboxService.SetIdentity"/>.</summary>
+        public TurnIdentity Identity { get => _identity; set => _identity = value; }
         public string Relay { get; } = relay;
         public Uri Uri { get; } = uri;
         public CancellationTokenSource Cts { get; } = new();
@@ -351,7 +384,7 @@ public sealed class MailboxService : IDisposable
         public volatile bool Stopped;
 
         /// <summary>The local player's box id (PBKDF2: derived off the app's thread, once).</summary>
-        public string Box() => _box ??= Secrets.MailboxBoxId(Secrets.MailboxBoxKey(password, GameId), playerId);
+        public string Box() => _box ??= Secrets.MailboxBoxId(Secrets.MailboxBoxKey(password, GameId), PlayerId);
 
         public byte[] SealKey() => _sealKey ??= Secrets.MailboxSealKey(password, GameId);
     }

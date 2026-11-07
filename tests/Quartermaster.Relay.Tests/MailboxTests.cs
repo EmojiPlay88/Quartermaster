@@ -383,6 +383,31 @@ public class MailboxTests
     }
 
     [Fact]
+    public async Task Restart_FutureStoredDate_ClampedToNow_StillExpires()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "qm-relay-tests", Guid.NewGuid().ToString("N"));
+        string id;
+        await using (var relay = await Start(dataDir: dir))
+        {
+            relay.KeepData = true;
+            var c = await relay.Connect("mailbox");
+            id = await Put(c, BoxA, [1, 2]);
+        }
+        File.WriteAllText(Path.Combine(dir, "mailbox", BoxA, "index.json"),
+            $$"""[{"ItemId":"{{id}}","Size":2,"StoredUtc":"2099-01-01T00:00:00Z"}]""");
+        var start = new DateTimeOffset(2026, 11, 8, 12, 0, 0, TimeSpan.Zero);
+        try
+        {
+            await using var relay = await Start(dataDir: dir, start: start);
+            var c = await relay.Connect("mailbox");
+            Assert.Equal(start.UtcDateTime, Assert.Single(await List(c, BoxA)).StoredUtc);
+            relay.Time.Advance(TimeSpan.FromDays(MailboxLimits.ExpiryDays + 1));
+            Assert.Empty(await List(c, BoxA));
+        }
+        finally { try { Directory.Delete(dir, true); } catch (IOException) { } }
+    }
+
+    [Fact]
     public async Task IdleRelay_LoadsAtStart_AndSweeps()
     {
         var dir = Path.Combine(Path.GetTempPath(), "qm-relay-tests", Guid.NewGuid().ToString("N"));

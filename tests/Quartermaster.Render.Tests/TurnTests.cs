@@ -518,6 +518,245 @@ public class TurnTests : IDisposable
         bob.SaveNative(path);
         Assert.True(File.Exists(path));
     }
+
+    // ---- final review fixes ----
+
+    private static readonly PlayerDef Carol = new("p3", "Carol", new[] { "green" });
+
+    private static (TurnFile T, TurnReplayModel M) SendAndReplay(ModuleSession from, ModuleSession to, PlayerDef sender, PlayerDef receiver,
+        Func<string, string, TurnIdentity> identity, string senderKey, string receiverKey)
+    {
+        var gameId = from.Game!.State.GameId!;
+        var t = TurnSender.Build(from, receiver.Id, identity(senderKey, gameId));
+        TurnSender.AfterSend(from);
+        var m = to.OpenTurn(t, receiver.Id, identity(receiverKey, gameId));
+        m.PlayAll();
+        Assert.True(m.Done);
+        Assert.True(m.EndMatches);
+        return (t, m);
+    }
+
+    [Fact]
+    public void Replay_PhaseMissingFromLocalPack_NotReconciled_EndMatches()
+    {
+        var alice = NewGame();
+        var g = alice.Game!;
+        // Alice's pack has a phase Bob's lacks: her game sits in it.
+        using (g.BeginAction()) g.Execute(new AdvancePhase(null, new PhasePosition(1, 1, "ph-only-alice", 9), "", "Alice's phase"));
+        TurnSender.AfterSend(alice);
+        MoveBy(g, AnyPiece(g), 6);
+        var t = TurnSender.Build(alice, Bob.Id, Identity("alice", g.State.GameId!, Alice.Id));
+
+        var bob = Open();
+        bob.LoadSetup(bob.Model.Setups[0], Difficulty.FullyAuto, new[] { Alice, Bob });
+        bob.NewRules("bob");
+        bob.UpdateRules(_ => PhaseFixture.Pack(bob.Archive.Sha256));
+        var (_, phases, _) = Ports(bob);
+        var model = bob.OpenTurn(t, Bob.Id, Identity("bob", t.GameId));
+        var logCount = bob.Game!.Log.Count;
+        Assert.Null(phases.Reconcile());   // what the app runs after any game replacement: nothing while replaying
+        Assert.Equal(logCount, bob.Game!.Log.Count);
+        Assert.Equal("ph-only-alice", bob.Game!.State.Position!.PhaseId);
+        model.PlayAll();
+        Assert.True(model.EndMatches);
+        Assert.Equal(t.EndHash, StateHash.Of(bob.Game!.State));
+    }
+
+    [Fact]
+    public void ThreePlayers_Chain_NoWarnings_BothMovedStillWarns()
+    {
+        var alice = Open();
+        alice.LoadSetup(alice.Model.Setups[0], Difficulty.FullyAuto, new[] { Alice, Bob, Carol });
+        var gameId = alice.Game!.State.GameId!;
+        TurnIdentity Id(string who, string game) => Identity(who, game, who switch { "alice" => Alice.Id, "bob" => Bob.Id, _ => Carol.Id });
+
+        MoveBy(alice.Game!, AnyPiece(alice.Game!), 4);
+        var bob = Open();
+        var carol = Open();
+        SendAndReplay(alice, bob, Alice, Bob, Id, "alice", "bob");          // A → B (B: new game)
+        MoveBy(bob.Game!, AnyPiece(bob.Game!), 3);
+        SendAndReplay(bob, carol, Bob, Carol, Id, "bob", "carol");          // B → C (C: new game)
+        MoveBy(carol.Game!, AnyPiece(carol.Game!), 2);
+
+        // C → A: Alice's game is still at the end of her own turn (two turns behind), with nothing done since: no warning.
+        var t3 = TurnSender.Build(carol, Alice.Id, Id("carol", gameId));
+        TurnSender.AfterSend(carol);
+        Assert.Equal(TurnCheck.Ok, TurnOpener.Check(alice, t3, Id("alice", gameId)));
+        var m3 = alice.OpenTurn(t3, Alice.Id, Id("alice", gameId));
+        m3.PlayAll();
+        Assert.True(m3.EndMatches);
+
+        // A → B: Bob has done nothing since he sent: no warning either.
+        MoveBy(alice.Game!, AnyPiece(alice.Game!), 1);
+        var t4 = TurnSender.Build(alice, Bob.Id, Id("alice", gameId));
+        TurnSender.AfterSend(alice);
+        Assert.Equal(TurnCheck.Ok, TurnOpener.Check(bob, t4, Id("bob", gameId)));
+        var m4 = bob.OpenTurn(t4, Bob.Id, Id("bob", gameId));
+        m4.PlayAll();
+        Assert.True(m4.EndMatches);
+        Assert.Equal(StateHash.Of(alice.Game!.State), StateHash.Of(bob.Game!.State));
+
+        // B → C while Carol moved on locally: her own moves would be replaced, so it still warns.
+        MoveBy(bob.Game!, AnyPiece(bob.Game!), -1);
+        var t5 = TurnSender.Build(bob, Carol.Id, Id("bob", gameId));
+        MoveBy(carol.Game!, AnyPiece(carol.Game!), 9);
+        Assert.Equal(TurnCheck.OlderPosition, TurnOpener.Check(carol, t5, Id("carol", gameId)));
+    }
+
+    [Fact]
+    public void Check_GameAtStart_IsOk_EvenWhenAlreadyPlayed()
+    {
+        var alice = NewGame();
+        TurnSender.AfterSend(alice);   // her turn starts here
+        var start = Path.Combine(_tmp, "start.qsave");
+        alice.SaveNative(start);
+        MoveBy(alice.Game!, AnyPiece(alice.Game!), 10);
+        var t = TurnSender.Build(alice, Bob.Id, Identity("alice", alice.Game!.State.GameId!, Alice.Id));
+
+        // Bob replayed it once, but the replayed game was never saved: his game is back at the turn's start.
+        var bob = Open();
+        var id = Identity("bob", t.GameId, Bob.Id);
+        id.RecordPlayed(t.StartHash);
+        Assert.Equal(TurnCheck.AlreadyPlayed, TurnOpener.Check(bob, t, id));
+        bob.LoadNative(start);
+        Assert.Equal(t.StartHash, StateHash.Of(bob.Game!.State));
+        Assert.Equal(TurnCheck.Ok, TurnOpener.Check(bob, t, id));
+    }
+
+    [Fact]
+    public void Check_StartNotMatchingItsHash_IsMalformed()
+    {
+        var (_, t) = AliceTurn();
+        var bob = Open();
+        var bad = t with { StartHash = new string('0', 64) };
+        Assert.Equal("Malformed turn file: start does not match its hash.",
+            Assert.Throws<InvalidDataException>(() => TurnOpener.Check(bob, bad, Identity("bob", t.GameId))).Message);
+        Assert.Equal(TurnOpener.StartMismatchText, Assert.Throws<InvalidDataException>(() =>
+            TurnOpener.Check(bob, t with { Start = t.Start.DeepClone().Also(s => s.Notes = "edited") }, Identity("bob", t.GameId))).Message);
+    }
+
+    [Fact]
+    public void Open_ReplacesAViewerCopy()
+    {
+        var (_, t) = AliceTurn();
+        var guest = Open();
+        guest.LoadSetup(guest.Model.Setups[0], Difficulty.FullyAuto);
+        guest.EnterGuestMode();
+        guest.ApplySnapshot(new GameState());
+        var viewer = Path.Combine(_tmp, "viewer.qsave");
+        guest.ExportViewerCopy(viewer);
+
+        var bob = Open();
+        bob.LoadNative(viewer);
+        Assert.True(bob.IsViewerCopy);
+        Assert.Equal(TurnCheck.NewGame, TurnOpener.Check(bob, t, Identity("bob", t.GameId)));
+        var m = bob.OpenTurn(t, Bob.Id, Identity("bob", t.GameId));
+        m.PlayAll();
+        Assert.True(m.EndMatches);
+        Assert.False(bob.IsViewerCopy);
+        Assert.True(bob.CanSave);
+    }
+
+    [Fact]
+    public void NextShown_SkipsStepsWithoutALogLine()
+    {
+        var alice = NewGame();
+        var g = alice.Game!;
+        var piece = AnyPiece(g);
+        using (g.BeginAction()) g.Execute(new ToggleTrail(piece));
+        using (g.BeginAction()) g.Execute(new ToggleTrail(piece));
+        using (g.BeginAction()) g.Execute(new RollDice("Red attack", 1, 6, new[] { 4 }));
+        using (g.BeginAction()) g.Execute(new ToggleTrail(piece));
+        var t = TurnSender.Build(alice, Bob.Id, Identity("alice", g.State.GameId!, Alice.Id));
+        Assert.Equal(4, t.Commands.Count);
+
+        var bob = Open();
+        var m = bob.OpenTurn(t, Bob.Id, Identity("bob", t.GameId));
+        var changed = 0;
+        m.Changed += () => changed++;
+        m.NextShown();   // two silent trail toggles and the roll in one timed step
+        Assert.Equal(3, m.Step);
+        Assert.True(m.LastStepLogged);
+        Assert.Contains("Red attack", m.CurrentLine);
+        Assert.Equal(1, changed);
+        m.NextShown();   // the last silent step ends the turn
+        Assert.True(m.Done);
+        Assert.Equal(4, m.Step);
+        Assert.True(m.EndMatches);
+    }
+
+    [Fact]
+    public void Undo_BelowSentTurn_Refused_InATurnGameOnly()
+    {
+        var s = NewGame();
+        var g = s.Game!;
+        Func<GameCommand, GameState, GameCommand> prepare = (c, _) => c;
+        var history = new HistoryController(s, new PhaseController(s, prepare), prepare);
+        MoveBy(g, AnyPiece(g), 5);
+        TurnSender.Build(s, Bob.Id, Identity("alice", g.State.GameId!, Alice.Id));
+        TurnSender.AfterSend(s);
+        Assert.True(history.CanUndo);   // not a play-by-email game here (hot-seat): undo as before
+        Assert.False(history.UndoBlockedBySentTurn);
+
+        history.IsTurnGame = () => true;
+        Assert.False(history.CanUndo);
+        Assert.True(history.UndoBlockedBySentTurn);
+        Assert.DoesNotContain(history.Checkpoints(), r => r.LogIndex < g.TurnBase);
+        var hash = StateHash.Of(g.State);
+        history.Undo();
+        Assert.Equal(hash, StateHash.Of(g.State));
+        Assert.Contains(s.Log.Items, d => d.Message == HistoryController.AlreadySentText);
+        Assert.Equal("This turn was already sent.", HistoryController.AlreadySentText);
+
+        MoveBy(g, AnyPiece(g), 2);   // the new turn's own moves can be undone
+        Assert.True(history.CanUndo);
+        history.Undo();
+        Assert.Equal(hash, StateHash.Of(g.State));
+        Assert.False(history.CanUndo);
+    }
+
+    [Fact]
+    public void ReceivedTurns_KeptUntilPruned()
+    {
+        var (_, t) = AliceTurn();
+        var root = Root("received");
+        var item = new string('a', 32);
+        var path = ReceivedTurns.Keep(t, item, out var why, root);
+        Assert.Null(why);
+        Assert.Equal(Path.Combine(root, t.GameId.ToLowerInvariant(), "received", item + ".qturn"), path);
+        Assert.Equal(t.EndHash, TurnFiles.Read(path!).EndHash);
+        Assert.Equal(path, ReceivedTurns.Keep(t, item, out _, root));   // kept once
+        Assert.Null(ReceivedTurns.Keep(t, "../../x", out why, root));
+        Assert.NotNull(why);
+        Assert.Single(ReceivedTurns.List(t.GameId, root));
+        Assert.Equal(1, ReceivedTurns.Prune(t.GameId, root));
+        Assert.Empty(ReceivedTurns.List(t.GameId, root));
+        Assert.Equal(0, ReceivedTurns.Prune("not a game id", root));
+    }
+
+    [Fact]
+    public void SenderName_Clamped_PlayStep_Capped()
+    {
+        var longName = new string('R', 200);
+        Assert.Equal(TurnUiModel.MaxShownName, TurnUiModel.ShownName(longName).Length);
+        Assert.EndsWith("…", TurnUiModel.ShownName(longName));
+        Assert.Equal("Rita", TurnUiModel.ShownName(" Ri\u0007ta "));
+        Assert.True(TurnUiModel.NewTurnWaitingText(longName).Length <= "New turn waiting from ".Length + TurnUiModel.MaxShownName);
+        Assert.Equal("New turn waiting from Rita", TurnUiModel.NewTurnWaitingText("Rita"));
+        Assert.Equal(300, TurnUiModel.PlayStepMs(1));
+        Assert.Equal(300, TurnUiModel.PlayStepMs(20));
+        Assert.True(TurnUiModel.PlayStepMs(1000) < 300);
+        Assert.True(TurnUiModel.PlayStepMs(int.MaxValue) > 0);
+    }
+}
+
+internal static class TestExtensions
+{
+    public static T Also<T>(this T value, Action<T> act)
+    {
+        act(value);
+        return value;
+    }
 }
 
 /// <summary>A fact that runs only on Windows (skipped elsewhere).</summary>

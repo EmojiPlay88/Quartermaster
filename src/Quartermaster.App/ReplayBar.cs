@@ -8,7 +8,8 @@ namespace Quartermaster.App;
 /// </summary>
 sealed class ReplayBar : Panel
 {
-    const int PlayIntervalMs = 300;
+    const int PlayIntervalMs = TurnUiModel.MaxPlayStepMs;
+    static int PlayInterval(int steps) => TurnUiModel.PlayStepMs(steps);
 
     readonly Button _next = new() { Text = "Next", AutoSize = true, MinimumSize = new Size(70, 24), Name = "replay.next" };
     readonly Button _playAll = new() { Text = "Play all", AutoSize = true, MinimumSize = new Size(70, 24), Name = "replay.playAll" };
@@ -32,12 +33,26 @@ sealed class ReplayBar : Panel
         Controls.Add(flow);
         Controls.Add(_line);   // its own row: one line, ellipsis, full text in the tooltip
         _next.Click += (_, _) => Act(() => { _timer.Stop(); _model?.Next(); });
-        _playAll.Click += (_, _) => Act(() => { if (_model is { Done: false }) _timer.Start(); Sync(); });
+        _playAll.Click += (_, _) => Act(() =>
+        {
+            if (_model is not { Done: false } m) { Sync(); return; }
+            if (_timer.Enabled)
+            {
+                // Second click ("Finish"): the rest replays at once.
+                _timer.Stop();
+                m.PlayAll();
+                Sync();
+                return;
+            }
+            _timer.Interval = PlayInterval(m.Count);
+            _timer.Start();
+            Sync();
+        });
         _stop.Click += (_, _) => Act(() => { _timer.Stop(); _model?.Stop(); Sync(); });
         _timer.Tick += (_, _) => Act(() =>
         {
-            if (_model is not { Done: false } m) { _timer.Stop(); return; }
-            m.Next();
+            if (_model is not { Done: false } m) { _timer.Stop(); Sync(); return; }
+            m.NextShown();   // steps that write no log line take no time of their own
             if (m.Done) _timer.Stop();
         });
     }
@@ -62,7 +77,7 @@ sealed class ReplayBar : Panel
         if (model != null)
         {
             model.Changed += Sync;
-            _title.Text = $"Turn from {model.Turn.FromName}:";
+            _title.Text = $"Turn from {TurnUiModel.ShownName(model.Turn.FromName)}:";
         }
         Visible = model != null;
         Sync();
@@ -84,7 +99,8 @@ sealed class ReplayBar : Panel
         var m = _model;
         var running = m is { Done: false };
         _next.Enabled = running;
-        _playAll.Enabled = running && !_timer.Enabled;
+        _playAll.Enabled = running;
+        _playAll.Text = running && _timer.Enabled ? "Finish" : "Play all";   // while playing, a click finishes at once
         _stop.Enabled = running && _timer.Enabled;
         _step.Text = m == null ? "" : TurnUiModel.StepText(m.Step, m.Count);
         _line.Text = m?.CurrentLine ?? (m == null ? "" : "Press Next or Play all to replay the turn.");

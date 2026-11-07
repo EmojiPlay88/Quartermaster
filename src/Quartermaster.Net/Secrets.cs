@@ -59,7 +59,13 @@ public static class Secrets
     public static byte[] MailboxSealKey(string password, string gameId) => Derive(password, $"qm-mbox-key:{gameId}");
 
     /// <summary>nonce(12) || ciphertext || tag(16); plaintext is gzipped first.</summary>
-    public static byte[] Seal(byte[] key, byte[] plain)
+    public static byte[] Seal(byte[] key, byte[] plain) => Seal(key, plain, null);
+
+    /// <summary>
+    /// As <see cref="Seal(byte[], byte[])"/>, binding <paramref name="associated"/> (e.g. a mailbox box id) as AES-GCM associated data:
+    /// the blob opens only with the same associated data (<see cref="Open(byte[], byte[], int, string?)"/>).
+    /// </summary>
+    public static byte[] Seal(byte[] key, byte[] plain, string? associated)
     {
         RequireKey(key);
         var packed = Gzip.Compress(plain);
@@ -67,7 +73,7 @@ public static class Secrets
         var nonce = result.AsSpan(0, NonceSize);
         RandomNumberGenerator.Fill(nonce);
         using var aes = new AesGcm(key, TagSize);
-        aes.Encrypt(nonce, packed, result.AsSpan(NonceSize, packed.Length), result.AsSpan(NonceSize + packed.Length, TagSize));
+        aes.Encrypt(nonce, packed, result.AsSpan(NonceSize, packed.Length), result.AsSpan(NonceSize + packed.Length, TagSize), Ad(associated));
         return result;
     }
 
@@ -75,7 +81,13 @@ public static class Secrets
     public static byte[] Open(byte[] key, byte[] sealed_) => Open(key, sealed_, MaxPlain);
 
     /// <summary>As <see cref="Open(byte[], byte[])"/>, inflating at most <paramref name="maxPlain"/> bytes (CryptographicException beyond).</summary>
-    public static byte[] Open(byte[] key, byte[] sealed_, int maxPlain)
+    public static byte[] Open(byte[] key, byte[] sealed_, int maxPlain) => Open(key, sealed_, maxPlain, null);
+
+    /// <summary>
+    /// As <see cref="Open(byte[], byte[], int)"/> for a blob sealed with associated data: CryptographicException unless
+    /// <paramref name="associated"/> is the same (a mailbox item moved to another box does not open).
+    /// </summary>
+    public static byte[] Open(byte[] key, byte[] sealed_, int maxPlain, string? associated)
     {
         RequireKey(key);
         if (sealed_.Length < NonceSize + TagSize) throw new CryptographicException("Sealed data is too short.");
@@ -83,7 +95,9 @@ public static class Secrets
         var packed = new byte[n];
         using (var aes = new AesGcm(key, TagSize))
             aes.Decrypt(sealed_.AsSpan(0, NonceSize), sealed_.AsSpan(NonceSize, n),
-                sealed_.AsSpan(NonceSize + n, TagSize), packed);
+                sealed_.AsSpan(NonceSize + n, TagSize), packed, Ad(associated));
         return Gzip.DecompressBounded(packed, Math.Clamp(maxPlain, 0, MaxPlain));
     }
+
+    private static byte[]? Ad(string? associated) => associated == null ? null : Encoding.UTF8.GetBytes(associated);
 }

@@ -538,7 +538,7 @@ public sealed class HostSession : IDisposable
                 if (t.IsCompletedSuccessfully) Post(() => { if (seat.MemberId == to) seat.TooLarge = false; });
                 else if (t.Exception?.InnerException is ProtocolException) Post(() => { if (seat.MemberId == to) TooLarge(seat, to, size); });
                 else _ = t.Exception;
-            }, TaskScheduler.Default);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
         catch (Exception) { }
     }
@@ -575,7 +575,11 @@ public sealed class HostSession : IDisposable
     /// <summary>Fire and forget; a failing or throwing transport never reaches the game.</summary>
     private static void Observe(Func<Task> send)
     {
-        try { send().ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted); }
+        try
+        {
+            send().ContinueWith(t => _ = t.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
         catch (Exception) { }
     }
 

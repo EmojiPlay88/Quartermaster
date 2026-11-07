@@ -55,6 +55,19 @@ public class NetTests
     }
 
     [Fact]
+    public void Seal_WithAssociatedData_OpensOnlyWithTheSame()
+    {
+        var key = Secrets.MailboxSealKey("pw", "0123abcd");
+        var plain = new byte[] { 1, 2, 3 };
+        var s = Secrets.Seal(key, plain, "box-a");
+        Assert.Equal(plain, Secrets.Open(key, s, 100, "box-a"));
+        Assert.ThrowsAny<CryptographicException>(() => Secrets.Open(key, s, 100, "box-b"));
+        Assert.ThrowsAny<CryptographicException>(() => Secrets.Open(key, s));
+        Assert.ThrowsAny<CryptographicException>(() => Secrets.Open(key, Secrets.Seal(key, plain), 100, "box-a"));
+        Assert.Equal(plain, Secrets.Open(key, Secrets.Seal(key, plain, null), 100, null));   // no associated data = the plain overloads
+    }
+
+    [Fact]
     public void Open_Tampered_Throws()
     {
         var key = Secrets.GameKey("pw", "ABC234");

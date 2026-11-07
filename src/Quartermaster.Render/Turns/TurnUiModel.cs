@@ -24,9 +24,19 @@ public static class TurnUiModel
 
     public const string FileFilter = "Quartermaster turns (*.qturn)|*.qturn|All files (*.*)|*.*";
 
-    /// <summary>Exact copy of the mailbox alert.</summary>
+    /// <summary>Exact copy of the mailbox alert (the sender's name at most <see cref="MaxShownName"/> characters).</summary>
     public static string NewTurnWaitingText(string? player) =>
-        $"New turn waiting from {(string.IsNullOrWhiteSpace(player) ? "another player" : player.Trim())}";
+        $"New turn waiting from {(string.IsNullOrWhiteSpace(player) ? "another player" : ShownName(player))}";
+
+    /// <summary>A sender name from a turn file is shown cut to this many characters (it is whatever the sender typed).</summary>
+    public const int MaxShownName = 60;
+
+    /// <summary>A turn's sender name for the alert and the replay bar: trimmed, controls removed, cut to <see cref="MaxShownName"/> (with "…").</summary>
+    public static string ShownName(string? name)
+    {
+        var s = new string((name ?? "").Where(c => !char.IsControl(c)).ToArray()).Trim();
+        return s.Length <= MaxShownName ? s : s[..(MaxShownName - 1)].TrimEnd() + "…";
+    }
 
     /// <summary>Who the turn may go to: every player of the game except the local one (in the game's order).</summary>
     public static IReadOnlyList<PlayerDef> Recipients(IReadOnlyList<PlayerDef>? players, string? localPlayerId) =>
@@ -92,6 +102,12 @@ public static class TurnUiModel
         var me = state.Players.FirstOrDefault(p => p != null && p.Id == localPlayerId);
         return me == null ? new HashSet<string>() : new HashSet<string>(me.Sides ?? Array.Empty<string>());
     }
+
+    /// <summary>Longest pause of Play all between two shown steps.</summary>
+    public const int MaxPlayStepMs = 300;
+
+    /// <summary>Play all's pause per shown step: a long turn plays faster (about 6 s in all), never longer than <see cref="MaxPlayStepMs"/>.</summary>
+    public static int PlayStepMs(int steps) => Math.Clamp(6000 / Math.Max(1, steps), 30, MaxPlayStepMs);
 
     /// <summary>The replay bar's step counter: "Step n / N".</summary>
     public static string StepText(int step, int count) => $"Step {Math.Max(0, step)} / {Math.Max(0, count)}";

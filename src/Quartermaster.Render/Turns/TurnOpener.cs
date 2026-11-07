@@ -23,17 +23,30 @@ public static class TurnOpener
     /// <summary>Exact copy of the warning shown for <see cref="TurnCheck.OlderPosition"/> (buttons "Open anyway" / "Cancel").</summary>
     public const string OlderPositionText = "This turn starts from an older position than your game";
 
+    /// <summary>Why a turn whose start does not hash to its <see cref="TurnFile.StartHash"/> is refused.</summary>
+    public const string StartMismatchText = "Malformed turn file: start does not match its hash.";
+
+    /// <summary>
+    /// In order: another module; the open game of this id is exactly at the turn's start (Ok, even when the turn was played before:
+    /// a replayed turn whose result was never saved can be played again); already played; no game of this id open (a new game); the
+    /// open game has no local moves since its turn base (Ok: nothing local is lost, e.g. the third player's turn in a chain); else an
+    /// older position (the receiver's own moves would be replaced).
+    /// </summary>
     /// <param name="identity">The game's identity; null = <see cref="TurnIdentity.Load(string)"/> of the turn's game id.</param>
-    /// <exception cref="InvalidDataException">The turn's game id is not a valid id.</exception>
+    /// <exception cref="InvalidDataException">The turn's game id is not a valid id, or its start does not match its start hash.</exception>
     public static TurnCheck Check(ModuleSession s, TurnFile t, TurnIdentity? identity = null)
     {
         ArgumentNullException.ThrowIfNull(s);
         ArgumentNullException.ThrowIfNull(t);
         if (!string.Equals(t.ModuleSha256, s.Archive.Sha256, StringComparison.OrdinalIgnoreCase)) return TurnCheck.DifferentModule;
         var id = identity ?? TurnIdentity.Load(t.GameId);
+        if (t.Start == null || !string.Equals(StateHash.Of(t.Start), t.StartHash, StringComparison.Ordinal))
+            throw new InvalidDataException(StartMismatchText);
+        var same = s.Game is { } g && !s.IsGuest && !s.IsViewerCopy && string.Equals(g.State.GameId, t.GameId, StringComparison.OrdinalIgnoreCase);
+        if (same && string.Equals(StateHash.Of(s.Game!.State), t.StartHash, StringComparison.Ordinal)) return TurnCheck.Ok;
         if (id.PlayedStartHashes.Contains(t.StartHash)) return TurnCheck.AlreadyPlayed;
-        if (s.Game is not { } g || s.IsGuest || s.IsViewerCopy || !string.Equals(g.State.GameId, t.GameId, StringComparison.OrdinalIgnoreCase))
-            return TurnCheck.NewGame;
-        return string.Equals(StateHash.Of(g.State), t.StartHash, StringComparison.Ordinal) ? TurnCheck.Ok : TurnCheck.OlderPosition;
+        if (!same) return TurnCheck.NewGame;
+        var open = s.Game!;
+        return open.Log.Count == open.TurnBase && !open.RebasedOnLoad ? TurnCheck.Ok : TurnCheck.OlderPosition;
     }
 }

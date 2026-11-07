@@ -487,6 +487,7 @@ sealed partial class MainForm
                 else if (!online && log.Chat != null) log.SetChat(null);
             }
             ApplyGuestLimits();
+            UpdateMailboxWatch();   // going online stops the turn mailbox; leaving brings it back for a play-by-email game
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

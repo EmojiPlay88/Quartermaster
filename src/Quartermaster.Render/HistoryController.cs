@@ -40,7 +40,21 @@ public sealed class HistoryController
     /// <summary>Raised once after an Undo, Redo or Step Back finished (state rebuilt, re-seeded and reconciled).</summary>
     public event Action? Rewound;
 
-    public bool CanUndo => _s.Game is { } g && LastAction(g) != null;
+    /// <summary>Exact copy: undo or step back would go below the start of the local player's turn in a play-by-email game.</summary>
+    public const string AlreadySentText = "This turn was already sent.";
+
+    /// <summary>
+    /// True while the open game is a play-by-email game on this computer (the app knows its local player): its history below
+    /// <see cref="GameSession.TurnBase"/> was sent, so undo and step back stop there. Null = never.
+    /// </summary>
+    public Func<bool>? IsTurnGame { get; set; }
+
+    private bool BelowTurnBase(GameSession g, int logIndex) => logIndex < g.TurnBase && IsTurnGame?.Invoke() == true;
+
+    /// <summary>True when the next undo would take back part of a turn already sent (<see cref="AlreadySentText"/>).</summary>
+    public bool UndoBlockedBySentTurn => _s.Game is { } g && LastAction(g) is { } a && BelowTurnBase(g, a.Start);
+
+    public bool CanUndo => _s.Game is { } g && LastAction(g) is { } a && !BelowTurnBase(g, a.Start);
     public bool CanRedo => _s.Game?.CanRedo == true;
     public string UndoText => _s.Game is { } g && LastAction(g) is { } a && LabelShown(CommandsOf(g, a)) ? "Undo " + a.Label : "Undo";
     public string RedoText => _s.Game is { } g && g.RedoActions.FirstOrDefault() is { } r && LabelShown(r.Commands) ? "Redo " + r.Label : "Redo";
@@ -91,7 +105,8 @@ public sealed class HistoryController
     /// everything on the redo stack; a plain Undo adds no line (spec 6.4).</summary>
     public void Undo()
     {
-        if (Usable("undo") is not { } g || LastAction(g) == null) return;
+        if (Usable("undo") is not { } g || LastAction(g) is not { } last) return;
+        if (BelowTurnBase(g, last.Start)) { _s.Log.Add(DiagnosticSeverity.Info, "history", AlreadySentText); return; }
         _busy = true;
         try
         {
@@ -135,7 +150,7 @@ public sealed class HistoryController
         for (var i = 0; i < cps.Count; i++)
         {
             var cp = cps[i];
-            if (cp.LogIndex >= end) continue;
+            if (cp.LogIndex >= end || BelowTurnBase(g, cp.LogIndex)) continue;
             var until = i + 1 < cps.Count ? cps[i + 1].LogIndex : g.Log.Count;
             var since = g.Actions.Count(a => a.Start >= cp.LogIndex && a.Start < until);
             string? stage = null, side = null;
@@ -189,6 +204,7 @@ public sealed class HistoryController
             _s.Log.Add(DiagnosticSeverity.Warning, "history", $"Step back skipped: checkpoint \"{row.Phase}\" is no longer in this game's history.");
             return;
         }
+        if (BelowTurnBase(g, row.LogIndex)) { _s.Log.Add(DiagnosticSeverity.Info, "history", AlreadySentText); return; }
         _busy = true;
         try
         {

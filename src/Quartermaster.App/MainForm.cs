@@ -358,6 +358,7 @@ sealed partial class MainForm : Form
     bool ConfirmDiscard()
     {
         FlushNotes(); // pending note text becomes a command first, so the dirty check below counts it
+        if (!ConfirmSendDone()) return false;   // a turn still on its way to the relay gets its chance first
         if (_session?.IsGuest == true) return true;   // a guest's game is the host's: nothing here to save or lose
         if (_session?.IsReplaying == true)
         {

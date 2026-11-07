@@ -316,18 +316,21 @@ public sealed class Mailbox : IDisposable
         }
         var index = ReadIndex(Path.Combine(dir, IndexName));
         var entries = new List<Entry>();
+        // A date in the future (edited index, clock set back) would keep an item past its expiry: never later than now.
+        var now = Now;
+        DateTime NotLater(DateTime utc) => utc > now ? now : utc;
         if (index is not null)
         {
             foreach (var e in index)
                 if (e is not null && MailboxLimits.IsItemId(e.ItemId) && files.TryGetValue(e.ItemId, out var f)
                     && entries.All(x => x.ItemId != e.ItemId))
-                    entries.Add(new Entry(e.ItemId, f.Size, DateTime.SpecifyKind(e.StoredUtc, DateTimeKind.Utc)));
+                    entries.Add(new Entry(e.ItemId, f.Size, NotLater(DateTime.SpecifyKind(e.StoredUtc, DateTimeKind.Utc))));
         }
         else
         {
             // Lost or damaged index: keep the files, dated by their write time.
             foreach (var (id, f) in files)
-                entries.Add(new Entry(id, f.Size, File.GetLastWriteTimeUtc(f.Path)));
+                entries.Add(new Entry(id, f.Size, NotLater(File.GetLastWriteTimeUtc(f.Path))));
         }
         entries = entries.OrderBy(e => e.StoredUtc).TakeLast(MailboxLimits.MaxItemsPerBox).ToList();
         var keep = entries.Select(e => e.ItemId).ToHashSet(StringComparer.Ordinal);

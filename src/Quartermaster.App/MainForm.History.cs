@@ -60,7 +60,9 @@ sealed partial class MainForm
             var start = h?.StartOfPhase();
             var any = h != null && h.Checkpoints().Count > 0;
             var floor = h?.AtFloorFromOldSave == true;
-            var why = guest ? ModuleSession.GuestUndoText : replaying ? ModuleSession.ReplayingText : floor ? FloorTip : null;
+            var sent = h?.UndoBlockedBySentTurn == true;
+            var why = guest ? ModuleSession.GuestUndoText : replaying ? ModuleSession.ReplayingText : sent ? HistoryController.AlreadySentText
+                : floor ? FloorTip : null;
 
             var undoText = h?.UndoText ?? "Undo";
             var redoText = h?.RedoText ?? "Redo";
@@ -119,7 +121,9 @@ sealed partial class MainForm
 
     void DoUndo()
     {
-        if (GuestCannotUndo() || _history is not { CanUndo: true }) return;
+        if (GuestCannotUndo()) return;
+        if (_history is { UndoBlockedBySentTurn: true }) { SetStatus(HistoryController.AlreadySentText); return; }
+        if (_history is not { CanUndo: true }) return;
         _rewindStatus = "Undone";
         try { _actions!.Undo(); } finally { _rewindStatus = null; }
     }

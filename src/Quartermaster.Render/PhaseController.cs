@@ -207,9 +207,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     }
 
     /// <summary>After a load or a rules change: moves a game whose phase vanished to the phase now at that place (logged). Returns the strip notice.</summary>
+    /// <remarks>Nothing happens while a received turn replays: the sender's game stays exactly as sent (it may use a phase this pack lacks).</remarks>
     public string? Reconcile()
     {
-        if (!HasPhases || s.Game!.State.Position is not { } stored) return null;
+        if (s.IsReplaying || !HasPhases || s.Game!.State.Position is not { } stored) return null;
         var pack = s.Rules!;
         var (pos, notice) = Sequencer.Resolve(pack, stored);
         if (pos == null || notice == null) return null;     // unchanged, or only index / repeat clamped (no state to relocate)

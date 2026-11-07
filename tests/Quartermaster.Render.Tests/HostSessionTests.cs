@@ -927,21 +927,36 @@ public class HostSessionTests : IDisposable
         JoinAs(r, bob, "Bob");
         ft!.FaultSnapshots = true;
         Send(r, bob, new ChooseSides(new[] { "blue" }));
-        Settle(r);
+        PumpUntil(r, () => bob.Of<Paused>().Any());
         Assert.Equal(HostSession.TooLargeText, Assert.Single(bob.Of<Paused>()).Reason);
-        for (var i = 0; i < 3; i++) { r.H.FlushSnapshots(); Settle(r); }
+        for (var i = 0; i < 3; i++)
+        {
+            var before = ft.Faulted;
+            r.H.FlushSnapshots();
+            PumpUntil(r, () => ft.Faulted > before);
+        }
+        Settle(r);   // a late refusal is handled before counting
         Assert.True(ft.Faulted >= 4, $"faulted {ft.Faulted}");
         Assert.Single(bob.Of<Paused>());   // once, not on every snapshot
         Assert.Single(r.S.Log.Items, e => e.Category == "online" && e.Message.Contains("too large", StringComparison.Ordinal));
 
         ft.FaultSnapshots = false;   // a view goes through: the next refusal pauses again
         r.H.FlushSnapshots();
+        PumpUntil(r, () => bob.Of<Snapshot>().Any());
         Settle(r);
         Assert.Single(bob.Of<Snapshot>());
         ft.FaultSnapshots = true;
         r.H.FlushSnapshots();
-        Settle(r);
+        PumpUntil(r, () => bob.Of<Paused>().Count() >= 2);
         Assert.Equal(2, bob.Of<Paused>().Count());
+    }
+
+    /// <summary>Pumps the dispatcher until <paramref name="done"/> holds (at most 10 s), then once more.</summary>
+    private static void PumpUntil(Rig r, Func<bool> done)
+    {
+        var end = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!done() && DateTime.UtcNow < end) { r.D.Pump(); Thread.Sleep(5); }
+        r.D.Pump();
     }
 
     /// <summary>The host's transport, refusing snapshot payloads as too large (as <see cref="RelayTransport"/> does when they would not fit).</summary>
@@ -961,14 +976,17 @@ public class HostSessionTests : IDisposable
             inner.HostBack += () => HostBack?.Invoke();
         }
 
-        public bool FaultSnapshots { get; set; }
-        public int Faulted { get; private set; }
+        private int _faulted;
+        private volatile bool _faultSnapshots;
+
+        public bool FaultSnapshots { get => _faultSnapshots; set => _faultSnapshots = value; }
+        public int Faulted => Volatile.Read(ref _faulted);
 
         public Task Send(string? to, byte[] payload)
         {
             if (FaultSnapshots && Framing.Decode<GamePayload>(payload) is Snapshot)
             {
-                Faulted++;
+                Interlocked.Increment(ref _faulted);
                 return Task.FromException(new ProtocolException("Message is too large."));
             }
             return _inner.Send(to, payload);

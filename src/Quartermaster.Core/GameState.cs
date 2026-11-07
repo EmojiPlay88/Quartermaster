@@ -269,8 +269,9 @@ public sealed class GameState
     {
         if (m.MapId == null) return;
         var moved = new List<PieceInstance>();
+        var seen = new HashSet<PieceInstance>(ReferenceEqualityComparer.Instance);   // a hostile turn file may repeat one id many times
         foreach (var id in m.PieceIds ?? Array.Empty<string>())
-            if (id != null && Pieces.TryGetValue(id, out var p) && !moved.Contains(p)) moved.Add(p);
+            if (id != null && Pieces.TryGetValue(id, out var p) && seen.Add(p)) moved.Add(p);
         if (moved.Count == 0) return;
         foreach (var p in moved) DetachFromStack(p);
         Place(moved, m.MapId, m.Pos, m.StackOnto);

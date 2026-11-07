@@ -277,7 +277,8 @@ player's Quartermaster picks it up, instead of sending it by e-mail or chat.
 
 - **Encrypted end to end.** Each turn is encrypted on the sender's computer with a key made from the game's
   private id (which only the players' copies hold) and the game password, if any. The relay stores the
-  encrypted bytes only and cannot read them.
+  encrypted bytes only and cannot read them. The encryption is bound to the box it was sent to: a turn copied
+  into another box does not open there.
 - **Boxes have opaque names.** A box is named by a 64-character code derived from the same secrets and the
   receiving player; the relay never sees game names, game ids, player names or passwords. Anyone who knows
   a box's code can list, fetch and delete what is in it, which is why the code is derived from secrets.
@@ -295,7 +296,8 @@ player's Quartermaster picks it up, instead of sending it by e-mail or chat.
     the disk or the relay's memory. Expired turns are cleared first; if it is still full, new turns are
     refused with "The mailbox is full.";
   - turns are deleted after `MailboxExpiryDays` days (default 30), checked every hour, or when the
-    receiving player's copy deletes them after opening.
+    receiving player's copy deletes them after replaying them (only once the replayed game has been
+    autosaved; that copy also keeps the turn locally until its player sends the next turn).
 - **Size it to your server.** The per-address limits slow a stranger down but do not stop a few addresses
   from filling the mailbox and keeping it full until their uploads expire. Set `MailboxMaxBytes` to what
   the disk can spare, and run the relay for people you know. Players' copies delete turns once they have

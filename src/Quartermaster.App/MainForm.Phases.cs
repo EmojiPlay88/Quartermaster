@@ -71,6 +71,7 @@ sealed partial class MainForm
         _phases = c;
         _history = new HistoryController(session, c, (cmd, st) => CommandLog.Prepare(cmd, st, session));
         _history.Rewound += OnHistoryRewound;
+        _history.IsTurnGame = () => _turnIdentity is { LocalPlayerId.Length: > 0 };   // a sent turn cannot be undone
         _localActions = new LocalActions(session, c, _history);
         _actions = new ActionPortSwitch(_localActions);   // an online guest swaps in RemoteActions behind it
         CreateHotSeat(session, c, _history);
@@ -129,6 +130,7 @@ sealed partial class MainForm
     void ReconcilePhases()
     {
         if (_phases == null || _session?.Game == null || _session.IsGuest) return;   // a guest's snapshot is the host's business
+        if (_session.IsReplaying) return;   // a received turn replays exactly as sent, whatever phases this pack has
         try
         {
             if (_phases.Reconcile() is { } notice) SetStatus(notice);

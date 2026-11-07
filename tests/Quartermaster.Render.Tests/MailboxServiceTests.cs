@@ -248,5 +248,102 @@ public sealed class MailboxServiceTests : IAsyncLifetime
         Assert.False(await alice.SendAsync(Identity("alice", "p1"), Turn(fromName: big), "pw"));
         Assert.Equal("This turn is too large for the mailbox; send the file another way.", Assert.Single(ap.Statuses));
         Assert.Equal(0, ap.Connects);
+        Assert.Equal(MailboxService.TooLargeText, await alice.TrySendAsync(Identity("alice", "p1"), Turn(fromName: big), "pw"));
+    }
+
+    [Fact]
+    public async Task TrySend_RelayDown_GivesTheReason()
+    {
+        var (alice, _) = Service();
+        var why = await alice.TrySendAsync(Identity("alice", "p1"), Turn(), "pw");
+        Assert.NotNull(why);
+        Assert.StartsWith("Turn mailbox: ", why);
+    }
+
+    /// <summary>Seals like a sender does: the game's key, the recipient's box id as associated data.</summary>
+    private byte[] SealFor(string box, TurnFile t) => Secrets.Seal(Secrets.MailboxSealKey("pw", _gameId), TurnFiles.ToBytes(t), box);
+
+    [Fact]
+    public async Task ItemMovedToAnotherBox_DoesNotOpen()
+    {
+        await StartRelay();
+        var (alice, _) = Service();
+        Assert.True(await alice.SendAsync(Identity("alice", "p1"), Turn(to: "p3"), "pw"));
+        await using (var raw = await RawClient())
+        {
+            // The relay (or anyone holding the blob) copies Carol's item into Bob's box: same key, other box.
+            var item = Assert.Single(await raw.MailboxListAsync([BoxOf("p3")]));
+            var blob = await raw.MailboxGetAsync(BoxOf("p3"), item.ItemId);
+            await raw.MailboxPutAsync(BoxOf("p2"), blob);
+            Assert.ThrowsAny<CryptographicException>(() =>
+                Secrets.Open(Secrets.MailboxSealKey("pw", _gameId), blob, (int)TurnFiles.MaxPlain, BoxOf("p2")));
+            Assert.NotEmpty(Secrets.Open(Secrets.MailboxSealKey("pw", _gameId), blob, (int)TurnFiles.MaxPlain, BoxOf("p3")));
+        }
+        var (bob, bp) = Service(new FakeTimeProvider());
+        bob.Watch(_gameId, Identity("bob", "p2"), "pw");
+        await Until(() => bob.Polls >= 1);
+        Assert.Empty(bp.Turns);
+        Assert.Equal(MailboxService.UnreadableText, Assert.Single(bp.Statuses));
+    }
+
+    [Fact]
+    public async Task WrongGame_OtherRecipient_OwnTurn_SkippedQuietly()
+    {
+        await StartRelay();
+        var box = BoxOf("p2");
+        await using (var raw = await RawClient())
+        {
+            await raw.MailboxPutAsync(box, SealFor(box, Turn(startHash: "other-game") with { GameId = Guid.NewGuid().ToString("N") }));
+            await raw.MailboxPutAsync(box, SealFor(box, Turn(to: "p3", startHash: "for-carol")));
+            await raw.MailboxPutAsync(box, SealFor(box, Turn(startHash: "own") with { FromPlayerId = "p2" }));
+            await raw.MailboxPutAsync(box, SealFor(box, Turn(startHash: "good")));
+        }
+        var clock = new FakeTimeProvider();
+        var (bob, bp) = Service(clock);
+        bob.Watch(_gameId, Identity("bob", "p2"), "pw");
+        await Until(() => bob.Polls >= 1);
+        Assert.Equal("good", Assert.Single(bp.Turns).T.StartHash);
+        Assert.Empty(bp.Statuses);
+        clock.Advance(MailboxService.PollInterval);
+        await Until(() => bob.Polls >= 2);
+        Assert.Single(bp.Turns);   // skipped items are not looked at again
+        Assert.Empty(bp.Statuses);
+    }
+
+    [Fact]
+    public async Task SetIdentity_PlayedTurnDeleted_NotRaisedAgain()
+    {
+        await StartRelay();
+        var clock = new FakeTimeProvider();
+        var (bob, bp) = Service(clock);
+        bob.Watch(_gameId, Identity("bob", "p2"), "pw");
+        await Until(() => bob.Polls >= 1);
+        // The turn was replayed here meanwhile: the app hands the watch the identity that remembers it.
+        var played = Identity("bob", "p2");
+        played.RecordPlayed("start-1");
+        bob.SetIdentity(played);
+        var (alice, _) = Service();
+        Assert.True(await alice.SendAsync(Identity("alice", "p1"), Turn(), "pw"));
+        clock.Advance(MailboxService.PollInterval);
+        await using var raw = await RawClient();
+        await Until(() => raw.MailboxListAsync([BoxOf("p2")]).Result.Count == 0);
+        Assert.Empty(bp.Turns);
+        Assert.Empty(bp.Statuses);
+    }
+
+    [Fact]
+    public async Task Stop_RightAfterWatch_NoStatus_NoTurn_NoThrow()
+    {
+        await StartRelay();
+        var (alice, _) = Service();
+        Assert.True(await alice.SendAsync(Identity("alice", "p1"), Turn(), "pw"));
+        var (bob, bp) = Service(new FakeTimeProvider());
+        bob.Watch(_gameId, Identity("bob", "p2"), "pw");
+        bob.Stop();
+        bob.Stop();   // twice is fine
+        await Task.Delay(300);
+        Assert.Empty(bp.Turns);
+        Assert.Empty(bp.Statuses);
+        await bob.DeleteAsync(new string('a', 32));   // nothing watched: nothing happens
     }
 }
