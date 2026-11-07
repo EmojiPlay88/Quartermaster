@@ -42,6 +42,12 @@ public sealed record Settings
     /// <summary>Difficulty preselected at game setup and shown in Settings → Game.</summary>
     public Difficulty LastDifficulty { get; init; } = Difficulty.SemiAuto;
 
+    // Accessibility
+    public bool AlertBarVisible { get; init; } = true;
+    public bool OutlinerVisible { get; init; }
+    public OutlinerGrouping OutlinerGrouping { get; init; } = OutlinerGrouping.OrgDisplays;
+    public bool TourShown { get; init; }
+
     // Toolbar / Keyboard
     /// <summary>Toolbar item id to visibility; a missing key means visible.</summary>
     public IReadOnlyDictionary<string, bool> ToolbarVisible { get; init; } = NoToolbar;
