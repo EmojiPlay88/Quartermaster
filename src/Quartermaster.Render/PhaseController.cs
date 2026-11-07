@@ -53,13 +53,20 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>The sides the current action is run for: the guest's while <see cref="ActingFor"/> is open, else the session's view.</summary>
     private IReadOnlySet<string>? ActorSides => _actorSet ? _actorSides : s.ViewSides;
 
+    /// <summary>Optional thread-affinity check for <see cref="ActingFor"/> (debug assert); the online host sets it to "not InvokeRequired".</summary>
+    public Func<bool>? IsOwnerThread { get; set; }
+
     /// <summary>
     /// Until disposed, actions run for a player holding <paramref name="sides"/>: formula stamps, OnMove trigger stamps and the
     /// "may act on this unit" check use them instead of the session's view; commands are stamped with <paramref name="who"/>.
-    /// Used by the online host to execute a guest's intent. Not nested.
+    /// Used by the online host to execute a guest's intent. Not reentrant (a nested call throws <see cref="InvalidOperationException"/>).
+    /// Like every game change it must run on the thread that owns the game (the host's UI thread); <see cref="IsOwnerThread"/> lets the
+    /// host check that in debug builds.
     /// </summary>
     public IDisposable ActingFor(IReadOnlySet<string> sides, string? who)
     {
+        System.Diagnostics.Debug.Assert(IsOwnerThread?.Invoke() ?? true, "PhaseController.ActingFor called off the game's owning thread.");
+        if (_actorSet) throw new InvalidOperationException("ActingFor is already open.");
         _actorSet = true;
         _actorSides = sides;
         _actorWho = who;

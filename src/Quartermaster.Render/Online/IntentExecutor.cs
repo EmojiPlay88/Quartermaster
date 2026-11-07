@@ -2,6 +2,7 @@ using System.Globalization;
 using Quartermaster.Core;
 using Quartermaster.Rules;
 using Quartermaster.Rules.Expr;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Render;
 
@@ -9,21 +10,35 @@ namespace Quartermaster.Render;
 /// Executes a guest's intent on the host (spec 8a.1, 8a.5). Validation uses the sender's sides, never the host's own view: pieces, units and
 /// holders of held sides or of no side; tick, acknowledge and Next Phase only while a held side acts (when phases exist); undo, step back,
 /// turn, difficulty, notes, players, hidden alerts and computed results are host only. Accepted intents run exactly as if the host had
-/// done them (same commands, triggers and dice) with the sender's side as the actor and the sender's id as Who. Never throws.
+/// done them (same commands, triggers and dice) with the sender's side as the actor and the sender's id as Who. Pieces the sender cannot
+/// see are treated as if they did not exist, so a refusal never reveals them. Never throws.
 /// </summary>
 public sealed class IntentExecutor(ModuleSession s, PhaseController c)
 {
     public const string HostOnlyText = "Only the host can do that.";
     public const string NoGameText = "No game is running.";
+    public const string NotUnderstoodText = "That request was not understood.";
+    public const string GoneText = "That piece no longer exists.";
+    public const string MapText = "You can't do that on this map.";
+    public const string StackText = "You can't stack there.";
+
+    /// <summary>Longest id (piece, map, stack, formula, run, ledger key, property) a guest may send.</summary>
+    public const int MaxId = 256;
+    /// <summary>Longest piece type or state string a guest may send (real module types can run to a few kilobytes).</summary>
+    public const int MaxTypeText = 16 * 1024;
+    /// <summary>Longest trait state a guest may set.</summary>
+    public const int MaxTraitState = 4 * 1024;
+    /// <summary>Most pieces in one guest move.</summary>
+    public const int MaxMovePieces = 1000;
 
     public IntentResult Execute(string playerId, IReadOnlySet<string> sides, GameIntent intent)
     {
         try
         {
-            if (intent == null) return IntentResult.Refused("That request was not understood.");
+            if (intent == null) return IntentResult.Refused(NotUnderstoodText);
             if (s.Game is not { } g) return IntentResult.Refused(NoGameText);
             var held = sides ?? new HashSet<string>();
-            var who = string.IsNullOrWhiteSpace(playerId) ? "guest" : playerId;
+            var who = string.IsNullOrWhiteSpace(playerId) ? "guest" : playerId.Length > MaxId ? playerId[..MaxId] : playerId;
             if (g.InAction) return IntentResult.Refused("The host is busy; try again.");
             return intent switch
             {
@@ -42,7 +57,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            try { s.Log.Add(Quartermaster.Vassal.DiagnosticSeverity.Error, "online", "A guest request failed: " + ex.Message); }
+            try { s.Log.Add(DiagnosticSeverity.Error, "online", "A guest request failed: " + ex.Message); }
             catch (Exception) { /* logging must not throw either */ }
             return IntentResult.Refused("The host could not do that.");
         }
@@ -52,26 +67,35 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
 
     private static string OtherSide(string what) => $"{what} {ModuleSession.OtherSideText}.";
 
+    private static bool BadId(string? id) => string.IsNullOrEmpty(id) || id.Length > MaxId;
+
+    /// <summary>True when the piece exists and the sender can see it (anything else is "no such piece" to the sender).</summary>
+    private static bool Exists(GameSession g, PieceAccess a, string? id) => id != null && g.State.Pieces.ContainsKey(id) && a.CanSee(id);
+
     // ---- moves and piece commands ----
 
     private static string? CheckStack(GameSession g, PieceAccess a, string mapId, string? onto)
     {
-        if (onto == null || !g.State.Stacks.TryGetValue(onto, out var st) || st == null || st.MapId != mapId) return null;
-        return st.PieceIds.All(a.CanAct) ? null : "Those pieces can't be stacked onto another side's piece.";
+        if (onto == null) return null;
+        if (onto.Length > MaxId) return StackText;
+        if (!g.State.Stacks.TryGetValue(onto, out var st) || st == null || st.MapId != mapId) return null;
+        return st.PieceIds.All(a.CanAct) ? null : StackText;
     }
 
     private static string? CheckMove(GameSession g, PieceAccess a, MovePieces m)
     {
-        if (m == null || m.PieceIds == null || m.PieceIds.Count == 0 || m.MapId == null) return "That move was not understood.";
-        if (m.PieceIds.Any(id => id == null || !g.State.Pieces.ContainsKey(id))) return "A piece in that move no longer exists.";
+        if (m == null || m.PieceIds == null || m.PieceIds.Count == 0 || m.PieceIds.Count > MaxMovePieces || BadId(m.MapId)
+            || !double.IsFinite(m.Pos.X) || !double.IsFinite(m.Pos.Y))
+            return NotUnderstoodText;
+        if (m.PieceIds.Any(id => BadId(id) || !Exists(g, a, id))) return "A piece in that move no longer exists.";
         if (!m.PieceIds.All(a.CanAct)) return OtherSide("A piece in that move");
-        if (a.MapHidden(m.MapId)) return "That map belongs to a side you don't hold.";
+        if (a.MapHidden(m.MapId)) return MapText;
         return CheckStack(g, a, m.MapId, m.StackOnto);
     }
 
     private IntentResult Move(GameSession g, IReadOnlySet<string> sides, string who, IReadOnlyList<MovePieces>? moves)
     {
-        if (moves == null || moves.Count == 0) return IntentResult.Refused("That move was not understood.");
+        if (moves == null || moves.Count == 0 || moves.Count > MaxMovePieces) return IntentResult.Refused(NotUnderstoodText);
         var a = Access(g, sides);
         foreach (var m in moves)
             if (CheckMove(g, a, m) is { } why) return IntentResult.Refused(why);
@@ -92,38 +116,34 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         {
             case AddPiece add:
             {
-                if (add.PieceId == null || add.TypeString == null || add.MapId == null || g.State.Pieces.ContainsKey(add.PieceId))
-                    return IntentResult.Refused("That piece can't be placed.");
-                if (a.MapHidden(add.MapId)) return IntentResult.Refused("That map belongs to a side you don't hold.");
-                if (a.NotHeld(a.SideOf(new PieceInstance { Id = add.PieceId, TypeString = add.TypeString, MapId = add.MapId, Pos = add.Pos })))
-                    return IntentResult.Refused(OtherSide("That piece"));
-                if (CheckStack(g, a, add.MapId, add.StackOnto) is { } why) return IntentResult.Refused(why);
+                if (CheckAdd(g, a, sides, add) is { } why) return IntentResult.Refused(why);
                 clean = add with { LogText = null, At = null, Who = null };
                 break;
             }
-            case RemovePiece r when Actable(g, a, r.PieceId) is { } why:
-                return IntentResult.Refused(why);
             case RemovePiece r:
+            {
+                if (Actable(g, a, r.PieceId) is { } why) return IntentResult.Refused(why);
                 clean = r with { LogText = null, At = null, Who = null };
                 break;
-            case SetTraitState t when Actable(g, a, t.PieceId) is { } why:
-                return IntentResult.Refused(why);
+            }
             case SetTraitState t:
+            {
+                if (CheckTrait(g, a, sides, t) is { } why) return IntentResult.Refused(why);
                 clean = t;
                 break;
-            case ToggleTrail tt when Actable(g, a, tt.PieceId) is { } why:
-                return IntentResult.Refused(why);
-            case ToggleTrail tt:
-                clean = tt;
-                break;
+            }
             case ClearMoved cm:
             {
-                if (cm.MapId == null || a.MapHidden(cm.MapId)) return IntentResult.Refused("That map belongs to a side you don't hold.");
-                if (!g.State.Pieces.Values.Where(p => p != null && p.MapId == cm.MapId).All(p => a.CanAct(p.Id)))
-                    return IntentResult.Refused("That map holds pieces of a side you don't hold.");
+                // One message for every refusal: it must not reveal whether the map holds pieces the sender cannot see.
+                if (BadId(cm.MapId) || a.MapHidden(cm.MapId)
+                    || !g.State.Pieces.Values.Where(p => p != null && p.MapId == cm.MapId).All(p => a.CanAct(p.Id)))
+                    return IntentResult.Refused(MapText);
                 clean = cm;
                 break;
             }
+            case ToggleTrail:
+            case SetStackExpanded:
+                return IntentResult.Refused("Trails and stack views are shown on your own screen only.");
             default:
                 return IntentResult.Refused(HostOnlyText);
         }
@@ -134,8 +154,57 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
 
     private static string? Actable(GameSession g, PieceAccess a, string? pieceId)
     {
-        if (pieceId == null || !g.State.Pieces.ContainsKey(pieceId)) return "That piece no longer exists.";
+        if (BadId(pieceId) || !Exists(g, a, pieceId)) return GoneText;
         return a.CanAct(pieceId) ? null : OtherSide("That piece");
+    }
+
+    /// <summary>A side change by trait state or a new piece is allowed only into a held side (or, for a side-less piece, staying side-less).</summary>
+    private static string? SideRule(IReadOnlySet<string> sides, string? before, string? after, string refusal)
+    {
+        if (after == null) return before == null ? null : refusal;
+        return sides.Contains(after) ? null : refusal;
+    }
+
+    private static string? CheckAdd(GameSession g, PieceAccess a, IReadOnlySet<string> sides, AddPiece add)
+    {
+        if (BadId(add.PieceId) || BadId(add.MapId) || string.IsNullOrEmpty(add.TypeString) || add.TypeString.Length > MaxTypeText
+            || (add.StateString?.Length ?? 0) > MaxTypeText || !double.IsFinite(add.Pos.X) || !double.IsFinite(add.Pos.Y)
+            || g.State.Pieces.ContainsKey(add.PieceId))
+            return "That piece can't be placed.";
+        if (a.MapHidden(add.MapId)) return MapText;
+        // Decode the state exactly as the reducer does, so the side is judged on the piece as it will exist.
+        var probe = new PieceInstance { Id = add.PieceId, TypeString = add.TypeString, MapId = add.MapId, Pos = add.Pos, TraitStates = DecodeState(add.TypeString, add.StateString ?? "") };
+        if (SideRule(sides, null, a.SideOf(probe), OtherSide("That piece")) is { } why) return why;
+        return CheckStack(g, a, add.MapId, add.StackOnto);
+    }
+
+    private static List<string> DecodeState(string typeString, string stateString)
+    {
+        if (string.IsNullOrEmpty(stateString)) return new();
+        try
+        {
+            var count = PieceTypeParser.Parse(typeString, new DiagnosticLog(), null).Traits.Count;
+            return PieceTypeParser.SplitState(stateString, count).ToList();
+        }
+        catch (Exception)
+        {
+            return new() { stateString };
+        }
+    }
+
+    private static string? CheckTrait(GameSession g, PieceAccess a, IReadOnlySet<string> sides, SetTraitState t)
+    {
+        if (Actable(g, a, t.PieceId) is { } why) return why;
+        var p = g.State.Pieces[t.PieceId];
+        int count;
+        try { count = PieceInfo.TypeOf(p).Traits.Count; }
+        catch (Exception) { return NotUnderstoodText; }
+        if (t.StateIndex < 0 || t.StateIndex >= count || t.NewState == null || t.NewState.Length > MaxTraitState) return NotUnderstoodText;
+        var states = new List<string>(p.TraitStates);
+        while (states.Count <= t.StateIndex) states.Add("");
+        states[t.StateIndex] = t.NewState;
+        var after = new PieceInstance { Id = p.Id, TypeString = p.TypeString, MapId = p.MapId, Pos = p.Pos, StackId = p.StackId, TraitStates = states };
+        return SideRule(sides, a.SideOf(p), a.SideOf(after), "That change would give the piece to a side you don't hold.");
     }
 
     // ---- formulas, ledger, dice ----
@@ -143,24 +212,23 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     private IntentResult Formula(IReadOnlySet<string> sides, string who, FormulaIntent f)
     {
         FormulaVerdict v;
-        using (c.ActingFor(sides, who)) v = FormulaIntentRunner.Run(s, c, sides, f);
+        using (c.ActingFor(sides, who)) v = FormulaIntentRunner.Run(s, c, sides, f, guest: true);
         return new IntentResult(v.Applied, v.Message, v);
     }
 
     private IntentResult EditLedger(GameSession g, IReadOnlySet<string> sides, string who, LedgerEditIntent l)
     {
-        if (l.Key == null || l.PropertyId == null) return IntentResult.Refused("That change was not understood.");
+        if (BadId(l.Key) || BadId(l.PropertyId)) return IntentResult.Refused(NotUnderstoodText);
         if (!double.IsFinite(l.After)) return IntentResult.Refused("That is not a number.");
         if (string.IsNullOrWhiteSpace(l.Note)) return IntentResult.Refused("A manual change needs a note.");
         if (s.Rules?.Properties.FirstOrDefault(p => p != null && p.Id == l.PropertyId) is not { } prop)
             return IntentResult.Refused("That value no longer exists.");
-        if (LedgerKey.TryParse(l.Key, out var isPiece, out var id) && isPiece && !g.State.Pieces.ContainsKey(id))
-            return IntentResult.Refused("That piece no longer exists.");
+        if (LedgerKey.TryParse(l.Key, out var isPiece, out var id) && isPiece && !Exists(g, Access(g, sides), id))
+            return IntentResult.Refused(GoneText);
         if (!s.CanEditLedgerFor(l.Key, sides)) return IntentResult.Refused(OtherSide("That value"));
         if (Ledger.Get(g.State, l.Key, prop.Id) is { } cur && cur == l.After) return IntentResult.Done();   // unchanged: no history entry
         var before = Ledger.GetOrDefault(g.State, l.Key, prop);
-        var note = l.Note.Trim();
-        if (note.Length > ChatText.MaxLength) note = note[..ChatText.MaxLength];
+        var note = ChatText.Clean(l.Note) ?? "";
         g.Execute(CommandLog.Prepare(CommandLog.Stamp(new LedgerDelta(l.Key, prop.Id, before, l.After, "manual", null, null, note, null), who), g.State, s));
         return IntentResult.Done();
     }
@@ -170,7 +238,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         // Same limits as the dice expression parser.
         if (d.Spec is not { Count: >= 1 and <= 100, Sides: >= 2 and <= 1000, Modifier: >= -1000 and <= 1000 } spec)
             return IntentResult.Refused(DiceExpr.FormatError);
-        var purpose = string.IsNullOrWhiteSpace(d.Purpose) ? "Roll" : d.Purpose.Trim();
+        var purpose = ChatText.Clean(d.Purpose) ?? "Roll";
         if (purpose.Length > 80) purpose = purpose[..80];
         var results = s.Roll(spec.Count, spec.Sides);
         if (results.Count != spec.Count || results.Any(x => x < 1 || x > spec.Sides))
@@ -225,21 +293,42 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
 
 /// <summary>
 /// The formula dialog's path without the dialog: a <see cref="FormulaDialogModel"/> in the game's checking mode, the sender's typed values,
-/// Calculate when asked, then <see cref="PhaseController.ApplyFormula"/>. Inputs whose value comes from data the sender may not see are filled
-/// by the engine and reported as <see cref="FormulaBox.Hidden"/>; no value ever goes into the verdict.
+/// Calculate when asked, then <see cref="PhaseController.ApplyFormula"/>. Typed values are taken only where the dialog lets a player type
+/// without overriding the engine: Input boxes always, checked boxes (which only gate Apply) in the manual modes, never dice. Inputs whose
+/// value comes from data the sender may not see are filled by the engine and reported as <see cref="FormulaBox.Hidden"/>; no value ever
+/// goes into the verdict.
 /// </summary>
 internal static class FormulaIntentRunner
 {
     private const string NotWaitingText = "This calculation is no longer waiting.";
+    private const string GoneUnitText = "That unit no longer exists.";
+    private const string NotYourPhaseText = "That can only be calculated during a phase of a side you hold.";
+    public const int MaxTyped = 64;
+    public const int MaxTypedValue = 256;
 
-    public static FormulaVerdict Run(ModuleSession s, PhaseController c, IReadOnlySet<string>? sides, FormulaIntent i)
+    private static bool IsCheckedKind(BindingKind k) =>
+        k is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Table or BindingKind.Location or BindingKind.Moved;
+
+    /// <param name="guest">True for a guest's intent (host-side rules on outputs and unit-less runs apply).</param>
+    public static FormulaVerdict Run(ModuleSession s, PhaseController c, IReadOnlySet<string>? sides, FormulaIntent i, bool guest)
     {
         if (s.Game is not { } g || s.Runner is not { } runner || s.Rules is not { } pack) return FormulaVerdict.Refused(IntentExecutor.NoGameText);
-        if (i == null || i.FormulaId == null || pack.ById<FormulaDef>(i.FormulaId) is not { } f) return FormulaVerdict.Refused("That formula no longer exists.");
+        if (i == null || i.FormulaId == null || i.FormulaId.Length > IntentExecutor.MaxId || (i.RunId?.Length ?? 0) > IntentExecutor.MaxId
+            || (i.PieceId?.Length ?? 0) > IntentExecutor.MaxId)
+            return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
+        if (i.Typed is { Count: > MaxTyped } || (i.Typed ?? new Dictionary<string, string>()).Any(kv => kv.Key == null || kv.Key.Length > MaxTypedValue || (kv.Value?.Length ?? 0) > MaxTypedValue))
+            return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
+        if (pack.ById<FormulaDef>(i.FormulaId) is not { } f) return FormulaVerdict.Refused("That formula no longer exists.");
         var full = g.State;
         PieceInstance? piece = null;
-        if (i.PieceId != null && !full.Pieces.TryGetValue(i.PieceId, out piece)) return FormulaVerdict.Refused("That unit no longer exists.");
+        if (i.PieceId != null)
+        {
+            // A unit the sender cannot see does not exist for it.
+            if (!full.Pieces.TryGetValue(i.PieceId, out piece) || (sides != null && !new PieceAccess(full, pack, s.Model, sides).CanSee(i.PieceId)))
+                return FormulaVerdict.Refused(GoneUnitText);
+        }
         if (!s.CanActFor(i.PieceId, sides)) return FormulaVerdict.Refused($"That unit {ModuleSession.OtherSideText}.");
+        if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides) is { } why) return FormulaVerdict.Refused(why);
         double? moved = null;
         if (i.RunId != null)
         {
@@ -252,7 +341,13 @@ internal static class FormulaIntentRunner
         var hidden = HiddenVariables(s, pack, f, full, i.PieceId, sides);
         var model = new FormulaDialogModel(runner, f, i.PieceId) { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved };
         foreach (var (variable, text) in i.Typed ?? new Dictionary<string, string>())
-            if (variable != null && !hidden.Contains(variable)) model.SetBoxText(variable, text ?? "");
+        {
+            if (variable == null || hidden.Contains(variable)) continue;
+            var b = f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable);
+            // Input boxes always; checked boxes only in the manual modes (they gate Apply and never feed the run); never dice or overrides.
+            var accept = b != null && (b.Kind == BindingKind.Input || (model.Checked && IsCheckedKind(b.Kind)));
+            if (accept) model.SetBoxText(variable, text ?? "");
+        }
         if (i.Calculate) model.Calculate(full);
         else if (model.Checked && hidden.Count > 0)
         {
@@ -267,6 +362,37 @@ internal static class FormulaIntentRunner
         if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));
         if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated)) return new FormulaVerdict(false, boxes, NotWaitingText);
         return new FormulaVerdict(true, boxes, null);
+    }
+
+    /// <summary>True when the current phase has an acting side and the sender holds it.</summary>
+    private static bool ActingSideHeld(ModuleSession s, RulesPack pack, IReadOnlySet<string> sides) =>
+        pack.Phases is { Count: > 0 } && s.Game?.State is { Position: not null } st && Sequencer.Current(pack, st) is { } phase
+        && Sequencer.ActingSide(pack, phase) is { } side && sides.Contains(side.Id);
+
+    /// <summary>
+    /// A guest may write holders of held sides or of no side; the global holder only during a phase of a side it holds; and may run a
+    /// unit-less formula only during a phase of a side it holds. Null when allowed.
+    /// </summary>
+    private static string? GuestRule(ModuleSession s, RulesPack pack, FormulaDef f, string? pieceId, IReadOnlySet<string> sides)
+    {
+        if (pieceId == null && !ActingSideHeld(s, pack, sides)) return NotYourPhaseText;
+        foreach (var o in f.Outputs ?? new List<FormulaOutput>())
+        {
+            if (o == null) continue;
+            var global = o.Target == OutputTarget.Global || (o.Target == OutputTarget.Holder && o.HolderId == HolderDef.GlobalId);
+            if (global)
+            {
+                if (!ActingSideHeld(s, pack, sides)) return "Global values can only be changed during a phase of a side you hold.";
+                continue;
+            }
+            if (o.Target == OutputTarget.Holder)
+            {
+                if (o.HolderId == null) return IntentExecutor.NotUnderstoodText;
+                if (Ownership.SideOfHolder(o.HolderId, pack) is { } owner && !sides.Contains(owner))
+                    return $"That formula writes to a holder that {ModuleSession.OtherSideText}.";
+            }
+        }
+        return null;
     }
 
     /// <summary>The dialog's status when it names only variables; an evaluation error is passed on only when no input is hidden.</summary>

@@ -53,7 +53,7 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
         FlushMoves();
     }
 
-    public FormulaVerdict ApplyFormula(FormulaIntent intent) => FormulaIntentRunner.Run(s, c, s.ViewSides, intent);
+    public FormulaVerdict ApplyFormula(FormulaIntent intent) => FormulaIntentRunner.Run(s, c, s.ViewSides, intent, guest: false);
 
     public Task<FormulaVerdict> ApplyFormulaAsync(FormulaIntent intent) => Task.FromResult(ApplyFormula(intent));
 
@@ -127,19 +127,4 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
     public void Redo() => h.Redo();
 
     public void StepBack(CheckpointRow row) => h.StepBack(row);
-}
-
-/// <summary>Chat line text: trimmed, at most <see cref="MaxLength"/> characters, "{name}: {text}" when the sender is known.</summary>
-public static class ChatText
-{
-    public const int MaxLength = 500;
-
-    public static string? Clean(string? text)
-    {
-        var t = (text ?? "").Replace('\r', ' ').Replace('\n', ' ').Trim();
-        if (t.Length == 0) return null;
-        return t.Length > MaxLength ? t[..MaxLength] : t;
-    }
-
-    public static string Line(string? sender, string clean) => string.IsNullOrWhiteSpace(sender) ? clean : $"{sender.Trim()}: {clean}";
 }

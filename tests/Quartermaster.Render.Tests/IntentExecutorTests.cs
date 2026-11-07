@@ -15,6 +15,7 @@ public class IntentExecutorTests : IDisposable
     private readonly List<ModuleSession> _sessions = new();
 
     private const double SecretStock = 61616;
+    private const string RedMap = "Red Command Post";
     private static readonly PlayerDef Alice = new("p1", "Alice", new[] { "red" });
     private static readonly PlayerDef Bob = new("p2", "Bob", new[] { "blue" });
     private static readonly IReadOnlySet<string> Red = new HashSet<string> { "red" };
@@ -38,10 +39,46 @@ public class IntentExecutorTests : IDisposable
             Properties = p.Properties.Concat(new[]
             {
                 new PropertyDef { Id = "supply", Name = "Supply", Scope = PropertyScope.Holders, Visibility = Visibility.Private },
+                new PropertyDef { Id = "morale", Name = "Morale", Scope = PropertyScope.Holders },
             }).ToList(),
             Holders = new() { new HolderDef { Id = "reddepot", Name = "Red Depot", SideId = "red" } },
+            MapOwners = new() { new MapOwner { MapId = RedMap, SideId = "red" } },
+            // Name decides the side of the fixture units; a "Side" marker decides it for the marked test pieces.
+            Sides = new()
+            {
+                new SideDef { Id = "red", Name = "Red", UnitFilter = "startsWith(name(), \"Red\") or marker(\"Side\") == \"Red\"" },
+                new SideDef { Id = "blue", Name = "Blue", UnitFilter = "startsWith(name(), \"Blue\") or marker(\"Side\") == \"Blue\"" },
+            },
             Formulas = p.Formulas.Concat(new[]
             {
+                new FormulaDef
+                {
+                    Id = "f-roll", Name = "Rolled water", Text = "D",
+                    Bindings = new() { new VariableBinding { Variable = "D", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 } },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
+                    Id = "f-glob", Name = "Morale water", Text = "W + G",
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                        new VariableBinding { Variable = "G", Kind = BindingKind.Global, Property = "morale" },
+                    },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
+                    Id = "f-depot", Name = "Fill depot", Text = "W",
+                    Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" } },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Holder, HolderId = "reddepot", Property = "supply", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
+                    Id = "f-gout", Name = "Raise morale", Text = "W",
+                    Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" } },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "morale", Op = OutputOp.Set } },
+                },
                 new FormulaDef
                 {
                     Id = "f-mix", Name = "Mixed supply", Text = "W + S",
@@ -255,5 +292,196 @@ public class IntentExecutorTests : IDisposable
         var verdict = new FormulaVerdict(false, new[] { new FormulaBox("W", FormulaBox.Wrong) }, "Doesn't match: W");
         var vj = JsonSerializer.Serialize(verdict, QuartermasterJson.Options);
         Assert.Equal(vj, JsonSerializer.Serialize(JsonSerializer.Deserialize<FormulaVerdict>(vj, QuartermasterJson.Options), QuartermasterJson.Options));
+    }
+
+    // ---- fix round 1: hardening ----
+
+    private static string MarkedType(string name) => PieceTypeParser.EncodeState(new[] { "mark;Side", "piece;;;unit.svg;" + name });
+    private static string MarkedState(string side) => PieceTypeParser.EncodeState(new[] { side, "" });
+
+    [Theory]
+    [InlineData(Difficulty.Hardcore)]
+    [InlineData(Difficulty.SemiAuto)]
+    [InlineData(Difficulty.FullyAuto)]
+    public void FormulaIntent_TypedRollOrOverride_Ignored(Difficulty mode)
+    {
+        var (s, _, x) = Open(mode, stock: 5);
+        var g = s.Game!;
+        var key = LedgerKey.Piece(PhaseFixture.BlueOne);
+        var r = x.Execute("p2", Blue, new FormulaIntent("f-roll", PhaseFixture.BlueOne, null, new Dictionary<string, string> { ["D"] = "6" }, false));
+        Assert.True(r.Ok, r.Message);
+        Assert.Equal(4, Ledger.Get(g.State, key, "water"));   // the host's roll, not the guest's 6
+        Assert.Equal(4, g.Log.OfType<RollDice>().Last().Results.Single());
+
+        if (mode != Difficulty.FullyAuto) return;
+        g.Execute(new LedgerDelta(LedgerKey.Holder(HolderDef.GlobalId), "morale", 0, 3, "manual", null, null, null, null));
+        var o = x.Execute("p2", Blue, new FormulaIntent("f-glob", PhaseFixture.BlueOne, null,
+            new Dictionary<string, string> { ["W"] = "999", ["G"] = "100" }, false));
+        Assert.True(o.Ok, o.Message);
+        Assert.Equal(7, Ledger.Get(g.State, key, "water"));   // 4 + 3: Unit and Global overrides ignored
+    }
+
+    [Fact]
+    public void SetTraitState_BadIndexOrHugeState_Refused_HostAlive()
+    {
+        var (s, _, x) = Open();
+        var g = s.Game!;
+        var before = Json(g.State);
+        foreach (var t in new[]
+        {
+            new SetTraitState(PhaseFixture.BlueOne, int.MaxValue, "x"),
+            new SetTraitState(PhaseFixture.BlueOne, -1, "x"),
+            new SetTraitState(PhaseFixture.BlueOne, 2, "x"),
+            new SetTraitState(PhaseFixture.BlueOne, 0, new string('9', 5000)),
+            new SetTraitState(new string('b', 300), 0, "1"),
+        })
+            Assert.False(x.Execute("p2", Blue, new PieceCommandIntent(t)).Ok);
+        Assert.Equal(before, Json(g.State));
+        Assert.True(x.Execute("p2", Blue, new PieceCommandIntent(new SetTraitState(PhaseFixture.BlueOne, 0, "41"))).Ok);
+    }
+
+    [Fact]
+    public void SetTraitState_SideChange_Refused()
+    {
+        var (s, _, x) = Open();
+        var g = s.Game!;
+        g.Execute(new AddPiece("m1", MarkedType("Flag"), MarkedState("Blue"), "Main Map", new PointD(150, 50), null));
+        var before = Json(g.State);
+        Assert.False(x.Execute("p2", Blue, new PieceCommandIntent(new SetTraitState("m1", 0, "Red"))).Ok);     // to another side
+        Assert.False(x.Execute("p2", Blue, new PieceCommandIntent(new SetTraitState("m1", 0, "Green"))).Ok);   // to no side
+        Assert.False(x.Execute("p1", Red, new PieceCommandIntent(new SetTraitState("m1", 0, "Red"))).Ok);      // not Alice's piece
+        Assert.Equal(before, Json(g.State));
+        Assert.True(x.Execute("p2", Blue, new PieceCommandIntent(new SetTraitState("m1", 0, "Blue"))).Ok);
+    }
+
+    [Fact]
+    public void AddPiece_SideFromDecodedState_AndForgedStampsReplaced()
+    {
+        var (s, _, x) = Open();
+        var g = s.Game!;
+        var before = Json(g.State);
+        Assert.False(x.Execute("p2", Blue, new PieceCommandIntent(
+            new AddPiece("m2", MarkedType("Flag"), MarkedState("Red"), "Main Map", new PointD(150, 50), null))).Ok);
+        Assert.False(x.Execute("p2", Blue, new PieceCommandIntent(
+            new AddPiece("m2", MarkedType("Flag"), MarkedState("Blue"), RedMap, new PointD(150, 50), null))).Ok);
+        Assert.Equal(before, Json(g.State));
+
+        var forgedAt = new DateTimeOffset(1999, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var ok = x.Execute("p2", Blue, new PieceCommandIntent(new AddPiece("m2", MarkedType("Flag"), MarkedState("Blue"), "Main Map",
+            new PointD(150, 50), null, "Alice placed a forged piece", forgedAt, "p1")));
+        Assert.True(ok.Ok, ok.Message);
+        var line = g.State.Log.Last(l => l.Kind == LogKind.Place);
+        Assert.Equal("p2", line.Who);
+        Assert.NotEqual(forgedAt, line.At);
+        Assert.DoesNotContain("forged", line.Text);
+        Assert.True(x.Execute("p2", Blue, new PieceCommandIntent(
+            new AddPiece("m3", MarkedType("Crate"), MarkedState("Green"), "Main Map", new PointD(160, 50), null))).Ok);   // side-less is fine
+    }
+
+    [Fact]
+    public void Move_ForgedStampsReplaced()
+    {
+        var (s, _, x) = Open();
+        var g = s.Game!;
+        var forgedAt = new DateTimeOffset(1999, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var r = x.Execute("p2", Blue, new MoveIntent(new[]
+        {
+            new MovePieces(new[] { PhaseFixture.BlueOne }, "Main Map", new PointD(150, 50), null, "Alice moved forged", forgedAt, "p1"),
+        }));
+        Assert.True(r.Ok, r.Message);
+        var line = g.State.Log.Last(l => l.Kind == LogKind.Move);
+        Assert.Equal("p2", line.Who);
+        Assert.NotEqual(forgedAt, line.At);
+        Assert.DoesNotContain("forged", line.Text);
+    }
+
+    [Fact]
+    public void FormulaIntent_GuestOutputsAndUnitlessRuns_NeedHeldSide()
+    {
+        var (s, c, x) = Open();
+        var g = s.Game!;
+        var before = Json(g.State);
+        Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-depot", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true)).Ok);
+        Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-gout", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true)).Ok);
+        Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-weather", null, null, new Dictionary<string, string>(), true)).Ok);
+        Assert.Equal(before, Json(g.State));
+
+        c.Start(); c.Advance(); c.Advance(); c.Advance();   // Combat (blue)
+        Assert.Equal("ph-combat", g.State.Position!.PhaseId);
+        Assert.False(x.Execute("p1", Red, new FormulaIntent("f-gout", PhaseFixture.RedOne, null, new Dictionary<string, string>(), true)).Ok);
+        Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-depot", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true)).Ok);
+        var gout = x.Execute("p2", Blue, new FormulaIntent("f-gout", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true));
+        Assert.True(gout.Ok, gout.Message);
+        Assert.Equal(Ledger.GetOrDefault(g.State, LedgerKey.Piece(PhaseFixture.BlueOne), s.Rules!.Properties.First(p => p.Id == "water")),
+            Ledger.Get(g.State, LedgerKey.Holder(HolderDef.GlobalId), "morale"));
+        var weather = x.Execute("p2", Blue, new FormulaIntent("f-weather", null, null, new Dictionary<string, string>(), true));
+        Assert.True(weather.Ok, weather.Message);
+    }
+
+    [Fact]
+    public void HiddenPieces_AreNonexistent_ToTheGuest()
+    {
+        var (s, _, x) = Open();
+        var g = s.Game!;
+        g.Execute(new AddPiece("secret", PieceTypeParser.EncodeState(new[] { "piece;;;unit.svg;Red Phantom" }), "", RedMap, new PointD(10, 10), null));
+        var before = Json(g.State);
+        var missing = x.Execute("p2", Blue, new PieceCommandIntent(new RemovePiece("nope")));
+        var hidden = x.Execute("p2", Blue, new PieceCommandIntent(new RemovePiece("secret")));
+        Assert.False(hidden.Ok);
+        Assert.Equal(missing.Message, hidden.Message);
+        var moveMissing = x.Execute("p2", Blue, new MoveIntent(new[] { new MovePieces(new[] { "nope" }, "Main Map", new PointD(1, 1), null) }));
+        var moveHidden = x.Execute("p2", Blue, new MoveIntent(new[] { new MovePieces(new[] { "secret" }, "Main Map", new PointD(1, 1), null) }));
+        Assert.Equal(moveMissing.Message, moveHidden.Message);
+        Assert.Equal(x.Execute("p2", Blue, new FormulaIntent("f-water", "nope", null, new Dictionary<string, string>(), true)).Message,
+            x.Execute("p2", Blue, new FormulaIntent("f-water", "secret", null, new Dictionary<string, string>(), true)).Message);
+        var hiddenMap = x.Execute("p2", Blue, new PieceCommandIntent(new ClearMoved(RedMap)));
+        var mixedMap = x.Execute("p2", Blue, new PieceCommandIntent(new ClearMoved("Main Map")));   // holds Red units
+        Assert.Equal(IntentExecutor.MapText, hiddenMap.Message);
+        Assert.Equal(IntentExecutor.MapText, mixedMap.Message);
+        Assert.Equal(before, Json(g.State));
+    }
+
+    [Fact]
+    public void ToggleTrail_FromGuest_Refused()
+    {
+        var (s, _, x) = Open();
+        var before = Json(s.Game!.State);
+        Assert.False(x.Execute("p2", Blue, new PieceCommandIntent(new ToggleTrail(PhaseFixture.BlueOne))).Ok);
+        Assert.Equal(before, Json(s.Game.State));
+    }
+
+    [Fact]
+    public void GuestStrings_AreCapped()
+    {
+        var (s, _, x) = Open();
+        var before = Json(s.Game!.State);
+        var many = Enumerable.Range(0, 65).ToDictionary(i => "V" + i, _ => "1");
+        Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-water", PhaseFixture.BlueOne, null, many, false)).Ok);
+        Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-water", PhaseFixture.BlueOne, null,
+            new Dictionary<string, string> { ["W"] = new string('1', 300) }, false)).Ok);
+        Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-water", new string('b', 300), null, new Dictionary<string, string>(), true)).Ok);
+        Assert.False(x.Execute("p2", Blue, new PieceCommandIntent(
+            new AddPiece(new string('p', 300), MarkedType("Flag"), MarkedState("Blue"), "Main Map", new PointD(1, 1), null))).Ok);
+        Assert.False(x.Execute("p2", Blue, new PieceCommandIntent(
+            new AddPiece("big", MarkedType(new string('F', 20000)), MarkedState("Blue"), "Main Map", new PointD(1, 1), null))).Ok);
+        Assert.Equal(before, Json(s.Game.State));
+    }
+
+    [Fact]
+    public void ChatText_StripsControlAndSeparators()
+    {
+        Assert.Equal("a b c d", ChatText.Clean("a" + (char)0x2028 + "b" + (char)0x85 + "c" + (char)9 + "d" + (char)7));
+        Assert.Equal("x  y", ChatText.Clean("x" + (char)13 + (char)10 + "y" + (char)0x2029));
+        Assert.Null(ChatText.Clean((char)1 + "" + (char)0x2028 + " "));
+        Assert.Equal("Bob: hi", ChatText.Line("Bob\n", "hi"));
+    }
+
+    [Fact]
+    public void ActingFor_IsNotReentrant()
+    {
+        var (_, c, _) = Open();
+        using (c.ActingFor(Blue, "p2"))
+            Assert.Throws<InvalidOperationException>(() => c.ActingFor(Red, "p1"));
+        using (c.ActingFor(Red, "p1")) { }   // usable again once closed
     }
 }
