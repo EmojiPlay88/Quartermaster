@@ -3,6 +3,7 @@ using Quartermaster.Render;
 using Quartermaster.Rules;
 using Quartermaster.Rules.Tables;
 using Quartermaster.Render.Search;
+using Quartermaster.Render.Ocr;
 
 namespace Quartermaster.App;
 
@@ -397,6 +398,91 @@ sealed class TablesTab : UserControl, IRuleRefEditor
     {
         if (Current is not { Kind: TableKind.TwoD } t) return;
         if (ColumnsDialog.Ask(this, t.ColumnKeys) is { } keys) Structural(x => TableEdit.SetColumnKeys(x, keys));
+    }
+
+    // ---------- import from a scan ----------
+
+    /// <summary>Creates or reuses the rule ref for (label, document entry, page); set by the workbench (its RefFor path).</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Func<string, string, int, RuleRef?>? MakeRuleRef { get; set; }
+
+    /// <summary>
+    /// Imports an OCR grid (TSV) through the Paste table dialog into a new table (name prompt) or, when a table is selected and the
+    /// user chooses it, into that table. A new table's rule ref is the source document and page (an image has no page); an existing
+    /// table keeps its rule ref and only gets one when it has none. Returns the table's id, or null when nothing was imported.
+    /// </summary>
+    public string? ImportGrid(string tsv, string? ruleRefEntry, int? page)
+    {
+        string? result = null;
+        Run(() => result = DoImport(tsv, ruleRefEntry, page));
+        return result;
+    }
+
+    string? DoImport(string tsv, string? ruleRefEntry, int? page)
+    {
+        if (_s.Rules == null) { Tell("Create or open a rules pack first; the table is stored in it."); return null; }
+        if (_s.IsGuest) { Tell("The host's rules pack is read-only here."); return null; }
+        FlushNotes();
+        var existing = Current;
+        bool intoExisting = false;
+        if (existing != null)
+        {
+            var choice = AskTarget(existing.Name);
+            if (choice == null) return null;
+            intoExisting = choice.Value;
+        }
+        string name;
+        if (intoExisting) name = existing!.Name;
+        else
+        {
+            var suggestion = ScanSessionModel.SuggestTableName(_s.Rules.Tables.Select(t => t.Name));
+            var typed = Program.Smoke ? suggestion : InputDialog.Ask(this, "Import into table", "Name of the new table:", suggestion);
+            if (string.IsNullOrWhiteSpace(typed)) return null;
+            if (NameRules.Problem(_s.Rules.Tables.Select(x => x.Name), typed, null) is { } bad) { Tell(bad); return null; }
+            name = typed.Trim();
+        }
+        var grid = PasteTableDialog.Ask(this, tsv, ScanSessionModel.TargetDescription(name, newTable: !intoExisting));
+        if (grid == null || _s.Rules == null) return null;
+
+        RuleRef? MakeRef(string label) =>
+            ruleRefEntry == null || MakeRuleRef == null ? null : MakeRuleRef(label, ruleRefEntry, page ?? 0);
+
+        if (intoExisting)
+        {
+            Structural(x => TableEdit.ApplyPaste(x, grid));
+            if (Current is { RuleRefId: null } t && MakeRef(t.Name) is { } r) { Commit(x => x with { RuleRefId = r.Id }); ShowRefLabel(Current); }
+            return existing!.Id;
+        }
+        var made = TableEdit.ApplyPaste(TableEdit.New(name, ScanSessionModel.KindFor(grid)), grid);
+        if (MakeRef(name) is { } rr) made = made with { RuleRefId = rr.Id };
+        _s.UpdateRules(p => p with { Tables = p.Tables.Append(made).ToList() }); // RulesChanged reloads the list
+        if (!_ids.Contains(made.Id)) Reload();
+        SelectTable(made.Id);
+        return made.Id;
+    }
+
+    /// <summary>True = the selected table, false = a new table, null = cancelled.</summary>
+    bool? AskTarget(string selected)
+    {
+        if (Program.Smoke) { Program.AppLog($"smoke: import target: a new table (the selected \"{selected}\" is kept)"); return false; }
+        var into = new TaskDialogButton($"Replace \"{selected}\"");
+        var fresh = new TaskDialogButton("New table…");
+        var page = new TaskDialogPage
+        {
+            Caption = "Import into table",
+            Heading = "Where should the scanned rows go?",
+            Text = $"Into a new table, or into the selected table \"{selected}\" (its rows, columns and cells are replaced).",
+            Buttons = { fresh, into, TaskDialogButton.Cancel },
+            DefaultButton = fresh,
+        };
+        var r = TaskDialog.ShowDialog(this, page);
+        return r == into ? true : r == fresh ? false : null;
+    }
+
+    void Tell(string text)
+    {
+        if (Program.Smoke) { Program.AppLog("tables tab: " + text); return; }
+        MessageBox.Show(this, text, "Import into table", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     void PasteTable()

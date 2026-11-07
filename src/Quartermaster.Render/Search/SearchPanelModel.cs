@@ -179,13 +179,14 @@ public static class SearchPanelModel
         {
             // Not indexed (yet, or not a PDF): the module has it, so it opens.
             text = Plain(r, string.IsNullOrWhiteSpace(m.Title) ? r.DocumentEntry : m.Title);
-            missing = r.Page < 1;
+            // An image has no pages: a page-less ref to it is fine; a page-less ref to a PDF is not.
+            missing = r.Page < 1 && !Ocr.ScanSessionModel.IsImageName(r.DocumentEntry);
         }
         return missing ? new RefDisplay(text + " " + RuleRefLinks.Missing, false, true) : new RefDisplay(text, true, false);
     }
 
     private static string Plain(RuleRef r, string name) =>
-        (string.IsNullOrWhiteSpace(r.Label) ? "" : r.Label + " — ") + $"{name}, p. {r.Page}";
+        (string.IsNullOrWhiteSpace(r.Label) ? "" : r.Label + " — ") + (r.Page < 1 && Ocr.ScanSessionModel.IsImageName(r.DocumentEntry) ? name : $"{name}, p. {r.Page}");
 
     /// <summary>"Used on this page" lines: "Formula: Name" etc., in <see cref="RuleRefLinks.UsedOnPage"/> order.</summary>
     public static IReadOnlyList<(string Kind, string Id, string Text)> UsedOnPageRows(RulesPack? pack, string? entry, int page)

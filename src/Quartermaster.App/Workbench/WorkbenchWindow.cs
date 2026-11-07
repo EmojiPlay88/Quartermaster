@@ -1,4 +1,6 @@
+using Quartermaster.Ocr;
 using Quartermaster.Render;
+using Quartermaster.Render.Ocr;
 using Quartermaster.Render.Search;
 using Quartermaster.Rules;
 using Quartermaster.Vassal;
@@ -46,6 +48,15 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     string? _pendingQuery;
     string _lastQuery = "";
     int _searchHeight = SearchPanel.ExpandedHeight;
+    int _indexGen;
+    CancellationTokenSource? _indexBuildCts;
+
+    // scans / OCR
+    readonly ScanSessionModel _scanModel = new();
+    readonly ScanPane _scan;
+    readonly IReadOnlyList<ScanSource> _moduleImages;
+    readonly ToolStripButton _scanPage = new("Scan this page") { DisplayStyle = ToolStripItemDisplayStyle.Text, Enabled = false };
+    readonly ToolStripButton _openScan = new("Open scan…") { DisplayStyle = ToolStripItemDisplayStyle.Text };
 
     public WorkbenchWindow(ModuleSession s, Action newPack, Action openPack)
     {
@@ -67,7 +78,9 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _visibilityTab = new VisibilityTab(s) { Dock = DockStyle.Fill };
         _visibilityPage.Controls.Add(_visibilityTab);
         _tabs.TabPages.AddRange(new[] { _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage, _visibilityPage });
+        _scan = new ScanPane(s, _scanModel, new OcrService()) { Dock = DockStyle.Fill, Visible = false };
         _split.Panel1.Controls.Add(_viewer);
+        _split.Panel1.Controls.Add(_scan);
         _split.Panel1.Controls.Add(_searchSplit);
         _split.Panel1.Controls.Add(_search);
         _split.Panel2.Controls.Add(_tabs);
@@ -83,6 +96,8 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _toolbar.Items.Add(new ToolStripLabel("Rulebooks:"));
         _toolbar.Items.Add(_searchBox);
         _toolbar.Items.Add(_searchBtn);
+        _toolbar.Items.Add(new ToolStripSeparator());
+        _toolbar.Items.Add(_openScan);
         _searchBox.TextBox.PlaceholderText = "Search the rulebooks (Ctrl+Shift+F)";
         _status.Items.Add(_statusText);
 
@@ -98,12 +113,14 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         Controls.Add(_status);
 
         _moduleDocs = s.Model.Documents.Select(d => (d.EntryName, d.Title)).ToList();
+        _moduleImages = ScanSessionModel.ModuleImages(s.Archive.EntryNames);
         WireSearch();
+        WireScans();
 
         _validateTimer.Tick += (_, _) => { _validateTimer.Stop(); Validate2(); };
         _s.RulesChanged += OnRulesChanged;
         Shown += (_, _) => { SetSplit(); TryPending(); };
-        FormClosed += (_, _) => { _indexCts.Cancel(); _s.RulesChanged -= OnRulesChanged; _validateTimer.Dispose(); };
+        FormClosed += (_, _) => { _indexCts.Cancel(); _scanModel.CancelRead(); _s.RulesChanged -= OnRulesChanged; _validateTimer.Dispose(); };
 
         if (Program.Smoke && s.Model.Documents.FirstOrDefault(d => d.Kind == Quartermaster.Vassal.DocumentKind.Pdf) is { } doc) _viewer.Open(doc);
         Apply();
@@ -263,6 +280,11 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     /// <summary>Creates or reuses a RuleRef for the document and page shown in the viewer. Null (with a message) when nothing is open.</summary>
     public RuleRef? LinkCurrentPage(string label)
     {
+        if (_scan.Visible && _scan.Source is { } src)
+        {
+            var (entry, page) = ScanSessionModel.RuleRefFor(src, _scan.Page);
+            return RefFor(label, entry, page);
+        }
         if (_viewer.Document is not { } doc)
         {
             Warn("Open a document in the left pane first, then go to the page to link.");
@@ -289,8 +311,11 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     void ShowRule(RuleRef r)
     {
         var doc = _s.Model.Documents.FirstOrDefault(d => d.EntryName == r.DocumentEntry);
-        if (doc == null) { Warn($"The reference points to '{r.DocumentEntry}', which is not in this module."); return; }
-        _viewer.Open(doc, r.Page);
+        if (doc != null) { ShowPdf(); _viewer.Open(doc, r.Page); return; }
+        var img = _moduleImages.FirstOrDefault(i => i.RefEntry == r.DocumentEntry)
+            ?? _scanModel.Opened.FirstOrDefault(o => string.Equals(o.RefEntry, r.DocumentEntry, StringComparison.OrdinalIgnoreCase));
+        if (img != null) { _ = ShowScan(img, Math.Max(1, r.Page)); return; }
+        Warn($"The reference points to '{r.DocumentEntry}', which is not in this module" + (ScanSessionModel.IsScanFile(r.DocumentEntry) ? " (open it with Open scan… to see it)." : "."));
     }
 
     // ---------- rulebook search ----------
@@ -305,7 +330,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     {
         foreach (var e in Editors)
         {
-            e.DescribeRef = r => SearchPanelModel.DescribeRef(r, _moduleDocs, _index?.Documents);
+            e.DescribeRef = r => SearchPanelModel.DescribeRef(r, RefDocs, _index?.Documents);
             e.FindInRulebook = q => { FocusSearchBox(select: false); RunSearch(q); };
             e.RefreshRuleRef();
         }
@@ -334,6 +359,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _viewer.EnableUsedOnPage();
         _viewer.PageChanged += _ => RefreshUsed();
         _viewer.DocumentOpened += RefreshUsed;
+        _viewer.DocumentOpened += () => _scanPage.Enabled = _viewer.Document?.Kind == DocumentKind.Pdf;
         _viewer.UsedItemActivated += (kind, id) => Guard(() =>
         {
             switch (kind)
@@ -368,6 +394,15 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     {
         var pdfs = _s.Model.Documents.Where(d => d.Kind == DocumentKind.Pdf).GroupBy(d => d.EntryName).Select(g => g.First())
             .Select(d => (d.EntryName, d.Title, (Func<Stream>)(() => _s.Archive.OpenEntry(d.EntryName)))).ToList();
+        // PDFs opened with "Open scan…" are searchable for this session too (keyed by their full path).
+        foreach (var o in _scanModel.OpenedPdfs)
+        {
+            var path = o.Key;
+            pdfs.Add((path, o.Title, () => File.OpenRead(path)));
+        }
+        _indexBuildCts?.Cancel(); // a rebuild supersedes the running build; the old index stays usable until the new one is ready
+        _indexBuildCts = CancellationTokenSource.CreateLinkedTokenSource(_indexCts.Token);
+        var gen = ++_indexGen;
         if (pdfs.Count == 0)
         {
             _index = RulebookIndex.Empty;
@@ -378,20 +413,20 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _statusText.Text = "Indexing rulebooks… 0 %";
         var progress = new Progress<double>(f =>
         {
-            if (IsDisposed || _index != null) return;
+            if (IsDisposed || gen != _indexGen) return;
             var pct = (int)Math.Clamp(f * 100, 0, 100);
             if (pct == last) return;
             last = pct;
             _statusText.Text = $"Indexing rulebooks… {pct} %";
         });
-        _indexTask = BuildIndexAsync(pdfs, progress);
+        _indexTask = BuildIndexAsync(pdfs, progress, gen, _indexBuildCts.Token);
     }
 
-    async Task BuildIndexAsync(IReadOnlyList<(string, string, Func<Stream>)> pdfs, IProgress<double> progress)
+    async Task BuildIndexAsync(IReadOnlyList<(string, string, Func<Stream>)> pdfs, IProgress<double> progress, int gen, CancellationToken ct)
     {
         RulebookIndex ix;
         string? failed = null;
-        try { ix = await RulebookIndex.BuildAsync(_s.Archive.Sha256, pdfs, progress, _indexCts.Token); }
+        try { ix = await RulebookIndex.BuildAsync(_s.Archive.Sha256, pdfs, progress, ct); }
         catch (OperationCanceledException) { return; }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -399,7 +434,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
             ix = RulebookIndex.Empty;
             failed = "The rulebooks could not be indexed: " + ex.Message;
         }
-        if (IsDisposed || _indexCts.IsCancellationRequested) return;
+        if (IsDisposed || ct.IsCancellationRequested || gen != _indexGen) return;
         _index = ix;
         var bad = ix.Documents.Count(d => !d.Searchable);
         OnIndexReady(failed ?? $"Rulebooks indexed: {ix.Documents.Count - bad} searchable" + (bad > 0 ? $", {bad} {SearchPanelModel.NotSearchableText}" : "") + ".");
@@ -453,7 +488,14 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     void OpenHit(string entry, int page)
     {
         var doc = _s.Model.Documents.FirstOrDefault(d => d.EntryName == entry);
-        if (doc == null) { Warn($"'{entry}' is not in this module."); return; }
+        if (doc == null)
+        {
+            // A PDF opened with "Open scan…": shown as a rendered page in the scan pane.
+            if (_scanModel.Opened.FirstOrDefault(o => o.Key == entry) is { } src) { _ = ShowScan(src, page); return; }
+            Warn($"'{entry}' is not in this module.");
+            return;
+        }
+        ShowPdf();
         _viewer.Open(doc, page, SearchPanelModel.ViewerSearchTerm(_lastQuery));
     }
 
@@ -480,7 +522,246 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         MessageBox.Show(this, text, "Rules Workbench", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
+    // ---------- scans / OCR ----------
+
+    /// <summary>Module images then opened scans: the "Images" part of the document lists.</summary>
+    IReadOnlyList<ScanSource> ImageSources => _moduleImages.Concat(_scanModel.Opened).ToList();
+
+    /// <summary>Documents a rule ref can point at: the module's documents, its images and the scans opened this session.</summary>
+    IReadOnlyList<(string Entry, string Title)> RefDocs =>
+        _moduleDocs.Concat(_moduleImages.Select(i => (i.RefEntry, i.Title))).Concat(_scanModel.Opened.Select(o => (o.RefEntry, o.Title))).ToList();
+
+    void WireScans()
+    {
+        _viewer.AddToolItem(new ToolStripSeparator());
+        _viewer.AddToolItem(_scanPage);
+        _scanPage.ToolTipText = $"Render this page as an image ({ScanPane.ScanDpi} DPI) to read a chart with OCR";
+        _scanPage.Click += (_, _) => ScanGuard(() =>
+        {
+            if (_viewer.Document is not { Kind: DocumentKind.Pdf } doc) { Warn("Open a PDF page first."); return; }
+            _ = ShowScan(ScanSource.ModulePdf(doc.EntryName, doc.Title), _viewer.Page);
+        });
+        _openScan.ToolTipText = "Open a scan or photo of a chart (image or PDF) to read it with OCR";
+        _openScan.Click += (_, _) => ScanGuard(ChooseScanFile);
+        _viewer.ImageDocumentChosen += i => ScanGuard(() => { var list = ImageSources; if (i >= 0 && i < list.Count) _ = ShowScan(list[i], 1); });
+        _scan.DocumentChosen += i => ScanGuard(() =>
+        {
+            var pdfs = _viewer.PdfDocuments;
+            if (i < pdfs.Count) { ShowPdf(); _viewer.Open(pdfs[i]); return; }
+            var list = ImageSources;
+            if (i - pdfs.Count < list.Count) _ = ShowScan(list[i - pdfs.Count], 1);
+        });
+        _scan.BackToPdf += () => ScanGuard(BackToPdf);
+        _scan.ImportRequested += (tsv, src, page) => ScanGuard(() => ImportScan(tsv, src, page));
+        _tables.MakeRuleRef = RefFor;
+        RefreshDocLists();
+    }
+
+    void ScanGuard(Action a)
+    {
+        try { a(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Program.AppLog("workbench scan: " + ex);
+            _s.Log.Add(DiagnosticSeverity.Warning, "rules", "Scan failed: " + ex.Message, "");
+        }
+    }
+
+    void RefreshDocLists()
+    {
+        var titles = _moduleImages.Select(i => i.Title).Concat(_scanModel.Opened.Select(o => o.Title + " (opened)")).ToList();
+        _viewer.SetImageDocuments(titles);
+        _scan.SetDocuments(_viewer.PdfDocuments.Select(d => d.Title).ToList(), titles);
+        foreach (var e in Editors) e.RefreshRuleRef();
+    }
+
+    void ChooseScanFile()
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Open scan", Filter = ScanSessionModel.OpenScanFilter, CheckFileExists = true, Multiselect = false,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        _ = OpenScanFile(dlg.FileName);
+    }
+
+    /// <summary>Opens an image or PDF file as a scan (session only); an opened PDF is also added to the rulebook search for the session.</summary>
+    public Task OpenScanFile(string path)
+    {
+        if (!File.Exists(path)) { Warn($"'{path}' was not found."); return Task.CompletedTask; }
+        if (!ScanSessionModel.IsScanFile(path)) { Warn("Choose an image (.png .jpg .jpeg .bmp .gif .tif .tiff) or a PDF."); return Task.CompletedTask; }
+        var before = _scanModel.Opened.Count;
+        var src = _scanModel.AddFile(path);
+        if (_scanModel.Opened.Count != before)
+        {
+            RefreshDocLists();
+            if (src.IsPdf) StartIndex();
+        }
+        return ShowScan(src, 1);
+    }
+
+    /// <summary>Switches the left pane to the scan pane showing the source (a PDF page or an image).</summary>
+    public Task ShowScan(ScanSource src, int page)
+    {
+        if (!_scan.Visible) WidenForScan();
+        _viewer.Visible = false;
+        _scan.Visible = true;
+        var at = ImageSources.ToList().FindIndex(x => x.Key == src.Key);
+        var pdfAt = src.Kind == ScanSourceKind.ModulePdf ? _viewer.PdfDocuments.ToList().FindIndex(d => d.EntryName == src.Key) : -1;
+        _scan.MarkSelected(pdfAt >= 0 ? pdfAt : at >= 0 ? _viewer.PdfDocuments.Count + at : -1);
+        return _scan.ShowSource(src, page);
+    }
+
+    /// <summary>The scan pane holds the image and the OCR panel (≥ 280 px): give the left pane about 60 % of the window when it has less.</summary>
+    void WidenForScan()
+    {
+        SetSplit();
+        var want = _split.Width * 60 / 100;
+        if (_split.Width < 400 || _split.SplitterDistance >= want) return;
+        try { _split.SplitterDistance = want; }
+        catch (InvalidOperationException) { }
+    }
+
+    void ShowPdf()
+    {
+        if (!_scan.Visible) return;
+        _scan.Ocr.CancelRead("Cancelled: back to the PDF.");
+        _scan.Visible = false;
+        _viewer.Visible = true;
+    }
+
+    /// <summary>Back to PDF: a scanned module page goes back to that page in the viewer.</summary>
+    void BackToPdf()
+    {
+        var src = _scan.Source;
+        var page = _scan.Page;
+        ShowPdf();
+        if (src is { Kind: ScanSourceKind.ModulePdf } && _viewer.PdfDocuments.FirstOrDefault(d => d.EntryName == src.Key) is { } doc) _viewer.Open(doc, page);
+    }
+
+    void ImportScan(string tsv, ScanSource src, int page)
+    {
+        var (entry, refPage) = ScanSessionModel.RuleRefFor(src, page);
+        _tabs.SelectedTab = _tablesPage;
+        var id = _tables.ImportGrid(tsv, entry, refPage);
+        if (id == null) return;
+        ShowTable(id);
+        RefreshUsed();
+    }
+
     // ---------- smoke ----------
+
+    static void Pump(Func<bool> done, int seconds)
+    {
+        var until = DateTime.UtcNow.AddSeconds(seconds);
+        while (!done() && DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(15); }
+        Application.DoEvents();
+    }
+
+    /// <summary>
+    /// Smoke (--smoke-ocr): draws an invented table to scratch, opens it with the Open scan… path, selects the table region, reads it,
+    /// checks the grid, imports it into a new table (the Paste table dialog confirms itself in smoke runs) and checks the table and its
+    /// rule ref; then Scan this page on the module PDF, Back to PDF, and back to the image (its region must come back).
+    /// Returns (problem, skipped note); both null when all is well.
+    /// </summary>
+    public (string? Problem, string? Skipped) OcrSmoke()
+    {
+        if (_s.Rules == null) return ("no rules pack is loaded", null);
+        var (path, region, expected) = SmokeOcrTable.Write(AppDataRoot.Sub("smoke-ocr"));
+        Program.AppLog($"smoke: invented table image written to {path}");
+        var open = OpenScanFile(path);
+        Pump(() => open.IsCompleted && _scan.Loading.IsCompleted, 20);
+        if (_scan.Image == null) return ($"the scan did not open ({_scan.Pane.Message})", null);
+        if (!_scan.Visible || _viewer.Visible) return ("the scan pane is not shown", null);
+        if (_scan.Source?.RefEntry != Path.GetFileName(path)) return ("the opened scan is not the shown source", null);
+        Program.AppLog($"smoke: scan shown {_scan.Image.Width}×{_scan.Image.Height}; OCR panel width {_scan.Ocr.Width}");
+        if (_scan.Ocr.Width < OcrPanel.MinPanelWidth) return ($"the OCR panel is narrower than {OcrPanel.MinPanelWidth} px", null);
+        _scan.Pane.CommitRegion(region); // the same path a finished drag takes
+        if (_scanModel.GetRegion(_scan.Source.Key, 1, _scan.Image.Size) != region) return ("the region was not remembered", null);
+
+        if (OcrService.Languages().Count == 0)
+        {
+            _scan.Ocr.ClickReadForSmoke();
+            Pump(() => _scan.Ocr.LastRead.IsCompleted, 10);
+            return (_scan.Ocr.StatusText == OcrService.NoLanguageMessage ? null : "the no-language message was not shown: " + _scan.Ocr.StatusText,
+                "no OCR language is installed; Read text showed the install message, the read/import steps were skipped");
+        }
+
+        _scan.Ocr.ShowGridTab();
+        _scan.Ocr.ClickReadForSmoke();
+        Pump(() => _scan.Ocr.LastRead.IsCompleted, 60);
+        Program.AppLog("smoke: ocr status: " + _scan.Ocr.StatusText);
+        var cells = _scan.Ocr.Cells;
+        Program.AppLog("smoke: ocr grid: " + string.Join(" / ", cells.Select(r => string.Join(" | ", r))));
+        if (cells.Length != expected.Length) return ($"the grid has {cells.Length} rows, expected {expected.Length}", null);
+        int digitCells = 0, exact = 0;
+        for (var r = 0; r < expected.Length; r++)
+            for (var c = 0; c < expected[r].Length; c++)
+            {
+                var got = c < cells[r].Length ? cells[r][c] : "";
+                if (r == 0 || c == 0) { if (got != expected[r][c]) return ($"key cell r{r}c{c} reads '{got}', expected '{expected[r][c]}'", null); continue; }
+                digitCells++;
+                if (got == expected[r][c]) exact++;
+            }
+        Program.AppLog($"smoke: ocr digit cells {exact}/{digitCells} exact");
+        if (exact < 0.95 * digitCells) return ($"only {exact}/{digitCells} digit cells read exactly", null);
+
+        var before = _s.Rules.Tables.Select(t => t.Id).ToHashSet();
+        if (!_scan.Ocr.ClickImportForSmoke()) return ("Import into table… is not enabled", null);
+        Application.DoEvents();
+        var made = _s.Rules!.Tables.FirstOrDefault(t => !before.Contains(t.Id));
+        if (made == null) return ("no table was created by the import", null);
+        Program.AppLog($"smoke: imported table '{made.Name}' {made.Kind}: cols [{string.Join(", ", made.ColumnKeys)}] rows [{string.Join(", ", made.RowKeys)}]");
+        if (made.Kind != Quartermaster.Rules.TableKind.TwoD) return ("the imported table is not two-dimensional", null);
+        if (!made.ColumnKeys.SequenceEqual(expected[0].Skip(1))) return ("the imported column keys differ from the header row", null);
+        if (!made.RowKeys.SequenceEqual(expected.Skip(1).Select(r => r[0]))) return ("the imported row keys differ from the first column", null);
+        for (var r = 1; r < cells.Length; r++)
+            if (!made.Cells[r - 1].SequenceEqual(cells[r].Skip(1).Take(made.ColumnKeys.Count))) return ($"imported row {r} differs from the grid", null);
+        if (_tables.SelectedTableId != made.Id) return ("the imported table is not selected in the Tables tab", null);
+        var rr = made.RuleRefId == null ? null : _s.Rules.ById<RuleRef>(made.RuleRefId);
+        if (rr == null || rr.DocumentEntry != Path.GetFileName(path) || rr.Page != 0) return ("the imported table's rule ref is not the scan file (no page)", null);
+        var shown = SearchPanelModel.DescribeRef(rr, RefDocs, _index?.Documents);
+        Program.AppLog($"smoke: imported table rule ref reads '{shown.Text}' (link {shown.IsLink})");
+        if (!shown.IsLink) return ("the imported table's rule ref is not a link", null);
+
+        var imageSrc = _scan.Source!;
+        if (_viewer.PdfDocuments.FirstOrDefault() is { } pdf)
+        {
+            BackToPdf();
+            _viewer.Open(pdf, 1);
+            if (!_scanPage.Enabled) return ("Scan this page is disabled on a PDF", null);
+            _scanPage.PerformClick();
+            Pump(() => _scan.Loading.IsCompleted, 30);
+            if (_scan.Image == null || _scan.Source?.Kind != ScanSourceKind.ModulePdf) return ($"Scan this page did not render the PDF page ({_scan.Pane.Message})", null);
+            Program.AppLog($"smoke: scanned PDF page 1 at {ScanPane.ScanDpi} DPI: {_scan.Image.Width}×{_scan.Image.Height}");
+            if (_scan.Image.Width < 1000) return ("the rendered page is smaller than 200 DPI would give", null);
+            var cached = Directory.GetFiles(ScanCache.Folder, "*.pdf").FirstOrDefault();
+            if (cached == null) return ("the module PDF was not copied to the scan cache", null);
+            BackToPdf();
+            if (!_viewer.Visible || _scan.Visible) return ("Back to PDF did not show the PDF viewer", null);
+
+            // A PDF opened with Open scan… joins the rulebook search for the session, and its hits open in the scan pane.
+            var opened = Path.Combine(AppDataRoot.Sub("smoke-ocr"), "opened-rules.pdf");
+            File.Copy(cached, opened, true);
+            var o = OpenScanFile(opened);
+            Pump(() => o.IsCompleted && _scan.Loading.IsCompleted, 30);
+            if (_scan.Source is not { Kind: ScanSourceKind.FilePdf } fp || _scan.Image == null) return ($"the opened PDF was not shown as a scan ({_scan.Pane.Message})", null);
+            Pump(() => _indexTask is { IsCompleted: true } && _index?.Documents.Any(d => d.Entry == fp.Key) == true, 60);
+            var hit = _index?.Search("supply").FirstOrDefault(h => h.Entry == fp.Key && h.Page == 2);
+            Program.AppLog($"smoke: opened PDF indexed: {_index?.Documents.Count} document(s); hit on its page 2: {hit != null}");
+            if (hit == null) return ("the opened PDF is not searchable", null);
+            OpenHit(hit.Entry, hit.Page);
+            Pump(() => _scan.Loading.IsCompleted, 30);
+            if (_scan.Source?.Key != fp.Key || _scan.Page != 2 || _scan.Image == null) return ("a search hit in the opened PDF did not show its page in the scan pane", null);
+        }
+        var back = ShowScan(imageSrc, 1);
+        Pump(() => back.IsCompleted && _scan.Loading.IsCompleted, 20);
+        if (_scan.Pane.SelectedRegion != region) return ("the image's region was not restored", null);
+        _scan.Ocr.ShowGridTab();
+        return (null, null);
+    }
+
+    // ---------- smoke (screenshot) ----------
 
     /// <summary>Smoke: shows the named tab (tables, formulas, properties, phases); unknown or empty keeps the Tables tab.</summary>
     public void SelectTabForSmoke(string? name)

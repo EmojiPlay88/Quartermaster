@@ -68,10 +68,49 @@ sealed class PdfViewerControl : UserControl
         _pageBox.ValueChanged += (_, _) => { if (!_loading) GoToPage((int)_pageBox.Value); };
         _docs.SelectedIndexChanged += (_, _) =>
         {
-            if (!_loading && _docs.SelectedIndex >= 0 && _docs.SelectedIndex < _docList.Count) Open(_docList[_docs.SelectedIndex]);
+            if (_loading || _docs.SelectedIndex < 0) return;
+            var i = _docs.SelectedIndex;
+            if (i < _docList.Count) { Open(_docList[i]); return; }
+            var image = i - _docList.Count - 1; // after the "Images" separator
+            if (image < 0 || image >= _imageCount) { SyncBar(); return; }
+            SyncBar(); // the PDF stays the viewer's document; the host switches to the image pane
+            ImageDocumentChosen?.Invoke(image);
         };
         ShowText(_docList.Count == 0 ? "This module has no PDF documents." : "Choose a document above.");
     }
+
+    /// <summary>The non-selectable line between the PDFs and the images in the document list.</summary>
+    public const string ImagesSeparator = "──── Images ────";
+
+    int _imageCount;
+
+    /// <summary>Lists images (module image entries, opened scans) under an "Images" separator after the PDFs.</summary>
+    public void SetImageDocuments(IReadOnlyList<string> titles)
+    {
+        if (_docs == null) return;
+        _loading = true;
+        try
+        {
+            while (_docs.Items.Count > _docList.Count) _docs.Items.RemoveAt(_docs.Items.Count - 1);
+            _imageCount = titles.Count;
+            if (titles.Count > 0)
+            {
+                _docs.Items.Add(ImagesSeparator);
+                foreach (var t in titles) _docs.Items.Add(t);
+            }
+        }
+        finally { _loading = false; }
+        SyncBar();
+    }
+
+    /// <summary>An image in the document list was chosen (index into the list given to <see cref="SetImageDocuments"/>).</summary>
+    public event Action<int>? ImageDocumentChosen;
+
+    /// <summary>The PDF documents in the list, in order.</summary>
+    public IReadOnlyList<DocumentDef> PdfDocuments => _docList;
+
+    /// <summary>Adds a host button to the viewer's toolbar.</summary>
+    public void AddToolItem(ToolStripItem item) => _bar?.Items.Add(item);
 
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public DocumentDef? Document { get; private set; }

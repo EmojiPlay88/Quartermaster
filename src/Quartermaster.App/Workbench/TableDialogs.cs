@@ -57,10 +57,10 @@ sealed class PasteTableDialog : Form
     readonly Button _ok = new() { Text = "OK", DialogResult = DialogResult.OK, Width = 75 };
     PastedGrid _grid = new(new(), new(), new());
 
-    PasteTableDialog(string clipboard)
+    PasteTableDialog(string clipboard, string? title = null, string? targetDescription = null)
     {
         _text = clipboard;
-        Text = "Paste table from clipboard";
+        Text = title ?? "Paste table from clipboard";
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(520, 360);
@@ -71,7 +71,7 @@ sealed class PasteTableDialog : Form
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 75 };
         bottom.Controls.Add(cancel);
         bottom.Controls.Add(_ok);
-        var note = new Label { Dock = DockStyle.Bottom, Height = 18, Text = "OK replaces the rows, columns and cells of the selected table.", Padding = new Padding(6, 0, 0, 0) };
+        var note = new Label { Dock = DockStyle.Bottom, Height = 18, Text = targetDescription ?? "OK replaces the rows, columns and cells of the selected table.", Padding = new Padding(6, 0, 0, 0) };
         Controls.Add(_preview);
         Controls.Add(note);
         Controls.Add(bottom);
@@ -106,6 +106,21 @@ sealed class PasteTableDialog : Form
     public static PastedGrid? Ask(IWin32Window owner, string clipboard)
     {
         using var d = new PasteTableDialog(clipboard);
+        return d.ShowDialog(owner) == DialogResult.OK ? d._grid : null;
+    }
+
+    /// <summary>
+    /// Previews prefilled TSV (an OCR grid) with the usual header/key checkboxes; <paramref name="targetDescription"/> says where OK
+    /// puts the rows. Null when cancelled. Smoke runs confirm with the default checkboxes without showing the dialog.
+    /// </summary>
+    public static PastedGrid? Ask(IWin32Window owner, string tsv, string targetDescription)
+    {
+        using var d = new PasteTableDialog(tsv, "Import into table", targetDescription);
+        if (Program.Smoke)
+        {
+            Program.AppLog($"smoke: paste table dialog auto-confirmed ({targetDescription})");
+            return d._grid.Cells.Count > 0 ? d._grid : null;
+        }
         return d.ShowDialog(owner) == DialogResult.OK ? d._grid : null;
     }
 }

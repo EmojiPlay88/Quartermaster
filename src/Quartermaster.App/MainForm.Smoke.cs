@@ -101,6 +101,29 @@ sealed partial class MainForm
         wb.SaveScreenshot(_opts.ScreenshotSearch);
     }
 
+    /// <summary>
+    /// Smoke (--smoke-ocr): opens the workbench, opens an invented table image as a scan, reads it, imports it into a new table and
+    /// checks it (skips the read with a note when Windows has no OCR language); --screenshot-ocr saves the workbench afterwards.
+    /// </summary>
+    void SmokeOcr()
+    {
+        if (_session?.Rules == null) { Program.AppLog("smoke: ocr FAILED: no rules pack is loaded"); Program.ExitCode = 1; return; }
+        ShowWorkbench();
+        if (!_benches.TryGetValue("workbench", out var w) || w.IsDisposed || w is not WorkbenchWindow wb)
+        {
+            Program.AppLog("smoke: ocr FAILED: the workbench did not open");
+            Program.ExitCode = 1;
+            return;
+        }
+        wb.WindowState = FormWindowState.Normal;
+        wb.Size = new Size(1280, 760); // room for the image, the OCR panel and the Tables tab
+        var (problem, skipped) = wb.OcrSmoke();
+        if (skipped != null) Program.AppLog("smoke: ocr SKIPPED (note): " + skipped);
+        Program.AppLog("smoke: scan pane and OCR import " + (problem == null ? "ok" : "FAILED: " + problem));
+        if (problem != null) Program.ExitCode = 1;
+        if (_opts.ScreenshotOcr != null) wb.SaveScreenshot(_opts.ScreenshotOcr);
+    }
+
     /// <summary>Smoke: the Tables tree must list exactly the pack's tables and formulas.</summary>
     void SmokeTablesTree()
     {
@@ -207,6 +230,7 @@ sealed partial class MainForm
         if (_opts.ScreenshotExport != null) Guard(SmokeExport);
         if (_opts.SmokeTurns || _opts.ScreenshotTurns != null) Guard(SmokeTurns);
         if (_opts.SmokeSearch || _opts.ScreenshotSearch != null) Guard(SmokeSearch);
+        if (_opts.SmokeOcr || _opts.ScreenshotOcr != null) Guard(SmokeOcr);
         if (_opts.SmokeLauncher) BackToLauncher(); else Close();
     }
 
