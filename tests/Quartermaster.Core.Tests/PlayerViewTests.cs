@@ -185,6 +185,22 @@ public class PlayerViewTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void StampAndPieceSide_BothMustBeHeld()
+    {
+        var pack = Pack();
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        RunFormula(s, pack, "f-peek", "r1", 5317, null, "blue");   // stamped Blue, but on a Red unit
+        foreach (var held in new[] { Blue, Red })
+        {
+            var v = PlayerView.For(s, pack, Model, held);
+            Assert.DoesNotContain("5317", Json(v));
+            Assert.Empty(v.DiceHistory[0].Results);
+        }
+        Assert.Contains("5317", Json(PlayerView.For(s, pack, Model, Both)));
+    }
+
+    [Fact]
     public void DeletedPiece_LogLinesHidden()
     {
         var pack = Pack();

@@ -206,12 +206,22 @@ public static class PlayerView
             return null;
         }
 
-        /// <summary>The explicit owner: the SideId stamp, else the side of an existing PieceId (null side = a public unit).</summary>
+        /// <summary>
+        /// The explicit owner: the SideId stamp, else the side of an existing PieceId (null side = a public unit). With both a stamp and a
+        /// unit of a known side, the line belongs to both: the owner is whichever of them is not held (fail closed).
+        /// </summary>
         private bool ExplicitOwner(LogEntry l, out string? side)
         {
             side = null;
-            if (!string.IsNullOrWhiteSpace(l.SideId)) { side = l.SideId; return true; }
-            return l.PieceId != null && _sideOf.TryGetValue(l.PieceId, out side);
+            string? pieceSide = null;
+            var hasPiece = l.PieceId != null && _sideOf.TryGetValue(l.PieceId, out pieceSide);
+            if (!string.IsNullOrWhiteSpace(l.SideId))
+            {
+                side = pieceSide != null && NotHeld(pieceSide) ? pieceSide : l.SideId;
+                return true;
+            }
+            side = pieceSide;
+            return hasPiece;
         }
 
         private bool IsPrivateRoll(string? text) =>
