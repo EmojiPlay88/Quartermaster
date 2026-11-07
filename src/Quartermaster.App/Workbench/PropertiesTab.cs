@@ -27,6 +27,10 @@ sealed class PropertiesTab : UserControl
         _props.Columns.Add(Col("Default", 50));
         _props.Columns.Add(new DataGridViewComboBoxColumn { HeaderText = "SheetField", FlatStyle = FlatStyle.Flat, FillWeight = 80, DisplayStyle = DataGridViewComboBoxDisplayStyle.Nothing, SortMode = DataGridViewColumnSortMode.NotSortable });
         _props.Columns.Add(Col("AppliesTo", 120));
+        var outliner = new DataGridViewComboBoxColumn { HeaderText = "Outliner", FlatStyle = FlatStyle.Flat, FillWeight = 60, DisplayStyle = DataGridViewComboBoxDisplayStyle.Nothing, SortMode = DataGridViewColumnSortMode.NotSortable };
+        outliner.Items.AddRange(Enum.GetNames<OutlinerAggregate>().Cast<object>().ToArray());
+        _props.Columns.Add(outliner);
+        _props.Columns.Add(Col("Notes", 160));
         _holders.Columns.Add(Col("Name", 80));
         _holders.Columns.Add(Col("Notes", 200));
         foreach (var g in new[] { _props, _holders })
@@ -36,7 +40,7 @@ sealed class PropertiesTab : UserControl
             g.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             g.DataError += (_, e) => e.ThrowException = false;
         }
-        _props.CurrentCellDirtyStateChanged += (_, _) => { if (_props.IsCurrentCellDirty && _props.CurrentCell is DataGridViewComboBoxCell && _props.CurrentCell.ColumnIndex == 1) _props.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+        _props.CurrentCellDirtyStateChanged += (_, _) => { if (_props.IsCurrentCellDirty && _props.CurrentCell is DataGridViewComboBoxCell && _props.CurrentCell.ColumnIndex is 1 or 5) _props.CommitEdit(DataGridViewDataErrorContexts.Commit); };
         _props.EditingControlShowing += (_, e) =>
         {
             if (_props.CurrentCell?.ColumnIndex == 3 && e.Control is ComboBox cb)
@@ -57,6 +61,7 @@ sealed class PropertiesTab : UserControl
         {
             if (e.ColumnIndex == 4 && e.RowIndex >= 0 && FormulaEdit.SyntaxProblem(Convert.ToString(_props[4, e.RowIndex].Value)) is { } p) e.ToolTipText = p;
             else if (e.ColumnIndex == 3) e.ToolTipText = "A property-sheet row name from the module's pieces; seeds the property from that row.";
+            else if (e.ColumnIndex == 5) e.ToolTipText = "How the outliner totals this property per group: None hides it; Sum, Min or Average show a column.";
         };
         _props.CellFormatting += (_, e) =>
         {
@@ -165,7 +170,7 @@ sealed class PropertiesTab : UserControl
             if (pack == null) return;
             foreach (var p in pack.Properties)
             {
-                var i = _props.Rows.Add(p.Name, p.Scope.ToString(), p.Default.ToString("R", CultureInfo.InvariantCulture), "", p.AppliesTo ?? "");
+                var i = _props.Rows.Add(p.Name, p.Scope.ToString(), p.Default.ToString("R", CultureInfo.InvariantCulture), "", p.AppliesTo ?? "", p.Outliner.ToString(), p.Notes ?? "");
                 _props.Rows[i].Cells[3] = SheetCell(p.SheetField ?? "");
                 _propIds.Add(p.Id);
             }
@@ -240,6 +245,11 @@ sealed class PropertiesTab : UserControl
                 if (FormulaEdit.SyntaxProblem(text) is { } problem) _status.Text = "Applies to: " + problem;
                 _props.InvalidateRow(row);
                 break;
+            case 5:
+                if (!Enum.TryParse<OutlinerAggregate>(text, out var oa)) return;
+                Commit(p => Edit(p, id, x => x with { Outliner = oa }));
+                break;
+            case 6: Commit(p => Edit(p, id, x => x with { Notes = text.Length == 0 ? null : text })); break;
         }
     }
 

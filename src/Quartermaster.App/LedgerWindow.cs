@@ -19,6 +19,8 @@ sealed class LedgerWindow : Form
     readonly ToolStripButton _refresh = new("Refresh") { DisplayStyle = ToolStripItemDisplayStyle.Text };
     readonly DataGridView _grid = new();
     readonly BreakdownTip _tip = new();
+    readonly ToolTip _headerTip = new() { ShowAlways = true, UseAnimation = false, UseFading = false, AutoPopDelay = 30000 };
+    (int Col, bool Shown) _headerAt = (-1, false);
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 200 };
     IReadOnlyList<PropertyDef> _cols = Array.Empty<PropertyDef>();
     List<LedgerRow> _rows = new();
@@ -54,6 +56,10 @@ sealed class LedgerWindow : Form
         _grid.CellValuePushed += OnCellValuePushed;
         _grid.CellFormatting += OnCellFormatting;
         _tip.Track(_grid, BreakdownFor);
+        // The breakdown tip turns the grid's own tooltips off, so property notes on the column headers get their own tooltip.
+        _grid.CellMouseMove += (_, e) => Run(() => HeaderTip(e.RowIndex, e.ColumnIndex));
+        _grid.MouseLeave += (_, _) => HideHeaderTip();
+        _grid.Scroll += (_, _) => HideHeaderTip();
         _grid.ColumnHeaderMouseClick += (_, e) => Run(() => SortBy(e.ColumnIndex));
         _grid.DataError += (_, e) => e.ThrowException = false;
 
@@ -123,7 +129,7 @@ sealed class LedgerWindow : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { Unhook(); _debounce.Dispose(); _tip.Dispose(); }
+        if (disposing) { Unhook(); _debounce.Dispose(); _tip.Dispose(); _headerTip.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -149,6 +155,22 @@ sealed class LedgerWindow : Form
         _grid.Invalidate();
     }
 
+    void HeaderTip(int row, int col)
+    {
+        if (row >= 0 || col < 0 || col >= _grid.Columns.Count || _grid.Columns[col].ToolTipText is not { Length: > 0 } text) { HideHeaderTip(); return; }
+        if (_headerAt == (col, true)) return;
+        _headerAt = (col, true);
+        var p = _grid.PointToClient(Cursor.Position);
+        _headerTip.Show(text, _grid, p.X + 12, p.Y + 18);
+    }
+
+    void HideHeaderTip()
+    {
+        if (!_headerAt.Shown) return;
+        _headerAt = (-1, false);
+        try { _headerTip.Hide(_grid); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+    }
+
     void RebuildColumns()
     {
         _grid.Columns.Clear();
@@ -157,7 +179,7 @@ sealed class LedgerWindow : Form
         foreach (var c in _cols)
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                HeaderText = c.Name, Width = 90, SortMode = DataGridViewColumnSortMode.Programmatic,
+                HeaderText = c.Name, ToolTipText = c.Notes ?? "", Width = 90, SortMode = DataGridViewColumnSortMode.Programmatic,
                 DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight },
             });
         if (_sortCol >= _grid.Columns.Count) _sortCol = -1;

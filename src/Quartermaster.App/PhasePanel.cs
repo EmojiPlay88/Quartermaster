@@ -19,6 +19,7 @@ sealed class PhasePanel : UserControl
     readonly Action<string, int> _openDoc;
     readonly PhaseWatcher _watch;
 
+    readonly ToolTip _notesTip = new() { ShowAlways = true, UseAnimation = false, UseFading = false, AutoPopDelay = 30000 };
     readonly Label _title = new() { Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft };
     readonly TextBox _instructions = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BackColor = SystemColors.Window };
     readonly LinkLabel _ref = new() { Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft, Visible = false };
@@ -126,6 +127,7 @@ sealed class PhasePanel : UserControl
             _title.Text = v.BeforeStart ? "Before turn 1" : v.Current is { } cur
                 ? (v.SideName != null ? $"{v.SideName} player — {cur.Name}" : cur.Name) : "";
             _instructions.Text = (v.Current?.Instructions ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n");
+            _notesTip.SetToolTip(_title, v.Current?.Notes ?? "");
             ShowRef(v);
             ShowWarnings(v);
             ShowDecisions(v);
@@ -245,7 +247,7 @@ sealed class PhasePanel : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _watch.Dispose(); _title.Font.Dispose(); }
+        if (disposing) { _watch.Dispose(); _title.Font.Dispose(); _notesTip.Dispose(); }
         base.Dispose(disposing);
     }
 }

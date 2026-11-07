@@ -13,11 +13,12 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     readonly PdfViewerControl _viewer;
     readonly SplitContainer _split = new() { Dock = DockStyle.Fill };
     readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
-    readonly TabPage _tablesPage = new("Tables"), _formulasPage = new("Formulas"), _propsPage = new("Properties & Holders"), _phasesPage = new("Phases");
+    readonly TabPage _tablesPage = new("Tables"), _formulasPage = new("Formulas"), _propsPage = new("Properties & Holders"), _phasesPage = new("Phases"), _alertsPage = new("Alerts");
     readonly TablesTab _tables;
     readonly FormulasTab _formulas;
     readonly PropertiesTab _props;
     readonly PhasesTab _phasesTab;
+    readonly AlertsTab _alertsTab;
     readonly ListView _issues = new()
     {
         Dock = DockStyle.Bottom, Height = 110, View = View.Details, FullRowSelect = true, HideSelection = false, MultiSelect = false,
@@ -42,7 +43,9 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _propsPage.Controls.Add(_props);
         _phasesTab = new PhasesTab(s, LinkCurrentPage, ShowRule) { Dock = DockStyle.Fill };
         _phasesPage.Controls.Add(_phasesTab);
-        _tabs.TabPages.AddRange(new[] { _tablesPage, _formulasPage, _propsPage, _phasesPage });
+        _alertsTab = new AlertsTab(s) { Dock = DockStyle.Fill };
+        _alertsPage.Controls.Add(_alertsTab);
+        _tabs.TabPages.AddRange(new[] { _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage });
         _split.Panel1.Controls.Add(_viewer);
         _split.Panel2.Controls.Add(_tabs);
 
@@ -143,6 +146,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         if (p.ById<TableDef>(i.EntityId) != null) { _tabs.SelectedTab = _tablesPage; _tables.SelectTable(i.EntityId); }
         else if (p.ById<FormulaDef>(i.EntityId) != null) { _tabs.SelectedTab = _formulasPage; _formulas.SelectFormula(i.EntityId); }
         else if (p.ById<PhaseDef>(i.EntityId) != null) ShowPhase(i.EntityId);
+        else if (p.ById<AlertDef>(i.EntityId) != null) { _tabs.SelectedTab = _alertsPage; _alertsTab.SelectAlert(i.EntityId); }
         else if (p.ById<PropertyDef>(i.EntityId) != null) { _tabs.SelectedTab = _propsPage; _props.SelectProperty(i.EntityId); }
         else if (p.ById<HolderDef>(i.EntityId) != null) { _tabs.SelectedTab = _propsPage; _props.SelectHolder(i.EntityId); }
     }
@@ -240,7 +244,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     /// <summary>Smoke: shows the named tab (tables, formulas, properties, phases); unknown or empty keeps the Tables tab.</summary>
     public void SelectTabForSmoke(string? name)
     {
-        _tabs.SelectedTab = name?.ToLowerInvariant() switch { "formulas" => _formulasPage, "properties" => _propsPage, "phases" => _phasesPage, _ => _tablesPage };
+        _tabs.SelectedTab = name?.ToLowerInvariant() switch { "formulas" => _formulasPage, "properties" => _propsPage, "phases" => _phasesPage, "alerts" => _alertsPage, _ => _tablesPage };
         if (_tabs.SelectedTab == _formulasPage && _formulas.SelectedFormulaId == null) Program.AppLog("smoke: no formula to show");
     }
 
