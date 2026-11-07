@@ -4,7 +4,7 @@ using Quartermaster.Render;
 namespace Quartermaster.App;
 
 /// <summary>
-/// Calls <c>changed</c> on the UI thread, debounced 150 ms, whenever the game changes, is replaced, or the rules pack changes.
+/// Calls <c>changed</c> on the UI thread, debounced (150 ms unless <c>debounceMs</c> says otherwise), whenever the game changes, is replaced, or the rules pack changes.
 /// Shared by the tracker strip and the phase panel. Never throws into the game's event.
 /// </summary>
 sealed class PhaseWatcher : IDisposable
@@ -16,9 +16,10 @@ sealed class PhaseWatcher : IDisposable
     GameSession? _attached;
     bool _disposed;
 
-    public PhaseWatcher(Control host, ModuleSession s, Action changed)
+    public PhaseWatcher(Control host, ModuleSession s, Action changed, int debounceMs = 150)
     {
         _host = host; _s = s; _changed = changed;
+        _debounce.Interval = debounceMs;
         _debounce.Tick += (_, _) =>
         {
             _debounce.Stop();

@@ -71,6 +71,7 @@ sealed partial class MainForm
         _history.Rewound += OnHistoryRewound;
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);
         _phaseDock!.Create(new PhasePanel(session, c, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
+        CreateAlerts(session);
         RefreshStrip();
         UpdatePhaseUi();
     }
@@ -86,6 +87,7 @@ sealed partial class MainForm
         _history = null;
         RefreshHistoryUi();
         _strip.Visible = false;
+        DestroyAlerts();
     }
 
     void RefreshStrip()
@@ -98,13 +100,15 @@ sealed partial class MainForm
     {
         Controls.SetChildIndex(_menu, Controls.Count - 1);
         Controls.SetChildIndex(_toolbar, Controls.Count - 2);
-        Controls.SetChildIndex(_strip, Controls.Count - 3);
+        Controls.SetChildIndex(_alertBar, Controls.Count - 3);
+        Controls.SetChildIndex(_strip, Controls.Count - 4);
     }
 
     /// <summary>Shows the strip while a game and a rules pack exist; shows the dock only when the pack has phases.</summary>
     void UpdatePhaseUi()
     {
         _strip.Visible = _session?.Game != null && _session.Rules != null;
+        UpdateAlertBarVisible();
         FixTopOrder();
         _viewPhases.Enabled = _session?.Game != null && _session.Rules is { Phases.Count: > 0 };
         _phaseDock?.Apply();

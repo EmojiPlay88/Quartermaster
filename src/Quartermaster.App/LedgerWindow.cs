@@ -203,6 +203,18 @@ sealed class LedgerWindow : Form
         catch (InvalidOperationException) { return null; }
     }
 
+    /// <summary>Selects and scrolls to the row of a holder (used by the alert bar). Clears the filter first so the row is visible.</summary>
+    public void SelectHolder(string holderId)
+    {
+        try
+        {
+            var key = LedgerKey.Holder(holderId);
+            if (_rows.FindIndex(r => r.Key == key) < 0 && _filter.Text.Length > 0) { _filter.Text = ""; Reload(); }
+            Restore(new HashSet<string> { key }, key);
+        }
+        catch (InvalidOperationException) { }
+    }
+
     void Restore(HashSet<string> keys, string? firstKey)
     {
         if (_rows.Count == 0) return;

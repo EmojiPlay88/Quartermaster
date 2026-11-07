@@ -139,6 +139,7 @@ sealed class DisplayTab : SettingsTab
     readonly NumericUpDown _label = Num(6, 20);
     readonly Panel _swatch = new() { Width = 40, Height = 20, BorderStyle = BorderStyle.FixedSingle };
     readonly NumericUpDown _tabMin = Num(40, 400), _tabMax = Num(60, 600);
+    readonly CheckBox _alertBar = Check("Show alert bar");
     string _color = "#FFD700";
 
     public override string Title => "Display";
@@ -160,6 +161,7 @@ sealed class DisplayTab : SettingsTab
         Row(t, "Selection highlight colour:", colour);
         Row(t, "Document tab minimum width:", _tabMin);
         Row(t, "Document tab maximum width:", _tabMax);
+        Full(t, _alertBar);
         return t;
     }
 
@@ -176,6 +178,7 @@ sealed class DisplayTab : SettingsTab
         SetColor(s.HighlightColor);
         Set(_tabMin, s.TabMinWidth);
         Set(_tabMax, s.TabMaxWidth);
+        _alertBar.Checked = s.AlertBarVisible;
     }
 
     public override Settings Collect(Settings s)
@@ -184,7 +187,7 @@ sealed class DisplayTab : SettingsTab
         return s with
         {
             GridDefault = (GridMode)Math.Max(0, _grid.SelectedIndex), LabelFontSize = (int)_label.Value, HighlightColor = _color,
-            TabMinWidth = min, TabMaxWidth = Math.Max(min, (int)_tabMax.Value),
+            TabMinWidth = min, TabMaxWidth = Math.Max(min, (int)_tabMax.Value), AlertBarVisible = _alertBar.Checked,
         };
     }
 }
