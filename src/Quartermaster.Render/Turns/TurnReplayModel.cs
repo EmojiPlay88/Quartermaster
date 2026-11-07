@@ -146,11 +146,14 @@ public sealed class TurnReplayModel
         EndMatches = string.Equals(StateHash.Of(_game.State), _t.EndHash, StringComparison.Ordinal);
         _game.Rebase();
         _game.MarkTurnBase();
-        _identity.RecordPlayed(_t.StartHash);
-        try { _identity.Save(); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        if (EndMatches)   // a mismatched turn may be fixed and resent from the same start: it is not "already played"
         {
-            _s.Log.Add(DiagnosticSeverity.Warning, "turns", $"Could not remember the replayed turn: {ex.Message}");
+            _identity.RecordPlayed(_t.StartHash);
+            try { _identity.Save(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _s.Log.Add(DiagnosticSeverity.Warning, "turns", $"Could not remember the replayed turn: {ex.Message}");
+            }
         }
         var st = _game.State;
         IReadOnlySet<string>? sides;

@@ -322,6 +322,7 @@ public sealed class ModuleSession : IDisposable
         if (Game == null) throw new InvalidOperationException("There is no game to save.");
         if (IsGuest) throw new InvalidOperationException(GuestSaveText);
         if (IsViewerCopy) throw new InvalidOperationException(ViewerCopyText);
+        RequireNotReplaying();
         if (Rules != null) Game.RulesSha256 = SafeHash(Rules) ?? Game.RulesSha256;
         NativeSave.Write(path, Game);
     }
@@ -331,6 +332,7 @@ public sealed class ModuleSession : IDisposable
     public void NewRules(string name)
     {
         RequireNoGuestRules();
+        RequireNotReplaying();
         Commit(RulesPackIo.CreateEmpty(name, Archive.Sha256), null, dirty: true);
     }
 
@@ -346,6 +348,7 @@ public sealed class ModuleSession : IDisposable
     public void OpenRules(string path)
     {
         RequireNoGuestRules();
+        RequireNotReplaying();
         var pack = RulesPackIo.Load(path);
         Commit(pack, path, dirty: false);
         if (!string.Equals(pack.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -373,6 +376,7 @@ public sealed class ModuleSession : IDisposable
     public void UpdateRules(Func<RulesPack, RulesPack> edit)
     {
         RequireNoGuestRules();
+        RequireNotReplaying();
         var current = Rules ?? throw new InvalidOperationException("There are no rules to edit.");
         var edited = edit(current);
         var next = edited with
@@ -394,6 +398,7 @@ public sealed class ModuleSession : IDisposable
 
     private void Commit(RulesPack pack, string? path, bool dirty)
     {
+        RequireNotReplaying();
         var runner = new FormulaRunner(pack, Model, _roller);
         Rules = pack;
         RulesPath = path;
@@ -449,7 +454,7 @@ public sealed class ModuleSession : IDisposable
     /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
     public void SeedLedgers()
     {
-        if (Game == null || Rules == null || IsGuest || IsViewerCopy) return;   // guests never execute commands; a viewer copy is read-only
+        if (Game == null || Rules == null || IsGuest || IsViewerCopy || IsReplaying) return;   // a turn being replayed stays the sender's   // guests never execute commands; a viewer copy is read-only
         try
         {
             var seed = LedgerSeeder.BuildSeeds(Game.State, Rules, _ => true, Model, Log);
@@ -493,8 +498,8 @@ public sealed class ModuleSession : IDisposable
     /// <summary>True when the open game is a viewer copy (read-only; every action is blocked).</summary>
     public bool IsViewerCopy => _game?.ViewerCopy == true;
 
-    /// <summary>False for a guest and for a viewer copy.</summary>
-    public bool CanSave => Game != null && !IsGuest && !IsViewerCopy;
+    /// <summary>False for a guest, a viewer copy and a half-replayed turn (the game opened before the turn is the last save).</summary>
+    public bool CanSave => Game != null && !IsGuest && !IsViewerCopy && !IsReplaying;
 
     /// <summary>The banner shown over a viewer copy; null for any other game.</summary>
     public string? ViewerBanner => IsViewerCopy ? ViewerCopyText : null;
@@ -582,6 +587,12 @@ public sealed class ModuleSession : IDisposable
     /// step). Cleared when the replay finishes or fails, and whenever another game replaces the replayed one.
     /// </summary>
     public bool IsReplaying { get; private set; }
+
+    /// <summary>No rules change and no save while a turn is half-replayed.</summary>
+    private void RequireNotReplaying()
+    {
+        if (IsReplaying) throw new InvalidOperationException(ReplayingText);
+    }
 
     /// <summary>Opens a received turn for step replay: the open game is replaced (as when opening a save) by the turn's start.</summary>
     public TurnReplayModel OpenTurn(TurnFile turn, string localPlayerId, TurnIdentity? identity = null) =>

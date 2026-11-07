@@ -359,8 +359,9 @@ public class TurnTests : IDisposable
             id.UseMailbox = true;
             id.SetPassword("hunter2");
             for (int i = 0; i < TurnIdentity.MaxPlayed + 5; i++) id.RecordPlayed("h" + i);
+            Assert.True(id.SetPassword("hunter2"));
             id.Save();
-            Assert.False(File.Exists(id.FilePath + ".tmp"));
+            Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(id.FilePath)!, "*.tmp"));
             Assert.DoesNotContain("hunter2", File.ReadAllText(id.FilePath));
 
             var back = TurnIdentity.Load(gameId, null, new FakeProtector());
@@ -378,13 +379,124 @@ public class TurnTests : IDisposable
         finally { Environment.SetEnvironmentVariable(AppDataRoot.EnvVar, old); }
     }
 
-    [Fact]
+    [WindowsFact]
     public void Dpapi_RoundTrip_CurrentUser()
     {
-        if (!OperatingSystem.IsWindows()) return;
         var p = DpapiProtector.Instance.Protect("secret"u8.ToArray());
         Assert.NotEqual("secret"u8.ToArray(), p);
         Assert.Equal("secret"u8.ToArray(), DpapiProtector.Instance.Unprotect(p));
+    }
+
+    private sealed class BrokenProtector : IPasswordProtector
+    {
+        public byte[] Protect(byte[] plain) => throw new System.ComponentModel.Win32Exception(5);
+        public byte[] Unprotect(byte[] p) => throw new System.ComponentModel.Win32Exception(5);
+    }
+
+    [Fact]
+    public void Identity_ProtectorFails_PasswordNotSaved_NeverThrows()
+    {
+        var id = TurnIdentity.Load(Guid.NewGuid().ToString("N"), Root("x"), new BrokenProtector());
+        Assert.False(id.SetPassword("pw"));
+        Assert.Null(id.ProtectedPassword);
+        id.ProtectedPassword = new byte[] { 1, 2 };
+        Assert.Null(id.GetPassword());
+        Assert.True(id.SetPassword(""));
+        Assert.Null(id.ProtectedPassword);
+    }
+
+    [Fact]
+    public void Identity_TooLargeFile_ReadsAsEmpty()
+    {
+        var gameId = Guid.NewGuid().ToString("N");
+        var id = Identity("big", gameId, "p1");
+        id.Save();
+        File.WriteAllText(id.FilePath, "{\"LocalPlayerId\":\"p1\",\"Relay\":\"" + new string('x', (int)TurnIdentity.MaxFileBytes) + "\"}");
+        Assert.Null(Identity("big", gameId).LocalPlayerId);
+    }
+
+    [Fact]
+    public void Identity_TwoInstances_PlayedHashesMerge()
+    {
+        var gameId = Guid.NewGuid().ToString("N");
+        var a = Identity("merge", gameId);
+        var b = Identity("merge", gameId);
+        a.RecordPlayed("ha");
+        a.Save();
+        b.RecordPlayed("hb");
+        b.Save();
+        var back = Identity("merge", gameId);
+        Assert.Contains("ha", back.PlayedStartHashes);
+        Assert.Contains("hb", back.PlayedStartHashes);
+        Assert.Contains("ha", b.PlayedStartHashes);   // the saving instance sees the union too
+
+        for (int i = 0; i < TurnIdentity.MaxPlayed; i++) a.RecordPlayed("n" + i);
+        a.Save();
+        var capped = Identity("merge", gameId);
+        Assert.Equal(TurnIdentity.MaxPlayed, capped.PlayedStartHashes.Count);
+        Assert.Contains("n" + (TurnIdentity.MaxPlayed - 1), capped.PlayedStartHashes);
+    }
+
+    [Fact]
+    public void Replay_EndMismatch_NotRecordedAsPlayed()
+    {
+        var (_, t) = AliceTurn();
+        var bob = Open();
+        var model = bob.OpenTurn(t with { EndHash = new string('0', 64) }, Bob.Id, Identity("bob", t.GameId));
+        model.PlayAll();
+        Assert.True(model.Done);
+        Assert.False(model.EndMatches);
+        Assert.Null(model.Error);
+        Assert.DoesNotContain(t.StartHash, Identity("bob", t.GameId).PlayedStartHashes);
+        Assert.Equal("The replayed turn does not match the sender's game.", TurnReplayModel.EndMismatchText);
+    }
+
+    [Fact]
+    public void Replay_RulesChangesRefusedWhilePaused()
+    {
+        var (_, t) = AliceTurn();
+        var bob = Open();
+        bob.NewRules("t");
+        var model = bob.OpenTurn(t, Bob.Id, Identity("bob", t.GameId));
+        model.Next();
+        var hash = StateHash.Of(bob.Game!.State);
+        var rules = bob.Rules;
+        var pack = Path.Combine(_tmp, "pack.qrules");
+        Assert.Equal(ModuleSession.ReplayingText,
+            Assert.Throws<InvalidOperationException>(() => bob.UpdateRules(_ => PhaseFixture.Pack(bob.Archive.Sha256))).Message);
+        Assert.Equal(ModuleSession.ReplayingText, Assert.Throws<InvalidOperationException>(() => bob.NewRules("other")).Message);
+        Assert.Equal(ModuleSession.ReplayingText, Assert.Throws<InvalidOperationException>(() => bob.OpenRules(pack)).Message);
+        bob.SeedLedgers();
+        Assert.Same(rules, bob.Rules);
+        Assert.Equal(hash, StateHash.Of(bob.Game!.State));
+        model.PlayAll();
+        Assert.True(model.EndMatches);
+    }
+
+    [Fact]
+    public void Replay_HalfReplayedGame_CannotBeSaved()
+    {
+        var (_, t) = AliceTurn();
+        var bob = Open();
+        var model = bob.OpenTurn(t, Bob.Id, Identity("bob", t.GameId));
+        model.Next();
+        Assert.False(bob.CanSave);
+        var path = Path.Combine(_tmp, "half.qsave");
+        Assert.Equal(ModuleSession.ReplayingText, Assert.Throws<InvalidOperationException>(() => bob.SaveNative(path)).Message);
+        Assert.False(File.Exists(path));
+        model.PlayAll();
+        Assert.True(bob.CanSave);
+        bob.SaveNative(path);
+        Assert.True(File.Exists(path));
+    }
+}
+
+/// <summary>A fact that runs only on Windows (skipped elsewhere).</summary>
+public sealed class WindowsFactAttribute : FactAttribute
+{
+    public WindowsFactAttribute()
+    {
+        if (!OperatingSystem.IsWindows()) Skip = "Windows only (DPAPI).";
     }
 }
 

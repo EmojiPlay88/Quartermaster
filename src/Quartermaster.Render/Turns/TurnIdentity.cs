@@ -86,6 +86,9 @@ public sealed class TurnIdentity
 
     private const int MaxGameIdLength = 64;
 
+    /// <summary>A larger identity file is not read (it reads as empty).</summary>
+    public const long MaxFileBytes = 1024 * 1024;
+
     private readonly List<string> _played = new();
     private readonly HashSet<string> _playedSet = new(StringComparer.Ordinal);
     private readonly IPasswordProtector _protector;
@@ -130,34 +133,58 @@ public sealed class TurnIdentity
         if (!IsValidGameId(gameId)) throw new InvalidDataException("This game has an invalid game id.");
         var id = new TurnIdentity(gameId, Path.Combine(root ?? DefaultRoot, gameId.ToLowerInvariant() + ".json"),
             protector ?? DpapiProtector.Instance);
-        try
-        {
-            if (!File.Exists(id.FilePath)) return id;
-            var dto = JsonSerializer.Deserialize<Dto>(File.ReadAllBytes(id.FilePath));
-            if (dto == null) return id;
-            id.LocalPlayerId = dto.LocalPlayerId;
-            id.Relay = dto.Relay;
-            id.UseMailbox = dto.UseMailbox;
-            id.ProtectedPassword = dto.ProtectedPassword;
-            foreach (var h in dto.PlayedStartHashes ?? new List<string>())
-                if (h != null) id.RecordPlayed(h);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
-        {
-            // An unreadable identity is forgotten: the player is asked again.
-        }
+        if (ReadDto(id.FilePath) is not { } dto) return id;
+        id.LocalPlayerId = dto.LocalPlayerId;
+        id.Relay = dto.Relay;
+        id.UseMailbox = dto.UseMailbox;
+        id.ProtectedPassword = dto.ProtectedPassword;
+        foreach (var h in dto.PlayedStartHashes ?? new List<string>())
+            if (h != null) id.RecordPlayed(h);
         return id;
     }
 
-    /// <summary>Writes the identity (temp file, then replace). Throws on I/O errors.</summary>
+    /// <summary>The stored file, or null when it is missing, larger than <see cref="MaxFileBytes"/> or unreadable (then forgotten).</summary>
+    private static Dto? ReadDto(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length > MaxFileBytes) return null;
+            return JsonSerializer.Deserialize<Dto>(File.ReadAllBytes(path));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes the identity (unique temp file, then replace). Played start hashes already on disk are kept (union, newest last, capped
+    /// at <see cref="MaxPlayed"/>), so two windows of the same game never erase each other's. Throws on I/O errors.
+    /// </summary>
     public void Save()
     {
-        var dir = Path.GetDirectoryName(FilePath)!;
-        Directory.CreateDirectory(dir);
-        var dto = new Dto(LocalPlayerId, Relay, UseMailbox, ProtectedPassword, _played.ToList());
-        var tmp = FilePath + ".tmp";
-        File.WriteAllBytes(tmp, JsonSerializer.SerializeToUtf8Bytes(dto, new JsonSerializerOptions { WriteIndented = true }));
-        File.Move(tmp, FilePath, overwrite: true);
+        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+        var played = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var h in (ReadDto(FilePath)?.PlayedStartHashes ?? new List<string>()).Concat(_played))
+            if (h != null && seen.Add(h)) played.Add(h);
+        if (played.Count > MaxPlayed) played.RemoveRange(0, played.Count - MaxPlayed);
+        _played.Clear();
+        _playedSet.Clear();
+        foreach (var h in played) RecordPlayed(h);
+        var dto = new Dto(LocalPlayerId, Relay, UseMailbox, ProtectedPassword, played);
+        var tmp = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllBytes(tmp, JsonSerializer.SerializeToUtf8Bytes(dto, new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(tmp, FilePath, overwrite: true);
+        }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
     }
 
     /// <summary>Remembers that the turn starting at <paramref name="startHash"/> was replayed here (the oldest beyond the cap are dropped).</summary>
@@ -173,9 +200,21 @@ public sealed class TurnIdentity
         }
     }
 
-    /// <summary>Saves a mailbox password (protected); null or empty clears it.</summary>
-    public void SetPassword(string? password) =>
-        ProtectedPassword = string.IsNullOrEmpty(password) ? null : _protector.Protect(Encoding.UTF8.GetBytes(password));
+    /// <summary>Saves a mailbox password (protected); null or empty clears it. False (nothing saved, never throws) when it cannot be protected.</summary>
+    public bool SetPassword(string? password)
+    {
+        if (string.IsNullOrEmpty(password)) { ProtectedPassword = null; return true; }
+        try
+        {
+            ProtectedPassword = _protector.Protect(Encoding.UTF8.GetBytes(password));
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ProtectedPassword = null;
+            return false;
+        }
+    }
 
     /// <summary>The saved mailbox password, or null when none is saved or it cannot be read back (another Windows user, damaged file).</summary>
     public string? GetPassword()
