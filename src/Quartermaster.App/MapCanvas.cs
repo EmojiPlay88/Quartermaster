@@ -14,6 +14,7 @@ sealed partial class MapCanvas : SKControl
     readonly PieceRenderer _pieces;
     readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = 600 };
     readonly System.Windows.Forms.Timer _graceTimer = new() { Interval = 450 }; // lets the pointer travel from a piece to a hoverable popup
+    readonly System.Windows.Forms.Timer _popupWatch = new() { Interval = 150 }; // closes the popup when the pointer leaves it off the map
     double _zoomStep = 1.2;
     int _dragThreshold = 4;
     SKColor? _highlight;
@@ -51,6 +52,7 @@ sealed partial class MapCanvas : SKControl
         BackColor = SystemColors.AppWorkspace;
         _hoverTimer.Tick += (_, _) => ShowPopup();
         _graceTimer.Tick += (_, _) => HidePopup();
+        _popupWatch.Tick += (_, _) => WatchPopup();
     }
 
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -648,10 +650,28 @@ sealed partial class MapCanvas : SKControl
             });
         };
         _popup.ShowAt(Cursor.Position);
+        _popupWatch.Start();
     }
+
+    /// <summary>The popup is click-through off its ledger lines, so the pointer can leave it onto a docked panel or another window without the
+    /// map seeing it: poll and close it once the pointer is neither on the popup nor on the map.</summary>
+    void WatchPopup()
+    {
+        if (_popup == null || IsDisposed) { _popupWatch.Stop(); return; }
+        var c = Cursor.Position;
+        var overCanvas = IsHandleCreated && WindowFromPoint(c) == Handle;
+        if (!PopupWatch.ShouldHide(_popup.Bounds, c, overCanvas)) return;
+        _hoverStack = null;
+        HidePopup();
+        Invalidate();
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr WindowFromPoint(Point p);
 
     public void HidePopup()
     {
+        _popupWatch.Stop();
         _hoverTimer.Stop();
         _graceTimer.Stop();
         _popup?.Close();
@@ -667,6 +687,7 @@ sealed partial class MapCanvas : SKControl
             _drag.Dispose();
             _hoverTimer.Dispose();
             _graceTimer.Dispose();
+            _popupWatch.Dispose();
         }
         base.Dispose(disposing);
     }

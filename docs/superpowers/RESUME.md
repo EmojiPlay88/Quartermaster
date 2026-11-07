@@ -100,7 +100,7 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-1. **The user hands-on tests piece 5** with the test pack: hover numbers in the Ledger, inventory and a unit popup; add a user alert in the Workbench Alerts tab and watch the bar and chips; set an outliner aggregate on a property and use the outliner dock; Help, Interface Tour; step back and check the bar and outliner follow. Fix whatever they find. Known open issue: the map hover popup can stay open if the pointer leaves it past the map edge onto a docked panel (fix: poll cursor against the popup bounds after the early return in MapCanvas).
+1. **The user hands-on tests piece 5** with the test pack: hover numbers in the Ledger, inventory and a unit popup; add a user alert in the Workbench Alerts tab and watch the bar and chips; set an outliner aggregate on a property and use the outliner dock; Help, Interface Tour; step back and check the bar and outliner follow. Fix whatever they find.
 
    Still open from piece 4: hands-on test with the test pack: Ctrl+Z and Ctrl+Y after a drag and after Next Phase; Step Back to Start of Phase and Step Back To...; redo after a step back; dice after a step back; an old (format 1-4) save and the greyed-out Undo tooltip; difficulty switch then undo; Open Autosave of a turn-boundary snapshot. Fix whatever they find.
 
