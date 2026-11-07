@@ -2,7 +2,7 @@
 
 Quartermaster is a desktop engine for playing tabletop wargames, a small alternative to [VASSAL](https://vassalengine.org) aimed at the heaviest board games. It opens the VASSAL modules you already have and then takes the paperwork off your hands. It runs the game's procedures for you, does the arithmetic, rolls the dice, and keeps count of everything a big game asks you to track, from fuel and ammunition to whose turn it is. Go ahead and close that spreadsheet. It's been open since the last campaign and it deserves a rest.
 
-> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers and the tools below work. The turn sequencer, difficulty modes and online multiplayer are designed but not built yet (see [Roadmap](#roadmap)).
+> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes and the tools below work. Undo, multiplayer and the rest of the [Roadmap](#roadmap) are not built yet.
 
 ## What it does
 
@@ -16,6 +16,15 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
 - A rules pack holds the tables, formulas and per-unit properties for a game. The **Rules Workbench** has an editor for each, with the module's rulebook open beside it.
 - **Formula dialogs** show the formula itself with a text box in place of each variable. The result calculates as soon as every box is filled. You can type values in or pull them from tables and ledgers.
 - **Ledgers** track per-unit values (fuel, ammo, stores and so on) as spreadsheets, and every change is logged.
+
+**Turn sequencer and difficulty**
+- Phases, sides and repeating blocks come from the rules pack and are edited in the Rules Workbench.
+- A tracker strip shows the turn, stage, acting side and phase. The phase panel lists instructions, warnings and the decisions still open. Next Phase warns about open decisions but never blocks you.
+- Three difficulty modes, chosen at setup and switchable later:
+  - *Hardcore*: you look up every value yourself, and typed values are checked.
+  - *Semi-automatic*: formula dialogs come with a cheat-sheet window of the relevant values.
+  - *Fully automatic*: the engine runs the formulas at the right phase and on moves, and writes every calculation to the log.
+- A wrong value never reaches a ledger. Formulas that run per unit open as one batch grid.
 
 **Tabletop tools**
 - Dice: 1d6, 2d6, custom expressions (`3d6+2`), special dice and multi-rolls. Every roll goes into the log.
@@ -83,11 +92,7 @@ Design documents and implementation plans are in [`docs/superpowers`](docs/super
 
 ## Roadmap
 
-- **Turn sequencer** that walks you through each phase of play.
-- **Difficulty modes**, chosen at setup:
-  - *Hardcore*: you look up every value yourself.
-  - *Semi-automatic*: formula dialogs come with a cheat-sheet window of the relevant values.
-  - *Fully automatic*: the engine runs the formulas at the right phase and writes every calculation to the log.
+- **Step back**: undo back to an earlier phase.
 - Accessibility in the style of grand strategy games: tooltips that explain every number, alerts, an outliner.
 - OCR for scanned rulebooks in the workbench.
 - Hot-seat, live online multiplayer (host-authoritative, with chat in the log) and play by turn files.
