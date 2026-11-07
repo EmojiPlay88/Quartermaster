@@ -160,7 +160,7 @@ public class RulebookSearchTests : IDisposable
         var progress = new List<double>();
         var ix1 = await RulebookIndex.BuildAsync("modC", new[] { Doc("r.pdf", "R", Rules, () => opens++) },
             new SyncProgress(progress.Add), CancellationToken.None);
-        Assert.Equal(2, opens); // hash + extract
+        Assert.Equal(1, opens); // hashed and parsed from one open
         Assert.Equal(0, progress.First());
         Assert.Equal(1, progress.Last());
         var sha = ix1.Documents[0].Sha256;
@@ -179,7 +179,7 @@ public class RulebookSearchTests : IDisposable
         var changed = Pdf(new[] { "Revised rules text." });
         opens = 0;
         var ix3 = await Build("modC", Doc("r.pdf", "R", changed, () => opens++));
-        Assert.Equal(2, opens);
+        Assert.Equal(1, opens);
         Assert.NotEqual(sha, ix3.Documents[0].Sha256);
         Assert.Single(ix3.Search("revised"));
         Assert.Empty(ix3.Search("cachedmarker"));
@@ -190,6 +190,91 @@ public class RulebookSearchTests : IDisposable
         Assert.Single(ix4.Search("depot"));
         Assert.NotNull(RulebookIndex.TryReadCache(folder, sha));
         Assert.Empty(Directory.GetFiles(folder, "*.tmp"));
+
+        // A cache from another extractor version is ignored and rebuilt.
+        var oldJson = "{\"Format\":" + RulebookIndex.CacheFormat + ",\"Extractor\":\"pdfpig-0.0.1/clean-0\",\"Sha256\":\"" + sha +
+                      "\",\"Searchable\":true,\"Pages\":[{\"Page\":1,\"Text\":\"oldextractormarker\"}]}";
+        File.WriteAllBytes(cacheFile, Quartermaster.Net.Gzip.Compress(System.Text.Encoding.UTF8.GetBytes(oldJson)));
+        var ix5 = await Build("modC", Doc("r.pdf", "R", Rules));
+        Assert.Empty(ix5.Search("oldextractormarker"));
+        Assert.Single(ix5.Search("depot"));
+    }
+
+    [Fact]
+    public async Task Index_TransientFailures_NotCached_StaleTempsSwept()
+    {
+        var folder = Path.Combine(_tmp, "search", "modT");
+        Directory.CreateDirectory(folder);
+        var stale = Path.Combine(folder, "x.json.gz.old.tmp");
+        var fresh = Path.Combine(folder, "y.json.gz.new.tmp");
+        File.WriteAllText(stale, "");
+        File.WriteAllText(fresh, "");
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddHours(-1));
+
+        var ix = await Build("modT",
+            ("locked.pdf", "Locked", () => throw new IOException("in use")),
+            ("broken.pdf", "Broken", () => new FailingStream(Rules, failAfter: 100)));
+        Assert.All(ix.Documents, d => { Assert.False(d.Searchable); Assert.Equal("", d.Sha256); });
+        Assert.Empty(Directory.GetFiles(folder, "*.json.gz"));
+        Assert.False(File.Exists(stale));
+        Assert.True(File.Exists(fresh));
+        Assert.EndsWith("(missing)", RuleRefLinks.Describe(new RuleRef { DocumentEntry = "locked.pdf", Page = 1 }, ix.Documents));
+
+        // Once readable again, it indexes normally.
+        var ok = await Build("modT", Doc("locked.pdf", "Locked", Rules));
+        Assert.True(ok.Documents[0].Searchable);
+    }
+
+    [Fact]
+    public async Task Index_NonSeekable_CopiedUpToCap()
+    {
+        var old = RulebookIndex.MaxCopyBytes;
+        try
+        {
+            var ix = await Build("modN", ("s.pdf", "S", () => new NonSeekable(Rules)));
+            Assert.True(ix.Documents[0].Searchable);
+            Assert.Equal(ix.Documents[0].Sha256, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Rules)));
+
+            var other = Pdf(new[] { "Another invented book." });
+            RulebookIndex.MaxCopyBytes = other.Length - 1;
+            var big = await Build("modN", ("b.pdf", "B", () => new NonSeekable(other)));
+            Assert.False(big.Documents[0].Searchable);
+            Assert.Single(Directory.GetFiles(Path.Combine(_tmp, "search", "modN"), "*.json.gz")); // only the first
+        }
+        finally { RulebookIndex.MaxCopyBytes = old; }
+    }
+
+    [Fact]
+    public async Task Search_WordStartOnly()
+    {
+        var pdf = Pdf(
+            new[] { "The soldier will return to base." },
+            new[] { "Units that die are removed; the dies are rolled each turn." },
+            new[] { "Each player controls one army." },
+            new[] { "The attacker rolls one die." });
+        var ix = await Build("modW", Doc("w.pdf", "W", pdf));
+        Assert.Equal(new[] { 2, 4 }, ix.Search("die").Select(h => h.Page));
+        Assert.Equal(new[] { 2 }, ix.Search("turn").Select(h => h.Page));
+        Assert.Equal(new[] { 4 }, ix.Search("\"rolls one\"").Select(h => h.Page));
+        Assert.Equal(new[] { 2 }, ix.Search("dies").Select(h => h.Page));
+        var p2 = ix.Search("die").First();
+        Assert.Equal(2, p2.Marks.Count); // "die" and the start of "dies"
+        Assert.Equal(2, ix.ProbablyDefinedOn("turn", "w.pdf"));
+        Assert.Null(ix.ProbablyDefinedOn("ldier", "w.pdf"));
+    }
+
+    [Fact]
+    public void Search_MarksKeepSurrogatePairsWhole_DocumentsReadOnly()
+    {
+        var ix = new RulebookIndex(new List<IndexedDocument>
+        {
+            new("m.pdf", "M", "x", true, new List<PageText> { new(1, "One \U0001D538lpha and alph\U0001D538 here.") }),
+        });
+        var h = ix.Search("alpha").Single();
+        var marked = h.Marks.Select(m => h.Snippet.Substring(m.Start, m.Length)).ToArray();
+        Assert.Equal(new[] { "\U0001D538lpha", "alph\U0001D538" }, marked);
+        Assert.Throws<NotSupportedException>(() => ((IList<IndexedDocument>)ix.Documents).Add(ix.Documents[0]));
+        Assert.Throws<NotSupportedException>(() => ((IList<PageText>)ix.Documents[0].Pages).Add(new PageText(2, "")));
     }
 
     [Fact]
@@ -311,6 +396,34 @@ public class RulebookSearchTests : IDisposable
         var lost = RuleRefLinks.Describe(new RuleRef { Label = "Lost", DocumentEntry = "nowhere.pdf", Page = 1 }, docs);
         Assert.Equal("Lost — nowhere.pdf, p. 1 (missing)", lost);
         Assert.Equal("Basic Rules, p. 1", RuleRefLinks.Describe(new RuleRef { DocumentEntry = "rules.pdf", Page = 1 }, docs));
+    }
+
+    /// <summary>A seekable stream whose reads fail with an IOException once <c>failAfter</c> bytes have been read.</summary>
+    private sealed class FailingStream(byte[] data, int failAfter) : MemoryStream(data, writable: false)
+    {
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (Position >= failAfter) throw new IOException("read failed");
+            return base.Read(buffer, offset, Math.Min(count, failAfter - (int)Position));
+        }
+
+        public override int Read(Span<byte> buffer) => throw new IOException("read failed");
+    }
+
+    /// <summary>A forward-only stream (CanSeek false).</summary>
+    private sealed class NonSeekable(byte[] data) : Stream
+    {
+        private readonly MemoryStream _inner = new(data, writable: false);
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class SyncProgress(Action<double> report) : IProgress<double>

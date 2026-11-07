@@ -28,7 +28,12 @@ public sealed record SearchHit(string Entry, string Title, int Page, string Snip
 public sealed class RulebookIndex
 {
     internal const int CacheFormat = 1;
+    /// <summary>Changes when the extractor changes (PdfPig version or our clean-up), so old cached text is rebuilt.</summary>
+    internal static readonly string ExtractorVersion = "pdfpig-" + typeof(PdfDocument).Assembly.GetName().Version + "/clean-1";
     internal const int MaxCacheBytes = 64 * 1024 * 1024;
+    /// <summary>Largest non-seekable PDF copied into memory; bigger ones are listed as not searchable (not cached).</summary>
+    internal static long MaxCopyBytes = 512L * 1024 * 1024;
+    private static readonly TimeSpan StaleTmpAge = TimeSpan.FromMinutes(10);
     internal const int SnippetMax = 200;
     private const int SnippetLead = 60;
 
@@ -42,7 +47,8 @@ public sealed class RulebookIndex
 
     internal RulebookIndex(IReadOnlyList<IndexedDocument> docs)
     {
-        Documents = docs;
+        Documents = Array.AsReadOnly(docs.Select(d => d with { Pages = Array.AsReadOnly(d.Pages.ToArray()) }).ToArray());
+        docs = Documents;
         _norm = docs.Select(d => d.Searchable
             ? d.Pages.Select(p =>
             {
@@ -65,6 +71,7 @@ public sealed class RulebookIndex
     {
         progress?.Report(0);
         var folder = CacheFolder(moduleSha);
+        SweepStaleTemps(folder);
         var docs = new List<IndexedDocument>(pdfs.Count);
         for (var i = 0; i < pdfs.Count; i++)
         {
@@ -79,75 +86,134 @@ public sealed class RulebookIndex
         return new RulebookIndex(docs);
     }
 
+    /// <summary>Failures that may go away next time (file locked, disk, memory): never cached.</summary>
+    private static bool IsTransient(Exception e) => e is IOException or UnauthorizedAccessException or OutOfMemoryException;
+
+    private static IndexedDocument Unreadable(string entry, string title) => new(entry, title, "", false, Array.Empty<PageText>());
+
+    /// <summary>
+    /// Opens the PDF once: a seekable stream is hashed then rewound and parsed; a non-seekable one is copied (≤ <see cref="MaxCopyBytes"/>)
+    /// while hashing, and the copy is parsed, so the SHA is always of the bytes parsed. Opening/reading failures are not cached;
+    /// deterministic outcomes (PdfPig cannot parse it, or no page has text) are.
+    /// </summary>
     private static IndexedDocument IndexOne(string folder, string entry, string title, Func<Stream> open, Action<double> report, CancellationToken ct)
     {
-        string sha;
+        Stream? raw = null;
+        MemoryStream? copy = null;
         try
         {
-            using var s = open();
-            sha = Convert.ToHexStringLower(SHA256.HashData(s));
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            return new IndexedDocument(entry, title, "", false, Array.Empty<PageText>());
-        }
+            string sha;
+            Stream parse;
+            try
+            {
+                raw = open();
+                if (raw.CanSeek)
+                {
+                    raw.Position = 0;
+                    sha = Hash(raw, null, long.MaxValue, ct)!;
+                    raw.Position = 0;
+                    parse = raw;
+                }
+                else
+                {
+                    copy = new MemoryStream();
+                    var h = Hash(raw, copy, MaxCopyBytes, ct);
+                    if (h == null) return Unreadable(entry, title); // too big to copy
+                    sha = h;
+                    copy.Position = 0;
+                    parse = copy;
+                }
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                return Unreadable(entry, title);
+            }
 
-        var cached = TryReadCache(folder, sha);
-        if (cached != null) return new IndexedDocument(entry, title, sha, cached.Value.Searchable, cached.Value.Pages);
+            var cached = TryReadCache(folder, sha);
+            if (cached != null) return new IndexedDocument(entry, title, sha, cached.Value.Searchable, cached.Value.Pages);
 
-        bool searchable;
-        IReadOnlyList<PageText> pages;
-        try
-        {
-            (searchable, pages) = Extract(open, report, ct);
+            bool searchable;
+            IReadOnlyList<PageText> pages;
+            try
+            {
+                (searchable, pages) = Extract(parse, report, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception e) when (IsTransient(e)) { return Unreadable(entry, title); }
+            catch (Exception)
+            {
+                (searchable, pages) = (false, Array.Empty<PageText>()); // PdfPig cannot read it (corrupt, encrypted, …)
+            }
+            WriteCache(folder, sha, searchable, pages);
+            return new IndexedDocument(entry, title, sha, searchable, pages);
         }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception)
+        finally
         {
-            (searchable, pages) = (false, Array.Empty<PageText>());
+            copy?.Dispose();
+            try { raw?.Dispose(); } catch (Exception) { }
         }
-        WriteCache(folder, sha, searchable, pages);
-        return new IndexedDocument(entry, title, sha, searchable, pages);
     }
 
-    private static (bool Searchable, IReadOnlyList<PageText> Pages) Extract(Func<Stream> open, Action<double> report, CancellationToken ct)
+    /// <summary>SHA-256 (lower hex) of the rest of the stream, copying it to <paramref name="copy"/> if given; null past <paramref name="max"/> bytes.</summary>
+    private static string? Hash(Stream s, Stream? copy, long max, CancellationToken ct)
     {
-        using var raw = open();
-        Stream seekable = raw;
-        MemoryStream? copy = null;
-        if (!raw.CanSeek)
+        using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buf = new byte[1 << 20];
+        long total = 0;
+        int n;
+        while ((n = s.Read(buf, 0, buf.Length)) > 0)
         {
-            copy = new MemoryStream();
-            raw.CopyTo(copy);
-            copy.Position = 0;
-            seekable = copy;
+            ct.ThrowIfCancellationRequested();
+            total += n;
+            if (total > max) return null;
+            h.AppendData(buf, 0, n);
+            copy?.Write(buf, 0, n);
         }
+        return Convert.ToHexStringLower(h.GetHashAndReset());
+    }
+
+    private static (bool Searchable, IReadOnlyList<PageText> Pages) Extract(Stream stream, Action<double> report, CancellationToken ct)
+    {
+        using var pdf = PdfDocument.Open(stream);
+        var count = pdf.NumberOfPages;
+        var pages = new List<PageText>(count);
+        var any = false;
+        for (var n = 1; n <= count; n++)
+        {
+            ct.ThrowIfCancellationRequested();
+            string text;
+            try
+            {
+                var page = pdf.GetPage(n);
+                string rawText;
+                try { rawText = ContentOrderTextExtractor.GetText(page, false); }
+                catch (Exception e) when (e is not OperationCanceledException && !IsTransient(e)) { rawText = page.Text; }
+                text = CleanPageText(rawText);
+            }
+            catch (Exception e) when (e is not OperationCanceledException && !IsTransient(e)) { text = ""; }
+            if (text.Length > 0) any = true;
+            pages.Add(new PageText(n, text));
+            report((double)n / count);
+        }
+        return (any, pages.AsReadOnly());
+    }
+
+    /// <summary>Deletes cache temp files left by a crashed write (older than a few minutes, so a concurrent write is not hit).</summary>
+    private static void SweepStaleTemps(string folder)
+    {
         try
         {
-            using var pdf = PdfDocument.Open(seekable);
-            var count = pdf.NumberOfPages;
-            var pages = new List<PageText>(count);
-            var any = false;
-            for (var n = 1; n <= count; n++)
+            if (!Directory.Exists(folder)) return;
+            foreach (var f in Directory.EnumerateFiles(folder, "*.tmp"))
             {
-                ct.ThrowIfCancellationRequested();
-                string text;
                 try
                 {
-                    var page = pdf.GetPage(n);
-                    string rawText;
-                    try { rawText = ContentOrderTextExtractor.GetText(page, false); }
-                    catch (Exception e) when (e is not OperationCanceledException) { rawText = page.Text; }
-                    text = CleanPageText(rawText);
+                    if (DateTime.UtcNow - File.GetLastWriteTimeUtc(f) > StaleTmpAge) File.Delete(f);
                 }
-                catch (Exception e) when (e is not OperationCanceledException) { text = ""; }
-                if (text.Length > 0) any = true;
-                pages.Add(new PageText(n, text));
-                report((double)n / count);
+                catch (Exception) { }
             }
-            return (any, pages);
         }
-        finally { copy?.Dispose(); }
+        catch (Exception) { }
     }
 
     private static readonly Regex Spaces = new(@"[^\S\n]+", RegexOptions.Compiled);
@@ -171,6 +237,7 @@ public sealed class RulebookIndex
     private sealed class CacheDto
     {
         public int Format { get; set; }
+        public string Extractor { get; set; } = "";
         public string Sha256 { get; set; } = "";
         public bool Searchable { get; set; }
         public List<CachePage> Pages { get; set; } = new();
@@ -203,10 +270,10 @@ public sealed class RulebookIndex
             if (!info.Exists || info.Length > MaxCacheBytes) return null;
             var json = Gzip.DecompressBounded(File.ReadAllBytes(path), MaxCacheBytes);
             var dto = JsonSerializer.Deserialize<CacheDto>(json);
-            if (dto == null || dto.Format != CacheFormat || dto.Sha256 != docSha || dto.Pages == null) return null;
+            if (dto == null || dto.Format != CacheFormat || dto.Extractor != ExtractorVersion || dto.Sha256 != docSha || dto.Pages == null) return null;
             var pages = dto.Pages.Select(p => new PageText(p.Page, p.Text ?? "")).ToList();
             for (var i = 0; i < pages.Count; i++) if (pages[i].Page != i + 1) return null;
-            return (dto.Searchable, pages);
+            return (dto.Searchable, pages.AsReadOnly());
         }
         catch (Exception) { return null; }
     }
@@ -219,7 +286,7 @@ public sealed class RulebookIndex
             Directory.CreateDirectory(folder);
             var dto = new CacheDto
             {
-                Format = CacheFormat, Sha256 = docSha, Searchable = searchable,
+                Format = CacheFormat, Extractor = ExtractorVersion, Sha256 = docSha, Searchable = searchable,
                 Pages = pages.Select(p => new CachePage { Page = p.Page, Text = p.Text }).ToList(),
             };
             var bytes = Gzip.Compress(JsonSerializer.SerializeToUtf8Bytes(dto));
@@ -238,7 +305,10 @@ public sealed class RulebookIndex
 
     // ---- search ----
 
-    /// <summary>Pages containing every word and phrase of the query, grouped by document (index order) and ordered by page.</summary>
+    /// <summary>
+    /// Pages containing every word and phrase of the query, each at the start of a word ("die" matches "dies", not "soldier"),
+    /// grouped by document (index order) and ordered by page.
+    /// </summary>
     public IReadOnlyList<SearchHit> Search(string query, int max = 200)
     {
         var hits = new List<SearchHit>();
@@ -254,7 +324,7 @@ public sealed class RulebookIndex
                 var all = true;
                 foreach (var t in terms)
                 {
-                    var at = p.Norm.IndexOf(t, StringComparison.Ordinal);
+                    var at = TextNormaliser.IndexOfWordStart(p.Norm, t, 0);
                     if (at < 0) { all = false; break; }
                     if (at < first) first = at;
                 }
@@ -284,14 +354,15 @@ public sealed class RulebookIndex
         var ranges = new List<(int S, int E)>();
         foreach (var t in terms)
         {
-            var at = p.Norm.IndexOf(t, StringComparison.Ordinal);
+            var at = TextNormaliser.IndexOfWordStart(p.Norm, t, 0);
             while (at >= 0)
             {
                 var s = p.Map[at];
                 var e = p.Map[at + t.Length - 1] + 1;
+                if (e < text.Length && char.IsHighSurrogate(text[e - 1]) && char.IsLowSurrogate(text[e])) e++; // keep pairs whole
                 if (e > start && s < end) ranges.Add((Math.Max(s, start) - start + prefix.Length, Math.Min(e, end) - start + prefix.Length));
                 if (s >= end) break;
-                at = p.Norm.IndexOf(t, at + 1, StringComparison.Ordinal);
+                at = TextNormaliser.IndexOfWordStart(p.Norm, t, at + 1);
             }
         }
         ranges.Sort();
@@ -321,12 +392,12 @@ public sealed class RulebookIndex
         int? firstAny = null;
         foreach (var p in _norm[d])
         {
-            if (p.Norm.IndexOf(t, StringComparison.Ordinal) < 0) continue;
+            if (TextNormaliser.IndexOfWordStart(p.Norm, t, 0) < 0) continue;
             firstAny ??= p.Page;
             foreach (var line in p.Original.Split('\n'))
             {
                 var nl = TextNormaliser.Normalise(line);
-                var at = nl.IndexOf(t, StringComparison.Ordinal);
+                var at = TextNormaliser.IndexOfWordStart(nl, t, 0);
                 if (at < 0) continue;
                 var words = nl.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
                 if (words <= 8) return p.Page;
@@ -334,7 +405,7 @@ public sealed class RulebookIndex
                 {
                     var after = nl.AsSpan(at + t.Length).TrimStart(' ');
                     if (after.Length > 0 && after[0] == ':') return p.Page;
-                    at = nl.IndexOf(t, at + 1, StringComparison.Ordinal);
+                    at = TextNormaliser.IndexOfWordStart(nl, t, at + 1);
                 }
             }
         }

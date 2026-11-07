@@ -21,15 +21,16 @@ public static class RuleRefLinks
     }
 
     /// <summary>
-    /// "Label — Title, p. N"; ends with " (missing)" when the document is not indexed or the page is past its last page
-    /// (or below 1). A document whose page count is unknown (unreadable) is not called missing.
+    /// "Label — Title, p. N"; ends with " (missing)" when the document is not indexed, could not be opened (empty SHA), or the
+    /// page is past its last page (or below 1). A document that opened but whose page count is unknown (PdfPig could not parse
+    /// it) is not called missing.
     /// </summary>
     public static string Describe(RuleRef r, IReadOnlyList<IndexedDocument> docs)
     {
         var doc = docs?.FirstOrDefault(d => d.Entry == r.DocumentEntry);
         var name = doc != null && !string.IsNullOrWhiteSpace(doc.Title) ? doc.Title : r.DocumentEntry;
         var text = (string.IsNullOrWhiteSpace(r.Label) ? "" : r.Label + " — ") + $"{name}, p. {r.Page}";
-        var missing = doc == null || r.Page < 1 || (doc.Pages.Count > 0 && r.Page > doc.Pages.Count);
+        var missing = doc == null || doc.Sha256.Length == 0 || r.Page < 1 || (doc.Pages.Count > 0 && r.Page > doc.Pages.Count);
         return missing ? text + " " + Missing : text;
     }
 }

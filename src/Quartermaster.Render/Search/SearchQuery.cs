@@ -70,6 +70,22 @@ internal static class TextNormaliser
 {
     public static string Normalise(string s) => NormaliseWithMap(s, collapseSpaces: true).Text;
 
+    /// <summary>
+    /// First ordinal occurrence of <paramref name="term"/> at or after <paramref name="from"/> that starts a word (the char before it
+    /// is not a letter or digit): "die" finds "dies" but not "soldier". -1 when none.
+    /// </summary>
+    public static int IndexOfWordStart(string text, string term, int from)
+    {
+        if (term.Length == 0) return -1;
+        var at = from < text.Length ? text.IndexOf(term, from, StringComparison.Ordinal) : -1;
+        while (at >= 0)
+        {
+            if (at == 0 || !char.IsLetterOrDigit(text[at - 1])) return at;
+            at = at + 1 < text.Length ? text.IndexOf(term, at + 1, StringComparison.Ordinal) : -1;
+        }
+        return -1;
+    }
+
     public static (string Text, int[] Map) NormaliseWithMap(string s, bool collapseSpaces)
     {
         var sb = new StringBuilder(s.Length);
