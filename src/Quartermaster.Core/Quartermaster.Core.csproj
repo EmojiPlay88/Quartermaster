@@ -5,6 +5,10 @@
     <ProjectReference Include="..\Quartermaster.Rules\Quartermaster.Rules.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Quartermaster.Core.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
