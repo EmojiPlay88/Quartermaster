@@ -41,6 +41,23 @@ public static class Secrets
     /// <summary>End-to-end key; never leaves the clients.</summary>
     public static byte[] GameKey(string password, string code) => Derive(password, $"qm-key:{GameCode.Normalize(code)}");
 
+    /// <summary>Turn mailbox: key behind every box id of a game. GameId is the random game GUID only players hold; empty password = none.</summary>
+    public static byte[] MailboxBoxKey(string password, string gameId) => Derive(password, $"qm-mbox:{gameId}");
+
+    /// <summary>Lower-hex SHA-256(box key ‖ UTF-8 player id): the relay-facing id of one player's box.</summary>
+    public static string MailboxBoxId(byte[] boxKey, string playerId)
+    {
+        RequireKey(boxKey);
+        var player = Encoding.UTF8.GetBytes(playerId);
+        var data = new byte[boxKey.Length + player.Length];
+        boxKey.CopyTo(data, 0);
+        player.CopyTo(data, boxKey.Length);
+        return Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+    }
+
+    /// <summary>Turn mailbox: key that seals the turn files (<see cref="Seal"/>); never leaves the clients.</summary>
+    public static byte[] MailboxSealKey(string password, string gameId) => Derive(password, $"qm-mbox-key:{gameId}");
+
     /// <summary>nonce(12) || ciphertext || tag(16); plaintext is gzipped first.</summary>
     public static byte[] Seal(byte[] key, byte[] plain)
     {

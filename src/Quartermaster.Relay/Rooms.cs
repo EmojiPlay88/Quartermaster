@@ -158,7 +158,7 @@ public sealed class Rooms : IDisposable
 {
     public const string HostId = "host";
     public const string WrongCodeOrPassword = "Wrong code or password";
-    private static readonly HashSet<string> RolesAllowed = ["host", "guest", "browser"];
+    private static readonly HashSet<string> RolesAllowed = ["host", "guest", "browser", "mailbox"];
     private static readonly string NoHash = new('0', 64), NoRoom = new('F', 64);
 
     private readonly object _lock = new();
@@ -168,9 +168,11 @@ public sealed class Rooms : IDisposable
     private readonly TimeProvider _time;
     private readonly ILogger<Rooms> _log;
     private readonly ITimer _sweeper;
+    private readonly Mailbox _mailbox;
 
-    public Rooms(TimeProvider time, ILogger<Rooms> log)
+    public Rooms(TimeProvider time, ILogger<Rooms> log, Mailbox mailbox)
     {
+        _mailbox = mailbox;
         _time = time;
         _log = log;
         _sweeper = time.CreateTimer(_ => Sweep(), null, Limits.SweepEvery, Limits.SweepEvery);
@@ -209,6 +211,15 @@ public sealed class Rooms : IDisposable
                 c.Close(WebSocketCloseStatus.PolicyViolation, "Unknown role.");
             }
             else c.Greeted = true;
+            return;
+        }
+
+        if (Mailbox.IsRequest(message))
+        {
+            // The mailbox has its own lock (it touches the disk) and never involves rooms.
+            var reply = _mailbox.Handle(c.Ip, message);
+            try { c.Post(reply); }
+            catch (ProtocolException) { c.Post(new Refused(MailboxLimits.NoSuchItem)); }
             return;
         }
 

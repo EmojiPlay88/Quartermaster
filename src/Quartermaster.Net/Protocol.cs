@@ -42,9 +42,17 @@ public sealed record LobbyListing(
 [JsonDerivedType(typeof(Members), "Members")]
 [JsonDerivedType(typeof(Ping), "Ping")]
 [JsonDerivedType(typeof(Pong), "Pong")]
+[JsonDerivedType(typeof(MailboxPut), "MailboxPut")]
+[JsonDerivedType(typeof(MailboxStored), "MailboxStored")]
+[JsonDerivedType(typeof(MailboxList), "MailboxList")]
+[JsonDerivedType(typeof(MailboxItems), "MailboxItems")]
+[JsonDerivedType(typeof(MailboxGet), "MailboxGet")]
+[JsonDerivedType(typeof(MailboxItem), "MailboxItem")]
+[JsonDerivedType(typeof(MailboxDelete), "MailboxDelete")]
+[JsonDerivedType(typeof(MailboxDeleted), "MailboxDeleted")]
 public abstract record RelayMessage;
 
-/// <summary>Role is "host", "guest" or "browser".</summary>
+/// <summary>Role is "host", "guest", "browser" or "mailbox".</summary>
 public sealed record Hello(int Version, string Role) : RelayMessage;
 public sealed record ReserveCode : RelayMessage;
 public sealed record CodeReserved(string Code) : RelayMessage;
@@ -71,6 +79,53 @@ public sealed record HostBack : RelayMessage;
 public sealed record Members(IReadOnlyList<string> MemberIds) : RelayMessage;
 public sealed record Ping : RelayMessage;
 public sealed record Pong : RelayMessage;
+
+// ---- Turn mailbox (spec §7). Any greeted connection may use it; it never joins a room. ----
+// Box: 64 lower-hex characters (Secrets.MailboxBoxId); the relay never sees game ids, player ids or passwords.
+// ItemId: 32 lower-hex characters, made by the relay. Sealed: opaque encrypted bytes (Secrets.Seal).
+// Every request is answered by its reply or by Refused.
+
+public sealed record MailboxPut(string Box, byte[] Sealed) : RelayMessage;
+public sealed record MailboxStored(string ItemId) : RelayMessage;
+/// <summary>At most <see cref="MailboxLimits.MaxBoxesPerList"/> boxes.</summary>
+public sealed record MailboxList(IReadOnlyList<string> Boxes) : RelayMessage;
+public sealed record MailboxItemInfo(string Box, string ItemId, long Size, DateTime StoredUtc);
+public sealed record MailboxItems(IReadOnlyList<MailboxItemInfo> Items) : RelayMessage;
+public sealed record MailboxGet(string Box, string ItemId) : RelayMessage;
+public sealed record MailboxItem(string Box, string ItemId, byte[] Sealed) : RelayMessage;
+public sealed record MailboxDelete(string Box, string ItemId) : RelayMessage;
+public sealed record MailboxDeleted(string ItemId) : RelayMessage;
+
+public static class MailboxLimits
+{
+    public const int MaxBoxesPerList = 32;
+    public const int MaxItemsPerBox = 50;
+    public const int UploadsPerHour = 30;
+    public const int ExpiryDays = 30;
+    /// <summary>Room left in a frame for the JSON around the Sealed bytes of a <see cref="MailboxItem"/>.</summary>
+    private const int Envelope = 1024;
+    /// <summary>Largest Sealed blob the mailbox takes: its base64 form plus the envelope fits one relay frame both ways.</summary>
+    public const int MaxSealedBytes = (Framing.MaxFrame - Envelope) / 4 * 3;
+
+    public const string Full = "The mailbox is full.";
+    public const string TooManyUploads = "Too many uploads; try again later.";
+    public const string NoSuchItem = "No such item.";
+    public const string BadBox = "Bad mailbox id.";
+    public const string BadItem = "The mailbox item is empty or too large.";
+
+    /// <summary>Exactly 64 lower-case hex characters.</summary>
+    public static bool IsBoxId(string? s) => IsLowerHex(s, 64);
+    /// <summary>Exactly 32 lower-case hex characters.</summary>
+    public static bool IsItemId(string? s) => IsLowerHex(s, 32);
+
+    private static bool IsLowerHex(string? s, int length)
+    {
+        if (s is null || s.Length != length) return false;
+        foreach (var ch in s)
+            if (!(ch is >= '0' and <= '9' or >= 'a' and <= 'f')) return false;
+        return true;
+    }
+}
 
 // ---- Game-level payloads (travel inside Sealed). Game data is opaque JSON owned by Render. ----
 

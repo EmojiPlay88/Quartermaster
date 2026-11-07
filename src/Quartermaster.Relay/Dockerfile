@@ -16,7 +16,7 @@ RUN dotnet publish src/Quartermaster.Relay/Quartermaster.Relay.csproj -c Release
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app ./
-# /data holds the generated certificate (and later the mailbox); owned by the non-root user.
+# /data holds the generated certificate and the turn mailbox; owned by the non-root user.
 RUN mkdir -p /data && chown app:app /data
 ENV ASPNETCORE_HTTP_PORTS= \
     Relay__Port=47820 \

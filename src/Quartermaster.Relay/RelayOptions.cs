@@ -26,6 +26,12 @@ public sealed class RelayOptions
     /// <summary>Burst size of a room's host connection.</summary>
     public double HostBurst { get; set; } = Limits.HostBurst;
 
-    /// <summary>Folder for the generated certificate (and later the mailbox).</summary>
+    /// <summary>Folder for the generated certificate and the turn mailbox (<c>{DataDir}/mailbox</c>).</summary>
     public string DataDir { get; set; } = "/data";
+
+    /// <summary>Most bytes the turn mailbox keeps, all boxes together (default 1 GiB). Full = new uploads refused.</summary>
+    public long MailboxMaxBytes { get; set; } = 1L << 30;
+
+    /// <summary>Days a turn stays in the mailbox before it is deleted.</summary>
+    public int MailboxExpiryDays { get; set; } = Quartermaster.Net.MailboxLimits.ExpiryDays;
 }
