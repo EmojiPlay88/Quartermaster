@@ -280,6 +280,7 @@ sealed partial class MainForm : Form
         Tool("tool.los", "LOS", () => { if (_handlers.TryGetValue("tool.los", out var h)) h(); }, needsGame: true);
         BuildHistoryToolbar();
         _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
+        _dice.Actions = () => Actions;
         SetCommandHandler("dice.1d6", () => _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll"));
         SetCommandHandler("dice.2d6", () => _dice!.RollSpec(new DiceSpec(2, 6, 0), "Roll"));
         SetCommandHandler("turn.next", NextTurnCommand);
@@ -802,7 +803,7 @@ sealed partial class MainForm : Form
     {
         if (_session?.Rules == null) return;
         var s = _session;
-        OpenChild(_ledgers, "ledger", () => new LedgerWindow(s));
+        OpenChild(_ledgers, "ledger", () => new LedgerWindow(s, () => Actions));
     }
 
     /// <summary>Opens (or activates) the single rules workbench of this session.</summary>

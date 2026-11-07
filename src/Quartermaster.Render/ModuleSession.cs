@@ -135,9 +135,11 @@ public sealed class ModuleSession : IDisposable
     /// The side a formula applied now is run for (its log lines and rolls are stamped with it): null in solo; else the current phase's
     /// acting side when held, else the first held side in pack order.
     /// </summary>
-    public string? ActorSide()
+    public string? ActorSide() => ActorSideFor(_viewSides);
+
+    /// <summary>As <see cref="ActorSide()"/> for a player holding <paramref name="sides"/> (null = solo); the host uses it for a guest's intents.</summary>
+    public string? ActorSideFor(IReadOnlySet<string>? sides)
     {
-        var sides = _viewSides;
         if (sides == null || sides.Count == 0) return null;
         var pack = Rules;
         if (pack != null && _game?.State is { } st && Sequencer.Current(pack, st) is { } phase
@@ -165,14 +167,24 @@ public sealed class ModuleSession : IDisposable
         return Access() is { } a && a.CanAct(pieceId);
     }
 
+    /// <summary>As <see cref="CanAct"/> for a player holding <paramref name="sides"/> (null = solo); the current view's sides use the cache.</summary>
+    public bool CanActFor(string? pieceId, IReadOnlySet<string>? sides)
+    {
+        if (ReferenceEquals(sides, _viewSides)) return CanAct(pieceId);
+        if (sides == null || pieceId == null) return true;
+        return _game?.State is { } st && new PieceAccess(st, Rules, Model, sides).CanAct(pieceId);
+    }
+
     /// <summary>True when the current viewer may change this ledger key by hand: always in solo; else a unit they may act on, the global
     /// holder or a holder of a held side or of no side.</summary>
-    public bool CanEditLedger(string key)
+    public bool CanEditLedger(string key) => CanEditLedgerFor(key, _viewSides);
+
+    /// <summary>As <see cref="CanEditLedger"/> for a player holding <paramref name="sides"/> (null = solo).</summary>
+    public bool CanEditLedgerFor(string key, IReadOnlySet<string>? sides)
     {
-        var sides = _viewSides;
         if (sides == null) return true;
         if (key == null || !LedgerKey.TryParse(key, out var isPiece, out var id)) return false;
-        if (isPiece) return CanAct(id);
+        if (isPiece) return CanActFor(id, sides);
         if (id == HolderDef.GlobalId) return true;
         if ((Rules?.Holders ?? new List<HolderDef>()).FirstOrDefault(h => h != null && h.Id == id) is not { } holder) return false;
         return Ownership.SideOfHolder(holder.Id, Rules!) is not { } side || sides.Contains(side);

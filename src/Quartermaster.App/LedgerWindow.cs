@@ -12,6 +12,7 @@ sealed class LedgerWindow : Form
 {
     const int FixedCols = 2; // Name, Kind
     readonly ModuleSession _s;
+    readonly Func<IActionPort?>? _actions;
     readonly ToolStrip _bar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
     readonly ToolStripTextBox _filter = new() { AutoSize = false, Width = 160, ToolTipText = "Filter by name or kind" };
     readonly ToolStripButton _export = new("Export CSV…") { DisplayStyle = ToolStripItemDisplayStyle.Text };
@@ -30,9 +31,10 @@ sealed class LedgerWindow : Form
     GameSession? _game;
     bool _closing;
 
-    public LedgerWindow(ModuleSession s)
+    public LedgerWindow(ModuleSession s, Func<IActionPort?>? actions = null)
     {
         _s = s;
+        _actions = actions;
         Text = "Ledger";
         Size = new Size(720, 520);
         _bar.Items.Add(new ToolStripLabel("Filter:"));
@@ -334,6 +336,7 @@ sealed class LedgerWindow : Form
         if (Ledger.Get(game.State, key, prop.Id) is { } cur && cur == after) { Reload(); return; } // unchanged: no history entry
         var note = InputDialog.Ask(this, "Manual change", $"Why is {prop.Name} being set to {Fmt(after)}? (required)");
         if (string.IsNullOrWhiteSpace(note)) { Reload(); return; }
+        if (_actions?.Invoke() is { } port) { port.EditLedger(key, prop.Id, after, note); return; }
         var before = Ledger.GetOrDefault(game.State, key, prop);
         game.Execute(CommandLog.Stamp(new LedgerDelta(key, prop.Id, before, after, "manual", null, null, note.Trim(), null)));
     }

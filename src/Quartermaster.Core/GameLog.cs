@@ -18,6 +18,8 @@ public static class LogKind
     public const string Turn = "turn";
     public const string System = "system";
     public const string Calc = "calc";
+    /// <summary>A player's chat message ("{name}: {text}"); public, never filtered by <see cref="PlayerView"/>.</summary>
+    public const string Chat = "chat";
 }
 
 public sealed record TurnState(int Turn, string? Phase);

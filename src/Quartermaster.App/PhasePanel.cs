@@ -13,6 +13,7 @@ sealed class PhasePanel : UserControl
 {
     readonly ModuleSession _s;
     readonly PhaseController _c;
+    readonly IActionPort _actions;
     readonly Action _next;
     readonly Action<string> _centre;
     readonly Action<string> _openRun;
@@ -42,9 +43,9 @@ sealed class PhasePanel : UserControl
     RuleRef? _refTarget;
     bool _updating;
 
-    public PhasePanel(ModuleSession s, PhaseController c, Action next, Action<string> centre, Action<string> openRun, Action<string, int> openDoc)
+    public PhasePanel(ModuleSession s, PhaseController c, IActionPort actions, Action next, Action<string> centre, Action<string> openRun, Action<string, int> openDoc)
     {
-        _s = s; _c = c; _next = next; _centre = centre; _openRun = openRun; _openDoc = openDoc;
+        _s = s; _c = c; _actions = actions; _next = next; _centre = centre; _openRun = openRun; _openDoc = openDoc;
         Name = "PhasePanel";
         MinimumSize = new Size(180, 200);
 
@@ -220,14 +221,14 @@ sealed class PhasePanel : UserControl
 
     void AckSelected()
     {
-        if (SelectedWarning() is { IsDecision: true, Acknowledged: false } w) _c.Acknowledge(w.Index);
+        if (SelectedWarning() is { IsDecision: true, Acknowledged: false } w) _actions.Ack(w.Index);
         _watch.Flush();
     }
 
     void OnItemCheck(ItemCheckEventArgs e)
     {
         if (_updating) return;
-        _c.Tick(e.Index, e.NewValue == CheckState.Checked);
+        _actions.Tick(e.Index, e.NewValue == CheckState.Checked);
         _watch.Request();
     }
 

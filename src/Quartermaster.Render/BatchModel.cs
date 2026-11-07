@@ -11,10 +11,15 @@ public sealed record BatchRowView(string? PieceId, string Label, IReadOnlyList<s
 /// <summary>
 /// UI-free model of the batch grid: one row per unit of a pending run. Each row owns a <see cref="FormulaDialogModel"/> built on demand,
 /// so a 1,200-unit run only pays for the rows that are shown or acted on. Applying goes through
-/// <see cref="PhaseController.ApplyFormula"/> with the row's expected engine run, so a wrong typed value never reaches the ledger.
+/// <see cref="PhaseController.ApplyFormula"/> (or the action port's <see cref="IActionPort.ApplyTrace"/>) with the row's expected engine
+/// run, so a wrong typed value never reaches the ledger.
 /// </summary>
-public sealed class BatchModel(ModuleSession s, PhaseController phases, string runId)
+public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTrace, bool, bool> apply, string runId)
 {
+    public BatchModel(ModuleSession s, PhaseController phases, string runId) : this(s, phases.ApplyFormula, runId) { }
+
+    public BatchModel(ModuleSession s, IActionPort actions, string runId) : this(s, actions.ApplyTrace, runId) { }
+
     private readonly Dictionary<int, FormulaDialogModel> _models = new();
     private readonly Dictionary<int, BatchRowView> _views = new();
     private readonly Dictionary<int, BatchRowView> _appliedSnapshots = new();
@@ -225,7 +230,7 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
             : new BatchRowView(u.PieceId, u.Label, vars.Select(v => dv.Boxes.FirstOrDefault(b => b.Variable == v)?.Text ?? "").ToList(),
                 new bool[vars.Count], dv.ResultText, LedgerOf(dv), "", true, false);
         // Refused (run cleared, unit already applied): nothing was written, so no snapshot and not counted.
-        if (!phases.ApplyFormula(runId, u.PieceId, trace, model.AutoCalculated)) return false;
+        if (!apply(runId, u.PieceId, trace, model.AutoCalculated)) return false;
         _appliedSnapshots[row] = snapshot;
         _views.Remove(row);
         return true;

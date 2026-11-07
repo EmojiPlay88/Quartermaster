@@ -16,7 +16,7 @@ sealed partial class MainForm
     {
         if (_session == null) return;
         var s = _session;
-        OpenChild(_docs, "notes", () => new NotesWindow(s));
+        OpenChild(_docs, "notes", () => new NotesWindow(s, () => Actions));
     }
 
     /// <summary>Commits an open notes window's pending text into the current game (before it is replaced or closed).</summary>

@@ -220,6 +220,7 @@ public static class PlayerView
         private (Outcome Outcome, string? Text) Decide(LogEntry? l, LedgerEntry? e)
         {
             if (l == null) return (Outcome.Drop, null);
+            if (l.Kind == LogKind.Chat) return (Outcome.Keep, null);   // chat is public: what a player wrote, never game data
             if (l.PieceId != null && _hidden.Contains(l.PieceId)) return (Outcome.Drop, null);
             if (MapHidden(l.MapId) || NameHit(l.Text)) return (Outcome.Drop, null);
             var stamp = string.IsNullOrWhiteSpace(l.SideId) ? null : l.SideId;

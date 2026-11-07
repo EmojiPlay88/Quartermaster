@@ -88,9 +88,9 @@ sealed partial class MapCanvas : SKControl
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Action<Action>? Guarded { get; set; }
 
-    /// <summary>Supplies the phase controller that executes drops as move gestures (null result = plain commands).</summary>
+    /// <summary>Supplies the action port that executes drops (move gestures, palette placements); null result = plain commands.</summary>
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public Func<PhaseController?>? Phases { get => _drag.Phases; set => _drag.Phases = value; }
+    public Func<IActionPort?>? Actions { get => _drag.Actions; set => _drag.Actions = value; }
 
     void Guard(Action a) { if (Guarded != null) Guarded(a); else a(); }
 
@@ -610,7 +610,7 @@ sealed partial class MapCanvas : SKControl
         {
             Guard(() =>
             {
-                var (_, msg) = PaletteDrop.Place(_s, Map, slot, MapPoint(PointToClient(new Point(e.X, e.Y))), _drag.Snap);
+                var (_, msg) = PaletteDrop.Place(_s, Map, slot, MapPoint(PointToClient(new Point(e.X, e.Y))), _drag.Snap, Actions?.Invoke());
                 DropMessage?.Invoke(msg);
             });
             Invalidate();
