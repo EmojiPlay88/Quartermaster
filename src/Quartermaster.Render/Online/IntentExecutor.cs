@@ -365,7 +365,8 @@ internal static class FormulaIntentRunner
         if (i.Preview)
         {
             // Nothing is executed. The visible values and the dice go back; the dice stay pinned for this sender's Apply.
-            pins?.Put(pinKey, g, pack, model.PinnedRolls, pin?.Created);
+            // A full pin table refuses new previews (never evicts a live pin: that would re-open fishing). Nothing was shown yet.
+            if (pins != null && !pins.Put(pinKey, g, pack, model.PinnedRolls, pin?.Created)) return FormulaVerdict.Refused(FormulaPins.FullText);
             var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var v in source.Variables)
@@ -430,11 +431,14 @@ internal static class FormulaIntentRunner
 /// Dice of guest formula previews, pinned per (sender, formula, unit, run) so pressing Calculate again shows the same roll and the next
 /// Apply uses it: no fishing for a better roll. A pin is used once (a successful Apply removes it), expires after <see cref="Lifetime"/>
 /// (counted from the first preview, so re-previewing does not extend it), and is dropped when the game or the rules pack is replaced or the
-/// run is no longer waiting (the runner refuses those first). At most <see cref="MaxPerSender"/> per sender; the oldest goes first.
+/// run is no longer waiting (the runner refuses those first). At most <see cref="MaxPerSender"/> live pins per sender: a live pin is never
+/// evicted (that would let a sender drop a roll it dislikes); when full, a new preview with dice is refused with <see cref="FullText"/>
+/// while existing pins keep re-showing their rolls.
 /// </summary>
 internal sealed class FormulaPins
 {
-    public const int MaxPerSender = 64;
+    public const int MaxPerSender = 512;
+    public const string FullText = "Apply or wait before previewing more.";
     public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
 
     public readonly record struct Key(string Who, string FormulaId, string? PieceId, string? RunId);
@@ -460,14 +464,25 @@ internal sealed class FormulaPins
         return null;
     }
 
-    /// <summary>Pins (or re-pins) a preview's dice. <paramref name="created"/> keeps the first preview's time.</summary>
-    public void Put(Key key, GameSession g, RulesPack pack, IReadOnlyDictionary<string, IReadOnlyList<int>> rolls, DateTime? created)
+    /// <summary>
+    /// Pins (or re-pins) a preview's dice. <paramref name="created"/> keeps the first preview's time. False (nothing changed) when this
+    /// would be a new pin and the sender already holds <see cref="MaxPerSender"/> live ones.
+    /// </summary>
+    public bool Put(Key key, GameSession g, RulesPack pack, IReadOnlyDictionary<string, IReadOnlyList<int>> rolls, DateTime? created)
     {
         if (!_bySender.TryGetValue(key.Who, out var list)) _bySender[key.Who] = list = new();
-        list.RemoveAll(p => p.Key == key || !Valid(p, g, pack));
-        if (rolls.Count == 0) return;
-        list.Add(new Pin(key, g, pack, created ?? Clock(), new Dictionary<string, IReadOnlyList<int>>(rolls, StringComparer.Ordinal)));
-        while (list.Count > MaxPerSender) list.RemoveAt(0);
+        list.RemoveAll(p => !Valid(p, g, pack));   // only expired or stale pins ever go
+        var at = list.FindIndex(p => p.Key == key);
+        if (rolls.Count == 0)
+        {
+            if (at >= 0) list.RemoveAt(at);
+            return true;
+        }
+        var pin = new Pin(key, g, pack, created ?? Clock(), new Dictionary<string, IReadOnlyList<int>>(rolls, StringComparer.Ordinal));
+        if (at >= 0) { list[at] = pin; return true; }
+        if (list.Count >= MaxPerSender) return false;
+        list.Add(pin);
+        return true;
     }
 
     public void Remove(Key key)

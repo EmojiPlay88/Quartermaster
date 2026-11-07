@@ -74,6 +74,16 @@ public class FormulaMaskingTests : IDisposable
                 },
                 new FormulaDef
                 {
+                    Id = "f-dice2", Name = "Second roll", Text = "W + R",
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                        new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 },
+                    },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
                     // Writes Blue's private depot below zero: Red's dialog must not mark it negative.
                     Id = "f-drain", Name = "Drain", Text = "W - 1000000",
                     Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" } },
@@ -376,6 +386,35 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
+    public async Task Pins_Full_NoEviction_SameRoll_NewPreviewRefused()
+    {
+        var (host, hc) = Open(Difficulty.Hardcore, new[] { Alice, Bob });
+        var next = 0;
+        host.SetRoller((n, _) => Enumerable.Range(0, n).Select(_ => next++ % 6 + 1).ToList());
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);
+        var a = Dialog(guest, "f-dice", PhaseFixture.BlueOne, check: true);
+        var roll = Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]);
+        // Fill the table with other previews (as 511 other units would).
+        var other = new Dictionary<string, IReadOnlyList<int>> { ["R"] = new[] { 1 } };
+        for (var i = 1; i < FormulaPins.MaxPerSender; i++)
+            Assert.True(executor.Pins.Put(new FormulaPins.Key("p2", "f-dice", "x" + i, null), host.Game!, host.Rules!, other, null));
+        Assert.Equal(FormulaPins.MaxPerSender, executor.Pins.Count("p2"));
+        // A still re-shows its same roll; a new preview is refused, nothing evicted, nothing executed.
+        Assert.Equal(roll, Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]));
+        var before = Json(host.Game!.State);
+        var b = Dialog(guest, "f-dice2", PhaseFixture.BlueOne, check: true);
+        var refused = await FormulaMasking.SendAsync(port, b, null, calculate: true, preview: true);
+        Assert.False(refused.Applied);
+        Assert.Equal(FormulaPins.FullText, refused.Message);
+        Assert.Null(refused.Rolls);
+        Assert.Equal(before, Json(host.Game!.State));
+        Assert.Equal(FormulaPins.MaxPerSender, executor.Pins.Count("p2"));
+        Assert.Equal(roll, Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]));
+    }
+
+    [Fact]
     public void Pins_Expire_AreCapped_AndFollowTheRules()
     {
         var (s, _) = Open(Difficulty.Hardcore);
@@ -383,10 +422,12 @@ public class FormulaMaskingTests : IDisposable
         var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
         pins.Clock = () => now;
         var rolls = new Dictionary<string, IReadOnlyList<int>> { ["R"] = new[] { 5 } };
-        for (var i = 0; i < FormulaPins.MaxPerSender + 1; i++)
-            pins.Put(new FormulaPins.Key("p2", "f-dice", "u" + i, null), s.Game!, s.Rules!, rolls, null);
+        for (var i = 0; i < FormulaPins.MaxPerSender; i++)
+            Assert.True(pins.Put(new FormulaPins.Key("p2", "f-dice", "u" + i, null), s.Game!, s.Rules!, rolls, null));
+        Assert.False(pins.Put(new FormulaPins.Key("p2", "f-dice", "new", null), s.Game!, s.Rules!, rolls, null));   // full: refused
         Assert.Equal(FormulaPins.MaxPerSender, pins.Count("p2"));
-        Assert.Null(pins.Find(new FormulaPins.Key("p2", "f-dice", "u0", null), s.Game!, s.Rules!));   // oldest evicted
+        Assert.NotNull(pins.Find(new FormulaPins.Key("p2", "f-dice", "u0", null), s.Game!, s.Rules!));   // never evicted
+        Assert.True(pins.Put(new FormulaPins.Key("p2", "f-dice", "u0", null), s.Game!, s.Rules!, rolls, null));   // re-pin still fine
         var key = new FormulaPins.Key("p2", "f-dice", "u1", null);
         Assert.NotNull(pins.Find(key, s.Game!, s.Rules!));
         Assert.Null(pins.Find(new FormulaPins.Key("p3", "f-dice", "u1", null), s.Game!, s.Rules!));   // per sender
