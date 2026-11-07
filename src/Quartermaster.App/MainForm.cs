@@ -216,7 +216,7 @@ sealed partial class MainForm : Form
         _needsRules.Add(Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false)));
         _needsRules.Add(Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true)));
         file.DropDownItems.Add(new ToolStripSeparator());
-        Item(file.DropDownItems, "&Back to launcher", BackToLauncher);
+        Item(file.DropDownItems, "&Back to launcher", BackToLauncher).Visible = Program.LauncherHook != null;
         Item(file.DropDownItems, "E&xit", Close);
 
         var editMenu = BuildEditMenu();
@@ -975,12 +975,12 @@ sealed partial class MainForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (!e.Cancel && (!ConfirmDiscard() || !ConfirmRulesSaved())) e.Cancel = true;
-        if (!e.Cancel && _backToLauncher) ReturnToLauncher = true;
         base.OnFormClosing(e);
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        if (_backToLauncher) ReturnToLauncher = true; // the close really completed
         _shuttingDown = true;   // the handover screen goes without bringing hidden windows back
         if (_floatKeys != null) Application.RemoveMessageFilter(_floatKeys);
         _smokeTimer?.Dispose();
