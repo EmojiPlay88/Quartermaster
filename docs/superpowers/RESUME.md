@@ -32,7 +32,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
 - Tests: xUnit under `tests/`. 898 tests are green after piece 5 (173 Rules, 116 Vassal, 207 Core, 402 Render).
-- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 4 is **pushed**. Piece 5 and a small undo fix are merged into local `master` but **not pushed**; push only when the user asks.
+- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. Push again only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
 - Commit messages end with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
