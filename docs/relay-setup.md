@@ -42,7 +42,7 @@ The image is built from the repository root, so keep the folder structure intact
 
 ### 1.3 Create the data folder
 
-The relay keeps its certificate (and, later, turn-file mailboxes) in `./data`, mounted at `/data` in the
+The relay keeps its certificate and the turn mailbox (section 4) in `./data`, mounted at `/data` in the
 container. The container runs as a non-root user with user id **1654**, so give that user the folder:
 
 ```sh
@@ -150,18 +150,22 @@ no .NET installed on the server. Copy the `relay-out` folder to the server, e.g.
 
 Settings are read from `appsettings.json` next to the program, or from environment variables
 (`Relay__Port`, `Relay__DataDir`, `Relay__CertificatePath`, `Relay__CertificateKeyPath`,
-`Relay__CertificatePassword`, `Relay__MaxConnections`, `Relay__HostMessagesPerSecond`, `Relay__HostBurst`):
+`Relay__CertificatePassword`, `Relay__MaxConnections`, `Relay__HostMessagesPerSecond`, `Relay__HostBurst`,
+`Relay__MailboxMaxBytes`, `Relay__MailboxMaxItems`, `Relay__MailboxExpiryDays`). The same variables work in `docker-compose.yml` under `environment:`.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `Port` | `47820` | TCP port to listen on (TLS) |
-| `DataDir` | `/data` | Folder for the generated certificate (must be writable) |
+| `DataDir` | `/data` | Folder for the generated certificate and the turn mailbox (must be writable) |
 | `CertificatePath` | empty | Own certificate (`.pem` or `.pfx`); empty = self-signed |
 | `CertificateKeyPath` | empty | Key file for a `.pem` certificate |
 | `CertificatePassword` | empty | Password of a `.pfx` file |
 | `MaxConnections` | `2000` | Most connections at once, from all addresses together |
 | `HostMessagesPerSecond` | `400` | Message rate of a room's host connection (never below the 50 guests get) |
 | `HostBurst` | `1000` | Burst size of a room's host connection (never below 200) |
+| `MailboxMaxBytes` | `1073741824` (1 GiB) | Most bytes the turn mailbox keeps, all games together; when full, new turns are refused |
+| `MailboxMaxItems` | `10000` | Most turns the mailbox keeps, all games together; when reached, new turns are refused |
+| `MailboxExpiryDays` | `30` | Days a turn waits in the mailbox before it is deleted |
 
 Outside Docker, set `DataDir` to a real folder, e.g. `/var/lib/quartermaster-relay`.
 
@@ -263,3 +267,39 @@ New-NetFirewallRule -DisplayName "Quartermaster relay" -Direction Inbound -Proto
 - Per-address limits treat an IPv6 address by its /64 network (one home or one server).
 - If the relay sits behind a reverse proxy, all players appear to come from the proxy's address and
   share the per-address limits; connecting directly is recommended.
+
+---
+
+## 4. Turn mailbox
+
+Players who take turns by turn file (Game → Send Turn…) can let the relay hold the file until the other
+player's Quartermaster picks it up, instead of sending it by e-mail or chat.
+
+- **Encrypted end to end.** Each turn is encrypted on the sender's computer with a key made from the game's
+  private id (which only the players' copies hold) and the game password, if any. The relay stores the
+  encrypted bytes only and cannot read them.
+- **Boxes have opaque names.** A box is named by a 64-character code derived from the same secrets and the
+  receiving player; the relay never sees game names, game ids, player names or passwords. Anyone who knows
+  a box's code can list, fetch and delete what is in it, which is why the code is derived from secrets.
+- **Where it is stored:** `DataDir/mailbox/<box>/` holds one `.bin` file per waiting turn and a small
+  `index.json`. On Linux the folders are created readable by the relay's user only (0700) and the files
+  0600. The mailbox survives restarts; back up or move `./data` to keep it.
+- **Limits:**
+  - one turn must fit in one relay message (about 6 MB once encrypted); a larger one is refused by the game
+    before it is sent;
+  - 50 waiting turns per box;
+  - per address (IPv6 by /64): 30 upload attempts per hour — refused attempts count too — and 100 MB of
+    stored turns per 24 hours; beyond that, "Too many uploads; try again later.";
+  - `MailboxMaxBytes` in total (default 1 GiB) and `MailboxMaxItems` turns in total (default 10,000). For the
+    byte total every turn counts at least 4 KB, and each box 8 KB more, so many tiny uploads cannot fill
+    the disk or the relay's memory. Expired turns are cleared first; if it is still full, new turns are
+    refused with "The mailbox is full.";
+  - turns are deleted after `MailboxExpiryDays` days (default 30), checked every hour, or when the
+    receiving player's copy deletes them after opening.
+- **Size it to your server.** The per-address limits slow a stranger down but do not stop a few addresses
+  from filling the mailbox and keeping it full until their uploads expire. Set `MailboxMaxBytes` to what
+  the disk can spare, and run the relay for people you know. Players' copies delete turns once they have
+  been played, so normal use keeps the mailbox small.
+- The relay log never names boxes or sizes per box; it only reports how many turns are kept and how many
+  expired.
+- To empty the mailbox, stop the relay and delete `DataDir/mailbox`.

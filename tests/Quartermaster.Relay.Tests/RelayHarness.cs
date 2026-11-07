@@ -35,19 +35,27 @@ public sealed class RelayHarness : IAsyncDisposable
 {
     public FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 11, 7, 12, 0, 0, TimeSpan.Zero));
     public LogCapture Logs { get; } = new();
-    public string DataDir { get; } = Path.Combine(Path.GetTempPath(), "qm-relay-tests", Guid.NewGuid().ToString("N"));
+    public string DataDir { get; private init; } = Path.Combine(Path.GetTempPath(), "qm-relay-tests", Guid.NewGuid().ToString("N"));
+    /// <summary>Leave DataDir on disposal (a later harness reuses it, e.g. to test a restart).</summary>
+    public bool KeepData { get; set; }
     private WebApplication _app = null!;
     public WebApplication App => _app;
     private TestServer _server = null!;
     private readonly List<RelayTestClient> _clients = [];
 
-    public static async Task<RelayHarness> Start()
+    /// <param name="settings">Extra <c>Relay:*</c> settings.</param>
+    /// <param name="dataDir">Reuse a data folder (default: a fresh one).</param>
+    /// <param name="start">Start time of the fake clock (default 2026-11-07 12:00 UTC).</param>
+    public static async Task<RelayHarness> Start(IDictionary<string, string?>? settings = null, string? dataDir = null, DateTimeOffset? start = null)
     {
-        var h = new RelayHarness();
+        var h = dataDir is null ? new RelayHarness() : new RelayHarness { DataDir = dataDir };
+        if (start is { } t) h.Time.SetUtcNow(t);
         h._app = RelayApp.Build([], b =>
         {
             b.WebHost.UseTestServer();
-            b.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Relay:DataDir"] = h.DataDir });
+            var config = new Dictionary<string, string?> { ["Relay:DataDir"] = h.DataDir };
+            foreach (var (k, v) in settings ?? new Dictionary<string, string?>()) config[k] = v;
+            b.Configuration.AddInMemoryCollection(config);
             b.Services.AddSingleton<TimeProvider>(h.Time);
             b.Logging.AddProvider(h.Logs);
             b.Logging.AddFilter<LogCapture>(null, LogLevel.Trace);
@@ -116,7 +124,7 @@ public sealed class RelayHarness : IAsyncDisposable
         foreach (var c in _clients) await c.DisposeAsync();
         await _app.StopAsync();
         await _app.DisposeAsync();
-        try { Directory.Delete(DataDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        if (!KeepData) try { Directory.Delete(DataDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 }
 

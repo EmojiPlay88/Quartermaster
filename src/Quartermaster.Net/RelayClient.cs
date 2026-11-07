@@ -132,6 +132,38 @@ public sealed class RelayClient : IAsyncDisposable
         return id;
     }
 
+    // ---- turn mailbox (any connection; never joins a room, never touches the rejoin) ----
+
+    /// <summary>Stores a sealed blob in a box; returns the relay's item id. Throws <see cref="RelayException"/> when refused.</summary>
+    public async Task<string> MailboxPutAsync(string box, byte[] sealed_)
+    {
+        if (!MailboxLimits.IsBoxId(box)) throw new RelayException(MailboxLimits.BadBox);
+        if (sealed_ is not { Length: > 0 and <= MailboxLimits.MaxSealedBytes }) throw new RelayException(MailboxLimits.BadItem);
+        return ((MailboxStored)await Request("mailbox", new MailboxPut(box, sealed_), typeof(MailboxStored)).ConfigureAwait(false)).ItemId;
+    }
+
+    /// <summary>The items waiting in up to <see cref="MailboxLimits.MaxBoxesPerList"/> boxes, oldest first.</summary>
+    public async Task<IReadOnlyList<MailboxItemInfo>> MailboxListAsync(IReadOnlyList<string> boxes)
+    {
+        if (boxes.Count > MailboxLimits.MaxBoxesPerList || boxes.Any(b => !MailboxLimits.IsBoxId(b))) throw new RelayException(MailboxLimits.BadBox);
+        return ((MailboxItems)await Request("mailbox", new MailboxList(boxes.ToList()), typeof(MailboxItems)).ConfigureAwait(false)).Items;
+    }
+
+    /// <summary>The sealed bytes of one item (still encrypted; open with the mailbox seal key).</summary>
+    public async Task<byte[]> MailboxGetAsync(string box, string itemId)
+    {
+        if (!MailboxLimits.IsBoxId(box)) throw new RelayException(MailboxLimits.BadBox);
+        var item = (MailboxItem)await Request("mailbox", new MailboxGet(box, itemId), typeof(MailboxItem)).ConfigureAwait(false);
+        if (item.Box != box || item.ItemId != itemId) throw new RelayException("The relay sent an unexpected answer.");
+        return item.Sealed;
+    }
+
+    public async Task MailboxDeleteAsync(string box, string itemId)
+    {
+        if (!MailboxLimits.IsBoxId(box)) throw new RelayException(MailboxLimits.BadBox);
+        await Request("mailbox", new MailboxDelete(box, itemId), typeof(MailboxDeleted)).ConfigureAwait(false);
+    }
+
     public Task SendAsync(string? to, byte[] sealed_) => Post(_role ?? "guest", new Send(to, sealed_));
 
     private static RelayMessage Expect(RelayMessage m) => m;
@@ -167,8 +199,11 @@ public sealed class RelayClient : IAsyncDisposable
         finally { _requestLock.Release(); }
     }
 
+    /// <summary>"browser" and "mailbox" are weak roles: a later host/guest request replaces them (before Hello is sent).</summary>
     private static string Upgrade(string? current, string wanted) =>
-        current == null || (current == "browser" && wanted != "browser") ? wanted : current;
+        current == null || (IsWeak(current) && !IsWeak(wanted)) ? wanted : current;
+
+    private static bool IsWeak(string role) => role is "browser" or "mailbox";
 
     /// <summary>
     /// App send: takes the send lock, and if a rejoin is still unanswered releases it and waits (re-checking after every
@@ -464,7 +499,7 @@ public sealed class RelayClient : IAsyncDisposable
                 else Complete(msg);
                 break;
             }
-            case CodeReserved or Lobbies: Complete(msg); break;
+            case CodeReserved or Lobbies or MailboxStored or MailboxItems or MailboxItem or MailboxDeleted: Complete(msg); break;
         }
         return null;
     }

@@ -22,6 +22,7 @@ namespace Quartermaster.Relay
             var options = builder.Configuration.GetSection("Relay").Get<RelayOptions>() ?? new RelayOptions();
             builder.Services.AddSingleton(options);
             builder.Services.TryAddSingleton(TimeProvider.System);
+            builder.Services.AddSingleton<Mailbox>();
             builder.Services.AddSingleton<Rooms>();
 
             var cert = Certificates.LoadOrCreate(options);
@@ -37,6 +38,8 @@ namespace Quartermaster.Relay
             if (cert.Created) log.LogInformation("Created a self-signed certificate in {DataDir}.", options.DataDir);
             log.LogInformation("Relay certificate fingerprint: {Fingerprint}", cert.Fingerprint);
             log.LogInformation("Relay listening on port {Port} (path {Path}).", options.Port, EndpointPath);
+            // Loaded now, not on the first connection: the expiry sweep must run on an idle relay too.
+            app.Services.GetRequiredService<Mailbox>();
 
             app.UseWebSockets(new WebSocketOptions
             {
