@@ -1,4 +1,4 @@
-# Piece 7 — Scans and OCR — Design
+# Piece 7 — Rulebook search, scans and OCR — Design
 
 *Date: 2026-11-07. Builds on pieces 1–6c as merged to `master`. Implements master spec §8.3 ("Scans and OCR") and the workbench line "OCR for scans" (§1 item 6). Everything not stated in the master spec is the assistant's call, marked "(call)".*
 
@@ -44,6 +44,18 @@ Content boundary (hard, unchanged): the engine ships no real-game content. OCR r
 8. **Tests/CI.** No CI exists; tests and smokes run locally. OCR integration tests and `--smoke-ocr` skip with a clear note when no OCR language is installed. PDF rendering is tested with a one-page PDF generated in the test from a tiny hand-written PDF byte template (no new dependency).
 9. **Threading.** One read at a time; **Cancel** while reading; changing the image or region cancels the running read; results for a stale request are dropped.
 10. **Smaller calls.** Language: profile language if installed, else `en-US` if installed, else the first installed. Multi-page TIFF: first page only, with a note. EXIF orientation is applied when loading photos. Zoom 25–400 %. Region cleared when the image changes.
+
+## 4b. Rulebook search (added 2026-11-07 at the user's request)
+
+What the user said: the rulebooks are mostly PDFs with selectable text (charts are scans), and hunting through the whole book for the little paragraphs a formula needs is the slow part. They chose "search" (and OCR for the charts) over AI drafting.
+
+- **Index:** on first use per module, the text of every PDF document in the module (and PDFs the user adds) is extracted page by page (Windows.Data.Pdf has no text API, so a small PDF text extractor is needed — call: use the `PdfPig` NuGet package, Apache-2.0, pure .NET; if it can't read a file, that file is listed as "not searchable" and OCR is offered for its pages). The index is cached under `AppDataRoot/search/{moduleSha}/` (per document: SHA, page texts) and rebuilt when a document's SHA changes. Indexing runs in the background with progress; never blocks the UI.
+- **Search box** in the workbench toolbar (and Ctrl+Shift+F): words, a "quoted phrase", or several words (all must appear on the page — call). Results list: document, page, a snippet with the hits highlighted, grouped by document and ordered by page. Clicking a result opens that page in the PDF pane (existing page box) and, where the viewer supports it, highlights the term (WebView2 PDF `#search=` fragment — call).
+- **Search from the editor:** a **Find in rulebook** button next to the formula, table and phase editors searches for the selected word or the item's name. **Use as rule ref** on a result fills the item's rule ref (document + page) — the same field "Link to current page" fills today.
+- **Rule refs become links both ways:** clicking an item's rule ref opens the page; on a page, a small list **Used on this page** shows every formula/table/phase whose rule ref points there.
+- **Glossary helper (call):** the results panel shows how often the term appears and the first page where it appears in bold or as a heading (often its definition), as a "Probably defined on page N" hint.
+- **Content boundary:** the index stays on the user's PC, built from their own files; nothing is uploaded; tests use invented PDFs generated at test time.
+- **Not included:** AI drafting of formulas (offered, not chosen); semantic search.
 
 ## 5. Architecture (for the builder)
 
