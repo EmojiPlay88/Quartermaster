@@ -295,3 +295,14 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - A module that fails to open from the launcher leaves an empty game window.
 - A whitespace-only module path is not handled specially.
 - Opening a module by command-line path does not record it as last played in the launcher list.
+
+## Piece 6b (live online play): parked items
+
+- A side filter that depends on a piece's position could, in an edge case, let a move change which side a piece belongs to. The host would not notice until the next view is built. Not seen in practice.
+- A mask (hidden input) on a piece that has no side is not enforced. This was already so before 6b.
+- If the host undoes a change of players made in the session, the saved player list and the online seats can disagree. Seats are what the host checks, so play is not affected.
+- Guests apply "show trail" and "expand stack" on their own copy only, because the host refuses them. They are not shared between players.
+- Task 4 screenshot smokes crashed in the graphics library while the display was locked; rerun them on an unlocked desktop.
+- All guests of a game share one game key. Guest-to-guest privacy relies on the relay routing messages honestly, so run your own relay. Any room creator gets the larger host message budget on the relay.
+- The host holds a side too (a game needs every side held). A host who only moderates must hold an extra side with no pieces.
+- The end-to-end test (`Piece6bEndToEndTests`) covers two guests over a real in-process relay; the Docker image is checked by hand (see the task 9 report), not by tests.

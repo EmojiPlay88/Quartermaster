@@ -150,7 +150,7 @@ no .NET installed on the server. Copy the `relay-out` folder to the server, e.g.
 
 Settings are read from `appsettings.json` next to the program, or from environment variables
 (`Relay__Port`, `Relay__DataDir`, `Relay__CertificatePath`, `Relay__CertificateKeyPath`,
-`Relay__CertificatePassword`):
+`Relay__CertificatePassword`, `Relay__MaxConnections`, `Relay__HostMessagesPerSecond`, `Relay__HostBurst`):
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -160,6 +160,8 @@ Settings are read from `appsettings.json` next to the program, or from environme
 | `CertificateKeyPath` | empty | Key file for a `.pem` certificate |
 | `CertificatePassword` | empty | Password of a `.pfx` file |
 | `MaxConnections` | `2000` | Most connections at once, from all addresses together |
+| `HostMessagesPerSecond` | `400` | Message rate of a room's host connection (never below the 50 guests get) |
+| `HostBurst` | `1000` | Burst size of a room's host connection (never below 200) |
 
 Outside Docker, set `DataDir` to a real folder, e.g. `/var/lib/quartermaster-relay`.
 
@@ -228,12 +230,18 @@ New-NetFirewallRule -DisplayName "Quartermaster relay" -Direction Inbound -Proto
 - **Game messages** are end-to-end encrypted with a key derived from the lobby password; the relay only
   passes them on and never stores or logs them. **Open lobbies (no password)** use a key anyone who
   knows the lobby code can derive, so the relay could read those games.
+- All guests of a game share one game key. Each guest still receives only the view of their own
+  sides from the host, but a guest-to-guest message is only kept private by the relay routing it
+  honestly. Run your own relay and you control that.
 - The relay stores a hash of the password check value, never the password. The host's copy also
   holds a private **host key** (random, never shown); only the copy with that key can take the host's
   place again after a dropped connection, so a guest who knows the password cannot take over the game.
 - Limits:
   - messages up to 8 MB (4 KB before a connection has introduced itself), 50 messages per second per
-    connection (bursts of 200); a connection that does not introduce itself within 10 seconds is closed;
+    connection (bursts of 200). A room's host gets a larger budget because it sends a snapshot to
+    every guest: 400 per second, bursts of 1000 (`HostMessagesPerSecond`, `HostBurst`). Anyone who
+    creates a room gets the host budget, not only the game's real host; a relay you run for friends
+    is fine with that. A connection that does not introduce itself within 10 seconds is closed;
   - 32 connections at once per address and 2000 in total (`MaxConnections`);
   - 20 lobbies per address. At the limit, the oldest lobby from that address whose host has gone is
     closed to make space; if every one still has its host, a new lobby is refused;

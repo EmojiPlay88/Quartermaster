@@ -2,7 +2,7 @@
 
 Quartermaster is a desktop engine for playing tabletop wargames, a small alternative to [VASSAL](https://vassalengine.org) aimed at the heaviest board games. It opens the VASSAL modules you already have and then takes the paperwork off your hands. It runs the game's procedures for you, does the arithmetic, rolls the dice, and keeps count of everything a big game asks you to track, from fuel and ammunition to whose turn it is. Go ahead and close that spreadsheet. It's been open since the last campaign and it deserves a rest.
 
-> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes, undo and step back, and the readable-at-a-glance tools below work. Hot-seat play with several players works; online play and the rest of the [Roadmap](#roadmap) are not built yet.
+> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes, undo and step back, and the readable-at-a-glance tools below work. Hot-seat play with several players and live online play work; the rest of the [Roadmap](#roadmap) is not built yet.
 
 ## What it does
 
@@ -45,7 +45,10 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
 - When the turn passes to another player, a handover screen hides every window ("Pass to Anna (Red)") until they press Continue. Until then the game shows only public information.
 - Each player sees only their own side's secrets. In the Rules Workbench's Visibility tab you mark which properties are private, which organisation displays and maps belong to a side, and which formulas roll their dice in private. Other players see "Red ledger changed" or "Red rolled dice" in the log, never the numbers.
 - Hot-seat is honour-based: the game hides things on screen, but everything is still in memory, and formula dialogs can show a held unit's inputs in full.
-- *Coming next:* live online play over the internet, then play by turn files.
+- *Live online play, available now:* open **Online lobby ▶** in the launcher. **Join…** takes a game from the list (or a code), **Create lobby…** starts a new game for others to join, and **Host a saved game…** continues one of your saves online. Games go through a relay that you run yourself, in Docker on any server you control; see [docs/relay-setup.md](docs/relay-setup.md).
+- Give the lobby a password and the game is end-to-end encrypted, so the relay cannot read it. An open lobby (no password) can be read by the relay.
+- The host's copy runs the game. Guests send what they want to do and receive only what their own sides may see, never another side's private values. Only the host can undo, step back and save; a guest can use File → Export Viewer Copy… to keep a copy of their view. If a guest drops, their seat is kept and they rejoin where they left off. Chat appears in the log.
+- *Coming next:* play by turn files.
 
 **Tabletop tools**
 - Dice: 1d6, 2d6, custom expressions (`3d6+2`), special dice and multi-rolls. Every roll goes into the log.
@@ -80,7 +83,7 @@ The tests use small, invented modules and rules packs.
 3. Press **Play offline ▶**. From there, **Continue** reopens the newest autosave, the recent games list reopens a saved game, **Open saved game…** browses for a file, and **New game…** opens the setup dialog (choose a start, difficulty and players).
 4. **File → Back to launcher** closes the game (asking about unsaved changes as usual) and returns to the module list. Closing the window ends the program.
 
-**Online lobby ▶** is greyed out for now; online play comes with a later update. Opening a module from the command line, or with File → Open Module, skips the launcher.
+**Online lobby ▶** opens the lobby window for the selected module (Relay: field, `Join…`, `Create lobby…`, `Host a saved game…`). Opening a module from the command line, or with File → Open Module, skips the launcher.
 
 ## Build and run
 
@@ -123,7 +126,7 @@ Design documents and implementation plans are in [`docs/superpowers`](docs/super
 ## Roadmap
 
 - OCR for scanned rulebooks in the workbench.
-- Live online multiplayer (host-authoritative, with chat in the log) and play by turn files.
+- Play by turn files, with a mailbox on your relay.
 
 ## License
 
