@@ -22,6 +22,7 @@ namespace Quartermaster.Render.Tests;
 public sealed class Piece6bEndToEndTests : IAsyncLifetime
 {
     private const string Password = "red-and-blue";
+    private const double BlueFuel = 31313;
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "qm-e2e6b-" + Guid.NewGuid().ToString("N"));
     private readonly List<FixtureModule> _fixtures = new();
     private readonly List<ModuleSession> _sessions = new();
@@ -95,7 +96,73 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         return s;
     }
 
-    private sealed record Guest(ModuleSession S, GuestSession G, RemoteActions A, RelayClient C, List<string> Notices);
+    private sealed record Guest(ModuleSession S, GuestSession G, RemoteActions A, RelayClient C, List<string> Notices, TapTransport Tap);
+
+    /// <summary>Records every payload a guest receives (opened frames, unzipped snapshots, unpacked rules packs) on its way to the session.</summary>
+    internal sealed class TapTransport : ITransport, IDisposable
+    {
+        private readonly RelayTransport _inner;
+        public List<byte[]> Opened { get; } = new();
+
+        public TapTransport(RelayTransport inner)
+        {
+            _inner = inner;
+            inner.Received += (from, p) => { lock (Opened) Opened.Add(p); Received?.Invoke(from, p); };
+            inner.MemberLeft += id => MemberLeft?.Invoke(id);
+            inner.Disconnected += why => Disconnected?.Invoke(why);
+            inner.Reconnected += () => Reconnected?.Invoke();
+            inner.MembersListed += ids => MembersListed?.Invoke(ids);
+            inner.HostLeft += () => HostLeft?.Invoke();
+            inner.HostBack += () => HostBack?.Invoke();
+        }
+
+        public Task Send(string? to, byte[] payload) => _inner.Send(to, payload);
+        public Task UpdateListing(LobbyListing listing) => _inner.UpdateListing(listing);
+        public void Dispose() => _inner.Dispose();
+
+        public event Action<string, byte[]>? Received;
+        public event Action<string>? MemberLeft;
+        public event Action<string>? Disconnected;
+        public event Action? Reconnected;
+        public event Action<IReadOnlyList<string>>? MembersListed;
+        public event Action? HostLeft;
+        public event Action? HostBack;
+
+        public string AllText()
+        {
+            var sb = new System.Text.StringBuilder();
+            byte[][] frames;
+            lock (Opened) frames = Opened.ToArray();
+            foreach (var raw in frames)
+            {
+                sb.Append(System.Text.Encoding.UTF8.GetString(raw)).Append('\n');
+                GamePayload msg;
+                try { msg = Framing.Decode<GamePayload>(raw); }
+                catch (ProtocolException) { continue; }
+                switch (msg)
+                {
+                    case Snapshot snap:
+                        try { sb.Append(System.Text.Encoding.UTF8.GetString(Gzip.DecompressBounded(snap.StateJsonGz, Framing.MaxFrame))).Append('\n'); }
+                        catch (System.Security.Cryptography.CryptographicException) { }
+                        break;
+                    case Welcome w: Zip(sb, w.RulesPack); break;
+                    case RulesChanged rc: Zip(sb, rc.RulesPack); break;
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static void Zip(System.Text.StringBuilder sb, byte[] zip)
+        {
+            try
+            {
+                using var z = new System.IO.Compression.ZipArchive(new MemoryStream(zip), System.IO.Compression.ZipArchiveMode.Read);
+                foreach (var e in z.Entries)
+                    using (var rd = new StreamReader(e.Open())) sb.Append(rd.ReadToEnd()).Append('\n');
+            }
+            catch (InvalidDataException) { }
+        }
+    }
 
     private async Task<Guest> JoinFound(QueueDispatcher d, string modulePath, string sha, byte[] key, string name, string tokens, string sessionName)
     {
@@ -104,7 +171,7 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         Assert.Equal("Friday", found.Name);
         Assert.True(found.Locked);
         await client.JoinRoomAsync(found.Code, Secrets.AuthVerifier(Password, found.Code));
-        var t = new RelayTransport(client, key);
+        var t = new TapTransport(new RelayTransport(client, key));
         _disposables.Add(t);
         var s = Session(modulePath, sessionName);
         var g = new GuestSession(s, t, found.Code, name, d.Post, new RejoinTokens(tokens));
@@ -113,7 +180,7 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         g.Notice += notices.Add;
         var a = new RemoteActions(g);
         a.Refused += notices.Add;
-        return new Guest(s, g, a, client, notices);
+        return new Guest(s, g, a, client, notices, t);
     }
 
     private static RulesPack WithGreen(RulesPack p) => p with { Sides = p.Sides.Append(new SideDef { Id = "green", Name = "Green", UnitFilter = "startsWith(name(), \"Green\")" }).ToList() };
@@ -133,6 +200,8 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         hs.NewRules("t");
         hs.UpdateRules(_ => WithGreen(GuestSessionTests.Pack(hs.Archive.Sha256)));
         GuestSessionTests.AddRedSecrets(hs);
+        // Blue's private fuel too, so Red can be checked for leaks of Blue's data.
+        hs.Game!.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.BlueOne), "fuel", 40, BlueFuel, "manual", null, null, null, null, null, "Moderator"));
 
         var hostClient = await NewClient();
         var code = await hostClient.ReserveCodeAsync();
@@ -171,15 +240,16 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         var verdict = Await(d, bob.A.ApplyFormulaAsync(new FormulaIntent("f-mix", PhaseFixture.BlueOne, null,
             new Dictionary<string, string> { ["W"] = "7", ["S"] = "1" }, false)));
         Assert.Equal(FormulaBox.Hidden, verdict.Boxes.Single(b => b.Var == "S").State);
-        // A guest asking for a preview of a formula never writes (and never sees the other side's input).
-        var peek = Await(d, ann.A.ApplyFormulaAsync(new FormulaIntent("f-peek", null, null, new Dictionary<string, string>(), true)));
+        // A preview of a formula over Red's hidden depot, asked by Blue: it comes back without the hidden value.
+        var peek = Await(d, bob.A.ApplyFormulaAsync(new FormulaIntent("f-peek", null, null, new Dictionary<string, string>(), true)));
+        Assert.DoesNotContain(GuestSessionTests.SecretStock.ToString(),
+            (peek.Message ?? "") + JsonSerializer.Serialize(peek, QuartermasterJson.Options));
         // Acting on the other side's unit is refused.
         bob.A.EditLedger(LedgerKey.Piece(PhaseFixture.RedOne), "fuel", 1, "drain");
         Until(d, () => bob.Notices.Count >= 1);
 
         Until(d, () => ann.S.Game!.State.Log.Any(l => l.Kind == LogKind.Chat && l.Text.Contains("Blue ready"))
             && bob.S.Game!.State.Log.Any(l => l.Kind == LogKind.Chat && l.Text.Contains("Red ready")));
-        Assert.NotNull(peek);
 
         // Guest drop: Bob's app goes away, the game moves on, Bob rejoins with his token and keeps his seat.
         var bobId = bob.G.PlayerId;
@@ -194,16 +264,22 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         Assert.Equal(new[] { "blue" }, bob2.S.GuestSides!.ToArray());
 
         // Host undo is host-only: a guest's attempt is refused, the host's takes effect and guests see it in the next snapshot.
-        var logBefore = hs.Game!.State.Log.Count;
+        Func<string, ModuleSession, bool> settled = (side, s) =>
+            Json(PlayerView.For(hs.Game!.State, hs.Rules, hs.Model, new HashSet<string> { side })) == Json(s.Game!.State);
+        Until(d, () => settled("red", ann.S) && settled("blue", bob2.S));   // quiet before the undo
+        var hostBefore = Json(hs.Game!.State);
+        var annBefore = Json(ann.S.Game!.State);
+        var bobBefore = Json(bob2.S.Game!.State);
         bob2.A.Undo();
         Assert.Contains(ModuleSession.GuestUndoText, bob2.Notices);
+        Assert.Equal(hostBefore, Json(hs.Game!.State));   // the guest's attempt changed nothing
         var undo = new HistoryController(hs, pc, prepare);
         Assert.True(undo.CanUndo);
         undo.Undo();
         host.FlushSnapshots();
-        Func<string, ModuleSession, bool> settled = (side, s) =>
-            Json(PlayerView.For(hs.Game!.State, hs.Rules, hs.Model, new HashSet<string> { side })) == Json(s.Game!.State);
+        Assert.NotEqual(hostBefore, Json(hs.Game!.State));   // the host's undo really undid something
         Until(d, () => settled("red", ann.S) && settled("blue", bob2.S));
+        Assert.NotEqual(annBefore + bobBefore, Json(ann.S.Game!.State) + Json(bob2.S.Game!.State));   // and the guests' views followed
 
         // Settle: both guests hold exactly the view the host computes for their sides, and nothing else.
         var model = hs.Model;
@@ -222,5 +298,15 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         Assert.Contains("Blue 1", bobAll);
         Assert.Contains("Red 1", annAll);
         Assert.Equal(0, ann.G.Malformed + bob2.G.Malformed);
+
+        // Every payload each guest received (frames, unzipped snapshots, unpacked rules packs), Bob before and after rejoining.
+        var redMarkers = GuestSessionTests.SecretMarkers.Append((GuestSessionTests.SecretFuel + 5).ToString()).ToList();
+        var blueMarkers = new[] { BlueFuel.ToString() };
+        var annRecv = ann.Tap.AllText();
+        var bobRecv = bob.Tap.AllText() + "\n" + bob2.Tap.AllText();
+        Assert.True(ann.Tap.Opened.Count > 0 && bob.Tap.Opened.Count > 0 && bob2.Tap.Opened.Count > 0);
+        foreach (var m in redMarkers) Assert.DoesNotContain(m, bobRecv);
+        foreach (var m in blueMarkers) { Assert.DoesNotContain(m, annRecv); Assert.Contains(m, bobRecv); }
+        Assert.Contains(GuestSessionTests.SecretName, annRecv);
     }
 }
