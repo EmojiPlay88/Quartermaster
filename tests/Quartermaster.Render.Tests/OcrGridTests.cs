@@ -144,4 +144,43 @@ public class OcrGridTests
         var words = new List<OcrWord> { W("b", 40, 0), W("a", 0, 0), W("c", 0, 20) };
         Assert.Equal("a b\nc", OcrResultModel.ToText(words));
     }
+
+    [Fact]
+    public void EmptyCells_InsideBands_RereadsFillAndAreMarked()
+    {
+        // Header "Roll A B" with values; the row keys 1 and 3 were skipped by the first pass (single characters).
+        var words = new List<OcrWord>
+        {
+            W("Roll", 0, 0), W("A", 100, 0), W("B", 200, 0),
+            W("10", 100, 20), W("20", 200, 20),
+            W("2", 10, 40, 10), W("11", 100, 40), W("21", 200, 40),
+            W("12", 100, 60), W("22", 200, 60),
+        };
+        var g = new OcrGridState(words, fixDigits: true);
+        Assert.Equal(new[] { "", "10", "20" }, g.Cells[1]);
+        var empty = g.EmptyCells();
+        Assert.Equal(new[] { (1, 0), (3, 0) }, empty.Select(e => (e.Row, e.Col)));
+        var box = empty[0].Box;
+        Assert.True(box.Left >= -4 && box.Right <= 50 && box.Top < 20 && box.Bottom > 30, $"box {box}");
+        var found = new OcrWord?[] { new OcrWord("1", 12, 20, 8, 10), new OcrWord("xyzw", 12, 60, 30, 10) };
+        Assert.Equal(1, g.AddRereads(empty, found)); // "xyzw" is not believable for a lone cell
+        Assert.Equal(new[] { "1", "10", "20" }, g.Cells[1]);
+        Assert.True(g.IsReread(1, 0));
+        Assert.False(g.IsEdited(1, 0));
+        Assert.Equal("", g.Cells[3][0]);
+        g.Edit(1, 0, "One");
+        Assert.False(g.IsReread(1, 0));
+        Assert.Equal(0, g.AddRereads(empty, found)); // never after the user edited
+    }
+
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData(" 1 2 ", true)]
+    [InlineData("10%", true)]
+    [InlineData("A", true)]
+    [InlineData("a", false)]
+    [InlineData("1234", false)]
+    [InlineData("Oil", false)]
+    [InlineData("", false)]
+    public void AcceptsCellReread(string text, bool ok) => Assert.Equal(ok, OcrCleanup.AcceptsCellReread(text));
 }

@@ -112,6 +112,189 @@ public sealed class OcrService
         }
     }
 
+    /// <summary>Upscale factor of the empty-cell second pass.</summary>
+    internal const double CellScale = 3.0;
+
+    /// <summary>
+    /// Second pass for cells the first reading left empty (Windows OCR tends to skip lone characters): each box (image px) is
+    /// cropped, grayscaled and upscaled ×3; blank cells are skipped. The cells' ink is laid out in as few strips as fit the engine
+    /// maximum, each after a printed anchor word ("Cell 1   Cell 2 …", <paramref name="padding"/> px source scale of white above
+    /// and below), because the engine drops glyphs that stand alone; each strip is read once and the words are mapped back to
+    /// their cell by x (anchor words dropped). Returns, per box, the words of its cell joined (union box in image px), or null.
+    /// The bitmap is only touched before the first await.
+    /// </summary>
+    /// <exception cref="OcrUnavailableException">No OCR language installed, or not <paramref name="language"/>.</exception>
+    /// <exception cref="InvalidDataException">GDI+ could not allocate/draw the tiles.</exception>
+    public async Task<IReadOnlyList<OcrWord?>> ReadCellsAsync(Bitmap image, IReadOnlyList<RectangleF> boxes, double padding, string language, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        ct.ThrowIfCancellationRequested();
+        var result = new OcrWord?[boxes.Count];
+        if (boxes.Count == 0) return result;
+        if (_languages().Count == 0) throw new OcrUnavailableException(NoLanguageMessage);
+        var engine = _engineFactory(language) ?? throw new OcrUnavailableException(LanguageNotInstalledMessage(language));
+        int max = (int)OcrEngine.MaxImageDimension;
+        if (max <= 0) max = 10000;
+
+        var bounds = new Rectangle(0, 0, image.Width, image.Height);
+        int pad = Math.Max(4, (int)Math.Round(Math.Max(0, padding) * CellScale));
+        var strips = new List<(Bitmap Strip, List<CellTile> Tiles)>();
+        try
+        {
+            var pending = new List<(int Index, Rectangle Src, double Scale, Bitmap Tile, Rectangle Ink)>();
+            try
+            {
+                for (int i = 0; i < boxes.Count; i++)
+                {
+                    var b = boxes[i];
+                    var src = Rectangle.Intersect(Rectangle.FromLTRB((int)Math.Floor(b.Left), (int)Math.Floor(b.Top), (int)Math.Ceiling(b.Right), (int)Math.Ceiling(b.Bottom)), bounds);
+                    if (src.Width <= 0 || src.Height <= 0) continue;
+                    double scale = Math.Min(CellScale, (double)(max - 2 * pad) / Math.Max(src.Width, src.Height));
+                    if (scale <= 0) continue;
+                    var tile = Guard(() => Draw(image, src, scale, grayscale: true));
+                    var ink = InkBounds(tile);
+                    if (ink.IsEmpty) { tile.Dispose(); continue; } // a blank cell: nothing to read
+                    pending.Add((i, src, scale, tile, ink));
+                }
+                // Windows OCR drops glyphs that stand alone (tested: wide gaps read nothing, tight gaps merge the cells into one
+                // number). So each cell's ink follows a printed anchor word, "Cell 1   Cell 2 …", read as an ordinary text line;
+                // the anchors are dropped when the words are mapped back.
+                double inkH = pending.Count == 0 ? 0 : Median(pending.Select(p => (double)p.Ink.Height));
+                using var anchorFont = new Font("Segoe UI", (float)Math.Max(8, inkH / 0.72), FontStyle.Regular, GraphicsUnit.Pixel);
+                int anchorW;
+                using (var probe = new Bitmap(1, 1))
+                using (var pg = Graphics.FromImage(probe))
+                    anchorW = (int)Math.Ceiling(pg.MeasureString(Anchor, anchorFont, PointF.Empty, StringFormat.GenericTypographic).Width);
+                int space = Math.Max(4, (int)Math.Round(0.6 * inkH)), gap = Math.Max(8, (int)Math.Round(1.6 * inkH));
+                int start = 0;
+                while (start < pending.Count)
+                {
+                    int x = pad, h = anchorFont.Height + 2 * pad, end = start;
+                    var tiles = new List<CellTile>();
+                    while (end < pending.Count)
+                    {
+                        var p = pending[end];
+                        int w = anchorW + space + p.Ink.Width;
+                        if (end > start && x + w + pad > max) break;
+                        tiles.Add(new CellTile(p.Index, p.Src, p.Scale, x + anchorW + space, p.Ink.Width, p.Ink, x));
+                        x += w + gap;
+                        h = Math.Max(h, p.Ink.Height + 2 * pad);
+                        end++;
+                    }
+                    int sw = Math.Max(1, Math.Min(max, x - gap + pad)), sh = Math.Max(1, Math.Min(max, h));
+                    var first = start;
+                    var strip = Guard(() =>
+                    {
+                        var bmp = new Bitmap(sw, sh, PixelFormat.Format32bppArgb);
+                        try
+                        {
+                            using (var g = Graphics.FromImage(bmp))
+                            {
+                                g.Clear(Color.White);
+                                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                                // Anchors: baseline level with the bottom of the cell's ink.
+                                float ascent = anchorFont.Size * anchorFont.FontFamily.GetCellAscent(anchorFont.Style) / anchorFont.FontFamily.GetEmHeight(anchorFont.Style);
+                                foreach (var tl in tiles)
+                                    g.DrawString(Anchor, anchorFont, Brushes.Black, tl.AnchorX, TileTop(sh, tl) + tl.Ink.Height - ascent, StringFormat.GenericTypographic);
+                                for (int k = 0; k < tiles.Count; k++)
+                                {
+                                    var tl = tiles[k];
+                                    var top = TileTop(sh, tl);
+                                    g.DrawImage(pending[first + k].Tile, new Rectangle(tl.X, top, tl.Ink.Width, tl.Ink.Height), tl.Ink, GraphicsUnit.Pixel);
+                                }
+                            }
+                            return bmp;
+                        }
+                        catch
+                        {
+                            bmp.Dispose();
+                            throw;
+                        }
+                    });
+                    strips.Add((strip, tiles));
+                    start = end;
+                }
+            }
+            finally
+            {
+                foreach (var p in pending) p.Tile.Dispose();
+            }
+
+            foreach (var (strip, tiles) in strips)
+            {
+                var words = await RecognizeAsync(engine, strip, new Rectangle(0, 0, strip.Width, strip.Height), ct).ConfigureAwait(false);
+                var perTile = new List<OcrWord>?[tiles.Count];
+                foreach (var w in words)
+                {
+                    if (string.IsNullOrWhiteSpace(w.Text)) continue;
+                    double cx = w.X + w.W / 2, best = double.MaxValue;
+                    if (tiles.Any(t => cx < t.X && cx >= t.AnchorX)) continue; // an anchor word (however it was read)
+                    int k = 0;
+                    for (int j = 0; j < tiles.Count; j++)
+                    {
+                        double lo = tiles[j].X, hi = tiles[j].X + tiles[j].W;
+                        double d = cx < lo ? lo - cx : cx > hi ? cx - hi : 0;
+                        if (d < best) { best = d; k = j; }
+                    }
+                    (perTile[k] ??= new List<OcrWord>()).Add(w);
+                }
+                for (int j = 0; j < tiles.Count; j++)
+                {
+                    if (perTile[j] is not { Count: > 0 } ws) continue;
+                    var tl = tiles[j];
+                    double l = ws.Min(w => w.X), t = ws.Min(w => w.Y), r = ws.Max(w => w.X + w.W), b = ws.Max(w => w.Y + w.H);
+                    int ty = TileTop(strip.Height, tl);
+                    result[tl.Index] = new OcrWord(string.Join(" ", ws.OrderBy(w => w.X).Select(w => w.Text.Trim())),
+                        tl.Src.X + (l - tl.X + tl.Ink.X) / tl.Scale, tl.Src.Y + (t - ty + tl.Ink.Y) / tl.Scale, (r - l) / tl.Scale, (b - t) / tl.Scale);
+                }
+            }
+        }
+        finally
+        {
+            foreach (var st in strips) st.Strip.Dispose();
+        }
+        return result;
+    }
+
+    private readonly record struct CellTile(int Index, Rectangle Src, double Scale, int X, int W, Rectangle Ink, int AnchorX);
+
+    private const string Anchor = "Cell";
+
+    private static int TileTop(int stripHeight, CellTile t) => (stripHeight - t.Ink.Height) / 2; // centred on one line
+
+    private static double Median(IEnumerable<double> values)
+    {
+        var v = values.OrderBy(x => x).ToList();
+        return v.Count == 0 ? 0 : v.Count % 2 == 1 ? v[v.Count / 2] : (v[v.Count / 2 - 1] + v[v.Count / 2]) / 2;
+    }
+
+    /// <summary>Bounding box of the dark pixels (luminance under 128) of a grayscale tile; empty when the tile is blank.</summary>
+    internal static Rectangle InkBounds(Bitmap tile)
+    {
+        var data = tile.LockBits(new Rectangle(0, 0, tile.Width, tile.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            int l = int.MaxValue, t = int.MaxValue, r = -1, b = -1;
+            var row = new byte[tile.Width * 4];
+            for (int y = 0; y < tile.Height; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
+                for (int x = 0; x < tile.Width; x++)
+                {
+                    int i = x * 4;
+                    if ((row[i] * 114 + row[i + 1] * 587 + row[i + 2] * 299) / 1000 >= 128) continue;
+                    if (x < l) l = x;
+                    if (x > r) r = x;
+                    if (y < t) t = y;
+                    b = y;
+                }
+            }
+            return r < 0 ? Rectangle.Empty : Rectangle.FromLTRB(l, t, r + 1, b + 1);
+        }
+        finally { tile.UnlockBits(data); }
+    }
+
+
     private static int CharCount(IReadOnlyList<OcrWord> words) => words.Sum(w => w.Text.Trim().Length);
 
     internal static double MedianHeight(IReadOnlyList<OcrWord> words)

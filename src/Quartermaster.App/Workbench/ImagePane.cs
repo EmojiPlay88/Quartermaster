@@ -96,12 +96,7 @@ sealed class ImagePane : ScrollableControl
         _fit = false;
         _zoom = zoom;
         UpdateScroll();
-        if (_image != null)
-        {
-            var o = Origin();
-            int sx = (int)Math.Round(img.X * _zoom + o.X - a.X), sy = (int)Math.Round(img.Y * _zoom + o.Y - a.Y);
-            AutoScrollPosition = new Point(Math.Max(0, sx), Math.Max(0, sy));
-        }
+        if (_image != null) AutoScrollPosition = ScanSessionModel.ScrollForZoom(img, a, _zoom, _image.Size, ClientSize);
         Invalidate();
         ZoomChanged?.Invoke();
     }
@@ -128,20 +123,16 @@ sealed class ImagePane : ScrollableControl
     // ---------- coordinates ----------
 
     /// <summary>Top-left of the image in view pixels (centred when smaller than the view).</summary>
-    Point Origin()
+    PointF Origin()
     {
-        if (_image == null) return Point.Empty;
-        int w = (int)Math.Ceiling(_image.Width * _zoom), h = (int)Math.Ceiling(_image.Height * _zoom);
-        int ox = w < ClientSize.Width ? (ClientSize.Width - w) / 2 : AutoScrollPosition.X;
-        int oy = h < ClientSize.Height ? (ClientSize.Height - h) / 2 : AutoScrollPosition.Y;
-        return new Point(ox, oy);
+        if (_image == null) return PointF.Empty;
+        // AutoScrollPosition is negative when scrolled; the model takes the positive offset.
+        return new PointF((float)ScanSessionModel.ImageOrigin(_image.Width, _zoom, ClientSize.Width, -AutoScrollPosition.X),
+                          (float)ScanSessionModel.ImageOrigin(_image.Height, _zoom, ClientSize.Height, -AutoScrollPosition.Y));
     }
 
-    PointF ViewToImageF(Point v)
-    {
-        var o = Origin();
-        return new PointF((float)((v.X - o.X) / _zoom), (float)((v.Y - o.Y) / _zoom));
-    }
+    PointF ViewToImageF(Point v) => _image == null ? PointF.Empty
+        : ScanSessionModel.ViewToImage(v, new Point(-AutoScrollPosition.X, -AutoScrollPosition.Y), _zoom, _image.Size, ClientSize);
 
     Point ViewToImage(Point v)
     {
@@ -288,7 +279,8 @@ sealed class ImagePane : ScrollableControl
             var moved = Math.Abs(e.X - _downView.X) + Math.Abs(e.Y - _downView.Y) >= 3;
             _region = moved ? RegionEdit.FromDrag(_downImage, ViewToImage(e.Location), _image.Size) : null; // a click clears
             Invalidate();
-            SelectionChanged?.Invoke(_region);
+            var before = _startRegion.IsEmpty ? (Rectangle?)null : _startRegion;
+            if (_region != before) SelectionChanged?.Invoke(_region); // a click that changes nothing does not cancel a read
             return;
         }
         if (_drag != RegionHandle.None)

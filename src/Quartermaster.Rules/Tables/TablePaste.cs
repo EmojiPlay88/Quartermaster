@@ -8,11 +8,18 @@ public sealed record PastedGrid(List<string> ColumnKeys, List<string> RowKeys, L
 /// <summary>Turns clipboard text (TSV, CSV or space-aligned) into a table grid.</summary>
 public static class TablePaste
 {
-    public static PastedGrid Parse(string clipboard, bool firstRowIsHeader, bool firstColumnIsKey)
+    public static PastedGrid Parse(string clipboard, bool firstRowIsHeader, bool firstColumnIsKey) =>
+        Parse(clipboard, firstRowIsHeader, firstColumnIsKey, tsvOnly: false);
+
+    /// <summary>
+    /// As <see cref="Parse(string, bool, bool)"/>; with <paramref name="tsvOnly"/> the text is always split on tabs (an OCR grid
+    /// exported as TSV): a one-column grid is never re-read as CSV or space-aligned text, so "1,000" stays one cell.
+    /// </summary>
+    public static PastedGrid Parse(string clipboard, bool firstRowIsHeader, bool firstColumnIsKey, bool tsvOnly)
     {
         var text = (clipboard ?? "").TrimStart('﻿').Replace("\r\n", "\n").Replace('\r', '\n');
         List<List<string>> rows;
-        if (text.Contains('\t')) rows = Lines(text).Select(l => l.Split('\t').Select(c => c.Trim()).ToList()).ToList();
+        if (tsvOnly || text.Contains('\t')) rows = Lines(text).Select(l => l.Split('\t').Select(c => c.Trim()).ToList()).ToList();
         else if (text.Contains(',')) rows = Csv(text);
         else rows = Lines(text).Select(l => Regex.Split(l.Trim(), @" {2,}").Select(c => c.Trim()).ToList()).ToList();
 

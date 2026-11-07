@@ -70,7 +70,10 @@ public static class OcrResultModel
         return chosen.Select(g => (g.Start + g.End) / 2).OrderBy(x => x).ToList();
     }
 
-    internal static string[][] Build(IReadOnlyList<OcrWord> words, IReadOnlyList<double> boundaries)
+    internal static string[][] Build(IReadOnlyList<OcrWord> words, IReadOnlyList<double> boundaries) => Build(words, boundaries, null);
+
+    /// <summary>Builds the grid; <paramref name="placed"/> is told the (row, column) of every word.</summary>
+    internal static string[][] Build(IReadOnlyList<OcrWord> words, IReadOnlyList<double> boundaries, Action<OcrWord, int, int>? placed)
     {
         var lines = Lines(words);
         int cols = boundaries.Count + 1;
@@ -84,6 +87,7 @@ public static class OcrResultModel
                 int c = 0;
                 while (c < boundaries.Count && cx > boundaries[c]) c++;
                 (parts[c] ??= new List<string>()).Add(w.Text.Trim());
+                placed?.Invoke(w, r, c);
             }
             grid[r] = parts.Select(p => p == null ? "" : string.Join(" ", p)).ToArray();
         }

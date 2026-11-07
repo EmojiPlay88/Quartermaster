@@ -17,6 +17,7 @@ sealed class OcrPanel : UserControl
     public const string ReplaceEditsQuestion = "Replace your edits with a new reading?";
     const string RebuildQuestion = "Rebuild the grid from the reading? Your edits to the grid will be lost.";
     static readonly Color EditedBack = Color.FromArgb(255, 248, 200);
+    static readonly Color RereadBack = Color.FromArgb(214, 234, 255);
 
     readonly OcrService _service;
     readonly ScanSessionModel _model;
@@ -119,6 +120,7 @@ sealed class OcrPanel : UserControl
     public bool IsReading => _model.IsReading;
     public string StatusText => _status.Text;
     public string[][] Cells => _state?.Cells ?? [];
+    public bool IsReread(int r, int c) => _state?.IsReread(r, c) == true;
     public Task LastRead => _lastRead;
     public bool HasGrid => _state != null && _state.Cells.Length > 0;
 
@@ -177,7 +179,20 @@ sealed class OcrPanel : UserControl
             if (IsDisposed || !_model.IsCurrent(ticket)) return; // stale: a newer read, a cancel, or another image
             ShowReading(words, target.Source, target.Page);
             var n = words.Count(w => !string.IsNullOrWhiteSpace(w.Text));
-            SetStatus(n == 0 ? "No text was found." : $"Read {n} word{(n == 1 ? "" : "s")}; {Cells.Length} row{(Cells.Length == 1 ? "" : "s")}. Check the grid, then Import into table….");
+            int recovered = 0, stillEmpty = 0;
+            // Second pass: cells left empty inside the table (lone characters are often skipped) are re-read one by one.
+            var empty = _state!.EmptyCells();
+            if (empty.Count > 0)
+            {
+                SetStatus($"Re-reading {empty.Count} empty cell{(empty.Count == 1 ? "" : "s")}…");
+                // Still current here, so the bitmap is the one shown; ReadCellsAsync copies the cells before its first await.
+                var found = await _service.ReadCellsAsync(target.Image, empty.Select(c => c.Box).ToList(), _state.MedianWordHeight, lang, ticket.Token);
+                if (IsDisposed || !_model.IsCurrent(ticket)) return;
+                recovered = _state.AddRereads(empty, found);
+                if (recovered > 0) FillGrid();
+                stillEmpty = _state.EmptyCells().Count;
+            }
+            ReportReading(n, recovered, stillEmpty);
         }
         catch (OperationCanceledException) { /* the canceller has set the status */ }
         catch (OcrUnavailableException ex) { if (_model.IsCurrent(ticket)) SetStatus(ex.Message, true); }
@@ -193,6 +208,21 @@ sealed class OcrPanel : UserControl
             if (!IsDisposed) UpdateButtons();
         }
     }
+
+    void ReportReading(int words, int recovered, int stillEmpty)
+    {
+        if (words == 0) { SetStatus("No text was found."); return; }
+        var text = $"Read {words} word{(words == 1 ? "" : "s")}; {Cells.Length} row{(Cells.Length == 1 ? "" : "s")}.";
+        if (recovered > 0) text += $" {recovered} empty cell{(recovered == 1 ? " was" : "s were")} re-read (tinted blue).";
+        if (stillEmpty > 0) text += " " + SomeEmptyText;
+        else text += " Check the grid, then Import into table…";
+        SetStatus(text);
+    }
+
+    public const string SomeEmptyText = "Some cells came back empty (single characters are often missed): type them in.";
+
+    /// <summary>Shows a note about the loaded image (e.g. a multi-page TIFF) in the status line.</summary>
+    public void ShowNote(string note) => SetStatus(note);
 
     /// <summary>Cancels the running read (Cancel, another image or region); its result is dropped.</summary>
     public void CancelRead(string? status = null)
@@ -258,8 +288,9 @@ sealed class OcrPanel : UserControl
 
     void OnCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
     {
-        if (_state != null && e.RowIndex >= 0 && e.ColumnIndex >= 0 && _state.IsEdited(e.RowIndex, e.ColumnIndex))
-            e.CellStyle!.BackColor = EditedBack;
+        if (_state == null || e.RowIndex < 0 || e.ColumnIndex < 0) return;
+        if (_state.IsEdited(e.RowIndex, e.ColumnIndex)) e.CellStyle!.BackColor = EditedBack;
+        else if (_state.IsReread(e.RowIndex, e.ColumnIndex)) e.CellStyle!.BackColor = RereadBack;
     }
 
     /// <summary>Rebuild steps drop edits: confirm first.</summary>

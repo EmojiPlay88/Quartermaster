@@ -15,8 +15,8 @@ static class SmokeOcrTable
         var expected = new string[rows + 1][];
         expected[0] = header;
         for (var r = 1; r <= rows; r++)
-            // Range keys: Windows OCR skips isolated single characters, so a lone "1" would not be read at all.
-            expected[r] = new[] { $"{2 * r - 1}-{2 * r}" }
+            // Single-digit keys: the first OCR pass skips lone characters; the empty-cell re-read must bring them back.
+            expected[r] = new[] { r.ToString(System.Globalization.CultureInfo.InvariantCulture) }
                 .Concat(Enumerable.Range(0, header.Length - 1).Select(_ => rng.Next(10, 100).ToString(System.Globalization.CultureInfo.InvariantCulture))).ToArray();
 
         int w = left * 2 + cw * header.Length, h = top + ch * (rows + 1) + 80;

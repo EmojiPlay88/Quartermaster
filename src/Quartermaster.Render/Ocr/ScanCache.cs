@@ -35,7 +35,11 @@ public static class ScanCache
                 sha = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             }
             var path = Path.Combine(Folder, sha + ext);
-            if (File.Exists(path)) File.Delete(tmp);
+            if (File.Exists(path))
+            {
+                File.Delete(tmp);
+                Touch(path);
+            }
             else File.Move(tmp, path);
             return path;
         }
@@ -44,5 +48,51 @@ public static class ScanCache
             try { File.Delete(tmp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             throw;
         }
+    }
+
+    /// <summary>Marks a cached file as used now (NTFS may not update the access time by itself); pruning goes by it.</summary>
+    static void Touch(string path)
+    {
+        try { File.SetLastAccessTimeUtc(path, DateTime.UtcNow); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    public static readonly TimeSpan MaxAge = TimeSpan.FromDays(30);
+    public const long MaxTotalBytes = 1L << 30;
+
+    /// <summary>
+    /// Deletes cached files not used for <see cref="MaxAge"/> (and leftover temps older than a day), then the least recently used
+    /// ones until the folder is at most <see cref="MaxTotalBytes"/>. Files in use are skipped. Returns how many were deleted.
+    /// </summary>
+    public static int Prune(DateTime? nowUtc = null, TimeSpan? maxAge = null, long? maxTotalBytes = null)
+    {
+        var now = nowUtc ?? DateTime.UtcNow;
+        var age = maxAge ?? MaxAge;
+        var cap = maxTotalBytes ?? MaxTotalBytes;
+        if (!Directory.Exists(Folder)) return 0;
+        var deleted = 0;
+        bool Delete(FileInfo f)
+        {
+            try { f.Delete(); deleted++; return true; }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
+        }
+        var files = new List<FileInfo>();
+        foreach (var f in new DirectoryInfo(Folder).EnumerateFiles())
+        {
+            var used = f.LastAccessTimeUtc > f.LastWriteTimeUtc ? f.LastAccessTimeUtc : f.LastWriteTimeUtc;
+            var isTmp = f.Extension.Equals(".tmp", StringComparison.OrdinalIgnoreCase);
+            if (now - used > (isTmp ? TimeSpan.FromDays(1) : age)) { Delete(f); continue; }
+            if (!isTmp) files.Add(f);
+        }
+        long total = files.Sum(f => f.Length);
+        foreach (var f in files.OrderBy(f => f.LastAccessTimeUtc > f.LastWriteTimeUtc ? f.LastAccessTimeUtc : f.LastWriteTimeUtc))
+        {
+            if (total <= cap) break;
+            var len = f.Length;
+            if (Delete(f)) total -= len;
+        }
+        return deleted;
     }
 }

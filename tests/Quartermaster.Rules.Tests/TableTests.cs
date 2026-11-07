@@ -93,6 +93,16 @@ public class TableTests
         Assert.Equal(new[] { "3", "4" }, g.Cells[1]);
     }
 
+    [Fact] public void Paste_TsvOnly_OneColumnKeepsCommasAndSpaces()
+    {
+        var g = TablePaste.Parse("Cost\n1,000\n2  500\n", true, false, tsvOnly: true);
+        Assert.Equal(new[] { "Cost" }, g.ColumnKeys);
+        Assert.Equal(new[] { "1,000" }, g.Cells[0]);
+        Assert.Equal(new[] { "2  500" }, g.Cells[1]);
+        var csv = TablePaste.Parse("Cost\n1,000\n", true, false);
+        Assert.Equal(2, csv.Cells[0].Count); // the clipboard path still reads commas as CSV
+    }
+
     [Fact] public void Paste_Csv_Quoted()
     {
         var g = TablePaste.Parse("Key,Value\n\"a,b\",\"say \"\"hi\"\"\"\nc,d", true, true);

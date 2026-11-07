@@ -247,4 +247,57 @@ public class OcrServiceTests(ITestOutputHelper output)
         Assert.Contains(def, OcrService.Languages());
         Assert.True(new OcrService().Available);
     }
+
+    /// <summary>Invented table with single-digit row keys 1–6 (which the first pass tends to skip), bordered, Segoe UI 11 pt at 200 DPI.</summary>
+    private static (Bitmap Image, string[][] Expected) SingleDigitKeys()
+    {
+        string[] header = ["Roll", "Open", "Rough", "City"];
+        const int rows = 6, cw = 200, ch = 66, margin = 60;
+        var rng = new Random(4410);
+        var expected = new string[rows + 1][];
+        expected[0] = header;
+        for (int r = 1; r <= rows; r++)
+            expected[r] = new[] { r.ToString() }.Concat(Enumerable.Range(0, header.Length - 1).Select(_ => rng.Next(10, 100).ToString())).ToArray();
+        var bmp = Blank(header.Length * cw + 2 * margin, (rows + 1) * ch + 2 * margin);
+        using var g = Pen(bmp);
+        using var font = new Font("Segoe UI", 11f, FontStyle.Regular, GraphicsUnit.Point);
+        using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        for (int r = 0; r <= rows; r++)
+            for (int c = 0; c < header.Length; c++)
+                g.DrawString(expected[r][c], font, Brushes.Black, new RectangleF(margin + c * cw, margin + r * ch, cw, ch), fmt);
+        using var pen = new System.Drawing.Pen(Color.Black, 2);
+        for (int r = 0; r <= rows + 1; r++) g.DrawLine(pen, margin, margin + r * ch, margin + header.Length * cw, margin + r * ch);
+        for (int c = 0; c <= header.Length; c++) g.DrawLine(pen, margin + c * cw, margin, margin + c * cw, margin + (rows + 1) * ch);
+        return (bmp, expected);
+    }
+
+    [OcrFact]
+    public async Task ReadCells_SingleDigitKeys_RecoveredBySecondPass()
+    {
+        var (img, expected) = SingleDigitKeys();
+        using (img)
+        {
+            var svc = new OcrService();
+            var words = await svc.ReadAsync(img, null, Lang, CancellationToken.None);
+            var state = new OcrGridState(words, fixDigits: true);
+            var empty = state.EmptyCells();
+            output.WriteLine($"first pass: {string.Join(" / ", state.Cells.Select(r => string.Join(" | ", r)))}; {empty.Count} empty cell(s)");
+            var found = await svc.ReadCellsAsync(img, empty.Select(e => e.Box).ToList(), state.MedianWordHeight, Lang, CancellationToken.None);
+            output.WriteLine("second pass: " + string.Join(", ", found.Select(f => f?.Text ?? "-")));
+            var added = state.AddRereads(empty, found);
+            output.WriteLine($"accepted {added}: {string.Join(" / ", state.Cells.Select(r => string.Join(" | ", r)))}");
+            Assert.Equal(expected.Length, state.Cells.Length);
+            int keys = Enumerable.Range(1, expected.Length - 1).Count(r => state.Cells[r][0] == expected[r][0]);
+            Assert.True(keys >= 5, $"only {keys}/6 single-digit keys recovered");
+            Assert.True(Enumerable.Range(1, expected.Length - 1).Any(r => state.IsReread(r, 0)), "re-read cells are not marked");
+            Assert.False(state.HasEdits);
+        }
+    }
+
+    [OcrFact]
+    public async Task ReadCells_NoBoxes_ReturnsEmpty()
+    {
+        using var img = Blank(100, 100);
+        Assert.Empty(await new OcrService().ReadCellsAsync(img, [], 10, Lang, CancellationToken.None));
+    }
 }

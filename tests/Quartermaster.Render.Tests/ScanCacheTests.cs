@@ -34,6 +34,32 @@ public class ScanCacheTests : IDisposable
     }
 
     [Fact]
+    public void Prune_DropsOldFiles_ThenOldestUntilUnderCap()
+    {
+        Directory.CreateDirectory(ScanCache.Folder);
+        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        string Make(string name, int bytes, int daysAgo)
+        {
+            var p = Path.Combine(ScanCache.Folder, name);
+            File.WriteAllBytes(p, new byte[bytes]);
+            var t = now.AddDays(-daysAgo);
+            File.SetLastWriteTimeUtc(p, t);
+            File.SetLastAccessTimeUtc(p, t);
+            return p;
+        }
+        var stale = Make("a.pdf", 10, 40);
+        var tmp = Make("x.tmp", 10, 2);
+        var oldest = Make("b.pdf", 600, 20);
+        var newer = Make("c.png", 600, 1);
+        var deleted = ScanCache.Prune(now, TimeSpan.FromDays(30), 1000);
+        Assert.Equal(3, deleted);
+        Assert.False(File.Exists(stale));
+        Assert.False(File.Exists(tmp));
+        Assert.False(File.Exists(oldest)); // over the cap: least recently used goes first
+        Assert.True(File.Exists(newer));
+    }
+
+    [Fact]
     public void Extract_FailureRemovesTemp()
     {
         Assert.Throws<IOException>(() => ScanCache.Extract(() => throw new IOException("locked"), ".pdf"));

@@ -9,7 +9,8 @@ public enum ScanSourceKind { ModulePdf, ModuleImage, FilePdf, FileImage }
 
 /// <summary>
 /// A scan source. <see cref="Key"/> identifies it for the session (archive entry, or full file path);
-/// <see cref="RefEntry"/> is what a rule ref stores (archive entry, or the file name for opened files).
+/// <see cref="RefEntry"/> is what a rule ref stores: the archive entry, or <c>scan:</c> + the file name for opened files (never a
+/// full path, and never confusable with a module entry).
 /// </summary>
 public sealed record ScanSource(ScanSourceKind Kind, string Key, string Title, string RefEntry)
 {
@@ -26,7 +27,7 @@ public sealed record ScanSource(ScanSourceKind Kind, string Key, string Title, s
     {
         var full = Path.GetFullPath(path);
         var name = Path.GetFileName(full);
-        return new(ScanSessionModel.IsPdfName(full) ? ScanSourceKind.FilePdf : ScanSourceKind.FileImage, full, name, name);
+        return new(ScanSessionModel.IsPdfName(full) ? ScanSourceKind.FilePdf : ScanSourceKind.FileImage, full, name, ScanSessionModel.ScanRefPrefix + name);
     }
 }
 
@@ -46,6 +47,18 @@ public sealed class ScanSessionModel
     public static string OpenScanFilter =>
         "Scans (" + string.Join(", ", ScanFileExtensions.Select(e => "*" + e)) + ")|" + string.Join(";", ScanFileExtensions.Select(e => "*" + e))
         + "|All files (*.*)|*.*";
+
+    /// <summary>Rule refs to files opened with "Open scan…" store <c>scan:{file name}</c>.</summary>
+    public const string ScanRefPrefix = "scan:";
+
+    /// <summary>Module images smaller than this (uncompressed) are hidden from the list by default: counters and icons, not charts.</summary>
+    public const long MinListedImageBytes = 64 * 1024;
+
+    /// <summary>True for a rule-ref entry that names an opened scan file.</summary>
+    public static bool IsScanRef(string? entry) => entry != null && entry.StartsWith(ScanRefPrefix, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The file name of a <c>scan:</c> ref (or the entry unchanged).</summary>
+    public static string ScanRefFileName(string entry) => IsScanRef(entry) ? entry[ScanRefPrefix.Length..] : entry;
 
     public const double MinZoom = 0.25, MaxZoom = 4.0;
     public static readonly IReadOnlyList<int> ZoomSteps = [25, 50, 75, 100, 150, 200, 300, 400];
@@ -70,6 +83,22 @@ public sealed class ScanSessionModel
             .Distinct(StringComparer.Ordinal)
             .OrderBy(e => e, StringComparer.OrdinalIgnoreCase)
             .Select(ScanSource.ModuleImage).ToList();
+
+    /// <summary>
+    /// The module images to list: all of them when <paramref name="showAll"/>, else only those of at least
+    /// <see cref="MinListedImageBytes"/> uncompressed. <c>Hidden</c> is how many were left out.
+    /// </summary>
+    public static (IReadOnlyList<ScanSource> Shown, int Hidden) ModuleImages(IReadOnlyDictionary<string, long> entrySizes, bool showAll)
+    {
+        var all = ModuleImages(entrySizes.Keys);
+        if (showAll) return (all, 0);
+        var shown = all.Where(s => entrySizes.TryGetValue(s.Key, out var n) && n >= MinListedImageBytes).ToList();
+        return (shown, all.Count - shown.Count);
+    }
+
+    /// <summary>The list line that toggles small images: "Show all images (N hidden)" / "Hide small images".</summary>
+    public static string? ImagesToggleText(int hidden, bool showAll) =>
+        showAll ? "Hide small images" : hidden > 0 ? $"Show all images ({hidden} hidden)" : null;
 
     // ---------- opened scans ----------
 
@@ -187,6 +216,30 @@ public sealed class ScanSessionModel
     {
         if (image.Width <= 0 || image.Height <= 0 || view.Width <= 0 || view.Height <= 0) return 1.0;
         return ClampZoom(Math.Min((double)view.Width / image.Width, (double)view.Height / image.Height));
+    }
+
+    /// <summary>Left/top of the image in view px on one axis: centred when it fits, else minus the scroll offset.</summary>
+    public static double ImageOrigin(double imageLen, double zoom, int viewLen, int scroll) =>
+        Math.Ceiling(imageLen * zoom) <= viewLen ? (viewLen - Math.Ceiling(imageLen * zoom)) / 2.0 : -scroll;
+
+    /// <summary>A view point (px) as an image point, for a view scrolled by <paramref name="scroll"/>.</summary>
+    public static PointF ViewToImage(Point view, Point scroll, double zoom, Size image, Size viewSize) => new(
+        (float)((view.X - ImageOrigin(image.Width, zoom, viewSize.Width, scroll.X)) / zoom),
+        (float)((view.Y - ImageOrigin(image.Height, zoom, viewSize.Height, scroll.Y)) / zoom));
+
+    /// <summary>
+    /// The scroll offset after zooming that keeps <paramref name="imagePoint"/> under <paramref name="anchor"/> (view px):
+    /// image × zoom − anchor on each axis where the image is larger than the view (clamped to the scroll range), 0 where it fits.
+    /// </summary>
+    public static Point ScrollForZoom(PointF imagePoint, Point anchor, double zoom, Size image, Size viewSize)
+    {
+        static int Axis(double p, int a, double z, int img, int view)
+        {
+            var len = Math.Ceiling(img * z);
+            if (len <= view) return 0;
+            return (int)Math.Clamp(Math.Round(p * z - a), 0, len - view);
+        }
+        return new Point(Axis(imagePoint.X, anchor.X, zoom, image.Width, viewSize.Width), Axis(imagePoint.Y, anchor.Y, zoom, image.Height, viewSize.Height));
     }
 
     /// <summary>The next zoom step up (+1) or down (-1) from <paramref name="zoom"/>.</summary>

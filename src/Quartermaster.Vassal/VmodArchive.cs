@@ -24,6 +24,7 @@ public sealed class VmodArchive : IDisposable
             _ignoreCase.TryAdd(e.FullName, e);
         }
         EntryNames = _exact.Keys.ToArray();
+        EntrySizes = _exact.ToDictionary(kv => kv.Key, kv => kv.Value.Length, StringComparer.Ordinal);
         Root = null!;
     }
 
@@ -31,6 +32,9 @@ public sealed class VmodArchive : IDisposable
     public string Sha256 { get; }
     public ModuleNode Root { get; private set; }
     public IReadOnlyCollection<string> EntryNames { get; }
+
+    /// <summary>Uncompressed size in bytes of every entry, by exact name.</summary>
+    public IReadOnlyDictionary<string, long> EntrySizes { get; }
 
     public static string ImagePath(string imageName) => "images/" + imageName;
 

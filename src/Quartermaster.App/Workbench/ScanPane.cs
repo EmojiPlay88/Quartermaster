@@ -156,6 +156,7 @@ sealed class ScanPane : UserControl
         _ocr.CancelRead("Cancelled: another image was opened.");
         page = source.IsPdf ? Math.Max(1, page) : 1;
         if (Source == source && Page == page && _image != null && _load.IsCompleted) return _load;
+        if (Source?.Key != source.Key) _pageCount = 1; // unknown until the new document is open
         Source = source;
         Page = page;
         SyncPageControls();
@@ -197,7 +198,7 @@ sealed class ScanPane : UserControl
         int pages = 1;
         try
         {
-            var path = await Task.Run(() => PathFor(src));
+            var path = await PathFor(src);
             if (src.IsPdf)
             {
                 pages = await PdfPageRender.PageCountAsync(path);
@@ -222,8 +223,10 @@ sealed class ScanPane : UserControl
                 _ when src.IsPdf => PdfPageRender.CantOpenMessage,
                 _ => "This file can't be opened as an image.",
             };
-            if (ex is not (InvalidDataException or FileNotFoundException)) Program.AppLog("scan load failed: " + ex);
+            if (ex is not (InvalidDataException or FileNotFoundException or DirectoryNotFoundException)) Program.AppLog("scan load failed: " + ex);
             _pane.Message = msg;
+            _note = null;
+            SyncPageControls();
             return;
         }
         if (gen != _loadGen || IsDisposed) { bmp.Dispose(); return; } // a newer source or page was asked for
@@ -236,6 +239,7 @@ sealed class ScanPane : UserControl
         SyncZoom();
         if (note != null) Program.AppLog("scan: " + note);
         _note = note;
+        if (note != null) _ocr.ShowNote(note);
         _pane.Invalidate();
     }
 
@@ -244,13 +248,28 @@ sealed class ScanPane : UserControl
     /// <summary>A note about the shown image (multi-page TIFF), null when none.</summary>
     public string? Note => _note;
 
-    /// <summary>The file to load: module entries are copied to the scan cache, opened files are used in place.</summary>
-    string PathFor(ScanSource src)
+    // Module entries extracted this session: (archive SHA, entry) → the shared extraction, so page flips never re-copy
+    // and two loads of the same entry never extract at once.
+    readonly Dictionary<(string, string), Task<string>> _extracts = new();
+
+    /// <summary>The file to load: module entries are copied to the scan cache once per session, opened files are used in place.</summary>
+    Task<string> PathFor(ScanSource src)
     {
-        if (!src.InModule) return src.Key;
+        if (!src.InModule) return Task.FromResult(src.Key);
+        var key = (_s.Archive.Sha256, src.Key);
+        if (_extracts.TryGetValue(key, out var t) && !t.IsFaulted && !t.IsCanceled && (!t.IsCompleted || File.Exists(t.Result))) return t;
         var ext = Path.GetExtension(src.Key);
-        return ScanCache.Extract(() => _s.Archive.OpenEntry(src.Key), ext);
+        var archive = _s.Archive;
+        t = Task.Run(() => ScanCache.Extract(() => archive.OpenEntry(src.Key), ext));
+        _extracts[key] = t; // a failed extraction is retried next time
+        _extractRuns++;
+        return t;
     }
+
+    int _extractRuns;
+
+    /// <summary>How many module-entry extractions ran this session (smoke check of the memo).</summary>
+    public int ExtractCount => _extractRuns;
 
     void SwapImage(Bitmap? next)
     {

@@ -41,7 +41,7 @@ public class ScanSessionModelTests
         var p = m.AddFile(Path.Combine(Path.GetTempPath(), "book.pdf"));
         Assert.Same(a, b);
         Assert.Equal(2, m.Opened.Count);
-        Assert.Equal("Chart.png", a.RefEntry);
+        Assert.Equal("scan:Chart.png", a.RefEntry); // never a full path, never a module entry name
         Assert.Equal(ScanSourceKind.FileImage, a.Kind);
         Assert.Equal(ScanSourceKind.FilePdf, p.Kind);
         Assert.Equal(new[] { p }, m.OpenedPdfs);
@@ -95,7 +95,7 @@ public class ScanSessionModelTests
         Assert.Equal(("rules.pdf", 4), ScanSessionModel.RuleRefFor(ScanSource.ModulePdf("rules.pdf", "Rules"), 4));
         Assert.Equal(("images/crt.png", 0), ScanSessionModel.RuleRefFor(ScanSource.ModuleImage("images/crt.png"), 4));
         var file = ScanSource.File(Path.Combine(Path.GetTempPath(), "scan.jpg"));
-        Assert.Equal(("scan.jpg", 0), ScanSessionModel.RuleRefFor(file, 1));
+        Assert.Equal(("scan:scan.jpg", 0), ScanSessionModel.RuleRefFor(file, 1));
     }
 
     [Fact]
@@ -107,6 +107,65 @@ public class ScanSessionModelTests
         Assert.Equal("CRT — scan.png", shown.Text);
         var pdf = SearchPanelModel.DescribeRef(r with { DocumentEntry = "a.pdf" }, new[] { ("a.pdf", "A") }, null);
         Assert.True(pdf.Missing);
+    }
+
+    [Fact]
+    public void ScanRef_NotOpen_SaysHowToOpenIt()
+    {
+        var r = new RuleRef { Id = "r", Label = "CRT", DocumentEntry = "scan:chart.png", Page = 0 };
+        var gone = SearchPanelModel.DescribeRef(r, new[] { ("rules.pdf", "Rules") }, null);
+        Assert.Equal("CRT — chart.png (open it with Open scan…)", gone.Text);
+        Assert.False(gone.IsLink);
+        var open = SearchPanelModel.DescribeRef(r, new[] { ("scan:chart.png", "chart.png") }, null);
+        Assert.True(open.IsLink);
+        Assert.Equal("CRT — chart.png", open.Text);
+        var pdf = SearchPanelModel.DescribeRef(r with { DocumentEntry = "scan:book.pdf", Page = 3 }, Array.Empty<(string, string)>(), null);
+        Assert.Equal("CRT — book.pdf, p. 3 (open it with Open scan…)", pdf.Text);
+    }
+
+    [Fact]
+    public void ModuleImages_SmallOnesHiddenUntilShowAll()
+    {
+        var sizes = new Dictionary<string, long>
+        {
+            ["images/counter.png"] = 3_000, ["images/crt.png"] = 300_000, ["images/map.jpg"] = 64 * 1024, ["rules.pdf"] = 900_000,
+        };
+        var (shown, hidden) = ScanSessionModel.ModuleImages(sizes, showAll: false);
+        Assert.Equal(new[] { "images/crt.png", "images/map.jpg" }, shown.Select(x => x.Key));
+        Assert.Equal(1, hidden);
+        Assert.Equal("Show all images (1 hidden)", ScanSessionModel.ImagesToggleText(hidden, false));
+        var (all, none) = ScanSessionModel.ModuleImages(sizes, showAll: true);
+        Assert.Equal(3, all.Count);
+        Assert.Equal(0, none);
+        Assert.Equal("Hide small images", ScanSessionModel.ImagesToggleText(0, true));
+        Assert.Null(ScanSessionModel.ImagesToggleText(0, false));
+    }
+
+    [Fact]
+    public void ZoomFromScrolledState_KeepsAnchorPoint()
+    {
+        var image = new Size(2000, 1500);
+        var view = new Size(800, 600);
+        // At 100 %, scrolled to (500, 300): the view point (400, 300) shows image point (900, 600).
+        var anchor = new Point(400, 300);
+        var p = ScanSessionModel.ViewToImage(anchor, new Point(500, 300), 1.0, image, view);
+        Assert.Equal(new PointF(900, 600), p);
+        // Wheel zoom to 200 % around the cursor: scroll = image × zoom − anchor.
+        var scroll = ScanSessionModel.ScrollForZoom(p, anchor, 2.0, image, view);
+        Assert.Equal(new Point(1400, 900), scroll);
+        Assert.Equal(p, ScanSessionModel.ViewToImage(anchor, scroll, 2.0, image, view));
+        // The − button zooms around the view centre: back to 50 %, where the image (1000×750) is wider than the view but
+        // only scrolls as far as its edge.
+        var centre = new Point(400, 300);
+        var q = ScanSessionModel.ViewToImage(centre, scroll, 2.0, image, view);
+        var down = ScanSessionModel.ScrollForZoom(q, centre, 0.5, image, view);
+        Assert.Equal(new Point(50, 0), down); // x: 900×0.5−400 = 50; y: 600×0.5−300 = 0
+        Assert.Equal(q, ScanSessionModel.ViewToImage(centre, down, 0.5, image, view));
+        // Fits at 25 %: centred, no scroll.
+        Assert.Equal(Point.Empty, ScanSessionModel.ScrollForZoom(q, centre, 0.25, image, view));
+        Assert.Equal(150, ScanSessionModel.ImageOrigin(image.Width, 0.25, view.Width, 999));
+        // Scrolling never passes the far edge.
+        Assert.Equal(new Point(3200, 2400), ScanSessionModel.ScrollForZoom(new PointF(2000, 1500), new Point(0, 0), 2.0, image, view));
     }
 
     [Fact]

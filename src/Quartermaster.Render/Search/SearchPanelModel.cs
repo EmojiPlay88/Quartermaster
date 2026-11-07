@@ -32,6 +32,9 @@ public static class SearchPanelModel
     public const int MaxHits = 200;
     public const string NotSearchableText = "not searchable";
     public const string None = "(none)";
+
+    /// <summary>Shown after a rule ref to a scan file that is not open in this session.</summary>
+    public const string OpenScanHint = "(open it with Open scan…)";
     /// <summary>A snippet is cut so its first hit starts within this many characters (it must show on a narrow panel).</summary>
     public const int DisplayLead = 40;
 
@@ -164,7 +167,13 @@ public static class SearchPanelModel
             if (d.Entry == r.DocumentEntry) { inModule = d; break; }
         string text;
         bool missing;
-        if (inModule is not { } m)
+        if (inModule == null && Ocr.ScanSessionModel.IsScanRef(r.DocumentEntry))
+        {
+            // A scan opened in an earlier session (scans are session-only): say how to get it back rather than "(missing)".
+            var file = Ocr.ScanSessionModel.ScanRefFileName(r.DocumentEntry);
+            return new RefDisplay(Plain(r with { DocumentEntry = file }, file) + " " + OpenScanHint, false, true);
+        }
+        if (inModule is not { } m2)
         {
             text = Plain(r, r.DocumentEntry);
             missing = true;
@@ -178,7 +187,7 @@ public static class SearchPanelModel
         else
         {
             // Not indexed (yet, or not a PDF): the module has it, so it opens.
-            text = Plain(r, string.IsNullOrWhiteSpace(m.Title) ? r.DocumentEntry : m.Title);
+            text = Plain(r, string.IsNullOrWhiteSpace(m2.Title) ? r.DocumentEntry : m2.Title);
             // An image has no pages: a page-less ref to it is fine; a page-less ref to a PDF is not.
             missing = r.Page < 1 && !Ocr.ScanSessionModel.IsImageName(r.DocumentEntry);
         }

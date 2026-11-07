@@ -21,6 +21,17 @@ public static class OcrCleanup
         return Plain.IsMatch(t) || Range.IsMatch(t) || Dice.IsMatch(t);
     }
 
+    /// <summary>
+    /// Whether a second-pass reading of an empty cell is believable: 1–3 characters (spaces ignored) that look numeric,
+    /// or a single letter A–Z.
+    /// </summary>
+    public static bool AcceptsCellReread(string? text)
+    {
+        var t = new string((text ?? "").Where(ch => !char.IsWhiteSpace(ch)).ToArray());
+        if (t.Length is < 1 or > 3) return false;
+        return IsNumericLooking(t) || (t.Length == 1 && t[0] is >= 'A' and <= 'Z');
+    }
+
     public static string Fix(string cell)
     {
         if (!IsNumericLooking(cell)) return cell;

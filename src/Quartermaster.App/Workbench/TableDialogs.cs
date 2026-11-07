@@ -54,12 +54,16 @@ sealed class PasteTableDialog : Form
         ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize, BackgroundColor = SystemColors.AppWorkspace,
     };
     readonly string _text;
+    readonly bool _tsvOnly;
+    readonly Label _note;
+    readonly string _noteText;
     readonly Button _ok = new() { Text = "OK", DialogResult = DialogResult.OK, Width = 75 };
     PastedGrid _grid = new(new(), new(), new());
 
-    PasteTableDialog(string clipboard, string? title = null, string? targetDescription = null)
+    PasteTableDialog(string clipboard, string? title = null, string? targetDescription = null, bool tsvOnly = false)
     {
         _text = clipboard;
+        _tsvOnly = tsvOnly;
         Text = title ?? "Paste table from clipboard";
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
@@ -71,7 +75,8 @@ sealed class PasteTableDialog : Form
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 75 };
         bottom.Controls.Add(cancel);
         bottom.Controls.Add(_ok);
-        var note = new Label { Dock = DockStyle.Bottom, Height = 18, Text = targetDescription ?? "OK replaces the rows, columns and cells of the selected table.", Padding = new Padding(6, 0, 0, 0) };
+        _noteText = targetDescription ?? "OK replaces the rows, columns and cells of the selected table.";
+        var note = _note = new Label { Dock = DockStyle.Bottom, Height = 30, Text = _noteText, Padding = new Padding(6, 0, 0, 0) };
         Controls.Add(_preview);
         Controls.Add(note);
         Controls.Add(bottom);
@@ -85,7 +90,7 @@ sealed class PasteTableDialog : Form
 
     void Refresh2()
     {
-        _grid = TablePaste.Parse(_text, _header.Checked, _keys.Checked);
+        _grid = TablePaste.Parse(_text, _header.Checked, _keys.Checked, _tsvOnly);
         _preview.Columns.Clear();
         _preview.Rows.Clear();
         var width = _grid.Cells.Count == 0 ? _grid.ColumnKeys.Count : Math.Max(_grid.Cells.Max(r => r.Count), _grid.ColumnKeys.Count);
@@ -100,7 +105,21 @@ sealed class PasteTableDialog : Form
             if (vals.Count > 0) _preview.Rows.Add(vals.ToArray());
         }
         _ok.Enabled = _grid.Cells.Count > 0;
+        _note.ForeColor = SystemColors.ControlText;
+        _note.Text = _noteText;
+        if (_tsvOnly && Problem(_grid, _keys.Checked) is { } problem)
+        {
+            _ok.Enabled = false;
+            _note.Text = problem;
+            _note.ForeColor = Color.Firebrick;
+        }
     }
+
+    /// <summary>Why an OCR grid can't be imported as parsed (null when it can).</summary>
+    internal static string? Problem(PastedGrid g, bool firstColumnIsKey) =>
+        firstColumnIsKey && g.Cells.Count > 0 && g.Cells.All(r => r.Count == 0)
+            ? "This grid has one column: with \"First column is the row key\" there are no values. Clear that box, or split the column."
+            : null;
 
     /// <summary>The parsed grid, or null when cancelled or the clipboard held no table.</summary>
     public static PastedGrid? Ask(IWin32Window owner, string clipboard)
@@ -115,11 +134,11 @@ sealed class PasteTableDialog : Form
     /// </summary>
     public static PastedGrid? Ask(IWin32Window owner, string tsv, string targetDescription)
     {
-        using var d = new PasteTableDialog(tsv, "Import into table", targetDescription);
+        using var d = new PasteTableDialog(tsv, "Import into table", targetDescription, tsvOnly: true);
         if (Program.Smoke)
         {
             Program.AppLog($"smoke: paste table dialog auto-confirmed ({targetDescription})");
-            return d._grid.Cells.Count > 0 ? d._grid : null;
+            return d._ok.Enabled ? d._grid : null;
         }
         return d.ShowDialog(owner) == DialogResult.OK ? d._grid : null;
     }
