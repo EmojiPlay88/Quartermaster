@@ -23,14 +23,19 @@ sealed partial class MainForm
 
     void CreateOutliner(ModuleSession session)
     {
-        var panel = new OutlinerPanel(session, () => _phases, _settings.Current.OutlinerGrouping,
+        var panel = new OutlinerPanel(session, () => _phases, AlertHits, _settings.Current.OutlinerGrouping,
             g => { if (_settings.Current.OutlinerGrouping != g) _settings.Save(_settings.Current with { OutlinerGrouping = g }); },
             CentreOnPiece, map => Guard(() => OpenMap(map, false)), JumpToDecision);
+        AlertsUpdated += panel.AlertsChanged; // one alert evaluation per change, shared with the alert bar
         _outlinerDock!.Create(panel);
         _outlinerDock.Wanted = _settings.Current.OutlinerVisible;
     }
 
-    void DestroyOutliner() => _outlinerDock?.Destroy();
+    void DestroyOutliner()
+    {
+        if (_outlinerDock?.Panel is { } panel) AlertsUpdated -= panel.AlertsChanged;
+        _outlinerDock?.Destroy();
+    }
 
     void SmokeOutliner()
     {
@@ -71,8 +76,25 @@ sealed partial class MainForm
         _outlinerDock.Apply();
         Application.DoEvents();
         var shown = panel.CellText(0, 3);
+        var expectedHidden = expected;
         if (panel.VisibleRowCount == 0 || !double.TryParse(shown, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var got) || Math.Abs(got - expected) > 0.01)
             fails.Add($"hidden replace: shown '{shown}', expected {expected}");
+
+        // A user column width survives a refresh driven by a game change (through the shared alert evaluation).
+        panel.SetColumnWidth(3, 97);
+        if (first != null && game.State.Pieces.Values.FirstOrDefault() is { } wp)
+        {
+            var key = LedgerKey.Piece(wp.Id);
+            var before = Ledger.Get(game.State, key, first.Id) ?? 0;
+            game.Execute(new LedgerDelta(key, first.Id, before, before + 1, "manual", null, null, "smoke width", null));
+            expected += 1;
+        }
+        _alertWatch?.Flush();
+        Application.DoEvents();
+        var afterChange = panel.CellText(0, 3);
+        if (panel.ColumnWidth(3) != 97) fails.Add($"column width lost on refresh ({panel.ColumnWidth(3)})");
+        if (!double.TryParse(afterChange, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var got2) || Math.Abs(got2 - expected) > 0.01)
+            fails.Add($"alert-driven refresh: shown '{afterChange}', expected {expected}");
 
         panel.ExpandAll();
         Application.DoEvents();
@@ -98,7 +120,7 @@ sealed partial class MainForm
         panel.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotOutliner!, null) + "-nophases.png");
         if (!hidden) fails.Add("Now still visible without phases");
 
-        Program.AppLog($"smoke: outliner screenshot saved to {_opts.ScreenshotOutliner} (rows {rows}, columns {cols}, breakdowns {breakdowns}, hidden-replace shown '{shown}' expected {expected}, now hidden without phases {hidden})");
+        Program.AppLog($"smoke: outliner screenshot saved to {_opts.ScreenshotOutliner} (rows {rows}, columns {cols}, breakdowns {breakdowns}, hidden-replace shown '{shown}' expected {expectedHidden}, after change '{afterChange}' expected {expected}, width kept {panel.ColumnWidth(3) == 97}, now hidden without phases {hidden})");
         if (fails.Count > 0) { Program.ExitCode = 1; Program.AppLog("smoke: outliner check FAILED: " + string.Join("; ", fails)); }
     }
 }

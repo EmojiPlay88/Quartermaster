@@ -22,7 +22,12 @@ public static class OutlinerModel
 
     private sealed record Leaf(PieceInstance Piece, string Name, double?[] Values, AlertSeverity[] Alerts);
 
-    public static OutlinerTree Build(GameState s, RulesPack? pack, ModuleModel model, OutlinerGrouping grouping, IReadOnlyList<AlertHit> alerts)
+    public static OutlinerTree Build(GameState s, RulesPack? pack, ModuleModel model, OutlinerGrouping grouping, IReadOnlyList<AlertHit> alerts) =>
+        Build(s, pack, model, grouping, alerts, PieceInfo.Name);
+
+    /// <summary>As above with the piece-name lookup injectable (tests); a lookup that throws for a piece falls back to the piece id.</summary>
+    internal static OutlinerTree Build(GameState s, RulesPack? pack, ModuleModel model, OutlinerGrouping grouping, IReadOnlyList<AlertHit> alerts,
+        Func<PieceInstance, string> nameOf)
     {
         var props = (pack == null ? new List<PropertyDef>() : LedgerTable.Columns(pack).Where(p => p.Outliner != OutlinerAggregate.None).ToList());
         var cols = props.Select(p => new OutlinerColumn(p.Id, p.Name, p.Outliner, p.Notes)).ToList();
@@ -39,7 +44,9 @@ public static class OutlinerModel
         var leaves = new Dictionary<string, Leaf>(StringComparer.Ordinal);
         foreach (var p in s.Pieces.Values)
         {
-            var name = PieceInfo.Name(p);
+            string name;
+            try { name = nameOf(p) ?? ""; }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { name = ""; } // one bad piece type must not blank the tree
             var vals = props.Select(c => Ledger.Get(s, LedgerKey.Piece(p.Id), c.Id)).ToArray();
             var sev = bySeverity.TryGetValue(p.Id, out var set) ? set.OrderByDescending(x => x).ToArray() : Array.Empty<AlertSeverity>();
             leaves[p.Id] = new Leaf(p, name.Length > 0 ? name : p.Id, vals, sev);

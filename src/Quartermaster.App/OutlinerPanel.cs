@@ -9,8 +9,10 @@ namespace Quartermaster.App;
 /// <summary>
 /// The outliner: the open "Now" decisions on top, then a tree-list of folders / groups / pieces with name, unit count, the pack's
 /// outliner properties (aggregated per group) and alert icons. Numbers explain themselves in a <see cref="BreakdownTip"/>; column headers show
-/// the property notes. Refreshes are debounced 250 ms and the alerts are evaluated here. Hosted docked on the right or in an
-/// <see cref="OutlinerFloatForm"/>; the same instance moves between them.
+/// the property notes. It does not evaluate alerts itself: the owner feeds it the alert bar's (debounced) results through
+/// <see cref="AlertsChanged"/>, which is also its refresh signal after every game change. The grid is virtual (values come from the row list on
+/// demand) and its columns are only rebuilt when the set of outliner properties changes, so user column widths survive refreshes. Hosted docked
+/// on the right or in an <see cref="OutlinerFloatForm"/>; the same instance moves between them.
 /// </summary>
 sealed class OutlinerPanel : UserControl
 {
@@ -21,10 +23,12 @@ sealed class OutlinerPanel : UserControl
     readonly Action<string> _centre;
     readonly Action<MapDef> _openMap;
     readonly Action<Decision> _jump;
+    readonly Font _font = new("Tahoma", 8.25f);
+    readonly Font _nowFont = new("Tahoma", 8.25f, FontStyle.Bold);
     readonly ToolStrip _bar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
     readonly ToolStripComboBox _grouping = new() { DropDownStyle = ComboBoxStyle.DropDownList, AutoSize = false, Width = 160 };
     readonly ToolStripButton _pop = new("Pop out") { Alignment = ToolStripItemAlignment.Right };
-    readonly Label _nowLabel = new() { Text = "Now", Dock = DockStyle.Top, Height = 16, Padding = new Padding(3, 2, 0, 0), Font = new Font("Tahoma", 8.25f, FontStyle.Bold) };
+    readonly Label _nowLabel = new() { Text = "Now", Dock = DockStyle.Top, Height = 16, Padding = new Padding(3, 2, 0, 0) };
     readonly ListBox _now = new() { Dock = DockStyle.Top, Height = 70, IntegralHeight = false, HorizontalScrollbar = true };
     readonly DataGridView _grid = new()
     {
@@ -32,28 +36,32 @@ sealed class OutlinerPanel : UserControl
         RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, MultiSelect = false,
         AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None, BackgroundColor = SystemColors.Window, BorderStyle = BorderStyle.Fixed3D,
         ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing, EnableHeadersVisualStyles = true,
-        CellBorderStyle = DataGridViewCellBorderStyle.None, ShowCellToolTips = false,
+        CellBorderStyle = DataGridViewCellBorderStyle.None, ShowCellToolTips = false, VirtualMode = true,
     };
-    readonly System.Windows.Forms.Timer _debounce = new() { Interval = 250 };
     readonly BreakdownTip _tip = new();
     readonly ToolTip _headerTip = new() { ShowAlways = true };
     readonly HashSet<string> _open = new(StringComparer.Ordinal);
     readonly HashSet<string> _seen = new(StringComparer.Ordinal);
     readonly List<(OutlinerNode Node, int Depth)> _rows = new();
+    readonly List<string> _shownKeys = new();
+    readonly Dictionary<string, int> _widths = new(StringComparer.Ordinal);
     IReadOnlyList<Decision> _decisions = Array.Empty<Decision>();
+    IReadOnlyList<AlertHit> _alerts;
+    string? _columnSet;
     OutlinerTree _tree = new(Array.Empty<OutlinerColumn>(), Array.Empty<OutlinerNode>());
     OutlinerGrouping _mode;
-    GameSession? _game;
     bool _loading, _closing, _dirty, _noPhases = true;
     Font? _bold;
     int _headerCol = -1;
 
-    public OutlinerPanel(ModuleSession s, Func<PhaseController?> phases, OutlinerGrouping grouping, Action<OutlinerGrouping> saveGrouping,
-        Action<string> centreOnPiece, Action<MapDef> openMap, Action<Decision> jump)
+    /// <param name="alerts">The latest evaluated alerts (the alert bar's); later results arrive through <see cref="AlertsChanged"/>.</param>
+    public OutlinerPanel(ModuleSession s, Func<PhaseController?> phases, IReadOnlyList<AlertHit> alerts, OutlinerGrouping grouping,
+        Action<OutlinerGrouping> saveGrouping, Action<string> centreOnPiece, Action<MapDef> openMap, Action<Decision> jump)
     {
-        _s = s; _phases = phases; _mode = grouping; _saveGrouping = saveGrouping; _centre = centreOnPiece; _openMap = openMap; _jump = jump;
+        _s = s; _phases = phases; _alerts = alerts; _mode = grouping; _saveGrouping = saveGrouping; _centre = centreOnPiece; _openMap = openMap; _jump = jump;
         Name = "OutlinerPanel";
-        Font = new Font("Tahoma", 8.25f);
+        Font = _font;
+        _nowLabel.Font = _nowFont;
 
         _grouping.Items.AddRange(new object[] { "By map / org display", "By side" });
         _grouping.SelectedIndex = grouping == OutlinerGrouping.BySide ? 1 : 0;
@@ -84,20 +92,22 @@ sealed class OutlinerPanel : UserControl
             else if (e.KeyCode == Keys.Left && IsOpen(r.Index)) { Toggle(r.Index); e.Handled = true; }
             else if (e.KeyCode == Keys.Enter) { Activate(r.Index, NameCol); e.Handled = true; }
         });
+        _grid.CellValueNeeded += (_, e) => e.Value = ValueAt(e.RowIndex, e.ColumnIndex);
+        _grid.CellFormatting += (_, e) =>
+        {
+            if (e.RowIndex >= 0 && e.RowIndex < _rows.Count && _rows[e.RowIndex].Node.Kind != OutlinerNodeKind.Piece && e.CellStyle != null)
+                e.CellStyle.Font = _bold ??= new Font(Font, FontStyle.Bold);
+        };
         _grid.CellPainting += OnPaint;
         _grid.CellMouseMove += OnHeaderHover;
         _grid.MouseLeave += (_, _) => { _headerTip.Hide(_grid); _headerCol = -1; };
         _tip.Track(_grid, NumberTip);
 
-        _debounce.Tick += (_, _) => { _debounce.Stop(); Guard(Reload); };
         Controls.Add(_grid);
         Controls.Add(_now);
         Controls.Add(_nowLabel);
         Controls.Add(_bar);
 
-        _s.GameReplaced += OnGameReplaced;
-        _s.RulesChanged += OnRulesChanged;
-        HookGame();
         Reload();
     }
 
@@ -111,7 +121,10 @@ sealed class OutlinerPanel : UserControl
     public int ValueColumnCount => _tree.Columns.Count;
     public int NowCount => _decisions.Count;
     public bool NowVisible => _now.Visible;
-    public string? CellText(int row, int col) => row >= 0 && row < _grid.RowCount && col < _grid.ColumnCount ? _grid.Rows[row].Cells[col].Value as string : null;
+    public string? CellText(int row, int col) => ValueAt(row, col);
+    /// <summary>Smoke: column widths, to check that user widths survive refreshes.</summary>
+    public int ColumnWidth(int col) => col >= 0 && col < _grid.ColumnCount ? _grid.Columns[col].Width : -1;
+    public void SetColumnWidth(int col, int width) { if (col >= 0 && col < _grid.ColumnCount) _grid.Columns[col].Width = width; }
 
     /// <summary>Smoke: opens every folder and group.</summary>
     public void ExpandAll()
@@ -130,39 +143,25 @@ sealed class OutlinerPanel : UserControl
         bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 
-    /// <summary>Smoke: recompute now instead of waiting for the debounce.</summary>
-    public void Flush() { _debounce.Stop(); Guard(Reload); }
+    /// <summary>Smoke: recompute now (with the latest alerts) instead of waiting for the next alert update.</summary>
+    public void Flush() => Guard(Reload);
+
+    /// <summary>
+    /// The owner's alert hub published a fresh evaluation (after any game change, rewind, rules change or game replacement, already debounced):
+    /// keep the hits and rebuild the tree, or just mark it stale while the panel is hidden.
+    /// </summary>
+    public void AlertsChanged(IReadOnlyList<AlertHit> hits)
+    {
+        if (IsDisposed || _closing) return;
+        _alerts = hits ?? Array.Empty<AlertHit>();
+        _dirty = true;
+        if (Visible) Guard(Reload);
+    }
 
     /// <summary>Smoke: the breakdown the tooltip would show for a cell (null = none).</summary>
     public Breakdown? BreakdownFor(int row, int col) => NumberTip(row, col);
 
     // ---------- refresh ----------
-
-    void OnUi(Action a)
-    {
-        if (IsDisposed || _closing) return;
-        if (InvokeRequired) BeginInvoke(() => { if (!IsDisposed && !_closing) a(); }); else a();
-    }
-
-    /// <summary>Marks the view stale; the (debounced) recompute only runs while the panel is actually showing.</summary>
-    void Kick()
-    {
-        _dirty = true;
-        if (!Visible) return;
-        _debounce.Stop(); _debounce.Start();
-    }
-
-    void HookGame()
-    {
-        if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnRewound; }
-        _game = _s.Game;
-        if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnRewound; }
-    }
-
-    void OnGameChanged(GameCommand _) => OnUi(Kick);
-    void OnRewound() => OnUi(Kick);
-    void OnGameReplaced() => OnUi(() => { HookGame(); Kick(); });
-    void OnRulesChanged() => OnUi(Kick);
 
     void Reload()
     {
@@ -181,15 +180,7 @@ sealed class OutlinerPanel : UserControl
         var state = game.State;
         PhaseView? view = null;
         try { view = _phases()?.View(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("outliner: " + ex.Message); }
-        var pack = _s.Rules;
-        IReadOnlyList<AlertHit> alerts = Array.Empty<AlertHit>();
-        try
-        {
-            var side = pack != null && view?.Current != null ? Sequencer.ActingSide(pack, view.Current)?.Id : null;
-            alerts = AlertEngine.Evaluate(state, pack, _s.Model, view?.Current, side);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("outliner alerts: " + ex.Message); }
-        try { _tree = OutlinerModel.Build(state, pack, _s.Model, _mode, alerts); }
+        try { _tree = OutlinerModel.Build(state, _s.Rules, _s.Model, _mode, _alerts); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Program.AppLog("outliner: " + ex.Message);
@@ -234,35 +225,58 @@ sealed class OutlinerPanel : UserControl
             foreach (var r in _tree.Roots) Add(r, 0);
 
             var first = _grid.FirstDisplayedScrollingRowIndex;
-            var cur = _grid.CurrentRow?.Index is { } ci && ci >= 0 && ci < _rows.Count ? _rows[ci].Node.Key : null;
-            _grid.SuspendLayout();
-            _grid.Rows.Clear();
-            _grid.Columns.Clear();
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "", Width = 26, SortMode = DataGridViewColumnSortMode.NotSortable, Resizable = DataGridViewTriState.False });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Name", Width = 190, SortMode = DataGridViewColumnSortMode.NotSortable });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Units", Width = 44, SortMode = DataGridViewColumnSortMode.NotSortable, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            foreach (var c in _tree.Columns)
-                _grid.Columns.Add(new DataGridViewTextBoxColumn
-                {
-                    HeaderText = c.Name, Width = 60, SortMode = DataGridViewColumnSortMode.NotSortable,
-                    DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight },
-                });
-            if (_rows.Count > 0) _grid.Rows.Add(_rows.Count);
-            for (var i = 0; i < _rows.Count; i++)
-            {
-                var n = _rows[i].Node;
-                var row = _grid.Rows[i];
-                row.Cells[NameCol].Value = n.Name;
-                row.Cells[UnitsCol].Value = n.Units.ToString(CultureInfo.InvariantCulture);
-                for (var c = 0; c < _tree.Columns.Count && c < n.Values.Count; c++)
-                    row.Cells[FirstValueCol + c].Value = n.Values[c] is { } v ? v.ToString("0.##", CultureInfo.InvariantCulture) : "";
-                if (n.Kind != OutlinerNodeKind.Piece) row.DefaultCellStyle.Font = (_bold ??= new Font(Font, FontStyle.Bold));
-                if (cur != null && n.Key == cur) { _grid.CurrentCell = row.Cells[NameCol]; }
-            }
+            var cur = _grid.CurrentCell is { RowIndex: var ci } && ci >= 0 && ci < _shownKeys.Count ? _shownKeys[ci] : null;
+            var curCol = _grid.CurrentCell?.ColumnIndex ?? NameCol;
+            EnsureColumns();
+            // Virtual grid: only the row count changes here; the visible cells ask ValueAt for their text when they repaint.
+            _grid.RowCount = 0;
+            _grid.RowCount = _rows.Count;
+            _shownKeys.Clear();
+            foreach (var r in _rows) _shownKeys.Add(r.Node.Key);
+            if (cur != null && _shownKeys.IndexOf(cur) is var at and >= 0 && curCol >= 0 && curCol < _grid.ColumnCount)
+                _grid.CurrentCell = _grid.Rows[at].Cells[curCol];
             if (first >= 0 && first < _grid.RowCount) { try { _grid.FirstDisplayedScrollingRowIndex = first; } catch (InvalidOperationException) { } }
-            _grid.ResumeLayout();
+            _grid.Invalidate();
         }
         finally { _loading = false; }
+    }
+
+    /// <summary>Rebuilds the columns only when the set of outliner properties changed; widths the user set are kept per property id.</summary>
+    void EnsureColumns()
+    {
+        var set = string.Join("\u001f", _tree.Columns.Select(c => c.PropertyId));
+        if (_grid.ColumnCount > 0 && set == _columnSet)
+        {
+            for (var i = 0; i < _tree.Columns.Count; i++) _grid.Columns[FirstValueCol + i].HeaderText = _tree.Columns[i].Name;
+            return;
+        }
+        foreach (DataGridViewColumn c in _grid.Columns) if (!string.IsNullOrEmpty(c.Name)) _widths[c.Name] = c.Width;
+        _columnSet = set;
+        _grid.Columns.Clear();
+        DataGridViewTextBoxColumn Col(string id, string header, int width, bool right) => new()
+        {
+            Name = id, HeaderText = header, Width = _widths.TryGetValue(id, out var w) ? w : width, SortMode = DataGridViewColumnSortMode.NotSortable,
+            DefaultCellStyle = right ? new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } : new DataGridViewCellStyle(),
+        };
+        var icon = Col("#icons", "", 26, false);
+        icon.Resizable = DataGridViewTriState.False;
+        _grid.Columns.Add(icon);
+        _grid.Columns.Add(Col("#name", "Name", 190, false));
+        _grid.Columns.Add(Col("#units", "Units", 44, true));
+        foreach (var c in _tree.Columns) _grid.Columns.Add(Col("p:" + c.PropertyId, c.Name, 60, true));
+    }
+
+    /// <summary>The text of one cell, straight from the row list (the grid is virtual).</summary>
+    string? ValueAt(int row, int col)
+    {
+        if (row < 0 || row >= _rows.Count || col < 0) return null;
+        var n = _rows[row].Node;
+        if (col == IconCol) return null;
+        if (col == NameCol) return n.Name;
+        if (col == UnitsCol) return n.Units.ToString(CultureInfo.InvariantCulture);
+        var ci = col - FirstValueCol;
+        if (ci >= _tree.Columns.Count) return null;
+        return ci < n.Values.Count && n.Values[ci] is { } v ? v.ToString("0.##", CultureInfo.InvariantCulture) : "";
     }
 
     // ---------- tree behaviour ----------
@@ -382,17 +396,17 @@ sealed class OutlinerPanel : UserControl
         if (disposing)
         {
             _closing = true;
-            _debounce.Stop();
-            _s.GameReplaced -= OnGameReplaced;
-            _s.RulesChanged -= OnRulesChanged;
-            if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnRewound; }
-            _game = null;
-            _debounce.Dispose();
             _tip.Dispose();
-            _bold?.Dispose();
             _headerTip.Dispose();
         }
         base.Dispose(disposing);
+        if (disposing)
+        {
+            // The fonts outlive the child controls that use them; free them last.
+            _bold?.Dispose();
+            _nowFont.Dispose();
+            _font.Dispose();
+        }
     }
 }
 

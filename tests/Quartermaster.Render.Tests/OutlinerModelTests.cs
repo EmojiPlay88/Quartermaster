@@ -134,4 +134,15 @@ public class OutlinerModelTests
         Assert.Empty(t.Roots[0].Values);
         Assert.Equal(2, t.Roots[0].Units);
     }
+
+    [Fact]
+    public void Outliner_BadPieceName_FallsBackToId()
+    {
+        static string NameOf(PieceInstance p) => p.Id == "c" ? throw new InvalidOperationException("bad type") : PieceInfo.Name(p);
+        var t = OutlinerModel.Build(State(), Pack(), Model(), OutlinerGrouping.OrgDisplays, new List<AlertHit>(), NameOf);
+        var orgA = t.Roots[0].Children.Single().Children[0];
+        Assert.Equal(new[] { "c", "Red Two" }, orgA.Children.Select(c => c.Name));
+        Assert.Equal(30, orgA.Children[0].Values[1]);
+        Assert.Equal("Red One", t.Roots[1].Children.Single().Name);
+    }
 }
