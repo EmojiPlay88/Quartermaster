@@ -44,7 +44,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         g.Execute(prepare(c, g.State));
     }
 
-    private void Calc(string text, string? pieceId = null) => Exec(new AddLogLine(LogKind.Calc, text, pieceId));
+    private void Calc(string text, string? pieceId = null) => Exec(new AddLogLine(LogKind.Calc, text, pieceId, SideId: s.ActorSide()));
 
     private bool HasPhases => s.Game != null && s.Rules is { Phases.Count: > 0 };
 
@@ -187,7 +187,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var unit = name ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
         using var action = s.Game.BeginAction(string.IsNullOrWhiteSpace(name) ? trace.Formula.Name : $"{trace.Formula.Name} on {name}");
-        foreach (var c in s.Runner.Commands(trace, null, tag, unit)) Exec(c);
+        foreach (var c in s.Runner.Commands(trace, null, tag, unit, s.ActorSide())) Exec(c);
         LogWorking(trace, unit, tag);
         if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }));
         return true;
@@ -318,7 +318,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             var trace = s.Runner.Run(s.Game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
             if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId); continue; }
             if (trace.Result == null) { needInput.Add(u); continue; }
-            foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label)) Exec(c);
+            foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, s.ActorSide())) Exec(c);
             LogWorking(trace, u.Label, "auto");
             applied++;
         }

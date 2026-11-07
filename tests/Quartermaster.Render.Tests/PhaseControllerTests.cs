@@ -637,4 +637,67 @@ public class PhaseControllerTests : IDisposable
         Assert.Equal(s.Game!.Log.Count, loaded.Log.Count);
         Assert.Equal(s.Game.Checkpoints.Count, loaded.Checkpoints.Count);
     }
+
+    // ---- side stamps (hot-seat) ----
+
+    private static RulesPack PrivateWeather(RulesPack p) =>
+        WithPhase(p with { Formulas = p.Formulas.Select(f => f.Id == "f-weather" ? f with { PrivateRolls = true } : f).ToList() },
+            "ph-combat", ph => ph with { SideId = "blue" });
+
+    private static readonly IReadOnlySet<string> RedOnly = new HashSet<string> { "red" };
+    private static readonly IReadOnlySet<string> BlueOnly = new HashSet<string> { "blue" };
+
+    [Fact]
+    public void OutOfPhase_UnitlessPrivateRun_StampedWithHeldSide()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, PrivateWeather);
+        ToMovement(c);
+        c.Advance();        // Combat: Blue's phase
+        Assert.Equal("ph-combat", s.Game!.State.Position!.PhaseId);
+        s.SetViewSides(RedOnly);
+        Assert.Equal("red", s.ActorSide());
+        var none = new Dictionary<string, string>();
+        var trace = s.Runner!.Run(s.Game.State, new RunRequest("f-weather", null, none, none, new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.True(c.ApplyFormula(null, null, trace, false));
+        Assert.Equal("red", s.Game.Log.OfType<RollDice>().Last().SideId);
+        var blue = PlayerView.For(s.Game.State, s.Rules, s.Model, BlueOnly);
+        Assert.Contains(blue.Log, l => l.Text == "Red rolled dice");
+        Assert.Empty(blue.DiceHistory[^1].Results);
+    }
+
+    [Fact]
+    public void ActorSide_ActingSideWhenHeld_ElseFirstHeldInPackOrder_NullSolo()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, PrivateWeather);
+        Assert.Null(s.ActorSide());
+        ToMovement(c);      // Red's phase
+        s.SetViewSides(new HashSet<string> { "blue", "red" });
+        Assert.Equal("red", s.ActorSide());
+        s.SetViewSides(BlueOnly);
+        Assert.Equal("blue", s.ActorSide());
+        c.Advance();        // Combat: Blue's phase
+        s.SetViewSides(RedOnly);
+        Assert.Equal("red", s.ActorSide());
+        c.Advance();        // Round 2 Movement (Red); then End has no side
+        c.Advance();
+        c.Advance();
+        Assert.Equal("ph-end", s.Game!.State.Position!.PhaseId);
+        s.SetViewSides(new HashSet<string> { "blue", "red" });
+        Assert.Equal("red", s.ActorSide());   // no acting side: first held side in pack order
+        s.SetViewSides(null);
+        Assert.Null(s.ActorSide());
+    }
+
+    [Fact]
+    public void AutoPhaseStart_StampsActingSide_SoloStampsNothing()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto);
+        c.Start();
+        Assert.All(s.Game!.Log.OfType<RollDice>(), r => Assert.Null(r.SideId));
+        s.SetViewSides(RedOnly);
+        c.Advance();        // Supply (Red): water per unit
+        var deltas = s.Game.Log.OfType<LedgerDelta>().Where(d => d.Source == "formula").ToList();
+        Assert.NotEmpty(deltas);
+        Assert.All(deltas, d => Assert.Equal("red", d.SideId));
+    }
 }

@@ -103,6 +103,22 @@ public sealed class ModuleSession : IDisposable
         return v != null && pieceId != null && v.Pieces.ContainsKey(pieceId);
     }
 
+    /// <summary>
+    /// The side a formula applied now is run for (its log lines and rolls are stamped with it): null in solo; else the current phase's
+    /// acting side when held, else the first held side in pack order.
+    /// </summary>
+    public string? ActorSide()
+    {
+        var sides = _viewSides;
+        if (sides == null || sides.Count == 0) return null;
+        var pack = Rules;
+        if (pack != null && _game?.State is { } st && Sequencer.Current(pack, st)?.SideId is { Length: > 0 } acting && sides.Contains(acting))
+            return acting;
+        foreach (var sd in pack?.Sides ?? new List<SideDef>())
+            if (sd != null && sd.Id != null && sides.Contains(sd.Id)) return sd.Id;
+        return sides.OrderBy(x => x, StringComparer.Ordinal).First();
+    }
+
     public bool CanSeeMap(string mapId)
     {
         if (_viewSides == null || Rules == null) return true;
