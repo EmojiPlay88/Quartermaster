@@ -38,12 +38,16 @@ public sealed class ModuleSession : IDisposable
             if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnGameRewound; }
             _game = value;
             if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnGameRewound; }
+            // Decided before anything (e.g. seeding the loaded game) can raise ViewChanged: a multi-player game starts public-only.
+            if (_game != null) _viewSides = ViewSidesFor(_game);
             ResetView();
         }
     }
     private GameSession? _game;
     private sealed record ViewCache(GameState? View);
     private volatile ViewCache? _cache;   // null = invalid; published as one immutable reference
+    private sealed record AccessCache(GameState State, RulesPack? Rules, IReadOnlySet<string> Sides, PieceAccess Access);
+    private volatile AccessCache? _access;   // null = invalid; reset with the view
     private IReadOnlySet<string>? _viewSides;
 
     private void OnGameChanged(GameCommand _) => InvalidateView();
@@ -52,13 +56,35 @@ public sealed class ModuleSession : IDisposable
     private void AfterGameReplaced()
     {
         // Session-owned so subscriber order never matters: a multi-player game starts public-only until a player takes over.
-        if (_game != null) _viewSides = Players.IsSolo(_game.State) ? null : new HashSet<string>();
+        if (_game != null) _viewSides = ViewSidesFor(_game);
         ResetView();
         GameReplaced?.Invoke();
         ViewChanged?.Invoke();
     }
 
-    private void ResetView() => _cache = null;
+    private static IReadOnlySet<string>? ViewSidesFor(GameSession game) => Players.IsSolo(game.State) ? null : new HashSet<string>();
+
+    private void ResetView() { _cache = null; _access = null; }
+
+    /// <summary>
+    /// Per-piece visibility for the current viewer, from the full state (side filters compiled once per state version: the cache is
+    /// dropped on every view invalidation and keyed on the state, rules and sides it was built for). Null in solo.
+    /// </summary>
+    private PieceAccess? Access()
+    {
+        var game = _game;
+        var sides = _viewSides;
+        if (game == null || sides == null) return null;
+        var st = game.State;
+        var rules = Rules;
+        var a = _access;
+        if (a == null || !ReferenceEquals(a.State, st) || !ReferenceEquals(a.Rules, rules) || !ReferenceEquals(a.Sides, sides))
+        {
+            a = new AccessCache(st, rules, sides, new PieceAccess(st, rules, Model, sides));
+            _access = a;
+        }
+        return a.Access;
+    }
 
     private void InvalidateView()
     {
@@ -98,10 +124,11 @@ public sealed class ModuleSession : IDisposable
         }
     }
 
+    /// <summary>True when the piece is in <see cref="View"/> (decided from the full state, without building the view).</summary>
     public bool CanSee(string pieceId)
     {
-        var v = View;
-        return v != null && pieceId != null && v.Pieces.ContainsKey(pieceId);
+        if (pieceId == null || _game?.State is not { } st) return false;
+        return Access() is { } a ? a.CanSee(pieceId) : st.Pieces.ContainsKey(pieceId);
     }
 
     /// <summary>
@@ -135,10 +162,7 @@ public sealed class ModuleSession : IDisposable
     {
         var sides = _viewSides;
         if (sides == null || pieceId == null) return true;
-        if (_game?.State is not { } st || !st.Pieces.TryGetValue(pieceId, out var p) || p == null || !CanSee(pieceId)) return false;
-        if (Rules is not { } pack) return true;
-        var side = Ownership.SideOfPiece(p, st, pack);
-        return side == null || sides.Contains(side);
+        return Access() is { } a && a.CanAct(pieceId);
     }
 
     /// <summary>True when the current viewer may change this ledger key by hand: always in solo; else a unit they may act on, the global

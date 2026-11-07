@@ -376,7 +376,7 @@ sealed class MapWindow : Form
             // Move commands (Send to, keyboard moves) are move gestures: consecutive ones go through the phase controller as one call.
             if (phases != null && c is MovePieces m) { gesture.Add(m); continue; }
             FlushMoves();
-            game.Execute(CommandLog.Prepare(c, game.State, _s.Model));
+            game.Execute(CommandLog.Prepare(c, game.State, _s));
         }
         FlushMoves();
     }

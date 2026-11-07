@@ -1,4 +1,6 @@
 using Quartermaster.Core;
+using Quartermaster.Render;
+using Quartermaster.Rules;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.App;
@@ -11,9 +13,9 @@ static class CommandLog
 {
     public const string LocalUser = "local";
 
-    public static GameCommand Prepare(GameCommand c, GameState st, ModuleModel model)
+    public static GameCommand Prepare(GameCommand c, GameState st, ModuleSession session)
     {
-        try { return PrepareCore(c, st, model); }
+        try { return PrepareCore(c, st, session.Model, session.Rules); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return Stamp(c); }
     }
 
@@ -44,21 +46,13 @@ static class CommandLog
         };
     }
 
-    static GameCommand PrepareCore(GameCommand c, GameState st, ModuleModel model)
+    static GameCommand PrepareCore(GameCommand c, GameState st, ModuleModel model, RulesPack? rules)
     {
         c = Stamp(c);
         switch (c)
         {
             case MovePieces m when m.LogText == null && m.PieceIds.Count > 0:
-            {
-                var first = m.PieceIds.Select(id => st.Pieces.GetValueOrDefault(id)).FirstOrDefault(p => p != null);
-                if (first == null) return c;
-                var from = PieceInfo.Location(first, model);
-                var to = Where(m.MapId, m.Pos, model);
-                var who = m.PieceIds.Count == 1 ? Name(first) : $"{m.PieceIds.Count} pieces";
-                var text = from != null && to != null ? $"{who} moved {from} → {to}" : to != null ? $"{who} moved → {to}" : $"{who} moved";
-                return m with { LogText = text };
-            }
+                return MoveLogText.For(m, st, model, rules) is { } text ? m with { LogText = text } : c;
             case RemovePiece r when r.LogText == null && st.Pieces.TryGetValue(r.PieceId, out var gone):
                 return r with { LogText = $"{Name(gone)} removed" };
             case AddPiece a when a.LogText == null:

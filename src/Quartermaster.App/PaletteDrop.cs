@@ -20,7 +20,7 @@ static class PaletteDrop
         if (PaletteModel.ResolveDrop(game.State, map, mapPoint, s.Images, snap) is not { } t) return (false, "Drop onto a board");
         var (type, state) = PieceFactory.FromSlot(s.Model, slot, t.MapId, t.Pos);
         var id = "p:" + Guid.NewGuid().ToString("N");
-        game.Execute(CommandLog.Prepare(new AddPiece(id, type, state, t.MapId, t.Pos, t.StackOnto), game.State, s.Model));
+        game.Execute(CommandLog.Prepare(new AddPiece(id, type, state, t.MapId, t.Pos, t.StackOnto), game.State, s));
         s.SeedLedgers();
         return (true, $"Placed {PaletteModel.PieceName(slot)}");
     }

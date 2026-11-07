@@ -147,7 +147,7 @@ sealed partial class MainForm
     void HideAlert(string alertId, string? name)
     {
         if (_session?.Game is not { } game) return;
-        var cmd = CommandLog.Prepare(new HideAlert(alertId, Name: string.IsNullOrWhiteSpace(name) ? null : name), game.State, _session.Model);
+        var cmd = CommandLog.Prepare(new HideAlert(alertId, Name: string.IsNullOrWhiteSpace(name) ? null : name), game.State, _session);
         game.Execute(cmd);
         _alertWatch?.Flush();
     }

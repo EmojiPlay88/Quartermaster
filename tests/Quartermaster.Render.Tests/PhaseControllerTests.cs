@@ -764,4 +764,32 @@ public class PhaseControllerTests : IDisposable
         Assert.NotEmpty(deltas);
         Assert.All(deltas, d => Assert.Equal("red", d.SideId));
     }
+
+    [Fact]
+    public void AutoOnMove_InRedsPhase_StampsRed()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto);
+        ToMovement(c);      // Movement (Red)
+        s.SetViewSides(RedOnly);
+        var mark = s.Game!.Log.Count;
+        c.ExecuteMove(new[] { Move("r1", 130) });
+        var deltas = s.Game.Log.Skip(mark).OfType<LedgerDelta>().Where(d => d.Source == "formula").ToList();
+        Assert.NotEmpty(deltas);
+        Assert.All(deltas, d => Assert.Equal("red", d.SideId));
+        Assert.True(Fuel(s, "r1") < 40);
+    }
+
+    [Fact]
+    public void AutoOnMove_InSidelessPhase_StampsTheActorSide()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto, p => WithPhase(p, "ph-move", ph => ph with { SideId = null }));
+        ToMovement(c);      // Movement, now with no side
+        s.SetViewSides(BlueOnly);
+        Assert.Equal("blue", s.ActorSide());
+        var mark = s.Game!.Log.Count;
+        c.ExecuteMove(new[] { Move("b1", 130) });
+        var deltas = s.Game.Log.Skip(mark).OfType<LedgerDelta>().Where(d => d.Source == "formula").ToList();
+        Assert.NotEmpty(deltas);
+        Assert.All(deltas, d => Assert.Equal("blue", d.SideId));
+    }
 }

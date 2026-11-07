@@ -80,13 +80,12 @@ public static class PlayerView
     private sealed class Filter
     {
         private readonly RulesPack _pack;
-        private readonly ModuleModel? _model;
         private readonly IReadOnlySet<string> _held;
         private readonly Dictionary<string, string?> _sideOf = new(StringComparer.Ordinal);
         private readonly HashSet<string> _removed = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ObscurableDef> _masked = new(StringComparer.Ordinal);
         private readonly HashSet<string> _hidden = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, bool> _mapHidden = new(StringComparer.Ordinal);
+        private readonly PieceAccess _access;
         private readonly Dictionary<string, Visibility> _visibility = new(StringComparer.Ordinal);
         /// <summary>Phase name -> the side ids of every phase with that name ("" for a phase with no side).</summary>
         private readonly Dictionary<string, HashSet<string>> _phaseSides = new(StringComparer.Ordinal);
@@ -97,7 +96,8 @@ public static class PlayerView
 
         public Filter(GameState full, RulesPack pack, ModuleModel? model, IReadOnlySet<string> held)
         {
-            _pack = pack; _model = model; _held = held;
+            _pack = pack; _held = held;
+            _access = new PieceAccess(full, pack, model, held);
             foreach (var p in pack.Properties ?? new()) if (p != null) _visibility.TryAdd(p.Id ?? "", p.Visibility);
             foreach (var ph in pack.Phases ?? new())
             {
@@ -107,23 +107,14 @@ public static class PlayerView
             }
             _privatePrefixes = (pack.Formulas ?? new()).Where(f => f is { PrivateRolls: true }).Select(f => (f.Name ?? "") + ": ").Distinct().ToList();
 
-            var sides = Ownership.PieceSides(full, pack);
             foreach (var p in full.Pieces.Values)
             {
                 if (p == null) continue;
-                var side = sides(p);
+                var side = _access.SideOf(p);
                 _sideOf[p.Id] = side;
                 if (MapHidden(p.MapId)) { _removed.Add(p.Id); continue; }
                 if (!NotHeld(side)) continue;
-                var type = PieceInfo.TypeOf(p);
-                ObscurableDef? mask = null;
-                var hide = false;
-                for (var i = 0; i < type.Traits.Count; i++)
-                {
-                    var st = i < p.TraitStates.Count ? p.TraitStates[i] : null;
-                    if (type.Traits[i] is HideableDef h && TraitState.IsHidden(h, st)) hide = true;
-                    if (type.Traits[i] is ObscurableDef o && mask == null && TraitState.IsObscured(o, st)) mask = o;
-                }
+                var (hide, mask) = PieceAccess.Masking(p);
                 if (hide) _removed.Add(p.Id);
                 else if (mask != null) _masked[p.Id] = mask;
             }
@@ -152,23 +143,14 @@ public static class PlayerView
                     + @")(?![\p{L}\p{N}_])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
-        private bool NotHeld(string? side) => side != null && !_held.Contains(side);
+        private bool NotHeld(string? side) => _access.NotHeld(side);
 
         private bool NameHit(string? text) => _names != null && !string.IsNullOrEmpty(text) && _names.IsMatch(text);
 
         private string Label(string? side) =>
             side == null ? Unknown : (_pack.Sides ?? new()).FirstOrDefault(x => x != null && x.Id == side)?.Name is { Length: > 0 } n ? n : side;
 
-        private bool MapHidden(string? mapId)
-        {
-            if (mapId == null) return false;
-            if (_mapHidden.TryGetValue(mapId, out var known)) return known;
-            var side = Ownership.SideOfMap(mapId, _pack);
-            if (side == null && _model != null)
-                foreach (var m in _model.Maps)
-                    if (m.Name == mapId && m.Id != mapId && Ownership.SideOfMap(m.Id, _pack) is { } s) { side = s; break; }
-            return _mapHidden[mapId] = NotHeld(side);
-        }
+        private bool MapHidden(string? mapId) => _access.MapHidden(mapId);
 
         /// <summary>The side of the phase with this name, only when every phase of that name belongs to the same single side.</summary>
         private string? PhaseSide(string? phaseName) =>
@@ -191,10 +173,9 @@ public static class PlayerView
                 return PropPrivate(prop);
             }
             if (id == HolderDef.GlobalId) return false;
-            if ((_pack.Holders ?? new()).FirstOrDefault(h => h != null && h.Id == id) is not { } holder) return true;   // unknown holder
-            if (string.IsNullOrWhiteSpace(holder.SideId)) return false;
-            side = holder.SideId;
-            return NotHeld(holder.SideId);
+            if (!(_pack.Holders ?? new()).Any(h => h != null && h.Id == id)) return true;   // unknown holder
+            side = Ownership.SideOfHolder(id, _pack);   // null: public, or owned by a deleted side (ignored, spec 8a.10)
+            return NotHeld(side);
         }
 
         /// <summary>A "{unit name}: " prefix naming another side's piece (hides only; never reveals).</summary>
@@ -345,7 +326,9 @@ public static class PlayerView
         private bool WholeKeyHidden(string key)
         {
             if (!LedgerKey.TryParse(key, out var isPiece, out var id)) return true;
-            return isPiece ? _hidden.Contains(id) : id != HolderDef.GlobalId;
+            if (isPiece) return _hidden.Contains(id);
+            if (id == HolderDef.GlobalId) return false;
+            return !(_pack.Holders ?? new()).Any(h => h != null && h.Id == id) || NotHeld(Ownership.SideOfHolder(id, _pack));
         }
 
         /// <summary>

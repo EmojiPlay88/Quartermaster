@@ -202,7 +202,7 @@ sealed class MapDragController : IDisposable
         if (Phases?.Invoke() is { } phases) _guard(() => phases.ExecuteMove(moves));
         else
             foreach (var move in moves)
-                _guard(() => game.Execute(CommandLog.Prepare(move, game.State, _s.Model)));
+                _guard(() => game.Execute(CommandLog.Prepare(move, game.State, _s)));
     }
 
     /// <summary>The main window's phase controller, when there is one; move gestures go through it.</summary>

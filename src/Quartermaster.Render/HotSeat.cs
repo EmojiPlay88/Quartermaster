@@ -19,6 +19,7 @@ public sealed class HotSeat
         _s = s;
         phases.PhaseBoundary += CheckHandover;
         s.GameReplaced += OnGameReplaced;
+        s.RulesApplied += OnRulesApplied;
         Hook();
         _wasSolo = !Active;
     }
@@ -114,6 +115,15 @@ public sealed class HotSeat
     private void OnCommand(GameCommand c)
     {
         if (c is SetPlayers) Reconcile();
+        // A phase relocation after a rules change or a load (not one inside "Next Phase" or a rewind, which re-check when they end).
+        else if (c is AdvancePhase { Reason: not null } && _s.Game is { InAction: false }) Reconcile();
+    }
+
+    /// <summary>An edited pack may change who acts now (a phase's side, the sides, the players' effective sides): re-check.</summary>
+    private void OnRulesApplied()
+    {
+        Hook();
+        Reconcile();
     }
 
     private void OnGameRewound() => PlayersChanged();

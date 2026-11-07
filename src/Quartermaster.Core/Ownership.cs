@@ -27,19 +27,24 @@ public static class Ownership
         };
     }
 
-    /// <summary>The holder's owning side; null for the global holder, a public holder or an unknown one.</summary>
+    /// <summary>
+    /// The holder's owning side; null for the global holder, a public holder, an unknown one, or one whose owner names a side that no
+    /// longer exists (spec 8a.10: such owners are ignored at runtime).
+    /// </summary>
     public static string? SideOfHolder(string holderId, RulesPack pack)
     {
         if (holderId == null || holderId == HolderDef.GlobalId) return null;
-        var side = (pack.Holders ?? new List<HolderDef>()).FirstOrDefault(h => h != null && h.Id == holderId)?.SideId;
-        return string.IsNullOrWhiteSpace(side) ? null : side;
+        return Existing((pack.Holders ?? new List<HolderDef>()).FirstOrDefault(h => h != null && h.Id == holderId)?.SideId, pack);
     }
 
-    /// <summary>The map's owning side (first matching <see cref="MapOwner"/>); null when the map is public.</summary>
+    /// <summary>The map's owning side (first matching <see cref="MapOwner"/>); null when the map is public or its owner names a deleted side.</summary>
     public static string? SideOfMap(string mapId, RulesPack pack)
     {
         if (mapId == null) return null;
-        var side = (pack.MapOwners ?? new List<MapOwner>()).FirstOrDefault(m => m != null && m.MapId == mapId)?.SideId;
-        return string.IsNullOrWhiteSpace(side) ? null : side;
+        return Existing((pack.MapOwners ?? new List<MapOwner>()).FirstOrDefault(m => m != null && m.MapId == mapId)?.SideId, pack);
     }
+
+    /// <summary>The side id when it names a side of the pack; null for blank or dangling ids.</summary>
+    private static string? Existing(string? side, RulesPack pack) =>
+        string.IsNullOrWhiteSpace(side) || !(pack.Sides ?? new List<SideDef>()).Any(x => x != null && x.Id == side) ? null : side;
 }

@@ -250,7 +250,7 @@ sealed partial class MainForm
             var problem = _session.Rules is { } pack ? Players.Validate(players, pack) : "Open a rules pack to set up players.";
             if (problem != null) { ShowError(problem); return; }
         }
-        g.Execute(CommandLog.Prepare(new SetPlayers(players.ToList()), g.State, _session.Model));
+        g.Execute(CommandLog.Prepare(new SetPlayers(players.ToList()), g.State, _session));
         UpdatePlayerButton();
     }
 

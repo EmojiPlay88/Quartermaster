@@ -568,4 +568,58 @@ public class PlayerViewTests(ITestOutputHelper output)
         Assert.True(v.Pieces.Count < 1200);
         Assert.True(sw.ElapsedMilliseconds < 500, $"took {sw.ElapsedMilliseconds} ms");   // generous: the full suite runs assemblies in parallel
     }
+    [Fact]
+    public void OwnersNamingADeletedSide_AreIgnored_VisibleToAll()
+    {
+        var pack = Pack() with
+        {
+            Holders = new() { new HolderDef { Id = "ghostdepot", Name = "Ghost Depot", SideId = "ghost" } },
+            MapOwners = new() { new MapOwner { MapId = RedHq, SideId = "ghost" } },
+        };
+        Assert.Null(Ownership.SideOfHolder("ghostdepot", pack));
+        Assert.Null(Ownership.SideOfMap(RedHq, pack));
+        var s = NewState();
+        Add(s, "n1", "NeutralUnit", "Neutral", RedHq);
+        Delta(s, LedgerKey.Holder("ghostdepot"), "supply", 0, 37);
+        foreach (var held in new[] { Red, Blue, new HashSet<string>() })
+        {
+            var v = PlayerView.For(s, pack, Model, held);
+            Assert.Contains("n1", v.Pieces.Keys);
+            Assert.Equal(37, Ledger.Get(v, LedgerKey.Holder("ghostdepot"), "supply"));
+            Assert.Contains(v.LedgerHistory, e => e.Key == LedgerKey.Holder("ghostdepot"));
+            Assert.True(new PieceAccess(s, pack, Model, held).CanSee("n1"));
+        }
+    }
+
+    [Fact]
+    public void PieceAccess_MatchesPlayerView()
+    {
+        var pack = Pack();
+        var s = NewState();
+        Add(s, "r1", "RedOpen", "Red");
+        Add(s, "r2", "RedHidden", "Red", traits: new[] { HideTrait }, states: new[] { "red" });
+        Add(s, "r3", "RedMasked", "Red", traits: new[] { ObsTrait }, states: new[] { "red" });
+        Add(s, "r4", "RedAtHq", "Red", RedHq);
+        Add(s, "b1", "BlueOpen", "Blue");
+        Add(s, "b2", "BlueHidden", "Blue", traits: new[] { HideTrait }, states: new[] { "blue" });
+        Add(s, "b3", "BlueMasked", "Blue", traits: new[] { ObsTrait }, states: new[] { "blue" });
+        Add(s, "b4", "BlueAtHq", "Blue", RedHq);
+        Add(s, "n1", "NeutralOpen", "Neutral");
+        var sides = Ownership.PieceSides(s, pack);
+        foreach (var held in new[] { Red, Blue, Both, new HashSet<string>() })
+        {
+            var view = PlayerView.For(s, pack, Model, held);
+            var access = new PieceAccess(s, pack, Model, held);
+            foreach (var id in s.Pieces.Keys.Append("gone"))
+            {
+                var seen = view.Pieces.ContainsKey(id);
+                Assert.Equal(seen, access.CanSee(id));
+                var side = s.Pieces.TryGetValue(id, out var p) ? sides(p) : null;
+                Assert.Equal(seen && (side == null || held.Contains(side)), access.CanAct(id));
+            }
+        }
+        PlayerView.FailForTest = true;
+        try { Assert.False(new PieceAccess(s, pack, Model, Blue).CanSee("r1")); }   // fails closed, like the view
+        finally { PlayerView.FailForTest = false; }
+    }
 }

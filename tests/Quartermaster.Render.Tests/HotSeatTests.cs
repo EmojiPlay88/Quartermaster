@@ -401,4 +401,39 @@ public class HotSeatTests : IDisposable
         Assert.Equal(2, s.Game!.Genesis.Players.Count);
         Assert.False(history.CanUndo);
     }
+    [Fact]
+    public void RulesApplied_PhaseSideEdited_HandsOverThenCancels()
+    {
+        var (s, c, _, hs) = Make(true);
+        c.Start(); c.Advance();           // Supply (red)
+        hs.TakeOver(Alice);
+        var raised = Track(hs);
+        var cancels = 0;
+        hs.HandoverCancelled += () => cancels++;
+        s.UpdateRules(p => p with { Phases = p.Phases.Select(x => x.Id == "ph-supply" ? x with { SideId = "blue" } : x).ToList() });
+        Assert.Equal(new[] { "p2" }, raised);
+        Assert.Equal("p2", hs.Pending?.Id);
+        Assert.Empty(s.ViewSides!);
+        s.UpdateRules(p => p with { Phases = p.Phases.Select(x => x.Id == "ph-supply" ? x with { SideId = "red" } : x).ToList() });
+        Assert.Equal(1, cancels);
+        Assert.Null(hs.Pending);
+        Assert.Equal(new[] { "red" }, s.ViewSides!.ToArray());
+    }
+
+    [Fact]
+    public void RelocationAdvance_OutsideAnAction_RechecksHandover()
+    {
+        var (s, c, _, hs) = Make(true);
+        c.Start(); c.Advance();           // Supply (red)
+        hs.TakeOver(Alice);
+        var raised = Track(hs);
+        var at = s.Game!.State.Position!;
+        using (s.Game.BeginAction("Next Phase"))   // inside an action (as in Next Phase): left to the boundary
+            s.Game.Execute(new AdvancePhase(at, at with { PhaseId = "ph-combat", PhaseIndex = 3 }, "Supply", "Combat", "Supply was removed"));
+        Assert.Empty(raised);
+        s.Game.Undo();
+        s.Game.Execute(new AdvancePhase(at, at with { PhaseId = "ph-combat", PhaseIndex = 3 }, "Supply", "Combat", "Supply was removed"));
+        Assert.Equal(new[] { "p2" }, raised);
+        Assert.Empty(s.ViewSides!);
+    }
 }

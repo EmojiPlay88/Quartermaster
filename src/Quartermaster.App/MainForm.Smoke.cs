@@ -238,7 +238,7 @@ sealed partial class MainForm
         }
         var piece = game.State.Pieces.Values.FirstOrDefault();
         if (piece != null)
-            game.Execute(CommandLog.Prepare(new MovePieces(new[] { piece.Id }, piece.MapId, new PointD(piece.Pos.X + 50, piece.Pos.Y - 20), null), game.State, _session.Model));
+            game.Execute(CommandLog.Prepare(new MovePieces(new[] { piece.Id }, piece.MapId, new PointD(piece.Pos.X + 50, piece.Pos.Y - 20), null), game.State, _session));
         else Program.AppLog("smoke: no piece to move for the log screenshot.");
         _logDock.PopOut();
         var floated = _logDock.Float is { } lf && _logDock.Panel!.Parent == lf && lf.Text == "Log — Quartermaster" && _wm.IsFloating(lf);
@@ -279,7 +279,7 @@ sealed partial class MainForm
         if (outside.Placed || outside.Message != "Drop onto a board" || game.State.Pieces.Count != pieces + 1) { SmokePaletteFail("drop outside boards was not rejected"); }
         if (placed && game.State.Pieces.Keys.FirstOrDefault(k => k.StartsWith("p:", StringComparison.Ordinal)) is { } id)
         {
-            game.Execute(CommandLog.Prepare(new RemovePiece(id), game.State, _session.Model));
+            game.Execute(CommandLog.Prepare(new RemovePiece(id), game.State, _session));
             if (!game.State.Log[^1].Text.EndsWith(" removed", StringComparison.Ordinal) || game.State.Pieces.ContainsKey(id)) SmokePaletteFail("delete counter did not log a removal");
         }
         if (panel.ListedSlots.Count > 600)

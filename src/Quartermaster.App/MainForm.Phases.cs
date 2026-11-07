@@ -62,12 +62,12 @@ sealed partial class MainForm
     /// <summary>Builds the controller, strip watcher and phase panel for a freshly opened session.</summary>
     void CreatePhases(ModuleSession session)
     {
-        var c = new PhaseController(session, (cmd, st) => CommandLog.Prepare(cmd, st, session.Model));
+        var c = new PhaseController(session, (cmd, st) => CommandLog.Prepare(cmd, st, session));
         c.PhaseBoundary += OnPhaseBoundary;
         c.RunsQueued += OnRunsQueued;
         c.DifficultyChanged += OnDifficultyChanged;
         _phases = c;
-        _history = new HistoryController(session, c, (cmd, st) => CommandLog.Prepare(cmd, st, session.Model));
+        _history = new HistoryController(session, c, (cmd, st) => CommandLog.Prepare(cmd, st, session));
         _history.Rewound += OnHistoryRewound;
         CreateHotSeat(session, c, _history);
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);

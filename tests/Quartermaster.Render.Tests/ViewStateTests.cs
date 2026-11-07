@@ -21,9 +21,9 @@ public class ViewStateTests : IDisposable
         try { Directory.Delete(_tmp, true); } catch (IOException) { }
     }
 
-    private ModuleSession Make(bool blueOwnsMap = false)
+    private ModuleSession Make(bool blueOwnsMap = false, bool numbered = false)
     {
-        var fx = PhaseFixture.Module();
+        var fx = PhaseFixture.Module(numbered: numbered);
         _fixtures.Add(fx);
         var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "cache"), Path.Combine(_tmp, "root"));
         _sessions.Add(s);
@@ -240,5 +240,78 @@ public class ViewStateTests : IDisposable
         Assert.False(seenInHandler);
         Assert.NotSame(before, s.View);
         Assert.False(s.CanSee("b1"));
+    }
+    [Fact]
+    public void RulesApplied_HandlerSeesFreshView()
+    {
+        var s = Make();
+        s.SetViewSides(Red);
+        Assert.Contains("b1", s.View!.Pieces.Keys);
+        GameState? inHandler = null;
+        s.RulesApplied += () => inHandler = s.View;
+        s.UpdateRules(p => p with { MapOwners = new() { new MapOwner { MapId = "Main Map", SideId = "blue" } } });
+        Assert.NotNull(inHandler);
+        Assert.DoesNotContain("b1", inHandler!.Pieces.Keys);
+        Assert.False(s.CanSee("b1"));
+        Assert.DoesNotContain("b1", s.View!.Pieces.Keys);
+    }
+
+    [Fact]
+    public void DeletedSideOwners_MapAndHolderVisibleToAll()
+    {
+        var s = Make();
+        s.UpdateRules(p => p with
+        {
+            MapOwners = new() { new MapOwner { MapId = "Main Map", SideId = "ghost" } },
+            Holders = new() { new HolderDef { Id = "ghostdepot", Name = "Ghost Depot", SideId = "ghost" } },
+        });
+        foreach (var held in new[] { Red, new HashSet<string> { "blue" } })
+        {
+            s.SetViewSides(held);
+            Assert.True(s.CanSeeMap("Main Map"));
+            Assert.True(s.CanSee("b1"));
+            Assert.True(s.CanSee("r1"));
+            Assert.True(s.CanEditLedger(LedgerKey.Holder("ghostdepot")));
+        }
+    }
+
+    [Fact]
+    public void LoadNative_MultiPlayer_ViewSidesSetBeforeSeedingRaisesViewChanged()
+    {
+        var fx = PhaseFixture.Module();
+        _fixtures.Add(fx);
+        var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "cache"), Path.Combine(_tmp, "root2"));
+        _sessions.Add(s);
+        s.LoadSetup(s.Model.Setups[0], players: new[] { new PlayerDef("p1", "Ann", new[] { "red" }), new PlayerDef("p2", "Bob", new[] { "blue" }) });
+        var path = Path.Combine(_tmp, "mp.qsave");
+        s.SaveNative(path);                          // saved without rules: nothing seeded yet
+        s.LoadSetup(s.Model.Setups[0]);              // a solo game is open now
+        s.NewRules("t");
+        s.UpdateRules(_ => PhaseFixture.Pack(s.Archive.Sha256));
+        Assert.Null(s.ViewSides);
+        var seen = new List<IReadOnlySet<string>?>();
+        var fuelSeeded = new List<bool>();
+        s.ViewChanged += () => { seen.Add(s.ViewSides); fuelSeeded.Add(s.Game!.State.Ledgers.Count > 0); };
+        s.LoadNative(path);
+        Assert.Contains(true, fuelSeeded);           // the load seeded the sheet values, raising ViewChanged
+        Assert.NotEmpty(seen);
+        Assert.All(seen, v => Assert.NotNull(v));    // never a solo (show-everything) view of the multi-player game
+        Assert.Empty(s.ViewSides!);
+    }
+
+    [Fact]
+    public void MoveLogText_OwnedSourceMap_OmitsTheSourceLocation()
+    {
+        var s = Make(numbered: true);
+        var move = new MovePieces(new[] { "r1" }, "Main Map", new PointD(130, 50), null);
+        var open = MoveLogText.For(move, s.Game!.State, s.Model, s.Rules);
+        Assert.Matches(@"^Red 1 moved \S+ → \S+$", open);
+        s.UpdateRules(p => p with { MapOwners = new() { new MapOwner { MapId = "Main Map", SideId = "red" } } });
+        var owned = MoveLogText.For(move, s.Game.State, s.Model, s.Rules);
+        Assert.Matches(@"^Red 1 moved → \S+$", owned);
+        Assert.EndsWith(open!.Split(' ')[^1], owned);
+        s.UpdateRules(p => p with { MapOwners = new() { new MapOwner { MapId = "Main Map", SideId = "ghost" } } });
+        Assert.Equal(open, MoveLogText.For(move, s.Game.State, s.Model, s.Rules));   // a deleted side's owner is ignored
+        Assert.Null(MoveLogText.For(new MovePieces(new[] { "gone" }, "Main Map", new PointD(1, 1), null), s.Game.State, s.Model, s.Rules));
     }
 }

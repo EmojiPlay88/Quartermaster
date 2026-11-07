@@ -272,4 +272,27 @@ public class BatchModelTests : IDisposable
         b.SetCell(0, "Terrain", "sand");
         Assert.Equal("sand", b.Row(0).Cells[b.Variables.ToList().IndexOf("Terrain")]);
     }
+    [Fact]
+    [Trait("Category", "Perf")]
+    public void Perf_HotSeat_ApplyAll20_On1200PieceGame()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        var g = s.Game!;
+        for (var i = 0; i < 1200; i++)
+            g.Execute(new AddPiece("x" + i, $"piece;;;unit.svg;{(i % 2 == 0 ? "Red" : "Blue")} {i + 10}", "", "Main Map", new PointD(i % 200, i / 200), null));
+        var units = Enumerable.Range(0, 20).Select(i => new PendingUnit("x" + (i * 2), "Red " + (i * 2 + 10), 0, false)).ToList();
+        g.Execute(new QueueRuns(new[] { new PendingRun("hs", "f-water", "Daily water", "start", units, false) }));
+        s.SetViewSides(new HashSet<string> { "red" });
+        var b = new BatchModel(s, c, "hs");
+        Assert.True(s.CanAct("x0"));
+        Assert.False(s.CanAct("x1"));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        b.CalculateAll();
+        Assert.True(b.Row(0).CanApply, b.Row(0).Exceptions + "|" + b.Row(0).Result);
+        var applied = b.ApplyAll();
+        sw.Stop();
+        Assert.Equal(20, applied);
+        Assert.Empty(g.State.Pending);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"ApplyAll took {sw.Elapsed}");
+    }
 }

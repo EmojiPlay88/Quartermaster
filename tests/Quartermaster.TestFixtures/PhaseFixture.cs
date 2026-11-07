@@ -14,11 +14,16 @@ public static class PhaseFixture
         "+/" + SequenceEncoder.Encode(new[] { id, $"propertysheet;0Fuel;Sheet;\tpiece;;;unit.svg;{name}", $"40\tMain Map;{x};50;1;0" }, '/');
 
     /// <summary>MinimalBuildFile plus a setup "Start" holding "Red 1", "Red 2" and "Blue 1", each with a Fuel sheet row of 40.</summary>
-    public static FixtureModule Module(bool grid = true)
+    /// <param name="numbered">Gives the grid numbered squares ("0101", ...), so moves have location names.</param>
+    public static FixtureModule Module(bool grid = true, bool numbered = false)
     {
         var xml = FixtureModule.MinimalBuildFile().Replace("</VASSAL.build.GameModule>",
             "<VASSAL.build.module.PredefinedSetup name=\"Start\" file=\"s.vsav\" useFile=\"true\" isMenu=\"false\"/></VASSAL.build.GameModule>");
         if (!grid) xml = System.Text.RegularExpressions.Regex.Replace(xml, @"<VASSAL\.build\.module\.map\.boardPicker\.board\.SquareGrid[^>]*/>", "");
+        else if (numbered)
+            xml = System.Text.RegularExpressions.Regex.Replace(xml, @"(<VASSAL\.build\.module\.map\.boardPicker\.board\.SquareGrid[^>]*)/>",
+                "$1><VASSAL.build.module.map.boardPicker.board.mapgrid.SquareGridNumbering first=\"H\" hType=\"N\" vType=\"N\" sep=\"\" "
+                + "hLeading=\"1\" vLeading=\"1\" hOff=\"1\" vOff=\"1\"/></VASSAL.build.module.map.boardPicker.board.SquareGrid>");
         return new FixtureModule().WithBuildFile(xml).AddImage("board.png", 200, 100).AddSvg("unit.svg")
             .AddSave("s.vsav", new[] { "begin_save", "", Add(RedOne, "Red 1", 30), Add(RedTwo, "Red 2", 30), Add(BlueOne, "Blue 1", 30), "end_save" });
     }
