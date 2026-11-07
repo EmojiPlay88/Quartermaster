@@ -2,6 +2,7 @@ using Quartermaster.Vassal;
 using Quartermaster.Render;
 using Quartermaster.Rules;
 using Quartermaster.Rules.Expr;
+using Quartermaster.Render.Search;
 
 namespace Quartermaster.App;
 
@@ -9,7 +10,7 @@ namespace Quartermaster.App;
 /// Formulas editor of the rules workbench. Everything is typed by the player: the formula text, what each variable means, what the result changes.
 /// Edits go through UpdateRules; the text is committed 400 ms after the last keystroke. The preview is an embedded preview-only FormulaDialog.
 /// </summary>
-sealed partial class FormulasTab : UserControl
+sealed partial class FormulasTab : UserControl, IRuleRefEditor
 {
     readonly ModuleSession _s;
     readonly Func<string, RuleRef?> _linkCurrentPage;
@@ -22,9 +23,10 @@ sealed partial class FormulasTab : UserControl
     readonly TextBox _applies = new() { Width = 260 };
     readonly TextBox _notes = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, WordWrap = true };
     readonly Label _appliesErr = new() { AutoSize = true, ForeColor = Color.Firebrick, Padding = new Padding(6, 5, 0, 0) };
-    readonly Label _refLabel = new() { AutoSize = true, Padding = new Padding(0, 5, 8, 0) };
+    readonly LinkLabel _refLabel = RuleRefLink.Create();
     readonly Button _link = new() { Text = "Link to current page", AutoSize = true };
-    readonly Button _showRefBtn = new() { Text = "Show", AutoSize = true };
+    readonly Button _find = RuleRefLink.FindButton();
+    TextBox? _lastEdit;
     readonly ComboBox _piece = new() { DropDownStyle = ComboBoxStyle.DropDown, AutoCompleteMode = AutoCompleteMode.SuggestAppend, AutoCompleteSource = AutoCompleteSource.ListItems, Width = 260 };
     readonly Panel _previewHost = new() { Dock = DockStyle.Fill, BorderStyle = BorderStyle.FixedSingle };
     readonly List<string?> _pieceIds = new();
@@ -59,8 +61,7 @@ sealed partial class FormulasTab : UserControl
         appliesRow.Controls.Add(_appliesErr);
         var refRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false, Margin = Padding.Empty };
         refRow.Controls.Add(new Label { Text = "Rule ref:", AutoSize = true, Padding = new Padding(0, 5, 2, 0) });
-        refRow.Controls.AddRange(new Control[] { _refLabel, _link, _showRefBtn });
-        _showRefBtn.Visible = showRef != null;
+        refRow.Controls.AddRange(new Control[] { _refLabel, _link, _find });
 
         var pickRow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false };
         pickRow.Controls.Add(new Label { Text = "Test piece:", AutoSize = true, Padding = new Padding(0, 5, 2, 0) });
@@ -106,7 +107,10 @@ sealed partial class FormulasTab : UserControl
         _timer.Tick += (_, _) => Run(() => FlushPending(final: false));
         _goto.LinkClicked += (_, _) => GoToError();
         _link.Click += (_, _) => Run(LinkPage);
-        _showRefBtn.Click += (_, _) => Run(ShowRef);
+        _refLabel.LinkClicked += (_, _) => Run(ShowRef);
+        _find.Click += (_, _) => Run(Find);
+        _text.Enter += (_, _) => _lastEdit = _text;
+        _notes.Enter += (_, _) => _lastEdit = _notes;
         _piece.SelectedIndexChanged += (_, _) => Run(OnPieceChosen);
         _piece.Leave += (_, _) => Run(OnPieceChosen);
         _piece.DropDown += (_, _) => Run(RefreshPieces);
@@ -274,7 +278,7 @@ sealed partial class FormulasTab : UserControl
         {
             var f = Current;
             var on = f != null;
-            _text.Enabled = _applies.Enabled = _notes.Enabled = _link.Enabled = _piece.Enabled = on;
+            _text.Enabled = _applies.Enabled = _notes.Enabled = _link.Enabled = _piece.Enabled = _find.Enabled = on;
             if (_text.Text != (f?.Text ?? "")) _text.Text = f?.Text ?? "";
             if (_applies.Text != (f?.AppliesTo ?? "")) _applies.Text = f?.AppliesTo ?? "";
             _appliesErr.Text = FormulaEdit.SyntaxProblem(_applies.Text) ?? "";
@@ -362,8 +366,44 @@ sealed partial class FormulasTab : UserControl
     void ShowRefLabel(FormulaDef? f)
     {
         var r = f?.RuleRefId == null ? null : _s.Rules?.ById<RuleRef>(f.RuleRefId);
-        _refLabel.Text = r == null ? "(none)" : $"{r.Label}, page {r.Page}";
-        _showRefBtn.Enabled = r != null;
+        RuleRefLink.Show(_refLabel, r, DescribeRef);
+    }
+
+    // ---------- rulebook search ----------
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Action<string>? FindInRulebook
+    {
+        get => _findInRulebook;
+        set { _findInRulebook = value; _find.Visible = value != null; }
+    }
+    Action<string>? _findInRulebook;
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Func<RuleRef?, RefDisplay>? DescribeRef { get; set; }
+
+    public bool CanUseRuleRef => Current != null && Enabled && _link.Enabled;
+
+    public bool UseRuleRef(Func<string, RuleRef?> make)
+    {
+        if (!CanUseRuleRef || Current is not { } f) return false;
+        FlushPending(final: false);
+        var r = make(f.Name);
+        if (r == null) return false;
+        Commit(x => x with { RuleRefId = r.Id });
+        ShowRefLabel(Current);
+        return true;
+    }
+
+    public void RefreshRuleRef() => ShowRefLabel(Current);
+
+    /// <summary>"Find in rulebook": the text selected in the formula or notes box, else the formula's name.</summary>
+    void Find()
+    {
+        if (Current is not { } f || _findInRulebook == null) return;
+        var box = _lastEdit is { SelectionLength: > 0 } ? _lastEdit : _text.SelectionLength > 0 ? _text : _notes.SelectionLength > 0 ? _notes : null;
+        var q = SearchPanelModel.FindText(box?.SelectedText, f.Name);
+        if (q.Length > 0) _findInRulebook(q);
     }
 
     void LinkPage()

@@ -34,6 +34,10 @@ public sealed class FixtureModule : IDisposable
 
     public FixtureModule WithBuildFile(string xml) => AddFile("buildFile.xml", Encoding.UTF8.GetBytes(xml));
 
+    /// <summary>Rewrites the build file already set (e.g. to add a component to a ready-made fixture).</summary>
+    public FixtureModule EditBuildFile(Func<string, string> edit) =>
+        WithBuildFile(edit(Encoding.UTF8.GetString(_files["buildFile.xml"])));
+
     public FixtureModule AddSave(string entryName, IEnumerable<string> commands)
     {
         var plain = Encoding.UTF8.GetBytes(string.Join('\u001B', commands));

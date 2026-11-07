@@ -2,6 +2,7 @@ using Quartermaster.Vassal;
 using Quartermaster.Render;
 using Quartermaster.Rules;
 using Quartermaster.Rules.Tables;
+using Quartermaster.Render.Search;
 
 namespace Quartermaster.App;
 
@@ -9,7 +10,7 @@ namespace Quartermaster.App;
 /// Tables editor of the rules workbench. Column keys are edited through the "Columns…" dialog (one key per line),
 /// not in the grid; OneD and Dice tables show one value column headed "Value".
 /// </summary>
-sealed class TablesTab : UserControl
+sealed class TablesTab : UserControl, IRuleRefEditor
 {
     static readonly Color Pink = Color.FromArgb(255, 200, 210);
 
@@ -20,9 +21,9 @@ sealed class TablesTab : UserControl
     readonly List<string> _ids = new();
     readonly ComboBox _kind = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 90 };
     readonly TextBox _notes = new() { Multiline = true, Dock = DockStyle.Top, Height = 44, ScrollBars = ScrollBars.Vertical };
-    readonly Label _refLabel = new() { AutoSize = true, Padding = new Padding(0, 5, 8, 0) };
+    readonly LinkLabel _refLabel = RuleRefLink.Create();
     readonly Button _link = new() { Text = "Link to current page", AutoSize = true };
-    readonly Button _showRefBtn = new() { Text = "Show", AutoSize = true };
+    readonly Button _find = RuleRefLink.FindButton();
     readonly DataGridView _grid = new();
     readonly ToolStripButton _addRow = new("Add row"), _delRow = new("Remove row"), _addCol = new("Add column"), _delCol = new("Remove column"), _cols = new("Columns…"), _paste = new("Paste from clipboard…");
     readonly System.Windows.Forms.Timer _notesTimer = new() { Interval = 400 };
@@ -51,8 +52,7 @@ sealed class TablesTab : UserControl
         head.Controls.Add(new Label { Text = "Rule ref:", AutoSize = true, Padding = new Padding(12, 5, 2, 0) });
         head.Controls.Add(_refLabel);
         head.Controls.Add(_link);
-        head.Controls.Add(_showRefBtn);
-        _showRefBtn.Visible = showRef != null;
+        head.Controls.Add(_find);
 
         var bar = new ToolStrip { LayoutStyle = ToolStripLayoutStyle.Flow, GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
         foreach (var b in new[] { _addRow, _delRow, _addCol, _delCol, _cols, _paste }) { b.DisplayStyle = ToolStripItemDisplayStyle.Text; bar.Items.Add(b); }
@@ -85,7 +85,8 @@ sealed class TablesTab : UserControl
         _notes.Leave += (_, _) => Run(FlushNotes);
         _notesTimer.Tick += (_, _) => Run(FlushNotes);
         _link.Click += (_, _) => Run(LinkPage);
-        _showRefBtn.Click += (_, _) => Run(ShowRef);
+        _refLabel.LinkClicked += (_, _) => Run(ShowRef);
+        _find.Click += (_, _) => Run(Find);
         _addRow.Click += (_, _) => Run(() => Structural(t => TableEdit.AddRow(t)));
         _delRow.Click += (_, _) => Run(() => { if (_grid.CurrentCell is { } c) Structural(t => TableEdit.RemoveRow(t, c.RowIndex)); });
         _addCol.Click += (_, _) => Run(() => Structural(t => TableEdit.AddColumn(t)));
@@ -237,7 +238,7 @@ sealed class TablesTab : UserControl
         {
             var t = Current;
             var on = t != null;
-            _kind.Enabled = _notes.Enabled = _link.Enabled = _grid.Enabled = on;
+            _kind.Enabled = _notes.Enabled = _link.Enabled = _grid.Enabled = _find.Enabled = on;
             _kind.SelectedIndex = t == null ? -1 : (int)t.Kind;
             _notes.Text = t?.Notes ?? "";
             ShowRefLabel(t);
@@ -251,8 +252,44 @@ sealed class TablesTab : UserControl
     void ShowRefLabel(TableDef? t)
     {
         var r = t?.RuleRefId == null ? null : _s.Rules?.ById<RuleRef>(t.RuleRefId);
-        _refLabel.Text = r == null ? "(none)" : $"{r.Label}, page {r.Page}";
-        _showRefBtn.Enabled = r != null;
+        RuleRefLink.Show(_refLabel, r, DescribeRef);
+    }
+
+    // ---------- rulebook search ----------
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Action<string>? FindInRulebook
+    {
+        get => _findInRulebook;
+        set { _findInRulebook = value; _find.Visible = value != null; }
+    }
+    Action<string>? _findInRulebook;
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Func<RuleRef?, RefDisplay>? DescribeRef { get; set; }
+
+    public bool CanUseRuleRef => Current != null && Enabled && _link.Enabled;
+
+    public bool UseRuleRef(Func<string, RuleRef?> make)
+    {
+        if (!CanUseRuleRef || Current is not { } t) return false;
+        FlushNotes();
+        var r = make(t.Name);
+        if (r == null) return false;
+        Commit(x => x with { RuleRefId = r.Id });
+        ShowRefLabel(Current);
+        return true;
+    }
+
+    public void RefreshRuleRef() => ShowRefLabel(Current);
+
+    /// <summary>"Find in rulebook": the text selected in the notes, else the table's name.</summary>
+    void Find()
+    {
+        if (Current is not { } t || _findInRulebook == null) return;
+        var sel = _notes.SelectionLength > 0 ? _notes.SelectedText : null;
+        var q = SearchPanelModel.FindText(sel, t.Name);
+        if (q.Length > 0) _findInRulebook(q);
     }
 
     void OnKindChosen()
