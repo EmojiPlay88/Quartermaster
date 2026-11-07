@@ -162,7 +162,7 @@ public class OcrServiceTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task Read_Cancelled_Throws_OperationCanceled()
+    public async Task Read_PreCancelledToken_Throws_OperationCanceled()
     {
         using var img = Blank(200, 100);
         using var cts = new CancellationTokenSource();
@@ -172,7 +172,7 @@ public class OcrServiceTests(ITestOutputHelper output)
     }
 
     [OcrFact]
-    public async Task Read_CancelledDuringRead_Throws_OperationCanceled()
+    public async Task Read_CancelWhileReading_EndsWithResultOrCancel()
     {
         var (img, _) = InventedTable(bordered: false);
         using (img)
@@ -180,7 +180,7 @@ public class OcrServiceTests(ITestOutputHelper output)
             using var cts = new CancellationTokenSource();
             var task = new OcrService().ReadAsync(img, null, Lang, cts.Token);
             cts.Cancel();
-            // The read may finish before the cancel lands; a completed read is fine, otherwise it must be a cancel.
+            // Timing-dependent: the read may finish first. Either outcome is fine; any other exception fails.
             try { await task; }
             catch (OperationCanceledException) { }
         }
@@ -189,7 +189,7 @@ public class OcrServiceTests(ITestOutputHelper output)
     [Fact]
     public async Task NoLanguage_ThrowsWithCopy()
     {
-        var svc = new OcrService(_ => null);
+        var svc = new OcrService(_ => null, () => []);
         using var img = Blank(200, 100);
 
         var ex = await Assert.ThrowsAsync<OcrUnavailableException>(
@@ -197,6 +197,38 @@ public class OcrServiceTests(ITestOutputHelper output)
 
         Assert.Equal("Windows has no OCR language installed. Add one in Settings → Time & language → Language (Optical character recognition).", ex.Message);
         Assert.False(svc.Available);
+    }
+
+    [Theory]
+    [InlineData("xx-ZZ")]
+    [InlineData("not a tag!")]
+    public async Task UnknownLanguage_ThrowsWithTag(string tag)
+    {
+        var svc = new OcrService(_ => null, () => ["en-US"]);
+        using var img = Blank(200, 100);
+
+        var ex = await Assert.ThrowsAsync<OcrUnavailableException>(
+            () => svc.ReadAsync(img, null, tag, CancellationToken.None));
+
+        Assert.Equal($"The OCR language {tag} isn't installed.", ex.Message);
+    }
+
+    [OcrFact]
+    public async Task UnknownLanguage_RealEngine_ThrowsWithTag()
+    {
+        using var img = Blank(200, 100);
+        var ex = await Assert.ThrowsAsync<OcrUnavailableException>(
+            () => new OcrService().ReadAsync(img, null, "xx-ZZ", CancellationToken.None));
+        Assert.Equal("The OCR language xx-ZZ isn't installed.", ex.Message);
+    }
+
+    [Fact]
+    public void Guard_GdiFailures_BecomeTooLarge()
+    {
+        var oom = Assert.Throws<InvalidDataException>(() => OcrService.Guard<int>(() => throw new OutOfMemoryException()));
+        Assert.Equal("This image is too large to read.", oom.Message);
+        var arg = Assert.Throws<InvalidDataException>(() => OcrService.Guard<Bitmap>(() => new Bitmap(70000, 70000)));
+        Assert.Equal("This image is too large to read.", arg.Message);
     }
 
     [OcrFact]

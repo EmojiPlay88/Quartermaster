@@ -8,7 +8,7 @@ using Windows.Media.Ocr;
 
 namespace Quartermaster.Ocr;
 
-/// <summary>Thrown when Windows has no OCR engine for the requested language (no OCR language installed).</summary>
+/// <summary>Thrown when Windows has no OCR engine for the requested language (none installed, or not that one).</summary>
 public sealed class OcrUnavailableException(string message) : Exception(message);
 
 /// <summary>Windows.Media.Ocr wrapper: crops, grayscales and rescales a region, then maps word boxes back to image pixels.</summary>
@@ -17,15 +17,24 @@ public sealed class OcrService
     public const string NoLanguageMessage =
         "Windows has no OCR language installed. Add one in Settings → Time & language → Language (Optical character recognition).";
 
+    public const string TooLargeMessage = "This image is too large to read.";
+
+    public static string LanguageNotInstalledMessage(string tag) => $"The OCR language {tag} isn't installed.";
+
     /// <summary>When the native reading's median word height is below this (image px), a ~2× upscaled re-read is tried.</summary>
     internal const double UpscaleBelowWordHeight = 20;
 
     private readonly Func<string, OcrEngine?> _engineFactory;
+    private readonly Func<IReadOnlyList<string>> _languages;
 
-    public OcrService() : this(CreateEngine) { }
+    public OcrService() : this(CreateEngine, Languages) { }
 
-    /// <summary>For tests: inject an engine factory (returning null simulates "no language installed").</summary>
-    internal OcrService(Func<string, OcrEngine?> engineFactory) => _engineFactory = engineFactory;
+    /// <summary>For tests: inject the engine factory and the installed-language list.</summary>
+    internal OcrService(Func<string, OcrEngine?> engineFactory, Func<IReadOnlyList<string>> languages)
+    {
+        _engineFactory = engineFactory;
+        _languages = languages;
+    }
 
     /// <summary>BCP-47 tags of the installed OCR languages (empty when none, or when the API is unavailable).</summary>
     public static IReadOnlyList<string> Languages()
@@ -48,13 +57,13 @@ public sealed class OcrService
         return langs.FirstOrDefault(l => l.Equals("en-US", StringComparison.OrdinalIgnoreCase)) ?? langs[0];
     }
 
-    /// <summary>True when an engine can be created for the default language.</summary>
-    public bool Available => DefaultLanguage() is string lang && _engineFactory(lang) != null;
+    /// <summary>True when an OCR language is installed and an engine can be created for the default one.</summary>
+    public bool Available => _languages().Count > 0 && DefaultLanguage() is string lang && _engineFactory(lang) != null;
 
     private static OcrEngine? CreateEngine(string language)
     {
         try { return OcrEngine.TryCreateFromLanguage(new Language(language)); }
-        catch (Exception) { return null; }
+        catch (Exception) { return null; } // malformed tag → treated as not installed
     }
 
     /// <summary>
@@ -64,11 +73,14 @@ public sealed class OcrService
     /// and keeps the reading with more recognised characters (ties keep the native one).
     /// The bitmap is only touched before the first await.
     /// </summary>
+    /// <exception cref="OcrUnavailableException">No OCR language installed, or not <paramref name="language"/>.</exception>
+    /// <exception cref="InvalidDataException">GDI+ could not allocate/draw the region (<see cref="TooLargeMessage"/>).</exception>
     public async Task<IReadOnlyList<OcrWord>> ReadAsync(Bitmap image, Rectangle? region, string language, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(image);
         ct.ThrowIfCancellationRequested();
-        var engine = _engineFactory(language) ?? throw new OcrUnavailableException(NoLanguageMessage);
+        if (_languages().Count == 0) throw new OcrUnavailableException(NoLanguageMessage);
+        var engine = _engineFactory(language) ?? throw new OcrUnavailableException(LanguageNotInstalledMessage(language));
 
         var bounds = new Rectangle(0, 0, image.Width, image.Height);
         var r = region is Rectangle given ? Rectangle.Intersect(given, bounds) : bounds;
@@ -77,15 +89,27 @@ public sealed class OcrService
         int max = (int)OcrEngine.MaxImageDimension;
         double native = NativeScale(r.Width, r.Height, max);
         double up = UpscaleFactor(r.Width, r.Height, max);
-        // Private 1:1 grayscale copy so the caller's bitmap is not used after the first await.
-        using var gray = GrayCrop(image, r);
+        // One step from the caller's bitmap straight to the native-scale grayscale image (no full-res copy when
+        // downscaling). It is private, so the caller's bitmap is not used after the first await.
+        using var gray = Guard(() => Draw(image, r, native, grayscale: true));
 
-        var first = await RecognizeAsync(engine, gray, native, r, ct).ConfigureAwait(false);
+        var first = await RecognizeAsync(engine, gray, r, ct).ConfigureAwait(false);
+        // up > native only when native == 1 (the region already fits), so the upscale starts from a 1:1 image.
         if (up <= native + 1e-6 || (first.Count > 0 && MedianHeight(first) >= UpscaleBelowWordHeight))
             return first;
 
-        var second = await RecognizeAsync(engine, gray, up, r, ct).ConfigureAwait(false);
+        using var big = Guard(() => Draw(gray, new Rectangle(0, 0, gray.Width, gray.Height), up, grayscale: false));
+        var second = await RecognizeAsync(engine, big, r, ct).ConfigureAwait(false);
         return CharCount(second) > CharCount(first) ? second : first;
+    }
+
+    internal static T Guard<T>(Func<T> gdi)
+    {
+        try { return gdi(); }
+        catch (Exception e) when (e is OutOfMemoryException or ArgumentException)
+        {
+            throw new InvalidDataException(TooLargeMessage, e);
+        }
     }
 
     private static int CharCount(IReadOnlyList<OcrWord> words) => words.Sum(w => w.Text.Trim().Length);
@@ -97,12 +121,17 @@ public sealed class OcrService
         return hs.Count % 2 == 1 ? hs[hs.Count / 2] : (hs[hs.Count / 2 - 1] + hs[hs.Count / 2]) / 2;
     }
 
-    private static async Task<IReadOnlyList<OcrWord>> RecognizeAsync(
-        OcrEngine engine, Bitmap gray, double scale, Rectangle r, CancellationToken ct)
+    /// <summary>OCR on <paramref name="prepared"/>, an image of region <paramref name="r"/> at some scale.</summary>
+    private static async Task<IReadOnlyList<OcrWord>> RecognizeAsync(OcrEngine engine, Bitmap prepared, Rectangle r, CancellationToken ct)
     {
-        byte[] png = ScaledPng(gray, scale);
-        using var ms = new MemoryStream(png);
-        using var ras = ms.AsRandomAccessStream();
+        byte[] png = Guard(() =>
+        {
+            using var ms = new MemoryStream();
+            prepared.Save(ms, ImageFormat.Png);
+            return ms.ToArray();
+        });
+        using var pngStream = new MemoryStream(png);
+        using var ras = pngStream.AsRandomAccessStream();
         var decoder = await BitmapDecoder.CreateAsync(ras).AsTask(ct).ConfigureAwait(false);
         using var soft = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied)
             .AsTask(ct).ConfigureAwait(false);
@@ -143,41 +172,30 @@ public sealed class OcrService
         [0, 0, 0, 0, 1],
     ]);
 
-    private static Bitmap GrayCrop(Bitmap image, Rectangle r)
+    /// <summary>Draws <paramref name="r"/> of <paramref name="src"/> at <paramref name="scale"/> onto white.</summary>
+    private static Bitmap Draw(Bitmap src, Rectangle r, double scale, bool grayscale)
     {
-        var dst = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppArgb);
-        using var g = Graphics.FromImage(dst);
-        using var attrs = new ImageAttributes();
-        g.Clear(Color.White);
-        g.InterpolationMode = InterpolationMode.NearestNeighbor;
-        g.PixelOffsetMode = PixelOffsetMode.Half;
-        attrs.SetColorMatrix(Gray);
-        g.DrawImage(image, new Rectangle(0, 0, r.Width, r.Height), r.X, r.Y, r.Width, r.Height, GraphicsUnit.Pixel, attrs);
-        return dst;
-    }
-
-    private static byte[] ScaledPng(Bitmap gray, double scale)
-    {
-        using var ms = new MemoryStream();
-        if (Math.Abs(scale - 1.0) < 1e-9)
+        int w = Math.Max(1, (int)Math.Floor(r.Width * scale));
+        int h = Math.Max(1, (int)Math.Floor(r.Height * scale));
+        var dst = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+        try
         {
-            gray.Save(ms, ImageFormat.Png);
-            return ms.ToArray();
-        }
-        int w = Math.Max(1, (int)Math.Floor(gray.Width * scale));
-        int h = Math.Max(1, (int)Math.Floor(gray.Height * scale));
-        using var dst = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(dst))
-        using (var attrs = new ImageAttributes())
-        {
+            using var g = Graphics.FromImage(dst);
+            using var attrs = new ImageAttributes();
             g.Clear(Color.White);
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            bool oneToOne = w == r.Width && h == r.Height;
+            g.InterpolationMode = oneToOne ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = oneToOne ? PixelOffsetMode.Half : PixelOffsetMode.HighQuality;
             g.CompositingQuality = CompositingQuality.HighQuality;
+            if (grayscale) attrs.SetColorMatrix(Gray);
             attrs.SetWrapMode(WrapMode.TileFlipXY); // no dark fringe at the edges
-            g.DrawImage(gray, new Rectangle(0, 0, w, h), 0, 0, gray.Width, gray.Height, GraphicsUnit.Pixel, attrs);
+            g.DrawImage(src, new Rectangle(0, 0, w, h), r.X, r.Y, r.Width, r.Height, GraphicsUnit.Pixel, attrs);
+            return dst;
         }
-        dst.Save(ms, ImageFormat.Png);
-        return ms.ToArray();
+        catch
+        {
+            dst.Dispose();
+            throw;
+        }
     }
 }
