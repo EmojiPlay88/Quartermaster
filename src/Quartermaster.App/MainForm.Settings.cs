@@ -32,7 +32,7 @@ sealed partial class MainForm
             if (InvokeRequired && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) ApplySettings(s); });
             else ApplySettings(s);
         };
-        _autosaver = new Autosaver(() => _session?.Archive.Sha256, p => _session!.SaveNative(p), LayoutRoot, OnAutosaveError);
+        _autosaver = new Autosaver(() => _session?.Archive.Sha256, p => _session!.SaveNative(p), LayoutRoot, OnAutosaveError, () => _session?.Game?.State.Turn.Turn);
         _autosaveTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
         _autosaveTimer.Tick += (_, _) => Guard(AutosaveTick);
         _autosaveTimer.Start();

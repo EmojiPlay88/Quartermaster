@@ -1,12 +1,13 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace Quartermaster.Render;
 
 /// <summary>
-/// Timed autosave policy: writes <c>&lt;root&gt;/autosave/&lt;module sha&gt;/autosave-yyyyMMdd-HHmmss.qsave</c> (UTC) through <c>saveTo</c> when the game
-/// is dirty and the interval has elapsed since the last save (or since the game was last seen clean), then keeps the newest 10. Never throws.
+/// Timed autosave policy: writes <c>&lt;root&gt;/autosave/&lt;module sha&gt;/autosave-yyyyMMdd-HHmmssfff[-t{turn}].qsave</c> (UTC) through <c>saveTo</c> when the game
+/// is dirty and the interval has elapsed since the last save (or since the game was last seen clean), then keeps the newest 20 plus the first save of each turn. Never throws.
 /// </summary>
-public sealed class Autosaver(Func<string?> moduleSha, Action<string> saveTo, string root, Action<string>? onError = null)
+public sealed class Autosaver(Func<string?> moduleSha, Action<string> saveTo, string root, Action<string>? onError = null, Func<int?>? turn = null)
 {
     DateTimeOffset? _last;
 
@@ -34,6 +35,13 @@ public sealed class Autosaver(Func<string?> moduleSha, Action<string> saveTo, st
         return intervalMinutes <= 0 ? null : Write(now);
     }
 
+    /// <summary>Writes right away even when autosave is off (before a destructive action), prunes, and restarts the interval. Never throws.</summary>
+    public string? SaveForced(DateTimeOffset now)
+    {
+        _last = now;
+        return Write(now);
+    }
+
     string? Write(DateTimeOffset now)
     {
         try
@@ -41,7 +49,12 @@ public sealed class Autosaver(Func<string?> moduleSha, Action<string> saveTo, st
             if (moduleSha() is not { Length: > 0 } sha) return null;
             var dir = Path.Combine(root, "autosave", sha);
             Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "autosave-" + now.UtcDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".qsave");
+            int? t = null;
+            try { t = turn?.Invoke(); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+            var stem = "autosave-" + now.UtcDateTime.ToString("yyyyMMdd-HHmmssfff", CultureInfo.InvariantCulture)
+                + (t is { } n ? "-t" + n.ToString(CultureInfo.InvariantCulture) : "");
+            var path = Path.Combine(dir, stem + ".qsave");
+            for (var i = 2; File.Exists(path); i++) path = Path.Combine(dir, stem + "-" + i.ToString(CultureInfo.InvariantCulture) + ".qsave");
             saveTo(path);
             Prune(dir);
             return path;
@@ -68,15 +81,24 @@ public sealed class Autosaver(Func<string?> moduleSha, Action<string> saveTo, st
     /// <summary>The folder holding autosaves of all modules.</summary>
     public static string AutosaveRoot(string root) => Path.Combine(root, "autosave");
 
-    /// <summary>Deletes all but the newest <paramref name="keep"/> autosave files (by name, which sorts by time). Other files are left alone.</summary>
-    public static void Prune(string dir, int keep = 10)
+    static readonly Regex TurnTag = new(@"-t(\d+)(?:-\d+)?\.qsave$", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Deletes autosave files except the newest <paramref name="keepRecent"/> (by name, which sorts by time) and, per turn number in a <c>-t{n}</c> tag,
+    /// the oldest file of that turn. Old-style names count only toward the recent set. Other files are left alone.
+    /// </summary>
+    public static void Prune(string dir, int keepRecent = 20)
     {
         try
         {
-            var old = Directory.GetFiles(dir, "autosave-*.qsave")
-                .OrderByDescending(f => Path.GetFileName(f), StringComparer.Ordinal)
-                .Skip(Math.Max(0, keep));
-            foreach (var f in old)
+            // Order on the name without extension so "...-t3" sorts before its collision twin "...-t3-2".
+            var files = Directory.GetFiles(dir, "autosave-*.qsave")
+                .OrderBy(f => Path.GetFileNameWithoutExtension(f), StringComparer.Ordinal).ToList();
+            var keep = new HashSet<string>(files.Skip(Math.Max(0, files.Count - Math.Max(0, keepRecent))));
+            var seen = new HashSet<string>();
+            foreach (var f in files) // oldest first
+                if (TurnTag.Match(Path.GetFileName(f)) is { Success: true } m && seen.Add(m.Groups[1].Value.TrimStart('0') + "|")) keep.Add(f);
+            foreach (var f in files.Where(f => !keep.Contains(f)))
             {
                 try { File.Delete(f); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             }
