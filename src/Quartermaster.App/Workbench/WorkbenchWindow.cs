@@ -312,7 +312,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     {
         if (_s.Rules == null) return null;
         // The pack is shared with other players: a rule ref never carries a path on this computer.
-        if (!ScanSessionModel.IsSafeRefEntry(entry))
+        if (!ScanSessionModel.IsAllowedRefEntry(entry, _s.Model.Documents.Select(d => d.EntryName).Concat(_s.Archive.EntryNames)))
         {
             Program.AppLog("workbench: refused a rule ref to a local path or unsafe entry");
             Warn("This document can't be used as a rule ref: rule refs name a module document or an opened scan's file name, never a path on this computer.");

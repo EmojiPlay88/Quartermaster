@@ -344,6 +344,58 @@ public class RulebookSearchTests : IDisposable
             var again = await RulebookIndex.BuildAsync("modH", docs, null, CancellationToken.None, null, null, hang, TimeSpan.FromMilliseconds(300));
             Assert.Equal(1, calls);
             Assert.False(again.Documents[0].Searchable);
+
+            // The marker expires after 7 days (fake clock): the document is tried again.
+            var stillFresh = DateTime.UtcNow + RulebookIndex.MarkerMaxAge - TimeSpan.FromHours(1);
+            await RulebookIndex.BuildAsync("modH", docs, null, CancellationToken.None, null, null, hang, TimeSpan.FromMilliseconds(300), () => stillFresh);
+            Assert.Equal(1, calls);
+            var expired = DateTime.UtcNow + RulebookIndex.MarkerMaxAge + TimeSpan.FromHours(1);
+            await RulebookIndex.BuildAsync("modH", docs, null, CancellationToken.None, null, null, hang, TimeSpan.FromMilliseconds(300), () => expired);
+            Assert.Equal(2, calls);
+        }
+        finally { release.Set(); }
+    }
+
+    [Fact]
+    public async Task Index_SlowExtractor_PageEvery100ms_StallLimit300ms_Completes()
+    {
+        RulebookIndex.TextExtractor slow = (_, report, _) =>
+        {
+            var pages = new List<PageText>();
+            for (var p = 1; p <= 8; p++) // 800 ms in all: far past the stall limit, but never 300 ms without a page
+            {
+                Thread.Sleep(100);
+                pages.Add(new PageText(p, $"Slow page {p} about supply"));
+                report(p / 8.0);
+            }
+            return (true, pages);
+        };
+        var ix = await RulebookIndex.BuildAsync("modS", new[] { Doc("slow.pdf", "Slow", Rules) }, null, CancellationToken.None, null, null,
+            slow, TimeSpan.FromMilliseconds(300));
+        Assert.True(ix.Documents[0].Searchable);
+        Assert.Equal(8, ix.Search("supply").Count);
+    }
+
+    [Fact]
+    public async Task Index_StallAfterSomePages_NotSearchable_NotCached()
+    {
+        using var release = new ManualResetEventSlim(false);
+        var calls = 0;
+        RulebookIndex.TextExtractor stallLater = (_, report, _) =>
+        {
+            Interlocked.Increment(ref calls);
+            report(0.5); // one page finished, then stuck
+            release.Wait();
+            throw new InvalidOperationException("released");
+        };
+        try
+        {
+            var docs = new[] { Doc("half.pdf", "Half", Rules) };
+            var ix = await RulebookIndex.BuildAsync("modP", docs, null, CancellationToken.None, null, null, stallLater, TimeSpan.FromMilliseconds(300));
+            Assert.False(ix.Documents[0].Searchable);
+            Assert.Null(RulebookIndex.TryReadCache(RulebookIndex.CacheFolder("modP"), ix.Documents[0].Sha256)); // treated as transient
+            await RulebookIndex.BuildAsync("modP", docs, null, CancellationToken.None, null, null, stallLater, TimeSpan.FromMilliseconds(300));
+            Assert.Equal(2, calls); // retried
         }
         finally { release.Set(); }
     }
@@ -359,17 +411,17 @@ public class RulebookSearchTests : IDisposable
         };
         var opened = Path.Combine(_tmp, "elsewhere", "opened.pdf");
         var docs = new[] { Doc(opened, "opened.pdf", Rules) };
-        var ix = await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, null, new[] { opened }, counting, RulebookIndex.ExtractTimeout);
+        var ix = await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, null, new[] { opened }, counting, RulebookIndex.StallLimit);
         Assert.True(ix.Documents[0].Searchable);
         Assert.Equal(1, calls);
         var folder = RulebookIndex.CacheFolder("modM");
         Assert.True(!Directory.Exists(folder) || Directory.GetFiles(folder).Length == 0); // text kept in memory only
         // A rebuild (another file opened) reuses the text the last index read.
-        var again = await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, ix, new[] { opened }, counting, RulebookIndex.ExtractTimeout);
+        var again = await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, ix, new[] { opened }, counting, RulebookIndex.StallLimit);
         Assert.Equal(1, calls);
         Assert.Single(again.Search("supply"));
         // Without a previous index it is read again (nothing on disk).
-        await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, null, new[] { opened }, counting, RulebookIndex.ExtractTimeout);
+        await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, null, new[] { opened }, counting, RulebookIndex.StallLimit);
         Assert.Equal(2, calls);
     }
 

@@ -137,8 +137,16 @@ public sealed class ScanSessionModel
         OpenedByKey(entry) is { } src ? RuleRefFor(src, page) : (entry, page);
 
     /// <summary>
-    /// True when <paramref name="entry"/> may be stored in a rule ref: not empty, not a rooted path, no backslash, and no ':' other than
-    /// the <c>scan:</c> prefix. A rule ref must never carry a path on this computer.
+    /// True when <paramref name="entry"/> may be stored in a rule ref: an entry the module has (a document or archive entry, taken
+    /// as it is, backslashes included), or anything else that passes <see cref="IsSafeRefEntry"/>.
+    /// </summary>
+    public static bool IsAllowedRefEntry(string? entry, IEnumerable<string> moduleEntries) =>
+        entry != null && (moduleEntries.Contains(entry, StringComparer.Ordinal) || IsSafeRefEntry(entry));
+
+    /// <summary>
+    /// True when <paramref name="entry"/> may be stored in a rule ref without being a known module entry: not empty, not a rooted
+    /// path, no backslash, and no ':' other than the <c>scan:</c> prefix. A rule ref must never carry a path on this computer.
+    /// (Known module entries — documents and archive entries — are allowed as they are: see <see cref="IsAllowedRefEntry"/>.)
     /// </summary>
     public static bool IsSafeRefEntry(string? entry)
     {

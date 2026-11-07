@@ -382,7 +382,7 @@ sealed partial class FormulasTab : UserControl, IRuleRefEditor
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Func<RuleRef?, RefDisplay>? DescribeRef { get; set; }
 
-    public bool CanUseRuleRef => Current != null && Enabled && _link.Enabled;
+    public bool CanUseRuleRef => Current != null && Enabled && _link.Enabled && !_s.IsReplaying;
 
     public bool UseRuleRef(Func<string, RuleRef?> make)
     {

@@ -250,6 +250,18 @@ public class ScanSessionModelTests
         Assert.Equal(safe, ScanSessionModel.IsSafeRefEntry(entry));
 
     [Fact]
+    public void IsAllowedRefEntry_KnownModuleEntriesAsIs_OthersMustBeSafe()
+    {
+        string[] module = { @"images\chart.png", "docs/rules.pdf" };
+        Assert.True(ScanSessionModel.IsAllowedRefEntry(@"images\chart.png", module)); // a module entry with a backslash links fine
+        Assert.True(ScanSessionModel.IsAllowedRefEntry("docs/rules.pdf", module));
+        Assert.True(ScanSessionModel.IsAllowedRefEntry("scan:opened.pdf", module));
+        Assert.False(ScanSessionModel.IsAllowedRefEntry(@"C:\Users\someone\rules.pdf", module)); // a rooted path is still refused
+        Assert.False(ScanSessionModel.IsAllowedRefEntry(@"images\other.png", module)); // not the module's: the backslash rule applies
+        Assert.False(ScanSessionModel.IsAllowedRefEntry(null, module));
+    }
+
+    [Fact]
     public void SameNameAs_FindsOtherOpenedFileWithSameName()
     {
         var m = new ScanSessionModel();

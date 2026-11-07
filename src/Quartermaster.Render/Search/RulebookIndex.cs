@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -58,8 +59,14 @@ public sealed class RulebookIndex
             : Array.Empty<NormPage>()).ToArray();
     }
 
-    /// <summary>How long one document's text extraction may take before it is given up as not searchable (a hostile or broken PDF).</summary>
-    public static readonly TimeSpan ExtractTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>
+    /// A document's text extraction is given up as not searchable (a hostile or broken PDF) when no page finishes for this long;
+    /// the deadline restarts after every page, so a long rulebook on a slow machine is not cut off.
+    /// </summary>
+    public static readonly TimeSpan StallLimit = TimeSpan.FromSeconds(30);
+
+    /// <summary>A "gave up" marker in the cache is trusted this long; after that the document is tried again.</summary>
+    public static readonly TimeSpan MarkerMaxAge = TimeSpan.FromDays(7);
 
     /// <summary>Why a cached document is not searchable because its extraction was given up.</summary>
     internal const string TimeoutReason = "timeout";
@@ -74,21 +81,23 @@ public sealed class RulebookIndex
     /// Indexes the PDFs off the caller's thread, reusing cached text for documents whose SHA-256 is unchanged.
     /// Progress goes 0..1; cancellation throws <see cref="OperationCanceledException"/> and leaves the cache consistent.
     /// Documents also in <paramref name="previous"/> (same SHA-256) are reused from it. Entries in <paramref name="memoryOnly"/>
-    /// (files opened for this session) are never read from or written to the disk cache. A document whose extraction takes
-    /// longer than <see cref="ExtractTimeout"/> is not searchable (and cached as such, so later builds skip it).
+    /// (files opened for this session) are never read from or written to the disk cache. A document whose extraction finishes no
+    /// page for <see cref="StallLimit"/> is not searchable; if it stalled before its first page that is cached for
+    /// <see cref="MarkerMaxAge"/>, so later builds skip it.
     /// </summary>
     public static Task<RulebookIndex> BuildAsync(string moduleSha, IReadOnlyList<(string Entry, string Title, Func<Stream> Open)> pdfs,
         IProgress<double>? progress, CancellationToken ct, RulebookIndex? previous = null, IReadOnlyCollection<string>? memoryOnly = null) =>
-        BuildAsync(moduleSha, pdfs, progress, ct, previous, memoryOnly, Extract, ExtractTimeout);
+        BuildAsync(moduleSha, pdfs, progress, ct, previous, memoryOnly, Extract, StallLimit);
 
+    /// <summary>Test seam: the extractor, the stall limit and the clock used for timeout markers.</summary>
     internal static Task<RulebookIndex> BuildAsync(string moduleSha, IReadOnlyList<(string Entry, string Title, Func<Stream> Open)> pdfs,
         IProgress<double>? progress, CancellationToken ct, RulebookIndex? previous, IReadOnlyCollection<string>? memoryOnly,
-        TextExtractor extractor, TimeSpan timeout) =>
-        Task.Run(() => Build(moduleSha, pdfs, progress, ct, previous, memoryOnly, extractor, timeout), ct);
+        TextExtractor extractor, TimeSpan stallLimit, Func<DateTime>? utcNow = null) =>
+        Task.Run(() => Build(moduleSha, pdfs, progress, ct, previous, memoryOnly, extractor, stallLimit, utcNow ?? (() => DateTime.UtcNow)), ct);
 
     private static RulebookIndex Build(string moduleSha, IReadOnlyList<(string Entry, string Title, Func<Stream> Open)> pdfs,
         IProgress<double>? progress, CancellationToken ct, RulebookIndex? previous, IReadOnlyCollection<string>? memoryOnly,
-        TextExtractor extractor, TimeSpan timeout)
+        TextExtractor extractor, TimeSpan stallLimit, Func<DateTime> utcNow)
     {
         progress?.Report(0);
         var folder = CacheFolder(moduleSha);
@@ -106,7 +115,7 @@ public sealed class RulebookIndex
             var lo = (double)i / pdfs.Count;
             var span = 1.0 / pdfs.Count;
             docs.Add(IndexOne(folder, entry, title, open, f => progress?.Report(lo + span * f), ct,
-                known, persist: !memory.Contains(entry), extractor, timeout));
+                known, persist: !memory.Contains(entry), extractor, stallLimit, utcNow));
             progress?.Report((double)(i + 1) / pdfs.Count);
         }
         progress?.Report(1);
@@ -124,7 +133,7 @@ public sealed class RulebookIndex
     /// deterministic outcomes (PdfPig cannot parse it, or no page has text) are.
     /// </summary>
     private static IndexedDocument IndexOne(string folder, string entry, string title, Func<Stream> open, Action<double> report, CancellationToken ct,
-        IReadOnlyDictionary<string, IndexedDocument> known, bool persist, TextExtractor extractor, TimeSpan timeout)
+        IReadOnlyDictionary<string, IndexedDocument> known, bool persist, TextExtractor extractor, TimeSpan stallLimit, Func<DateTime> utcNow)
     {
         Stream? raw = null;
         MemoryStream? copy = null;
@@ -159,29 +168,53 @@ public sealed class RulebookIndex
             }
 
             if (known.TryGetValue(sha, out var seen)) return new IndexedDocument(entry, title, sha, seen.Searchable, seen.Pages);
-            var cached = persist ? TryReadCache(folder, sha) : null;
+            var cached = persist ? TryReadCache(folder, sha, utcNow()) : null;
             if (cached != null) return new IndexedDocument(entry, title, sha, cached.Value.Searchable, cached.Value.Pages);
 
-            bool searchable;
-            IReadOnlyList<PageText> pages;
+            bool searchable = false;
+            IReadOnlyList<PageText> pages = Array.Empty<PageText>();
             try
             {
-                // Watchdog: PdfPig can loop forever on a hostile file. The extraction runs on its own thread; past the timeout the
-                // document is given up (that thread is left to finish on its own) and remembered as not searchable.
+                // Watchdog: PdfPig can loop forever on a hostile file. The extraction runs on its own thread and reports each finished
+                // page; when no page finishes for the stall limit the document is given up (that thread is left to finish on its own).
+                // Stuck before any page: remembered as not searchable for MarkerMaxAge. Stuck after some pages: not cached (retried
+                // next session), as a slow machine or a huge page may be to blame.
                 var gaveUp = false;
-                var work = Task.Run(() => extractor(parse, f => { if (!Volatile.Read(ref gaveUp)) report(f); }, ct));
-                try { (searchable, pages) = work.WaitAsync(timeout, ct).GetAwaiter().GetResult(); }
-                catch (TimeoutException)
+                var pagesDone = 0;
+                var lastPage = Stopwatch.GetTimestamp();
+                var work = Task.Run(() => extractor(parse, f =>
                 {
-                    Volatile.Write(ref gaveUp, true);
-                    abandoned = work;
-                    if (persist) WriteCache(folder, sha, false, Array.Empty<PageText>(), TimeoutReason);
-                    return new IndexedDocument(entry, title, sha, false, Array.Empty<PageText>());
+                    Interlocked.Increment(ref pagesDone);
+                    Interlocked.Exchange(ref lastPage, Stopwatch.GetTimestamp());
+                    if (!Volatile.Read(ref gaveUp)) report(f);
+                }, ct));
+                var stalled = false;
+                try
+                {
+                    while (true)
+                    {
+                        var idle = Stopwatch.GetElapsedTime(Interlocked.Read(ref lastPage));
+                        if (idle >= stallLimit) { stalled = true; break; }
+                        try
+                        {
+                            (searchable, pages) = work.WaitAsync(stallLimit - idle, ct).GetAwaiter().GetResult();
+                            break;
+                        }
+                        catch (TimeoutException) { } // check whether a page finished meanwhile
+                    }
                 }
                 catch (OperationCanceledException) when (!work.IsCompleted)
                 {
                     abandoned = work;
                     throw;
+                }
+                if (stalled)
+                {
+                    Volatile.Write(ref gaveUp, true);
+                    abandoned = work;
+                    if (persist && Volatile.Read(ref pagesDone) == 0)
+                        WriteCache(folder, sha, false, Array.Empty<PageText>(), TimeoutReason, utcNow());
+                    return new IndexedDocument(entry, title, sha, false, Array.Empty<PageText>());
                 }
             }
             catch (OperationCanceledException) { throw; }
@@ -335,6 +368,8 @@ public sealed class RulebookIndex
         public bool Searchable { get; set; }
         /// <summary>Why it is not searchable when that was decided without reading the text ("timeout"); null otherwise.</summary>
         public string? Reason { get; set; }
+        /// <summary>When a "timeout" marker was written (UTC); it expires after <see cref="MarkerMaxAge"/>.</summary>
+        public DateTime? MarkedUtc { get; set; }
         public List<CachePage> Pages { get; set; } = new();
     }
 
@@ -356,7 +391,7 @@ public sealed class RulebookIndex
 
     internal static string CachePath(string folder, string docSha) => Path.Combine(folder, docSha + ".json.gz");
 
-    internal static (bool Searchable, IReadOnlyList<PageText> Pages)? TryReadCache(string folder, string docSha)
+    internal static (bool Searchable, IReadOnlyList<PageText> Pages)? TryReadCache(string folder, string docSha, DateTime? nowUtc = null)
     {
         try
         {
@@ -366,6 +401,9 @@ public sealed class RulebookIndex
             var json = Gzip.DecompressBounded(File.ReadAllBytes(path), MaxCacheBytes);
             var dto = JsonSerializer.Deserialize<CacheDto>(json);
             if (dto == null || dto.Format != CacheFormat || dto.Extractor != ExtractorVersion || dto.Sha256 != docSha || dto.Pages == null) return null;
+            // A "gave up" marker is retried once it is old (or undated): the file, the machine or PdfPig may do better now.
+            if (dto.Reason == TimeoutReason
+                && (dto.MarkedUtc is not { } marked || (nowUtc ?? DateTime.UtcNow) - marked.ToUniversalTime() > MarkerMaxAge)) return null;
             var pages = dto.Pages.Select(p => new PageText(p.Page, p.Text ?? "")).ToList();
             for (var i = 0; i < pages.Count; i++) if (pages[i].Page != i + 1) return null;
             return (dto.Searchable, pages.AsReadOnly());
@@ -373,7 +411,7 @@ public sealed class RulebookIndex
         catch (Exception) { return null; }
     }
 
-    internal static void WriteCache(string folder, string docSha, bool searchable, IReadOnlyList<PageText> pages, string? reason = null)
+    internal static void WriteCache(string folder, string docSha, bool searchable, IReadOnlyList<PageText> pages, string? reason = null, DateTime? markedUtc = null)
     {
         string? tmp = null;
         try
@@ -381,7 +419,7 @@ public sealed class RulebookIndex
             Directory.CreateDirectory(folder);
             var dto = new CacheDto
             {
-                Format = CacheFormat, Extractor = ExtractorVersion, Sha256 = docSha, Searchable = searchable, Reason = reason,
+                Format = CacheFormat, Extractor = ExtractorVersion, Sha256 = docSha, Searchable = searchable, Reason = reason, MarkedUtc = markedUtc,
                 Pages = pages.Select(p => new CachePage { Page = p.Page, Text = p.Text }).ToList(),
             };
             var bytes = Gzip.Compress(JsonSerializer.SerializeToUtf8Bytes(dto));
