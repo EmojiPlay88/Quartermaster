@@ -13,7 +13,8 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     readonly PdfViewerControl _viewer;
     readonly SplitContainer _split = new() { Dock = DockStyle.Fill };
     readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
-    readonly TabPage _tablesPage = new("Tables"), _formulasPage = new("Formulas"), _propsPage = new("Properties & Holders"), _phasesPage = new("Phases"), _alertsPage = new("Alerts");
+    readonly TabPage _tablesPage = new("Tables"), _formulasPage = new("Formulas"), _propsPage = new("Properties & Holders"), _phasesPage = new("Phases"), _alertsPage = new("Alerts"), _visibilityPage = new("Visibility");
+    readonly VisibilityTab _visibilityTab;
     readonly TablesTab _tables;
     readonly FormulasTab _formulas;
     readonly PropertiesTab _props;
@@ -45,7 +46,9 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _phasesPage.Controls.Add(_phasesTab);
         _alertsTab = new AlertsTab(s) { Dock = DockStyle.Fill };
         _alertsPage.Controls.Add(_alertsTab);
-        _tabs.TabPages.AddRange(new[] { _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage });
+        _visibilityTab = new VisibilityTab(s) { Dock = DockStyle.Fill };
+        _visibilityPage.Controls.Add(_visibilityTab);
+        _tabs.TabPages.AddRange(new[] { _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage, _visibilityPage });
         _split.Panel1.Controls.Add(_viewer);
         _split.Panel2.Controls.Add(_tabs);
 
@@ -118,7 +121,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     {
         if (IsDisposed || _s.Rules is not { } pack) return;
         IReadOnlyList<RulesIssue> list;
-        try { list = RulesValidator.Validate(pack); }
+        try { list = RulesValidator.Validate(pack, _s.Model.Maps.Select(m => m.Id).ToList()); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Program.AppLog("workbench validation failed: " + ex);
@@ -149,6 +152,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         else if (p.ById<AlertDef>(i.EntityId) != null) { _tabs.SelectedTab = _alertsPage; _alertsTab.SelectAlert(i.EntityId); }
         else if (p.ById<PropertyDef>(i.EntityId) != null) { _tabs.SelectedTab = _propsPage; _props.SelectProperty(i.EntityId); }
         else if (p.ById<HolderDef>(i.EntityId) != null) { _tabs.SelectedTab = _propsPage; _props.SelectHolder(i.EntityId); }
+        else if (p.MapOwners.Any(o => o.MapId == i.EntityId)) _tabs.SelectedTab = _visibilityPage;
     }
 
     // ---------- navigation from the tables tree ----------
@@ -244,7 +248,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     /// <summary>Smoke: shows the named tab (tables, formulas, properties, phases); unknown or empty keeps the Tables tab.</summary>
     public void SelectTabForSmoke(string? name)
     {
-        _tabs.SelectedTab = name?.ToLowerInvariant() switch { "formulas" => _formulasPage, "properties" => _propsPage, "phases" => _phasesPage, "alerts" => _alertsPage, _ => _tablesPage };
+        _tabs.SelectedTab = name?.ToLowerInvariant() switch { "formulas" => _formulasPage, "properties" => _propsPage, "phases" => _phasesPage, "alerts" => _alertsPage, "visibility" => _visibilityPage, _ => _tablesPage };
         if (_tabs.SelectedTab == _formulasPage && _formulas.SelectedFormulaId == null) Program.AppLog("smoke: no formula to show");
     }
 
