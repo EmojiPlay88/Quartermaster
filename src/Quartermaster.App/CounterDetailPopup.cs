@@ -71,9 +71,23 @@ sealed class CounterDetailPopup : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        HoverAt(e.Location);
+    }
+
+    /// <summary>The hover code path: shows the breakdown of the ledger line under <paramref name="p"/> (client pixels), else hides it.</summary>
+    void HoverAt(Point p)
+    {
         foreach (var (rect, tip) in _hot)
-            if (rect.Contains(e.Location)) { _tip.Show(this, new Point(rect.Right + 6, rect.Top), tip); return; }
+            if (rect.Contains(p)) { _tip.Show(this, new Point(rect.Right + 6, rect.Top), tip); return; }
         _tip.Hide();
+    }
+
+    /// <summary>Smoke: hovers the first ledger line through the same path as the mouse. False when there is none.</summary>
+    public bool SmokeHoverFirstLine()
+    {
+        if (_hot.Count == 0) return false;
+        HoverAt(new Point(_hot[0].Rect.Left + 2, _hot[0].Rect.Top + 2));
+        return true;
     }
 
     protected override void Dispose(bool disposing)

@@ -52,7 +52,8 @@ sealed class InventoryWindow : Form
         _keyName.SelectedIndexChanged += (_, _) => Run(() => { if (!_loadingCombos) { _cycle.Clear(); Reload(); } });
         _filter.TextChanged += (_, _) => { _cycle.Clear(); Kick(); };
         _list.MouseMove += (_, e) => Run(() => TotalTip(e.Location));
-        _list.MouseLeave += (_, _) => _tip.Hide();
+        _list.MouseLeave += (_, _) => { _tip.Hide(); _tipGroup = null; };
+        _list.MouseWheel += (_, _) => { _tip.Hide(); _tipGroup = null; };
         _list.DoubleClick += (_, _) => Run(CycleSelected);
         _debounce.Tick += (_, _) => { _debounce.Stop(); Run(() => { FillKeyNames(); Reload(); }); };
 
@@ -151,6 +152,8 @@ sealed class InventoryWindow : Form
         _rows = _s.Game == null ? new() : InventoryQuery.Run(_s.Game.State, _s.Model, _s.Rules, CurrentKey, _keyName.SelectedItem as string, _filter.Text).ToList();
         var showTotal = CurrentKey == InventoryKey.LedgerProperty;
         var sel = _list.SelectedItems.Count > 0 ? _list.SelectedItems[0].Text : null;
+        _tip.Hide();
+        _tipGroup = null;
         _list.BeginUpdate();
         _list.Items.Clear();
         foreach (var r in _rows)

@@ -635,7 +635,7 @@ sealed partial class MapCanvas : SKControl
         HidePopup();
         _popup = CounterDetailPopup.Create(_s, st, stack, _pieces, DeviceDpi / 96f);
         _popup.PointerEntered += _graceTimer.Stop;
-        _popup.PointerLeft += () => { if (!IsDisposed) BeginInvoke(HidePopup); };
+        _popup.PointerLeft += () => { if (!IsDisposed) BeginInvoke(() => { _hoverStack = null; HidePopup(); }); };
         _popup.ShowAt(Cursor.Position);
     }
 

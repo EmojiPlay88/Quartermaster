@@ -61,7 +61,7 @@ sealed class BatchGridWindow : Form
         _grid.CellFormatting += (_, e) => Safe(() => OnFormatting(e));
         _grid.CellToolTipTextNeeded += (_, e) => Safe(() => OnToolTip(e));
         _tip.Track(_grid, LedgerTip);
-        _grid.ShowCellToolTips = true; // Track turns them off for its own grid-wide tip; the "doesn't match" hint still needs them
+        _grid.ShowCellToolTips = true; // native tips stay on for the "doesn't match" hint; OnToolTip returns nothing for the Ledger column, so they never overlap the breakdown
         _grid.CurrentCellChanged += (_, _) => Safe(UpdateCheat);
         _grid.CellDoubleClick += (_, e) => Safe(() => { if (e.RowIndex >= 0 && e.ColumnIndex == 0) _openRow?.Invoke(e.RowIndex); });
         _grid.DataError += (_, e) => e.ThrowException = false;

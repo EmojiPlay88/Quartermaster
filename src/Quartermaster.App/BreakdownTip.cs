@@ -9,7 +9,7 @@ namespace Quartermaster.App;
 sealed class BreakdownTip : IDisposable
 {
     const int Pad = 4;
-    readonly ToolTip _tip = new() { OwnerDraw = true, UseAnimation = false, UseFading = false, AutoPopDelay = 30000 };
+    readonly ToolTip _tip = new() { OwnerDraw = true, UseAnimation = false, UseFading = false, ShowAlways = true, AutoPopDelay = 30000 };
     Font? _font;
     Control? _shownOn;
 
@@ -17,7 +17,7 @@ sealed class BreakdownTip : IDisposable
     {
         _tip.Popup += (_, e) =>
         {
-            try { e.ToolTipSize = Measure(_tip.GetToolTip(e.AssociatedControl!)); } catch (Exception) { /* keep the default size */ }
+            try { e.ToolTipSize = Measure(_tip.GetToolTip(e.AssociatedControl!) ?? ""); } catch (Exception) { /* keep the default size */ }
         };
         _tip.Draw += (_, e) =>
         {
