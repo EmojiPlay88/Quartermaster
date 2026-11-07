@@ -4,12 +4,11 @@ using Quartermaster.Render;
 namespace Quartermaster.App;
 
 /// <summary>
-/// The first window: the module list with Add/Remove, the module's rules pack, the (not yet available) online lobby, and Play offline.
+/// The first window: the module list with Add/Remove, the module's rules pack, the Online lobby and Play offline.
 /// <see cref="Result"/> is what to play once the dialog closed with OK; closing the window otherwise ends the app.
 /// </summary>
 sealed class LauncherForm : Form
 {
-    public const string OnlineTip = "Online play arrives with the online update.";
     public const string NotFound = "(file not found)";
 
     readonly SettingsStore _store;
@@ -24,7 +23,8 @@ sealed class LauncherForm : Form
     readonly LinkLabel _none = new() { AutoSize = true, Text = "use (none)", Anchor = AnchorStyles.Left, Visible = false };
     readonly Button _add = new() { Text = "Add module…", AutoSize = true, MinimumSize = new Size(90, 26) };
     readonly Button _remove = new() { Text = "Remove", AutoSize = true, MinimumSize = new Size(75, 26) };
-    readonly Button _online = new() { Text = "Online lobby ▶", AutoSize = true, MinimumSize = new Size(110, 26), Enabled = false };
+    readonly Button _online = new() { Text = "Online lobby ▶", AutoSize = true, MinimumSize = new Size(110, 26) };
+    readonly Panel _onlineHost = new() { AutoSize = true, Margin = new Padding(3), Padding = Padding.Empty };
     readonly Button _play = new() { Text = "Play offline ▶", AutoSize = true, MinimumSize = new Size(110, 26) };
     readonly Label _progress = new() { AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = SystemColors.GrayText };
     readonly ToolTip _tip = new();
@@ -65,11 +65,8 @@ sealed class LauncherForm : Form
         _list.Columns.Add("File", 240);
         _list.Columns.Add("Last played", 120);
 
-        // Disabled buttons get no mouse messages, so the tooltip hangs on a host panel around the button as well.
-        var onlineHost = new Panel { AutoSize = true, Margin = new Padding(3), Padding = Padding.Empty };
-        onlineHost.Controls.Add(_online);
-        _tip.SetToolTip(onlineHost, OnlineTip);
-        _tip.SetToolTip(_online, OnlineTip);
+        // Disabled buttons get no mouse messages, so their tooltips hang on a host panel around the button as well.
+        _onlineHost.Controls.Add(_online);
 
         var rulesRow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Padding = new Padding(8, 6, 8, 0) };
         rulesRow.Controls.Add(_rules);
@@ -81,7 +78,7 @@ sealed class LauncherForm : Form
         left.Controls.Add(_add);
         left.Controls.Add(_remove);
         var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false };
-        right.Controls.Add(onlineHost);
+        right.Controls.Add(_onlineHost);
         _playHost.Controls.Add(_play);
         right.Controls.Add(_playHost);
         var buttons = new Panel { Dock = DockStyle.Top, Height = 42, Padding = new Padding(8, 6, 8, 6) };
@@ -102,6 +99,7 @@ sealed class LauncherForm : Form
         _add.Click += (_, _) => Guarded(AddModules);
         _remove.Click += (_, _) => Guarded(RemoveSelected);
         _play.Click += (_, _) => Guarded(PlayOffline);
+        _online.Click += (_, _) => Guarded(OpenLobby);
         _change.LinkClicked += (_, _) => Guarded(ChangeRules);
         _none.LinkClicked += (_, _) => Guarded(ClearRules);
         _tip.SetToolTip(_none, "Play this module without a rules pack.");
@@ -235,6 +233,7 @@ sealed class LauncherForm : Form
         var row = Selected;
         _remove.Enabled = row != null;
         _play.Enabled = row != null && !row.Missing;
+        _online.Enabled = row != null && !row.Missing;
         _change.Enabled = row is { Missing: false };
         string? pack = null;
         if (row == null) _rules.Text = "Rules pack: (none)";
@@ -247,6 +246,27 @@ sealed class LauncherForm : Form
         var hint = row is { Missing: true } ? "This module's file was not found. Remove it or add it again." : "";
         _tip.SetToolTip(_playHost, hint);
         _tip.SetToolTip(_play, hint);
+        var onlineHint = row == null ? "Select a module first." : hint.Length > 0 ? hint : "Join or host a live online game of this module.";
+        _tip.SetToolTip(_onlineHost, onlineHint);
+        _tip.SetToolTip(_online, onlineHint);
+    }
+
+    /// <summary>Online lobby ▶: the selected module's lobbies; a join or a new lobby closes the launcher with that request.</summary>
+    void OpenLobby()
+    {
+        if (Selected is not { } row || row.Missing) return;
+        if (row.Entry.Sha256 is not { Length: > 0 })
+        {
+            MessageBox.Show(this, "This module is still being checked; try again in a moment.", "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        using var dlg = new OnlineLobbyForm(row, _library, _store);
+        if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Result is { } req)
+        {
+            Result = req;
+            DialogResult = DialogResult.OK;
+            Close();
+        }
     }
 
     void AddModules()

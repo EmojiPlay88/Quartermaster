@@ -12,7 +12,7 @@ public static class LogFilter
 {
     public static readonly IReadOnlyList<string> AllKinds = new[]
     {
-        LogKind.Dice, LogKind.Move, LogKind.Place, LogKind.Delete, LogKind.Formula, LogKind.Ledger, LogKind.Note, LogKind.Turn, LogKind.Calc, LogKind.System,
+        LogKind.Dice, LogKind.Move, LogKind.Place, LogKind.Delete, LogKind.Formula, LogKind.Ledger, LogKind.Note, LogKind.Turn, LogKind.Calc, LogKind.Chat, LogKind.System,
     };
 
     /// <summary>The filter-button label of a kind: "Calculations" for calc, the kind itself otherwise.</summary>

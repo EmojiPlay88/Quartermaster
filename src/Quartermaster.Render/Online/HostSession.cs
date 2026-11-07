@@ -130,6 +130,40 @@ public sealed class HostSession : IDisposable
         return true;
     }
 
+    public const string HostEndedText = "The host ended the online game.";
+
+    /// <summary>The host leaves the online game: every connected guest is told (<see cref="HostEndedText"/>). Call before disposing.</summary>
+    public void EndGame()
+    {
+        if (_disposed) return;
+        foreach (var seat in Seats.Guests.ToList())
+            if (seat.MemberId is { } member) Send(member, new Kicked(HostEndedText));
+    }
+
+    public const string NoSuchSeatText = "That player is not in this game.";
+    public const string SideHeldText = "That side is held by another player.";
+
+    /// <summary>
+    /// The host's Players dialog (spec 8a.10): gives a seat (a guest's or the host's own) these sides. Each side must be free or already
+    /// held by that seat; the result must pass <see cref="Seats.CheckChoice"/>. Returns null when done, else why not. A guest that now
+    /// holds sides gets its view at once.
+    /// </summary>
+    public string? AssignSides(string playerId, IReadOnlyList<string> sides)
+    {
+        if (_disposed) return IntentExecutor.NoGameText;
+        if (Seats.ByPlayer(playerId) is not { } seat) return NoSuchSeatText;
+        if (_s.Game == null || _s.Rules is not { } pack) return IntentExecutor.NoGameText;
+        var list = (sides ?? Array.Empty<string>()).Where(x => !string.IsNullOrEmpty(x)).Distinct().ToList();
+        var others = Seats.All.Where(x => !ReferenceEquals(x, seat)).SelectMany(x => x.Sides).ToHashSet();
+        if (list.Any(others.Contains)) return SideHeldText;
+        if (Seats.CheckChoice(seat, list, pack) is { } why) return why;
+        if (seat.Sides.SequenceEqual(list)) return null;
+        seat.Sides = list;
+        AfterSeatChange();
+        if (!seat.IsHost && seat.Connected) SendSnapshot(seat);
+        return null;
+    }
+
     /// <summary>Sends every guest its snapshot now, ignoring the spacing (normally run <see cref="SnapshotDelay"/> after the last change).</summary>
     public void FlushSnapshots()
     {

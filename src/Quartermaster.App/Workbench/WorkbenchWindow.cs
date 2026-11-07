@@ -108,12 +108,29 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         else a();
     }
 
+    readonly Label _readOnly = new()
+    {
+        Dock = DockStyle.Top, Height = 24, Visible = false, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 8, 0),
+        BackColor = Color.FromArgb(255, 240, 200), Text = "Read-only: the host's rules pack for this online game. Only the host can change it.",
+    };
+
+    /// <summary>An online guest reads the host's pack but never edits it (the session refuses edits too): the editors are switched off.</summary>
+    void ApplyReadOnly()
+    {
+        var ro = _s.IsGuest;
+        if (_readOnly.Parent == null) { _main.Controls.Add(_readOnly); _readOnly.SendToBack(); }
+        _readOnly.Visible = ro;
+        foreach (TabPage page in _tabs.TabPages)
+            foreach (Control c in page.Controls) c.Enabled = !ro;
+    }
+
     void Apply(bool validate = true)
     {
         var has = _s.Rules != null;
         _main.Visible = has;
-        _prompt.Visible = !has;
-        Text = has ? $"Rules Workbench — {_s.Rules!.Name}" : "Rules Workbench";
+        _prompt.Visible = !has && !_s.IsGuest;
+        ApplyReadOnly();
+        Text = has ? $"Rules Workbench — {_s.Rules!.Name}" + (_s.IsGuest ? " (read-only)" : "") : "Rules Workbench";
         if (has && validate) Validate2();
     }
 

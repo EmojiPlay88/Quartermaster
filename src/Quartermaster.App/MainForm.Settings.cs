@@ -36,7 +36,8 @@ sealed partial class MainForm
             if (InvokeRequired && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed) ApplySettings(s); });
             else ApplySettings(s);
         };
-        _autosaver = new Autosaver(() => _session?.Archive.Sha256, p => _session!.SaveNative(p), LayoutRoot, OnAutosaveError, () => _session?.Game?.State.Turn.Turn);
+        // A guest's game and a viewer copy are never written (CanSave): no module hash means no autosave.
+        _autosaver = new Autosaver(() => _session is { CanSave: true } s ? s.Archive.Sha256 : null,p => _session!.SaveNative(p), LayoutRoot, OnAutosaveError, () => _session?.Game?.State.Turn.Turn);
         _autosaveTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
         _autosaveTimer.Tick += (_, _) => Guard(AutosaveTick);
         _autosaveTimer.Start();
@@ -118,7 +119,7 @@ sealed partial class MainForm
         () => _session?.CacheDir,
         m => Info(m, "Settings"), _commands,
         () => _session?.Game?.State.Difficulty,
-        d => { try { _phases?.SetDifficulty(d); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("set difficulty: " + ex.Message); } },
+        d => { try { if (_session?.IsGuest == true) ShowError(IntentExecutor.HostOnlyText); else _phases?.SetDifficulty(d); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("set difficulty: " + ex.Message); } },
         GamePlayers,
         p => { try { SetGamePlayers(p); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("set players: " + ex.Message); } });
 

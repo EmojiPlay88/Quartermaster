@@ -9,10 +9,14 @@ public static class StartupDecision
         => smoke || !string.IsNullOrWhiteSpace(modulePath) ? StartupAction.DirectModule : StartupAction.Launcher;
 }
 
-public enum LaunchKind { NewGame, OpenSave, Continue }
+/// <summary>
+/// <see cref="HostOnline"/>: start <see cref="LaunchRequest.NewGame"/> (or load <see cref="LaunchRequest.SavePath"/>) and host it online;
+/// <see cref="JoinOnline"/>: open the module and play as a guest of the room in <see cref="LaunchRequest.Online"/>.
+/// </summary>
+public enum LaunchKind { NewGame, OpenSave, Continue, HostOnline, JoinOnline }
 
-/// <summary>What the launcher asks the game window to do.</summary>
-public sealed record LaunchRequest(string ModulePath, string? RulesPath, LaunchKind Kind, NewGameRequest? NewGame, string? SavePath);
+/// <summary>What the launcher asks the game window to do. <see cref="Online"/> is set for the two online kinds only.</summary>
+public sealed record LaunchRequest(string ModulePath, string? RulesPath, LaunchKind Kind, NewGameRequest? NewGame, string? SavePath, OnlineLaunch? Online = null);
 
 /// <summary>Library and recent-save bookkeeping the game window performs. Never throws on bad input.</summary>
 public static class LaunchBookkeeping

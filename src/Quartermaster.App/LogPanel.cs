@@ -82,6 +82,27 @@ sealed class LogPanel : UserControl
     public event Action? PopToggleRequested;
 
     public void SetFloating(bool floating) => _popButton.Text = floating ? "Dock" : "Pop out";
+
+    ChatBox? _chat;
+
+    /// <summary>The chat line under the log while the game is online; null otherwise.</summary>
+    public ChatBox? Chat => _chat;
+
+    /// <summary>Shows the chat line (online) with what sends a line, or removes it (null).</summary>
+    public void SetChat(Action<string>? send)
+    {
+        if (_chat != null)
+        {
+            Controls.Remove(_chat);
+            _chat.Dispose();
+            _chat = null;
+        }
+        if (send == null) return;
+        _chat = new ChatBox(send) { Dock = DockStyle.Bottom };
+        Controls.Add(_chat);
+        _chat.SendToBack();   // docks first: the list fills what is left above it
+        _bar.SendToBack();
+    }
     public int RowCountForSmoke => _list.VirtualListSize;
 
     // ---------- game wiring ----------

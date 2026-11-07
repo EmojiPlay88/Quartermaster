@@ -14,9 +14,14 @@ public sealed class HotSeat
     private GameSession? _hooked;
     private bool _wasSolo = true;
 
+    private readonly PhaseController _phases;
+    private HistoryController? _history;
+    private bool _detached;
+
     public HotSeat(ModuleSession s, PhaseController phases)
     {
         _s = s;
+        _phases = phases;
         phases.PhaseBoundary += CheckHandover;
         s.GameReplaced += OnGameReplaced;
         s.RulesApplied += OnRulesApplied;
@@ -42,7 +47,29 @@ public sealed class HotSeat
     public event Action? CurrentChanged;
 
     /// <summary>Also raise <see cref="HandoverRequired"/> after an undo, redo or step back.</summary>
-    public void Watch(HistoryController history) => history.Rewound += OnRewound;
+    public void Watch(HistoryController history)
+    {
+        if (_detached) return;
+        _history = history;
+        history.Rewound += OnRewound;
+    }
+
+    /// <summary>
+    /// Stops following the game for good (an online session owns the view instead, spec 8a): every subscription is dropped, so nothing
+    /// here changes <see cref="ModuleSession.ViewSides"/> or raises a handover again. The view is left as it is.
+    /// </summary>
+    public void Detach()
+    {
+        if (_detached) return;
+        _detached = true;
+        _phases.PhaseBoundary -= CheckHandover;
+        _s.GameReplaced -= OnGameReplaced;
+        _s.RulesApplied -= OnRulesApplied;
+        if (_history != null) _history.Rewound -= OnRewound;
+        if (_hooked != null) { _hooked.Changed -= OnCommand; _hooked.Rewound -= OnGameRewound; }
+        _hooked = null;
+        Pending = null;
+    }
 
     /// <summary>The player who must take over now, else null (solo; same player still on; no phase side to hand to).</summary>
     public PlayerDef? HandoverDue()

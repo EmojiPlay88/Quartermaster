@@ -287,6 +287,60 @@ public class HostSessionTests : IDisposable
     }
 
     [Fact]
+    public void AssignSides_GivesFreeSidesToAGuest_WhoGetsItsView()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        var w = JoinAs(r, bob, "Bob");
+        Assert.Empty(bob.Of<Snapshot>());
+        Assert.Null(r.H.AssignSides(w.PlayerId, new[] { "green" }));
+        Assert.Equal(new[] { "green" }, r.H.Seats.ByPlayer(w.PlayerId)!.Sides);
+        Assert.Single(bob.Of<Snapshot>());                                    // the view comes at once
+        Assert.Equal(new[] { "Blue" }, r.Relay.Listings.Last().FreeSides);
+        Assert.Equal(new[] { r.H.Seats.Host.PlayerId, w.PlayerId }, r.S.Game!.State.Players.Select(p => p.Id));
+        Assert.DoesNotContain(SecretStock, AllReceivedText(bob));             // green never sees red's private supply
+    }
+
+    [Fact]
+    public void AssignSides_RefusesSidesHeldByOthersAndUnknownSides()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        var w = JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        Assert.Equal(HostSession.SideHeldText, r.H.AssignSides(w.PlayerId, new[] { "red" }));            // the host's
+        Assert.Equal(HostSession.SideHeldText, r.H.AssignSides(r.H.Seats.Host.PlayerId, new[] { "blue" })); // Bob's
+        Assert.NotNull(r.H.AssignSides(w.PlayerId, new[] { "purple" }));
+        Assert.NotNull(r.H.AssignSides(w.PlayerId, Array.Empty<string>()));
+        Assert.Equal(HostSession.NoSuchSeatText, r.H.AssignSides("nobody", new[] { "green" }));
+        Assert.Equal(new[] { "blue" }, r.H.Seats.ByPlayer(w.PlayerId)!.Sides);
+        Assert.Equal(new[] { "red" }, r.H.Seats.Host.Sides);
+    }
+
+    [Fact]
+    public void AssignSides_HostTakesAFreeSide_ViewFollows()
+    {
+        var r = Open();
+        Assert.Null(r.H.AssignSides(r.H.Seats.Host.PlayerId, new[] { "red", "green" }));
+        Assert.True(r.S.ViewSides!.SetEquals(new[] { "red", "green" }));
+        Assert.Equal(new[] { "Blue" }, r.Relay.Listings.Last().FreeSides);
+    }
+
+    [Fact]
+    public void EndGame_TellsEveryConnectedGuest()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        var cara = r.Relay.Guest("m2");
+        JoinAs(r, cara, "Cara");
+        r.H.EndGame();
+        Assert.Equal(HostSession.HostEndedText, bob.Of<Kicked>().Last().Reason);
+        Assert.Equal(HostSession.HostEndedText, cara.Of<Kicked>().Last().Reason);
+    }
+
+    [Fact]
     public void HostingSavedGame_HostKeepsOwnSides_OthersBecomeOpenSeats()
     {
         var r = Open(new[] { new PlayerDef("p7", "Old Bob", new[] { "blue", "green" }), Alice });

@@ -92,6 +92,7 @@ sealed partial class MainForm : Form
         RegisterCommands();
         InitLos();
         InitHotSeat();
+        InitOnline();
         _cmdItems["view.log"] = _viewLog;
         BuildMenu();
         BuildToolbar();
@@ -110,6 +111,7 @@ sealed partial class MainForm : Form
         Controls.Add(_leftSplit);
         Controls.Add(_status);
         Controls.Add(_toolbar);
+        Controls.Add(_onlineBanner);
         Controls.Add(_alertBar);
         Controls.Add(_strip); // the phase tracker sits directly under the toolbar
         Controls.Add(_menu);
@@ -202,20 +204,26 @@ sealed partial class MainForm : Form
     void BuildMenu()
     {
         var file = new ToolStripMenuItem("&File");
-        Item(file.DropDownItems, "&Open Module...", OpenModuleDialog, "file.openModule");
+        _guestBlocked.Add(Item(file.DropDownItems, "&Open Module...", OpenModuleDialog, "file.openModule"));
         file.DropDownItems.Add(new ToolStripSeparator());
-        Item(file.DropDownItems, "&New Game", NewGame, "file.newGame", needsModule: true);
-        Item(file.DropDownItems, "Load &Setup...", LoadSetupDialog, needsModule: true);
-        Item(file.DropDownItems, "Open &Game...", OpenGameDialog, "file.openGame", needsModule: true);
-        Item(file.DropDownItems, "Open Auto&save...", OpenAutosaveDialog, needsModule: true);
+        _guestBlocked.Add(Item(file.DropDownItems, "&New Game", NewGame, "file.newGame", needsModule: true));
+        _guestBlocked.Add(Item(file.DropDownItems, "Load &Setup...", LoadSetupDialog, needsModule: true));
+        _guestBlocked.Add(Item(file.DropDownItems, "Open &Game...", OpenGameDialog, "file.openGame", needsModule: true));
+        _guestBlocked.Add(Item(file.DropDownItems, "Open Auto&save...", OpenAutosaveDialog, needsModule: true));
         file.DropDownItems.Add(new ToolStripSeparator());
-        Item(file.DropDownItems, "&Save Game", () => SaveGame(false), "file.saveGame", needsGame: true);
-        Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), "file.saveGameAs", needsGame: true);
+        _needsSave.Add(Item(file.DropDownItems, "&Save Game", () => SaveGame(false), "file.saveGame", needsGame: true));
+        _needsSave.Add(Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), "file.saveGameAs", needsGame: true));
+        _exportViewer = Item(file.DropDownItems, "&Export Viewer Copy…", ExportViewerCopy);
+        _exportViewer.Visible = false;
         file.DropDownItems.Add(new ToolStripSeparator());
-        Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, needsModule: true);
-        Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, needsModule: true);
-        _needsRules.Add(Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false)));
-        _needsRules.Add(Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true)));
+        _guestBlocked.Add(Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, needsModule: true));
+        _guestBlocked.Add(Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, needsModule: true));
+        var saveRules = Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false));
+        var saveRulesAs = Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true));
+        _needsRules.Add(saveRules);
+        _needsRules.Add(saveRulesAs);
+        _guestBlocked.Add(saveRules);
+        _guestBlocked.Add(saveRulesAs);
         file.DropDownItems.Add(new ToolStripSeparator());
         Item(file.DropDownItems, "&Back to launcher", BackToLauncher).Visible = Program.LauncherHook != null;
         Item(file.DropDownItems, "E&xit", Close);
@@ -258,17 +266,17 @@ sealed partial class MainForm : Form
         Item(help.DropDownItems, "Interface &Tour", ShowTour, null, needsGame: true);
         Item(help.DropDownItems, "&About", () => Info("Quartermaster\nA VASSAL module reader and engine.", "About Quartermaster"));
 
-        _menu.Items.AddRange(new ToolStripItem[] { file, editMenu, view, tools, window, help });
+        _menu.Items.AddRange(new ToolStripItem[] { file, editMenu, BuildGameMenu(), view, tools, window, help });
         _menu.MdiWindowListItem = window;
     }
 
     void BuildToolbar()
     {
-        Tool("tool.openModule", "Open Module", OpenModuleDialog);
-        Tool("tool.newGame", "New Game", NewGame, needsModule: true);
-        Tool("tool.loadSetup", "Load Setup", LoadSetupDialog, needsModule: true);
-        Tool("tool.openGame", "Open Game", OpenGameDialog, needsModule: true);
-        Tool("tool.saveGame", "Save Game", () => SaveGame(false), needsGame: true);
+        _guestBlocked.Add(Tool("tool.openModule", "Open Module", OpenModuleDialog));
+        _guestBlocked.Add(Tool("tool.newGame", "New Game", NewGame, needsModule: true));
+        _guestBlocked.Add(Tool("tool.loadSetup", "Load Setup", LoadSetupDialog, needsModule: true));
+        _guestBlocked.Add(Tool("tool.openGame", "Open Game", OpenGameDialog, needsModule: true));
+        _needsSave.Add(Tool("tool.saveGame", "Save Game", () => SaveGame(false), needsGame: true));
         _toolbar.Items.Add(new ToolStripSeparator());
         Tool("tool.diagnostics", "Diagnostics", ShowDiagnostics, needsModule: true);
         Tool("tool.notes", "Notes", ShowNotes, needsGame: true);
@@ -292,7 +300,7 @@ sealed partial class MainForm : Form
         {
             if (_problemCount > 0) ShowDiagnostics();
         };
-        _status.Items.AddRange(new ToolStripItem[] { _sbModule, _sbMessage, _sbTiling, _sbPlayer, _dice!.TurnLabel, _sbLocation, _sbZoom });
+        _status.Items.AddRange(new ToolStripItem[] { _sbModule, _sbMessage, _sbTiling, _sbOnline, _sbPlayer, _dice!.TurnLabel, _sbLocation, _sbZoom });
     }
 
     // ---------- public hooks for map windows (Task 12) ----------
@@ -339,6 +347,7 @@ sealed partial class MainForm : Form
     bool ConfirmDiscard()
     {
         FlushNotes(); // pending note text becomes a command first, so the dirty check below counts it
+        if (_session?.IsGuest == true) return true;   // a guest's game is the host's: nothing here to save or lose
         if (!_dirty || Program.Smoke) return true;
         return MessageBox.Show(this, "The current game has unsaved changes. Discard them?", "Quartermaster",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
@@ -353,6 +362,7 @@ sealed partial class MainForm : Form
         UpdatePhaseUi();
         RefreshHistoryUi();
         UpdatePlayerButton();
+        ApplyGuestLimits();
     }
 
     void UpdateTitle()
@@ -365,7 +375,8 @@ sealed partial class MainForm : Form
             {
                 if (_savePath != null) t += " — " + Path.GetFileNameWithoutExtension(_savePath);
                 else if (_recoveredAutosave) t += " — (recovered autosave)";
-                if (_dirty) t += "*";
+                if (_dirty && _session.CanSave) t += "*";   // a guest or a viewer copy has nothing to save
+                if (_session.IsGuest) t += " — online guest";
             }
             if (_session.Rules is { } r) t += $" — rules: {r.Name}{(_session.RulesDirty ? "*" : "")}";
         }
@@ -462,6 +473,18 @@ sealed partial class MainForm : Form
             case LaunchKind.OpenSave or LaunchKind.Continue when !string.IsNullOrEmpty(launch.SavePath):
                 LoadSavedGame(s, launch.SavePath);
                 break;
+            case LaunchKind.HostOnline when launch.Online is { } host:
+                if (!string.IsNullOrEmpty(launch.SavePath)) LoadSavedGame(s, launch.SavePath);
+                else
+                {
+                    var diff = launch.NewGame?.Difficulty ?? _settings.Current.LastDifficulty;
+                    if (launch.NewGame?.Setup is { } hostSetup) s.LoadSetup(hostSetup, diff); else s.StartNewGame(diff);
+                }
+                StartOnline(() => BeginHostingAsync(s, host), guest: false);
+                break;
+            case LaunchKind.JoinOnline when launch.Online is { } guest:
+                StartOnline(() => BeginGuestAsync(s, guest), guest: true);   // no game of our own: the host's snapshot becomes the game
+                break;
             default:
                 ChooseAndStart(s, preselectNew: false);
                 break;
@@ -539,6 +562,7 @@ sealed partial class MainForm : Form
 
     void CloseSession()
     {
+        EndOnline(notifyGuests: true);
         _tour?.Close();
         _wm.EndModule(); // layout is written before the windows go away
         _logDock.Destroy();
@@ -590,6 +614,7 @@ sealed partial class MainForm : Form
         UpdateUi();
         UpdateTitle();
         ReconcilePhases();
+        UpdateOnlineUi();
     }
 
     // Log.Added can fire from any thread, and an exception here would propagate into the logger.
@@ -708,8 +733,8 @@ sealed partial class MainForm : Form
     void OnViewChanged()
     {
         if (IsDisposed || !IsHandleCreated) return;
-        if (InvokeRequired) BeginInvoke(() => { if (!IsDisposed) { Guard(_tree.RefreshVisibility); UpdatePlayerButton(); } });
-        else { Guard(_tree.RefreshVisibility); UpdatePlayerButton(); }
+        if (InvokeRequired) BeginInvoke(() => { if (!IsDisposed) { Guard(_tree.RefreshVisibility); UpdatePlayerButton(); if (IsOnline) UpdateOnlineUi(); } });
+        else { Guard(_tree.RefreshVisibility); UpdatePlayerButton(); if (IsOnline) UpdateOnlineUi(); }
     }
 
     // ---------- rules packs ----------

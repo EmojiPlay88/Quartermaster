@@ -69,6 +69,12 @@ public sealed record Settings
     /// <summary>Per module SHA-256, recently opened or saved game files, newest first (max 10).</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>> RecentSaves { get; init; } = NoRecent;
 
+    // Online
+    /// <summary>The Online lobby's relay address as typed (host, host:port or wss://…); null = never set.</summary>
+    public string? RelayAddress { get; init; }
+    /// <summary>The name last used to host or join an online game.</summary>
+    public string? PlayerName { get; init; }
+
     public bool IsToolbarVisible(string id) => !ToolbarVisible.TryGetValue(id, out var v) || v;
 
     /// <summary>Selection colour as RGB; falls back to the default gold when <see cref="HighlightColor"/> is malformed.</summary>

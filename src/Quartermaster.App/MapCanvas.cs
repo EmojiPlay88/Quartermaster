@@ -411,7 +411,10 @@ sealed partial class MapCanvas : SKControl
         var hit = PieceAt(e.Location);
         if (hit == null || !st.Pieces.TryGetValue(hit, out var p) || p.StackId == null || !st.Stacks.TryGetValue(p.StackId, out var stack)) return;
         var game = _s.Game;
-        Guard(() => game?.Execute(new SetStackExpanded(stack.Id, !stack.Expanded)));
+        var toggle = new SetStackExpanded(stack.Id, !stack.Expanded);
+        // An online guest's stack expansion is its own view: the remote port keeps it across the host's snapshots.
+        if (Actions?.Invoke() is { IsRemote: true } port) Guard(() => port.PieceCommand(toggle));
+        else Guard(() => game?.Execute(toggle));
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)

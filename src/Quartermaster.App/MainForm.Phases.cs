@@ -22,7 +22,7 @@ sealed partial class MainForm
     readonly ToolStripMenuItem _viewPhases = new("&Phase panel");
     PhaseDock? _phaseDock;
     PhaseController? _phases;
-    LocalActions? _actions;
+    ActionPortSwitch? _actions;
     PhaseWatcher? _stripWatch;
 
     void BuildRightStack()
@@ -64,13 +64,15 @@ sealed partial class MainForm
     void CreatePhases(ModuleSession session)
     {
         var c = new PhaseController(session, (cmd, st) => CommandLog.Prepare(cmd, st, session));
+        c.IsOwnerThread = () => !InvokeRequired;   // game changes run on this window's thread (online events are marshalled here)
         c.PhaseBoundary += OnPhaseBoundary;
         c.RunsQueued += OnRunsQueued;
         c.DifficultyChanged += OnDifficultyChanged;
         _phases = c;
         _history = new HistoryController(session, c, (cmd, st) => CommandLog.Prepare(cmd, st, session));
         _history.Rewound += OnHistoryRewound;
-        _actions = new LocalActions(session, c, _history);
+        _localActions = new LocalActions(session, c, _history);
+        _actions = new ActionPortSwitch(_localActions);   // an online guest swaps in RemoteActions behind it
         CreateHotSeat(session, c, _history);
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);
         _phaseDock!.Create(new PhasePanel(session, c, _actions, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
@@ -90,6 +92,7 @@ sealed partial class MainForm
         if (_history != null) _history.Rewound -= OnHistoryRewound;
         _history = null;
         _actions = null;
+        _localActions = null;
         RefreshHistoryUi();
         _strip.Visible = false;
         DestroyAlerts();
@@ -107,6 +110,7 @@ sealed partial class MainForm
         Controls.SetChildIndex(_toolbar, Controls.Count - 2);
         Controls.SetChildIndex(_alertBar, Controls.Count - 3);
         Controls.SetChildIndex(_strip, Controls.Count - 4);
+        Controls.SetChildIndex(_onlineBanner, Controls.Count - 5);
     }
 
     /// <summary>Shows the strip while a game and a rules pack exist; shows the dock only when the pack has phases.</summary>
@@ -123,7 +127,7 @@ sealed partial class MainForm
     /// <summary>After a load or rules change: moves a game whose phase vanished to the phase now at that place and says so.</summary>
     void ReconcilePhases()
     {
-        if (_phases == null || _session?.Game == null) return;
+        if (_phases == null || _session?.Game == null || _session.IsGuest) return;   // a guest's snapshot is the host's business
         try
         {
             if (_phases.Reconcile() is { } notice) SetStatus(notice);

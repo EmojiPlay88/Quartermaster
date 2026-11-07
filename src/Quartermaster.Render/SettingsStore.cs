@@ -141,6 +141,8 @@ public sealed class SettingsStore(string root)
             ShortcutOverrides = r.Map<string>("ShortcutOverrides", (JsonNode? n, out string s) => { s = ""; return n is JsonValue v && v.TryGetValue(out s!) && s != null; }),
             LeftSplitterDistance = r.Double("LeftSplitterDistance", d.LeftSplitterDistance, 0.2, 0.8),
             LastModulePath = r.NullableStr("LastModulePath"),
+            RelayAddress = r.NullableStr("RelayAddress") is { } relay && relay.Length <= 512 ? relay : null,
+            PlayerName = r.NullableStr("PlayerName") is { } player && player.Length <= 200 ? player : null,
             Modules = r.List<ModuleEntry>("Modules", ReadModule) is { Count: > 0 } mods ? mods : d.Modules,
             RecentSaves = r.Map<IReadOnlyList<string>>("RecentSaves", (JsonNode? n, out IReadOnlyList<string> l) =>
             {
@@ -380,6 +382,8 @@ public sealed class SettingsStore(string root)
         ["ShortcutOverrides"] = new JsonObject(s.ShortcutOverrides.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)JsonValue.Create(p.Value)))),
         ["LeftSplitterDistance"] = s.LeftSplitterDistance,
         ["LastModulePath"] = s.LastModulePath,
+        ["RelayAddress"] = s.RelayAddress,
+        ["PlayerName"] = s.PlayerName,
         ["Modules"] = new JsonArray(s.Modules.Select(m => (JsonNode?)ModuleJson(m)).ToArray()),
         ["RecentSaves"] = new JsonObject(s.RecentSaves.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)new JsonArray(p.Value.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray())))),
     };

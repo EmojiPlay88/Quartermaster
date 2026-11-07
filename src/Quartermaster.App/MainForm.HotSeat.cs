@@ -245,6 +245,12 @@ sealed partial class MainForm
     {
         if (_session?.Game is not { } g) return;
         if (PlayersEditor.Same(g.State.Players, players)) return;
+        if (IsOnline || _session.IsGuest)
+        {
+            // Spec 8a.10: during a live session only the host's Players dialog changes who holds what.
+            ShowError(_session.IsGuest ? IntentExecutor.HostOnlyText : "While the game is online, change seats with Game → Players….");
+            return;
+        }
         if (players.Count >= 2)
         {
             var problem = _session.Rules is { } pack ? Players.Validate(players, pack) : "Open a rules pack to set up players.";

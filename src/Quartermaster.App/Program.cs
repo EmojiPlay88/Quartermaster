@@ -4,9 +4,9 @@ using Quartermaster.Render;
 
 namespace Quartermaster.App;
 
-/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--smoke-launcher] [--screenshot-launcher &lt;png&gt;] [--screenshot-offline &lt;png&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;] [--workbench-tab tables|formulas|properties|phases] [--gm] [--screenshot-palette &lt;png&gt;] [--screenshot-log &lt;png&gt;] [--screenshot-overview &lt;png&gt;] [--screenshot-export &lt;png&gt;] [--screenshot-inventory &lt;png&gt;] [--screenshot-notes &lt;png&gt;] [--screenshot-settings &lt;png&gt;] [--difficulty hardcore|semiauto|fullyauto] [--smoke-phases] [--smoke-undo] [--screenshot-stepback &lt;png&gt;] [--screenshot-breakdown &lt;png&gt;] [--screenshot-outliner &lt;png&gt;] [--screenshot-alerts &lt;png&gt;] [--screenshot-tour &lt;png&gt;] [--screenshot-handover &lt;png&gt;] [--screenshot-playerview &lt;png&gt;] [--screenshot-phases &lt;png&gt;] [--screenshot-nextphase &lt;png&gt;] [--screenshot-cheatsheet &lt;png&gt;] [--settings-tab general|display|map|dice|toolbar|keyboard|folders].</summary>
+/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--smoke-launcher] [--screenshot-launcher &lt;png&gt;] [--screenshot-offline &lt;png&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;] [--workbench-tab tables|formulas|properties|phases] [--gm] [--screenshot-palette &lt;png&gt;] [--screenshot-log &lt;png&gt;] [--screenshot-overview &lt;png&gt;] [--screenshot-export &lt;png&gt;] [--screenshot-inventory &lt;png&gt;] [--screenshot-notes &lt;png&gt;] [--screenshot-settings &lt;png&gt;] [--difficulty hardcore|semiauto|fullyauto] [--smoke-phases] [--smoke-undo] [--screenshot-stepback &lt;png&gt;] [--screenshot-breakdown &lt;png&gt;] [--screenshot-outliner &lt;png&gt;] [--screenshot-alerts &lt;png&gt;] [--screenshot-tour &lt;png&gt;] [--screenshot-handover &lt;png&gt;] [--screenshot-playerview &lt;png&gt;] [--screenshot-phases &lt;png&gt;] [--screenshot-nextphase &lt;png&gt;] [--screenshot-cheatsheet &lt;png&gt;] [--smoke-online &lt;seconds&gt;] [--screenshot-online &lt;png&gt;] [--settings-tab general|display|map|dice|toolbar|keyboard|folders].</summary>
 sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null, bool FloatMainMap = false, string? ScreenshotFloat = null,
-    string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null, string? ScreenshotWorkbench = null, string? WorkbenchTab = null, string? ScreenshotLog = null, string? ScreenshotSettings = null, string? SettingsTab = null, bool GameMaster = false, string? ScreenshotPalette = null, string? ScreenshotOverview = null, string? ScreenshotExport = null, string? ScreenshotInventory = null, string? ScreenshotNotes = null, Difficulty? Difficulty = null, bool SmokePhases = false, string? ScreenshotPhases = null, string? ScreenshotNextPhase = null, string? ScreenshotCheatSheet = null, string? ScreenshotBatch = null, string? ScreenshotSetup = null, bool SmokeUndo = false, string? ScreenshotStepBack = null, string? ScreenshotBreakdown = null, string? ScreenshotOutliner = null, string? ScreenshotAlerts = null, string? ScreenshotTour = null, string? ScreenshotHandover = null, string? ScreenshotPlayerView = null, string? ScreenshotLauncher = null, string? ScreenshotOffline = null, bool SmokeLauncher = false)
+    string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null, string? ScreenshotWorkbench = null, string? WorkbenchTab = null, string? ScreenshotLog = null, string? ScreenshotSettings = null, string? SettingsTab = null, bool GameMaster = false, string? ScreenshotPalette = null, string? ScreenshotOverview = null, string? ScreenshotExport = null, string? ScreenshotInventory = null, string? ScreenshotNotes = null, Difficulty? Difficulty = null, bool SmokePhases = false, string? ScreenshotPhases = null, string? ScreenshotNextPhase = null, string? ScreenshotCheatSheet = null, string? ScreenshotBatch = null, string? ScreenshotSetup = null, bool SmokeUndo = false, string? ScreenshotStepBack = null, string? ScreenshotBreakdown = null, string? ScreenshotOutliner = null, string? ScreenshotAlerts = null, string? ScreenshotTour = null, string? ScreenshotHandover = null, string? ScreenshotPlayerView = null, string? ScreenshotLauncher = null, string? ScreenshotOffline = null, bool SmokeLauncher = false, int? SmokeOnline = null, string? ScreenshotOnline = null)
 {
     public bool Smoke => SmokeSeconds != null;
 
@@ -20,6 +20,8 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
         var smokePhases = false;
         var smokeUndo = false;
         var smokeLauncher = false;
+        int? smokeOnline = null;
+        string? shotOnline = null;
         var gm = false;
         var floatMain = false;
         for (var i = 0; i < args.Length; i++)
@@ -79,6 +81,14 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                 case "--smoke-phases": smokePhases = true; break;
                 case "--smoke-undo": smokeUndo = true; break;
                 case "--smoke-launcher": smokeLauncher = true; break;
+                case "--smoke-online":
+                    if (i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var so)) { smokeOnline = so; i++; }
+                    else warn("--smoke-online needs a number of seconds; ignored.");
+                    break;
+                case "--screenshot-online":
+                    if (i + 1 < args.Length) shotOnline = args[++i];
+                    else warn("--screenshot-online needs a file path; ignored.");
+                    break;
                 case "--screenshot-stepback":
                     if (i + 1 < args.Length) shotStepBack = args[++i];
                     else warn("--screenshot-stepback needs a file path; ignored.");
@@ -172,7 +182,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     break;
             }
         }
-        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat, rules, newRules, shotFormula, shotLedger, shotBench, benchTab, shotLog, shotSettings, settingsTab, gm, shotPalette, shotOverview, shotExport, shotInventory, shotNotes, difficulty, smokePhases, shotPhases, shotNext, shotCheat, shotBatch, shotSetup, smokeUndo, shotStepBack, shotBreakdown, shotOutliner, shotAlerts, shotTour, shotHandover, shotPlayerView, shotLauncher, shotOffline, smokeLauncher);
+        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat, rules, newRules, shotFormula, shotLedger, shotBench, benchTab, shotLog, shotSettings, settingsTab, gm, shotPalette, shotOverview, shotExport, shotInventory, shotNotes, difficulty, smokePhases, shotPhases, shotNext, shotCheat, shotBatch, shotSetup, smokeUndo, shotStepBack, shotBreakdown, shotOutliner, shotAlerts, shotTour, shotHandover, shotPlayerView, shotLauncher, shotOffline, smokeLauncher, smokeOnline, shotOnline);
     }
 
     static Difficulty? ParseDifficulty(string s) => s.ToLowerInvariant() switch
@@ -266,6 +276,11 @@ static class Program
                 if (smokeModule == null || !opts.Smoke) { AppLog("--smoke-launcher needs a module path and --smoke N."); return 1; }
                 opts = opts with { ModulePath = null };
                 LauncherHook = LauncherShots.SmokeHook(smokeModule);
+            }
+            if (opts.SmokeOnline != null || opts.ScreenshotOnline != null)
+            {
+                OnlineSmoke.Run(opts);
+                return ExitCode;
             }
             if (opts.ScreenshotLauncher != null || opts.ScreenshotOffline != null)
             {

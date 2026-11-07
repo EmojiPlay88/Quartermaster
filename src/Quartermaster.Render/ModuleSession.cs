@@ -327,12 +327,24 @@ public sealed class ModuleSession : IDisposable
 
     // ---- rules ----
 
-    public void NewRules(string name) =>
+    public void NewRules(string name)
+    {
+        RequireNoGuestRules();
         Commit(RulesPackIo.CreateEmpty(name, Archive.Sha256), null, dirty: true);
+    }
+
+    /// <summary>An online guest plays with the host's pack: it is read-only here (nothing edits, replaces or saves it).</summary>
+    public const string GuestRulesText = "The rules pack belongs to the host's game and is read-only here.";
+
+    private void RequireNoGuestRules()
+    {
+        if (IsGuest) throw new InvalidOperationException(GuestRulesText);
+    }
 
     /// <summary>Loads a pack. Throws (e.g. InvalidDataException) without changing the session when it cannot be read.</summary>
     public void OpenRules(string path)
     {
+        RequireNoGuestRules();
         var pack = RulesPackIo.Load(path);
         Commit(pack, path, dirty: false);
         if (!string.Equals(pack.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -342,6 +354,7 @@ public sealed class ModuleSession : IDisposable
 
     public void SaveRules(string? path = null)
     {
+        RequireNoGuestRules();
         var pack = Rules ?? throw new InvalidOperationException("There are no rules to save.");
         var target = path ?? RulesPath ?? throw new InvalidOperationException("Choose where to save the rules pack.");
         RulesPackIo.Save(pack, target);
@@ -358,6 +371,7 @@ public sealed class ModuleSession : IDisposable
     /// <summary>Applies the edit first; nothing changes (and no event fires) if it throws.</summary>
     public void UpdateRules(Func<RulesPack, RulesPack> edit)
     {
+        RequireNoGuestRules();
         var current = Rules ?? throw new InvalidOperationException("There are no rules to edit.");
         var edited = edit(current);
         var next = edited with

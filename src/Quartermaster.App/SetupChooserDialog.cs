@@ -32,7 +32,9 @@ sealed class SetupChooserDialog : Form
     readonly RulesPack? _pack;
     readonly TextBox _lobbyName = new() { Width = 200, MaxLength = NewGameRules.MaxLobbyName };
     readonly TextBox _password = new() { Width = 200, UseSystemPasswordChar = true };
-    readonly Panel _lobbyPanel = new() { Dock = DockStyle.Bottom, Height = 52, Visible = false };
+    readonly Panel _lobbyPanel = new() { Dock = DockStyle.Bottom, Height = 72, Visible = false };
+    readonly Label _openWarning = new() { Text = OnlineLobbyModel.OpenLobbyWarning, AutoSize = true, ForeColor = Color.DarkGoldenrod };
+    readonly HostSidesPanel? _hostSides;
     readonly Difficulty _difficulty;
 
     /// <summary>The choice made in the dialog (valid after OK). The caller writes <see cref="NewGameRequest.Difficulty"/> back to <see cref="Settings.LastDifficulty"/>.</summary>
@@ -41,13 +43,16 @@ sealed class SetupChooserDialog : Form
     /// <param name="preselect">Selects this setup (the one double-clicked in the window tree).</param>
     /// <param name="preselectNew">Selects "New game from module" instead of the first setup.</param>
     /// <param name="pack">The rules pack whose sides the Players page offers (null: one player plays everything).</param>
-    public SetupChooserDialog(ModuleModel model, GameMode mode, Difficulty defaultDifficulty = Difficulty.SemiAuto, RulesPack? pack = null, bool preselectNew = false, SetupDef? preselect = null)
+    /// <param name="hostName">Online: the name the host plays under (preset in the Players page).</param>
+    /// <param name="lobbyName">Online: the preset lobby name.</param>
+    public SetupChooserDialog(ModuleModel model, GameMode mode, Difficulty defaultDifficulty = Difficulty.SemiAuto, RulesPack? pack = null, bool preselectNew = false, SetupDef? preselect = null,
+        string? hostName = null, string? lobbyName = null)
     {
         _mode = mode;
         _pack = pack;
         _players = new PlayersEditor(pack, Array.Empty<PlayerDef>()) { Dock = DockStyle.Fill };
         _difficulty = defaultDifficulty;
-        Text = "New game";
+        Text = mode == GameMode.Online ? "Create lobby" : "New game";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = MaximizeBox = ShowInTaskbar = false;
@@ -89,11 +94,22 @@ sealed class SetupChooserDialog : Form
         _lobbyName.Left = 92; _lobbyName.Top = 0; _lobbyPanel.Controls.Add(_lobbyName);
         _lobbyPanel.Controls.Add(new Label { Text = "Password:", Left = 8, Top = 28, Width = 80, AutoSize = false });
         _password.Left = 92; _password.Top = 24; _lobbyPanel.Controls.Add(_password);
+        _openWarning.Left = 92; _openWarning.Top = 50; _lobbyPanel.Controls.Add(_openWarning);
+        _password.TextChanged += (_, _) => _openWarning.Visible = _password.Text.Length == 0;
         _lobbyPanel.Visible = mode == GameMode.Online;
         _gamePage.Controls.Add(_list);
         _gamePage.Controls.Add(group);
         _gamePage.Controls.Add(_lobbyPanel);
-        _playersPage.Controls.Add(_players);
+        if (mode == GameMode.Online)
+        {
+            // Online: the host's own sides; every other side is an open seat (launcher spec 3.4).
+            _lobbyName.Text = lobbyName ?? "";
+            _hostSides = new HostSidesPanel(pack, hostName ?? "") { Dock = DockStyle.Fill };
+            _playersPage.Text = "You and the open seats";
+            _playersPage.Controls.Add(_hostSides);
+            ClientSize = new Size(420, 410);
+        }
+        else _playersPage.Controls.Add(_players);
         Controls.Add(_gamePage);
         Controls.Add(_playersPage);
         Controls.Add(buttons);
@@ -105,7 +121,7 @@ sealed class SetupChooserDialog : Form
         };
         FormClosing += (_, e) =>
         {
-            if (DialogResult == DialogResult.OK && _players.Problem is { } problem)
+            if (DialogResult == DialogResult.OK && (_hostSides != null ? _hostSides.Problem : _players.Problem) is { } problem)
             {
                 ShowPlayersPage();
                 MessageBox.Show(this, problem, "Players", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -116,9 +132,10 @@ sealed class SetupChooserDialog : Form
             var diff = _difficulty;
             for (var i = 0; i < _radios.Length; i++) if (_radios[i].Checked) diff = Modes[i].D;
             var online = _mode == GameMode.Online;
+            // Online, the one player is the host (its sides); the game itself starts solo and the seats follow from the lobby.
+            var players = _hostSides != null ? new[] { _hostSides.ToPlayer() } : _players.Result.Count >= 2 ? _players.Result : null;
             var req = new NewGameRequest(_mode, _list.SelectedIndex >= 0 ? _items[_list.SelectedIndex] : null, diff,
-                _players.Result.Count >= 2 ? _players.Result : null,
-                online ? _lobbyName.Text.Trim() : null, online ? _password.Text : null);
+                players, online ? _lobbyName.Text.Trim() : null, online ? _password.Text : null);
             if (NewGameRules.Validate(req, _pack) is { } bad)
             {
                 MessageBox.Show(this, bad, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -145,6 +162,9 @@ sealed class SetupChooserDialog : Form
         _nextPage.Visible = true;
         _back.Visible = false;
     }
+
+    /// <summary>Online: the host's name and sides page (null offline).</summary>
+    public HostSidesPanel? HostSidesForSmoke => _hostSides;
 
     /// <summary>Smoke: the Players page's editor.</summary>
     public PlayersEditor PlayersForSmoke => _players;
