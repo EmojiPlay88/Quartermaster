@@ -187,7 +187,7 @@ public class PhaseStateTests
         try
         {
             NativeSave.Write(path, sess);
-            Assert.Equal(4, NativeSave.FormatVersion);
+            Assert.Equal(5, NativeSave.FormatVersion);
             var back = NativeSave.Read(path);
             Assert.Equal(P(2, "a", 0, 2), back.State.Position);
             Assert.Equal(Difficulty.Hardcore, back.State.Difficulty);

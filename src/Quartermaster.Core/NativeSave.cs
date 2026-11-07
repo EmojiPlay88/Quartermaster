@@ -5,7 +5,7 @@ namespace Quartermaster.Core;
 /// <summary>Native .qsave format: JSON { format, moduleSha256, rulesSha256?, snapshot, log }.</summary>
 public static class NativeSave
 {
-    public const int FormatVersion = 4;
+    public const int FormatVersion = 5;
     const int MinFormat = 1;
 
     sealed class SaveFile
@@ -15,15 +15,23 @@ public static class NativeSave
         public string? RulesSha256 { get; set; }
         public GameState Snapshot { get; set; } = new();
         public List<GameCommand> Log { get; set; } = new();
+        public GameState? Genesis { get; set; }
+        public List<ActionMark>? Actions { get; set; }
+        public List<Checkpoint>? Checkpoints { get; set; }
     }
+
+    const string RebaseNotice = "Undo history in this save did not match the game; undo starts from here.";
 
     public static void Write(string path, GameSession s)
     {
         var file = new SaveFile
         {
             Format = FormatVersion, ModuleSha256 = s.ModuleSha256, RulesSha256 = s.RulesSha256, Snapshot = s.State, Log = s.Log.ToList(),
+            Genesis = s.Genesis, Actions = s.Actions.ToList(), Checkpoints = s.Checkpoints.ToList(),
         };
-        File.WriteAllText(path, JsonSerializer.Serialize(file, QuartermasterJson.Options));
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(file, QuartermasterJson.Options));
+        File.Move(tmp, path, overwrite: true);
     }
 
     private static void Validate(SaveFile f)
@@ -32,7 +40,13 @@ public static class NativeSave
         Need(f.Snapshot != null, "snapshot");
         Need(f.Log != null, "log");
         Need(f.ModuleSha256 != null, "module hash");
-        var snap = f.Snapshot!;
+        Need(f.Log!.All(c => c != null), "log entry");
+        ValidateState(f.Snapshot!);
+    }
+
+    private static void ValidateState(GameState snap)
+    {
+        static void Need(bool ok, string what) { if (!ok) throw new InvalidDataException("Malformed save file: " + what + " is missing."); }
         Need(snap.Pieces != null && snap.Stacks != null && snap.MapOrder != null, "snapshot content");
         foreach (var p in snap.Pieces!.Values)
             Need(p != null && p.TraitStates != null && p.Trail != null && p.TypeString != null && p.Id != null && p.MapId != null, "piece data");
@@ -42,7 +56,6 @@ public static class NativeSave
         Need(snap.DiceHistory!.All(e => e != null && e.Purpose != null && e.Results != null), "dice history");
         foreach (var st in snap.Stacks!.Values)
             Need(st != null && st.PieceIds != null && st.Id != null && st.MapId != null, "stack data");
-        Need(f.Log!.All(c => c != null), "log entry");
         Need(snap.Log != null && snap.Log.All(e => e != null && e.Kind != null && e.Text != null), "game log");
         snap.Notes ??= "";
         snap.Ticked ??= new();
@@ -69,6 +82,52 @@ public static class NativeSave
         Validate(f);
         var session = new GameSession(f.Snapshot, f.ModuleSha256) { RulesSha256 = f.RulesSha256 };
         session.RestoreLog(f.Log);
+        if (f.Format < 5 || f.Genesis == null)
+        {
+            session.Rebase();
+            session.RebasedOnLoad = true;
+            return session;
+        }
+        if (TryRestoreHistory(f, session)) return session;
+        session.Rebase();
+        session.RebasedOnLoad = true;
+        session.LoadNotice = RebaseNotice;
         return session;
+    }
+
+    /// <summary>Validates the format-5 history and checks that replaying it reproduces the snapshot.</summary>
+    static bool TryRestoreHistory(SaveFile f, GameSession session)
+    {
+        try
+        {
+            var genesis = f.Genesis!;
+            ValidateState(genesis);
+            int n = f.Log.Count;
+            var actions = f.Actions ?? new();
+            int prev = -1;
+            foreach (var a in actions)
+            {
+                if (a == null || a.Label == null || a.Start <= prev || a.Start >= n) return false;
+                prev = a.Start;
+            }
+            List<Checkpoint>? cps = f.Checkpoints;
+            if (cps != null)
+            {
+                if (cps.Count == 0 || cps[0] == null || cps[0].LogIndex != 0) return false;
+                int last = 0;
+                foreach (var c in cps)
+                {
+                    if (c == null || c.Label == null || c.LogIndex < last || c.LogIndex > n) return false;
+                    last = c.LogIndex;
+                }
+            }
+            var replay = genesis.DeepClone();
+            foreach (var c in f.Log) replay.Apply(c);
+            if (JsonSerializer.Serialize(replay, QuartermasterJson.Options) != JsonSerializer.Serialize(f.Snapshot, QuartermasterJson.Options))
+                return false;
+            session.RestoreHistory(genesis, actions, cps);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
     }
 }

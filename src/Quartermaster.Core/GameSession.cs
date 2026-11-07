@@ -262,7 +262,13 @@ public sealed class GameSession
 
     internal void RestoreLog(IEnumerable<GameCommand> log) => _log.AddRange(log);
 
-    internal void RestoreHistory(GameState genesis, IEnumerable<ActionMark> actions)
+    /// <summary>Set by <c>NativeSave.Read</c> when it rebased an inconsistent format-5 save.</summary>
+    public string? LoadNotice { get; internal set; }
+    /// <summary>True when <c>NativeSave.Read</c> rebased history (old format or inconsistent save).</summary>
+    public bool RebasedOnLoad { get; internal set; }
+
+    /// <summary>Restores genesis, actions and (already validated) checkpoints; null checkpoints keep just "game start".</summary>
+    internal void RestoreHistory(GameState genesis, IEnumerable<ActionMark> actions, IEnumerable<Checkpoint>? checkpoints = null)
     {
         Genesis = genesis;
         _actions.Clear();
@@ -270,5 +276,10 @@ public sealed class GameSession
         _redo.Clear();
         ResetCache();
         ResetCheckpoints();
+        if (checkpoints != null)
+        {
+            _checkpoints.Clear();
+            _checkpoints.AddRange(checkpoints);
+        }
     }
 }
