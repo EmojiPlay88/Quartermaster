@@ -17,6 +17,11 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
 - **Formula dialogs** show the formula itself with a text box in place of each variable. The result calculates as soon as every box is filled. You can type values in or pull them from tables and ledgers.
 - **Ledgers** track per-unit values (fuel, ammo, stores and so on) as spreadsheets, and every change is logged.
 
+**Rulebook search and scans (Rules Workbench)**
+- *Search:* the search box above the rulebook (or Ctrl+Shift+F) looks through every rulebook PDF in the module. Words match from the start, so "supp" finds "supply". Results are grouped by rulebook and show the page. When the text looks like a rule heading, the result says "Probably defined on page N". **Find in rulebook** jumps to the hit, and **Use as rule ref** fills in a rule reference from it. Rule references on tables, formulas and phases are clickable and open the rulebook at that page. A "Used on this page" list shows which tables, formulas and phases point at the page you are reading.
+- *Scans and OCR:* **Open scan…** opens a picture or scanned PDF, and **Scan this page** reads the page of the rulebook you are looking at. The Images list hides small images (icons, bullets) unless you ask for all of them. Drag a box around a table, press **Read text**, and the result appears as a grid beside the image. Digit clean-up fixes common misreads (an O in a number, an l for a 1). Single characters, such as die-roll keys, are read again separately, and those cells are tinted so you can check them. **Import into table…** sends the grid through the same Paste dialog as any other table, and **Copy text** puts it on the clipboard. OCR is not perfect: check the grid against the image before importing.
+- Everything runs on your PC and nothing is uploaded. OCR uses the Windows OCR engine, so it needs a Windows OCR language (Settings → Time & language → Language). Scans opened with **Open scan…** only last for the session, and a rule reference to one stores just the file name.
+
 **Turn sequencer and difficulty**
 - Phases, sides and repeating blocks come from the rules pack and are edited in the Rules Workbench.
 - A tracker strip shows the turn, stage, acting side and phase. The phase panel lists instructions, warnings and the decisions still open. Next Phase warns about open decisions but never blocks you.
@@ -127,7 +132,7 @@ Design documents and implementation plans are in [`docs/superpowers`](docs/super
 
 ## Roadmap
 
-- OCR for scanned rulebooks in the workbench.
+Nothing is planned beyond what is built; the next piece is whatever the user picks.
 
 ## License
 

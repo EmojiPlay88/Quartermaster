@@ -31,7 +31,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Core`: command-log game state and deterministic replay.
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
-- Tests: xUnit under `tests/`. All green: 1370 tests after 6c (1 Linux-only skip).
+- Tests: xUnit under `tests/`. All green: 1474 tests after piece 7 (1 skip).
 - Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. everything through piece 6a is pushed; push again only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
@@ -51,6 +51,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
 | 6a | Multiplayer base: players, rules-pack visibility, player view filter, hot-seat (below) | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6a-hotseat.md` |
 | 6b | Live online play: relay server (Docker), lobbies per module, host-authoritative sessions, guests get only their sides' view, chat, input masking, rejoin. Merged to master and pushed | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6b-online.md`, `docs/relay-setup.md` |
 | 6c | Turn files: `.qturn` (whole game at turn start + commands + hashes), Game → Send Turn…, File → Open Turn File…, step replay, optional encrypted mailbox on the relay with a poll and a "New turn waiting" alert. Merged to master and pushed | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6c-turn-files.md`, `docs/relay-setup.md` |
+| 7 | Rulebook search (PdfPig index, word-start matching, grouped results, rule-ref links, Used on this page) and scans/OCR (Windows.Media.Ocr: Open scan…, region read, grid, digit clean-up, single-character re-read, import via Paste dialog). Everything local. **On branch `piece7-search-ocr`, not yet merged to master** | `specs/2026-11-07-piece7-ocr-design.md`, `plans/2026-11-07-piece7-search-ocr.md` |
 | Launcher | VASSAL-style launcher: module list (Add/Remove, rules pack per module), Play offline (Continue, recent saves, New game…, Open saved game…), shared New game setup dialog, launcher <-> game window loop with File → Back to launcher; Online lobby opened by 6b. Smokes: `--screenshot-launcher`, `--screenshot-offline`, `--smoke-launcher <module>` (with `--smoke N`) | `specs/2026-11-07-launcher-design.md`, `plans/2026-11-07-launcher.md` |
 
 All rulings and deferred minors for every piece are in `docs/superpowers/piece1-followups.md`.
@@ -134,8 +135,8 @@ How the formula window behaves:
    2. The launcher is merged, pushed and user-tested.
    3. **Piece 6b (live online play) is built, merged to master and pushed**. It includes the relay server (`src/Quartermaster.Relay`, Docker, `docs/relay-setup.md`), lobbies, host-authoritative sessions, per-side views for guests, chat and formula input masking. An end-to-end test with two guests runs over an in-process relay. Hands-on test by the user is still to do; parked items are in `piece1-followups.md` (section "Piece 6b").
    4. **Piece 6c (turn files .qturn, step replay, encrypted relay mailbox, `Piece6cEndToEndTests`) is built and merged to master and pushed.** Parked items: `piece1-followups.md` (section "Piece 6c"). Plan: `plans/2026-11-07-piece6c-turn-files.md`.
-   5. Next: user hands-on test of 6b/6c, then **OCR for scanned rulebooks** (section 8.3).
-   After that, OCR for scanned rulebooks (section 8.3). Brainstorm, spec, plan, build, using the superpowers skills.
+   5. **Piece 7 (rulebook search and scans/OCR) is built on branch `piece7-search-ocr`, not yet merged to master.** Parked items: `piece1-followups.md` (section "Piece 7").
+   6. Next: the user hands-on tests 6b, 6c and 7 (search a rulebook, open a scan, read a table region, import it), then merges piece 7. After that there is no fixed next piece; do whatever the user picks.
 4. Residual piece-3 minors are listed at the end of `piece1-followups.md`.
 
 ## How the user likes to work

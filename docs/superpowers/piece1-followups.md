@@ -322,3 +322,13 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - Sending a turn catches write errors broadly except out of memory; a narrower list may be better.
 - The list of already-played turns is kept per game identity and can go stale while the game is open.
 - The replay bar height is not scaled for high-DPI screens.
+
+## Piece 7 (rulebook search and OCR): parked items
+
+- Dice-like text: the dice pattern should require a digit before the d; thin-space and similar space characters (U+2007, U+2008, U+00A0) are not all handled; forced column counts below N lack docs and a test; digit matching mixes `[0-9]` and `\d`.
+- A corrupt PDF that ends early is treated as a temporary failure, so it is parsed again on every index build. A non-seekable file over 512 MB is reported as missing. The temporary-failure path during parsing has no test. A hostile PDF that hangs the parser cannot be cancelled.
+- The image guard turns any argument error into "too large". A failed PNG save leaks a raw error. A corrupt image body gives a raw error that the app has to catch. The PDF render error wording is a catch-all.
+- Search panel: the index cancellation source is not disposed; a failure is logged even after cancel; the Search button could enable earlier; result links should be tab stops; Find in rulebook can use a stale selection; Ctrl+Shift+F with no pack open does nothing visible.
+- OCR grid: the "empty cell" message also shows for cells that are meant to be blank. A merged anchor-plus-digit cell stays empty with a message.
+- Scan cache pruning can race with a file check. The test `RelayClientTests.MemberId_Exposed_AndUpdatedOnRejoin` is flaky under heavy parallel load.
+- Small text is read natively first and again at 2x only when words look small or nothing was found, so it can cost two OCR passes. PdfPig is also referenced from the OCR tests (a deviation from the spec).
