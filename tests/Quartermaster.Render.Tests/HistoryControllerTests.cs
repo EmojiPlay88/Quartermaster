@@ -231,6 +231,50 @@ public class HistoryControllerTests : IDisposable
     }
 
     [Fact]
+    public void Redo_AfterUndoOfNewAction_KeepsOlderRelocation()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        c.Start();      // Weather
+        c.Advance();    // Supply
+        c.Advance();    // Movement
+        s.UpdateRules(p => p with { Phases = p.Phases.Where(x => x.Id != "ph-supply").ToList() });
+        h.Undo();       // relocation off the deleted Supply: the tail of this rewind
+        c.Advance();    // action B: real play on top of the relocation (now history)
+        var before = Json(s.Game!.State);
+        var relocations = s.Game.Log.Count(x => x is AdvancePhase { Reason: not null });
+        Assert.Equal(1, relocations);
+
+        h.Undo();       // B
+        Assert.Equal(relocations, s.Game.Log.Count(x => x is AdvancePhase { Reason: not null }));
+        h.Redo();
+
+        Assert.False(h.CanRedo);
+        Assert.Equal(before, Json(s.Game.State));
+    }
+
+    [Fact]
+    public void UndoThenStepBack_LineCountsPlainlyUndoneDice()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        c.Start();
+        for (var i = 0; i < 30 && s.Game!.State.Position!.Turn < 2; i++) c.Advance();   // action A rolls the turn-2 Weather die
+        var log = s.Game!.Log.ToList();
+        var marks = s.Game.Actions.ToList();
+        var supply1 = Row(h, "Supply", 1);
+        var aDice = log.Skip(marks[^1].Start).Count(x => x is RollDice);
+        Assert.True(aDice > 0);
+
+        h.Undo();       // plain undo of A: no line
+        Assert.DoesNotContain(s.Game.Log, x => x is SteppedBack);
+        h.StepBack(supply1);
+
+        var line = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+        var (actions, dice) = After(log, marks, supply1.LogIndex);
+        Assert.Equal(dice, line.DiceUndone);
+        Assert.Equal(actions, line.ActionsUndone);
+    }
+
+    [Fact]
     public void Undo_ThroughDeletedPhase_DoesNotLoop()
     {
         var (s, c, h) = Make(Difficulty.FullyAuto);

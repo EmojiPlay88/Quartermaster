@@ -17,6 +17,14 @@ public sealed class HistoryController
     private readonly PhaseController _phases;
     private readonly Func<GameCommand, GameState, GameCommand> _prepare;
 
+    // The tail the most recent rewind appended (its "Stepped back" line, re-seed and relocation). Only this tail is dropped by the
+    // next Undo / Redo / Step Back; it is forgotten as soon as anything else changes the game.
+    private GameSession? _tailGame;
+    private int _tailStart = -1;
+    private bool _tailHasLine;
+    private GameSession? _hooked;
+    private bool _busy;
+
     public HistoryController(ModuleSession s, PhaseController phases, Func<GameCommand, GameState, GameCommand> prepare)
     {
         _s = s;
@@ -24,43 +32,49 @@ public sealed class HistoryController
         _prepare = prepare;
         // Spec 7: a rules-pack change that reseeds / reconciles makes the undone actions unsafe to replay (a plain save does not).
         s.RulesApplied += () => _s.Game?.ClearRedo();
+        s.GameReplaced += Hook;
+        Hook();
     }
 
     /// <summary>Raised once after an Undo, Redo or Step Back finished (state rebuilt, re-seeded and reconciled).</summary>
     public event Action? Rewound;
 
-    public bool CanUndo => _s.Game?.CanUndo == true;
+    public bool CanUndo => _s.Game is { } g && LastAction(g) != null;
     public bool CanRedo => _s.Game?.CanRedo == true;
-    public string UndoText => _s.Game?.UndoLabel is { } l ? "Undo " + l : "Undo";
+    public string UndoText => _s.Game is { } g && LastAction(g) is { } a ? "Undo " + a.Label : "Undo";
     public string RedoText => _s.Game?.RedoLabel is { } l ? "Redo " + l : "Redo";
     /// <summary>True when undo stops at the load point of an old (or inconsistent) save.</summary>
-    public bool AtFloorFromOldSave => _s.Game is { } g && g.RebasedOnLoad && !g.CanUndo;
+    public bool AtFloorFromOldSave => _s.Game is { } g && g.RebasedOnLoad && !CanUndo;
 
     // ---- undo / redo ----
 
-    /// <summary>Undoes the last action. After a step back the "Stepped back" line is kept, merged: it then covers this action too,
-    /// so the log always accounts for every action (and dice roll) on the redo stack.</summary>
+    /// <summary>Undoes the last action. After a step back the "Stepped back" line is kept and re-logged so that it covers
+    /// everything on the redo stack; a plain Undo adds no line (spec 6.4).</summary>
     public void Undo()
     {
-        if (Usable("undo") is not { } g || !g.CanUndo) return;
-        SteppedBack? prev = null;
-        IReadOnlyList<UndoneAction> undone = Array.Empty<UndoneAction>();
-        if (!Try("undo", () => { prev = DropSteppedBackTail(g, false); undone = g.Undo(); })) return;
-        After("undo", () =>
+        if (Usable("undo") is not { } g || LastAction(g) == null) return;
+        _busy = true;
+        try
         {
-            if (prev != null)
-                g.Execute(_prepare(new SteppedBack(g.Log.Count, prev.ActionsUndone + undone.Count, prev.DiceUndone + Dice(undone), PositionText(g)), g.State));
-            Settle(g);
-        });
+            var hadLine = false;
+            if (!Try("undo", () => { hadLine = DropRewindTail(g); g.Undo(); })) return;
+            Finish(g, hadLine ? PositionText(g) : null, -1);
+        }
+        finally { _busy = false; }
         Rewound?.Invoke();
     }
 
     public void Redo()
     {
         if (Usable("redo") is not { } g || !g.CanRedo) return;
-        // Spec 7: the "Stepped back" line (and what the rewind settled after it) goes when the first undone action is redone.
-        if (!Try("redo", () => { DropSteppedBackTail(g, true); g.Redo(); })) return;
-        After("redo", () => _s.SeedLedgers());   // keys seeded after the rewind and dropped with its tail come back
+        _busy = true;
+        try
+        {
+            // Spec 7: the "Stepped back" line (and what the rewind settled after it) goes when the first undone action is redone.
+            if (!Try("redo", () => { DropRewindTail(g); g.Redo(); })) return;
+            After("redo", () => _s.SeedLedgers());   // keys seeded after the rewind and dropped with its tail come back
+        }
+        finally { _busy = false; }
         Rewound?.Invoke();
     }
 
@@ -100,6 +114,7 @@ public sealed class HistoryController
         var empty = new RewindPreview(0, 0, Array.Empty<(string, int)>(), 0, 0, 0);
         if (_s.Game is not { } g || row.LogIndex < 0 || row.LogIndex > g.Log.Count) return empty;
         var p = g.Preview(row.LogIndex);
+        if (TailStart(g) is { } t) p = p with { Actions = Math.Max(0, p.Actions - g.Actions.Count(a => a.Start >= t)) };
         return p with { Ledger = p.Ledger.Select(x => (PropertyName(x.PropertyId), x.Units)).ToList() };
     }
 
@@ -129,34 +144,49 @@ public sealed class HistoryController
             _s.Log.Add(DiagnosticSeverity.Warning, "history", $"Step back skipped: checkpoint \"{row.Phase}\" is no longer in this game's history.");
             return;
         }
-        SteppedBack? prev = null;
-        IReadOnlyList<UndoneAction> undone = Array.Empty<UndoneAction>();
-        var target = row.LogIndex;
-        if (!Try("step back", () =>
+        _busy = true;
+        try
         {
-            prev = DropSteppedBackTail(g, false);
-            target = Math.Min(target, g.Log.Count);
-            undone = g.RewindTo(target);
-        })) return;
-        After("step back", () =>
-        {
-            g.Execute(_prepare(new SteppedBack(target, (prev?.ActionsUndone ?? 0) + undone.Count, (prev?.DiceUndone ?? 0) + Dice(undone), TargetText(row)), g.State));
-            Settle(g);
-        });
+            var target = row.LogIndex;
+            if (!Try("step back", () =>
+            {
+                DropRewindTail(g);
+                target = Math.Min(target, g.Log.Count);
+                g.RewindTo(target);
+            })) return;
+            Finish(g, TargetText(row), target);
+        }
+        finally { _busy = false; }
         Rewound?.Invoke();
     }
 
     // ---- helpers ----
 
+    /// <summary>After the core rewind: the "Stepped back" line (when <paramref name="lineTarget"/> is set) covering every action and
+    /// dice roll now on the redo stack, then re-seed and reconcile. Records what was appended as the rewind's tail.</summary>
+    private void Finish(GameSession g, string? lineTarget, int toIndex)
+    {
+        var start = g.Log.Count;
+        After("rewind", () =>
+        {
+            if (lineTarget != null)
+            {
+                var redo = g.RedoActions;
+                var dice = redo.Sum(a => a.Commands.Count(c => c is RollDice));
+                g.Execute(_prepare(new SteppedBack(toIndex < 0 ? start : toIndex, redo.Count, dice, lineTarget), g.State));
+            }
+            Settle(g);
+        });
+        if (g.Log.Count > start) { _tailGame = g; _tailStart = start; _tailHasLine = lineTarget != null; }
+    }
+
     /// <summary>Spec 6.3: pick up rules-pack keys added since, and move off a phase the pack no longer has (logged with a reason).
-    /// The relocation is a settle action: it keeps the redo stack and is undone together with the action before it.</summary>
+    /// The relocation keeps the redo stack: it is part of the rewind, not a new action.</summary>
     private void Settle(GameSession g)
     {
         _s.SeedLedgers();
         using (g.BeginSettle("phase relocation")) _phases.Reconcile();
     }
-
-    private static int Dice(IReadOnlyList<UndoneAction> undone) => undone.Sum(a => a.Commands.Count(c => c is RollDice));
 
     /// <summary>The open game, or null (with a diagnostic when an action is still open).</summary>
     private GameSession? Usable(string what)
@@ -187,45 +217,52 @@ public sealed class HistoryController
         }
     }
 
-    /// <summary>
-    /// Finds the rewind tail (trailing folding commands and settle actions). When it holds a <see cref="SteppedBack"/>, removes it and
-    /// everything after it without touching the redo stack, and returns it. With <paramref name="whole"/> (Redo) the whole tail goes
-    /// when it holds a SteppedBack or a settle action, so redoing everything restores the game exactly.
-    /// </summary>
-    private static SteppedBack? DropSteppedBackTail(GameSession g, bool whole)
+    private void Hook()
     {
-        var k = g.Log.Count;
-        while (k > 0 && (GameSession.IsFolding(g.Log[k - 1]) || InSettle(g, k - 1))) k--;
-        var sb = -1;
-        var settle = false;
-        for (var i = k; i < g.Log.Count; i++)
-        {
-            if (g.Log[i] is SteppedBack) sb = i;
-            if (InSettle(g, i)) settle = true;
-        }
-        var found = sb >= 0 ? (SteppedBack)g.Log[sb] : null;
-        var cut = whole ? (sb >= 0 || settle ? k : -1) : sb;
-        if (cut < 0) return found;
-        while (g.Log.Count > cut) g.DropTail();
-        return found;
+        if (_hooked != null) { _hooked.Changed -= OnChanged; _hooked.Rewound -= OnRewound; }
+        _hooked = _s.Game;
+        if (_hooked != null) { _hooked.Changed += OnChanged; _hooked.Rewound += OnRewound; }
+        ClearTail();
     }
 
-    private static bool InSettle(GameSession g, int logIndex)
+    // Anything that changes the game outside this controller ends the last rewind's tail (view-only folding commands do not).
+    private void OnChanged(GameCommand c) { if (!_busy && !GameSession.IsFolding(c)) ClearTail(); }
+    private void OnRewound() { if (!_busy) ClearTail(); }
+
+    private void ClearTail() { _tailGame = null; _tailStart = -1; _tailHasLine = false; }
+
+    /// <summary>Where the last rewind's tail starts, or null when there is none (or it was overtaken).</summary>
+    private int? TailStart(GameSession g) =>
+        ReferenceEquals(_tailGame, g) && _tailStart >= 0 && _tailStart <= g.Log.Count ? _tailStart : null;
+
+    /// <summary>Removes the last rewind's tail without touching the redo stack. True when it held a "Stepped back" line.</summary>
+    private bool DropRewindTail(GameSession g)
     {
+        if (TailStart(g) is not { } t) return false;
+        var hadLine = _tailHasLine;
+        while (g.Log.Count > t) g.DropTail();
+        ClearTail();
+        return hadLine;
+    }
+
+    /// <summary>The action Undo goes back to: the last one before the rewind tail.</summary>
+    private ActionMark? LastAction(GameSession g)
+    {
+        var limit = TailStart(g) ?? g.Log.Count;
         for (var i = g.Actions.Count - 1; i >= 0; i--)
-            if (g.Actions[i].Start <= logIndex) return g.Actions[i].Settle;
-        return false;
+            if (g.Actions[i].Start < limit) return g.Actions[i];
+        return null;
     }
 
-    /// <summary>Log length without trailing folding commands and settle actions: a checkpoint at or past it has nothing done after it.</summary>
-    private static int WorkEnd(GameSession g)
+    /// <summary>Log length without the rewind tail and trailing folding commands: a checkpoint at or past it has nothing done after it.</summary>
+    private int WorkEnd(GameSession g)
     {
-        var end = g.Log.Count;
-        while (end > 0 && (GameSession.IsFolding(g.Log[end - 1]) || InSettle(g, end - 1))) end--;
+        var end = TailStart(g) ?? g.Log.Count;
+        while (end > 0 && GameSession.IsFolding(g.Log[end - 1])) end--;
         return end;
     }
 
-    /// <summary>Where the game now stands, for a merged "Stepped back to …" line after an Undo.</summary>
+    /// <summary>Where the game now stands, for a re-logged "Stepped back to …" line after an Undo.</summary>
     private string PositionText(GameSession g)
     {
         if (g.State.Position is { } pos)
