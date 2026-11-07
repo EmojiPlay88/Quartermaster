@@ -58,7 +58,7 @@ public class Piece3EndToEndTests : IDisposable
         var path = Path.Combine(_tmp, "g.qsave");
         s.SaveNative(path);
         var loaded = NativeSave.Read(path);
-        Assert.Equal(5, NativeSave.FormatVersion);
+        Assert.Equal(6, NativeSave.FormatVersion);
         s.LoadNative(path);
         Assert.Null(c.Reconcile());
 

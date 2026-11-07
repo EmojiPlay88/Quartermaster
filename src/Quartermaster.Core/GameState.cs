@@ -192,7 +192,7 @@ public sealed class GameState
         if (d.Key == null || d.PropertyId == null || !double.IsFinite(d.After)) return;
         SetLedger(d.Key, d.PropertyId, d.After);
         LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, d.Key, d.PropertyId, double.IsFinite(d.Before) ? d.Before : 0,
-            d.After, d.Source ?? "manual", d.FormulaId, d.RuleRefId, d.Note, d.Working));
+            d.After, d.Source ?? "manual", d.FormulaId, d.RuleRefId, d.Note, d.Working, Turn.Turn, Turn.Phase));
         Log.Add(LogBuilder.Ledger(this, d));
     }
 
@@ -204,7 +204,7 @@ public sealed class GameState
             if (s == null || s.Key == null || s.PropertyId == null || !double.IsFinite(s.Value)) continue;
             if (Ledgers.TryGetValue(s.Key, out var inner) && inner.ContainsKey(s.PropertyId)) continue;
             SetLedger(s.Key, s.PropertyId, s.Value);
-            LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, s.Key, s.PropertyId, 0, s.Value, "seed", null, null, null, null));
+            LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, s.Key, s.PropertyId, 0, s.Value, "seed", null, null, null, null, Turn.Turn, Turn.Phase));
         }
     }
 
