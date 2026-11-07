@@ -1,0 +1,183 @@
+# Piece 6b — Live Online Play Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Two or more players on different PCs play one game in real time through a small relay server the user runs in Docker; the host's copy runs the game and each guest receives only their filtered view.
+
+**Architecture:**
+- **Quartermaster.Net** (new, `net10.0`, UI-free): protocol messages, framing, game codes, key derivation, AES-GCM envelopes, the relay client with certificate pinning.
+- **Quartermaster.Relay** (new, ASP.NET Core minimal app, cross-platform): WebSocket-over-TLS rooms that route opaque encrypted bytes; Dockerfile + compose; setup guide.
+- **Render**: an action port (local vs remote) that every UI action goes through; guest **intents** executed by the host with full state (§8a.1); host and guest sessions; formula input masking (§8a.2).
+- **App**: Host/Join dialogs, seats, chat, guest restrictions, connection status.
+
+**Tech Stack:** .NET 10, C#, WinForms, ASP.NET Core (relay only), `System.Net.WebSockets`, `System.Security.Cryptography` (PBKDF2, AesGcm, CertificateRequest), xUnit, Docker.
+
+**Spec:** `docs/superpowers/specs/2026-11-07-piece6-multiplayer-design.md` (binding) — this plan covers §5, §7 (rooms; mailbox is 6c), §8 (protocol v1), §8a items 1, 2, 3, 4, 5, 6, 7, 10. Base: piece 6a as merged (`PlayerView`, `ModuleSession.View/ViewSides/CanAct/ActorSide`, `HotSeat`, `Players`).
+
+## Global Constraints
+
+- **Content boundary (hard):** no real-game content. Tests use invented Red/Blue sides and existing fixtures.
+- **A guest's copy never holds another side's private data** (spec §10): the only game data a guest receives is `PlayerView.For(host state, pack, model, guestSides)` plus the rules pack. Tested by searching every byte a guest receives.
+- **The relay never sees plaintext game data**: everything between players is AES-GCM encrypted with a key the relay never gets. Tested by asserting on relay buffers.
+- **Two secrets from one password:** relay auth verifier = PBKDF2-SHA256(password, salt `qm-auth:{code}`); end-to-end key = PBKDF2-SHA256(password, salt `qm-key:{code}`); 200,000 iterations; 32-byte outputs. The key never leaves the clients.
+- **Protocol version 1**, negotiated at join; mismatch refused with `This game uses a different Quartermaster network version ({theirs}); update both copies.`
+- **Game code:** 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`.
+- **Default relay port 47820.** Docker image runs as non-root; one volume `/data` (config, certificate, later mailbox).
+- **Solo and hot-seat unchanged:** with no network session, every path behaves exactly as in piece 6a.
+- **Determinism:** the host is the only place commands execute; guests never execute commands. Undo/replay on the host unchanged.
+- **Exact copy:** menus `Game → Host &Online…`, `Game → &Join Online…`, `Game → &Leave Online Game`; Join dialog note `The host's copy runs the game.`; guest Undo tooltip `Only the host can undo`; `Host disconnected — waiting for the host to return.`; formula input `hidden — the host calculates`; status bar `Online: {code} · {n} players`; certificate warning title `The relay's certificate has changed`.
+- **Never crash** on network errors, bad messages, oversized frames or a relay that disappears: messages and a reconnect path, never an exception to the user.
+- **Build:** `TreatWarningsAsErrors`; warning-free except the known MSB3277; `dotnet test Quartermaster.slnx` green after every task. Relay tests run in-process (no Docker needed for tests).
+- **Test isolation / smokes:** never touch the real `%LOCALAPPDATA%` (smokes use `QUARTERMASTER_LAYOUT_ROOT`); screenshots only in scratch; smoke runs always pass `--smoke N` so the app exits.
+- **Commits:** end with a blank line then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; noreply identity; never stage `startapp.cmd`.
+
+## Review Focus
+
+1. **A guest acting on another side's unit, or out of phase** (crafted intent): the host refuses with a message and changes nothing. Task 4 test `Intent_OtherSidesUnit_Refused_StateUnchanged` and `Intent_NextPhaseOutOfPhase_Refused`.
+2. **Every byte a guest receives** (snapshots, pack transfer, chat echoes, formula verdicts, error messages) is free of the other side's private values. Task 6 test `Guest_ReceivedBytes_ContainNoPrivateData`.
+3. **Network trouble**: relay restart, host drop, guest drop and rejoin, oversized/garbage frames, wrong password, protocol mismatch — clear messages, no crash, rejoin restores the current view. Task 6 tests `Guest_Rejoin_GetsCurrentView`, `Host_Drop_GuestsPaused`, `GarbageFrame_Ignored`, `WrongPassword_Refused`.
+4. **Seat theft**: a second guest using another's name cannot take the seat without the rejoin token. Task 5 test `Rejoin_WithoutToken_Refused`.
+5. **Formula verdicts in hardcore for guests**: typed values are checked on the host; the guest's dialog shows the host's verdict; hidden inputs never shown. Task 7 test `Guest_HardcoreTyped_VerdictFromHost_NoHiddenValues`.
+
+---
+
+## File Structure
+
+```
+src/Quartermaster.Net/            (new project, net10.0)
+  Protocol.cs        – message records, version, JSON options, framing (length-prefixed, gzip for payloads)
+  GameCode.cs        – code generation/validation
+  Secrets.cs         – PBKDF2 auth verifier and E2E key; AesGcm Seal/Open
+  RelayClient.cs     – ClientWebSocket wrapper: connect, TLS pinning (TOFU), send/receive, reconnect, events
+  PinStore.cs        – known relay fingerprints (file under the layout root)
+src/Quartermaster.Relay/          (new project, Microsoft.NET.Sdk.Web)
+  Program.cs, RelayOptions.cs, Rooms.cs, Certificates.cs, appsettings.json
+  Dockerfile, docker-compose.yml (in the project folder), .dockerignore
+src/Quartermaster.Render/
+  Actions/ActionPort.cs, LocalActions.cs, RemoteActions.cs – one interface for every user action
+  Online/Intents.cs, IntentExecutor.cs                      – guest intents and host-side execution
+  Online/HostSession.cs, GuestSession.cs, Seats.cs          – online roles
+  FormulaMasking.cs                                         – hidden inputs (§8a.2)
+src/Quartermaster.App/
+  HostOnlineDialog.cs, JoinOnlineDialog.cs, SeatsDialog.cs, ChatBox.cs, MainForm.Online.cs
+docs/relay-setup.md
+tests/Quartermaster.Net.Tests/, tests/Quartermaster.Relay.Tests/ (new), Render tests for intents/sessions
+```
+
+## Task dependencies
+
+- Task 1 first. Task 2 needs 1. Task 3 needs 1. (2 ∥ 3)
+- Task 4 independent of 1–3 (pure Render). Task 7 needs 4.
+- Task 5 needs 1, 3, 4. Task 6 needs 2, 5.
+- Task 8 needs 5, 6, 7. Task 9 needs all.
+
+---
+
+### Task 1: Protocol, game codes, secrets (Quartermaster.Net)
+
+**Files:** Create project `src/Quartermaster.Net` (+ add to `Quartermaster.slnx`), `Protocol.cs`, `GameCode.cs`, `Secrets.cs`; tests `tests/Quartermaster.Net.Tests` (new project).
+
+**Interfaces — produces:**
+- `public const int ProtocolVersion = 1;`
+- Relay-level messages (JSON, `$t` discriminator): `Hello(int Version, string Role /*host|guest*/)`, `CreateRoom(string AuthVerifier)` → `RoomCreated(string Code)`, `JoinRoom(string Code, string AuthVerifier)` → `Joined(string MemberId)` / `Refused(string Reason)`, `Send(string? ToMemberId /*null = host*/, byte[] Sealed)`, `Deliver(string FromMemberId, byte[] Sealed)`, `MemberLeft(string MemberId)`, `HostLeft`, `Ping`/`Pong`.
+- `public static class Framing { byte[] Encode<T>(T msg); T Decode<T>(ReadOnlySpan<byte>); const int MaxFrame = 8 * 1024 * 1024; }` — oversized or malformed frames throw `ProtocolException` (callers drop the frame).
+- `public static class GameCode { string New(); bool IsValid(string code); string Normalize(string input); }` (alphabet in Global Constraints; normalize upper-cases and strips spaces/dashes).
+- `public static class Secrets { string AuthVerifier(string password, string code); byte[] GameKey(string password, string code); byte[] Seal(byte[] key, byte[] plain); byte[] Open(byte[] key, byte[] sealed_) /* throws CryptographicException on tamper */; }` — Seal = random 12-byte nonce ‖ ciphertext ‖ 16-byte tag; payloads gzip-compressed before sealing.
+- Game-level payloads (inside `Sealed`, JSON): `JoinRequest(string Name, string? RejoinToken, string ModuleSha256)`, `Welcome(string PlayerId, string RejoinToken, byte[] RulesPack, IReadOnlyList<string> FreeSides)`, `ChooseSides(IReadOnlyList<string> Sides)`, `Snapshot(long Version, GameStateJson)`, `IntentMsg(Guid Id, GameIntent Intent)`, `IntentResult(Guid Id, bool Ok, string? Message, FormulaVerdict? Verdict)`, `Chat(string From, string Text)`, `Kicked(string Reason)`, `Paused(string Reason)`.
+
+- [ ] **Step 1: Failing tests:** `GameCode_New_ValidAndUnambiguous`, `GameCode_Normalize`, `Secrets_AuthAndKey_Differ_AndAreDeterministic`, `Seal_Open_RoundTrip`, `Open_Tampered_Throws`, `Framing_RoundTrip_AllMessages`, `Framing_Oversized_Throws`, `Framing_Garbage_Throws`.
+- [ ] **Step 2–4:** RED → implement → full suite PASS.
+- [ ] **Step 5:** Commit `feat(net): protocol, game codes and end-to-end secrets`.
+
+### Task 2: The relay server + Docker
+
+**Files:** Create project `src/Quartermaster.Relay` (`Microsoft.NET.Sdk.Web`), `Program.cs`, `RelayOptions.cs`, `Rooms.cs`, `Certificates.cs`, `appsettings.json`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`; `docs/relay-setup.md`; tests `tests/Quartermaster.Relay.Tests` (new, in-process via `WebApplicationFactory`/TestServer WebSocket client).
+
+**Behaviour:**
+- One WebSocket endpoint `/qm`. First message `Hello`; wrong version → `Refused` with the Global copy text.
+- `CreateRoom` → new code (unique among live rooms), stores the verifier hash (store SHA-256 of the verifier, compare in constant time). `JoinRoom` → member id or `Refused("Wrong code or password")` (same text for both, no oracle).
+- `Send` routes `Sealed` bytes to the host (`ToMemberId == null`) or the given member; the relay never parses `Sealed`.
+- `MemberLeft`/`HostLeft` notifications; a host may reconnect to its room with the same verifier within the idle window (room survives 24 h idle).
+- Limits: frame ≤ 8 MB, 50 messages/s per connection (burst 200), 20 rooms per IP, 7 members per room; excess → close with a reason. No payload logging.
+- TLS: `RelayOptions { Port = 47820, CertificatePath?, CertificatePassword?, DataDir = "/data" }`. No certificate configured → generate a self-signed ECDSA certificate in `DataDir` on first run and log its SHA-256 fingerprint at startup: `Relay certificate fingerprint: {hex}`.
+- **Dockerfile:** multi-stage (`mcr.microsoft.com/dotnet/sdk:10.0` build → `mcr.microsoft.com/dotnet/aspnet:10.0` run), non-root `app` user, `EXPOSE 47820`, `VOLUME /data`, `ENTRYPOINT ["dotnet","Quartermaster.Relay.dll"]`. **Compose:** service `relay`, `ports: ["47820:47820"]`, volume `./data:/data`, `restart: unless-stopped`, env overrides for options. Builds for `linux/amd64` and `linux/arm64` (`docker buildx` noted in the guide).
+- **docs/relay-setup.md:** Docker first (install Docker, get the folder, optional cert, `docker compose up -d`, open the port, read fingerprint via `docker compose logs relay`, update with `docker compose pull/build`), then plain program (self-contained publish, systemd unit example for Linux; Windows note). Generic wording, no personal hosts.
+- [ ] **Step 1: Failing tests:** `Hello_WrongVersion_Refused`, `CreateAndJoin_RoutesSealedBytes`, `WrongPassword_RefusedSameMessage`, `Send_ToMember_OnlyThatMemberGetsIt`, `HostLeft_NotifiesGuests`, `Host_Reconnects_SameRoom`, `Oversized_Closed`, `RateLimit_Closes`, `SelfSignedCert_CreatedOnce_FingerprintLogged`, `Relay_NeverLogsOrStoresPayload` (inspect logs).
+- [ ] **Step 2–4:** RED → implement → PASS. If Docker is available locally, run `docker build` once and note the result; otherwise say so (not required for tests).
+- [ ] **Step 5:** Commit `feat(relay): websocket relay with rooms; docker image and setup guide`.
+
+### Task 3: Relay client with certificate pinning
+
+**Files:** `src/Quartermaster.Net/RelayClient.cs`, `PinStore.cs`; tests in `tests/Quartermaster.Net.Tests` (spin the Task 2 relay in-process if merged, else a minimal in-test WebSocket server).
+
+**Interfaces — produces:**
+- `public sealed class PinStore(string path) { string? Get(string hostPort); void Set(string hostPort, string fingerprint); }`
+- `public sealed class RelayClient : IAsyncDisposable` — `Task ConnectAsync(Uri relay, Func<CertificateCheck, bool> onUnknownOrChangedCert, CancellationToken)`; `Task<string> CreateRoomAsync(string verifier)`; `Task<string> JoinRoomAsync(string code, string verifier)`; `Task SendAsync(string? to, byte[] sealed_)`; events `Delivered(string from, byte[] sealed_)`, `MemberLeft(string)`, `HostLeft`, `Disconnected(string reason)`; automatic reconnect with backoff (1, 2, 5, 10 s) re-joining the same room.
+- `public sealed record CertificateCheck(string HostPort, string Fingerprint, string? PinnedFingerprint)` — unknown → caller decides (UI asks; first use accepts and pins); changed → caller decides with the warning copy; certificates valid by public CA chain are accepted without pinning prompts.
+- [ ] **Step 1: Failing tests:** `FirstConnect_PinsFingerprint`, `ChangedFingerprint_AsksAndRefusesByDefault`, `Reconnect_RejoinsRoom`, `Disconnected_RaisedOnRelayStop`.
+- [ ] **Step 2–4:** RED → implement → PASS. **Step 5:** Commit `feat(net): relay client with certificate pinning and reconnect`.
+
+### Task 4: Action port and intents (host executes for guests)
+
+**Files:** Create `src/Quartermaster.Render/Actions/ActionPort.cs`, `LocalActions.cs`, `Online/Intents.cs`, `Online/IntentExecutor.cs`; modify App call sites to go through the port (MapWindow, MapDragController, PieceActions callers, PaletteDrop, LedgerWindow manual edit, DiceTools, NotesWindow, PhasePanel tick/ack, Next Phase, FormulaDialog apply/calculate, BatchGrid apply/apply-all, MissingInputDialog, alert Hide, chat later). Tests `tests/Quartermaster.Render.Tests/IntentExecutorTests.cs`, `ActionPortTests.cs`.
+
+**Interfaces — produces:**
+- `public abstract record GameIntent` (JSON-polymorphic `$t`): `MoveIntent(IReadOnlyList<MovePieces> Moves)`, `PieceCommandIntent(GameCommand Command)` (trait state, add/remove piece, toggles — validated by type), `FormulaIntent(string FormulaId, string? PieceId, string? RunId, IReadOnlyDictionary<string,string> Typed, bool Calculate)`, `LedgerEditIntent(string Key, string PropertyId, double After, string Note)`, `DiceIntent(DiceSpec Spec, string Purpose)`, `TickIntent(int Index, bool Ticked)`, `AckIntent(int Index)`, `NextPhaseIntent`, `HideAlertIntent(string AlertId, string? Name)`, `ChatIntent(string Text)`.
+- `public sealed record FormulaVerdict(bool Applied, IReadOnlyList<(string Var, string State /*ok|wrong|hidden*/)> Boxes, string? Message);`
+- `public interface IActionPort { void Move(IReadOnlyList<MovePieces>); void PieceCommand(GameCommand); FormulaVerdict ApplyFormula(FormulaIntent); void EditLedger(...); void Roll(DiceSpec, string purpose); void Tick(int, bool); void Ack(int); void NextPhase(); void HideAlert(string id, string? name); void Chat(string text); bool IsRemote { get; } }` — synchronous for local; remote returns a pending verdict via callback (`Task<FormulaVerdict>` variant for formulas).
+- `LocalActions(ModuleSession s, PhaseController c, HistoryController h)` — exactly today's behaviour (refactor only; all existing tests must pass unchanged).
+- `public sealed class IntentExecutor(ModuleSession s, PhaseController c)` — `IntentResult Execute(string playerId, IReadOnlySet<string> sides, GameIntent intent)`: validates per spec §8a.5 (pieces/units/holders of held or unowned sides; tick/ack/Next Phase only while a held side acts when phases exist; host-only intents refused), then executes with `sides` as the actor (formula stamps the player's side as in 6a `ActorSide`, computed from `sides`, not from the host's ViewSides); returns Ok/Message/Verdict. Never throws.
+- [ ] **Step 1: Failing tests:** `LocalActions_BehaveAsBefore` (a scripted sequence through the port equals the old direct calls, JSON state equal); `Intent_OtherSidesUnit_Refused_StateUnchanged`; `Intent_NextPhaseOutOfPhase_Refused`; `Intent_HostOnly_Refused` (undo-like, set turn, difficulty, notes); `FormulaIntent_HardcoreTyped_WrongBoxReported_NotApplied`; `FormulaIntent_Calculate_Applies_StampsGuestSide`; `DiceIntent_RolledByHost`; `ChatIntent_LoggedAsChat`.
+- [ ] **Step 2–4:** RED → implement (port first, refactor call sites, then executor) → PASS (all existing tests unchanged).
+- [ ] **Step 5:** Commit `feat(render): action port and host-executed guest intents`.
+
+### Task 5: Host session and seats
+
+**Files:** Create `src/Quartermaster.Render/Online/HostSession.cs`, `Seats.cs`. Tests `tests/Quartermaster.Render.Tests/HostSessionTests.cs` (fake transport: an in-memory pair implementing a small `ITransport` interface over `RelayClient`'s surface, so tests don't need the network).
+
+**Behaviour:**
+- `HostSession(ModuleSession s, IntentExecutor exec, ITransport t, string password, string code)`: on `JoinRequest` checks module hash (refuse `Different module`), protocol version, rejoin token (seat reclaim needs the token issued at first join; same name without token → refused), assigns a player id + token, sends `Welcome` with the rules pack bytes and free sides; on `ChooseSides` validates via `Players.Validate` and executes `SetPlayers` (host's own seat included).
+- After every accepted action and every host-local change (`Game.Changed`, `Rewound`, `RulesApplied`, `GameReplaced`), sends each guest `Snapshot(version, PlayerView.For(state, pack, model, guestSides))` (debounced 100 ms, coalesced); `IntentMsg` → `IntentExecutor.Execute` → `IntentResult` to that guest.
+- Chat: `ChatIntent` from anyone → logged chat line → appears in all snapshots (chat is public).
+- Guest drop: seat stays, marked disconnected; host's Players dialog can free it.
+- `ITransport { Task Send(string? to, byte[] payload); event Action<string, byte[]> Received; event Action<string> MemberLeft; event Action<string> Disconnected; }` with `RelayTransport` (encrypts with `Secrets.Seal` using the game key) and `MemoryTransport` for tests.
+- [ ] **Step 1: Failing tests:** `Join_WrongModule_Refused`; `Join_NewGuest_GetsWelcomeWithPack`; `Rejoin_WithoutToken_Refused`; `Rejoin_WithToken_SameSeat`; `ChooseSides_Invalid_Refused`; `Snapshot_IsPlayerViewForGuestSides`; `Intent_Executed_ResultToSenderOnly`; `Chat_ReachesAll`.
+- [ ] **Step 2–4:** RED → implement → PASS. **Step 5:** Commit `feat(render): host session and seats`.
+
+### Task 6: Guest session
+
+**Files:** Create `src/Quartermaster.Render/Online/GuestSession.cs`, `Actions/RemoteActions.cs`; modify `ModuleSession` (guest mode). Tests `GuestSessionTests.cs`, plus an end-to-end test with the in-process relay (Task 2) and real `RelayTransport`.
+
+**Behaviour:**
+- `GuestSession(ModuleSession s, ITransport t)`: sends `JoinRequest` (module hash; stored rejoin token for this code if any), receives `Welcome` → loads the rules pack in memory (never written over the user's own pack files; offered as "Save rules pack as…" only), stores the token (under the layout root, per code), lets the UI choose sides.
+- `ModuleSession` guest mode: `IsGuest`, `ApplySnapshot(GameState filtered)` replaces the displayed game (a `GameSession` with no history; `CanUndo` false; `ViewSides` null because the snapshot is already filtered); `Save` disabled; `ExportViewerCopy(path)` writes the filtered snapshot as a read-only save (`ViewerCopy = true` flag in the save; opening it shows a banner and blocks actions).
+- `RemoteActions` sends intents; formula intents return the host's `FormulaVerdict` via the result message (timeout 10 s → message `The host didn't answer`).
+- Host gone → `Paused` UI state with the Global copy; reconnect → rejoin with token → fresh snapshot.
+- [ ] **Step 1: Failing tests:** `Guest_ReceivedBytes_ContainNoPrivateData` (record every payload a guest receives across a scripted game, decrypt, search for host-side private values); `Guest_Snapshot_UndoDisabled_SaveDisabled`; `Guest_Rejoin_GetsCurrentView`; `Host_Drop_GuestsPaused`; `GarbageFrame_Ignored`; `WrongPassword_Refused`; `ProtocolMismatch_Refused`; `Relay_SeesNoPlaintext` (end-to-end through the in-process relay: relay-side captured bytes contain no unit names/values); `ViewerCopy_OpensReadOnly`.
+- [ ] **Step 2–4:** RED → implement → PASS. **Step 5:** Commit `feat(render): guest session, remote actions, viewer copy`.
+
+### Task 7: Formula input masking (§8a.2)
+
+**Files:** Create `src/Quartermaster.Render/FormulaMasking.cs`; modify `FormulaDialogModel`/checked model, `BatchModel`, `CheatSheetModel`, `App/FormulaDialog.cs`, `BatchGridWindow.cs`. Tests `FormulaMaskingTests.cs`.
+
+**Behaviour:** when `ModuleSession.ViewSides != null` (hot-seat) **or** guest mode, formula inputs whose value comes from data the viewer can't see (another side's private ledger/holder, a hidden piece) show `hidden — the host calculates` (hot-seat: `hidden`), are excluded from the cheat sheet, and are never written into the working text shown locally. Hot-seat: Calculate/Apply still run locally (the host is this PC) but the dialog never displays hidden values; the logged working for such runs is redacted for that viewer by PlayerView already. Guest: Calculate/Apply send a `FormulaIntent`; boxes show the host's verdict states.
+- [ ] **Step 1: Failing tests:** `HotSeat_HiddenInput_ShownAsHidden_NotInCheatSheet`; `Guest_HardcoreTyped_VerdictFromHost_NoHiddenValues`; `Solo_NoMasking` (unchanged).
+- [ ] **Step 2–4:** RED → implement → PASS. **Step 5:** Commit `feat(render): mask hidden formula inputs`.
+
+### Task 8: Online UI
+
+**Files:** Create `HostOnlineDialog.cs`, `JoinOnlineDialog.cs`, `SeatsDialog.cs`, `ChatBox.cs`, `MainForm.Online.cs`; modify `MainForm.cs` (Game menu), `LogPanel`/`LogDock` (chat box under the log), `MainForm.History.cs` (guest Undo disabled with tooltip), status bar.
+
+**Behaviour:** per spec §5 and Global copy: Host Online (relay address remembered in Settings, password, shows code + "Copy" button, seats list), Join Online (relay, code, password, name; certificate prompt on first connect and the changed-certificate warning), side choice after Welcome, chat box (Enter sends; chat lines in the log), `Online: {code} · {n} players` in the status bar with connection state, Leave Online Game, guest restrictions (Save disabled, Export Viewer Copy…, Undo/Step Back disabled with tooltip, Workbench read-only), host Players dialog (free/assign seats). Network events marshalled to the UI thread; every handler guarded.
+- [ ] **Step 1:** Implement. **Step 2:** full suite PASS, build warning-free.
+- [ ] **Step 3:** Smoke `--smoke-online <seconds>`: starts an in-process relay on a free port, opens a second in-process guest session against it, hosts the phases fixture, joins, chooses sides, sends one intent and a chat, screenshots host and guest (`--screenshot-online <png>` writes `-host` and `-guest`); inspect PNGs.
+- [ ] **Step 4:** Commit `feat(app): host and join online, chat, seats`.
+
+### Task 9: End-to-end, docs
+
+**Files:** `tests/Quartermaster.Render.Tests/Piece6bEndToEndTests.cs`; `README.md`, `docs/superpowers/RESUME.md`, `docs/superpowers/piece1-followups.md`, `docs/relay-setup.md` (final check).
+
+- [ ] **Step 1: E2E:** in-process relay + host + two guests (Red, Blue) over real `RelayTransport`: join, choose sides, a phase of play with a private-dice formula and private ledgers, chat, guest drop/rejoin, host undo seen by guests; assert every guest's received bytes are leak-free and each guest's final view equals `PlayerView.For(host state, their sides)`.
+- [ ] **Step 2:** If Docker is available: `docker compose build` in the relay folder and a container start/stop; report the result (not a test requirement).
+- [ ] **Step 3: Docs:** README "Play with others" → live online now (relay in Docker, link to `docs/relay-setup.md`); RESUME 6b row + next steps (6c turn files + mailbox); followups 6b section. No personal hosts, paths or emails; keep the user's intro wording.
+- [ ] **Step 4:** full suite PASS. **Step 5:** Commit `test: piece 6b end-to-end; docs`.

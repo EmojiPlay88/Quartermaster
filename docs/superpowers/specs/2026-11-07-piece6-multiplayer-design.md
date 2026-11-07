@@ -10,9 +10,9 @@ The user wants to play their wargame with other people in all three ways tableto
 - **live online** — a friend elsewhere, moves appearing in real time (like VASSAL's server);
 - **turn files** — one turn at a time, a day apart (like VASSAL's play-by-email logs).
 
-Online play must not need anyone to touch their home router. The user has an **Ubuntu VPS** and will run a small relay program on it. Hidden information must be **enforced** online: a player's copy of Quartermaster never receives what that player is not allowed to see.
+Online play must not need anyone to touch their home router. The user has an **Ubuntu VPS** and will run a small relay program on it, packaged as a **Docker container** so it isn't tied to Ubuntu. Hidden information must be **enforced** online: a player's copy of Quartermaster never receives what that player is not allowed to see.
 
-What the user said, condensed: all three modes; a relay server on their VPS (Ubuntu, no Docker requirement); hidden-information rules "you decide" (the assistant's proposal below was accepted); turn files like VASSAL plus an optional "send via my VPS" mailbox (the assistant's call, accepted). Everything else is marked "(call)".
+What the user said, condensed: all three modes; a relay server on their VPS (Ubuntu), later asked for as a Docker container so it runs anywhere; hidden-information rules "you decide" (the assistant's proposal below was accepted); turn files like VASSAL plus an optional "send via my VPS" mailbox (the assistant's call, accepted). Everything else is marked "(call)".
 
 ## 2. Content boundary (unchanged, hard)
 
@@ -88,9 +88,12 @@ All game payloads are encrypted between players with a key derived from the game
 - Hidden information in turn files is **hidden on screen, not enforced** (the file holds the whole game; same as VASSAL). Documented plainly (call).
 - **Send via my VPS (optional):** the relay also keeps a **mailbox** per game: `Send Turn` can upload the (encrypted) file; the receiver's Quartermaster checks on game open and every few minutes, and shows **"New turn waiting from {player}"** in the alert bar. Files expire after 30 days.
 
-## 7. The relay (Ubuntu VPS)
+## 7. The relay (any server; Docker first)
 
-- A new project `Quartermaster.Relay`: a small .NET console program (no WinForms), published self-contained for `linux-x64`. Runs as a **systemd service**. A setup guide `docs/relay-setup.md` covers: copy the binary, create a user, install the service, open one port in the VPS firewall, certificates.
+- A new project `Quartermaster.Relay`: a small cross-platform .NET console program (no WinForms) that runs anywhere .NET runs — Linux, Windows, macOS, x64 or ARM64.
+- **Docker is the main way to run it** (user's request, 2026-11-07, so it isn't tied to Ubuntu): the repo ships a multi-stage `Dockerfile` (SDK image builds, small ASP.NET/runtime image runs, non-root user) and a `docker-compose.yml`. One volume holds the config file, the certificate and the mailbox; one port is published. `docker compose up -d` starts it; restart policy `unless-stopped`. Images build for `linux/amd64` and `linux/arm64`.
+- **Without Docker** it still runs as a plain program (self-contained publish), e.g. as a systemd service on Linux or a scheduled task/service on Windows.
+- Setup guide `docs/relay-setup.md`: Docker steps first (install Docker, copy the folder or clone, set the port and optional certificate path in the config, `docker compose up -d`, open the port in the firewall, read the fingerprint from `docker compose logs`), then the plain-program steps for Linux (systemd) as the alternative.
 - **Transport (call):** WebSocket over TLS on one configurable port (default 47820). Certificates: either the admin points it at a Let's Encrypt certificate, or it generates a self-signed one on first run and prints its fingerprint; clients **pin** the fingerprint on first connect (trust on first use) and warn loudly if it changes.
 - **Rooms:** created by a host, identified by game code, protected by a password hash; members are the host and guests. The relay only routes messages between room members. Idle rooms close after 24 hours.
 - **Mailbox:** per game code, per recipient player; stores encrypted blobs; size limit 20 MB per file; 30-day expiry.
@@ -127,7 +130,7 @@ Three parts, each usable on its own, built and reviewed in order:
 
 ## 10. Goals, non-goals, anti-goals
 
-**Goals:** the three modes; enforced hidden information online; no router setup; a relay the user can run on their Ubuntu VPS with a one-page guide.
+**Goals:** the three modes; enforced hidden information online; no router setup; a relay the user can run in Docker on their VPS (or any server) with a one-page guide.
 
 **Non-goals:** roles within a side; more than 6 players; spectators; voice; matchmaking or a public server; an AI opponent; cryptographic hidden information in turn files; the VPS acting as referee (host authority instead).
 

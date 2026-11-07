@@ -32,7 +32,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
 - Tests: xUnit under `tests/`. 1011 tests are green after piece 6a (178 Rules, 116 Vassal, 236 Core, 481 Render).
-- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. piece 6a is merged into local `master`, not pushed; push only when the user asks.
+- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. everything through piece 6a is pushed; push again only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
 - Commit messages end with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -126,7 +126,7 @@ How the formula window behaves:
 
    Fix whatever they find.
 2. The README Status line and Roadmap are current as of piece 5. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
-3. **Piece 6a (hot-seat) is merged into local master (user tested OK); push only when the user asks.** Next:
+3. **Piece 6a (hot-seat) is merged and pushed (user tested OK).** Next:
    1. The user hands-on tests hot-seat: two players on the setup page, play through a phase change and the handover screen, mark a property private in the Workbench Visibility tab, step back across a side change, save and load.
    2. Piece 6b: live online play (through a relay server). It includes the input masking for formula dialogs left open by 6a.
    3. Piece 6c: play by turn files.
