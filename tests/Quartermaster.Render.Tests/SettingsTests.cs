@@ -15,6 +15,28 @@ public class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void Settings_NewFields_RoundTrip()
+    {
+        var d = new Settings();
+        Assert.True(d.AlertBarVisible);
+        Assert.False(d.OutlinerVisible);
+        Assert.Equal(OutlinerGrouping.OrgDisplays, d.OutlinerGrouping);
+        Assert.False(d.TourShown);
+        var s = new Settings { AlertBarVisible = false, OutlinerVisible = true, OutlinerGrouping = OutlinerGrouping.BySide, TourShown = true };
+        new SettingsStore(_tmp).Save(s);
+        var back = new SettingsStore(_tmp).Load(new DiagnosticLog());
+        Assert.False(back.AlertBarVisible);
+        Assert.True(back.OutlinerVisible);
+        Assert.Equal(OutlinerGrouping.BySide, back.OutlinerGrouping);
+        Assert.True(back.TourShown);
+        File.WriteAllText(Path.Combine(_tmp, "settings.json"), "{ \"AlertBarVisible\": 3, \"OutlinerGrouping\": \"Nope\", \"TourShown\": \"x\" }");
+        var bad = new SettingsStore(_tmp).Load(new DiagnosticLog());
+        Assert.True(bad.AlertBarVisible);
+        Assert.Equal(OutlinerGrouping.OrgDisplays, bad.OutlinerGrouping);
+        Assert.False(bad.TourShown);
+    }
+
+    [Fact]
     public void SettingsStore_RoundTrip()
     {
         var store = new SettingsStore(_tmp);
