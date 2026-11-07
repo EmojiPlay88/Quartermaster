@@ -75,6 +75,7 @@ sealed partial class MainForm : Form
         _logDock = new LogDock(this, _wm, _logHost, _logSplitter, _viewLog, CentreOnPiece, Guard);
         _paletteDock = new PaletteDock(this, _wm, _paletteHost, _paletteSplitter, Guard);
         InitPhases();
+        InitOutliner();
         RegisterCommands();
         InitLos();
         _cmdItems["view.log"] = _viewLog;
@@ -214,6 +215,8 @@ sealed partial class MainForm : Form
         _needsGame.Add(_viewLog);
         view.DropDownItems.Add(_viewLog);
         view.DropDownItems.Add(_viewPhases);
+        _needsGame.Add(_viewOutliner);
+        view.DropDownItems.Add(_viewOutliner);
         _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, "view.ledger"));
         Item(view.DropDownItems, "&Overview", ShowOverview, needsGame: true);
         _viewPalette.Click += (_, _) => Guard(TogglePalette);
@@ -401,6 +404,7 @@ sealed partial class MainForm : Form
         _paletteDock.Create(_session);
         _paletteDock.SetGameMaster(GameMaster);
         CreatePhases(_session);
+        CreateOutliner(_session);
         _sbModule.Text = $"{_session.Model.Name} {_session.Model.Version}".Trim();
         _sbLocation.Text = "-";
         _sbZoom.Text = "-";
@@ -466,6 +470,7 @@ sealed partial class MainForm : Form
         _wm.EndModule(); // layout is written before the windows go away
         _logDock.Destroy();
         _paletteDock.Destroy();
+        DestroyOutliner();
         DestroyPhases();
         CloseAllWindows();
         if (_session == null) return;
