@@ -38,25 +38,34 @@ public sealed class ModuleSession : IDisposable
             if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnGameRewound; }
             _game = value;
             if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnGameRewound; }
-            _view = null;
+            ResetView();
         }
     }
     private GameSession? _game;
-    private GameState? _view;
-    private bool _viewValid;
+    private sealed record ViewCache(GameState? View);
+    private volatile ViewCache? _cache;   // null = invalid; published as one immutable reference
     private IReadOnlySet<string>? _viewSides;
 
     private void OnGameChanged(GameCommand _) => InvalidateView();
     private void OnGameRewound() => InvalidateView();
 
-    private void InvalidateView()
+    private void AfterGameReplaced()
     {
-        _view = null;
-        _viewValid = false;
+        if (_game != null && Players.IsSolo(_game.State)) _viewSides = null;
+        ResetView();
+        GameReplaced?.Invoke();
         ViewChanged?.Invoke();
     }
 
-    /// <summary>Raised once per view invalidation (game change, rewind, rules change, game replaced, sides changed). UIs debounce.</summary>
+    private void ResetView() => _cache = null;
+
+    private void InvalidateView()
+    {
+        ResetView();
+        ViewChanged?.Invoke();
+    }
+
+    /// <summary>Raised once per view invalidation, on the thread that raised the change (game change, rewind, rules change, game replaced, sides changed). UIs debounce.</summary>
     public event Action? ViewChanged;
 
     /// <summary>The sides whose information is shown; null = everything (solo, or all sides held).</summary>
@@ -64,7 +73,7 @@ public sealed class ModuleSession : IDisposable
 
     public void SetViewSides(IReadOnlySet<string>? sides)
     {
-        _viewSides = sides;
+        _viewSides = sides == null ? null : new HashSet<string>(sides);
         InvalidateView();
     }
 
@@ -74,14 +83,17 @@ public sealed class ModuleSession : IDisposable
     {
         get
         {
-            if (_game == null) return null;
-            if (_viewSides == null) return _game.State;
-            if (!_viewValid)
+            var game = _game;
+            var sides = _viewSides;
+            if (game == null) return null;
+            if (sides == null) return game.State;
+            var c = _cache;
+            if (c == null)
             {
-                _view = PlayerView.For(_game.State, Rules, Model, _viewSides);
-                _viewValid = true;
+                c = new ViewCache(PlayerView.For(game.State, Rules, Model, sides));
+                _cache = c;
             }
-            return _view;
+            return c.View;
         }
     }
 
@@ -178,8 +190,7 @@ public sealed class ModuleSession : IDisposable
         if (loaded.LoadNotice is { } notice) Log.Add(DiagnosticSeverity.Warning, "save", notice);
         WarnIfSaveRulesDiffer(loaded);
         SeedLedgers();
-        GameReplaced?.Invoke();
-        InvalidateView();
+        AfterGameReplaced();
     }
 
     public void SaveNative(string path)
@@ -214,8 +225,9 @@ public sealed class ModuleSession : IDisposable
         RulesDirty = false;
         if (Game != null) Game.RulesSha256 = hash;
         Remember(target);
+        ResetView();
         RulesChanged?.Invoke();
-        InvalidateView();
+        ViewChanged?.Invoke();
     }
 
     /// <summary>Applies the edit first; nothing changes (and no event fires) if it throws.</summary>
@@ -233,9 +245,11 @@ public sealed class ModuleSession : IDisposable
         Runner = runner;
         RulesDirty = true;
         SeedLedgers();
+        ResetView();
         if (Game != null) RulesApplied?.Invoke();
+        ResetView();
         RulesChanged?.Invoke();
-        InvalidateView();
+        ViewChanged?.Invoke();
     }
 
     private void Commit(RulesPack pack, string? path, bool dirty)
@@ -249,10 +263,12 @@ public sealed class ModuleSession : IDisposable
         {
             Game.RulesSha256 = SafeHash(pack);
             SeedLedgers();
+            ResetView();
             RulesApplied?.Invoke();
         }
+        ResetView();
         RulesChanged?.Invoke();
-        InvalidateView();
+        ViewChanged?.Invoke();
     }
 
     private void Remember(string path)
@@ -314,8 +330,7 @@ public sealed class ModuleSession : IDisposable
         if (Rules != null) Game.RulesSha256 = SafeHash(Rules);
         SeedLedgers();
         Game.Rebase();   // the start seed is part of genesis, not an undoable action
-        GameReplaced?.Invoke();
-        InvalidateView();
+        AfterGameReplaced();
     }
 
     public bool Disposed { get; private set; }

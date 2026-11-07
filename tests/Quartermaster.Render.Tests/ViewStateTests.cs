@@ -122,4 +122,44 @@ public class ViewStateTests : IDisposable
         Assert.True(s.CanSeeMap("Main Map"));
         Assert.True(s.CanSeeMap("Other Map"));   // public
     }
+
+    [Fact]
+    public void GameReplaced_HandlerReadsViewNonNull_AndSoloResetsSides()
+    {
+        var s = Make();
+        s.SetViewSides(Red);
+        GameState? seen = null;
+        s.GameReplaced += () => seen = s.View;
+        s.LoadSetup(s.Model.Setups[0]);
+        Assert.NotNull(seen);
+        Assert.Same(s.Game!.State, seen);
+        Assert.Null(s.ViewSides);   // solo game: view sides reset
+    }
+
+    [Fact]
+    public void SetViewSides_CopiesTheSet()
+    {
+        var s = Make();
+        var set = new HashSet<string> { "red" };
+        s.SetViewSides(set);
+        set.Add("blue");
+        Assert.Single(s.ViewSides!);
+    }
+
+    [Fact]
+    public void UpdateRules_InvalidatesView()
+    {
+        var s = Make();
+        s.SetViewSides(Red);
+        Assert.True(s.CanSee("b1"));
+        Assert.True(s.CanSeeMap("Main Map"));
+        var before = s.View;
+        bool? seenInHandler = null;
+        s.RulesChanged += () => seenInHandler = s.CanSeeMap("Main Map");
+        s.UpdateRules(p => p with { MapOwners = new() { new MapOwner { MapId = "Main Map", SideId = "blue" } } });
+        Assert.False(s.CanSeeMap("Main Map"));
+        Assert.False(seenInHandler);
+        Assert.NotSame(before, s.View);
+        Assert.False(s.CanSee("b1"));
+    }
 }
