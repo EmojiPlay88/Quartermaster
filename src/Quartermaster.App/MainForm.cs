@@ -63,9 +63,18 @@ sealed partial class MainForm : Form
     public bool GridVisible => _showGrid.Checked;
     public event Action? GridVisibleChanged;
 
-    public MainForm(StartupOptions opts)
+    readonly LaunchRequest? _launch;
+    bool _backToLauncher;
+
+    /// <summary>True when the window was closed through File -> Back to launcher (not the close box or Exit).</summary>
+    public bool ReturnToLauncher { get; private set; }
+
+    public MainForm(StartupOptions opts) : this(opts, null) { }
+
+    public MainForm(StartupOptions opts, LaunchRequest? launch)
     {
         _opts = opts;
+        _launch = launch;
         IsMdiContainer = true;
         Text = "Quartermaster";
         ClientSize = new Size(1024, 700);
@@ -207,6 +216,7 @@ sealed partial class MainForm : Form
         _needsRules.Add(Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false)));
         _needsRules.Add(Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true)));
         file.DropDownItems.Add(new ToolStripSeparator());
+        Item(file.DropDownItems, "&Back to launcher", BackToLauncher);
         Item(file.DropDownItems, "E&xit", Close);
 
         var editMenu = BuildEditMenu();
@@ -370,7 +380,7 @@ sealed partial class MainForm : Form
     }
 
     /// <summary>Opens a module and starts a game. Returns false (leaving everything as it was) on failure.</summary>
-    bool OpenModule(string path, bool fromArgs)
+    bool OpenModule(string path, bool fromArgs, LaunchRequest? launch = null)
     {
         if (!ConfirmDiscard() || !ConfirmRulesSaved()) return false;
         ModuleSession next;
@@ -419,13 +429,59 @@ sealed partial class MainForm : Form
         UpdateUi();
         UpdateTitle();
 
-        Guard(() => StartGameFor(_session, fromArgs));
+        if (launch != null) Guard(() => StartGameForLaunch(_session, launch));
+        else Guard(() => StartGameFor(_session, fromArgs));
         if (fromArgs) Guard(() => LoadRulesFromArgs(_session));
         OpenMainMap();
         if (_opts.FloatMainMap && Program.Smoke && FirstMap() is { } fm) _wm.PopOut(fm);
         MaybeAutoTour();
         RememberModule(path);
+        if (!Program.Smoke) Guard(() => LaunchBookkeeping.ModuleOpened(_library, path, DateTimeOffset.UtcNow));
         return true;
+    }
+
+    /// <summary>Starts the game the launcher asked for: a new game (or setup), a saved game, or the newest autosave.</summary>
+    void StartGameForLaunch(ModuleSession s, LaunchRequest launch)
+    {
+        if (launch.RulesPath != null) Guard(() => s.OpenRules(launch.RulesPath));
+        switch (launch.Kind)
+        {
+            case LaunchKind.NewGame when launch.NewGame is { } ng:
+                var players = ng.Players is { Count: >= 2 } ? ng.Players : null;
+                if (ng.Setup is { } setup) s.LoadSetup(setup, ng.Difficulty, players); else s.StartNewGame(ng.Difficulty, players);
+                if (ng.Difficulty != _settings.Current.LastDifficulty) _settings.Update(cur => cur with { LastDifficulty = ng.Difficulty });
+                break;
+            case LaunchKind.OpenSave or LaunchKind.Continue when !string.IsNullOrEmpty(launch.SavePath):
+                LoadSavedGame(s, launch.SavePath);
+                break;
+            default:
+                ChooseAndStart(s, preselectNew: false);
+                break;
+        }
+    }
+
+    /// <summary>Loads a native save into the session and tracks it as the current file (autosaves are never a Save target).</summary>
+    void LoadSavedGame(ModuleSession s, string path)
+    {
+        s.LoadNative(path);
+        _recoveredAutosave = Autosaver.IsAutosavePath(path, LayoutRoot);
+        _savePath = _recoveredAutosave ? null : path;
+        _dirty = false;
+        if (!_recoveredAutosave) NoteRecentSave(path);
+        UpdateTitle();
+    }
+
+    void NoteRecentSave(string path)
+    {
+        if (Program.Smoke) return;
+        Guard(() => LaunchBookkeeping.SaveUsed(_recent, _session?.Archive.Sha256, path));
+    }
+
+    void BackToLauncher()
+    {
+        _backToLauncher = true;
+        try { Close(); }
+        finally { _backToLauncher = false; }
     }
 
     void StartGameFor(ModuleSession s, bool fromArgs)
@@ -580,7 +636,7 @@ sealed partial class MainForm : Form
     {
         using var dlg = new SetupChooserDialog(s.Model, _settings.Current.LastDifficulty, preselectNew, preselect, s.Rules);
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        if (dlg.SelectedDifficulty != _settings.Current.LastDifficulty) _settings.Save(_settings.Current with { LastDifficulty = dlg.SelectedDifficulty });
+        if (dlg.SelectedDifficulty != _settings.Current.LastDifficulty) _settings.Update(cur => cur with { LastDifficulty = dlg.SelectedDifficulty });
         // The players are part of the game's start (not an undoable command); two or more bring up the first handover screen.
         var players = dlg.SelectedPlayers.Count >= 2 ? dlg.SelectedPlayers : null;
         if (dlg.Selected is { } setup) s.LoadSetup(setup, dlg.SelectedDifficulty, players); else s.StartNewGame(dlg.SelectedDifficulty, players);
@@ -611,12 +667,8 @@ sealed partial class MainForm : Form
             dlg.InitialDirectory = mine != null && Directory.Exists(mine) ? mine : Directory.Exists(root) ? root : "";
         }
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        _session.LoadNative(dlg.FileName);
         // A file inside the autosave folder is pruned automatically, so it must never become the target of Save.
-        _recoveredAutosave = Autosaver.IsAutosavePath(dlg.FileName, LayoutRoot);
-        _savePath = _recoveredAutosave ? null : dlg.FileName;
-        _dirty = false;
-        UpdateTitle();
+        LoadSavedGame(_session, dlg.FileName);
     }
 
     void SaveGame(bool saveAs)
@@ -641,6 +693,7 @@ sealed partial class MainForm : Form
         _dirty = false;
         _autosavedSeq = _changeSeq;
         _autosaver?.Reset(DateTimeOffset.UtcNow);
+        NoteRecentSave(path);
         UpdateTitle();
     }
 
@@ -901,7 +954,15 @@ sealed partial class MainForm : Form
             _smokeTimer.Start();
         }
         ReopenLastModuleIfWanted();
-        if (_opts.ModulePath != null && !_startupDone)
+        if (_launch != null && !_startupDone)
+        {
+            _startupDone = true;
+            BeginInvoke(new Action(() =>
+            {
+                if (!IsDisposed) OpenModule(_launch.ModulePath, fromArgs: false, _launch);
+            }));
+        }
+        else if (_opts.ModulePath != null && !_startupDone)
         {
             _startupDone = true;
             BeginInvoke(new Action(() =>
@@ -915,6 +976,7 @@ sealed partial class MainForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (!e.Cancel && (!ConfirmDiscard() || !ConfirmRulesSaved())) e.Cancel = true;
+        if (!e.Cancel && _backToLauncher) ReturnToLauncher = true;
         base.OnFormClosing(e);
     }
 

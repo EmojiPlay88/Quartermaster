@@ -18,13 +18,13 @@ sealed partial class MainForm
 
     void SaveOutlinerVisible(bool visible)
     {
-        if (_settings.Current.OutlinerVisible != visible) _settings.Save(_settings.Current with { OutlinerVisible = visible });
+        if (_settings.Current.OutlinerVisible != visible) _settings.Update(s => s with { OutlinerVisible = visible });
     }
 
     void CreateOutliner(ModuleSession session)
     {
         var panel = new OutlinerPanel(session, () => _phases, AlertHits, _settings.Current.OutlinerGrouping,
-            g => { if (_settings.Current.OutlinerGrouping != g) _settings.Save(_settings.Current with { OutlinerGrouping = g }); },
+            g => { if (_settings.Current.OutlinerGrouping != g) _settings.Update(s => s with { OutlinerGrouping = g }); },
             CentreOnPiece, map => Guard(() => OpenMap(map, false)), JumpToDecision);
         AlertsUpdated += panel.AlertsChanged; // one alert evaluation per change, shared with the alert bar
         _outlinerDock!.Create(panel);

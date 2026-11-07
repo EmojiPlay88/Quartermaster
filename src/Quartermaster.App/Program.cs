@@ -1,5 +1,6 @@
 using System.Globalization;
 using Quartermaster.Core;
+using Quartermaster.Render;
 
 namespace Quartermaster.App;
 
@@ -178,6 +179,12 @@ static class Program
     public static bool Smoke { get; private set; }
     public static int ExitCode { get; set; }
 
+    /// <summary>Shows the launcher and returns what to play, or null when it was closed. Task 4 sets this; while null the app opens the game window directly as before.</summary>
+    public static Func<LaunchRequest?>? LauncherHook { get; set; }
+
+    /// <summary>True once the game window was closed through Back to launcher (so nothing reopens the last module by itself).</summary>
+    public static bool Relaunched { get; private set; }
+
     static string LogDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
 
     /// <summary>Appends a line to app.log (used instead of dialogs in smoke mode).</summary>
@@ -226,7 +233,25 @@ static class Program
             {
                 if (e.ExceptionObject is Exception ex) Crash(ex);
             };
-            Application.Run(new MainForm(opts));
+            var first = true;
+            while (true)
+            {
+                LaunchRequest? launch = null;
+                var o = opts;
+                if (!first) o = opts with { ModulePath = null, SetupIndex = null, NewGame = false, RulesPath = null, NewRulesName = null };
+                if (StartupDecision.For(o.ModulePath, o.Smoke) == StartupAction.Launcher && LauncherHook is { } show)
+                {
+                    launch = show();
+                    if (launch == null) break; // launcher closed: the app ends
+                }
+                first = false;
+                var form = new MainForm(o, launch);
+                Application.Run(form);
+                var again = form.ReturnToLauncher;
+                form.Dispose();
+                if (!again) break;
+                Relaunched = true;
+            }
         }
         catch (Exception ex)
         {

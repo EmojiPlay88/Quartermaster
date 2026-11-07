@@ -280,4 +280,35 @@ public class LauncherTests : IDisposable
         Assert.Equal("ok.vmod", Assert.Single(tolerant.Modules).Path);
         Assert.Equal(new[] { "p" }, tolerant.RecentSaves["a"]);
     }
+
+    [Theory]
+    [InlineData(null, false, StartupAction.Launcher)]
+    [InlineData("m.vmod", false, StartupAction.DirectModule)]
+    [InlineData("m.vmod", true, StartupAction.DirectModule)]
+    [InlineData(null, true, StartupAction.DirectModule)]
+    [InlineData("", false, StartupAction.Launcher)]
+    public void StartupDecision_Table(string? module, bool smoke, StartupAction expected)
+        => Assert.Equal(expected, StartupDecision.For(module, smoke));
+
+    [Fact]
+    public void ReturnToLauncher_UpdatesLastPlayed()
+    {
+        var store = NewStore();
+        var lib = new ModuleLibrary(store);
+        var recent = new RecentGames(store, Path.Combine(_tmp, "root"));
+        var a = Module("a");
+        lib.Add(a);
+        var save = Path.Combine(_tmp, "g.qsave");
+        File.WriteAllText(save, "{}");
+        var when = new DateTimeOffset(2026, 11, 7, 10, 0, 0, TimeSpan.Zero);
+        LaunchBookkeeping.ModuleOpened(lib, a, when);
+        LaunchBookkeeping.SaveUsed(recent, "abc123", save);
+        Assert.Equal(when, lib.Rows[0].Entry.LastPlayed);
+        var reloaded = LoadedStore();
+        Assert.Equal(when, new ModuleLibrary(reloaded).Rows[0].Entry.LastPlayed);
+        Assert.Equal(save, new RecentGames(reloaded, Path.Combine(_tmp, "root")).For("abc123")[0].Path);
+        // Blank hash or path is ignored, never throws.
+        LaunchBookkeeping.SaveUsed(recent, null, save);
+        LaunchBookkeeping.ModuleOpened(lib, "", when);
+    }
 }
