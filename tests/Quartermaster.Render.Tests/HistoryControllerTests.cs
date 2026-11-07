@@ -140,6 +140,124 @@ public class HistoryControllerTests : IDisposable
     }
 
     [Fact]
+    public void SaveRules_KeepsRedo()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        c.Start();
+        c.Advance();
+        h.Undo();
+        s.SaveRules(Path.Combine(_tmp, "r.qrules"));
+        Assert.True(h.CanRedo);
+    }
+
+    // ---- fix round 1: no silent reroll, no undo loop ----
+
+    /// <summary>Fully automatic play into turn 2 (the turn-2 Weather rolls a die), then a move in turn 2 Supply.</summary>
+    private static void PlayIntoTurnTwo(ModuleSession s, PhaseController c)
+    {
+        c.Start();
+        for (var i = 0; i < 30 && s.Game!.State.Position!.Turn < 2; i++) c.Advance();
+        c.Advance();   // Supply, turn 2
+        c.ExecuteMove(new[] { Move("r1", 130) });
+    }
+
+    private static CheckpointRow Row(HistoryController h, string phase, int turn) =>
+        h.Checkpoints().First(r => r.Phase == phase && r.Turn == turn);
+
+    private static (int Actions, int Dice) After(IReadOnlyList<GameCommand> log, IReadOnlyList<ActionMark> marks, int index) =>
+        (marks.Count(a => a.Start >= index), log.Skip(index).Count(x => x is RollDice));
+
+    private static void AssertRedoAllRestores(ModuleSession s, HistoryController h, string played)
+    {
+        h.Redo();
+        Assert.DoesNotContain(s.Game!.Log, x => x is SteppedBack);
+        for (var i = 0; i < 40 && h.CanRedo; i++) h.Redo();
+        Assert.Equal(played, Json(s.Game.State));
+    }
+
+    [Fact]
+    public void StepBackTwice_OneLineCoversAllDice()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        PlayIntoTurnTwo(s, c);
+        var played = Json(s.Game!.State);
+        var log = s.Game.Log.ToList();
+        var marks = s.Game.Actions.ToList();
+        var end1 = Row(h, "End", 1);
+        var supply1 = Row(h, "Supply", 1);
+        Assert.True(After(log, marks, end1.LogIndex).Dice > 0);   // the first step back undoes the turn-2 Weather roll
+
+        h.StepBack(end1);
+        h.StepBack(supply1);
+
+        var line = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+        var (actions, dice) = After(log, marks, supply1.LogIndex);
+        Assert.Equal(dice, line.DiceUndone);
+        Assert.Equal(actions, line.ActionsUndone);
+        Assert.Equal(1, s.Game.State.Log.Count(l => l.Text.StartsWith("Stepped back to", StringComparison.Ordinal)));
+        AssertRedoAllRestores(s, h, played);
+    }
+
+    [Fact]
+    public void StepBackThenUndo_MergedLineCoversAllDice()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        PlayIntoTurnTwo(s, c);
+        var played = Json(s.Game!.State);
+        var log = s.Game.Log.ToList();
+        var marks = s.Game.Actions.ToList();
+
+        h.StepBack(Row(h, "End", 1));
+        h.Undo();
+
+        var line = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+        var (actions, dice) = After(log, marks, line.ToIndex);
+        Assert.True(dice > 0);
+        Assert.Equal(dice, line.DiceUndone);
+        Assert.Equal(actions, line.ActionsUndone);
+        Assert.Equal("ph-combat", s.Game.State.Position!.PhaseId);
+        Assert.Contains(s.Game.State.Log, l => l.Text.StartsWith("Stepped back to Turn 1 · Combat", StringComparison.Ordinal));
+        Assert.Equal(1, s.Game.State.Log.Count(l => l.Text.StartsWith("Stepped back to", StringComparison.Ordinal)));
+        AssertRedoAllRestores(s, h, played);
+    }
+
+    [Fact]
+    public void PlainUndo_AddsNoLine()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        PlayIntoTurnTwo(s, c);
+        h.Undo();
+        Assert.DoesNotContain(s.Game!.Log, x => x is SteppedBack);
+    }
+
+    [Fact]
+    public void Undo_ThroughDeletedPhase_DoesNotLoop()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        c.Start();      // Weather
+        c.Advance();    // Supply
+        c.Advance();    // Movement
+        var played = Json(s.Game!.State);
+        s.UpdateRules(p => p with { Phases = p.Phases.Where(x => x.Id != "ph-supply").ToList() });
+
+        h.Undo();       // back into Supply, which is gone: relocated (logged), redo kept
+        Assert.Contains(s.Game.Log, x => x is AdvancePhase { Reason: not null });
+        Assert.True(h.CanRedo);
+        Assert.Equal("Undo Next Phase", h.UndoText);
+
+        h.Undo();       // through the relocation and the advance into Supply, in one step
+        Assert.Equal("ph-weather", s.Game.State.Position!.PhaseId);
+        Assert.DoesNotContain(s.Game.Log, x => x is AdvancePhase { Reason: not null });
+
+        h.Redo();
+        Assert.True(h.CanRedo);
+        h.Redo();
+        Assert.False(h.CanRedo);
+        Assert.Equal("ph-move", s.Game.State.Position!.PhaseId);
+        Assert.Equal(played, Json(s.Game.State));
+    }
+
+    [Fact]
     public void ApplyFormula_AfterRunUndone_ReturnsFalse()
     {
         var (s, c, h) = Make(Difficulty.SemiAuto);

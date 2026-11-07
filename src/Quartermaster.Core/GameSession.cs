@@ -12,6 +12,7 @@ public sealed class GameSession
     int _scopeDepth;
     string? _scopeLabel;
     bool _scopeActionOpen;
+    bool _scopeSettle;
     bool _redoing;
     readonly List<Checkpoint> _checkpoints = new();
     bool _cpPending;
@@ -43,9 +44,17 @@ public sealed class GameSession
 
     /// <summary>True while an action scope (<see cref="BeginAction"/>) is open; rewinds are refused then.</summary>
     public bool InAction => _scopeDepth > 0;
-    public bool CanUndo => _actions.Count > 0;
+    public bool CanUndo => LastUndoable() >= 0;
     public bool CanRedo => _redo.Count > 0;
-    public string? UndoLabel => _actions.Count > 0 ? _actions[^1].Label : null;
+    public string? UndoLabel => LastUndoable() is var i and >= 0 ? _actions[i].Label : null;
+
+    /// <summary>Index in <see cref="Actions"/> of the action Undo goes back to (trailing settle actions go with it); -1 when none.</summary>
+    int LastUndoable()
+    {
+        int i = _actions.Count - 1;
+        while (i >= 0 && _actions[i].Settle) i--;
+        return i;
+    }
     public string? RedoLabel => _redo.Count > 0 ? _redo.Peek().Label : null;
 
     /// <summary>Commands that never form an action of their own (view-only or bookkeeping).</summary>
@@ -62,6 +71,15 @@ public sealed class GameSession
     {
         if (_scopeDepth++ == 0) { _scopeLabel = label; _scopeActionOpen = false; ClearPendingCheckpoint(); }
         return new Scope(this);
+    }
+
+    /// <summary>Like <see cref="BeginAction"/>, for a follow-up a rewind makes itself (re-seed / relocation): the action it records
+    /// keeps the redo stack, is undone together with the action before it and is never redone.</summary>
+    public IDisposable BeginSettle(string label)
+    {
+        var scope = BeginAction(label);
+        if (_scopeDepth == 1) _scopeSettle = true;
+        return scope;
     }
 
     sealed class Scope(GameSession s) : IDisposable
@@ -81,6 +99,7 @@ public sealed class GameSession
         if (_scopeActionOpen) CloseAction();
         _scopeLabel = null;
         _scopeActionOpen = false;
+        _scopeSettle = false;
     }
 
     /// <summary>The single entry point for changing game state.</summary>
@@ -89,7 +108,7 @@ public sealed class GameSession
         bool oneShot = false;
         if (_scopeDepth > 0)
         {
-            if (!_scopeActionOpen) { NewAction(_scopeLabel ?? ActionLabels.For(c, 1)); _scopeActionOpen = true; }
+            if (!_scopeActionOpen) { NewAction(_scopeLabel ?? ActionLabels.For(c, 1), _scopeSettle); _scopeActionOpen = true; }
         }
         else if (!IsFolding(c))
         {
@@ -133,10 +152,10 @@ public sealed class GameSession
         _checkpoints.Add(new Checkpoint(0, Genesis.Turn.Turn, Genesis.Position, "game start", null));
     }
 
-    void NewAction(string label)
+    void NewAction(string label, bool settle = false)
     {
-        _actions.Add(new ActionMark(_log.Count, label));
-        if (!_redoing) _redo.Clear();
+        _actions.Add(new ActionMark(_log.Count, label, settle));
+        if (!_redoing && !settle) _redo.Clear();
     }
 
     /// <summary>Splits the commands from <paramref name="logIndex"/> onward into redoable actions.</summary>
@@ -148,11 +167,12 @@ public sealed class GameSession
         var undone = new List<UndoneAction>();
         // A cut through the middle of an action: its tail is redone first, as its own entry.
         // A tail of only folding commands (SteppedBack, SeedLedger, view state) is dropped, not redoable.
-        if (prev != null && firstRemoved > logIndex
+        if (prev != null && !prev.Settle && firstRemoved > logIndex
             && !_log.Skip(logIndex).Take(firstRemoved - logIndex).All(IsFolding))
             undone.Add(new UndoneAction(prev.Label, _log.GetRange(logIndex, firstRemoved - logIndex)));
         for (int k = 0; k < removedMarks.Count; k++)
         {
+            if (removedMarks[k].Settle) continue;   // made by a rewind; never redone
             // With no earlier action, orphan folded commands before the first removed action go down with it.
             int from = k == 0 && prev == null ? logIndex : removedMarks[k].Start;
             int to = k + 1 < removedMarks.Count ? removedMarks[k + 1].Start : _log.Count;
@@ -227,11 +247,13 @@ public sealed class GameSession
     /// <summary>Forgets every undone action (e.g. after a rules-pack change).</summary>
     public void ClearRedo() => _redo.Clear();
 
-    public void Undo()
+    /// <summary>Rewinds the last action (and any settle actions after it). Returns what was undone, in log order.</summary>
+    public IReadOnlyList<UndoneAction> Undo()
     {
         if (_scopeDepth > 0) throw new InvalidOperationException("Cannot undo while an action scope is open.");
-        if (_actions.Count == 0) return;
-        RewindTo(_actions[^1].Start);
+        int i = LastUndoable();
+        if (i < 0) return Array.Empty<UndoneAction>();
+        return RewindTo(_actions[i].Start);
     }
 
     public void Redo()

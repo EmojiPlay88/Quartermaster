@@ -40,6 +40,10 @@ public sealed class ModuleSession : IDisposable
     /// <summary>Raised after the rules pack changed (new, opened, edited or saved).</summary>
     public event Action? RulesChanged;
 
+    /// <summary>Raised (before <see cref="RulesChanged"/>) when a new, opened or edited pack was applied to the open game and re-seeded it.
+    /// Not raised by a plain save. Undone actions are not safe to redo after this (spec 7).</summary>
+    public event Action? RulesApplied;
+
     /// <summary>Raised after <see cref="Game"/> is replaced (new game, setup or loaded save).</summary>
     public event Action? GameReplaced;
 
@@ -160,6 +164,7 @@ public sealed class ModuleSession : IDisposable
         Runner = runner;
         RulesDirty = true;
         SeedLedgers();
+        if (Game != null) RulesApplied?.Invoke();
         RulesChanged?.Invoke();
     }
 
@@ -174,6 +179,7 @@ public sealed class ModuleSession : IDisposable
         {
             Game.RulesSha256 = SafeHash(pack);
             SeedLedgers();
+            RulesApplied?.Invoke();
         }
         RulesChanged?.Invoke();
     }

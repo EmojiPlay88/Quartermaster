@@ -1,7 +1,9 @@
 namespace Quartermaster.Core;
 
-/// <summary>One undoable action: <see cref="Start"/> is the log index of its first command.</summary>
-public sealed record ActionMark(int Start, string Label);
+/// <summary>One undoable action: <see cref="Start"/> is the log index of its first command.
+/// <see cref="Settle"/> marks a follow-up made by a rewind itself (e.g. moving off a deleted phase): it is undone together with the
+/// action before it and never becomes a redo entry.</summary>
+public sealed record ActionMark(int Start, string Label, bool Settle = false);
 
 /// <summary>An action removed by a rewind, kept so it can be redone.</summary>
 public sealed record UndoneAction(string Label, IReadOnlyList<GameCommand> Commands);
