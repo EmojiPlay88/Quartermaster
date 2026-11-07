@@ -190,7 +190,7 @@ public class LedgerBreakdownTests
         {
             var sess = Played();
             NativeSave.Write(path, sess);
-            Assert.Equal(6, NativeSave.FormatVersion);
+            Assert.Equal(7, NativeSave.FormatVersion);
             var back = NativeSave.Read(path);
             Assert.True(back.CanUndo);
             Assert.False(back.RebasedOnLoad);

@@ -43,6 +43,10 @@ public sealed class GameState
     public List<DiceEntry> DiceHistory { get; set; } = new();
     public List<LogEntry> Log { get; set; } = new();
     public string Notes { get; set; } = "";
+    /// <summary>Empty = solo (one implicit player holding every side).</summary>
+    public List<PlayerDef> Players { get; set; } = new();
+    /// <summary>Identifies this game across saves (GUID "N" format); empty only in bare test states.</summary>
+    public string GameId { get; set; } = "";
     public TurnState Turn { get; set; } = new(1, null);
     /// <summary>Null = before turn 1.</summary>
     public PhasePosition? Position { get; set; }
@@ -106,6 +110,10 @@ public sealed class GameState
                 Log.Add(LogBuilder.Turn(this, st));
                 break;
             case AdvancePhase ap: DoAdvance(ap); break;
+            case SetPlayers sp:
+                Players = (sp.Players ?? Array.Empty<PlayerDef>()).Select(p => p with { Sides = p.Sides.ToList() }).ToList();
+                Log.Add(LogBuilder.Line(this, LogKind.System, LogBuilder.PlayersText(Players), sp.Who, sp.At));
+                break;
             case SetDifficulty sd:
                 Difficulty = sd.Difficulty;
                 Log.Add(LogBuilder.Line(this, LogKind.System, $"Difficulty changed to {DifficultyText.Display(sd.Difficulty)}", sd.Who, sd.At));

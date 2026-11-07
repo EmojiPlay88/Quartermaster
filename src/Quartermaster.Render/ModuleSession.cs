@@ -238,6 +238,7 @@ public sealed class ModuleSession : IDisposable
     {
         state.Log.Clear();
         state.Log.Add(new LogEntry(1, LogKind.System, summary, "local", null, null, DateTimeOffset.UtcNow));
+        if (string.IsNullOrEmpty(state.GameId)) state.GameId = Guid.NewGuid().ToString("N");
         Game = new GameSession(state, Archive.Sha256);
         if (Rules != null) Game.RulesSha256 = SafeHash(Rules);
         SeedLedgers();

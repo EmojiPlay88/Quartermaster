@@ -302,6 +302,14 @@ public sealed class GameSession
         }
     }
 
+    /// <summary>Gives a legacy game its id after the history check, on the live state and genesis alike so replay still matches.</summary>
+    internal void AssignGameId(string id)
+    {
+        State.GameId = id;
+        Genesis.GameId = id;
+        foreach (var s in _cache.Values) s.GameId = id;
+    }
+
     internal void ReplaceState(GameState state) => State = state;
 
     internal void RestoreLog(IEnumerable<GameCommand> log) => _log.AddRange(log);

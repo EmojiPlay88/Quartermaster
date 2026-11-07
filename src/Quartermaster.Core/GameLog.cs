@@ -77,6 +77,9 @@ static class LogBuilder
     public static LogEntry Turn(GameState s, SetTurn t) =>
         Make(s, LogKind.Turn, $"Turn {t.Turn}" + (string.IsNullOrEmpty(t.Phase) ? "" : " · " + t.Phase), t.Who, t.At);
 
+    public static string PlayersText(IReadOnlyList<PlayerDef> players) =>
+        "Players: " + (players.Count == 0 ? "solo" : string.Join("; ", players.Select(p => $"{p.Name} ({string.Join(", ", p.Sides)})")));
+
     public static LogEntry SteppedBack(GameState s, SteppedBack c)
     {
         var text = $"Stepped back to {c.Target}. Undid {c.ActionsUndone} {(c.ActionsUndone == 1 ? "action" : "actions")}";
