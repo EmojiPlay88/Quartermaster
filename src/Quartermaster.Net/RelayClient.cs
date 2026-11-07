@@ -33,7 +33,8 @@ public sealed class RelayClient : IAsyncDisposable
     private Func<CertificateCheck, bool> _onCert = _ => false;
     private ClientWebSocket? _ws;
     private volatile bool _certRejected, _down, _disposed;
-    private bool _helloSent, _awaitingRejoin;
+    private bool _helloSent, _awaitingRejoin, _postSinceRequest;
+    private readonly TimeSpan _rejoinTimeout;
     private int _connectStarted;
     private string? _role;
     private volatile string? _memberId;
@@ -54,8 +55,14 @@ public sealed class RelayClient : IAsyncDisposable
     /// <summary>Raised after a reconnect has re-joined the room (or, with no room yet, re-established the link).</summary>
     public event Action? Reconnected;
 
-    public RelayClient(PinStore pins, IReadOnlyList<TimeSpan>? backoff = null)
+    /// <remarks>
+    /// Events are raised on the client's pump thread (or the connecting thread) and must not block or call back into
+    /// this client synchronously. A Refused arriving after a fire-and-forget Post (UpdateListing/Send) is reported
+    /// only through <see cref="RequestRefused"/>; it is never used to fail a pending request.
+    /// </remarks>
+    public RelayClient(PinStore pins, IReadOnlyList<TimeSpan>? backoff = null, TimeSpan? rejoinTimeout = null)
     {
+        _rejoinTimeout = rejoinTimeout ?? RequestTimeout;
         _pins = pins;
         _backoff = backoff is { Count: > 0 } ? backoff.ToArray() : DefaultBackoff;
     }
@@ -71,7 +78,7 @@ public sealed class RelayClient : IAsyncDisposable
         if (Interlocked.Exchange(ref _connectStarted, 1) != 0) throw new RelayException("Already connected.");
         _relay = relay.AbsolutePath is "/" or "" ? new UriBuilder(relay) { Path = "/qm" }.Uri : relay;
         _onCert = onUnknownOrChangedCert;
-        var (ws, reason) = await TryConnect(ct);
+        var (ws, reason) = await TryConnect(ct).ConfigureAwait(false);
         if (_disposed) { ws?.Dispose(); return; }
         if (ws == null)
         {
@@ -90,28 +97,28 @@ public sealed class RelayClient : IAsyncDisposable
     // ---- requests ----
 
     public async Task<string> ReserveCodeAsync() =>
-        ((CodeReserved)Expect(await Request("host", new ReserveCode(), typeof(CodeReserved)))).Code;
+        ((CodeReserved)Expect(await Request("host", new ReserveCode(), typeof(CodeReserved)).ConfigureAwait(false))).Code;
 
     public async Task CreateRoomAsync(string code, string verifier, LobbyListing draft)
     {
         var msg = new CreateRoom(code, verifier, draft);
-        Expect(await Request("host", msg, typeof(RoomCreated)));
+        Expect(await Request("host", msg, typeof(RoomCreated)).ConfigureAwait(false));
         lock (_gate) _rejoin = msg;
     }
 
     public async Task UpdateListingAsync(LobbyListing listing)
     {
-        await Post("host", new UpdateListing(listing));
+        await Post("host", new UpdateListing(listing)).ConfigureAwait(false);
         lock (_gate) if (_rejoin is CreateRoom c) _rejoin = c with { Draft = listing };
     }
 
     public async Task<IReadOnlyList<LobbyListing>> ListLobbiesAsync(string moduleSha) =>
-        ((Lobbies)Expect(await Request("browser", new ListLobbies(moduleSha), typeof(Lobbies)))).Listings;
+        ((Lobbies)Expect(await Request("browser", new ListLobbies(moduleSha), typeof(Lobbies)).ConfigureAwait(false))).Listings;
 
     public async Task<string> JoinRoomAsync(string code, string verifier)
     {
         var msg = new JoinRoom(code, verifier);
-        var id = ((Joined)Expect(await Request("guest", msg, typeof(Joined)))).MemberId;
+        var id = ((Joined)Expect(await Request("guest", msg, typeof(Joined)).ConfigureAwait(false))).MemberId;
         lock (_gate) _rejoin = msg;
         _memberId = id;
         return id;
@@ -124,7 +131,7 @@ public sealed class RelayClient : IAsyncDisposable
     private async Task Post(string role, RelayMessage msg)
     {
         if (_disposed) throw new RelayException("The relay client was closed.");
-        if (!await SendMsg(role, msg)) throw new RelayException("Not connected to the relay.");
+        if (!await SendMsg(role, msg, true).ConfigureAwait(false)) throw new RelayException("Not connected to the relay.");
     }
 
     private async Task<RelayMessage> Request(string role, RelayMessage msg, Type expected)
@@ -138,10 +145,10 @@ public sealed class RelayClient : IAsyncDisposable
             lock (_gate) _pending = tcs;
             try
             {
-                if (!await SendMsg(role, msg)) throw new RelayException("Not connected to the relay.");
+                if (!await SendMsg(role, msg, false).ConfigureAwait(false)) throw new RelayException("Not connected to the relay.");
                 var done = await Task.WhenAny(tcs.Task, Task.Delay(RequestTimeout, _stop.Token)).ConfigureAwait(false);
                 if (done != tcs.Task) throw new RelayException("The relay did not answer.");
-                var reply = await tcs.Task;
+                var reply = await tcs.Task.ConfigureAwait(false);
                 if (reply is Refused r) throw new RelayException(r.Reason);
                 if (!expected.IsInstanceOfType(reply)) throw new RelayException("The relay sent an unexpected answer.");
                 return reply;
@@ -155,46 +162,82 @@ public sealed class RelayClient : IAsyncDisposable
     private static string Upgrade(string? current, string wanted) =>
         current == null || (current == "browser" && wanted != "browser") ? wanted : current;
 
-    /// <summary>Sends msg (preceded by Hello on a fresh connection). App sends wait for an in-progress rejoin to be answered.</summary>
-    private async Task<bool> SendMsg(string role, RelayMessage msg, bool isRejoin = false)
+    /// <summary>
+    /// App send: takes the send lock, and if a rejoin is still unanswered releases it and waits (re-checking after every
+    /// acquisition), so nothing reaches the relay between a reconnect and its rejoin answer.
+    /// </summary>
+    private async Task<bool> SendMsg(string role, RelayMessage msg, bool isPost)
     {
         try
         {
-            if (!isRejoin)
+            while (true)
             {
-                Task? wait;
-                lock (_gate) wait = _awaitingRejoin ? _rejoinDone?.Task : null;
-                if (wait != null)
-                    await Task.WhenAny(wait, Task.Delay(RequestTimeout, _stop.Token)).ConfigureAwait(false);
-            }
-            await _sendLock.WaitAsync(_stop.Token).ConfigureAwait(false);
-            try
-            {
-                ClientWebSocket? ws;
-                bool hello;
-                string effective;
-                lock (_gate)
+                Task? wait = null;
+                await _sendLock.WaitAsync(_stop.Token).ConfigureAwait(false);
+                try
                 {
-                    ws = _ws;
-                    hello = !_helloSent;
-                    effective = Upgrade(_role, role);
+                    lock (_gate) if (_awaitingRejoin) wait = _rejoinDone?.Task;
+                    if (wait == null) return await SendLocked(role, msg, isPost).ConfigureAwait(false);
                 }
-                if (ws == null || ws.State != WebSocketState.Open) return false;
-                if (hello)
-                {
-                    await SendRaw(ws, new Hello(Protocol.ProtocolVersion, effective));
-                    lock (_gate) _helloSent = true;
-                }
-                await SendRaw(ws, msg);
-                lock (_gate) _role = effective;
-                return true;
+                finally { _sendLock.Release(); }
+                await Task.WhenAny(wait, Task.Delay(RequestTimeout, _stop.Token)).ConfigureAwait(false);
             }
-            finally { _sendLock.Release(); }
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or IOException)
         {
             return false;
         }
+    }
+
+    /// <summary>Caller holds _sendLock. Hello is decided and sent here, so it always precedes the first message.</summary>
+    private async Task<bool> SendLocked(string role, RelayMessage msg, bool isPost)
+    {
+        try
+        {
+            ClientWebSocket? ws;
+            bool hello;
+            string effective;
+            lock (_gate)
+            {
+                ws = _ws;
+                hello = !_helloSent;
+                effective = Upgrade(_role, role);
+            }
+            if (ws == null || ws.State != WebSocketState.Open) return false;
+            if (hello)
+            {
+                await SendRaw(ws, new Hello(Protocol.ProtocolVersion, effective)).ConfigureAwait(false);
+                lock (_gate) _helloSent = true;
+            }
+            await SendRaw(ws, msg).ConfigureAwait(false);
+            lock (_gate)
+            {
+                _role = effective;
+                // A Refused after a Post can't be attributed to the pending request.
+                _postSinceRequest = isPost;
+            }
+            return true;
+        }
+        catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or IOException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>If the relay doesn't answer the rejoin in time, drop the socket; the pump then reconnects again.</summary>
+    private void WatchRejoin(ClientWebSocket ws, CancellationToken ct)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(_rejoinTimeout, ct).ConfigureAwait(false);
+                bool stuck;
+                lock (_gate) stuck = _awaitingRejoin && ReferenceEquals(_ws, ws);
+                if (stuck) ws.Abort();
+            }
+            catch (Exception) { }
+        }, ct);
     }
 
     private Task SendRaw(ClientWebSocket ws, RelayMessage msg) =>
@@ -272,17 +315,25 @@ public sealed class RelayClient : IAsyncDisposable
                     }
                     ws = w;
                     RelayMessage? rejoin;
-                    lock (_gate)
+                    bool sent = true;
+                    // Hold the send lock from publishing the socket until Hello + rejoin are written, so no app message can slip in first.
+                    await _sendLock.WaitAsync(ct).ConfigureAwait(false);
+                    try
                     {
-                        _ws = ws; _helloSent = false; rejoin = _rejoin; _awaitingRejoin = rejoin != null;
-                        if (rejoin != null) _rejoinDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        lock (_gate)
+                        {
+                            _ws = ws; _helloSent = false; rejoin = _rejoin; _awaitingRejoin = rejoin != null;
+                            if (rejoin != null) _rejoinDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        }
+                        if (rejoin != null)
+                        {
+                            sent = await SendLocked(rejoin is CreateRoom ? "host" : "guest", rejoin, false).ConfigureAwait(false);
+                            if (sent) WatchRejoin(ws, ct);
+                        }
                     }
-                    if (rejoin != null)
-                    {
-                        if (!await SendMsg(rejoin is CreateRoom ? "host" : "guest", rejoin, isRejoin: true))
-                        { EndRejoin(); ws = Drop(ws); continue; }
-                    }
-                    else { attempt = 0; _down = false; try { Reconnected?.Invoke(); } catch (Exception) { } }
+                    finally { _sendLock.Release(); }
+                    if (!sent) { EndRejoin(); ws = Drop(ws); continue; }
+                    if (rejoin == null) { attempt = 0; _down = false; try { Reconnected?.Invoke(); } catch (Exception) { } }
                 }
 
                 var end = await ReceiveLoop(ws, ct).ConfigureAwait(false);
@@ -346,9 +397,13 @@ public sealed class RelayClient : IAsyncDisposable
                 try { msg = Framing.Decode<RelayMessage>(ms.GetBuffer().AsSpan(0, (int)ms.Length)); }
                 catch (ProtocolException) { continue; }
 
-                var fatal = await Dispatch(ws, msg);
+                var fatal = await Dispatch(ws, msg).ConfigureAwait(false);
                 if (fatal != null) { ws.Abort(); return new End(fatal, true); }
             }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return new End("Lost connection to the relay.", false); // socket aborted (e.g. rejoin timeout)
         }
         catch (OperationCanceledException) { }
         catch (Exception e) when (e is WebSocketException or IOException or ObjectDisposedException or InvalidOperationException)
@@ -367,7 +422,7 @@ public sealed class RelayClient : IAsyncDisposable
             case Quartermaster.Net.MemberLeft m: Try(() => MemberLeft?.Invoke(m.MemberId)); break;
             case Quartermaster.Net.HostLeft: Try(() => HostLeft?.Invoke()); break;
             case Ping:
-                try { await _sendLock.WaitAsync(_stop.Token); try { await SendRaw(ws, new Pong()); } finally { _sendLock.Release(); } }
+                try { await _sendLock.WaitAsync(_stop.Token).ConfigureAwait(false); try { await SendRaw(ws, new Pong()).ConfigureAwait(false); } finally { _sendLock.Release(); } }
                 catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException) { }
                 break;
             case Refused r:
@@ -379,7 +434,10 @@ public sealed class RelayClient : IAsyncDisposable
                     return r.Reason;
                 }
                 if (EndRejoin()) return $"Could not re-join the game after reconnecting: {r.Reason}";
-                if (!Complete(msg)) Try(() => RequestRefused?.Invoke(r.Reason));
+                // Attributable to the pending Request only if no fire-and-forget Post was sent since it.
+                bool attributable;
+                lock (_gate) attributable = _pending != null && !_postSinceRequest;
+                if (!attributable || !Complete(msg)) Try(() => RequestRefused?.Invoke(r.Reason));
                 break;
             }
             case Joined or RoomCreated:

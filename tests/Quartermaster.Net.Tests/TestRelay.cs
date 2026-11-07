@@ -39,7 +39,7 @@ public sealed class TestRelay : IAsyncDisposable
     public List<LobbyListing> Listings { get; } = new();
     public string Password = "ok-verifier";
     public bool RefuseUpdates;
-    public int JoinDelayMs;
+    public int JoinDelayMs, ListDelayMs;
     public int Ids;
 
     public Uri Uri => new($"wss://127.0.0.1:{Port}/qm");
@@ -109,7 +109,12 @@ public sealed class TestRelay : IAsyncDisposable
                 Ping => new Pong(),
                 _ => null,
             };
-            if (reply != null) await Push(ws, reply);
+            if (reply is Lobbies && ListDelayMs > 0)
+            {
+                var r2 = reply;
+                _ = Task.Run(async () => { await Task.Delay(ListDelayMs); try { await Push(ws, r2); } catch { } });
+            }
+            else if (reply != null) await Push(ws, reply);
         }
     }
 

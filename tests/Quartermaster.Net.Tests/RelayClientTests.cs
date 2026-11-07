@@ -291,15 +291,55 @@ public class RelayClientTests : IDisposable
     {
         var (relay2, c, reconnects) = await GuestThenRestart(400, 0);
         await using var _r = relay2; await using var _c = c;
-        while (true)
+        // Many concurrent senders hammer the client while it reconnects; none may overtake Hello + JoinRoom.
+        var spam = Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
         {
-            try { await c.SendAsync("m2", new byte[] { 1 }); break; }
-            catch (RelayException) { await Task.Delay(5); }
-        }
-        await Until(() => relay2.Received.Any(m => m is Send));
+            while (true)
+            {
+                try { await c.SendAsync("m2", new byte[] { 1 }); break; }
+                catch (RelayException) { await Task.Delay(1); }
+            }
+        })).ToArray();
+        await Within(Task.WhenAll(spam).ContinueWith(_ => 0));
+        await Until(() => relay2.Received.Count(m => m is Send) == 8);
         var order = relay2.Received.Select(m => m.GetType()).ToList();
-        Assert.Equal(new[] { typeof(Hello), typeof(JoinRoom), typeof(Send) }, order.Take(3));
+        Assert.Equal(new[] { typeof(Hello), typeof(JoinRoom) }, order.Take(2));
         await Until(() => reconnects() == 1);
+    }
+
+    [Fact]
+    public async Task Rejoin_NoAnswer_TimesOut_AndRetries()
+    {
+        var cert = TestRelay.MakeCert();
+        var relay = new TestRelay(cert);
+        await relay.StartAsync();
+        await using var c = new RelayClient(Pins(), Fast, TimeSpan.FromMilliseconds(150));
+        int disconnects = 0;
+        c.Disconnected += _ => Interlocked.Increment(ref disconnects);
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await Within(c.JoinRoomAsync("ABC234", "ok-verifier"));
+        await relay.StopAsync();
+        await Until(() => disconnects >= 1);
+        await using var relay2 = new TestRelay(cert, relay.Port) { JoinDelayMs = 5000 };
+        await relay2.StartAsync();
+        await Until(() => relay2.Received.Count(m => m is JoinRoom) >= 2);
+    }
+
+    [Fact]
+    public async Task RefusedPost_DoesNotFailUnrelatedPendingRequest()
+    {
+        await using var relay = new TestRelay(TestRelay.MakeCert()) { RefuseUpdates = true, ListDelayMs = 400 };
+        await relay.StartAsync();
+        relay.Listings.Add(L);
+        await using var c = new RelayClient(Pins(), Fast);
+        string? refused = null;
+        c.RequestRefused += r => refused = r;
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        var list = c.ListLobbiesAsync("sha");
+        await Until(() => relay.Received.Any(m => m is ListLobbies));
+        await c.UpdateListingAsync(L);
+        await Until(() => refused != null);
+        Assert.Single(await Within(list));
     }
 
     [Fact]
