@@ -128,27 +128,37 @@ public class OcrServiceTests(ITestOutputHelper output)
     [OcrFact]
     public async Task Read_TinyRegion_Upscaled_StillReads()
     {
+        // Genuinely small text: ~8 px tall digits (11 px em) in a 60×24 px region → upscaled re-read.
         using var img = Blank(400, 200, dpi: 96);
         using (var g = Pen(img))
-        using (var font = new Font("Segoe UI", 8f, GraphicsUnit.Point))
+        using (var font = new Font("Segoe UI", 11f, GraphicsUnit.Pixel))
             g.DrawString("57", font, Brushes.Black, 200, 100);
-        var region = new Rectangle(190, 95, 50, 25);
+        var region = new Rectangle(192, 94, 60, 24);
 
         var words = await new OcrService().ReadAsync(img, region, Lang, CancellationToken.None);
 
         var w = Assert.Single(words);
         Assert.Equal("57", OcrCleanup.Fix(w.Text));
+        Assert.True(w.H < OcrService.UpscaleBelowWordHeight, $"text should be small, was {w.H} px");
         Assert.InRange(w.X, region.X, region.Right);
         Assert.InRange(w.Y, region.Y, region.Bottom);
     }
 
     [Fact]
-    public void Scale_UpscalesShortRegions_CapsAtEngineMaximum()
+    public void Scale_NativeFitsEngineMaximum_UpscaleIsCapped()
     {
-        Assert.Equal(2.0, OcrService.Scale(300, 100, 10000));
-        Assert.Equal(1.0, OcrService.Scale(800, 600, 10000));
-        Assert.Equal(1.5, OcrService.Scale(3000, 500, 4500), 6);   // ~2× capped
-        Assert.Equal(0.5, OcrService.Scale(4000, 9000, 4500), 6);  // too big: scaled down to fit
+        Assert.Equal(1.0, OcrService.NativeScale(800, 600, 10000));
+        Assert.Equal(0.5, OcrService.NativeScale(4000, 9000, 4500), 6);  // too big: scaled down to fit
+        Assert.Equal(2.0, OcrService.UpscaleFactor(300, 100, 10000));
+        Assert.Equal(1.5, OcrService.UpscaleFactor(3000, 500, 4500), 6);  // ~2× capped
+    }
+
+    [Fact]
+    public void MedianHeight_OfWords()
+    {
+        Assert.Equal(0, OcrService.MedianHeight([]));
+        Assert.Equal(15, OcrService.MedianHeight([new("a", 0, 0, 5, 10), new("b", 0, 0, 5, 20)]));
+        Assert.Equal(12, OcrService.MedianHeight([new("a", 0, 0, 5, 30), new("b", 0, 0, 5, 12), new("c", 0, 0, 5, 8)]));
     }
 
     [Fact]

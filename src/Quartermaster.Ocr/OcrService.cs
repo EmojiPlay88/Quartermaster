@@ -17,8 +17,8 @@ public sealed class OcrService
     public const string NoLanguageMessage =
         "Windows has no OCR language installed. Add one in Settings → Time & language → Language (Optical character recognition).";
 
-    /// <summary>Regions shorter than this are upscaled (about 2×) before OCR.</summary>
-    internal const int UpscaleBelowHeight = 600;
+    /// <summary>When the native reading's median word height is below this (image px), a ~2× upscaled re-read is tried.</summary>
+    internal const double UpscaleBelowWordHeight = 20;
 
     private readonly Func<string, OcrEngine?> _engineFactory;
 
@@ -59,7 +59,10 @@ public sealed class OcrService
 
     /// <summary>
     /// Reads the words in <paramref name="region"/> (image pixels; null = whole image). Word boxes are returned in
-    /// the original image's pixel coordinates. The bitmap is only touched before the first await.
+    /// the original image's pixel coordinates. Reads at native scale (grayscale; scaled down to the engine maximum
+    /// if needed); when no words were found or their median height is under 20 px, re-reads upscaled ~2× (capped)
+    /// and keeps the reading with more recognised characters (ties keep the native one).
+    /// The bitmap is only touched before the first await.
     /// </summary>
     public async Task<IReadOnlyList<OcrWord>> ReadAsync(Bitmap image, Rectangle? region, string language, CancellationToken ct)
     {
@@ -71,9 +74,33 @@ public sealed class OcrService
         var r = region is Rectangle given ? Rectangle.Intersect(given, bounds) : bounds;
         if (r.Width <= 0 || r.Height <= 0) return [];
 
-        double scale = Scale(r.Width, r.Height, (int)OcrEngine.MaxImageDimension);
-        byte[] png = PrepareGrayPng(image, r, scale);
+        int max = (int)OcrEngine.MaxImageDimension;
+        double native = NativeScale(r.Width, r.Height, max);
+        double up = UpscaleFactor(r.Width, r.Height, max);
+        // Private 1:1 grayscale copy so the caller's bitmap is not used after the first await.
+        using var gray = GrayCrop(image, r);
 
+        var first = await RecognizeAsync(engine, gray, native, r, ct).ConfigureAwait(false);
+        if (up <= native + 1e-6 || (first.Count > 0 && MedianHeight(first) >= UpscaleBelowWordHeight))
+            return first;
+
+        var second = await RecognizeAsync(engine, gray, up, r, ct).ConfigureAwait(false);
+        return CharCount(second) > CharCount(first) ? second : first;
+    }
+
+    private static int CharCount(IReadOnlyList<OcrWord> words) => words.Sum(w => w.Text.Trim().Length);
+
+    internal static double MedianHeight(IReadOnlyList<OcrWord> words)
+    {
+        var hs = words.Select(w => w.H).OrderBy(h => h).ToList();
+        if (hs.Count == 0) return 0;
+        return hs.Count % 2 == 1 ? hs[hs.Count / 2] : (hs[hs.Count / 2 - 1] + hs[hs.Count / 2]) / 2;
+    }
+
+    private static async Task<IReadOnlyList<OcrWord>> RecognizeAsync(
+        OcrEngine engine, Bitmap gray, double scale, Rectangle r, CancellationToken ct)
+    {
+        byte[] png = ScaledPng(gray, scale);
         using var ms = new MemoryStream(png);
         using var ras = ms.AsRandomAccessStream();
         var decoder = await BitmapDecoder.CreateAsync(ras).AsTask(ct).ConfigureAwait(false);
@@ -93,13 +120,18 @@ public sealed class OcrService
         return words;
     }
 
-    /// <summary>~2× when shorter than 600 px; then capped so neither side exceeds the engine maximum.</summary>
-    internal static double Scale(int width, int height, int maxDimension)
+    /// <summary>1, or smaller so the longest side fits the engine maximum.</summary>
+    internal static double NativeScale(int width, int height, int maxDimension)
     {
-        double s = height < UpscaleBelowHeight ? 2.0 : 1.0;
         int longest = Math.Max(width, height);
-        if (maxDimension > 0 && longest * s > maxDimension) s = (double)maxDimension / longest;
-        return s;
+        return maxDimension > 0 && longest > maxDimension ? (double)maxDimension / longest : 1.0;
+    }
+
+    /// <summary>~2×, capped so the longest side does not exceed the engine maximum.</summary>
+    internal static double UpscaleFactor(int width, int height, int maxDimension)
+    {
+        int longest = Math.Max(width, height);
+        return maxDimension > 0 ? Math.Min(2.0, (double)maxDimension / longest) : 2.0;
     }
 
     private static readonly ColorMatrix Gray = new(
@@ -111,10 +143,29 @@ public sealed class OcrService
         [0, 0, 0, 0, 1],
     ]);
 
-    private static byte[] PrepareGrayPng(Bitmap image, Rectangle r, double scale)
+    private static Bitmap GrayCrop(Bitmap image, Rectangle r)
     {
-        int w = Math.Max(1, (int)Math.Floor(r.Width * scale));
-        int h = Math.Max(1, (int)Math.Floor(r.Height * scale));
+        var dst = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(dst);
+        using var attrs = new ImageAttributes();
+        g.Clear(Color.White);
+        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = PixelOffsetMode.Half;
+        attrs.SetColorMatrix(Gray);
+        g.DrawImage(image, new Rectangle(0, 0, r.Width, r.Height), r.X, r.Y, r.Width, r.Height, GraphicsUnit.Pixel, attrs);
+        return dst;
+    }
+
+    private static byte[] ScaledPng(Bitmap gray, double scale)
+    {
+        using var ms = new MemoryStream();
+        if (Math.Abs(scale - 1.0) < 1e-9)
+        {
+            gray.Save(ms, ImageFormat.Png);
+            return ms.ToArray();
+        }
+        int w = Math.Max(1, (int)Math.Floor(gray.Width * scale));
+        int h = Math.Max(1, (int)Math.Floor(gray.Height * scale));
         using var dst = new Bitmap(w, h, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(dst))
         using (var attrs = new ImageAttributes())
@@ -123,11 +174,9 @@ public sealed class OcrService
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.CompositingQuality = CompositingQuality.HighQuality;
-            attrs.SetColorMatrix(Gray);
-            attrs.SetWrapMode(WrapMode.TileFlipXY); // no dark fringe at the crop edges
-            g.DrawImage(image, new Rectangle(0, 0, w, h), r.X, r.Y, r.Width, r.Height, GraphicsUnit.Pixel, attrs);
+            attrs.SetWrapMode(WrapMode.TileFlipXY); // no dark fringe at the edges
+            g.DrawImage(gray, new Rectangle(0, 0, w, h), 0, 0, gray.Width, gray.Height, GraphicsUnit.Pixel, attrs);
         }
-        using var ms = new MemoryStream();
         dst.Save(ms, ImageFormat.Png);
         return ms.ToArray();
     }
