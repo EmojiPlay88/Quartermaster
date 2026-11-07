@@ -37,6 +37,7 @@ public sealed class RelayHarness : IAsyncDisposable
     public LogCapture Logs { get; } = new();
     public string DataDir { get; } = Path.Combine(Path.GetTempPath(), "qm-relay-tests", Guid.NewGuid().ToString("N"));
     private WebApplication _app = null!;
+    public WebApplication App => _app;
     private TestServer _server = null!;
     private readonly List<RelayTestClient> _clients = [];
 
@@ -65,7 +66,11 @@ public sealed class RelayHarness : IAsyncDisposable
         var ws = await wsc.ConnectAsync(new Uri(_server.BaseAddress, "qm"), CancellationToken.None);
         var c = new RelayTestClient(ws);
         _clients.Add(c);
-        if (role is not null) await c.Send(new Hello(Protocol.ProtocolVersion, role));
+        if (role is not null)
+        {
+            await c.Send(new Hello(Protocol.ProtocolVersion, role));
+            await c.AssertSilent(); // Hello processed before the test moves the clock
+        }
         return c;
     }
 
@@ -75,11 +80,13 @@ public sealed class RelayHarness : IAsyncDisposable
         new("", name, host, sha, "Test Module", ["Red", "Blue"], ["Blue"], 1, 2, true, Protocol.ProtocolVersion);
 
     /// <summary>Reserves a code and creates a room with the given password; returns the code.</summary>
-    public static async Task<string> CreateRoom(RelayTestClient host, string password = "pw", LobbyListing? draft = null)
+    public static readonly string HostKey = new string('a', 64);
+
+    public static async Task<string> CreateRoom(RelayTestClient host, string password = "pw", LobbyListing? draft = null, string? hostKey = null)
     {
         await host.Send(new ReserveCode());
         var code = (await host.Receive<CodeReserved>()).Code;
-        await host.Send(new CreateRoom(code, Verifier(password, code), draft ?? Draft()));
+        await host.Send(new CreateRoom(code, Verifier(password, code), hostKey ?? HostKey, draft ?? Draft()));
         Assert.Equal(code, (await host.Receive<RoomCreated>()).Code);
         return code;
     }

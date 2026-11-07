@@ -159,6 +159,7 @@ Settings are read from `appsettings.json` next to the program, or from environme
 | `CertificatePath` | empty | Own certificate (`.pem` or `.pfx`); empty = self-signed |
 | `CertificateKeyPath` | empty | Key file for a `.pem` certificate |
 | `CertificatePassword` | empty | Password of a `.pfx` file |
+| `MaxConnections` | `2000` | Most connections at once, from all addresses together |
 
 Outside Docker, set `DataDir` to a real folder, e.g. `/var/lib/quartermaster-relay`.
 
@@ -189,6 +190,9 @@ Environment=Relay__DataDir=/var/lib/quartermaster-relay
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/quartermaster-relay
 
 [Install]
 WantedBy=multi-user.target
@@ -224,10 +228,20 @@ New-NetFirewallRule -DisplayName "Quartermaster relay" -Direction Inbound -Proto
 - **Game messages** are end-to-end encrypted with a key derived from the lobby password; the relay only
   passes them on and never stores or logs them. **Open lobbies (no password)** use a key anyone who
   knows the lobby code can derive, so the relay could read those games.
-- The relay stores a hash of the password check value, never the password.
-- Limits: messages up to 8 MB, 50 messages per second per connection (bursts of 200), 20 lobbies per
-  address, 7 connections per game, lobby names up to 40 characters. A lobby disappears from the list
-  90 seconds after its host stopped refreshing it or when the host disconnects; a game whose host is
-  away for 24 hours closes.
+- The relay stores a hash of the password check value, never the password. The host's copy also
+  holds a private **host key** (random, never shown); only the copy with that key can take the host's
+  place again after a dropped connection, so a guest who knows the password cannot take over the game.
+- Limits:
+  - messages up to 8 MB (4 KB before a connection has introduced itself), 50 messages per second per
+    connection (bursts of 200); a connection that does not introduce itself within 10 seconds is closed;
+  - 32 connections at once per address and 2000 in total (`MaxConnections`);
+  - 20 lobbies per address. At the limit, the oldest lobby from that address whose host has gone is
+    closed to make space; if every one still has its host, a new lobby is refused;
+  - 7 places per game, the host's place included (it stays reserved while the host is away). A full game
+    and the lobby limit are answered with a message; the connection stays open;
+  - lobby names longer than 40 characters are cut to 40.
+- A lobby disappears from the list 90 seconds after its host stopped refreshing it, or when the host
+  disconnects. A game whose host is away for 24 hours closes.
+- Per-address limits treat an IPv6 address by its /64 network (one home or one server).
 - If the relay sits behind a reverse proxy, all players appear to come from the proxy's address and
   share the per-address limits; connecting directly is recommended.

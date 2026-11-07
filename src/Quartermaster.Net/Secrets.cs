@@ -34,6 +34,9 @@ public static class Secrets
         catch (FormatException) { return false; }
     }
 
+    /// <summary>A fresh host key for <see cref="CreateRoom.HostKey"/>: 32 random bytes, lower-case hex.</summary>
+    public static string NewHostKey() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+
     /// <summary>End-to-end key; never leaves the clients.</summary>
     public static byte[] GameKey(string password, string code) => Derive(password, $"qm-key:{GameCode.Normalize(code)}");
 

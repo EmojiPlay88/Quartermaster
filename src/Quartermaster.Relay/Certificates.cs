@@ -31,10 +31,16 @@ public static class Certificates
         {
             try
             {
-                Directory.CreateDirectory(options.DataDir);
+                if (!Directory.Exists(options.DataDir))
+                {
+                    if (OperatingSystem.IsWindows()) Directory.CreateDirectory(options.DataDir);
+                    else Directory.CreateDirectory(options.DataDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
                 var tmp = file + ".tmp";
-                File.WriteAllBytes(tmp, CreateSelfSigned());
-                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                var fileOptions = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write };
+                // Owner-only from the moment it exists (no umask window).
+                if (!OperatingSystem.IsWindows()) fileOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                using (var fs = new FileStream(tmp, fileOptions)) fs.Write(CreateSelfSigned());
                 File.Move(tmp, file);
             }
             catch (UnauthorizedAccessException e)

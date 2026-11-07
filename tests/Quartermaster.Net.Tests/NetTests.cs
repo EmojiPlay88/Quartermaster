@@ -75,11 +75,11 @@ public class NetTests
         RelayMessage[] relay =
         {
             new Hello(1, "host"), new ReserveCode(), new CodeReserved("ABC234"),
-            new CreateRoom("ABC234", "v", L), new RoomCreated("ABC234"), new UpdateListing(L),
+            new CreateRoom("ABC234", "v", "k", L), new RoomCreated("ABC234"), new UpdateListing(L),
             new ListLobbies("sha"), new Lobbies(new[] { L }), new JoinRoom("ABC234", "v"),
             new Joined("m1"), new Refused("no"), new Send(null, new byte[] { 1, 2 }),
             new Send("m2", new byte[] { 3 }), new Deliver("m1", new byte[] { 9, 8 }),
-            new MemberLeft("m1"), new HostLeft(), new Ping(), new Pong(),
+            new MemberLeft("m1"), new HostLeft(), new HostBack(), new Members(new[] { "g1", "g2" }), new Ping(), new Pong(),
         };
         foreach (var m in relay)
         {
@@ -92,6 +92,18 @@ public class NetTests
         var snd = (Send)Framing.Decode<RelayMessage>(Framing.Encode(new Send(null, new byte[] { 1, 2 })));
         Assert.Null(snd.ToMemberId);
         Assert.Equal(new byte[] { 1, 2 }, snd.Sealed);
+        var mem = (Members)Framing.Decode<RelayMessage>(Framing.Encode(new Members(new[] { "g1", "g2" })));
+        Assert.Equal(new[] { "g1", "g2" }, mem.MemberIds);
+        var cr = (CreateRoom)Framing.Decode<RelayMessage>(Framing.Encode(new CreateRoom("ABC234", "v", "k", L)));
+        Assert.Equal("k", cr.HostKey);
+        Assert.Throws<ProtocolException>(() => Framing.Decode<RelayMessage>(System.Text.Encoding.UTF8.GetBytes(
+            "{\"$t\":\"CreateRoom\",\"Code\":\"ABC234\",\"AuthVerifier\":\"v\",\"Draft\":" +
+            System.Text.Json.JsonSerializer.Serialize(L) + "}"))); // HostKey is required
+
+        var hk = Secrets.NewHostKey();
+        Assert.Equal(64, hk.Length);
+        Assert.Equal(32, Convert.FromHexString(hk).Length);
+        Assert.NotEqual(hk, Secrets.NewHostKey());
 
         var id = Guid.NewGuid();
         GamePayload[] game =

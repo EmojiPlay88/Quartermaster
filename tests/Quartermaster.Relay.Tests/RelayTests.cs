@@ -42,7 +42,7 @@ public class RelayTests
 
         // A draft may carry any code; the relay fills its own.
         var draft = Draft() with { Code = "ZZZZZZ" };
-        await host.Send(new CreateRoom(code, Verifier("pw", code), draft));
+        await host.Send(new CreateRoom(code, Verifier("pw", code), HostKey, draft));
         Assert.Equal(code, (await host.Receive<RoomCreated>()).Code);
 
         var browser = await relay.Connect("browser", "198.51.100.7");
@@ -60,16 +60,25 @@ public class RelayTests
         await host2.Send(new ReserveCode());
         var code3 = (await host2.Receive<CodeReserved>()).Code;
         relay.Time.Advance(TimeSpan.FromSeconds(61));
-        await host2.Send(new CreateRoom(code3, Verifier("pw", code3), Draft()));
-        Assert.IsType<Refused>(await host2.Receive());
+        await host2.Send(new CreateRoom(code3, Verifier("pw", code3), HostKey, Draft()));
+        Assert.Equal("Wrong code or password", (await host2.Receive<Refused>()).Reason);
 
-        // A reservation belongs to the connection that made it.
+        // A reservation belongs to the connection that made it; a code nobody reserved gets the same answer.
         var host3 = await relay.Connect("host");
         await host3.Send(new ReserveCode());
         var code4 = (await host3.Receive<CodeReserved>()).Code;
         var thief = await relay.Connect("host", "192.0.2.99");
-        await thief.Send(new CreateRoom(code4, Verifier("pw", code4), Draft()));
-        Assert.IsType<Refused>(await thief.Receive());
+        await thief.Send(new CreateRoom(code4, Verifier("pw", code4), HostKey, Draft()));
+        Assert.Equal("Wrong code or password", (await thief.Receive<Refused>()).Reason);
+        await thief.Send(new CreateRoom("XYZ234", Verifier("pw", "XYZ234"), HostKey, Draft()));
+        Assert.Equal("Wrong code or password", (await thief.Receive<Refused>()).Reason);
+
+        // The host key must be 32 bytes of hex.
+        var host4 = await relay.Connect("host");
+        await host4.Send(new ReserveCode());
+        var code5 = (await host4.Receive<CodeReserved>()).Code;
+        await host4.Send(new CreateRoom(code5, Verifier("pw", code5), "short", Draft()));
+        Assert.IsType<Refused>(await host4.Receive());
     }
 
     [Fact]
@@ -161,7 +170,7 @@ public class RelayTests
         var extra = await relay.Connect("host", "203.0.113.50");
         await extra.Send(new ReserveCode());
         var c21 = (await extra.Receive<CodeReserved>()).Code;
-        await extra.Send(new CreateRoom(c21, Verifier("pw", c21), Draft()));
+        await extra.Send(new CreateRoom(c21, Verifier("pw", c21), HostKey, Draft()));
         Assert.Contains("Too many", Assert.IsType<Refused>(await extra.Receive()).Reason);
         Assert.Equal(20, (await relay.List()).Count);
 
@@ -235,6 +244,12 @@ public class RelayTests
         var eighth = await relay.Connect("guest", "198.51.100.1");
         await eighth.Send(new JoinRoom(openCode, Verifier("", openCode)));
         Assert.Contains("full", Assert.IsType<Refused>(await eighth.Receive()).Reason);
+
+        // The host's slot stays reserved while the host is away.
+        await openHost.DisposeAsync();
+        await g4.Receive<HostLeft>();
+        await eighth.Send(new JoinRoom(openCode, Verifier("", openCode)));
+        Assert.Contains("full", Assert.IsType<Refused>(await eighth.Receive()).Reason);
     }
 
     [Fact]
@@ -298,17 +313,27 @@ public class RelayTests
 
         // Wrong password cannot take the room.
         var impostor = await relay.Connect("host", "192.0.2.1");
-        await impostor.Send(new CreateRoom(code, Verifier("nope", code), Draft()));
+        await impostor.Send(new CreateRoom(code, Verifier("nope", code), HostKey, Draft()));
         Assert.Equal("Wrong code or password", (await impostor.Receive<Refused>()).Reason);
 
+        // Nor can a guest who knows the password but not the host's key.
+        var guestAsHost = await relay.Connect("host", "198.51.100.1");
+        await guestAsHost.Send(new CreateRoom(code, Verifier("pw", code), Secrets.NewHostKey(), Draft("Mine")));
+        Assert.Equal("Wrong code or password", (await guestAsHost.Receive<Refused>()).Reason);
+        await guestAsHost.Send(new CreateRoom(code, Verifier("pw", code), "", Draft("Mine")));
+        Assert.Equal("Wrong code or password", (await guestAsHost.Receive<Refused>()).Reason);
+        await guest.AssertSilent();
+
         var back = await relay.Connect("host");
-        await back.Send(new CreateRoom(code, Verifier("pw", code), Draft("Again")));
+        await back.Send(new CreateRoom(code, Verifier("pw", code), HostKey, Draft("Again")));
         Assert.Equal(code, (await back.Receive<RoomCreated>()).Code);
+        Assert.Equal([id], (await back.Receive<Members>()).MemberIds);
+        await guest.Receive<HostBack>();
         Assert.Equal("Again", Assert.Single(await relay.List()).Name);
 
         // A second host cannot take a room whose host is present.
         var second = await relay.Connect("host");
-        await second.Send(new CreateRoom(code, Verifier("pw", code), Draft()));
+        await second.Send(new CreateRoom(code, Verifier("pw", code), HostKey, Draft()));
         Assert.IsType<Refused>(await second.Receive());
 
         await guest.Send(new Send(null, [5]));

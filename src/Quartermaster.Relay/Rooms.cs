@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Threading.Channels;
@@ -13,7 +15,11 @@ public static class Limits
     public const int MaxSides = 16;
     public const int LobbiesPerIp = 20;
     public const int ReservationsPerIp = 20;
-    public const int MembersPerRoom = 7; // host included
+    public const int MembersPerRoom = 7; // the host's slot always counts, present or not
+    public const int ConnectionsPerIp = 32;
+    /// <summary>Largest frame accepted before Hello.</summary>
+    public const int PreHelloMaxFrame = 4 * 1024;
+    public static readonly TimeSpan HelloTimeout = TimeSpan.FromSeconds(10);
     public const double MessagesPerSecond = 50;
     public const double Burst = 200;
     /// <summary>Bytes queued for one slow receiver before it is dropped.</summary>
@@ -29,6 +35,7 @@ public static class Limits
 public sealed class Connection
 {
     private readonly Channel<byte[]> _out = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly CancellationTokenSource _abort = new();
     private readonly TimeProvider _time;
     private long _queuedBytes;
     private double _tokens = Limits.Burst;
@@ -41,7 +48,22 @@ public sealed class Connection
         _lastRefill = time.GetTimestamp();
     }
 
+    /// <summary>The per-address bucket (<see cref="Bucket"/>) all per-IP limits use.</summary>
     public string Ip { get; }
+
+    /// <summary>IPv4 address as is (IPv4-mapped IPv6 unwrapped); IPv6 by its /64 prefix.</summary>
+    public static string Bucket(IPAddress? address)
+    {
+        if (address is null) return "unknown";
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return address.ToString();
+        var bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return $"{new IPAddress(bytes)}/64";
+    }
+
+    /// <summary>Cancelled when the connection is dropped without flushing (a receiver too slow to keep up).</summary>
+    public CancellationToken Aborted => _abort.Token;
     public bool Greeted { get; internal set; }
     internal Room? Room { get; set; }
     internal string? MemberId { get; set; }
@@ -64,6 +86,7 @@ public sealed class Connection
         if (Interlocked.Add(ref _queuedBytes, frame.Length) > Limits.MaxQueuedBytes)
         {
             Close(WebSocketCloseStatus.PolicyViolation, "Too slow to receive; reconnect.");
+            Abort();
             return;
         }
         _out.Writer.TryWrite(frame);
@@ -79,6 +102,14 @@ public sealed class Connection
         _out.Writer.TryComplete();
     }
 
+    /// <summary>Stops sending at once and drops everything still queued.</summary>
+    public void Abort()
+    {
+        _out.Writer.TryComplete();
+        try { _abort.Cancel(); } catch (ObjectDisposedException) { }
+        while (_out.Reader.TryRead(out var f)) Interlocked.Add(ref _queuedBytes, -f.Length);
+    }
+
     /// <summary>Token bucket: 50 messages/s, burst 200.</summary>
     public bool TakeToken()
     {
@@ -91,10 +122,11 @@ public sealed class Connection
     }
 }
 
-internal sealed class Room(string code, string verifierHash, string creatorIp, LobbyListing listing, DateTimeOffset now)
+internal sealed class Room(string code, string verifierHash, string hostKeyHash, string creatorIp, LobbyListing listing, DateTimeOffset now)
 {
     public string Code { get; } = code;
     public string VerifierHash { get; } = verifierHash;
+    public string HostKeyHash { get; } = hostKeyHash;
     public string CreatorIp { get; } = creatorIp;
     public DateTimeOffset Created { get; } = now;
     public Connection? Host { get; set; }
@@ -124,6 +156,7 @@ public sealed class Rooms : IDisposable
     private readonly object _lock = new();
     private readonly Dictionary<string, Room> _rooms = [];
     private readonly Dictionary<string, Reservation> _reservations = [];
+    private readonly Dictionary<string, int> _connectionsPerIp = [];
     private readonly TimeProvider _time;
     private readonly ILogger<Rooms> _log;
     private readonly ITimer _sweeper;
@@ -188,6 +221,28 @@ public sealed class Rooms : IDisposable
         }
     }
 
+    /// <summary>Counts a new connection from the address bucket; false when it already has the maximum.</summary>
+    public bool TryAdmit(string bucket)
+    {
+        lock (_lock)
+        {
+            _connectionsPerIp.TryGetValue(bucket, out var n);
+            if (n >= Limits.ConnectionsPerIp) return false;
+            _connectionsPerIp[bucket] = n + 1;
+            return true;
+        }
+    }
+
+    public void Release(string bucket)
+    {
+        lock (_lock)
+        {
+            if (!_connectionsPerIp.TryGetValue(bucket, out var n)) return;
+            if (n <= 1) _connectionsPerIp.Remove(bucket);
+            else _connectionsPerIp[bucket] = n - 1;
+        }
+    }
+
     /// <summary>A connection ended: drop its reservations, leave its room, notify the others.</summary>
     public void Disconnect(Connection c)
     {
@@ -233,11 +288,15 @@ public sealed class Rooms : IDisposable
         if (c.Room is not null) { Refuse(c, "Already in a game on this connection."); return; }
         var code = GameCode.Normalize(m.Code);
         var hash = HashVerifier(m.AuthVerifier);
+        var keyHash = HashVerifier(m.HostKey);
 
         if (_rooms.TryGetValue(code, out var existing))
         {
-            // The host coming back to its room (same password), e.g. after a dropped connection.
-            if (hash is null || !Secrets.VerifierEquals(hash, existing.VerifierHash)) { Refuse(c, WrongCodeOrPassword); return; }
+            // The host coming back to its room, e.g. after a dropped connection: same password AND same host key.
+            // Both compares always run (constant time, no hint which one failed).
+            bool passwordOk = Secrets.VerifierEquals(hash ?? NoHash, existing.VerifierHash);
+            bool keyOk = Secrets.VerifierEquals(keyHash ?? NoHash, existing.HostKeyHash);
+            if (!(passwordOk & keyOk) || hash is null || keyHash is null) { Refuse(c, WrongCodeOrPassword); return; }
             if (existing.Host is not null) { Refuse(c, "This game already has a host."); return; }
             existing.Host = c;
             existing.LastHostSeen = Now;
@@ -247,16 +306,19 @@ public sealed class Rooms : IDisposable
             c.Room = existing;
             c.MemberId = HostId;
             c.Post(new RoomCreated(code));
+            c.Post(new Members(existing.Members.Keys.ToList()));
+            foreach (var guest in existing.Members.Values) guest.Post(new HostBack());
             _log.LogInformation("A host returned to its room.");
             return;
         }
 
-        if (!_reservations.TryGetValue(code, out var reservation) || reservation.Owner != c)
+        // No room: only the creator's own live reservation may be used; anything else gets the same answer as a wrong password.
+        if (!_reservations.TryGetValue(code, out var reservation) || reservation.Owner != c || hash is null)
         {
-            Refuse(c, "That game code has expired; try again.");
+            Refuse(c, WrongCodeOrPassword);
             return;
         }
-        if (hash is null) { Refuse(c, WrongCodeOrPassword); return; }
+        if (keyHash is null) { Refuse(c, "The host key must be 32 bytes of hex."); return; }
 
         var fromIp = _rooms.Values.Where(r => r.CreatorIp == c.Ip).ToList();
         if (fromIp.Count >= Limits.LobbiesPerIp)
@@ -268,7 +330,7 @@ public sealed class Rooms : IDisposable
         }
 
         _reservations.Remove(code);
-        var room = new Room(code, hash, c.Ip, Sanitize(m.Draft, code), Now) { Host = c };
+        var room = new Room(code, hash, keyHash, c.Ip, Sanitize(m.Draft, code), Now) { Host = c };
         _rooms[code] = room;
         c.Room = room;
         c.MemberId = HostId;
@@ -323,7 +385,7 @@ public sealed class Rooms : IDisposable
         // Same answer (and the same work) for an unknown code, a malformed verifier and a wrong password: no oracle.
         bool match = Secrets.VerifierEquals(hash ?? NoHash, room?.VerifierHash ?? NoRoom);
         if (!match || hash is null || room is null) { Refuse(c, WrongCodeOrPassword); return; }
-        if (room.Members.Count + (room.Host is null ? 0 : 1) >= Limits.MembersPerRoom) { Refuse(c, "This game is full."); return; }
+        if (room.Members.Count + 1 >= Limits.MembersPerRoom) { Refuse(c, "This game is full."); return; }
         var id = $"g{++room.NextMember}";
         room.Members[id] = c;
         c.Room = room;

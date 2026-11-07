@@ -5,6 +5,9 @@ services:
     build:
       context: ../..
       dockerfile: src/Quartermaster.Relay/Dockerfile
+    # Name given to the locally built image. `docker compose build` (re)builds it from source.
+    # To use `docker compose pull` instead, push a built image to your own registry and put its full
+    # name here, e.g. `your-registry.example/quartermaster-relay:1.0`; pull fetches that tag.
     image: quartermaster-relay
     ports:
       - "47820:47820"

@@ -17,6 +17,9 @@ public sealed class RelayOptions
     /// <summary>PEM private key file (e.g. Let's Encrypt <c>privkey.pem</c>); only for PEM certificates.</summary>
     public string? CertificateKeyPath { get; set; }
 
+    /// <summary>Kestrel's limit on concurrent connections (all addresses together).</summary>
+    public int MaxConnections { get; set; } = 2000;
+
     /// <summary>Folder for the generated certificate (and later the mailbox).</summary>
     public string DataDir { get; set; } = "/data";
 }

@@ -1,4 +1,4 @@
-﻿using System.Net.WebSockets;
+using System.Net.WebSockets;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Quartermaster.Net;
@@ -27,6 +27,8 @@ namespace Quartermaster.Relay
             var cert = Certificates.LoadOrCreate(options);
             builder.WebHost.ConfigureKestrel(k =>
             {
+                k.Limits.MaxConcurrentConnections = options.MaxConnections;
+                k.Limits.MaxConcurrentUpgradedConnections = options.MaxConnections;
                 k.ListenAnyIP(options.Port, l => l.UseHttps(cert.Certificate));
             });
 
@@ -56,9 +58,26 @@ namespace Quartermaster.Relay
                 await ctx.Response.WriteAsync("Quartermaster relay: connect with the game.");
                 return;
             }
+            var bucket = Connection.Bucket(ctx.Connection.RemoteIpAddress);
+            if (!rooms.TryAdmit(bucket))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                return;
+            }
+            try { await ServeAdmitted(ctx, rooms, time, log, bucket); }
+            finally { rooms.Release(bucket); }
+        }
+
+        private static async Task ServeAdmitted(HttpContext ctx, Rooms rooms, TimeProvider time, ILogger log, string bucket)
+        {
+            var conn = new Connection(bucket, time);
+            // Started before the handshake completes, so a client that never says Hello is always timed.
+            using var helloTimer = time.CreateTimer(_ =>
+            {
+                if (!conn.Greeted) conn.Close(WebSocketCloseStatus.PolicyViolation, "No Hello received.");
+            }, null, Limits.HelloTimeout, Timeout.InfiniteTimeSpan);
             using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
-            var conn = new Connection(ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", time);
-            using var abort = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            using var abort = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted, conn.Aborted);
             var writer = WriteLoop(ws, conn, abort, log);
             try { await ReadLoop(ws, conn, rooms, abort.Token); }
             catch (Exception e) when (IsNetworkError(e)) { }
@@ -86,6 +105,11 @@ namespace Quartermaster.Relay
                 var r = await ws.ReceiveAsync(buf.AsMemory(len), ct);
                 if (r.MessageType == WebSocketMessageType.Close) return;
                 len += r.Count;
+                if (!conn.Greeted && len > Limits.PreHelloMaxFrame)
+                {
+                    conn.Close(WebSocketCloseStatus.MessageTooBig, "Say Hello first.");
+                    return;
+                }
                 if (len > Framing.MaxFrame)
                 {
                     conn.Close(WebSocketCloseStatus.MessageTooBig, "Message is too large.");
