@@ -559,4 +559,82 @@ public class PhaseControllerTests : IDisposable
     }
 
     private static string Json(GameState st) => JsonSerializer.Serialize(st, QuartermasterJson.Options);
+
+    // ---- action scopes (piece 4) ----
+
+    [Fact]
+    public void NextPhase_FullyAuto_IsOneAction_UndoRestoresPreviousPhase()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto);
+        c.Start();
+        var before = Json(s.Game!.State);
+        var actions = s.Game.Actions.Count;
+
+        c.Advance();   // Supply: water applied automatically to both red units
+
+        Assert.Equal(actions + 1, s.Game.Actions.Count);
+        Assert.Equal("Next Phase", s.Game.UndoLabel);
+        Assert.Equal(9, Water(s, "r1"));
+        s.Game.Undo();
+        Assert.Equal(before, Json(s.Game.State));
+        Assert.Equal("ph-weather", s.Game.State.Position!.PhaseId);
+    }
+
+    [Fact]
+    public void ApplyFormula_IsOneAction()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        c.Start();
+        c.Advance();   // Supply queues the water run for Red 1 and Red 2
+        var run = s.Game!.State.Pending.Single(r => r.FormulaId == "f-water");
+        var none = new Dictionary<string, string>();
+        var trace = s.Runner!.Run(s.Game.State, new RunRequest("f-water", "r1", none, none, new Dictionary<string, IReadOnlyList<int>>(), null, true));
+        var actions = s.Game.Actions.Count;
+        var log = s.Game.Log.Count;
+
+        Assert.True(c.ApplyFormula(run.Id, "r1", trace, true));
+
+        Assert.True(s.Game.Log.Count - log > 1);
+        Assert.Equal(actions + 1, s.Game.Actions.Count);
+        Assert.Equal("Daily water on Red 1", s.Game.UndoLabel);
+    }
+
+    [Fact]
+    public void MoveWithOnMoveTrigger_IsOneAction()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto);
+        ToMovement(c);
+        var before = Json(s.Game!.State);
+        var actions = s.Game.Actions.Count;
+
+        c.ExecuteMove(new[] { Move("r1", 130), Move("r2", 180) });
+
+        Assert.True(Fuel(s, "r1") < 40);
+        Assert.Equal(actions + 1, s.Game.Actions.Count);
+        s.Game.Undo();
+        Assert.Equal(before, Json(s.Game.State));
+    }
+
+    [Fact]
+    public void PhaseBoundary_RaisedAfterActionClosed()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto);
+        var path = Path.Combine(_tmp, "boundary.qsave");
+        var atCheckpoint = new List<bool>();
+        c.PhaseBoundary += () =>
+        {
+            atCheckpoint.Add(s.Game!.Checkpoints[^1].LogIndex == s.Game.Log.Count);
+            s.SaveNative(path);
+        };
+
+        c.Start();
+        c.Advance();
+
+        Assert.Equal(new[] { true, true }, atCheckpoint);
+        var loaded = NativeSave.Read(path);
+        Assert.True(loaded.CanUndo);
+        Assert.Equal("Next Phase", loaded.UndoLabel);
+        Assert.Equal(s.Game!.Log.Count, loaded.Log.Count);
+        Assert.Equal(s.Game.Checkpoints.Count, loaded.Checkpoints.Count);
+    }
 }

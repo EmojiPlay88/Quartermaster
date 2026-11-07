@@ -32,7 +32,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>Runs queued (or needing input) by a trigger; raised once per OnStart / OnMove batch that queued any.</summary>
     public event Action<IReadOnlyList<PendingRun>>? RunsQueued;
 
-    /// <summary>Raised after the phase changed (start, advance), once its OnStart has run.</summary>
+    /// <summary>Raised after the phase changed (start, advance), once its OnStart has run and the "Next Phase" action has closed.</summary>
     public event Action? PhaseBoundary;
 
     /// <summary>Raised after the difficulty of the open game changed (windows that were checking in the old mode must close).</summary>
@@ -97,8 +97,14 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var first = Sequencer.First(pack);
         if (first == null) return;
         _notice = null;
-        Exec(new AdvancePhase(null, first, "", pack.Phases[first.PhaseIndex].Name));
-        OnEnter(pack.Phases[first.PhaseIndex]);
+        List<PendingRun> queued;
+        // One action; the boundary (and the autosave it triggers) comes after the action closed, so the save holds it and its checkpoint.
+        using (s.Game.BeginAction("Next Phase"))
+        {
+            Exec(new AdvancePhase(null, first, "", pack.Phases[first.PhaseIndex].Name));
+            queued = OnEnter(pack.Phases[first.PhaseIndex]);
+        }
+        RaiseQueued(queued);
         PhaseBoundary?.Invoke();
     }
 
@@ -108,20 +114,31 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (!HasPhases) return null;
         if (s.Game!.State.Position == null) { Start(); return null; }
         var pack = s.Rules!;
-        var relocated = Reconcile();
-        if (Resolved(out _) is not { } cur) return null;
-        var next = Sequencer.Next(pack, cur);
-        if (next == null) return null;
-        var from = pack.Phases[cur.PhaseIndex];
-        var to = pack.Phases[next.PhaseIndex];
-        _notice = relocated;
-        Exec(new AdvancePhase(cur, next, from.Name, to.Name));
-        var toSide = Sequencer.ActingSide(pack, to);
-        var pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
-        _notice = pass == null ? relocated : relocated == null ? pass : relocated + ". " + pass;
-        OnEnter(to);
+        string? pass;
+        List<PendingRun> queued;
+        using (s.Game.BeginAction("Next Phase"))
+        {
+            var relocated = Reconcile();
+            if (Resolved(out _) is not { } cur) return null;
+            var next = Sequencer.Next(pack, cur);
+            if (next == null) return null;
+            var from = pack.Phases[cur.PhaseIndex];
+            var to = pack.Phases[next.PhaseIndex];
+            _notice = relocated;
+            Exec(new AdvancePhase(cur, next, from.Name, to.Name));
+            var toSide = Sequencer.ActingSide(pack, to);
+            pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
+            _notice = pass == null ? relocated : relocated == null ? pass : relocated + ". " + pass;
+            queued = OnEnter(to);
+        }
+        RaiseQueued(queued);
         PhaseBoundary?.Invoke();
         return pass;
+    }
+
+    private void RaiseQueued(List<PendingRun> queued)
+    {
+        if (queued.Count > 0) RunsQueued?.Invoke(queued);
     }
 
     /// <summary>After a load or a rules change: moves a game whose phase vanished to the phase now at that place (logged). Returns the strip notice.</summary>
@@ -166,8 +183,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (trace.Error != null || trace.Result == null) return false;   // a failed trace changes nothing and keeps the run pending
         // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
         if (runId != null && !IsPending(runId, pieceId)) return false;
-        var unit = UnitName(pieceId) ?? trace.Formula.Name;
+        var name = UnitName(pieceId);
+        var unit = name ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
+        using var action = s.Game.BeginAction(string.IsNullOrWhiteSpace(name) ? trace.Formula.Name : $"{trace.Formula.Name} on {name}");
         foreach (var c in s.Runner.Commands(trace, null, tag, unit)) Exec(c);
         LogWorking(trace, unit, tag);
         if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }));
@@ -190,10 +209,11 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
 
     // ---- triggers ----
 
-    private void OnEnter(PhaseDef phase)
+    /// <returns>The runs queued (the caller raises <see cref="RunsQueued"/> once its action has closed).</returns>
+    private List<PendingRun> OnEnter(PhaseDef phase)
     {
-        if (s.Game == null || s.Rules is not { } pack) return;
         var queued = new List<PendingRun>();
+        if (s.Game == null || s.Rules is not { } pack) return queued;
         foreach (var e in phase.OnStart ?? new())
         {
             if (e == null) continue;
@@ -205,22 +225,30 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 : Sequencer.UnitsFor(pack, s.Game.State, phase, f, e.UnitFilter).Select(p => new Unit(p.Id, PieceInfo.Name(p), null)).ToList();
             Apply(f, "start", units, queued);
         }
-        if (queued.Count > 0) RunsQueued?.Invoke(queued);
+        return queued;
     }
 
     /// <summary>Executes one move gesture (any number of pieces), then fires the current phase's OnMove entries for the moved pieces.</summary>
     public void ExecuteMove(IReadOnlyList<MovePieces> moves)
     {
         if (s.Game is not { } g) return;
+        List<PendingRun> queued;
+        using (g.BeginAction()) queued = MoveAndTrigger(g, moves);
+        RaiseQueued(queued);
+    }
+
+    /// <summary>The moves plus their OnMove triggers (one action, opened by <see cref="ExecuteMove"/>).</summary>
+    private List<PendingRun> MoveAndTrigger(GameSession g, IReadOnlyList<MovePieces> moves)
+    {
+        var queued = new List<PendingRun>();
         var records = new Dictionary<string, MoveRecord>();
         foreach (var m in moves)
             foreach (var id in m.PieceIds ?? Array.Empty<string>())
                 if (g.State.Pieces.TryGetValue(id, out var p)) records.TryAdd(id, new MoveRecord(id, p.MapId, p.Pos));
         foreach (var m in moves) Exec(m);
 
-        if (s.Rules is not { } pack || s.Runner == null || CurrentPhase() is not { } phase || phase.OnMove is not { Count: > 0 }) return;
+        if (s.Rules is not { } pack || s.Runner == null || CurrentPhase() is not { } phase || phase.OnMove is not { Count: > 0 }) return queued;
         var distances = new Dictionary<string, double>();
-        var queued = new List<PendingRun>();
         foreach (var e in phase.OnMove)
         {
             if (e == null) continue;
@@ -242,7 +270,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             }
             Apply(f, "move", units, queued);
         }
-        if (queued.Count > 0) RunsQueued?.Invoke(queued);
+        return queued;
     }
 
     private FormulaDef? FindFormula(PhaseDef phase, string id)

@@ -41,6 +41,8 @@ public sealed class GameSession
     public event Action<GameCommand>? Changed;
     public event Action? Rewound;
 
+    /// <summary>True while an action scope (<see cref="BeginAction"/>) is open; rewinds are refused then.</summary>
+    public bool InAction => _scopeDepth > 0;
     public bool CanUndo => _actions.Count > 0;
     public bool CanRedo => _redo.Count > 0;
     public string? UndoLabel => _actions.Count > 0 ? _actions[^1].Label : null;
@@ -192,7 +194,15 @@ public sealed class GameSession
         if (logIndex < 0 || logIndex > _log.Count) throw new ArgumentOutOfRangeException(nameof(logIndex));
 
         var undone = SplitFrom(logIndex);
+        Truncate(logIndex);
+        for (int i = undone.Count - 1; i >= 0; i--) _redo.Push(undone[i]);
+        Rewound?.Invoke();
+        return undone;
+    }
 
+    /// <summary>Cuts the log at <paramref name="logIndex"/> and rebuilds state; the redo stack is not touched.</summary>
+    void Truncate(int logIndex)
+    {
         // Rebuild state from the nearest snapshot at or before the target.
         int baseIdx = _cache.Keys.Where(k => k <= logIndex).Max();
         var state = _cache[baseIdx].DeepClone();
@@ -202,12 +212,20 @@ public sealed class GameSession
         _actions.RemoveAll(a => a.Start >= logIndex);
         _checkpoints.RemoveAll(c => c.LogIndex > logIndex);
         foreach (var k in _cacheOrder.Where(k => k > logIndex).ToList()) { _cache.Remove(k); _cacheOrder.Remove(k); }
-        for (int i = undone.Count - 1; i >= 0; i--) _redo.Push(undone[i]);
-
         State = state;
-        Rewound?.Invoke();
-        return undone;
     }
+
+    /// <summary>Removes the last logged command (e.g. a trailing <see cref="SteppedBack"/> before Redo) without touching the redo stack.</summary>
+    public void DropTail()
+    {
+        if (_scopeDepth > 0) throw new InvalidOperationException("Cannot rewind while an action scope is open.");
+        if (_log.Count == 0) return;
+        Truncate(_log.Count - 1);
+        Rewound?.Invoke();
+    }
+
+    /// <summary>Forgets every undone action (e.g. after a rules-pack change).</summary>
+    public void ClearRedo() => _redo.Clear();
 
     public void Undo()
     {

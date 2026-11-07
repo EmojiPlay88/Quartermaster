@@ -210,14 +210,23 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
         return true;
     }
 
+    /// <summary>Undo label of an "apply to every unit" action: "{formula} on {n} units".</summary>
+    internal static string ActionLabel(string formulaName, int units) => $"{formulaName} on {units} {(units == 1 ? "unit" : "units")}";
+
     /// <summary>Applies every row that can apply (rows with a wrong or missing checked cell are left alone). Returns how many were applied.
     /// Caches are dropped once at the end, not per row.</summary>
     public int ApplyAll()
     {
         var n = RowCount;
         var applied = 0;
-        for (var i = 0; i < n; i++)
-            if (ApplyOne(i)) applied++;
+        if (s.Game is { } g && Run is { } run)
+        {
+            // One undoable action for the whole grid. The label is fixed when the action opens, so it names the units still open.
+            var open = run.Units.Count(u => u is { Applied: false });
+            using var action = g.BeginAction(ActionLabel(run.FormulaName, open));
+            for (var i = 0; i < n; i++)
+                if (ApplyOne(i)) applied++;
+        }
         Invalidate();
         return applied;
     }

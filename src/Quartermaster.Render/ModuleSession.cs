@@ -104,6 +104,7 @@ public sealed class ModuleSession : IDisposable
         if (!string.Equals(loaded.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("This save was made with a different module and cannot be loaded here.");
         Game = loaded;
+        if (loaded.LoadNotice is { } notice) Log.Add(DiagnosticSeverity.Warning, "save", notice);
         WarnIfSaveRulesDiffer(loaded);
         SeedLedgers();
         GameReplaced?.Invoke();
@@ -234,6 +235,7 @@ public sealed class ModuleSession : IDisposable
         Game = new GameSession(state, Archive.Sha256);
         if (Rules != null) Game.RulesSha256 = SafeHash(Rules);
         SeedLedgers();
+        Game.Rebase();   // the start seed is part of genesis, not an undoable action
         GameReplaced?.Invoke();
     }
 

@@ -52,7 +52,9 @@ public static class MissingInputs
         var noRolls = new Dictionary<string, IReadOnlyList<int>>();
         var none = new Dictionary<string, string>();
         var typed = new Dictionary<string, string>(values);
-        foreach (var u in Open(s, run).ToList())
+        var units = Open(s, run).ToList();
+        using var action = s.Game.BeginAction(BatchModel.ActionLabel(run.FormulaName, units.Count));
+        foreach (var u in units)
         {
             try
             {
