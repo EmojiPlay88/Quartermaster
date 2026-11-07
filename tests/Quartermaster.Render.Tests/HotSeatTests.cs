@@ -235,4 +235,95 @@ public class HotSeatTests : IDisposable
         Assert.Null(hs.Current);
         Assert.Null(s.ViewSides);
     }
+
+    private static List<int> TrackCancel(HotSeat hs)
+    {
+        var l = new List<int>();
+        hs.HandoverCancelled += () => l.Add(1);
+        return l;
+    }
+
+    [Fact]
+    public void Rewind_BackIntoCurrentsPhase_CancelsPendingHandover()
+    {
+        var (s, c, h, hs) = Make(true);
+        c.Start(); c.Advance(); c.Advance();                 // Movement (red)
+        hs.TakeOver(Alice);
+        var raised = Track(hs);
+        var cancelled = TrackCancel(hs);
+        c.Advance();                                          // Combat (blue): Bob due
+        Assert.Equal(new[] { "p2" }, raised);
+        Assert.Empty(s.ViewSides!);
+        Assert.Equal(Bob.Id, hs.Pending?.Id);
+        h.Undo();                                             // back into Movement (red): Alice still at the screen
+        Assert.Single(cancelled);
+        Assert.Null(hs.HandoverDue());
+        Assert.Null(hs.Pending);
+        Assert.Equal(new[] { "red" }, s.ViewSides!.ToArray());
+        Assert.Equal("p1", hs.Current?.Id);
+        c.Advance();                                          // Combat again: dedupe was reset
+        Assert.Equal(new[] { "p2", "p2" }, raised);
+    }
+
+    [Fact]
+    public void SetPlayers_SoloToTwo_MidGame_HandsOverToActingPlayer()
+    {
+        var (s, c, _, hs) = Make(false);
+        c.Start(); c.Advance(); c.Advance(); c.Advance();   // Combat (blue)
+        var raised = Track(hs);
+        Assert.Null(s.ViewSides);
+        s.Game!.Execute(new SetPlayers(new[] { Alice, Bob }));
+        Assert.True(hs.Active);
+        Assert.Empty(s.ViewSides!);
+        Assert.Equal(new[] { "p2" }, raised);
+        Assert.Null(hs.Current);
+    }
+
+    [Fact]
+    public void SetPlayers_SoloToTwo_NoActingSide_HandsOverToFirstPlayer()
+    {
+        var (s, _, _, hs) = Make(false);
+        var raised = Track(hs);
+        s.Game!.Execute(new SetPlayers(new[] { Alice, Bob }));
+        Assert.Equal(new[] { "p1" }, raised);
+        Assert.Empty(s.ViewSides!);
+    }
+
+    [Fact]
+    public void SetPlayers_BackToSolo_ClearsViewAndDismisses()
+    {
+        var (s, c, _, hs) = Make(true);
+        c.Start(); c.Advance();
+        hs.TakeOver(Alice);
+        c.Advance(); c.Advance();                            // Combat (blue): Bob pending
+        var cancelled = TrackCancel(hs);
+        Assert.NotNull(hs.Pending);
+        s.Game!.Execute(new SetPlayers(Array.Empty<PlayerDef>()));
+        Assert.False(hs.Active);
+        Assert.Null(s.ViewSides);
+        Assert.Null(hs.Pending);
+        Assert.Null(hs.Current);
+        Assert.Single(cancelled);
+    }
+
+    [Fact]
+    public void Undo_SetPlayers_BackToSolo_ClearsView()
+    {
+        var (s, _, h, hs) = Make(false);
+        s.Game!.Execute(new SetPlayers(new[] { Alice, Bob }));
+        hs.TakeOver(Alice);
+        h.Undo();
+        Assert.False(hs.Active);
+        Assert.Null(s.ViewSides);
+    }
+
+    [Fact]
+    public void SetPlayers_ChangesCurrentsSides_ViewFollows()
+    {
+        var (s, _, _, hs) = Make(true);
+        hs.TakeOver(Alice);
+        s.Game!.Execute(new SetPlayers(new[] { Alice with { Sides = new[] { "blue" } }, Bob with { Sides = new[] { "red" } } }));
+        Assert.Equal(new[] { "blue" }, s.ViewSides!.ToArray());
+        Assert.Equal(new[] { "blue" }, hs.Current!.Sides.ToArray());
+    }
 }
