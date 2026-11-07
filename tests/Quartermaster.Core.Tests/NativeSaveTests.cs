@@ -44,9 +44,9 @@ public class NativeSaveTests
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
         try
         {
-            File.WriteAllText(path, "{\"format\":5,\"moduleSha256\":\"x\",\"snapshot\":{},\"log\":[]}");
+            File.WriteAllText(path, "{\"format\":6,\"moduleSha256\":\"x\",\"snapshot\":{},\"log\":[]}");
             var ex = Assert.Throws<InvalidDataException>(() => NativeSave.Read(path));
-            Assert.Contains("5", ex.Message);
+            Assert.Contains("6", ex.Message);
             File.WriteAllText(path, "{not json");
             Assert.IsType<JsonException>(Assert.Throws<InvalidDataException>(() => NativeSave.Read(path)).InnerException);
         }
@@ -66,7 +66,7 @@ public class NativeSaveTests
         try
         {
             NativeSave.Write(path, sess);
-            Assert.Equal(4, NativeSave.FormatVersion);
+            Assert.Equal(5, NativeSave.FormatVersion);
             var back = NativeSave.Read(path);
             Assert.Equal(3, back.State.Log.Count);
             Assert.Equal(sess.State.Log, back.State.Log);
@@ -139,4 +139,164 @@ public class NativeSaveTests
     [Fact]
     public void NativeSave_LogEntryMissingTypeDiscriminator_IsInvalidData() =>
         AssertRejected("{\"format\":1,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[]},\"log\":[{\"pieceId\":\"a\"}]}");
+
+    // ---- format 5 ----
+    static string Json(GameState s) => JsonSerializer.Serialize(s, QuartermasterJson.Options);
+    static string Tmp() => Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".qsave");
+
+    static GameSession Played()
+    {
+        var st = new GameState(); st.MapOrder.Add("m1");
+        var g = new GameSession(st, "sha");
+        using (g.BeginAction()) g.Execute(new AddPiece("a", "piece;;;a.png;a", "", "m1", new PointD(1, 2), null));
+        using (g.BeginAction())
+        {
+            g.Execute(new AdvancePhase(new PhasePosition(1, 1, "a", 0), new PhasePosition(1, 1, "b", 1), "Alpha", "Supply", null, null));
+            g.Execute(new SetNotes("n", null));
+        }
+        using (g.BeginAction()) g.Execute(new MovePieces(["a"], "m1", new PointD(5, 5), null));
+        return g;
+    }
+
+    [Fact]
+    public void Format5_RoundTrip_FullUndoToGameStart()
+    {
+        var g = Played();
+        var path = Tmp();
+        try
+        {
+            NativeSave.Write(path, g);
+            var back = NativeSave.Read(path);
+            Assert.False(back.RebasedOnLoad);
+            Assert.Null(back.LoadNotice);
+            Assert.Equal(g.Actions, back.Actions);
+            Assert.Equal(g.Checkpoints, back.Checkpoints);
+            Assert.Equal(Json(g.State), Json(back.State));
+            Assert.True(back.CanUndo);
+            back.RewindTo(0);
+            Assert.Equal(Json(g.Genesis), Json(back.State));
+            Assert.Empty(back.State.Pieces);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Format4File_LoadsWithFloorAtLoadPoint()
+    {
+        var path = Tmp();
+        try
+        {
+            File.WriteAllText(path, "{\"format\":4,\"moduleSha256\":\"x\",\"snapshot\":{\"pieces\":{},\"stacks\":{},\"mapOrder\":[\"m1\"]},\"log\":[]}");
+            var s = NativeSave.Read(path);
+            Assert.False(s.CanUndo);
+            Assert.Null(s.LoadNotice);
+            Assert.True(s.RebasedOnLoad);
+            var loaded = Json(s.State);
+            s.Execute(new AddPiece("a", "piece;;;a.png;a", "", "m1", new PointD(1, 2), null));
+            NativeSave.Write(path, s);
+            Assert.Contains("\"format\":5", File.ReadAllText(path).Replace(" ", ""));
+            var back = NativeSave.Read(path);
+            Assert.Single(back.Log);
+            Assert.Equal(loaded, Json(back.Genesis));
+            Assert.Equal(Json(s.State), Json(back.State));
+            Assert.Null(back.LoadNotice);
+        }
+        finally { File.Delete(path); }
+    }
+
+    static void Tamper(string path, Action<System.Text.Json.Nodes.JsonObject> edit)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        edit(node);
+        File.WriteAllText(path, node.ToJsonString());
+    }
+
+    static void AssertRebased(string path, GameSession original)
+    {
+        var s = NativeSave.Read(path);
+        Assert.False(s.CanUndo);
+        Assert.True(s.RebasedOnLoad);
+        Assert.Equal("Undo history in this save did not match the game; undo starts from here.", s.LoadNotice);
+        Assert.Equal(Json(original.State), Json(s.State));
+        Assert.Empty(s.Log);
+    }
+
+    [Fact]
+    public void TamperedLog_RemovedEntry_RebasesWithNotice()
+    {
+        var g = Played(); var path = Tmp();
+        try
+        {
+            NativeSave.Write(path, g);
+            Tamper(path, o => o["log"]!.AsArray().RemoveAt(0));
+            AssertRebased(path, g);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ReplayMismatch_PassesStructure_RebasesWithNotice()
+    {
+        var g = Played(); var path = Tmp();
+        try
+        {
+            NativeSave.Write(path, g);
+            // Structure intact (marks, checkpoints, genesis) but the stored snapshot no longer equals genesis + log.
+            Tamper(path, o => o["snapshot"]!["notes"] = "tampered");
+            var s = NativeSave.Read(path);
+            Assert.False(s.CanUndo);
+            Assert.True(s.RebasedOnLoad);
+            Assert.Equal("Undo history in this save did not match the game; undo starts from here.", s.LoadNotice);
+            Assert.Equal("replay mismatch", s.LoadDiagnostic);
+            Assert.Equal("tampered", s.State.Notes);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void ActionMarkPastLog_RebasesWithNotice()
+    {
+        var g = Played(); var path = Tmp();
+        try
+        {
+            NativeSave.Write(path, g);
+            Tamper(path, o => o["actions"]!.AsArray()[1]!["start"] = 99);
+            AssertRebased(path, g);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void BadCheckpointsOrGenesis_RebaseWithNotice()
+    {
+        var g = Played(); var path = Tmp();
+        try
+        {
+            NativeSave.Write(path, g);
+            Tamper(path, o => o["checkpoints"]!.AsArray()[0]!["logIndex"] = 1);
+            AssertRebased(path, g);
+            NativeSave.Write(path, g);
+            Tamper(path, o => o["checkpoints"]!.AsArray()[1]!["logIndex"] = 99);
+            AssertRebased(path, g);
+            NativeSave.Write(path, g);
+            Tamper(path, o => o["genesis"]!["pieces"] = null);
+            AssertRebased(path, g);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Write_UsesTempThenMove_NoTmpLeft()
+    {
+        var g = Played(); var path = Tmp();
+        try
+        {
+            File.WriteAllText(path, "old");
+            NativeSave.Write(path, g);
+            Assert.False(File.Exists(path + ".tmp"));
+            Assert.Contains("\"genesis\"", File.ReadAllText(path));
+            Assert.Equal(Json(g.State), Json(NativeSave.Read(path).State));
+        }
+        finally { File.Delete(path); File.Delete(path + ".tmp"); }
+    }
 }
