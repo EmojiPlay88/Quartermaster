@@ -482,21 +482,86 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
-    public void Pins_AdHocPreview_ThenPendingRunApply_SameRoll()
+    public void Pins_PendingRun_AdHocRefused_RunPreviewThenApplySameRoll()
     {
         var blue = new PhaseDef
         {
             Id = "ph-blue", Name = "Blue roll", SideId = "blue",
             OnStart = new() { new StartEntry { FormulaId = "f-dice2", ForEach = ForEachMode.Units } },
         };
-        var (host, hc, x, _) = DiceHost(p => p with { Phases = new[] { blue }.Concat(p.Phases).ToList() });
+        var (host, hc, x, rolled) = DiceHost(p => p with { Phases = new[] { blue }.Concat(p.Phases).ToList() });
         hc.Start();
         var run = host.Game!.State.Pending.Single(r => r.FormulaId == "f-dice2" && r.Units.Any(u => u.PieceId == PhaseFixture.BlueOne));
-        var roll = Assert.Single(PreviewRoll(x, "f-dice2", "R"));   // ad hoc (no run id)
+        var before = Json(host.Game!.State);
+        // An ad-hoc run of the same formula on that unit is refused, preview or Apply, and rolls nothing.
+        Assert.Equal(FormulaIntentRunner.UsePendingText, Send(x, "f-dice2", null, calculate: true, preview: true).Message);
+        Assert.Equal(FormulaIntentRunner.UsePendingText,
+            Send(x, "f-dice2", new Dictionary<string, string> { ["W"] = "10" }, calculate: false, preview: false).Message);
+        Assert.Empty(rolled);
+        Assert.Equal(before, Json(host.Game!.State));
+        // Another formula on the same unit is not affected.
+        Assert.NotEqual(FormulaIntentRunner.UsePendingText, Send(x, "f-dice", null, calculate: true, preview: true).Message);
+        // The run itself: preview, then Apply with the same roll.
+        var roll = Assert.Single(Send(x, "f-dice2", null, calculate: true, preview: true, runId: run.Id).Rolls!["R"]);
         var ok = Send(x, "f-dice2", new Dictionary<string, string> { ["W"] = "10" }, calculate: false, preview: false, runId: run.Id);
         Assert.True(ok.Applied, ok.Message);
         Assert.Equal(new[] { roll }, host.Game!.State.DiceHistory.Last().Results);
         Assert.Equal(10 + roll, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+
+    [Fact]
+    public async Task Guest_InputChangesDice_LocalRollNeverShownAsHosts()
+    {
+        var (host, _, executor, _) = DiceHost();
+        var guest = Guest(host);
+        guest.SetRoller((n, _) => Enumerable.Repeat(6, n).ToList());   // the guest's own (local) dice, never the host's
+        var port = PortTo(executor);
+        var m = Dialog(guest, "f-n", PhaseFixture.BlueOne, check: true);
+        m.SetBoxText("N", "1");
+        var hostDice = (await FormulaMasking.SendAsync(port, m, null, calculate: true, preview: true)).Rolls!["dice#0"];
+        var shown = m.Evaluate(guest.Game!.State);
+        Assert.Equal(hostDice.Sum().ToString(CultureInfo.InvariantCulture), Assert.Single(shown.InlineRolls).Text);
+        Assert.NotEqual("", shown.ResultText);
+
+        // Two dice now: the guest's local run rolls its own, which are not the host's.
+        m.SetBoxText("N", "2");
+        var two = m.Evaluate(guest.Game!.State);
+        Assert.Empty(two.InlineRolls);
+        Assert.Equal("", two.ResultText);
+        Assert.Equal("", two.WorkingText);
+        Assert.Equal(hostDice, m.PinnedRolls["dice#0"]);   // the host's dice were not overwritten by the local roll
+
+        // Back to one die: the host's roll is shown again.
+        m.SetBoxText("N", "1");
+        var back = m.Evaluate(guest.Game!.State);
+        Assert.Equal(hostDice.Sum().ToString(CultureInfo.InvariantCulture), Assert.Single(back.InlineRolls).Text);
+    }
+
+    [Theory]
+    [InlineData("W + R", false)]
+    [InlineData("dice(2, 6) + W", true)]
+    [InlineData("W + DICE (1,6)", true)]
+    [InlineData("paradice(2) + W", false)]
+    [InlineData("dice + W", false)]
+    public void MayRoll_MatchesDiceCalls(string text, bool expected)
+    {
+        var f = new FormulaDef { Id = "x", Text = text, Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Input } } };
+        Assert.Equal(expected, FormulaPins.MayRoll(f));
+    }
+
+    [Fact]
+    public void MayRoll_SeesInputAutoValueAndTableKeys()
+    {
+        Assert.True(FormulaPins.MayRoll(new FormulaDef
+        {
+            Id = "x", Text = "N",
+            Bindings = new() { new VariableBinding { Variable = "N", Kind = BindingKind.Input, AutoValue = "dice(1, 6)" } },
+        }));
+        Assert.True(FormulaPins.MayRoll(new FormulaDef
+        {
+            Id = "x", Text = "T",
+            Bindings = new() { new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t-cost", RowExpr = "dice(1,2)" } },
+        }));
     }
 
     [Fact]

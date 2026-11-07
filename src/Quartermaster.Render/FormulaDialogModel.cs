@@ -154,10 +154,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     /// <summary>True when the run's dice for this key are the host's (same key and same dice; another count means the guest changed an input).</summary>
     private bool HostRolled(string key, FormulaTrace t) =>
-        _hostRolls.Contains(key) && _fixedRolls.TryGetValue(key, out var pin) && t.RollsByKey.TryGetValue(key, out var used) && pin.SequenceEqual(used);
+        _hostDice.TryGetValue(key, out var host) && t.RollsByKey.TryGetValue(key, out var used) && host.SequenceEqual(used);
 
     /// <summary>Roll keys whose dice came from the host (guest). Until then a guest's dice boxes say the host rolls.</summary>
-    private readonly HashSet<string> _hostRolls = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyList<int>> _hostDice = new(StringComparer.Ordinal);
 
     /// <summary>A guest's dice box before the host rolled it.</summary>
     public const string HostRollsText = "rolled by the host";
@@ -181,7 +181,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     private void MergePins(FormulaTrace trace)
     {
         var merged = new Dictionary<string, IReadOnlyList<int>>(_fixedRolls, StringComparer.Ordinal);
-        foreach (var kv in trace.RollsByKey) merged[kv.Key] = kv.Value;
+        foreach (var kv in trace.RollsByKey)
+        {
+            // A guest's local roll (e.g. after an input changed the dice count) never replaces the host's dice for that key.
+            if (HostCalculates && _hostDice.ContainsKey(kv.Key)) continue;
+            merged[kv.Key] = kv.Value;
+        }
         _fixedRolls = merged;
     }
 
@@ -355,7 +360,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (verdict.Rolls != null)
         {
             PinRolls(verdict.Rolls);
-            foreach (var k in verdict.Rolls.Keys) if (k != null) _hostRolls.Add(k);
+            foreach (var (k, dice) in verdict.Rolls) if (k != null && dice != null) _hostDice[k] = dice.ToList();
         }
         AutoCalculated = true;
     }

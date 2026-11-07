@@ -304,6 +304,7 @@ internal static class FormulaIntentRunner
 {
     private const string NotWaitingText = "This calculation is no longer waiting.";
     private const string GoneUnitText = "That unit no longer exists.";
+    public const string UsePendingText = "Use the pending run for this unit.";
     private const string NotYourPhaseText = "That can't be calculated during another side's phase.";
     public const int MaxTyped = 64;
     public const int MaxTypedValue = 256;
@@ -354,6 +355,10 @@ internal static class FormulaIntentRunner
             var accept = b != null && (b.Kind == BindingKind.Input || (model.Checked && IsCheckedKind(b.Kind)));
             if (accept) model.SetBoxText(variable, text ?? "");
         }
+        // One unit, one set of dice: while the unit has this formula's run waiting, a guest uses that run (an ad-hoc run would be another roll).
+        if (guest && i.RunId == null && i.PieceId != null
+            && full.Pending.Any(r => r != null && r.FormulaId == f.Id && (r.Units ?? Array.Empty<PendingUnit>()).Any(u => u is { Applied: false } && u.PieceId == i.PieceId)))
+            return FormulaVerdict.Refused(UsePendingText);
         // Every die of a guest's run is pinned per (sender, formula, unit) and dice configuration before anything is answered: a preview,
         // a refused Apply and a retry all see the same roll, so nothing can be re-rolled by asking again.
         var pinKey = new FormulaPins.Key(who ?? "", f.Id, i.PieceId);
@@ -479,12 +484,21 @@ internal sealed class FormulaPins
 
     public static string ConfigKey(string key, int n, int sides) => $"{key}|{n}|{sides}";
 
-    /// <summary>True when the formula may roll dice (a Roll binding or an inline dice() call); only those take a pinned scope.</summary>
-    public static bool MayRoll(FormulaDef f) =>
-        (f.Bindings ?? new List<VariableBinding>()).Any(b => b is { Kind: BindingKind.Roll })
-        || (f.Text ?? "").Contains("dice", StringComparison.OrdinalIgnoreCase)
-        || (f.Bindings ?? new List<VariableBinding>()).Any(b => (b?.RowExpr ?? "").Contains("dice", StringComparison.OrdinalIgnoreCase)
-            || (b?.ColExpr ?? "").Contains("dice", StringComparison.OrdinalIgnoreCase));
+    private static readonly System.Text.RegularExpressions.Regex DiceCall = new(@"(?<![\p{L}\p{N}_])dice\s*\(",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// True when the formula may roll dice: a Roll binding, or a dice( call in its text, a table key expression or a binding's AutoValue
+    /// (an Input's pre-fill). Only those take a pinned scope.
+    /// </summary>
+    public static bool MayRoll(FormulaDef f)
+    {
+        var bindings = f.Bindings ?? new List<VariableBinding>();
+        bool Calls(string? expr) => !string.IsNullOrEmpty(expr) && DiceCall.IsMatch(expr);
+        return bindings.Any(b => b is { Kind: BindingKind.Roll })
+            || Calls(f.Text)
+            || bindings.Any(b => b != null && (Calls(b.RowExpr) || Calls(b.ColExpr) || Calls(b.AutoValue)));
+    }
 
     private static bool Valid(Scope sc, GameSession g, RulesPack pack) =>
         ReferenceEquals(sc.Game, g) && ReferenceEquals(sc.Pack, pack) && Equals(sc.Position, g.State.Position);
