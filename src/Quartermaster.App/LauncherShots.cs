@@ -9,6 +9,7 @@ static class LauncherShots
     {
         try
         {
+            RequireScratchRoot(); // before anything is read or written: these runs write a library, saves and settings
             var root = SettingsStore.DefaultRoot;
             var store = new SettingsStore(root);
             store.Load(null);
@@ -26,7 +27,6 @@ static class LauncherShots
     /// <summary>Screenshot fixture: lists the given module plus a copy that is then deleted (shown as missing); for the offline window also writes an autosave and a recent save.</summary>
     static void Seed(SettingsStore store, string root, string modulePath, bool withGames)
     {
-        RequireScratchRoot();
         var lib = new ModuleLibrary(store);
         lib.Add(modulePath);
         var gone = Path.Combine(root, "gone", "Vanished Module.vmod");

@@ -69,6 +69,9 @@ sealed partial class MainForm : Form
     /// <summary>True when the window was closed through File -> Back to launcher (not the close box or Exit).</summary>
     public bool ReturnToLauncher { get; private set; }
 
+    /// <summary>The module last opened in this window (the launcher selects it after Back to launcher).</summary>
+    public string? OpenedModulePath { get; private set; }
+
     public MainForm(StartupOptions opts) : this(opts, null) { }
 
     public MainForm(StartupOptions opts, LaunchRequest? launch)
@@ -435,6 +438,7 @@ sealed partial class MainForm : Form
         OpenMainMap();
         if (_opts.FloatMainMap && Program.Smoke && FirstMap() is { } fm) _wm.PopOut(fm);
         MaybeAutoTour();
+        OpenedModulePath = path;
         RememberModule(path);
         if (!Program.Smoke || _opts.SmokeLauncher) Guard(() => LaunchBookkeeping.ModuleOpened(_library, path, DateTimeOffset.UtcNow));
         return true;
@@ -443,7 +447,12 @@ sealed partial class MainForm : Form
     /// <summary>Starts the game the launcher asked for: a new game (or setup), a saved game, or the newest autosave.</summary>
     void StartGameForLaunch(ModuleSession s, LaunchRequest launch)
     {
-        if (launch.RulesPath != null) Guard(() => s.OpenRules(launch.RulesPath));
+        // Same guard as Play offline's New game: a remembered pack that moved (or is already loaded) is skipped silently.
+        if (launch.RulesPath is { Length: > 0 } rules && !string.Equals(s.RulesPath, rules, StringComparison.OrdinalIgnoreCase)
+            && (File.Exists(rules) || Directory.Exists(rules)))
+        {
+            try { s.OpenRules(rules); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("launcher: rules pack not loaded: " + ex.Message); }
+        }
         switch (launch.Kind)
         {
             case LaunchKind.NewGame when launch.NewGame is { } ng:

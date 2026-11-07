@@ -355,4 +355,146 @@ public class LauncherTests : IDisposable
         LaunchBookkeeping.SaveUsed(recent, null, save);
         LaunchBookkeeping.ModuleOpened(lib, "", when);
     }
+
+    // ---------- final review fixes ----------
+
+    [Fact]
+    public void CorruptSettings_BackedUp_AndNeverOverwritten()
+    {
+        var root = Path.Combine(_tmp, "root");
+        Directory.CreateDirectory(root);
+        var file = Path.Combine(root, "settings.json");
+        const string bad = "{ \"Modules\": [ { \"Path\": \"C:\\m.vmod\" } ], oops";
+        File.WriteAllText(file, bad);
+        var log = new DiagnosticLog();
+        var store = NewStore();
+        store.Load(log);
+        Assert.True(store.Degraded);
+        Assert.Single(log.Items);
+        var backups = Directory.GetFiles(root, "settings.json.bad-*");
+        Assert.Single(backups);
+        Assert.Equal(bad, File.ReadAllText(backups[0]));
+        new ModuleLibrary(store).Add(Module("a"));
+        store.Update(cur => cur with { AutosaveMinutes = 9 });
+        Assert.Equal(bad, File.ReadAllText(file));
+        Assert.NotNull(store.LastSaveError);
+        Assert.Equal(9, store.Current.AutosaveMinutes); // kept for this session
+        store.Load(null); // a second load in the same store makes no second copy
+        Assert.Single(Directory.GetFiles(root, "settings.json.bad-*"));
+
+        // Once the file reads again, saving works again.
+        File.WriteAllText(file, "{}");
+        store.Load(null);
+        Assert.False(store.Degraded);
+        store.Update(cur => cur with { AutosaveMinutes = 7 });
+        Assert.Null(store.LastSaveError);
+        Assert.Equal(7, LoadedStore().Current.AutosaveMinutes);
+    }
+
+    [Fact]
+    public void LockedSettings_DuringLoad_NotOverwritten()
+    {
+        var store = NewStore();
+        var lib = new ModuleLibrary(store);
+        lib.Add(Module("a"));
+        var file = Path.Combine(_tmp, "root", "settings.json");
+        var before = File.ReadAllText(file);
+        var locked = NewStore();
+        using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            locked.Load(null);
+            Assert.True(locked.Degraded);
+            Assert.Empty(locked.Current.Modules);
+            locked.Update(cur => cur with { AutosaveMinutes = 3 });
+        }
+        locked.Update(cur => cur with { AutosaveMinutes = 4 }); // still degraded after the lock is gone: no write
+        Assert.Equal(before, File.ReadAllText(file));
+        Assert.Single(LoadedStore().Current.Modules);
+    }
+
+    [Fact]
+    public void MissingSettings_NotDegraded()
+    {
+        var store = LoadedStore();
+        Assert.False(store.Degraded);
+        store.Update(cur => cur with { AutosaveMinutes = 8 });
+        Assert.True(File.Exists(Path.Combine(_tmp, "root", "settings.json")));
+    }
+
+    [Fact]
+    public void MarkPlayed_NoMatchOrNoChange_DoesNotWrite()
+    {
+        var store = LoadedStore();
+        var lib = new ModuleLibrary(store);
+        var file = Path.Combine(_tmp, "root", "settings.json");
+        lib.MarkPlayed(Path.Combine(_tmp, "nope.vmod"), DateTimeOffset.UtcNow);
+        Assert.False(File.Exists(file));
+        var a = Module("a");
+        lib.Add(a);
+        var when = new DateTimeOffset(2026, 11, 7, 10, 0, 0, TimeSpan.Zero);
+        lib.MarkPlayed(a, when);
+        var stamp = DateTime.UtcNow.AddMinutes(-5);
+        File.SetLastWriteTimeUtc(file, stamp);
+        var changes = 0;
+        store.Changed += _ => changes++;
+        lib.MarkPlayed(a, when);
+        lib.MarkPlayed(Path.Combine(_tmp, "nope.vmod"), when);
+        Assert.Equal(0, changes);
+        Assert.Equal(stamp, File.GetLastWriteTimeUtc(file));
+    }
+
+    [Fact]
+    public async Task Refresh_InvalidPath_DoesNotAbortOthers()
+    {
+        var store = LoadedStore();
+        var good = Module("good");
+        store.Update(cur => cur with
+        {
+            Modules = new[]
+            {
+                new ModuleEntry("C:\\bad\0name.vmod", null, 0, DateTime.MinValue, "Bad", "", null),
+                new ModuleEntry(@"C:\bad|pipe?.vmod", null, 0, DateTime.MinValue, "Bad2", "", null),
+                new ModuleEntry(Path.GetFullPath(good), null, 0, DateTime.MinValue, "Good", "", null),
+            },
+        });
+        var lib = new ModuleLibrary(store);
+        lib.Hasher = p => p.Contains("bad", StringComparison.Ordinal) ? throw new InvalidDataException("bad archive") : Sha(p);
+        await lib.RefreshAsync(null, CancellationToken.None);
+        var rows = lib.Rows;
+        Assert.Equal(Sha(good), rows.Single(r => r.Entry.Path == Path.GetFullPath(good)).Entry.Sha256);
+        Assert.All(rows.Where(r => r.Entry.Path.Contains("bad", StringComparison.Ordinal)), r => Assert.Null(r.Entry.Sha256));
+    }
+
+    [Fact]
+    public async Task Refresh_HasherThrows_KeepsEntryUnhashed()
+    {
+        var store = LoadedStore();
+        var lib = new ModuleLibrary(store);
+        var a = Module("a");
+        var b = Module("b", "bb");
+        lib.Add(a);
+        lib.Add(b);
+        lib.Hasher = p => p.EndsWith("a.vmod", StringComparison.OrdinalIgnoreCase) ? throw new InvalidOperationException("boom") : Sha(p);
+        await lib.RefreshAsync(null, CancellationToken.None);
+        Assert.Null(lib.Rows.Single(r => r.Entry.Path == Path.GetFullPath(a)).Entry.Sha256);
+        Assert.Equal(Sha(b), lib.Rows.Single(r => r.Entry.Path == Path.GetFullPath(b)).Entry.Sha256);
+    }
+
+    [Fact]
+    public void RulesPack_None_ForgetsOnlyThatModule()
+    {
+        var store = NewStore();
+        var lib = new ModuleLibrary(store);
+        var e1 = new ModuleEntry("x", "sha1", 1, DateTime.UtcNow, "t", "", null);
+        var e2 = e1 with { Sha256 = "sha2" };
+        lib.SetRulesPack(e1, @"C:\packs\one.qrules");
+        lib.SetRulesPack(e2, @"C:\packs\two.qrules");
+        lib.SetRulesPack(e1, null);
+        Assert.Null(lib.RulesPackFor(e1));
+        Assert.Null(RulesMemory.LastFor(store.Root, "sha1"));
+        Assert.Equal(@"C:\packs\two.qrules", lib.RulesPackFor(e2));
+        RulesMemory.Forget(store.Root, "sha1"); // nothing to forget: no error
+        lib.SetRulesPack(e2, "  ");
+        Assert.Null(lib.RulesPackFor(e2));
+    }
 }

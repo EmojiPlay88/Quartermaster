@@ -43,33 +43,64 @@ public sealed class SettingsStore(string root)
 
     // ---------- load ----------
 
+    /// <summary>
+    /// True after a <see cref="Load"/> found <c>settings.json</c> but could not read or parse it. Until a later successful load, saves only
+    /// change <see cref="Current"/> and never touch the file (so a locked or damaged file is not replaced by defaults); <see cref="LastSaveError"/> says why.
+    /// </summary>
+    public bool Degraded { get; private set; }
+
+    /// <summary>The copy made of an unreadable <c>settings.json</c> (null when none was made).</summary>
+    public string? BackupPath { get; private set; }
+
     public Settings Load(DiagnosticLog? log)
     {
-        lock (_gate) Current = ReadFile(log);
+        lock (_gate)
+        {
+            var (s, problem) = ReadFile(log);
+            Current = s;
+            Degraded = problem != null;
+            if (problem != null)
+            {
+                Backup();
+                LastSaveError = $"settings.json {problem}; using the defaults, and settings are not saved until it can be read again" + (BackupPath != null ? $" (a copy was kept as {Path.GetFileName(BackupPath)})" : "") + ".";
+                log?.Add(DiagnosticSeverity.Warning, "settings", LastSaveError, "file");
+            }
+        }
         return Current;
     }
 
-    Settings ReadFile(DiagnosticLog? log)
+    /// <summary>Copies the unreadable file aside once per store (best effort: a file locked for reading may not copy either).</summary>
+    void Backup()
+    {
+        if (BackupPath != null) return;
+        try
+        {
+            var target = FilePath + ".bad-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+            if (!File.Exists(target)) File.Copy(FilePath, target);
+            BackupPath = target;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { }
+    }
+
+    /// <summary>The settings in the file plus, when the file exists but cannot be read or parsed, why (null when it loaded or is absent).</summary>
+    (Settings, string?) ReadFile(DiagnosticLog? log)
     {
         string text;
         try { text = File.ReadAllText(FilePath); }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return new Settings(); }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return (new Settings(), null); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Warn(log, "file", "could not be read: " + ex.Message);
-            return new Settings();
+            return (new Settings(), "could not be read: " + ex.Message);
         }
         JsonObject? o;
         try { o = JsonNode.Parse(text) as JsonObject; }
         catch (JsonException ex)
         {
-            Warn(log, "file", "is not valid JSON: " + ex.Message);
-            return new Settings();
+            return (new Settings(), "is not valid JSON: " + ex.Message);
         }
         if (o == null)
         {
-            Warn(log, "file", "does not hold a JSON object");
-            return new Settings();
+            return (new Settings(), "does not hold a JSON object");
         }
 
         var r = new Reader(o, log);
@@ -82,7 +113,7 @@ public sealed class SettingsStore(string root)
             tabMin = d.TabMinWidth;
             tabMax = d.TabMaxWidth;
         }
-        return new Settings
+        return (new Settings
         {
             ReopenLastModule = r.Bool("ReopenLastModule", d.ReopenLastModule),
             AutosaveMinutes = r.Int("AutosaveMinutes", d.AutosaveMinutes, 0, 240),
@@ -118,7 +149,7 @@ public sealed class SettingsStore(string root)
                 l = arr.Select(x => x is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null).OfType<string>().Take(10).ToList();
                 return true;
             }) is { Count: > 0 } recent ? recent : d.RecentSaves,
-        };
+        }, null);
     }
 
     static bool ReadModule(JsonNode? n, out ModuleEntry e)
@@ -292,6 +323,7 @@ public sealed class SettingsStore(string root)
     void Write(Settings s)
     {
         Current = s;
+        if (Degraded) return; // the file on disk could not be read: never replace it (LastSaveError already says so)
         try
         {
             Directory.CreateDirectory(root);

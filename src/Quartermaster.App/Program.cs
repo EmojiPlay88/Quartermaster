@@ -195,6 +195,9 @@ static class Program
     /// <summary>True once the game window was closed through Back to launcher (so nothing reopens the last module by itself).</summary>
     public static bool Relaunched { get; private set; }
 
+    /// <summary>The module the game window had open when it went Back to launcher (selected there whatever the setting says).</summary>
+    public static string? JustPlayedModule { get; private set; }
+
     static string LogDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
 
     /// <summary>Appends a line to app.log (used instead of dialogs in smoke mode).</summary>
@@ -233,7 +236,7 @@ static class Program
         var root = SettingsStore.DefaultRoot;
         var store = new SettingsStore(root);
         store.Load(null);
-        using var form = new LauncherForm(store, root);
+        using var form = new LauncherForm(store, root, Relaunched ? JustPlayedModule : null);
         Application.Run(form);
         return form.Result;
     }
@@ -283,6 +286,7 @@ static class Program
                 var form = new MainForm(o, launch);
                 Application.Run(form);
                 var again = form.ReturnToLauncher;
+                if (again) JustPlayedModule = form.OpenedModulePath ?? launch?.ModulePath;
                 form.Dispose();
                 if (!again) break;
                 Relaunched = true;

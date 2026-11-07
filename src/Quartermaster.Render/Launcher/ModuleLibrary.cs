@@ -66,12 +66,16 @@ public sealed class ModuleLibrary(SettingsStore store)
     /// <summary>Takes the module off the list; the file is left alone.</summary>
     public void Remove(string path) => Mutate(l => { l.RemoveAll(m => Same(m.Path, path)); return l; });
 
-    public void MarkPlayed(string path, DateTimeOffset when) =>
+    /// <summary>Records when the module was last played. Writes nothing when no entry matches or nothing changes.</summary>
+    public void MarkPlayed(string path, DateTimeOffset when)
+    {
+        if (!store.Current.Modules.Any(m => Same(m.Path, path) && m.LastPlayed != when)) return;
         Mutate(l =>
         {
             for (var i = 0; i < l.Count; i++) if (Same(l[i].Path, path)) l[i] = l[i] with { LastPlayed = when };
             return l;
         });
+    }
 
     /// <summary>
     /// Re-hashes the modules whose file size or last-write time differ from what was recorded (and those never hashed), on a background
@@ -118,16 +122,18 @@ public sealed class ModuleLibrary(SettingsStore store)
             var info = ModuleInfo.Read(e.Path);
             return e with { Sha256 = sha, Size = fi.Length, LastWriteUtc = written, Title = info.Title, Version = info.Version };
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return e; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return e; } // one bad path (invalid characters, unreadable archive…) never aborts the refresh
     }
 
     /// <summary>The rules pack remembered for this module (by SHA), or null.</summary>
     public string? RulesPackFor(ModuleEntry entry) =>
         entry.Sha256 is { Length: > 0 } sha ? RulesMemory.LastFor(store.Root, sha) : null;
 
-    /// <summary>Remembers (or, with null, leaves unchanged) the rules pack for this module. A null path is ignored: <see cref="RulesMemory"/> only stores.</summary>
+    /// <summary>Remembers the rules pack for this module; a null or blank path forgets it (the module then plays with no rules pack).</summary>
     public void SetRulesPack(ModuleEntry entry, string? path)
     {
-        if (entry.Sha256 is { Length: > 0 } sha && !string.IsNullOrWhiteSpace(path)) RulesMemory.Remember(store.Root, sha, path);
+        if (entry.Sha256 is not { Length: > 0 } sha) return;
+        if (string.IsNullOrWhiteSpace(path)) RulesMemory.Forget(store.Root, sha);
+        else RulesMemory.Remember(store.Root, sha, path);
     }
 }

@@ -275,7 +275,21 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - The "file was not found" hint on the disabled Play button is shown through a host panel, like the Online lobby hint, since a disabled button gets no mouse events.
 - Smokes: `--smoke-launcher <module> --smoke N` starts a blank new game from the launcher, goes back to the launcher and checks that the module shows a last-played time. The two screenshot flags take a module path and set up a scratch library (one module listed, one missing; for the offline window also an autosave and recent saves). Always run with `QUARTERMASTER_LAYOUT_ROOT` pointing at a scratch folder.
 
+### Rulings of the final review
+- Launcher screenshot runs (`--screenshot-launcher`, `--screenshot-offline`) check `QUARTERMASTER_LAYOUT_ROOT` before reading or writing anything, with or without a module path; without it they log the reason and exit 1. `--smoke-launcher` already did.
+- An unreadable `settings.json` (bad JSON, not an object, or a read error such as a lock) is never replaced by defaults: the store copies it once to `settings.json.bad-<yyyyMMdd-HHmmss>`, logs one warning, and is marked degraded. While degraded, changes stay in memory for the session but are not written (`LastSaveError` says why) until a later load succeeds. A missing file is not degraded.
+- A module added while the module check runs is hashed by one more check that starts when the running one ends. It only re-runs when something was added meanwhile, so an unhashable file cannot loop.
+- Starting a game from the launcher loads the remembered rules pack only when it differs from the one already loaded and the file or folder still exists (same guard as Play offline's New game). A moved pack is skipped without a dialog.
+- After Back to launcher, the launcher selects the module just played whatever "Select the last module in the launcher" says.
+- `ModuleLibrary.MarkPlayed` writes nothing when no entry matches or the time is unchanged.
+- The module check catches every error per entry (except out of memory), so one bad path (invalid characters, unreadable archive) cannot stop the others.
+- Rules pack "(none)": a `use (none)` link next to `change…` (shown when a pack is remembered) forgets it via `RulesMemory.Forget`; `ModuleLibrary.SetRulesPack(entry, null)` does the same.
+
 ### Deferred minors
+- A module on a slow or offline network path can stall the module check (existence checks and hashing are not time-limited).
+- The Play offline window's close veto (while busy) does not look at `CloseReason`, so it also refuses a Windows shutdown or task-manager close.
+- Two app instances share `settings.json`: the last one to write wins (no merge across processes).
+- Play offline's New game opens the module once to read its setups and the game window opens it again.
 - Setup dialog: players are not validated when the module has no rules pack (a test documents this).
 - The Online lobby panel height in the setup dialog is not tuned yet (6b).
 - A module that fails to open from the launcher leaves an empty game window.

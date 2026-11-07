@@ -32,12 +32,17 @@ public static class RulesMemory
     public static string? LastFor(string root, string moduleSha) =>
         Read(root).TryGetValue(moduleSha, out var p) ? p : null;
 
-    public static void Remember(string root, string moduleSha, string path)
+    public static void Remember(string root, string moduleSha, string path) => Change(root, d => { d[moduleSha] = path; return true; });
+
+    /// <summary>Drops the remembered rules pack for this module (no write when there is none).</summary>
+    public static void Forget(string root, string moduleSha) => Change(root, d => d.Remove(moduleSha));
+
+    private static void Change(string root, Func<Dictionary<string, string>, bool> change)
     {
         try
         {
             var d = Read(root);
-            d[moduleSha] = path;
+            if (!change(d)) return;
             Directory.CreateDirectory(root);
             var tmp = IndexPath(root) + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(d, new JsonSerializerOptions { WriteIndented = true }));

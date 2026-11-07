@@ -21,6 +21,7 @@ sealed class LauncherForm : Form
     };
     readonly Label _rules = new() { AutoSize = true, Text = "Rules pack: (none)", Anchor = AnchorStyles.Left };
     readonly LinkLabel _change = new() { AutoSize = true, Text = "change…", Anchor = AnchorStyles.Left };
+    readonly LinkLabel _none = new() { AutoSize = true, Text = "use (none)", Anchor = AnchorStyles.Left, Visible = false };
     readonly Button _add = new() { Text = "Add module…", AutoSize = true, MinimumSize = new Size(90, 26) };
     readonly Button _remove = new() { Text = "Remove", AutoSize = true, MinimumSize = new Size(75, 26) };
     readonly Button _online = new() { Text = "Online lobby ▶", AutoSize = true, MinimumSize = new Size(110, 26), Enabled = false };
@@ -29,8 +30,10 @@ sealed class LauncherForm : Form
     readonly ToolTip _tip = new();
     readonly Panel _playHost = new() { AutoSize = true, Margin = new Padding(3), Padding = Padding.Empty };
     readonly CancellationTokenSource _cts = new();
+    readonly string? _justPlayed;
     Task _refresh = Task.CompletedTask;
     bool _closing;
+    bool _addedDuringRefresh; // set when a module is added while a refresh runs: one more refresh hashes it
 
     public LaunchRequest? Result { get; private set; }
 
@@ -42,9 +45,12 @@ sealed class LauncherForm : Form
 
     public bool OnlineEnabled => _online.Enabled;
 
-    public LauncherForm(SettingsStore store, string layoutRoot)
+    /// <param name="justPlayed">After Back to launcher: the module just played, selected regardless of "Select the last module in the launcher".</param>
+    public LauncherForm(SettingsStore store, string layoutRoot, string? justPlayed = null)
     {
         _store = store;
+        try { _justPlayed = justPlayed == null ? null : Path.GetFullPath(justPlayed); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { _justPlayed = justPlayed; }
         _library = new ModuleLibrary(store);
         _recent = new RecentGames(store, layoutRoot);
         Text = "Quartermaster";
@@ -68,6 +74,7 @@ sealed class LauncherForm : Form
         var rulesRow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Padding = new Padding(8, 6, 8, 0) };
         rulesRow.Controls.Add(_rules);
         rulesRow.Controls.Add(_change);
+        rulesRow.Controls.Add(_none);
         rulesRow.Controls.Add(_progress);
 
         var left = new FlowLayoutPanel { Dock = DockStyle.Left, AutoSize = true, WrapContents = false };
@@ -96,6 +103,8 @@ sealed class LauncherForm : Form
         _remove.Click += (_, _) => Guarded(RemoveSelected);
         _play.Click += (_, _) => Guarded(PlayOffline);
         _change.LinkClicked += (_, _) => Guarded(ChangeRules);
+        _none.LinkClicked += (_, _) => Guarded(ClearRules);
+        _tip.SetToolTip(_none, "Play this module without a rules pack.");
         _list.SelectedIndexChanged += (_, _) => Guarded(UpdateButtons);
         _list.DoubleClick += (_, _) => Guarded(PlayOffline);
         _list.KeyDown += (_, e) =>
@@ -157,6 +166,12 @@ sealed class LauncherForm : Form
         {
             _progress.Text = "";
             Fill(preselectLast: false);
+            // Only re-run for modules added since this refresh started (an unhashable file never loops).
+            if (_addedDuringRefresh)
+            {
+                _addedDuringRefresh = false;
+                StartRefresh();
+            }
         });
     }
 
@@ -184,6 +199,8 @@ sealed class LauncherForm : Form
                 _list.Items.Add(item);
             }
             var want = keep;
+            if (want == null && preselectLast && _justPlayed != null)
+                want = rows.FirstOrDefault(r => string.Equals(r.Entry.Path, _justPlayed, StringComparison.OrdinalIgnoreCase))?.Entry.Path;
             if (want == null && preselectLast && _store.Current.ReopenLastModule)
                 want = rows.FirstOrDefault(r => string.Equals(r.Entry.Path, _store.Current.LastModulePath, StringComparison.OrdinalIgnoreCase))?.Entry.Path
                     ?? rows.FirstOrDefault(r => !r.Missing)?.Entry.Path;
@@ -219,12 +236,14 @@ sealed class LauncherForm : Form
         _remove.Enabled = row != null;
         _play.Enabled = row != null && !row.Missing;
         _change.Enabled = row is { Missing: false };
+        string? pack = null;
         if (row == null) _rules.Text = "Rules pack: (none)";
         else
         {
-            var pack = _library.RulesPackFor(row.Entry);
+            pack = _library.RulesPackFor(row.Entry);
             _rules.Text = "Rules pack: " + (string.IsNullOrEmpty(pack) ? "(none)" : SafeFileName(pack.TrimEnd('\\', '/')));
         }
+        _none.Visible = row is { Missing: false } && !string.IsNullOrEmpty(pack);
         var hint = row is { Missing: true } ? "This module's file was not found. Remove it or add it again." : "";
         _tip.SetToolTip(_playHost, hint);
         _tip.SetToolTip(_play, hint);
@@ -245,7 +264,9 @@ sealed class LauncherForm : Form
         }
         Fill(preselectLast: false);
         SelectPath(last);
+        if (last == null) return;
         if (_refresh.IsCompleted) StartRefresh(); // hash what was just added
+        else _addedDuringRefresh = true;          // the running refresh took its snapshot before: run again when it ends
     }
 
     void RemoveSelected()
@@ -266,6 +287,14 @@ sealed class LauncherForm : Form
         using var dlg = new OpenFileDialog { Filter = "Rules packs (*.qrules)|*.qrules|All files (*.*)|*.*", Title = "Rules pack for " + row.Entry.Title };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         _library.SetRulesPack(row.Entry, dlg.FileName);
+        UpdateButtons();
+    }
+
+    /// <summary>The "use (none)" link: forget the module's rules pack so it plays without one.</summary>
+    void ClearRules()
+    {
+        if (Selected is not { } row) return;
+        _library.SetRulesPack(row.Entry, null);
         UpdateButtons();
     }
 
