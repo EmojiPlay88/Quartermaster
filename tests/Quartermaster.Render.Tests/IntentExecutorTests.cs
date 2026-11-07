@@ -400,13 +400,14 @@ public class IntentExecutorTests : IDisposable
     {
         var (s, c, x) = Open();
         var g = s.Game!;
+        c.Start(); c.Advance();   // Supply (red)
         var before = Json(g.State);
         Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-depot", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true)).Ok);
         Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-gout", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true)).Ok);
         Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-weather", null, null, new Dictionary<string, string>(), true)).Ok);
         Assert.Equal(before, Json(g.State));
 
-        c.Start(); c.Advance(); c.Advance(); c.Advance();   // Combat (blue)
+        c.Advance(); c.Advance();   // Combat (blue)
         Assert.Equal("ph-combat", g.State.Position!.PhaseId);
         Assert.False(x.Execute("p1", Red, new FormulaIntent("f-gout", PhaseFixture.RedOne, null, new Dictionary<string, string>(), true)).Ok);
         Assert.False(x.Execute("p2", Blue, new FormulaIntent("f-depot", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true)).Ok);
@@ -416,6 +417,75 @@ public class IntentExecutorTests : IDisposable
             Ledger.Get(g.State, LedgerKey.Holder(HolderDef.GlobalId), "morale"));
         var weather = x.Execute("p2", Blue, new FormulaIntent("f-weather", null, null, new Dictionary<string, string>(), true));
         Assert.True(weather.Ok, weather.Message);
+    }
+
+    [Fact]
+    public void FormulaIntent_NoTurnOwnership_NoPhaseRestriction()
+    {
+        // Before the start, in a side-less phase and without phases nobody owns the turn: global writes and unit-less runs are allowed.
+        var (s, c, x) = Open();
+        Assert.True(x.Execute("p2", Blue, new FormulaIntent("f-weather", null, null, new Dictionary<string, string>(), true)).Ok);
+        c.Start();   // Weather: no acting side
+        Assert.True(x.Execute("p2", Blue, new FormulaIntent("f-gout", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true)).Ok);
+        Assert.True(x.Execute("p1", Red, new FormulaIntent("f-weather", null, null, new Dictionary<string, string>(), true)).Ok);
+
+        var (s2, _, x2) = Open();
+        s2.UpdateRules(p => p with { Phases = new(), Blocks = new() });
+        var r = x2.Execute("p2", Blue, new FormulaIntent("f-gout", PhaseFixture.BlueOne, null, new Dictionary<string, string>(), true));
+        Assert.True(r.Ok, r.Message);
+        Assert.NotNull(Ledger.Get(s2.Game!.State, LedgerKey.Holder(HolderDef.GlobalId), "morale"));
+    }
+
+    [Fact]
+    public void AddPiece_TakenId_GetsFreshIdFromHost()
+    {
+        var (s, _, x) = Open();
+        var g = s.Game!;
+        g.Execute(new AddPiece("secret", PieceTypeParser.EncodeState(new[] { "piece;;;unit.svg;Red Phantom" }), "", RedMap, new PointD(10, 10), null));
+        var count = g.State.Pieces.Count;
+        // Both a hidden and a visible taken id behave like a free one: the piece is placed under a host-chosen id.
+        foreach (var id in new[] { "secret", PhaseFixture.RedOne })
+        {
+            var r = x.Execute("p2", Blue, new PieceCommandIntent(new AddPiece(id, MarkedType("Flag"), MarkedState("Blue"), "Main Map", new PointD(150, 50), null)));
+            Assert.True(r.Ok, r.Message);
+        }
+        Assert.Equal(count + 2, g.State.Pieces.Count);
+        Assert.Equal("Red Phantom", PieceInfo.Name(g.State.Pieces["secret"]));
+        Assert.StartsWith("Red", PieceInfo.Name(g.State.Pieces[PhaseFixture.RedOne]));
+    }
+
+    [Fact]
+    public void StackOnto_StackWithHiddenPiece_ActsAsNewStack()
+    {
+        var (s, _, x) = Open();
+        var g = s.Game!;
+        // A hidden Red piece sharing a stack with a public piece on the main map (hidden by a Hideable while not held).
+        g.Execute(new AddPiece("crate", MarkedType("Crate"), MarkedState("Green"), "Main Map", new PointD(170, 50), null));
+        var stackId = g.State.Pieces["crate"].StackId!;
+        g.Execute(new AddPiece("spy", PieceTypeParser.EncodeState(new[] { "hide;I;Hide it;;;0.3;;false", "piece;;;unit.svg;Red Spy" }),
+            PieceTypeParser.EncodeState(new[] { "red", "" }), "Main Map", new PointD(170, 50), stackId));
+        var access = new PieceAccess(g.State, s.Rules, s.Model, Blue);
+        Assert.Equal(stackId, g.State.Pieces["spy"].StackId);
+        Assert.False(access.CanSee("spy"));
+
+        var r = x.Execute("p2", Blue, new MoveIntent(new[] { new MovePieces(new[] { PhaseFixture.BlueOne }, "Main Map", new PointD(170, 50), stackId) }));
+        Assert.True(r.Ok, r.Message);
+        Assert.NotEqual(stackId, g.State.Pieces[PhaseFixture.BlueOne].StackId);
+        Assert.DoesNotContain(PhaseFixture.BlueOne, g.State.Stacks[stackId].PieceIds);
+
+        var add = x.Execute("p2", Blue, new PieceCommandIntent(new AddPiece("m9", MarkedType("Flag"), MarkedState("Blue"), "Main Map", new PointD(170, 50), stackId)));
+        Assert.True(add.Ok, add.Message);
+        Assert.NotEqual(stackId, g.State.Pieces["m9"].StackId);
+    }
+
+    [Fact]
+    public void EditLedger_NoteOfOnlyControlCharacters_Refused()
+    {
+        var (s, _, x) = Open();
+        var before = Json(s.Game!.State);
+        var r = x.Execute("p2", Blue, new LedgerEditIntent(LedgerKey.Piece(PhaseFixture.BlueOne), "water", 3, (char)7 + "" + (char)0x2028));
+        Assert.False(r.Ok);
+        Assert.Equal(before, Json(s.Game.State));
     }
 
     [Fact]

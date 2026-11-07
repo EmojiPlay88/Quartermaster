@@ -74,12 +74,19 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
 
     // ---- moves and piece commands ----
 
-    private static string? CheckStack(GameSession g, PieceAccess a, string mapId, string? onto)
+    /// <summary>
+    /// The stack a guest's pieces may join: the requested one when every piece in it is the sender's to act on; null (a new stack at the
+    /// position) when it does not exist, is on another map or holds a piece the sender cannot see, so its existence is never revealed.
+    /// <paramref name="why"/> is set when a visible piece of another side is in it.
+    /// </summary>
+    private static string? StackFor(GameSession g, PieceAccess a, string mapId, string? onto, out string? why)
     {
-        if (onto == null) return null;
-        if (onto.Length > MaxId) return StackText;
+        why = null;
+        if (onto == null || onto.Length > MaxId) return null;
         if (!g.State.Stacks.TryGetValue(onto, out var st) || st == null || st.MapId != mapId) return null;
-        return st.PieceIds.All(a.CanAct) ? null : StackText;
+        if (!st.PieceIds.All(a.CanSee)) return null;
+        if (!st.PieceIds.All(a.CanAct)) why = StackText;
+        return onto;
     }
 
     private static string? CheckMove(GameSession g, PieceAccess a, MovePieces m)
@@ -90,7 +97,8 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (m.PieceIds.Any(id => BadId(id) || !Exists(g, a, id))) return "A piece in that move no longer exists.";
         if (!m.PieceIds.All(a.CanAct)) return OtherSide("A piece in that move");
         if (a.MapHidden(m.MapId)) return MapText;
-        return CheckStack(g, a, m.MapId, m.StackOnto);
+        StackFor(g, a, m.MapId, m.StackOnto, out var why);
+        return why;
     }
 
     private IntentResult Move(GameSession g, IReadOnlySet<string> sides, string who, IReadOnlyList<MovePieces>? moves)
@@ -99,8 +107,8 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         var a = Access(g, sides);
         foreach (var m in moves)
             if (CheckMove(g, a, m) is { } why) return IntentResult.Refused(why);
-        // The guest's own log text and stamps are never trusted.
-        var clean = moves.Select(m => m with { LogText = null, At = null, Who = null }).ToList();
+        // The guest's own log text and stamps are never trusted; a stack it may not see becomes a new stack.
+        var clean = moves.Select(m => m with { LogText = null, At = null, Who = null, StackOnto = StackFor(g, a, m.MapId, m.StackOnto, out _) }).ToList();
         using (c.ActingFor(sides, who))
         using (g.BeginAction())
             c.ExecuteMove(clean);
@@ -117,7 +125,9 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             case AddPiece add:
             {
                 if (CheckAdd(g, a, sides, add) is { } why) return IntentResult.Refused(why);
-                clean = add with { LogText = null, At = null, Who = null };
+                // A taken id gets a fresh one from the host: refusing would let a guest probe for pieces it cannot see.
+                var id = g.State.Pieces.ContainsKey(add.PieceId) ? "p:" + Guid.NewGuid().ToString("N") : add.PieceId;
+                clean = add with { PieceId = id, LogText = null, At = null, Who = null, StackOnto = StackFor(g, a, add.MapId, add.StackOnto, out _) };
                 break;
             }
             case RemovePiece r:
@@ -147,8 +157,11 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             default:
                 return IntentResult.Refused(HostOnlyText);
         }
-        g.Execute(CommandLog.Prepare(CommandLog.Stamp(clean, who), g.State, s));
-        if (clean is AddPiece) s.SeedLedgers();
+        using (c.ActingFor(sides, who))
+        {
+            g.Execute(CommandLog.Prepare(CommandLog.Stamp(clean, who), g.State, s));
+            if (clean is AddPiece) s.SeedLedgers();
+        }
         return IntentResult.Done();
     }
 
@@ -168,28 +181,15 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     private static string? CheckAdd(GameSession g, PieceAccess a, IReadOnlySet<string> sides, AddPiece add)
     {
         if (BadId(add.PieceId) || BadId(add.MapId) || string.IsNullOrEmpty(add.TypeString) || add.TypeString.Length > MaxTypeText
-            || (add.StateString?.Length ?? 0) > MaxTypeText || !double.IsFinite(add.Pos.X) || !double.IsFinite(add.Pos.Y)
-            || g.State.Pieces.ContainsKey(add.PieceId))
+            || (add.StateString?.Length ?? 0) > MaxTypeText || !double.IsFinite(add.Pos.X) || !double.IsFinite(add.Pos.Y))
             return "That piece can't be placed.";
         if (a.MapHidden(add.MapId)) return MapText;
         // Decode the state exactly as the reducer does, so the side is judged on the piece as it will exist.
-        var probe = new PieceInstance { Id = add.PieceId, TypeString = add.TypeString, MapId = add.MapId, Pos = add.Pos, TraitStates = DecodeState(add.TypeString, add.StateString ?? "") };
+        var probe = new PieceInstance { Id = add.PieceId, TypeString = add.TypeString, MapId = add.MapId, Pos = add.Pos,
+            TraitStates = GameState.DecodeState(add.TypeString, add.StateString ?? "") };
         if (SideRule(sides, null, a.SideOf(probe), OtherSide("That piece")) is { } why) return why;
-        return CheckStack(g, a, add.MapId, add.StackOnto);
-    }
-
-    private static List<string> DecodeState(string typeString, string stateString)
-    {
-        if (string.IsNullOrEmpty(stateString)) return new();
-        try
-        {
-            var count = PieceTypeParser.Parse(typeString, new DiagnosticLog(), null).Traits.Count;
-            return PieceTypeParser.SplitState(stateString, count).ToList();
-        }
-        catch (Exception)
-        {
-            return new() { stateString };
-        }
+        StackFor(g, a, add.MapId, add.StackOnto, out var stackWhy);
+        return stackWhy;
     }
 
     private static string? CheckTrait(GameSession g, PieceAccess a, IReadOnlySet<string> sides, SetTraitState t)
@@ -220,7 +220,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     {
         if (BadId(l.Key) || BadId(l.PropertyId)) return IntentResult.Refused(NotUnderstoodText);
         if (!double.IsFinite(l.After)) return IntentResult.Refused("That is not a number.");
-        if (string.IsNullOrWhiteSpace(l.Note)) return IntentResult.Refused("A manual change needs a note.");
+        if (ChatText.Clean(l.Note) is not { } note) return IntentResult.Refused("A manual change needs a note.");
         if (s.Rules?.Properties.FirstOrDefault(p => p != null && p.Id == l.PropertyId) is not { } prop)
             return IntentResult.Refused("That value no longer exists.");
         if (LedgerKey.TryParse(l.Key, out var isPiece, out var id) && isPiece && !Exists(g, Access(g, sides), id))
@@ -228,7 +228,6 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (!s.CanEditLedgerFor(l.Key, sides)) return IntentResult.Refused(OtherSide("That value"));
         if (Ledger.Get(g.State, l.Key, prop.Id) is { } cur && cur == l.After) return IntentResult.Done();   // unchanged: no history entry
         var before = Ledger.GetOrDefault(g.State, l.Key, prop);
-        var note = ChatText.Clean(l.Note) ?? "";
         g.Execute(CommandLog.Prepare(CommandLog.Stamp(new LedgerDelta(l.Key, prop.Id, before, l.After, "manual", null, null, note, null), who), g.State, s));
         return IntentResult.Done();
     }
@@ -302,7 +301,7 @@ internal static class FormulaIntentRunner
 {
     private const string NotWaitingText = "This calculation is no longer waiting.";
     private const string GoneUnitText = "That unit no longer exists.";
-    private const string NotYourPhaseText = "That can only be calculated during a phase of a side you hold.";
+    private const string NotYourPhaseText = "That can't be calculated during another side's phase.";
     public const int MaxTyped = 64;
     public const int MaxTypedValue = 256;
 
@@ -364,10 +363,16 @@ internal static class FormulaIntentRunner
         return new FormulaVerdict(true, boxes, null);
     }
 
-    /// <summary>True when the current phase has an acting side and the sender holds it.</summary>
-    private static bool ActingSideHeld(ModuleSession s, RulesPack pack, IReadOnlySet<string> sides) =>
-        pack.Phases is { Count: > 0 } && s.Game?.State is { Position: not null } st && Sequencer.Current(pack, st) is { } phase
-        && Sequencer.ActingSide(pack, phase) is { } side && sides.Contains(side.Id);
+    /// <summary>
+    /// False only while a side the sender does not hold owns the turn: true without phases, before the game started and in a phase with
+    /// no acting side (no turn ownership, no restriction), and in a phase of a held side.
+    /// </summary>
+    private static bool ActingSideHeld(ModuleSession s, RulesPack pack, IReadOnlySet<string> sides)
+    {
+        if (pack.Phases is not { Count: > 0 } || s.Game?.State is not { Position: not null } st) return true;
+        if (Sequencer.Current(pack, st) is not { } phase || Sequencer.ActingSide(pack, phase) is not { } side) return true;
+        return sides.Contains(side.Id);
+    }
 
     /// <summary>
     /// A guest may write holders of held sides or of no side; the global holder only during a phase of a side it holds; and may run a
@@ -382,7 +387,7 @@ internal static class FormulaIntentRunner
             var global = o.Target == OutputTarget.Global || (o.Target == OutputTarget.Holder && o.HolderId == HolderDef.GlobalId);
             if (global)
             {
-                if (!ActingSideHeld(s, pack, sides)) return "Global values can only be changed during a phase of a side you hold.";
+                if (!ActingSideHeld(s, pack, sides)) return "Global values can't be changed during another side's phase.";
                 continue;
             }
             if (o.Target == OutputTarget.Holder)
