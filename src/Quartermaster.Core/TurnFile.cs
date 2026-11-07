@@ -137,19 +137,31 @@ public static class TurnFiles
         var g = new GameSession(t.Start.DeepClone(), moduleSha) { RulesSha256 = t.RulesSha256 };
         for (int i = 0; i < t.Commands.Count; i++)
         {
-            var c = t.Commands[i];
-            try
-            {
-                using (g.BeginAction()) g.Execute(c);
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                throw new InvalidDataException($"Malformed turn file: step {i + 1} could not be replayed ({ex.Message}).", ex);
-            }
-            step?.Invoke(c, i);
+            Step(g, t, i);
+            step?.Invoke(t.Commands[i], i);
         }
         g.Rebase();
         g.MarkTurnBase();
         return g;
+    }
+
+    /// <summary>
+    /// Runs command <paramref name="index"/> of the turn on <paramref name="g"/> in its own action, exactly as <see cref="Replay"/> does
+    /// (interactive replay steps through the same code). A command that fails to apply throws <see cref="InvalidDataException"/>.
+    /// </summary>
+    public static void Step(GameSession g, TurnFile t, int index)
+    {
+        ArgumentNullException.ThrowIfNull(g);
+        ArgumentNullException.ThrowIfNull(t);
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, t.Commands.Count);
+        try
+        {
+            using (g.BeginAction()) g.Execute(t.Commands[index]);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            throw new InvalidDataException($"Malformed turn file: step {index + 1} could not be replayed ({ex.Message}).", ex);
+        }
     }
 }

@@ -35,6 +35,7 @@ public sealed class ModuleSession : IDisposable
         private set
         {
             if (ReferenceEquals(_game, value)) return;
+            IsReplaying = false;   // any other game replacing the replayed one ends the replay; the turn path sets it again afterwards
             if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnGameRewound; }
             _game = value;
             if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnGameRewound; }
@@ -321,6 +322,7 @@ public sealed class ModuleSession : IDisposable
         if (Game == null) throw new InvalidOperationException("There is no game to save.");
         if (IsGuest) throw new InvalidOperationException(GuestSaveText);
         if (IsViewerCopy) throw new InvalidOperationException(ViewerCopyText);
+        RequireNotReplaying();
         if (Rules != null) Game.RulesSha256 = SafeHash(Rules) ?? Game.RulesSha256;
         NativeSave.Write(path, Game);
     }
@@ -330,6 +332,7 @@ public sealed class ModuleSession : IDisposable
     public void NewRules(string name)
     {
         RequireNoGuestRules();
+        RequireNotReplaying();
         Commit(RulesPackIo.CreateEmpty(name, Archive.Sha256), null, dirty: true);
     }
 
@@ -345,6 +348,7 @@ public sealed class ModuleSession : IDisposable
     public void OpenRules(string path)
     {
         RequireNoGuestRules();
+        RequireNotReplaying();
         var pack = RulesPackIo.Load(path);
         Commit(pack, path, dirty: false);
         if (!string.Equals(pack.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -372,6 +376,7 @@ public sealed class ModuleSession : IDisposable
     public void UpdateRules(Func<RulesPack, RulesPack> edit)
     {
         RequireNoGuestRules();
+        RequireNotReplaying();
         var current = Rules ?? throw new InvalidOperationException("There are no rules to edit.");
         var edited = edit(current);
         var next = edited with
@@ -393,6 +398,7 @@ public sealed class ModuleSession : IDisposable
 
     private void Commit(RulesPack pack, string? path, bool dirty)
     {
+        RequireNotReplaying();
         var runner = new FormulaRunner(pack, Model, _roller);
         Rules = pack;
         RulesPath = path;
@@ -448,7 +454,7 @@ public sealed class ModuleSession : IDisposable
     /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
     public void SeedLedgers()
     {
-        if (Game == null || Rules == null || IsGuest || IsViewerCopy) return;   // guests never execute commands; a viewer copy is read-only
+        if (Game == null || Rules == null || IsGuest || IsViewerCopy || IsReplaying) return;   // a turn being replayed stays the sender's   // guests never execute commands; a viewer copy is read-only
         try
         {
             var seed = LedgerSeeder.BuildSeeds(Game.State, Rules, _ => true, Model, Log);
@@ -492,8 +498,8 @@ public sealed class ModuleSession : IDisposable
     /// <summary>True when the open game is a viewer copy (read-only; every action is blocked).</summary>
     public bool IsViewerCopy => _game?.ViewerCopy == true;
 
-    /// <summary>False for a guest and for a viewer copy.</summary>
-    public bool CanSave => Game != null && !IsGuest && !IsViewerCopy;
+    /// <summary>False for a guest, a viewer copy and a half-replayed turn (the game opened before the turn is the last save).</summary>
+    public bool CanSave => Game != null && !IsGuest && !IsViewerCopy && !IsReplaying;
 
     /// <summary>The banner shown over a viewer copy; null for any other game.</summary>
     public string? ViewerBanner => IsViewerCopy ? ViewerCopyText : null;
@@ -565,6 +571,66 @@ public sealed class ModuleSession : IDisposable
         if (Game is not { } g) throw new InvalidOperationException("There is no game to export yet.");
         var copy = new GameSession(g.State.DeepClone(), Archive.Sha256) { ViewerCopy = true, RulesSha256 = g.RulesSha256 };
         NativeSave.Write(path, copy);
+    }
+
+    // ---- turn files (spec 6) ----
+
+    /// <summary>Why an action was refused while a received turn is being replayed.</summary>
+    public const string ReplayingText = "Finish the replay first.";
+
+    /// <summary>Exact copy: a turn file made with another module.</summary>
+    public const string DifferentModuleTurnText = "This turn file belongs to a different module";
+
+    /// <summary>
+    /// True while a received turn is being replayed step by step (<see cref="TurnReplayModel"/>): every action through
+    /// <see cref="LocalActions"/> is refused with <see cref="ReplayingText"/>. Autosave stays allowed (the game is consistent after each
+    /// step). Cleared when the replay finishes or fails, and whenever another game replaces the replayed one.
+    /// </summary>
+    public bool IsReplaying { get; private set; }
+
+    /// <summary>No rules change and no save while a turn is half-replayed.</summary>
+    private void RequireNotReplaying()
+    {
+        if (IsReplaying) throw new InvalidOperationException(ReplayingText);
+    }
+
+    /// <summary>Opens a received turn for step replay: the open game is replaced (as when opening a save) by the turn's start.</summary>
+    public TurnReplayModel OpenTurn(TurnFile turn, string localPlayerId, TurnIdentity? identity = null) =>
+        new(this, turn, localPlayerId, identity);
+
+    /// <summary>
+    /// Replaces the game by a turn's start session (the same replace path as <see cref="LoadNative"/>, without seeding: the receiver's
+    /// game must stay exactly the sender's) and marks the session as replaying.
+    /// </summary>
+    internal void BeginTurnReplay(GameSession start)
+    {
+        ArgumentNullException.ThrowIfNull(start);
+        RequireNotGuest();
+        if (IsViewerCopy) throw new InvalidOperationException(ViewerCopyText);
+        if (IsReplaying) throw new InvalidOperationException(ReplayingText);
+        if (!string.Equals(start.ModuleSha256, Archive.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(DifferentModuleTurnText);
+        Game = start;
+        IsReplaying = true;
+        WarnIfSaveRulesDiffer(start);
+        AfterGameReplaced();
+    }
+
+    /// <summary>The replay finished: actions are allowed again and the view narrows to <paramref name="sides"/> (null = everything).</summary>
+    internal void EndTurnReplay(GameSession replayed, IReadOnlySet<string>? sides)
+    {
+        if (!ReferenceEquals(_game, replayed)) return;
+        IsReplaying = false;
+        SetViewSides(sides);
+    }
+
+    /// <summary>A replay failed: the game the user had before opening the turn comes back, with its view.</summary>
+    internal void RestoreAfterFailedReplay(GameSession replayed, GameSession? before, IReadOnlySet<string>? sides)
+    {
+        if (!ReferenceEquals(_game, replayed)) return;
+        Game = before;   // also clears IsReplaying
+        AfterGameReplaced();
+        if (before != null) SetViewSides(sides);
     }
 
     public bool Disposed { get; private set; }
