@@ -139,6 +139,39 @@ public sealed class ModuleSession : IDisposable
         return side == null || sides.Contains(side);
     }
 
+    /// <summary>True when the current viewer may change this ledger key by hand: always in solo; else a unit they may act on, the global
+    /// holder or a holder of a held side or of no side.</summary>
+    public bool CanEditLedger(string key)
+    {
+        var sides = _viewSides;
+        if (sides == null) return true;
+        if (key == null || !LedgerKey.TryParse(key, out var isPiece, out var id)) return false;
+        if (isPiece) return CanAct(id);
+        if (id == HolderDef.GlobalId) return true;
+        if ((Rules?.Holders ?? new List<HolderDef>()).FirstOrDefault(h => h != null && h.Id == id) is not { } holder) return false;
+        return Ownership.SideOfHolder(holder.Id, Rules!) is not { } side || sides.Contains(side);
+    }
+
+    /// <summary>Tooltip suffix of totals that cover only what the viewer may see.</summary>
+    public const string VisibleOnlyText = "visible units only";
+
+    /// <summary>True when the view leaves out or masks something of the game (a piece, a mask or a ledger value).</summary>
+    public bool ViewFiltered
+    {
+        get
+        {
+            if (_viewSides == null || _game?.State is not { } full || View is not { } v || ReferenceEquals(v, full)) return false;
+            if (v.Pieces.Count != full.Pieces.Count) return true;
+            foreach (var (id, p) in v.Pieces)
+                if (!full.Pieces.TryGetValue(id, out var f) || f?.TypeString != p?.TypeString) return true;
+            static int Values(GameState st) => st.Ledgers.Values.Sum(inner => inner?.Count ?? 0);
+            return Values(v) != Values(full);
+        }
+    }
+
+    /// <summary>The text with " — visible units only" added when <see cref="ViewFiltered"/>.</summary>
+    public string VisibleOnly(string text) => ViewFiltered ? text + " — " + VisibleOnlyText : text;
+
     public bool CanSeeMap(string mapId)
     {
         if (_viewSides == null || Rules == null) return true;

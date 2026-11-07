@@ -124,7 +124,7 @@ sealed class PhasePanel : UserControl
                 _nextButton.Text = "Next Phase ▶";
                 return;
             }
-            _title.Text = v.BeforeStart ? "Before turn 1" : v.Current is { } cur
+            _title.Text = v.BeforeStart ? "Before turn 1" : v.PlayingText is { } playing ? playing : v.Current is { } cur
                 ? (v.SideName != null ? $"{v.SideName} player — {cur.Name}" : cur.Name) : "";
             _instructions.Text = (v.Current?.Instructions ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n");
             _notesTip.SetToolTip(_title, v.Current?.Notes ?? "");
@@ -177,8 +177,9 @@ sealed class PhasePanel : UserControl
 
     void ShowDecisions(PhaseView v)
     {
-        var items = v.Current?.Checklist ?? new List<string>();
-        var ticked = _s.Game?.State.Ticked;
+        // Hot-seat: another side's phase shows none of its decisions (its checklist included).
+        var items = v.PlayingText != null ? new List<string>() : v.Current?.Checklist ?? new List<string>();
+        var ticked = _s.View?.Ticked;
         _checklist.BeginUpdate();
         _checklist.Items.Clear();
         for (var i = 0; i < items.Count; i++) _checklist.Items.Add(items[i] ?? "", ticked?.Contains(i) == true);

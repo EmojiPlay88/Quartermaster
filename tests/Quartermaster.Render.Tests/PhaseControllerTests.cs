@@ -689,6 +689,26 @@ public class PhaseControllerTests : IDisposable
     }
 
     [Fact]
+    public void View_ActingSideNotHeld_IsPlayingText_NoDecisions()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, PrivateWeather);
+        ToMovement(c);
+        c.Advance();        // Combat: Blue's phase, with a checklist decision
+        Assert.Null(c.View().PlayingText);
+        Assert.NotEmpty(c.View().Decisions);
+        s.SetViewSides(BlueOnly);
+        Assert.Null(c.View().PlayingText);
+        Assert.NotEmpty(c.View().Decisions);
+        s.SetViewSides(RedOnly);
+        var v = c.View();
+        Assert.Equal("Blue is playing Combat", v.PlayingText);
+        Assert.Empty(v.Decisions);
+        Assert.Empty(v.Warnings);
+        s.SetViewSides(null);
+        Assert.Null(c.View().PlayingText);
+    }
+
+    [Fact]
     public void ApplyFormula_RefusesUnitOfSideNotHeld()
     {
         var (s, c) = Make(Difficulty.SemiAuto);

@@ -9,7 +9,6 @@ sealed class MapWindow : Form
 {
     readonly ModuleSession _s;
     readonly CancellationTokenSource _cts = new();
-    GameSession? _attached;
     bool _tilingStarted;
 
     public MapWindow(ModuleSession s, MapDef map)
@@ -30,8 +29,7 @@ sealed class MapWindow : Form
         {
             if (Host is { } mf && mf.IsActiveDocument(this)) { mf.SetLocationText(loc); mf.SetZoomText(zoom); }
         };
-        s.GameReplaced += OnGameReplaced;
-        Attach();
+        s.ViewChanged += OnViewChanged;
     }
 
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -47,23 +45,8 @@ sealed class MapWindow : Form
 
     // ---------- game wiring ----------
 
-    void Attach()
-    {
-        if (_attached != null) _attached.Changed -= OnGameChanged;
-        if (_attached != null) _attached.Rewound -= OnRewound;
-        _attached = _s.Game;
-        if (_attached != null) _attached.Changed += OnGameChanged;
-        if (_attached != null) _attached.Rewound += OnRewound;
-    }
-
-    void OnGameReplaced()
-    {
-        Attach();
-        OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
-    }
-
-    void OnGameChanged(GameCommand _) => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
-    void OnRewound() => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
+    /// <summary>The player's view changed (a game change, undo, another game, a rules edit or a new viewer): drop what is gone and repaint.</summary>
+    void OnViewChanged() => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
 
     void OnUi(Action a)
     {
@@ -173,9 +156,7 @@ sealed class MapWindow : Form
         if (_closed) { base.OnFormClosed(e); return; }
         _closed = true;
         _cts.Cancel();
-        _s.GameReplaced -= OnGameReplaced;
-        if (_attached != null) _attached.Changed -= OnGameChanged;
-        if (_attached != null) _attached.Rewound -= OnRewound;
+        _s.ViewChanged -= OnViewChanged;
         if (Host is { } mf)
         {
             mf.GridVisibleChanged -= OnGridVisibleChanged;
@@ -243,7 +224,12 @@ sealed class MapWindow : Form
         var menu = new ContextMenuStrip();
         menu.Closed += (_, _) => BeginInvoke(new Action(menu.Dispose));
         if (pieceId != null && game.State.Pieces.TryGetValue(pieceId, out var piece))
-            BuildPieceMenu(menu, piece, game);
+        {
+            // Hot-seat: a piece drawn as its mask (or not shown at all) must not reveal its real commands.
+            if (_s.ViewSides != null && (_s.View?.Pieces.TryGetValue(pieceId, out var seen) != true || seen!.TypeString != piece.TypeString))
+                menu.Items.Add(new ToolStripMenuItem("(no commands)") { Enabled = false });
+            else BuildPieceMenu(menu, piece, game);
+        }
         else
             BuildMapMenu(menu, game);
         if (menu.Items.Count > 0) menu.Show(Canvas, at);
@@ -275,7 +261,7 @@ sealed class MapWindow : Form
     /// <summary>"Calculate" submenu: one entry per formula that applies to the piece. Hidden without a rules pack.</summary>
     void AddCalculateMenu(ContextMenuStrip menu, PieceInstance piece, GameSession game)
     {
-        if (_s.Rules is not { } rules || _s.Runner == null) return;
+        if (_s.Rules is not { } rules || _s.Runner == null || !_s.CanAct(piece.Id)) return;
         IReadOnlyList<Quartermaster.Rules.FormulaDef> formulas;
         try { formulas = PieceFilter.FormulasFor(rules, piece, game.State, _s.Model); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -405,7 +391,9 @@ sealed class MapWindow : Form
             && string.Equals(p.SheetField, rowName, StringComparison.OrdinalIgnoreCase)
             && PieceFilter.Matches(p.AppliesTo, piece, game.State, _s.Model, rules));
         if (prop == null) return null;
-        return Ledger.GetOrDefault(game.State, LedgerKey.Piece(piece.Id), prop).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        if (_s.View is not { } view || (_s.ViewSides != null && Ledger.Get(view, LedgerKey.Piece(piece.Id), prop.Id) == null
+            && Ledger.Get(game.State, LedgerKey.Piece(piece.Id), prop.Id) != null)) return ModuleSession.HiddenText;
+        return Ledger.GetOrDefault(view,LedgerKey.Piece(piece.Id), prop).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     void EditSheet(PieceAction action, PieceInstance piece, GameSession game)

@@ -15,7 +15,7 @@ public sealed record PhaseChip(string Id, string Name, ChipState State, string? 
 /// <summary>Everything the tracker strip and phase panel show. Built fresh by <see cref="PhaseController.View"/>.</summary>
 public sealed record PhaseView(bool NoPhases, bool BeforeStart, int Turn, string? StageText, string? SideName,
     IReadOnlyList<PhaseChip> Chips, PhaseDef? Current, string? NextName, IReadOnlyList<Decision> Decisions,
-    IReadOnlyList<WarningHit> Warnings, string? Notice);
+    IReadOnlyList<WarningHit> Warnings, string? Notice, string? PlayingText = null);
 
 /// <summary>
 /// Drives the turn sequence: advancing, OnStart / OnMove formula triggers per difficulty mode, checklist ticks and warning
@@ -83,9 +83,14 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             i < pos.PhaseIndex ? ChipState.Done : i == pos.PhaseIndex ? ChipState.Current : ChipState.Upcoming, p.Notes)).ToList();
         var next = Sequencer.Next(pack, pos);
         var side = Sequencer.ActingSide(pack, cur);
-        return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur,
-            next == null ? null : pack.Phases.ElementAtOrDefault(next.PhaseIndex)?.Name,
-            Decisions.Compute(pack, st), Decisions.Warnings(pack, st, cur), _notice);
+        var nextName = next == null ? null : pack.Phases.ElementAtOrDefault(next.PhaseIndex)?.Name;
+        // Hot-seat: another side's phase shows who is playing and none of their decisions.
+        if (s.ViewSides is { } held && side != null && !held.Contains(side.Id))
+            return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
+                Array.Empty<WarningHit>(), _notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
+        var seen = s.View ?? st;   // decisions and warnings over what this player may see
+        return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
+            Decisions.Compute(pack, seen), Decisions.Warnings(pack, seen, cur), _notice);
     }
 
     // ---- advancing ----

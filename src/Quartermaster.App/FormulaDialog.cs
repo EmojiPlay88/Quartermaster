@@ -132,6 +132,7 @@ sealed class FormulaDialog : Form
         CancelButton = _cancel;
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
+        s.ViewChanged += OnViewChanged;
         HookGame();
         Recalc();
     }
@@ -152,6 +153,9 @@ sealed class FormulaDialog : Form
     void OnGameChanged(GameCommand _) => OnUi(CheckPieceThenRefresh);
 
     void OnGameReplaced() => OnUi(() => { HookGame(); CheckPieceThenRefresh(); });
+
+    /// <summary>Hot-seat: once the unit belongs to a side the new viewer does not hold, its dialog closes (nothing of it stays on screen).</summary>
+    void OnViewChanged() => OnUi(() => { if (!_previewOnly && !_embedded && !_s.CanAct(_pieceId)) Close(); });
 
     void CheckPieceThenRefresh()
     {
@@ -226,6 +230,7 @@ sealed class FormulaDialog : Form
         _closing = true;
         _s.RulesChanged -= OnRulesChanged;
         _s.GameReplaced -= OnGameReplaced;
+        _s.ViewChanged -= OnViewChanged;
         if (_game != null) _game.Changed -= OnGameChanged;
         _game = null;
         _debounce.Stop();

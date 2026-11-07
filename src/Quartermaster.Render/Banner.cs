@@ -12,6 +12,7 @@ public static class Banner
     {
         if (v.NoPhases) return ("No phases defined — free play.", null);
         if (v.BeforeStart) return ("Press Start game ▶ to begin turn 1.", null);
+        if (v.PlayingText is { Length: > 0 } playing) return ("Now: " + playing, null);   // hot-seat: another side's phase
 
         var phase = v.Current?.Name is { Length: > 0 } n ? n : v.StageText ?? "Phase";
         var instructions = v.Current?.Instructions?.Trim() ?? "";

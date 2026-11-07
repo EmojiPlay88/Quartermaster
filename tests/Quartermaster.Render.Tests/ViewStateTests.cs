@@ -152,6 +152,51 @@ public class ViewStateTests : IDisposable
     }
 
     [Fact]
+    public void CanEditLedger_HeldOrPublicOwnersOnly()
+    {
+        var s = Make();
+        s.UpdateRules(p => p with { Holders = new() { new HolderDef { Id = "bluedepot", Name = "Blue Depot", SideId = "blue" }, new HolderDef { Id = "pool", Name = "Pool" } } });
+        Assert.True(s.CanEditLedger(LedgerKey.Piece("b1")));
+        Assert.True(s.CanEditLedger(LedgerKey.Holder("bluedepot")));
+        s.SetViewSides(Red);
+        Assert.True(s.CanEditLedger(LedgerKey.Piece("r1")));
+        Assert.False(s.CanEditLedger(LedgerKey.Piece("b1")));
+        Assert.False(s.CanEditLedger(LedgerKey.Holder("bluedepot")));
+        Assert.True(s.CanEditLedger(LedgerKey.Holder("pool")));
+        Assert.True(s.CanEditLedger(LedgerKey.Holder(HolderDef.GlobalId)));
+        Assert.False(s.CanEditLedger("garbage"));
+    }
+
+    [Fact]
+    public void ViewFiltered_OnlyWhenSomethingIsHidden()
+    {
+        var s = Make();
+        s.UpdateRules(p => p with { Properties = p.Properties.Select(x => x with { Visibility = Visibility.Public }).ToList() });
+        Assert.False(s.ViewFiltered);
+        Assert.Equal("Fuel 80", s.VisibleOnly("Fuel 80"));
+        s.SetViewSides(Red);
+        Assert.False(s.ViewFiltered);            // nothing private, no owned map: the view hides nothing
+        Assert.Equal("Fuel 80", s.VisibleOnly("Fuel 80"));
+        s.UpdateRules(p => p with { MapOwners = new() { new MapOwner { MapId = "Main Map", SideId = "blue" } } });
+        Assert.True(s.ViewFiltered);
+        Assert.Equal("Fuel 80 — visible units only", s.VisibleOnly("Fuel 80"));
+    }
+
+    [Fact]
+    public void ViewFiltered_PrivateLedgerValueHidden()
+    {
+        var s = Make();
+        s.UpdateRules(p => p with
+        {
+            Format = 4,
+            Properties = p.Properties.Select(x => x.Id == "water" ? x with { Visibility = Visibility.Private } : x).ToList(),
+        });
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Piece("b1"), "water", 10, 7, "manual", null, null, "test", null));
+        s.SetViewSides(Red);
+        Assert.True(s.ViewFiltered);
+    }
+
+    [Fact]
     public void SetViewSides_CopiesTheSet()
     {
         var s = Make();

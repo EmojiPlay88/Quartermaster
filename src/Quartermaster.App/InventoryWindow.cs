@@ -59,6 +59,7 @@ sealed class InventoryWindow : Form
 
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
+        s.ViewChanged += OnViewChanged;
         HookGame();
         Run(() => { FillKeyNames(); Reload(); });
     }
@@ -96,6 +97,7 @@ sealed class InventoryWindow : Form
     void OnRewound() => OnUi(Kick);
     void OnGameReplaced() => OnUi(() => { HookGame(); _cycle.Clear(); Kick(); });
     void OnRulesChanged() => OnUi(Kick);
+    void OnViewChanged() => OnUi(Kick);   // debounced
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
@@ -109,6 +111,7 @@ sealed class InventoryWindow : Form
         _debounce.Stop();
         _s.RulesChanged -= OnRulesChanged;
         _s.GameReplaced -= OnGameReplaced;
+        _s.ViewChanged -= OnViewChanged;
         if (_game != null) _game.Changed -= OnGameChanged;
         if (_game != null) _game.Rewound -= OnRewound;
         _game = null;
@@ -127,7 +130,7 @@ sealed class InventoryWindow : Form
     {
         IReadOnlyList<string> names = CurrentKey switch
         {
-            InventoryKey.Marker => _s.Game is { } g ? InventoryQuery.MarkerKeys(g.State) : Array.Empty<string>(),
+            InventoryKey.Marker => _s.View is { } g ? InventoryQuery.MarkerKeys(g) : Array.Empty<string>(),
             InventoryKey.LedgerProperty => _s.Rules?.Properties.Where(p => p.Scope is PropertyScope.Pieces or PropertyScope.Both).Select(p => p.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>(),
             _ => Array.Empty<string>(),
         };
@@ -149,7 +152,7 @@ sealed class InventoryWindow : Form
     void Reload()
     {
         if (IsDisposed) return;
-        _rows = _s.Game == null ? new() : InventoryQuery.Run(_s.Game.State, _s.Model, _s.Rules, CurrentKey, _keyName.SelectedItem as string, _filter.Text).ToList();
+        _rows = _s.View is not { } view ? new() : InventoryQuery.Run(view, _s.Model, _s.Rules, CurrentKey, _keyName.SelectedItem as string, _filter.Text).ToList();
         var showTotal = CurrentKey == InventoryKey.LedgerProperty;
         var sel = _list.SelectedItems.Count > 0 ? _list.SelectedItems[0].Text : null;
         _tip.Hide();
@@ -177,19 +180,19 @@ sealed class InventoryWindow : Form
         if (group == _tipGroup) return;
         _tipGroup = group;
         _tip.Hide();
-        if (group == null || CurrentKey != InventoryKey.LedgerProperty || _s.Game is not { } game || _s.Rules is not { } pack) return;
+        if (group == null || CurrentKey != InventoryKey.LedgerProperty || _s.View is not { } view || _s.Rules is not { } pack) return;
         var row = _rows.FirstOrDefault(r => string.Equals(r.Group, group, StringComparison.OrdinalIgnoreCase));
         var prop = pack.PropertyByName((_keyName.SelectedItem as string ?? "").Trim());
         if (row?.Total is not { } total || prop == null) return;
         var parts = new List<(string, double)>();
         foreach (var id in row.PieceIds)
         {
-            if (!game.State.Pieces.TryGetValue(id, out var p) || Ledger.Get(game.State, LedgerKey.Piece(id), prop.Id) is not { } v) continue;
+            if (!view.Pieces.TryGetValue(id, out var p) || Ledger.Get(view, LedgerKey.Piece(id), prop.Id) is not { } v) continue;
             string name;
             try { name = PieceInfo.Name(p); } catch (Exception ex) when (ex is not OutOfMemoryException) { name = ""; }
             parts.Add((string.IsNullOrWhiteSpace(name) ? id : name, v));
         }
-        var title = $"{prop.Name} {LedgerTable.FormatNumber(total)}  ({row.Group}, {row.Count} {(row.Count == 1 ? "piece" : "pieces")})";
+        var title = _s.VisibleOnly($"{prop.Name} {LedgerTable.FormatNumber(total)}  ({row.Group}, {row.Count} {(row.Count == 1 ? "piece" : "pieces")})");
         _tip.Show(_list, new Point(at.X + 12, at.Y + 18), LedgerBreakdown.ForTotal(title, parts));
     }
 

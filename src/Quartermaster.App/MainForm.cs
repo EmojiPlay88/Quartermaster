@@ -400,7 +400,9 @@ sealed partial class MainForm : Form
         ReportSettingsProblems(_session);
         _session.GameReplaced += OnGameReplaced;
         _session.RulesChanged += OnRulesChanged;
-        _tree.Load(_session.Model);
+        _session.ViewChanged += OnViewChanged;
+        var opened = _session;
+        _tree.Load(_session.Model, id => opened.CanSeeMap(id));
         _tablesTree.Bind(_session);
         _logDock.Create(_session);
         _logDock.Panel?.ApplySettings(_settings.Current);
@@ -482,6 +484,7 @@ sealed partial class MainForm : Form
         _session.Log.Added -= OnLogAdded;
         _session.GameReplaced -= OnGameReplaced;
         _session.RulesChanged -= OnRulesChanged;
+        _session.ViewChanged -= OnViewChanged;
         _session.Dispose();
         _session = null;
         _tree.Clear();
@@ -493,7 +496,7 @@ sealed partial class MainForm : Form
     /// <summary>Opens or activates the piece's map and scrolls it to the piece (used by double-clicking a log row).</summary>
     public void CentreOnPiece(string pieceId)
     {
-        if (_session?.Game is not { } game || !game.State.Pieces.TryGetValue(pieceId, out var piece)) return;
+        if (_session?.View is not { } seen || !seen.Pieces.TryGetValue(pieceId, out var piece)) return;   // only pieces this player may see
         var map = _session.Model.Maps.FirstOrDefault(m => m.Id == piece.MapId) ?? _session.Model.Maps.FirstOrDefault(m => m.Name == piece.MapId);
         if (map == null || OpenMap(map, false) is not { } w) return;
         w.Canvas.CentreOn(piece.Pos);
@@ -635,6 +638,14 @@ sealed partial class MainForm : Form
         _autosavedSeq = _changeSeq;
         _autosaver?.Reset(DateTimeOffset.UtcNow);
         UpdateTitle();
+    }
+
+    /// <summary>The player's view changed (raised on the thread that made the change): the module tree hides maps the player can't see.</summary>
+    void OnViewChanged()
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        if (InvokeRequired) BeginInvoke(() => { if (!IsDisposed) Guard(_tree.RefreshVisibility); });
+        else Guard(_tree.RefreshVisibility);
     }
 
     // ---------- rules packs ----------

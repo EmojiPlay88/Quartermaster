@@ -4,7 +4,8 @@ using Quartermaster.Render;
 namespace Quartermaster.App;
 
 /// <summary>
-/// Calls <c>changed</c> on the UI thread, debounced (150 ms unless <c>debounceMs</c> says otherwise), whenever the game changes, is replaced, or the rules pack changes.
+/// Calls <c>changed</c> on the UI thread, debounced (150 ms unless <c>debounceMs</c> says otherwise), whenever the game changes, is replaced,
+/// the rules pack changes or the player's view changes.
 /// Shared by the tracker strip and the phase panel. Never throws into the game's event.
 /// </summary>
 sealed class PhaseWatcher : IDisposable
@@ -29,6 +30,7 @@ sealed class PhaseWatcher : IDisposable
         };
         _s.GameReplaced += OnReplaced;
         _s.RulesChanged += Request;
+        _s.ViewChanged += Request;   // also a new viewer (hot-seat handover)
         Attach();
     }
 
@@ -74,6 +76,7 @@ sealed class PhaseWatcher : IDisposable
         _disposed = true;
         _s.GameReplaced -= OnReplaced;
         _s.RulesChanged -= Request;
+        _s.ViewChanged -= Request;
         if (_attached != null) _attached.Changed -= OnChanged;
         if (_attached != null) _attached.Rewound -= OnRewound;
         _debounce.Dispose();
