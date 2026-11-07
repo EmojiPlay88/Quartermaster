@@ -113,7 +113,8 @@ public class AlertEngineTests(ITestOutputHelper output)
         Assert.Equal("a", m.PieceId);
         Assert.Null(m.HolderId);
         Assert.Equal("Red One is low", m.Text);
-        Assert.Contains("Red One is low", AlertEngine.Tooltip(h));
+        Assert.Equal("Low fuel", h.Message);
+        Assert.Equal("Low fuel\nRed One is low", AlertEngine.Tooltip(h));
     }
 
     [Fact]
@@ -132,7 +133,7 @@ public class AlertEngineTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void UserAlert_SideLimited_OnlyWhileActing()
+    public void UserAlert_SideLimited_OnlyWhileActing_HiddenInNeutralPhase()
     {
         var pk = Pack(new PhaseDef { Id = "P", Name = "P" }, Alert("rl", "Red low", "Fuel < 100", "{unit}", side: "red"));
         var s = new GameState();
@@ -141,8 +142,11 @@ public class AlertEngineTests(ITestOutputHelper output)
         var red = AlertEngine.Evaluate(s, pk, null, null, "red");
         Assert.Equal(new[] { "a" }, Assert.Single(red).Matches.Select(m => m.PieceId));
         Assert.Empty(AlertEngine.Evaluate(s, pk, null, null, "blue"));
-        // no one acting (no phases / neutral phase): side filter still limits the pieces
-        var any = AlertEngine.Evaluate(s, pk, null, null, null);
+        // neutral phase (nobody acting) with phases defined: hidden
+        Assert.Empty(AlertEngine.Evaluate(s, pk, null, null, null));
+        // no phases defined: shown, limited to the side's pieces
+        var nophase = Pack(null, Alert("rl", "Red low", "Fuel < 100", "{unit}", side: "red"));
+        var any = AlertEngine.Evaluate(s, nophase, null, null, null);
         Assert.Equal(new[] { "a" }, Assert.Single(any).Matches.Select(m => m.PieceId));
     }
 

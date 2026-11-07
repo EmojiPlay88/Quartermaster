@@ -138,7 +138,7 @@ public static class AlertEngine
         {
             var side = pack.ById<SideDef>(a.SideId);
             if (side == null) return null;
-            if (pack.Phases.Count > 0 && actingSideId != null && actingSideId != a.SideId) return null;
+            if (pack.Phases.Count > 0 && actingSideId != a.SideId) return null;
             sideFilter = side.UnitFilter;
         }
         var inSide = PieceFilter.Compile(sideFilter, s, pack);
@@ -152,6 +152,6 @@ public static class AlertEngine
             if (string.IsNullOrEmpty(name)) name = p.Id;
             matches.Add(new AlertMatch(p.Id, null, msg.Contains(Token) ? msg.Replace(Token, name) : name));
         }
-        return new AlertHit(a.Id, a.Name, a.Severity, msg.Replace(Token, "").Trim(), matches, a.Notes);
+        return new AlertHit(a.Id, a.Name, a.Severity, msg.Contains(Token) ? a.Name : msg, matches, a.Notes);
     }
 }
