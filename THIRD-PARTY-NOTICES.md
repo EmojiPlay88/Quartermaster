@@ -23,3 +23,10 @@ Ported files:
 - `src/Quartermaster.Render/PieceRenderer.cs` (label placement from `VASSAL/counters/Labeler.java` getLabelPosition)
 - `src/Quartermaster.Vassal/Traits/TraitDefs.cs` (trait field sets from the `VASSAL/counters/` trait classes)
 - `src/Quartermaster.Vassal/Traits/PrototypeExpander.cs` (prototype expansion and starting state from `VASSAL/build/module/PrototypeDefinition.java` and `counters/PieceCloner.java`)
+
+## PdfPig
+
+`src/Quartermaster.Render` uses PdfPig (NuGet package `PdfPig`, https://github.com/UglyToad/PdfPig) to extract
+rulebook page text for search. PdfPig is licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0). The full licence text is in [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt).
+PdfPig is used unmodified, as a binary package.
