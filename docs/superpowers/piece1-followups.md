@@ -242,11 +242,21 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - The player-view speed test allows 500 ms (it was flaky under a parallel test run). Cost: a weaker guard on speed.
 - **Acceptance ruling:** the formula dialog and the batch grid evaluate against the full game state for the player's own units, so a hidden input a formula reads is visible there. Hot-seat is honour-based in 6a. Masking inputs belongs to piece 6b.
 
+### Rulings of the final review
+- A move off a map that has an owner no longer names the square or hex it left: the log line reads "{unit} moved → {to}". The log line only records the map it went to, so the source would otherwise reach players who cannot see that map. Done when the line is written; the reducer and replay are unchanged.
+- A holder or map whose owner names a side that no longer exists counts as public at runtime (spec 8a.10), in the player view, in "can see map" and in "can edit ledger". The validator still reports the dangling side.
+- Loading or starting a game decides public-only or solo view at once, before seeding the starting values can raise a view change. So a multi-player game is never shown in full for a moment.
+- "Can this player act on / see this unit" is answered from the full state through ownership, map owners and the hide/mask state, with the side filters compiled once per game state. It no longer builds the whole player view for each unit. Same answers; a speed test covers applying 20 units in hot-seat on a 1,200-piece game.
+- Hot-seat re-checks the handover after a rules change and after a phase relocation outside Next Phase or a rewind. If the current phase's side was edited, the handover is raised or cancelled as needed.
+- Tests added: automatic OnMove runs are stamped with the phase's side, or with the player's side when the phase has none; the view is fresh inside a rules-applied handler.
+
 ### Deferred minors
 - Rules pack loading: formats below 4 do not clear owner fields that were edited by hand; an empty holder side and a map owner can disagree; only the map loop is guarded; the app does not pass the known map ids to the loader.
 - Visibility tab: no reload after a failed commit; an owner is matched by name with IndexOf; the issue filter matches message text; duplicate rows for items not in the module; some test gaps.
 - Player view: building the view costs about 80 ms on a large game (it deep-copies the state); pairing of ledger lines to holders has an edge case; a deleted piece's lines are over-hidden for its own side.
 - View cache: a duplicate view-changed event per rules update or command (the UI coalesces them); a stale-publish race across threads; the reset of view sides on a rules change has no test.
-- Rewind and stamps: the undo label stays plain for a player's own removed pieces; a queued-refresh flag has a small race; no tests for move stamps.
+- Rewind and stamps: the undo label stays plain for a player's own removed pieces; a queued-refresh flag has a small race.
 - Phase strip: hovering a chip shows the notes of another side's phase (rules content, not game state).
+- Small counts: a move of several pieces says "{n} pieces moved" and the step-back preview counts actions and dice for everyone, so another side can learn how many pieces moved or how many actions a step back undoes.
+- Alerts: how alerts should behave during another side's phase is not decided yet.
 - Smokes: `--screenshot-playerview` makes one property private in memory when the pack has none (older packs load everything Public); it never saves the pack.

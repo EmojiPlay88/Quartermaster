@@ -31,7 +31,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Core`: command-log game state and deterministic replay.
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
-- Tests: xUnit under `tests/`. 1000 tests are green after piece 6a (178 Rules, 116 Vassal, 234 Core, 472 Render).
+- Tests: xUnit under `tests/`. 1011 tests are green after piece 6a (178 Rules, 116 Vassal, 236 Core, 481 Render).
 - Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. Piece 6a is on branch `piece6a-hotseat`, to be merged into master; push only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
@@ -48,7 +48,6 @@ The engine ships **no content from any real game**: no rules text, tables, formu
 | 3 | Turn sequencer + difficulty modes (below) | `specs/2026-11-06-piece3-sequencer-difficulty-design.md`, `plans/…piece3…` |
 | 4 | Undo / Redo and Step Back by truncate-and-replay of the command log (below) | `specs/2026-11-07-piece4-undo-design.md`, `plans/…piece4…` |
 | 5 | Accessibility layer: breakdown tooltips, alert bar, what-now line, outliner, interface tour, notes (below) | `specs/2026-11-07-piece5-accessibility-design.md`, `plans/…piece5…` |
-
 | 6a | Multiplayer base: players, rules-pack visibility, player view filter, hot-seat (below) | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6a-hotseat.md` |
 
 All rulings and deferred minors for every piece are in `docs/superpowers/piece1-followups.md`.
@@ -129,7 +128,7 @@ How the formula window behaves:
 2. The README Status line and Roadmap are current as of piece 5. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
 3. **Piece 6a (hot-seat) is on branch `piece6a-hotseat`, to be merged into master; push only when the user asks.** Next:
    1. The user hands-on tests hot-seat: two players on the setup page, play through a phase change and the handover screen, mark a property private in the Workbench Visibility tab, step back across a side change, save and load.
-   2. Piece 6b: live online play (a relay on the user's Ubuntu VPS). It includes the input masking for formula dialogs left open by 6a.
+   2. Piece 6b: live online play (through a relay server). It includes the input masking for formula dialogs left open by 6a.
    3. Piece 6c: play by turn files.
    After that, OCR for scanned rulebooks (section 8.3). Brainstorm, spec, plan, build, using the superpowers skills.
 4. Residual piece-3 minors are listed at the end of `piece1-followups.md`.
