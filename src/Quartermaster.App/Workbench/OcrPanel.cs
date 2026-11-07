@@ -306,7 +306,7 @@ sealed class OcrPanel : UserControl
             _syncing = false;
             return;
         }
-        _state = NewState();
+        _state?.SetFixDigits(_fix.Checked); // keeps the re-read cells and the columns
         FillGrid();
     }
 

@@ -22,14 +22,15 @@ public static class OcrCleanup
     }
 
     /// <summary>
-    /// Whether a second-pass reading of an empty cell is believable: 1–3 characters (spaces ignored) that look numeric,
-    /// or a single letter A–Z.
+    /// Whether a second-pass reading of an empty cell is believable: 1–3 characters (spaces ignored) that look numeric, or —
+    /// only when the column already holds letters — a single letter A–Z other than I (a misread 1 is far likelier).
     /// </summary>
-    public static bool AcceptsCellReread(string? text)
+    public static bool AcceptsCellReread(string? text, bool columnHoldsLetters = false)
     {
         var t = new string((text ?? "").Where(ch => !char.IsWhiteSpace(ch)).ToArray());
         if (t.Length is < 1 or > 3) return false;
-        return IsNumericLooking(t) || (t.Length == 1 && t[0] is >= 'A' and <= 'Z');
+        if (IsNumericLooking(t)) return true;
+        return columnHoldsLetters && t.Length == 1 && t[0] is >= 'A' and <= 'Z' && t[0] != 'I';
     }
 
     public static string Fix(string cell)

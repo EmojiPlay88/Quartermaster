@@ -121,7 +121,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _ = Task.Run(() =>
         {
             try { ScanCache.Prune(); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Program.AppLog("scan cache prune: " + ex.Message); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("scan cache prune: " + ex.Message); }
         });
         WireSearch();
         WireScans();

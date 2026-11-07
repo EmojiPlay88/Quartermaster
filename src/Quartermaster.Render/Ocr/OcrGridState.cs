@@ -9,7 +9,7 @@ public readonly record struct EmptyCell(int Row, int Col, RectangleF Box);
 public sealed class OcrGridState
 {
     private readonly List<OcrWord> _words;
-    private readonly bool _fixDigits;
+    private bool _fixDigits;
     private List<double> _bounds;
     private readonly HashSet<(int, int)> _edited = new();
     private readonly List<OcrWord> _extra = new();
@@ -63,6 +63,19 @@ public sealed class OcrGridState
 
     /// <summary>The cell was filled by the second pass over empty cells (not by the user).</summary>
     public bool IsReread(int r, int c) => _reread.Contains((r, c));
+
+    /// <summary>
+    /// Turns the digit clean-up on or off and rebuilds from the same words (re-read cells included, columns unchanged).
+    /// Like the other rebuilds it drops the user's edits.
+    /// </summary>
+    public void SetFixDigits(bool fix)
+    {
+        if (fix == _fixDigits) return;
+        _fixDigits = fix;
+        Reset(_bounds);
+    }
+
+    public bool FixDigits => _fixDigits;
 
     public void SetColumns(int? n) => Reset(OcrResultModel.Boundaries(_words, n));
 
@@ -137,7 +150,7 @@ public sealed class OcrGridState
         int n = 0;
         for (int i = 0; i < cells.Count && i < found.Count; i++)
         {
-            if (found[i] is not { } w || !OcrCleanup.AcceptsCellReread(w.Text)) continue;
+            if (found[i] is not { } w || !OcrCleanup.AcceptsCellReread(w.Text, ColumnHoldsLetters(cells[i].Col))) continue;
             var word = w with { Text = new string(w.Text.Where(ch => !char.IsWhiteSpace(ch)).ToArray()) };
             _words.Add(word);
             _extra.Add(word);
@@ -145,6 +158,14 @@ public sealed class OcrGridState
         }
         if (n > 0) Cells = Rebuild();
         return n;
+    }
+
+    /// <summary>A column holds letters when a cell below the first row is text without digits (e.g. A, B, C ratings).</summary>
+    internal bool ColumnHoldsLetters(int col)
+    {
+        for (int r = 1; r < Cells.Length; r++)
+            if (col < Cells[r].Length && Cells[r][col] is { Length: > 0 } t && t.Any(char.IsLetter) && !t.Any(char.IsDigit)) return true;
+        return false;
     }
 
     public string ToTsv() => OcrResultModel.ToTsv(Cells);

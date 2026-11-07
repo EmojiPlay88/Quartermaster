@@ -174,13 +174,57 @@ public class OcrGridTests
     }
 
     [Theory]
-    [InlineData("1", true)]
-    [InlineData(" 1 2 ", true)]
-    [InlineData("10%", true)]
-    [InlineData("A", true)]
-    [InlineData("a", false)]
-    [InlineData("1234", false)]
-    [InlineData("Oil", false)]
-    [InlineData("", false)]
-    public void AcceptsCellReread(string text, bool ok) => Assert.Equal(ok, OcrCleanup.AcceptsCellReread(text));
+    [InlineData("1", false, true)]
+    [InlineData(" 1 2 ", false, true)]
+    [InlineData("10%", false, true)]
+    [InlineData("A", false, false)] // letters only in a column that already holds letters
+    [InlineData("A", true, true)]
+    [InlineData("I", true, false)]  // I and l are likelier a misread 1
+    [InlineData("l", true, false)]
+    [InlineData("l", false, false)]
+    [InlineData("a", true, false)]
+    [InlineData("1234", false, false)]
+    [InlineData("Oil", true, false)]
+    [InlineData("", false, false)]
+    public void AcceptsCellReread(string text, bool letters, bool ok) => Assert.Equal(ok, OcrCleanup.AcceptsCellReread(text, letters));
+
+    [Fact]
+    public void Reread_SurvivesFixDigitsToggle()
+    {
+        var words = new List<OcrWord>
+        {
+            W("Roll", 0, 0), W("A", 100, 0), W("B", 200, 0),
+            W("1O", 100, 20), W("20", 200, 20),
+            W("2", 10, 40, 10), W("11", 100, 40), W("21", 200, 40),
+        };
+        var g = new OcrGridState(words, fixDigits: true);
+        var empty = g.EmptyCells();
+        Assert.Equal(1, g.AddRereads(empty, new OcrWord?[] { new OcrWord("1", 12, 20, 8, 10) }));
+        Assert.Equal(new[] { "1", "10", "20" }, g.Cells[1]);
+        g.SetFixDigits(false);
+        Assert.Equal(new[] { "1", "1O", "20" }, g.Cells[1]); // clean-up off, re-read cell kept
+        Assert.True(g.IsReread(1, 0));
+        g.SetFixDigits(true);
+        Assert.Equal(new[] { "1", "10", "20" }, g.Cells[1]);
+        Assert.True(g.IsReread(1, 0));
+        Assert.Empty(g.EmptyCells());
+    }
+
+    [Fact]
+    public void Reread_LetterOnlyInLetterColumn()
+    {
+        var words = new List<OcrWord>
+        {
+            W("Roll", 0, 0), W("Grade", 100, 0),
+            W("2", 10, 20, 10), W("B", 110, 20, 10),
+            W("12", 0, 40), W("C", 110, 40, 10),
+            W("13", 0, 60),
+        };
+        var g = new OcrGridState(words, fixDigits: true);
+        var empty = g.EmptyCells();
+        Assert.Contains(empty, e => e.Row == 3 && e.Col == 1);
+        var found = empty.Select(e => e.Col == 1 ? new OcrWord("A", 110, 60, 10, 10) : (OcrWord?)null).ToList();
+        Assert.Equal(1, g.AddRereads(empty, found));
+        Assert.Equal("A", g.Cells[3][1]);
+    }
 }
