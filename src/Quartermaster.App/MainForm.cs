@@ -471,6 +471,7 @@ sealed partial class MainForm : Form
 
     void CloseSession()
     {
+        _tour?.Close();
         _wm.EndModule(); // layout is written before the windows go away
         _logDock.Destroy();
         _paletteDock.Destroy();
@@ -507,6 +508,7 @@ sealed partial class MainForm : Form
 
     void OnGameReplaced()
     {
+        _tour?.Close();
         if (_session?.Game is { } g)
         {
             g.Changed += _ => { _dirty = true; Interlocked.Increment(ref _changeSeq); UpdateTitle(); _dice?.Refresh(); RequestHistoryRefresh(); };

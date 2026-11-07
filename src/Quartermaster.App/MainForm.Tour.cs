@@ -81,9 +81,11 @@ sealed partial class MainForm
         Application.DoEvents();
         ShotWithBalloon(Path.ChangeExtension(path, null) + "-last.png");
         var saved = _settings.Current.TourShown;
+        if (saved) _settings.Save(_settings.Current with { TourShown = false }); // repeatable regardless of prior state
         tour.Close();
         Application.DoEvents();
-        var ok = _settings.Current.TourShown && !saved;
+        var ok = _settings.Current.TourShown;
+        _settings.Save(_settings.Current with { TourShown = saved }); // a smoke run must not change the real first-run state
         Program.AppLog($"{log}; skip sets TourShown {(ok ? "ok" : "FAILED")}");
         if (!ok) Program.ExitCode = 1;
     }
