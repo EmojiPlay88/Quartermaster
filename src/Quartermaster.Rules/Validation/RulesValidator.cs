@@ -86,9 +86,14 @@ public static class RulesValidator
         else foreach (var u in UnknownPropertyRefs(text!, pack)) err($"{who}: {what} refers to unknown property \"{u}\"");
     }
 
-    private static void CheckSide(SideDef s, RulesPack pack, List<RulesIssue> issues) =>
+    private static void CheckSide(SideDef s, RulesPack pack, List<RulesIssue> issues)
+    {
+        // An empty filter matches every unit; with several sides that side owns every piece it comes before (ownership is first match).
+        if (string.IsNullOrWhiteSpace(s.UnitFilter) && pack.Sides.Count > 1)
+            Add(issues, RulesIssueSeverity.Warning, s.Id, s.Name, $"Side \"{s.Name}\": unit filter is empty, so it matches every unit");
         CheckPhaseExpr(pack, s.UnitFilter, $"Side \"{s.Name}\"", "unit filter",
             m => Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, m));
+    }
 
     private static void CheckPhase(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
     {

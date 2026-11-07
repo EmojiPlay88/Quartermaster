@@ -60,6 +60,17 @@ public class PlayerViewTests(ITestOutputHelper output)
             },
             new FormulaDef
             {
+                Id = "f-peek", Name = "Secret Peek", Text = "R", PrivateRolls = true,
+                Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 10000 } },
+            },
+            new FormulaDef
+            {
+                Id = "f-pool", Name = "Pool Roll", Text = "R", PrivateRolls = true,
+                Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 10000 } },
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Holder, HolderId = "pool", Property = "supply", Op = OutputOp.Set } },
+            },
+            new FormulaDef
+            {
                 Id = "f-open", Name = "Open Attack", Text = "R", PrivateRolls = false,
                 Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 10000 } },
                 Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "morale", Op = OutputOp.Add } },
@@ -97,13 +108,112 @@ public class PlayerViewTests(ITestOutputHelper output)
     private static void Delta(GameState s, string key, string prop, double before, double after, string? note = null) =>
         s.Apply(new LedgerDelta(key, prop, before, after, "manual", null, null, note, null));
 
-    private static void RunFormula(GameState s, RulesPack pack, string formulaId, string? pieceId, int roll, string? subject)
+    private static void RunFormula(GameState s, RulesPack pack, string formulaId, string? pieceId, int roll, string? subject, string? sideId = null)
     {
         var runner = new FormulaRunner(pack, Model, (n, sides) => Enumerable.Repeat(roll, n).ToList());
         var t = runner.Run(s, new RunRequest(formulaId, pieceId, new Dictionary<string, string>(), new Dictionary<string, string>(),
             new Dictionary<string, IReadOnlyList<int>>()));
         Assert.Null(t.Error);
-        foreach (var c in runner.Commands(t, null, subject == null ? null : "auto", subject)) s.Apply(c);
+        Assert.NotNull(t.Result);
+        foreach (var c in runner.Commands(t, null, subject == null ? null : "auto", subject, sideId)) s.Apply(c);
+    }
+
+    private static void EnterPhase(GameState s, RulesPack pack, string phaseId)
+    {
+        var idx = pack.Phases.FindIndex(p => p.Id == phaseId);
+        s.Apply(new AdvancePhase(s.Position, new PhasePosition(1, 1, phaseId, idx), "", pack.Phases[idx].Name));
+    }
+
+    [Fact]
+    public void PrivateRoll_NoOutputs_NotCreditedToNextLine()
+    {
+        var pack = Pack();
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Add(s, "b1", "Lancer", "Blue");
+        RunFormula(s, pack, "f-peek", "r1", 8461, null);           // FormulaDialog style: no subject, only a RollDice
+        Delta(s, LedgerKey.Piece("b1"), "fuel", 0, 3);             // an unrelated Blue line follows
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.DoesNotContain("8461", Json(blue));
+        Assert.Contains(blue.Log, l => l.Text == "Red rolled dice");
+        Assert.Contains("8461", Json(PlayerView.For(s, pack, Model, Red)));
+    }
+
+    [Fact]
+    public void DuplicatePhaseNames_UnitlessRun_Hidden()
+    {
+        var pack = Pack() with
+        {
+            Phases = new()
+            {
+                new PhaseDef { Id = "rm", Name = "Movement", SideId = "red" },
+                new PhaseDef { Id = "bm", Name = "Movement", SideId = "blue" },
+            },
+        };
+        var s = NewState();
+        EnterPhase(s, pack, "bm");
+        RunFormula(s, pack, "f-pool", null, 7243, null);           // unit-less, unstamped: the phase name maps to two sides
+        foreach (var held in new[] { Blue, Red })
+        {
+            var v = PlayerView.For(s, pack, Model, held);
+            var json = Json(v);
+            Assert.DoesNotContain("7243 ", json);                  // the working line ("7243 → Supply = 7243") and the roll
+            Assert.DoesNotContain("= 7243", json);
+            Assert.Empty(v.DiceHistory[0].Results);
+            Assert.Contains(v.Log, l => l.Text == "Another side rolled dice");
+            Assert.Contains(v.Log, l => l.Text == "Another side ledger changed");
+            Assert.Equal(7243, Ledger.Get(v, LedgerKey.Holder("pool"), "supply"));   // the public value itself stays
+        }
+    }
+
+    [Fact]
+    public void OutOfPhase_UnitlessRun_FollowsSideStamp()
+    {
+        var pack = Pack();
+        var s = NewState();
+        EnterPhase(s, pack, "bm");                                 // Blue's phase...
+        RunFormula(s, pack, "f-pool", null, 6911, null, "red");    // ...but Red runs a unit-less formula (stamped)
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.DoesNotContain("= 6911", Json(blue));
+        Assert.Empty(blue.DiceHistory[0].Results);
+        Assert.Contains(blue.Log, l => l.Text == "Red rolled dice");
+        Assert.Contains(blue.Log, l => l.Text == "Red ledger changed");
+        Assert.Null(blue.LedgerHistory.Single(e => e.Key == LedgerKey.Holder("pool")).Working);
+        var red = PlayerView.For(s, pack, Model, Red);
+        Assert.Equal(new[] { 6911 }, red.DiceHistory[0].Results);
+        Assert.NotNull(red.LedgerHistory.Single(e => e.Key == LedgerKey.Holder("pool")).Working);
+    }
+
+    [Fact]
+    public void DeletedPiece_LogLinesHidden()
+    {
+        var pack = Pack();
+        var s = NewState();
+        Add(s, "r1", "RedGoneUnit", "Red");
+        Delta(s, LedgerKey.Piece("r1"), "morale", 0, 2);
+        s.Apply(new RemovePiece("r1", "RedGoneUnit removed"));
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.DoesNotContain("RedGoneUnit", Json(blue));
+        Assert.Contains(blue.Log, l => l.Text == "Another side ledger changed");
+    }
+
+    [Fact]
+    public void FilterError_Lockdown_WithDiagnostic()
+    {
+        var pack = Pack();
+        var s = Seeded(pack);
+        PlayerView.FailForTest = true;
+        GameState v;
+        try { v = PlayerView.For(s, pack, Model, Blue); }
+        finally { PlayerView.FailForTest = false; }
+        Assert.Empty(v.Pieces);
+        Assert.Empty(v.Ledgers);
+        Assert.Empty(v.LedgerHistory);
+        Assert.Empty(v.DiceHistory);
+        Assert.Empty(v.Pending);
+        var line = Assert.Single(v.Log);
+        Assert.Equal((LogKind.System, PlayerView.FilterErrorText), (line.Kind, line.Text));
+        Assert.Equal("g1", v.GameId);
     }
 
     private static string Json(GameState s) => JsonSerializer.Serialize(s, QuartermasterJson.Options);
