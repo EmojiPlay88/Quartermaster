@@ -252,6 +252,17 @@ public class ValidatorTests
     }
 
     [Fact]
+    public void Validator_EmptySideFilter_WarnsWhenSeveralSides()
+    {
+        var red = new SideDef { Id = "r", Name = "Red" };
+        var blue = new SideDef { Id = "b", Name = "Blue", UnitFilter = "has(Fuel)" };
+        Assert.Empty(V(Clean() with { Sides = new() { red } }));            // one side: nothing to share
+        var issue = Assert.Single(V(Clean() with { Sides = new() { red, blue } }));
+        Assert.Equal(RulesIssueSeverity.Warning, issue.Severity);
+        Assert.Equal("Side \"Red\": unit filter is empty, so it matches every unit", issue.Message);
+    }
+
+    [Fact]
     public void Validator_Blocks_OverlapReversedCountMissing()
     {
         var phases = new List<PhaseDef> { Ph("a"), Ph("b"), Ph("c") };

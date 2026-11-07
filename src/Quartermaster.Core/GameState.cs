@@ -136,7 +136,7 @@ public sealed class GameState
                 break;
             case ResolveRun rr: DoResolve(rr); break;
             case AddLogLine al:
-                Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId));
+                Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId, al.SideId));
                 break;
             case HideAlert ha:
                 HiddenAlerts ??= new();

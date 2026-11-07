@@ -44,7 +44,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         g.Execute(prepare(c, g.State));
     }
 
-    private void Calc(string text) => Exec(new AddLogLine(LogKind.Calc, text));
+    private void Calc(string text, string? pieceId = null) => Exec(new AddLogLine(LogKind.Calc, text, pieceId));
 
     private bool HasPhases => s.Game != null && s.Rules is { Phases.Count: > 0 };
 
@@ -201,7 +201,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private void LogWorking(FormulaTrace trace, string unit, string? tag)
     {
         if (trace.Outputs.Count > 0 || string.IsNullOrWhiteSpace(trace.Working)) return;
-        Calc($"{unit}: {trace.Working}" + (tag == null ? "" : $" ({tag})"));
+        Calc($"{unit}: {trace.Working}" + (tag == null ? "" : $" ({tag})"), trace.PieceId);
     }
 
     private string? UnitName(string? pieceId) =>
@@ -264,7 +264,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                     var (cells, problem) = MoveMeasure.Cells(s.Model, rec.FromMap, rec.From, p.MapId, p.Pos);
                     d = cells;
                     distances[p.Id] = d;
-                    if (problem != null) Calc($"{PieceInfo.Name(p)}: moved distance counted as 0 ({problem})");
+                    if (problem != null) Calc($"{PieceInfo.Name(p)}: moved distance counted as 0 ({problem})", p.Id);
                 }
                 units.Add(new Unit(p.Id, PieceInfo.Name(p), d));
             }
@@ -316,7 +316,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         foreach (var u in units)
         {
             var trace = s.Runner.Run(s.Game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
-            if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}"); continue; }
+            if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId); continue; }
             if (trace.Result == null) { needInput.Add(u); continue; }
             foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label)) Exec(c);
             LogWorking(trace, u.Label, "auto");

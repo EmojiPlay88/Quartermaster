@@ -16,7 +16,7 @@ public sealed record OutputPreview(string Key, string PropertyId, string Propert
 
 public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableState> Variables, Value? Result, string Working,
     IReadOnlyList<OutputPreview> Outputs, string? Error, IReadOnlyList<DiceEntry> Rolls,
-    IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey);
+    IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey, string? PieceId = null);
 
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
     IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false);
@@ -40,7 +40,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var produced = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
         try
         {
-            return RunCore(s, r, formula, produced);
+            var t = RunCore(s, r, formula, produced);
+            return r.PieceId != null && s.Pieces.ContainsKey(r.PieceId) ? t with { PieceId = r.PieceId } : t;
         }
         catch (Exception ex)
         {
@@ -125,13 +126,18 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey);
     }
 
-    public IReadOnlyList<GameCommand> Commands(FormulaTrace t, string? note, string? tag = null, string? subject = null)
+    /// <summary>
+    /// The commands applying a trace. Each carries the unit the formula ran on (<see cref="FormulaTrace.PieceId"/>) and, when given, the side
+    /// it was run for, so PlayerView can attribute rolls and working explicitly.
+    /// </summary>
+    public IReadOnlyList<GameCommand> Commands(FormulaTrace t, string? note, string? tag = null, string? subject = null, string? sideId = null)
     {
         var list = new List<GameCommand>();
         if (t.Result == null || t.Error != null) return list;
-        foreach (var d in t.Rolls) list.Add(new RollDice(d.Purpose, d.Count, d.Sides, d.Results));
+        foreach (var d in t.Rolls) list.Add(new RollDice(d.Purpose, d.Count, d.Sides, d.Results, PieceId: t.PieceId, SideId: sideId));
         foreach (var o in t.Outputs)
-            list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note, t.Working, Tag: tag, Subject: subject));
+            list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note, t.Working, Tag: tag,
+                Subject: subject, PieceId: t.PieceId, SideId: sideId));
         return list;
     }
 

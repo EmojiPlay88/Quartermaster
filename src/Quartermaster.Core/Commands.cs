@@ -36,11 +36,14 @@ public sealed record SetStackExpanded(string StackId, bool Expanded) : GameComma
 public sealed record ClearMoved(string MapId) : GameCommand;
 public sealed record ToggleTrail(string PieceId) : GameCommand;
 
-/// <summary>Sets a ledger value to After (absolute, so replay is deterministic). Source is "formula", "manual" or "seed".</summary>
-public sealed record LedgerDelta(string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, DateTimeOffset? At = null, string? Who = null, string? Tag = null, string? Subject = null) : GameCommand;
+/// <summary>
+/// Sets a ledger value to After (absolute, so replay is deterministic). Source is "formula", "manual" or "seed". PieceId: the unit a formula
+/// ran on (its log line carries it even for holder outputs); SideId: the side it was run for, when the caller knows it. Both drive PlayerView.
+/// </summary>
+public sealed record LedgerDelta(string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, DateTimeOffset? At = null, string? Who = null, string? Tag = null, string? Subject = null, string? PieceId = null, string? SideId = null) : GameCommand;
 public sealed record LedgerSeed(string Key, string PropertyId, double Value);
 public sealed record SeedLedger(IReadOnlyList<LedgerSeed> Seeds) : GameCommand;
-public sealed record RollDice(string Purpose, int Count, int Sides, IReadOnlyList<int> Results, string? Expression = null, IReadOnlyList<string>? FaceTexts = null, int Modifier = 0, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+public sealed record RollDice(string Purpose, int Count, int Sides, IReadOnlyList<int> Results, string? Expression = null, IReadOnlyList<string>? FaceTexts = null, int Modifier = 0, DateTimeOffset? At = null, string? Who = null, string? PieceId = null, string? SideId = null) : GameCommand;
 public sealed record SetNotes(string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetTurn(int Turn, string? Phase, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetPlayers(IReadOnlyList<PlayerDef> Players, DateTimeOffset? At = null, string? Who = null) : GameCommand;
@@ -50,7 +53,7 @@ public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTime
 public sealed record AcknowledgeWarning(int Index, string Message, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record QueueRuns(IReadOnlyList<PendingRun> Runs, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record ResolveRun(string RunId, IReadOnlyList<string?> PieceIds, DateTimeOffset? At = null, string? Who = null) : GameCommand;
-public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null, string? SideId = null) : GameCommand;
 
 /// <summary>Log line recorded after stepping back to a checkpoint. Folding: never an undoable action of its own.</summary>
 public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone, string Target, DateTimeOffset? At = null, string? Who = null) : GameCommand;

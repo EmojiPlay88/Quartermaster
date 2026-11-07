@@ -3,7 +3,8 @@ using System.Globalization;
 namespace Quartermaster.Core;
 
 /// <summary>One line of the human-readable game log. Kind is a <see cref="LogKind"/> value; unknown kinds are shown as system.</summary>
-public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At, int? Turn = null, string? Phase = null);
+/// <summary>SideId: the side the entry was explicitly made for (formula runs, stamped by the caller); null when not stamped.</summary>
+public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At, int? Turn = null, string? Phase = null, string? SideId = null);
 
 public static class LogKind
 {
@@ -26,8 +27,9 @@ static class LogBuilder
 {
     static string Num(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
-    static LogEntry Make(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? mapId = null) =>
-        new(s.Log.Count + 1, kind, text, who, pieceId, mapId, at ?? DateTimeOffset.UnixEpoch, s.Position?.Turn, s.Position == null ? null : s.Turn.Phase);
+    static LogEntry Make(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? mapId = null, string? sideId = null) =>
+        new(s.Log.Count + 1, kind, text, who, pieceId, mapId, at ?? DateTimeOffset.UnixEpoch, s.Position?.Turn, s.Position == null ? null : s.Turn.Phase,
+            string.IsNullOrWhiteSpace(sideId) ? null : sideId);
 
     public static LogEntry Place(GameState s, AddPiece a) =>
         Make(s, LogKind.Place, a.LogText ?? $"piece {a.PieceId} placed", a.Who, a.At, a.PieceId, a.MapId);
@@ -55,7 +57,7 @@ static class LogBuilder
                 ? $"{expr} = {detail}"
                 : $"{expr} = {detail} = {total.ToString(CultureInfo.InvariantCulture)}";
         }
-        return Make(s, LogKind.Dice, $"{d.Purpose}: {body}", d.Who, d.At);
+        return Make(s, LogKind.Dice, $"{d.Purpose}: {body}", d.Who, d.At, d.PieceId, sideId: d.SideId);
     }
 
     public static LogEntry Ledger(GameState s, LedgerDelta d)
@@ -65,12 +67,12 @@ static class LogBuilder
         if (!string.IsNullOrEmpty(d.Subject)) text = $"{d.Subject}: {text}";
         if (!string.IsNullOrEmpty(d.Tag)) text += $" ({d.Tag})";
         var kind = d.Tag != null ? LogKind.Calc : d.Source == "formula" ? LogKind.Formula : LogKind.Ledger;
-        string? pieceId = LedgerKey.TryParse(d.Key, out var isPiece, out var id) && isPiece ? id : null;
-        return Make(s, kind, text, d.Who, d.At, pieceId);
+        string? pieceId = LedgerKey.TryParse(d.Key, out var isPiece, out var id) && isPiece ? id : d.PieceId;
+        return Make(s, kind, text, d.Who, d.At, pieceId, sideId: d.SideId);
     }
 
-    public static LogEntry Line(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null) =>
-        Make(s, kind, text, who, at, pieceId);
+    public static LogEntry Line(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? sideId = null) =>
+        Make(s, kind, text, who, at, pieceId, sideId: sideId);
 
     public static LogEntry Notes(GameState s, SetNotes n) => Make(s, LogKind.Note, "notes updated", n.Who, n.At);
 
