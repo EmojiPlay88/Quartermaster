@@ -126,6 +126,25 @@ public sealed class RenderAndLoadTests : IDisposable
     }
 
     [Fact]
+    public async Task PdfRenderClamped_OneLoad_ReturnsPageCount_AndClampsPage()
+    {
+        string pdf = LetterPdf(pages: 2);
+        var (bmp, count, page) = await PdfPageRender.RenderClampedAsync(pdf, 5, 50);
+        using (bmp)
+        {
+            Assert.Equal(2, count);
+            Assert.Equal(2, page);
+            Assert.InRange(bmp.Width, 424, 426); // 8.5 in at 50 DPI
+        }
+        var (b0, _, p0) = await PdfPageRender.RenderClampedAsync(pdf, 0, 50);
+        b0.Dispose();
+        Assert.Equal(1, p0);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => PdfPageRender.RenderClampedAsync(pdf, 1, 50, cts.Token));
+    }
+
+    [Fact]
     public async Task PdfRender_PageOutOfRange_Throws()
     {
         string pdf = LetterPdf();

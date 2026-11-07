@@ -314,6 +314,90 @@ public class RulebookSearchTests : IDisposable
     }
 
     [Fact]
+    public async Task Index_ExtractorHangs_TimesOut_NotSearchable_MarkerSkipsNextBuild()
+    {
+        using var release = new ManualResetEventSlim(false); // stands in for "forever"; released at the end so no thread leaks
+        var calls = 0;
+        RulebookIndex.TextExtractor hang = (_, _, _) =>
+        {
+            Interlocked.Increment(ref calls);
+            release.Wait();
+            throw new InvalidOperationException("released");
+        };
+        try
+        {
+            var docs = new[] { Doc("hang.pdf", "Hang", Rules), };
+            var sw = Stopwatch.StartNew();
+            var ix = await RulebookIndex.BuildAsync("modH", docs, null, CancellationToken.None, null, null, hang, TimeSpan.FromMilliseconds(300));
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20));
+            Assert.Equal(1, calls);
+            var d = Assert.Single(ix.Documents);
+            Assert.False(d.Searchable);
+            Assert.NotEqual("", d.Sha256);
+            Assert.Contains(ix.Documents, x => x.Entry == "hang.pdf");
+            Assert.Equal(SearchPanelModel.NotSearchableText, SearchPanelModel.Build(ix, "supply").Single(r => r.Kind == SearchRowKind.NotSearchable).Text.Split(" — ")[1]);
+            var cached = RulebookIndex.TryReadCache(RulebookIndex.CacheFolder("modH"), d.Sha256);
+            Assert.NotNull(cached);
+            Assert.False(cached!.Value.Searchable);
+
+            // The marker is used: a later build never calls the extractor for that document.
+            var again = await RulebookIndex.BuildAsync("modH", docs, null, CancellationToken.None, null, null, hang, TimeSpan.FromMilliseconds(300));
+            Assert.Equal(1, calls);
+            Assert.False(again.Documents[0].Searchable);
+        }
+        finally { release.Set(); }
+    }
+
+    [Fact]
+    public async Task Index_MemoryOnlyEntries_NotCached_ReusedFromPreviousIndex()
+    {
+        var calls = 0;
+        RulebookIndex.TextExtractor counting = (s, r, ct) =>
+        {
+            Interlocked.Increment(ref calls);
+            return (true, new[] { new PageText(1, "Opened supply rules") });
+        };
+        var opened = Path.Combine(_tmp, "elsewhere", "opened.pdf");
+        var docs = new[] { Doc(opened, "opened.pdf", Rules) };
+        var ix = await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, null, new[] { opened }, counting, RulebookIndex.ExtractTimeout);
+        Assert.True(ix.Documents[0].Searchable);
+        Assert.Equal(1, calls);
+        var folder = RulebookIndex.CacheFolder("modM");
+        Assert.True(!Directory.Exists(folder) || Directory.GetFiles(folder).Length == 0); // text kept in memory only
+        // A rebuild (another file opened) reuses the text the last index read.
+        var again = await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, ix, new[] { opened }, counting, RulebookIndex.ExtractTimeout);
+        Assert.Equal(1, calls);
+        Assert.Single(again.Search("supply"));
+        // Without a previous index it is read again (nothing on disk).
+        await RulebookIndex.BuildAsync("modM", docs, null, CancellationToken.None, null, new[] { opened }, counting, RulebookIndex.ExtractTimeout);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task PruneCache_DeletesOtherModulesUnusedFor90Days_NeverCurrent()
+    {
+        await Build("modOld", Doc("r.pdf", "R", Rules));
+        await Build("modNew", Doc("r.pdf", "R", Rules));
+        await Build("modCur", Doc("r.pdf", "R", Rules));
+        var root = Path.Combine(_tmp, "search");
+        var old = DateTime.UtcNow.AddDays(-120);
+        foreach (var name in new[] { "modOld", "modCur" })
+        {
+            var dir = Path.Combine(root, name);
+            foreach (var f in Directory.GetFiles(dir)) File.SetLastWriteTimeUtc(f, old);
+            Directory.SetLastWriteTimeUtc(dir, old);
+        }
+        Assert.Equal(1, RulebookIndex.PruneCache("modCur"));
+        Assert.False(Directory.Exists(Path.Combine(root, "modOld")));
+        Assert.True(Directory.Exists(Path.Combine(root, "modNew")));
+        Assert.True(Directory.Exists(Path.Combine(root, "modCur"))); // the open module's cache is never pruned
+        // Using a module's cache marks it fresh.
+        await Build("modCur", Doc("r.pdf", "R", Rules));
+        Assert.True(DateTime.UtcNow - Directory.GetLastWriteTimeUtc(Path.Combine(root, "modCur")) < TimeSpan.FromDays(1));
+        Assert.Equal(0, RulebookIndex.PruneCache("other"));
+    }
+
+    [Fact]
     public async Task Index_500Pages_QueryUnder200ms()
     {
         var rnd = new Random(42);

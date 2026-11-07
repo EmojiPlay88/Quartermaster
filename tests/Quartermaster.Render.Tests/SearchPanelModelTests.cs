@@ -133,4 +133,16 @@ public class SearchPanelModelTests : IDisposable
         Assert.Empty(SearchPanelModel.UsedOnPageRows(pack, "a.pdf", 3));
         Assert.Empty(SearchPanelModel.UsedOnPageRows(null, "a.pdf", 2));
     }
+
+    [Fact]
+    public void Opens_HitsAndNotSearchableRows_NotHeadingsOrMessages()
+    {
+        TextRun[] runs = { new("x", false) };
+        Assert.True(SearchPanelModel.Opens(new SearchRow(SearchRowKind.Hit, "a.pdf", "A", 2, "p. 2", runs)));
+        Assert.True(SearchPanelModel.Opens(new SearchRow(SearchRowKind.NotSearchable, "scan.pdf", "Scan", 0, "Scan — not searchable", runs)));
+        Assert.False(SearchPanelModel.Opens(new SearchRow(SearchRowKind.Document, "a.pdf", "A", 0, "A — 1 page", runs)));
+        Assert.False(SearchPanelModel.Opens(new SearchRow(SearchRowKind.Message, "", "", 0, "No pages match x.", runs)));
+        Assert.False(SearchPanelModel.Opens(null));
+        Assert.Equal("This PDF has no text; use Scan this page to read a page with OCR.", SearchPanelModel.NoTextStatus);
+    }
 }

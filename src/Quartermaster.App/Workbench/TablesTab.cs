@@ -269,7 +269,7 @@ sealed class TablesTab : UserControl, IRuleRefEditor
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Func<RuleRef?, RefDisplay>? DescribeRef { get; set; }
 
-    public bool CanUseRuleRef => Current != null && Enabled && _link.Enabled;
+    public bool CanUseRuleRef => Current != null && Enabled && _link.Enabled && !_s.IsReplaying;
 
     public bool UseRuleRef(Func<string, RuleRef?> make)
     {
@@ -422,6 +422,7 @@ sealed class TablesTab : UserControl, IRuleRefEditor
     {
         if (_s.Rules == null) { Tell("Create or open a rules pack first; the table is stored in it."); return null; }
         if (_s.IsGuest) { Tell("The host's rules pack is read-only here."); return null; }
+        if (_s.IsReplaying) { Tell(ModuleSession.ReplayingText); return null; } // a received turn replays as sent: no rules edits
         FlushNotes();
         var existing = Current;
         bool intoExisting = false;

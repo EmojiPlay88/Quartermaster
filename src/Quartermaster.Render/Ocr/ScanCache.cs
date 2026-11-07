@@ -35,12 +35,15 @@ public static class ScanCache
                 sha = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             }
             var path = Path.Combine(Folder, sha + ext);
-            if (File.Exists(path))
+            // Always move the fresh copy into place (same bytes when it was already there), so a prune that deletes the cached file
+            // between a check and its use can't leave us returning a missing path. A file kept open by a reader can't be replaced:
+            // then the cached copy (same SHA, same bytes) is used.
+            try { File.Move(tmp, path, overwrite: true); }
+            catch (Exception e) when ((e is IOException or UnauthorizedAccessException) && File.Exists(path))
             {
-                File.Delete(tmp);
-                Touch(path);
+                try { File.Delete(tmp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
-            else File.Move(tmp, path);
+            Touch(path);
             return path;
         }
         catch

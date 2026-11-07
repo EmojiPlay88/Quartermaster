@@ -361,10 +361,25 @@ public class RelayClientTests : IDisposable
     [Fact]
     public async Task MemberId_Exposed_AndUpdatedOnRejoin()
     {
-        var (relay2, c, reconnects) = await GuestThenRestart(0, 4);
-        await using var _r = relay2; await using var _c = c;
-        await Until(() => reconnects() == 1);
-        Assert.Equal("m5", c.MemberId);
+        var cert = TestRelay.MakeCert();
+        var relay = new TestRelay(cert);
+        await relay.StartAsync();
+        // The first retry waits long enough for relay2 to be listening, so the rejoin lands on relay2 rather than racing its start.
+        await using var c = new RelayClient(Pins(), new[] { TimeSpan.FromMilliseconds(1500), TimeSpan.FromMilliseconds(40) });
+        int reconnects = 0;
+        c.Reconnected += () => Interlocked.Increment(ref reconnects);
+        await c.ConnectAsync(relay.Uri, _ => true, CancellationToken.None);
+        await Within(c.JoinRoomAsync("ABC234", "ok-verifier"));
+        var firstId = Assert.Single(relay.JoinedIds);
+        Assert.Equal(firstId, c.MemberId);
+        await relay.StopAsync();
+        await using var relay2 = new TestRelay(cert, relay.Port) { Ids = 4 };
+        await relay2.StartAsync();
+        await Until(() => Volatile.Read(ref reconnects) >= 1);
+        // Under load a rejoin may be retried; the client must hold the id relay2 issued last.
+        await Until(() => !relay2.JoinedIds.IsEmpty && c.MemberId == relay2.JoinedIds.Last());
+        Assert.Equal(relay2.JoinedIds.Last(), c.MemberId);
+        Assert.NotEqual(firstId, c.MemberId);
     }
 
     [Fact]

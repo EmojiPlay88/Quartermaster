@@ -58,20 +58,46 @@ public sealed class RulebookIndex
             : Array.Empty<NormPage>()).ToArray();
     }
 
+    /// <summary>How long one document's text extraction may take before it is given up as not searchable (a hostile or broken PDF).</summary>
+    public static readonly TimeSpan ExtractTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>Why a cached document is not searchable because its extraction was given up.</summary>
+    internal const string TimeoutReason = "timeout";
+
+    /// <summary>Search cache folders of other modules not written (or used) for this long are deleted.</summary>
+    public static readonly TimeSpan CacheMaxAge = TimeSpan.FromDays(90);
+
+    /// <summary>Extracts a PDF's page text (the seam tests replace).</summary>
+    internal delegate (bool Searchable, IReadOnlyList<PageText> Pages) TextExtractor(Stream stream, Action<double> report, CancellationToken ct);
+
     /// <summary>
     /// Indexes the PDFs off the caller's thread, reusing cached text for documents whose SHA-256 is unchanged.
     /// Progress goes 0..1; cancellation throws <see cref="OperationCanceledException"/> and leaves the cache consistent.
+    /// Documents also in <paramref name="previous"/> (same SHA-256) are reused from it. Entries in <paramref name="memoryOnly"/>
+    /// (files opened for this session) are never read from or written to the disk cache. A document whose extraction takes
+    /// longer than <see cref="ExtractTimeout"/> is not searchable (and cached as such, so later builds skip it).
     /// </summary>
     public static Task<RulebookIndex> BuildAsync(string moduleSha, IReadOnlyList<(string Entry, string Title, Func<Stream> Open)> pdfs,
-        IProgress<double>? progress, CancellationToken ct) =>
-        Task.Run(() => Build(moduleSha, pdfs, progress, ct), ct);
+        IProgress<double>? progress, CancellationToken ct, RulebookIndex? previous = null, IReadOnlyCollection<string>? memoryOnly = null) =>
+        BuildAsync(moduleSha, pdfs, progress, ct, previous, memoryOnly, Extract, ExtractTimeout);
+
+    internal static Task<RulebookIndex> BuildAsync(string moduleSha, IReadOnlyList<(string Entry, string Title, Func<Stream> Open)> pdfs,
+        IProgress<double>? progress, CancellationToken ct, RulebookIndex? previous, IReadOnlyCollection<string>? memoryOnly,
+        TextExtractor extractor, TimeSpan timeout) =>
+        Task.Run(() => Build(moduleSha, pdfs, progress, ct, previous, memoryOnly, extractor, timeout), ct);
 
     private static RulebookIndex Build(string moduleSha, IReadOnlyList<(string Entry, string Title, Func<Stream> Open)> pdfs,
-        IProgress<double>? progress, CancellationToken ct)
+        IProgress<double>? progress, CancellationToken ct, RulebookIndex? previous, IReadOnlyCollection<string>? memoryOnly,
+        TextExtractor extractor, TimeSpan timeout)
     {
         progress?.Report(0);
         var folder = CacheFolder(moduleSha);
         SweepStaleTemps(folder);
+        MarkUsed(folder);
+        var known = new Dictionary<string, IndexedDocument>(StringComparer.Ordinal);
+        foreach (var d in previous?.Documents ?? Array.Empty<IndexedDocument>())
+            if (d.Sha256.Length > 0) known.TryAdd(d.Sha256, d);
+        var memory = new HashSet<string>(memoryOnly ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
         var docs = new List<IndexedDocument>(pdfs.Count);
         for (var i = 0; i < pdfs.Count; i++)
         {
@@ -79,7 +105,8 @@ public sealed class RulebookIndex
             var (entry, title, open) = pdfs[i];
             var lo = (double)i / pdfs.Count;
             var span = 1.0 / pdfs.Count;
-            docs.Add(IndexOne(folder, entry, title, open, f => progress?.Report(lo + span * f), ct));
+            docs.Add(IndexOne(folder, entry, title, open, f => progress?.Report(lo + span * f), ct,
+                known, persist: !memory.Contains(entry), extractor, timeout));
             progress?.Report((double)(i + 1) / pdfs.Count);
         }
         progress?.Report(1);
@@ -96,10 +123,12 @@ public sealed class RulebookIndex
     /// while hashing, and the copy is parsed, so the SHA is always of the bytes parsed. Opening/reading failures are not cached;
     /// deterministic outcomes (PdfPig cannot parse it, or no page has text) are.
     /// </summary>
-    private static IndexedDocument IndexOne(string folder, string entry, string title, Func<Stream> open, Action<double> report, CancellationToken ct)
+    private static IndexedDocument IndexOne(string folder, string entry, string title, Func<Stream> open, Action<double> report, CancellationToken ct,
+        IReadOnlyDictionary<string, IndexedDocument> known, bool persist, TextExtractor extractor, TimeSpan timeout)
     {
         Stream? raw = null;
         MemoryStream? copy = null;
+        Task? abandoned = null; // a timed-out extraction still running: it owns the streams until it ends
         try
         {
             string sha;
@@ -129,14 +158,31 @@ public sealed class RulebookIndex
                 return Unreadable(entry, title);
             }
 
-            var cached = TryReadCache(folder, sha);
+            if (known.TryGetValue(sha, out var seen)) return new IndexedDocument(entry, title, sha, seen.Searchable, seen.Pages);
+            var cached = persist ? TryReadCache(folder, sha) : null;
             if (cached != null) return new IndexedDocument(entry, title, sha, cached.Value.Searchable, cached.Value.Pages);
 
             bool searchable;
             IReadOnlyList<PageText> pages;
             try
             {
-                (searchable, pages) = Extract(parse, report, ct);
+                // Watchdog: PdfPig can loop forever on a hostile file. The extraction runs on its own thread; past the timeout the
+                // document is given up (that thread is left to finish on its own) and remembered as not searchable.
+                var gaveUp = false;
+                var work = Task.Run(() => extractor(parse, f => { if (!Volatile.Read(ref gaveUp)) report(f); }, ct));
+                try { (searchable, pages) = work.WaitAsync(timeout, ct).GetAwaiter().GetResult(); }
+                catch (TimeoutException)
+                {
+                    Volatile.Write(ref gaveUp, true);
+                    abandoned = work;
+                    if (persist) WriteCache(folder, sha, false, Array.Empty<PageText>(), TimeoutReason);
+                    return new IndexedDocument(entry, title, sha, false, Array.Empty<PageText>());
+                }
+                catch (OperationCanceledException) when (!work.IsCompleted)
+                {
+                    abandoned = work;
+                    throw;
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception e) when (IsTransient(e)) { return Unreadable(entry, title); }
@@ -144,14 +190,61 @@ public sealed class RulebookIndex
             {
                 (searchable, pages) = (false, Array.Empty<PageText>()); // PdfPig cannot read it (corrupt, encrypted, …)
             }
-            WriteCache(folder, sha, searchable, pages);
+            if (persist) WriteCache(folder, sha, searchable, pages);
             return new IndexedDocument(entry, title, sha, searchable, pages);
         }
         finally
         {
-            copy?.Dispose();
-            try { raw?.Dispose(); } catch (Exception) { }
+            var c = copy;
+            var r = raw;
+            void Close()
+            {
+                c?.Dispose();
+                try { r?.Dispose(); } catch (Exception) { }
+            }
+            if (abandoned == null) Close();
+            else abandoned.ContinueWith(t => { _ = t.Exception; Close(); }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
+    }
+
+    /// <summary>Marks a module's cache folder as used now (pruning goes by its newest write time).</summary>
+    private static void MarkUsed(string folder)
+    {
+        try { if (Directory.Exists(folder)) Directory.SetLastWriteTimeUtc(folder, DateTime.UtcNow); }
+        catch (Exception) { }
+    }
+
+    /// <summary>
+    /// Deletes the search cache folders (<c>AppDataRoot/search/*</c>) of other modules whose newest file or folder write is older than
+    /// <see cref="CacheMaxAge"/>; the folder of <paramref name="currentModuleSha"/> is never deleted. Returns how many were deleted.
+    /// </summary>
+    public static int PruneCache(string currentModuleSha, DateTime? nowUtc = null, TimeSpan? maxAge = null)
+    {
+        var now = nowUtc ?? DateTime.UtcNow;
+        var age = maxAge ?? CacheMaxAge;
+        var root = AppDataRoot.Sub("search");
+        var current = Path.GetFileName(CacheFolder(currentModuleSha));
+        var deleted = 0;
+        try
+        {
+            if (!Directory.Exists(root)) return 0;
+            foreach (var dir in new DirectoryInfo(root).EnumerateDirectories())
+            {
+                try
+                {
+                    if (string.Equals(dir.Name, current, StringComparison.OrdinalIgnoreCase)) continue;
+                    var newest = dir.LastWriteTimeUtc;
+                    foreach (var f in dir.EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+                        if (f.LastWriteTimeUtc > newest) newest = f.LastWriteTimeUtc;
+                    if (now - newest <= age) continue;
+                    dir.Delete(recursive: true);
+                    deleted++;
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return deleted;
     }
 
     /// <summary>SHA-256 (lower hex) of the rest of the stream, copying it to <paramref name="copy"/> if given; null past <paramref name="max"/> bytes.</summary>
@@ -240,6 +333,8 @@ public sealed class RulebookIndex
         public string Extractor { get; set; } = "";
         public string Sha256 { get; set; } = "";
         public bool Searchable { get; set; }
+        /// <summary>Why it is not searchable when that was decided without reading the text ("timeout"); null otherwise.</summary>
+        public string? Reason { get; set; }
         public List<CachePage> Pages { get; set; } = new();
     }
 
@@ -278,7 +373,7 @@ public sealed class RulebookIndex
         catch (Exception) { return null; }
     }
 
-    internal static void WriteCache(string folder, string docSha, bool searchable, IReadOnlyList<PageText> pages)
+    internal static void WriteCache(string folder, string docSha, bool searchable, IReadOnlyList<PageText> pages, string? reason = null)
     {
         string? tmp = null;
         try
@@ -286,7 +381,7 @@ public sealed class RulebookIndex
             Directory.CreateDirectory(folder);
             var dto = new CacheDto
             {
-                Format = CacheFormat, Extractor = ExtractorVersion, Sha256 = docSha, Searchable = searchable,
+                Format = CacheFormat, Extractor = ExtractorVersion, Sha256 = docSha, Searchable = searchable, Reason = reason,
                 Pages = pages.Select(p => new CachePage { Page = p.Page, Text = p.Text }).ToList(),
             };
             var bytes = Gzip.Compress(JsonSerializer.SerializeToUtf8Bytes(dto));

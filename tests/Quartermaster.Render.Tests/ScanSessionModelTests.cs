@@ -214,4 +214,51 @@ public class ScanSessionModelTests
         Assert.Equal(new Rectangle(300, 300, 200, 100), RegionEdit.Adjust(r, RegionHandle.Move, 900, 900, img)); // kept inside
         Assert.Equal(Rectangle.FromLTRB(0, 0, 300, 200), RegionEdit.Adjust(r, RegionHandle.NW, -500, -500, img));
     }
+
+    [Fact]
+    public void RefForSearchHit_OpenedPdfKey_BecomesScanRef_ModuleEntryUnchanged()
+    {
+        var m = new ScanSessionModel();
+        var path = Path.Combine(Path.GetTempPath(), "qm-invented", "Opened Rules.pdf");
+        var src = m.AddFile(path);
+        // The index keys an opened PDF by its full path; the rule ref must not keep it.
+        Assert.Equal(("scan:Opened Rules.pdf", 2), m.RefForSearchHit(src.Key, 2));
+        Assert.Equal(("scan:Opened Rules.pdf", 2), m.RefForSearchHit(src.Key.ToUpperInvariant(), 2));
+        Assert.Equal(("scan:Opened Rules.pdf", 1), m.RefForSearchHit(src.Key, 0));
+        Assert.Equal(("docs/rules.pdf", 3), m.RefForSearchHit("docs/rules.pdf", 3));
+        Assert.True(ScanSessionModel.IsSafeRefEntry(m.RefForSearchHit(src.Key, 2).Entry));
+        Assert.False(ScanSessionModel.IsSafeRefEntry(src.Key));
+    }
+
+    [Theory]
+    [InlineData("docs/rules.pdf", true)]
+    [InlineData("rules.pdf", true)]
+    [InlineData("scan:chart.png", true)]
+    [InlineData("SCAN:chart.png", true)]
+    [InlineData(@"C:\Users\someone\rules.pdf", false)]
+    [InlineData("C:/Users/someone/rules.pdf", false)]
+    [InlineData("c:rules.pdf", false)]
+    [InlineData(@"\\server\share\rules.pdf", false)]
+    [InlineData("/home/someone/rules.pdf", false)]
+    [InlineData(@"docs\rules.pdf", false)]
+    [InlineData(@"scan:C:\x\rules.pdf", false)]
+    [InlineData("scan:/x/rules.pdf", false)]
+    [InlineData("scan:", false)]
+    [InlineData("docs/a:b.pdf", false)]
+    [InlineData("", false)]
+    public void IsSafeRefEntry_RefusesLocalPaths(string entry, bool safe) =>
+        Assert.Equal(safe, ScanSessionModel.IsSafeRefEntry(entry));
+
+    [Fact]
+    public void SameNameAs_FindsOtherOpenedFileWithSameName()
+    {
+        var m = new ScanSessionModel();
+        var a = m.AddFile(Path.Combine(Path.GetTempPath(), "qm-a", "chart.png"));
+        Assert.Null(m.SameNameAs(a));
+        var b = m.AddFile(Path.Combine(Path.GetTempPath(), "qm-b", "CHART.png"));
+        Assert.Equal(a, m.SameNameAs(b));
+        Assert.Equal(b, m.SameNameAs(a));
+        var c = m.AddFile(Path.Combine(Path.GetTempPath(), "qm-b", "other.png"));
+        Assert.Null(m.SameNameAs(c));
+    }
 }

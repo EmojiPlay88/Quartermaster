@@ -26,6 +26,27 @@ public static class PdfPageRender
         var doc = await LoadAsync(pdfPath, ct).ConfigureAwait(false);
         if (page < 1 || page > doc.PageCount)
             throw new ArgumentOutOfRangeException(nameof(page), page, $"The PDF has {doc.PageCount} page(s).");
+        return await RenderPageAsync(doc, page, dpi, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Loads the PDF once and renders 1-based <paramref name="page"/>, clamped to its pages, at <paramref name="dpi"/> (≤ 60 MP as in
+    /// <see cref="RenderAsync"/>). Returns the bitmap, the page count and the page rendered.
+    /// </summary>
+    /// <exception cref="FileNotFoundException">The file is missing.</exception>
+    /// <exception cref="InvalidDataException">Corrupt, encrypted, not a PDF, or no pages (<see cref="CantOpenMessage"/>).</exception>
+    public static async Task<(Bitmap Bitmap, int PageCount, int Page)> RenderClampedAsync(string pdfPath, int page, int dpi = 200, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(dpi, 1);
+        var doc = await LoadAsync(pdfPath, ct).ConfigureAwait(false);
+        var count = (int)doc.PageCount;
+        if (count < 1) throw new InvalidDataException(CantOpenMessage);
+        page = Math.Clamp(page, 1, count);
+        return (await RenderPageAsync(doc, page, dpi, ct).ConfigureAwait(false), count, page);
+    }
+
+    private static async Task<Bitmap> RenderPageAsync(PdfDocument doc, int page, int dpi, CancellationToken ct)
+    {
         try
         {
             using var p = doc.GetPage((uint)(page - 1));

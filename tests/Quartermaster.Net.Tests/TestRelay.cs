@@ -105,7 +105,7 @@ public sealed class TestRelay : IAsyncDisposable
                 CreateRoom c => new RoomCreated(c.Code),
                 ListLobbies q => new Lobbies(Listings.Where(x => x.ModuleSha256 == q.ModuleSha256).ToList()),
                 UpdateListing when RefuseUpdates => new Refused("Slow down"),
-                JoinRoom j => j.AuthVerifier == Password ? new Joined("m" + Interlocked.Increment(ref Ids)) : new Refused("Wrong code or password"),
+                JoinRoom j => j.AuthVerifier == Password ? Join() : new Refused("Wrong code or password"),
                 Ping => new Pong(),
                 _ => null,
             };
@@ -116,6 +116,16 @@ public sealed class TestRelay : IAsyncDisposable
             }
             else if (reply != null) await Push(ws, reply);
         }
+    }
+
+    /// <summary>Member ids this relay issued, in order.</summary>
+    public ConcurrentQueue<string> JoinedIds { get; } = new();
+
+    private Joined Join()
+    {
+        var id = "m" + Interlocked.Increment(ref Ids);
+        JoinedIds.Enqueue(id);
+        return new Joined(id);
     }
 
     private static Task Push(WebSocket ws, RelayMessage m) =>

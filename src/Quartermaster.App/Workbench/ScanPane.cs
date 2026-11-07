@@ -160,9 +160,15 @@ sealed class ScanPane : UserControl
         Source = source;
         Page = page;
         SyncPageControls();
-        _load = LoadAsync(source, page, ++_loadGen);
+        // A superseded render is cancelled (its result would be dropped anyway); each load disposes its own source when it ends.
+        try { _loadCts?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        var cts = _loadCts = new CancellationTokenSource();
+        _load = LoadAsync(source, page, ++_loadGen, cts);
         return _load;
     }
+
+    CancellationTokenSource? _loadCts;
 
     void GoToPage(int page)
     {
@@ -188,7 +194,17 @@ sealed class ScanPane : UserControl
         _next.Enabled = pdf && Page < _pageCount;
     }
 
-    async Task LoadAsync(ScanSource src, int page, int gen)
+    async Task LoadAsync(ScanSource src, int page, int gen, CancellationTokenSource cts)
+    {
+        try { await LoadCoreAsync(src, page, gen, cts.Token); }
+        finally
+        {
+            if (ReferenceEquals(_loadCts, cts)) _loadCts = null;
+            cts.Dispose();
+        }
+    }
+
+    async Task LoadCoreAsync(ScanSource src, int page, int gen, CancellationToken ct)
     {
         _pane.SetImage(null, null);
         _pane.Message = src.IsPdf ? $"Rendering page {page} of {src.Title}…" : $"Opening {src.Title}…";
@@ -199,22 +215,22 @@ sealed class ScanPane : UserControl
         try
         {
             var path = await PathFor(src);
+            ct.ThrowIfCancellationRequested();
             if (src.IsPdf)
             {
-                pages = await PdfPageRender.PageCountAsync(path);
-                if (page > pages) page = pages;
-                bmp = await PdfPageRender.RenderAsync(path, page, ScanDpi);
+                // One PDF load per page: the page count comes with the render (the page is clamped to it).
+                (bmp, pages, page) = await PdfPageRender.RenderClampedAsync(path, page, ScanDpi, ct);
             }
             else
             {
-                (bmp, var count) = await Task.Run(() => { var b = ImageLoad.Load(path, out var n); return (b, n); });
+                (bmp, var count) = await Task.Run(() => { var b = ImageLoad.Load(path, out var n); return (b, n); }, ct);
                 if (count > 1) note = $"This TIFF has {count} pages; only the first is shown.";
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             bmp?.Dispose();
-            if (gen != _loadGen || IsDisposed) return;
+            if (gen != _loadGen || IsDisposed || ex is OperationCanceledException) return;
             var msg = ex switch
             {
                 InvalidDataException => ex.Message,
@@ -307,6 +323,8 @@ sealed class ScanPane : UserControl
         if (disposing)
         {
             _loadGen++;
+            try { _loadCts?.Cancel(); }
+            catch (ObjectDisposedException) { }
             _model.CancelRead();
             _pane.SetImage(null, null);
             SwapImage(null);

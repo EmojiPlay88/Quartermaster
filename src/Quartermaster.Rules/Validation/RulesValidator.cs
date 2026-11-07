@@ -37,6 +37,7 @@ public static class RulesValidator
             CheckBlocks(pack, issues);
             CheckAlerts(pack, issues);
             CheckOwners(pack, knownMapIds, issues);
+            CheckRuleRefPaths(pack, issues);
         }
         catch (Exception ex)
         {
@@ -187,6 +188,38 @@ public static class RulesValidator
 
     private static void Add(List<RulesIssue> l, RulesIssueSeverity s, string id, string name, string msg) =>
         l.Add(new RulesIssue(s, id, name, msg));
+
+    /// <summary>
+    /// True when a rule ref's document looks like a path on someone's computer (a drive like <c>C:</c>, a UNC or rooted path):
+    /// rule refs name a module document or <c>scan:{file name}</c>, never a local path (the pack is shared with other players).
+    /// </summary>
+    public static bool IsLocalPath(string? entry)
+    {
+        if (string.IsNullOrEmpty(entry)) return false;
+        var e = entry.Trim();
+        if (e.Length >= 2 && char.IsAsciiLetter(e[0]) && e[1] == ':') return true;   // C:\…, C:/…, C:file
+        if (e.StartsWith('\\') || e.StartsWith('/')) return true;                     // \\server\share, \x, /x
+        try { return Path.IsPathRooted(e); }
+        catch (ArgumentException) { return false; }
+    }
+
+    /// <summary>Rule refs whose document is a local path: an error on every item that uses them (or on the ref itself when none does).</summary>
+    private static void CheckRuleRefPaths(RulesPack pack, List<RulesIssue> issues)
+    {
+        foreach (var r in pack.RuleRefs)
+        {
+            if (!IsLocalPath(r.DocumentEntry)) continue;
+            string file;
+            try { file = Path.GetFileName(r.DocumentEntry.Replace('\\', '/').TrimEnd('/')); }
+            catch (ArgumentException) { file = ""; }
+            var msg = $"rule reference points to a file on this computer (\"{file}\"); link it again to a module document or an opened scan";
+            var users = pack.Formulas.Where(f => f.RuleRefId == r.Id).Select(f => (f.Id, f.Name, Who: $"Formula \"{f.Name}\""))
+                .Concat(pack.Tables.Where(t => t.RuleRefId == r.Id).Select(t => (t.Id, t.Name, Who: $"Table \"{t.Name}\"")))
+                .Concat(pack.Phases.Where(p => p.RuleRefId == r.Id).Select(p => (p.Id, p.Name, Who: $"Phase \"{p.Name}\""))).ToList();
+            if (users.Count == 0) Add(issues, RulesIssueSeverity.Error, r.Id, r.Label, $"Rule reference \"{r.Label}\": {msg}");
+            foreach (var u in users) Add(issues, RulesIssueSeverity.Error, u.Id, u.Name, $"{u.Who}: {msg}");
+        }
+    }
 
     private static string? ParseProblem(string text)
     {

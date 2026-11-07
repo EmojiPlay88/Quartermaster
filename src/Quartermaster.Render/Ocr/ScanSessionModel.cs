@@ -120,6 +120,34 @@ public sealed class ScanSessionModel
     /// <summary>The opened PDFs, which the rulebook search also indexes for this session.</summary>
     public IEnumerable<ScanSource> OpenedPdfs => _opened.Where(o => o.Kind == ScanSourceKind.FilePdf);
 
+    /// <summary>The opened scan with this <see cref="ScanSource.Key"/> (full path, case-insensitive), or null.</summary>
+    public ScanSource? OpenedByKey(string? key) =>
+        key == null ? null : _opened.FirstOrDefault(o => string.Equals(o.Key, key, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Another opened scan with the same file name as <paramref name="source"/> (their <c>scan:</c> refs would be the same), or null.</summary>
+    public ScanSource? SameNameAs(ScanSource source) =>
+        _opened.FirstOrDefault(o => !string.Equals(o.Key, source.Key, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(o.Title, source.Title, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The rule ref for a search hit: an entry that is an opened scan's key (its full path) becomes <c>scan:{file name}</c> via
+    /// <see cref="RuleRefFor"/>; anything else (a module entry) is unchanged.
+    /// </summary>
+    public (string Entry, int Page) RefForSearchHit(string entry, int page) =>
+        OpenedByKey(entry) is { } src ? RuleRefFor(src, page) : (entry, page);
+
+    /// <summary>
+    /// True when <paramref name="entry"/> may be stored in a rule ref: not empty, not a rooted path, no backslash, and no ':' other than
+    /// the <c>scan:</c> prefix. A rule ref must never carry a path on this computer.
+    /// </summary>
+    public static bool IsSafeRefEntry(string? entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry)) return false;
+        var rest = IsScanRef(entry) ? entry[ScanRefPrefix.Length..] : entry;
+        if (rest.Length == 0 || rest.Contains(':') || rest.Contains('\\')) return false;
+        return !Path.IsPathRooted(rest) && !RulesValidator.IsLocalPath(entry);
+    }
+
     // ---------- regions ----------
 
     readonly Dictionary<(string, int), (Size Image, Rectangle Region)> _regions = new();

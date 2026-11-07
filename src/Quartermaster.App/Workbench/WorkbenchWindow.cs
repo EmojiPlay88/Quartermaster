@@ -50,6 +50,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     int _searchHeight = SearchPanel.ExpandedHeight;
     int _indexGen;
     CancellationTokenSource? _indexBuildCts;
+    bool _closed;
 
     // scans / OCR
     readonly ScanSessionModel _scanModel = new();
@@ -118,10 +119,13 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _moduleDocs = s.Model.Documents.Select(d => (d.EntryName, d.Title)).ToList();
         _allModuleImages = ScanSessionModel.ModuleImages(s.Archive.EntryNames);
         (_moduleImages, _hiddenImages) = ScanSessionModel.ModuleImages(s.Archive.EntrySizes, _showAllImages);
+        var moduleSha = s.Archive.Sha256;
         _ = Task.Run(() =>
         {
             try { ScanCache.Prune(); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("scan cache prune: " + ex.Message); }
+            try { RulebookIndex.PruneCache(moduleSha); } // other modules' search caches unused for 90 days
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("search cache prune: " + ex.Message); }
         });
         WireSearch();
         WireScans();
@@ -129,7 +133,8 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _validateTimer.Tick += (_, _) => { _validateTimer.Stop(); Validate2(); };
         _s.RulesChanged += OnRulesChanged;
         Shown += (_, _) => { SetSplit(); TryPending(); };
-        FormClosed += (_, _) => { _indexCts.Cancel(); _scanModel.CancelRead(); _s.RulesChanged -= OnRulesChanged; _validateTimer.Dispose(); };
+        // FormClosed can fire more than once (an MDI child closed with its parent): the index source is cancelled and disposed once.
+        FormClosed += (_, _) => { if (!_closed) { _closed = true; _indexCts.Cancel(); _indexCts.Dispose(); } _scanModel.CancelRead(); _s.RulesChanged -= OnRulesChanged; _validateTimer.Dispose(); };
 
         if (Program.Smoke && s.Model.Documents.FirstOrDefault(d => d.Kind == Quartermaster.Vassal.DocumentKind.Pdf) is { } doc) _viewer.Open(doc);
         Apply();
@@ -306,6 +311,13 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     RuleRef? RefFor(string label, string entry, int page)
     {
         if (_s.Rules == null) return null;
+        // The pack is shared with other players: a rule ref never carries a path on this computer.
+        if (!ScanSessionModel.IsSafeRefEntry(entry))
+        {
+            Program.AppLog("workbench: refused a rule ref to a local path or unsafe entry");
+            Warn("This document can't be used as a rule ref: rule refs name a module document or an opened scan's file name, never a path on this computer.");
+            return null;
+        }
         RuleRef? made = null;
         _s.UpdateRules(p =>
         {
@@ -357,6 +369,8 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         _split.Panel1.Resize += (_, _) => FitSearch();
         _search.HitActivated += (entry, page) => Guard(() => OpenHit(entry, page));
         _search.UseAsRuleRef += (entry, page) => Guard(() => UseAsRuleRef(entry, page));
+        _search.NotSearchableActivated += entry => Guard(() => OpenNotSearchable(entry));
+        _search.ScanFirstPage += entry => Guard(() => ScanFirstPage(entry));
         _search.CanUseRuleRef = () => !_s.IsGuest && _s.Rules != null && ActiveEditor?.CanUseRuleRef == true;
         _searchBtn.Click += (_, _) => Guard(() => RunSearch(_searchBox.Text));
         _searchBox.KeyDown += (_, e) =>
@@ -401,14 +415,19 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
     /// <summary>Indexes the module's PDFs in the background (cached per document); the status bar shows progress.</summary>
     void StartIndex()
     {
+        if (_closed) return; // the index source is disposed
         var pdfs = _s.Model.Documents.Where(d => d.Kind == DocumentKind.Pdf).GroupBy(d => d.EntryName).Select(g => g.First())
             .Select(d => (d.EntryName, d.Title, (Func<Stream>)(() => _s.Archive.OpenEntry(d.EntryName)))).ToList();
-        // PDFs opened with "Open scan…" are searchable for this session too (keyed by their full path).
+        // PDFs opened with "Open scan…" are searchable for this session too (keyed by their full path); their text stays in memory
+        // only (never in the disk cache), and a rebuild reuses what the last index already read.
+        var memoryOnly = new List<string>();
         foreach (var o in _scanModel.OpenedPdfs)
         {
             var path = o.Key;
             pdfs.Add((path, o.Title, () => File.OpenRead(path)));
+            memoryOnly.Add(path);
         }
+        var previous = _index;
         // A rebuild supersedes the running build (the old index stays usable until the new one is ready). Each build's source is
         // disposed once its build has finished, so a running Task.Run never sees a disposed token source.
         try { _indexBuildCts?.Cancel(); }
@@ -432,15 +451,16 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
             _statusText.Text = $"Indexing rulebooks… {pct} %";
         });
         var cts = _indexBuildCts = CancellationTokenSource.CreateLinkedTokenSource(_indexCts.Token);
-        _indexTask = BuildIndexAsync(pdfs, progress, gen, cts.Token);
+        _indexTask = BuildIndexAsync(pdfs, progress, gen, previous, memoryOnly, cts.Token);
         _indexTask.ContinueWith(_ => cts.Dispose(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
-    async Task BuildIndexAsync(IReadOnlyList<(string, string, Func<Stream>)> pdfs, IProgress<double> progress, int gen, CancellationToken ct)
+    async Task BuildIndexAsync(IReadOnlyList<(string, string, Func<Stream>)> pdfs, IProgress<double> progress, int gen,
+        RulebookIndex? previous, IReadOnlyCollection<string> memoryOnly, CancellationToken ct)
     {
         RulebookIndex ix;
         string? failed = null;
-        try { ix = await RulebookIndex.BuildAsync(_s.Archive.Sha256, pdfs, progress, ct); }
+        try { ix = await RulebookIndex.BuildAsync(_s.Archive.Sha256, pdfs, progress, ct, previous, memoryOnly); }
         catch (OperationCanceledException) { return; }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -505,12 +525,38 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         if (doc == null)
         {
             // A PDF opened with "Open scan…": shown as a rendered page in the scan pane.
-            if (_scanModel.Opened.FirstOrDefault(o => o.Key == entry) is { } src) { _ = ShowScan(src, page); return; }
-            Warn($"'{entry}' is not in this module.");
+            if (_scanModel.OpenedByKey(entry) is { } src) { _ = ShowScan(src, page); return; }
+            Warn($"'{Path.GetFileName(entry)}' is not in this module.");
             return;
         }
         ShowPdf();
         _viewer.Open(doc, page, SearchPanelModel.ViewerSearchTerm(_lastQuery));
+    }
+
+    /// <summary>A "not searchable" row was opened: a module PDF opens on page 1 with a hint to scan it; an opened PDF shows page 1 as a scan.</summary>
+    void OpenNotSearchable(string entry)
+    {
+        if (_s.Model.Documents.FirstOrDefault(d => d.EntryName == entry) is { } doc)
+        {
+            ShowPdf();
+            _viewer.Open(doc, 1);
+            _statusText.Text = SearchPanelModel.NoTextStatus;
+            return;
+        }
+        if (_scanModel.OpenedByKey(entry) is { } src) { _ = ShowScan(src, 1); return; }
+        Warn($"'{Path.GetFileName(entry)}' is not in this module.");
+    }
+
+    /// <summary>"Scan page 1" on a "not searchable" row: renders the document's first page in the scan pane.</summary>
+    void ScanFirstPage(string entry)
+    {
+        if (_s.Model.Documents.FirstOrDefault(d => d.EntryName == entry && d.Kind == DocumentKind.Pdf) is { } doc)
+        {
+            _ = ShowScan(ScanSource.ModulePdf(doc.EntryName, doc.Title), 1);
+            return;
+        }
+        if (_scanModel.OpenedByKey(entry) is { } src) { _ = ShowScan(src, 1); return; }
+        Warn($"'{Path.GetFileName(entry)}' is not in this module.");
     }
 
     void UseAsRuleRef(string entry, int page)
@@ -520,7 +566,9 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
             Warn("Select a formula, table or phase first, then use the result as its rule ref.");
             return;
         }
-        editor.UseRuleRef(label => RefFor(label, entry, page));
+        // A hit in a PDF opened with Open scan… is keyed by its full path: the ref stores scan:{file name}, never the path.
+        var (refEntry, refPage) = _s.Model.Documents.Any(d => d.EntryName == entry) ? (entry, page) : _scanModel.RefForSearchHit(entry, page);
+        editor.UseRuleRef(label => RefFor(label, refEntry, refPage));
         RefreshUsed();
     }
 
@@ -639,6 +687,8 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         var src = _scanModel.AddFile(path);
         if (_scanModel.Opened.Count != before)
         {
+            if (_scanModel.SameNameAs(src) is { } other)
+                Warn($"Another opened scan is also named \"{src.Title}\" (in {Path.GetDirectoryName(other.Key)}). Rule refs to opened scans keep only the file name (scan:{src.Title}), so they can't tell the two apart; rename one to keep their links separate.");
             RefreshDocLists();
             if (src.IsPdf) StartIndex();
         }
@@ -824,6 +874,28 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
             OpenHit(hit.Entry, hit.Page);
             Pump(() => _scan.Loading.IsCompleted, 30);
             if (_scan.Source?.Key != fp.Key || _scan.Page != 2 || _scan.Image == null) return ("a search hit in the opened PDF did not show its page in the scan pane", null);
+
+            // Use as rule ref on that hit: the ref names the opened file (scan:{file name}), never its full path.
+            _tabs.SelectedTab = _tablesPage;
+            _tables.SelectTable(made.Id);
+            RunSearch("supply");
+            if (!_search.SelectHitForSmoke(2, fp.Key)) return ("the opened PDF's page-2 hit is not in the results", null);
+            if (!_search.UseSelectedForSmoke()) return ("Use as rule ref was not available on the opened PDF's hit", null);
+            Application.DoEvents();
+            var t2 = _s.Rules!.ById<TableDef>(made.Id);
+            var r2 = t2?.RuleRefId == null ? null : _s.Rules.ById<RuleRef>(t2.RuleRefId);
+            Program.AppLog($"smoke: rule ref from the opened PDF's hit: '{r2?.DocumentEntry}' p. {r2?.Page}");
+            if (r2 == null || r2.DocumentEntry != ScanSessionModel.ScanRefPrefix + "opened-rules.pdf" || r2.Page != 2)
+                return ("Use as rule ref on the opened PDF's hit did not store scan:opened-rules.pdf p. 2", null);
+            if (_s.Rules.RuleRefs.Any(x => RulesValidator.IsLocalPath(x.DocumentEntry))) return ("a rule ref stores a local path", null);
+            var shown2 = SearchPanelModel.DescribeRef(r2, RefDocs, _index?.Documents);
+            Program.AppLog($"smoke: opened PDF rule ref reads '{shown2.Text}' (link {shown2.IsLink})");
+            if (!shown2.IsLink) return ("the opened PDF's rule ref is not a link", null);
+            RefreshUsed();
+            var usedScan = SearchPanelModel.UsedOnPageRows(_s.Rules, r2.DocumentEntry, 2).Select(u => u.Text).ToList();
+            Program.AppLog("smoke: used on scan:opened-rules.pdf p. 2: " + string.Join(" | ", usedScan));
+            if (!usedScan.Contains("Table: " + t2!.Name)) return ("Used on this page does not list the table for the opened PDF's page", null);
+            if (_viewer.UsedOnPageLines.Contains("Table: " + t2.Name)) return ("Used on this page lists the scan ref on the module PDF", null);
         }
         var back = ShowScan(imageSrc, 1);
         Pump(() => back.IsCompleted && _scan.Loading.IsCompleted, 20);
@@ -884,6 +956,11 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         if (!shown.IsLink) return "the rule ref is not a link";
         var missing = SearchPanelModel.DescribeRef(r with { Page = 99 }, _moduleDocs, _index.Documents);
         if (!missing.Missing || missing.IsLink) return "a ref past the last page is not shown as missing";
+        // A "not searchable" row opens its PDF on page 1 with the scan hint (the same path the row's double-click takes).
+        OpenNotSearchable(doc.Entry);
+        Program.AppLog($"smoke: not-searchable open: {_viewer.Document?.EntryName} p. {_viewer.Page}; status '{_statusText.Text}'");
+        if (_viewer.Document?.EntryName != doc.Entry || _viewer.Page != 1 || _statusText.Text != SearchPanelModel.NoTextStatus)
+            return "opening a not-searchable document did not show page 1 with the scan hint";
         return null;
     }
 

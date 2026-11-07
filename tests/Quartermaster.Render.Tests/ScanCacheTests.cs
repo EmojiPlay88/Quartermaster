@@ -34,6 +34,22 @@ public class ScanCacheTests : IDisposable
     }
 
     [Fact]
+    public void Extract_ExistingCopy_ReplacedOrKeptWhenOpen_AlwaysReturnsAnExistingFile()
+    {
+        var bytes = Encoding.ASCII.GetBytes("%PDF-1.4 invented again");
+        var a = ScanCache.Extract(() => new MemoryStream(bytes), ".pdf");
+        // Pruned between extractions: the next one puts it back.
+        File.Delete(a);
+        Assert.Equal(a, ScanCache.Extract(() => new MemoryStream(bytes), ".pdf"));
+        Assert.Equal(bytes, File.ReadAllBytes(a));
+        // Held open by a reader (the PDF renderer): it can't be replaced, the cached copy (same bytes) is used.
+        using (new FileStream(a, FileMode.Open, FileAccess.Read, FileShare.Read))
+            Assert.Equal(a, ScanCache.Extract(() => new MemoryStream(bytes), ".pdf"));
+        Assert.Equal(bytes, File.ReadAllBytes(a));
+        Assert.Empty(Directory.GetFiles(ScanCache.Folder, "*.tmp"));
+    }
+
+    [Fact]
     public void Prune_DropsOldFiles_ThenOldestUntilUnderCap()
     {
         Directory.CreateDirectory(ScanCache.Folder);

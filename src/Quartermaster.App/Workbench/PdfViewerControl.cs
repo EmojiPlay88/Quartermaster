@@ -30,6 +30,13 @@ sealed class PdfViewerControl : UserControl
     readonly Panel? _usedPanel;
     readonly ListBox? _used;
     readonly List<(string Kind, string Id)> _usedIds = new();
+    readonly Font? _boldFont; // "Used on this page" title; disposed with the control
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing); // the label using the font goes first
+        if (disposing) _boldFont?.Dispose();
+    }
 
     /// <param name="toolbar">Show the document combo and page controls.</param>
     /// <param name="allowWeb">False in smoke runs: PDF/HTML show a placeholder instead of starting WebView2.</param>
@@ -58,7 +65,8 @@ sealed class PdfViewerControl : UserControl
         _used = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None, BackColor = SystemColors.Control };
         _usedPanel = new Panel { Dock = DockStyle.Top, Height = 50, Visible = false, Padding = new Padding(4, 0, 4, 2) };
         _usedPanel.Controls.Add(_used);
-        _usedPanel.Controls.Add(new Label { Text = "Used on this page", Dock = DockStyle.Top, Height = 16, Font = new Font(Font, FontStyle.Bold) });
+        _boldFont = new Font(Font, FontStyle.Bold);
+        _usedPanel.Controls.Add(new Label { Text = "Used on this page", Dock = DockStyle.Top, Height = 16, Font = _boldFont });
         Controls.Add(_usedPanel);
         Controls.Add(_bar);
         _used.DoubleClick += (_, _) => ActivateUsed();

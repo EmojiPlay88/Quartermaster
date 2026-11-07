@@ -40,6 +40,16 @@ public static class SearchPanelModel
 
     public static string DefinedHint(int page) => $"Probably defined on page {page}";
 
+    /// <summary>Status shown when a "not searchable" module PDF is opened from the results.</summary>
+    public const string NoTextStatus = "This PDF has no text; use Scan this page to read a page with OCR.";
+
+    /// <summary>
+    /// Rows that open something when activated: a hit (its page), or a "not searchable" document (page 1, to read it with OCR).
+    /// Headings and messages do nothing.
+    /// </summary>
+    public static bool Opens(SearchRow? row) =>
+        row is { Kind: SearchRowKind.Hit or SearchRowKind.NotSearchable } && !string.IsNullOrEmpty(row.Entry);
+
     /// <summary>
     /// The results for a query: per document (index order) a heading and its matching pages in page order; every document that is
     /// not searchable is listed greyed "not searchable". An empty query gives no rows.

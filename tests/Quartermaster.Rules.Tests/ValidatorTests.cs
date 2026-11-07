@@ -2,6 +2,34 @@ namespace Quartermaster.Rules.Tests;
 
 public class ValidatorTests
 {
+    [Fact]
+    public void RuleRef_ToLocalPath_IsAnErrorOnItsUsers()
+    {
+        var pack = new RulesPack
+        {
+            RuleRefs = new()
+            {
+                new RuleRef { Id = "r1", Label = "Supply", DocumentEntry = @"C:\Users\someone\Rules.pdf", Page = 2 },
+                new RuleRef { Id = "r2", Label = "Orphan", DocumentEntry = @"\\server\share\x.pdf", Page = 1 },
+                new RuleRef { Id = "r3", Label = "Fine", DocumentEntry = "scan:Rules.pdf", Page = 2 },
+                new RuleRef { Id = "r4", Label = "Module", DocumentEntry = "docs/rules.pdf", Page = 1 },
+            },
+            Formulas = new() { new FormulaDef { Id = "f1", Name = "Supply roll", Text = "1", RuleRefId = "r1" } },
+            Tables = new() { new TableDef { Id = "t1", Name = "Chart", Kind = TableKind.OneD, RowKeys = new() { "1" }, ColumnKeys = new() { "V" }, Cells = new() { new() { "1" } }, RuleRefId = "r3" } },
+        };
+        var issues = RulesValidator.Validate(pack).Where(i => i.Message.Contains("file on this computer")).ToList();
+        Assert.Equal(2, issues.Count);
+        Assert.All(issues, i => Assert.Equal(RulesIssueSeverity.Error, i.Severity));
+        Assert.Contains(issues, i => i.EntityId == "f1" && i.Message.StartsWith("Formula \"Supply roll\":") && i.Message.Contains("\"Rules.pdf\""));
+        Assert.Contains(issues, i => i.EntityId == "r2");
+        Assert.DoesNotContain(issues, i => i.Message.Contains(@"C:\Users"));   // the message names the file, not the path
+        Assert.True(RulesValidator.IsLocalPath("/home/x/r.pdf"));
+        Assert.True(RulesValidator.IsLocalPath("D:r.pdf"));
+        Assert.False(RulesValidator.IsLocalPath("scan:r.pdf"));
+        Assert.False(RulesValidator.IsLocalPath("docs/r.pdf"));
+        Assert.False(RulesValidator.IsLocalPath(""));
+    }
+
     private static RulesPack Clean() => new()
     {
         Properties = new()

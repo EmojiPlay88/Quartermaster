@@ -54,6 +54,7 @@ sealed class SearchPanel : UserControl
     readonly ListBox _list = new() { Dock = DockStyle.Fill, DrawMode = DrawMode.OwnerDrawVariable, IntegralHeight = false, HorizontalScrollbar = false };
     readonly ContextMenuStrip _menu = new();
     readonly ToolStripMenuItem _useRef = new("Use as rule ref");
+    readonly ToolStripMenuItem _scanFirst = new("Scan page 1");
     readonly Font _bold;
     IReadOnlyList<SearchRow> _rows = Array.Empty<SearchRow>();
     bool _collapsed;
@@ -63,6 +64,12 @@ sealed class SearchPanel : UserControl
 
     /// <summary>"Use as rule ref" chosen on a hit row: document entry and page.</summary>
     public event Action<string, int>? UseAsRuleRef;
+
+    /// <summary>A "not searchable" row was opened (double-click or Enter): document entry.</summary>
+    public event Action<string>? NotSearchableActivated;
+
+    /// <summary>"Scan page 1" chosen on a "not searchable" row: document entry.</summary>
+    public event Action<string>? ScanFirstPage;
 
     /// <summary>Asked when the context menu opens: is there an editor item that can take a rule ref?</summary>
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -80,6 +87,7 @@ sealed class SearchPanel : UserControl
         Controls.Add(_list);
         Controls.Add(head);
         _menu.Items.Add(_useRef);
+        _menu.Items.Add(_scanFirst);
         _list.ContextMenuStrip = _menu;
 
         _toggle.Click += (_, _) => Collapsed = !Collapsed;
@@ -102,10 +110,14 @@ sealed class SearchPanel : UserControl
         _menu.Opening += (_, e) =>
         {
             var hit = SelectedHit;
+            var noText = SelectedNotSearchable;
+            _useRef.Visible = hit != null;
             _useRef.Enabled = hit != null && (CanUseRuleRef?.Invoke() ?? false);
-            if (hit == null) e.Cancel = true;
+            _scanFirst.Visible = noText != null;
+            if (hit == null && noText == null) e.Cancel = true;
         };
         _useRef.Click += (_, _) => { if (SelectedHit is { } h) UseAsRuleRef?.Invoke(h.Entry, h.Page); };
+        _scanFirst.Click += (_, _) => { if (SelectedNotSearchable is { } r) ScanFirstPage?.Invoke(r.Entry); };
     }
 
     protected override void Dispose(bool disposing)
@@ -156,16 +168,21 @@ sealed class SearchPanel : UserControl
     SearchRow? SelectedHit => _list.SelectedIndex >= 0 && _list.SelectedIndex < _rows.Count && _rows[_list.SelectedIndex].Kind == SearchRowKind.Hit
         ? _rows[_list.SelectedIndex] : null;
 
+    SearchRow? SelectedNotSearchable => _list.SelectedIndex >= 0 && _list.SelectedIndex < _rows.Count && _rows[_list.SelectedIndex].Kind == SearchRowKind.NotSearchable
+        ? _rows[_list.SelectedIndex] : null;
+
     void Activate(int index)
     {
-        if (index < 0 || index >= _rows.Count || _rows[index].Kind != SearchRowKind.Hit) return;
-        HitActivated?.Invoke(_rows[index].Entry, _rows[index].Page);
+        if (index < 0 || index >= _rows.Count || !SearchPanelModel.Opens(_rows[index])) return;
+        var row = _rows[index];
+        if (row.Kind == SearchRowKind.NotSearchable) NotSearchableActivated?.Invoke(row.Entry);
+        else HitActivated?.Invoke(row.Entry, row.Page);
     }
 
-    /// <summary>Smoke: selects the first hit row on the given page (any page when 0); false when there is none.</summary>
-    public bool SelectHitForSmoke(int page)
+    /// <summary>Smoke: selects the first hit row on the given page (any page when 0), in <paramref name="entry"/> when given; false when there is none.</summary>
+    public bool SelectHitForSmoke(int page, string? entry = null)
     {
-        var i = _rows.ToList().FindIndex(r => r.Kind == SearchRowKind.Hit && (page == 0 || r.Page == page));
+        var i = _rows.ToList().FindIndex(r => r.Kind == SearchRowKind.Hit && (page == 0 || r.Page == page) && (entry == null || r.Entry == entry));
         if (i < 0) return false;
         _list.SelectedIndex = i;
         return true;
@@ -199,7 +216,7 @@ sealed class SearchPanel : UserControl
     {
         if (e.Index < 0 || e.Index >= _rows.Count) return;
         var row = _rows[e.Index];
-        var selected = (e.State & DrawItemState.Selected) != 0 && row.Kind == SearchRowKind.Hit;
+        var selected = (e.State & DrawItemState.Selected) != 0 && SearchPanelModel.Opens(row);
         var g = e.Graphics;
         using (var back = new SolidBrush(selected ? SystemColors.Highlight : row.Kind == SearchRowKind.Document ? SystemColors.Control : SystemColors.Window))
             g.FillRectangle(back, e.Bounds);
