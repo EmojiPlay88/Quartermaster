@@ -341,6 +341,25 @@ public class HostSessionTests : IDisposable
     }
 
     [Fact]
+    public void Leave_BackToSoloWithTheFullView()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        Assert.True(r.S.ViewSides!.SetEquals(new[] { "red" }));
+        Assert.Equal(2, r.S.Game!.State.Players.Count);
+        var snaps = bob.Of<Snapshot>().Count();
+        r.H.Leave();
+        r.D.Pump();
+        Assert.Null(r.S.ViewSides);                                   // no lingering one-side filter
+        Assert.Empty(r.S.Game!.State.Players);                        // a solo game again
+        Assert.Equal(HostSession.HostEndedText, bob.Of<Kicked>().Last().Reason);
+        Assert.Equal(snaps, bob.Of<Snapshot>().Count());              // nothing more reaches the guest
+        Assert.DoesNotContain(SecretStock, AllReceivedText(bob));
+    }
+
+    [Fact]
     public void HostingSavedGame_HostKeepsOwnSides_OthersBecomeOpenSeats()
     {
         var r = Open(new[] { new PlayerDef("p7", "Old Bob", new[] { "blue", "green" }), Alice });

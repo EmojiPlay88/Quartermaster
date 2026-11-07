@@ -844,6 +844,7 @@ sealed partial class MainForm : Form
         if (_session == null) return;
         if (n.Kind == WindowNodeKind.Setup && n.Ref is SetupDef s)
         {
+            if (_session.IsGuest) { SetStatus(ModuleSession.GuestBusyText); return; }   // a guest plays the host's game only
             if (!ConfirmDiscard()) return;
             // Same difficulty choice as File > Load Setup (default = last used); this setup is preselected.
             if (Program.Smoke) Guard(() => _session.LoadSetup(s, _opts.Difficulty ?? _settings.Current.LastDifficulty));

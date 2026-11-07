@@ -118,6 +118,36 @@ public class OnlineLobbyModelTests : IDisposable
     }
 
     [Fact]
+    public void Rows_UntrustedListingsAreBounded()
+    {
+        var many = Enumerable.Range(0, 40).Select(i => "Side" + i).ToList();
+        var row = Assert.Single(OnlineLobbyModel.Rows(new[] { Listing("AAAAAA", free: many, max: 6) }, Sha));
+        Assert.Equal(OnlineLobbyModel.MaxFreeSidesShown, row.FreeSides.Split(", ").Count(x => x.StartsWith("Side", StringComparison.Ordinal)));
+        Assert.EndsWith("…", row.FreeSides);
+        var flood = Enumerable.Range(0, 500).Select(i => Listing("AAAAAA", "L" + i));
+        Assert.Equal(OnlineLobbyModel.MaxRows, OnlineLobbyModel.Rows(flood, Sha).Count);
+        Assert.Equal("a b", OnlineLobbyModel.CleanText("a\u0007b"));
+        Assert.Equal(5, OnlineLobbyModel.CleanText(new string('x', 99), 5).Length);
+    }
+
+    [Fact]
+    public void CertificateTrust_CanBeRepointed_AndNeverThrows()
+    {
+        var t = new CertificateTrust();
+        var check = new CertificateCheck("relay:1", "AA", null);
+        Assert.False(t.Check(check));                 // nobody asked yet: no
+        t.Ask = _ => true;
+        Assert.True(t.Check(check));
+        t.Ask = _ => throw new InvalidOperationException("window gone");
+        Assert.False(t.Check(check));
+        t.Ask = null!;
+        Assert.False(t.Check(check));
+    }
+
+    [Fact]
+    public void GuestSaveText_NamesTheMenuItem() => Assert.Contains("Export Viewer Copy…", ModuleSession.GuestSaveText);
+
+    [Fact]
     public void HostedCodes_AreRemembered_AndForgotten()
     {
         OnlineLobbyModel.MarkHosted("zz9-zz8");

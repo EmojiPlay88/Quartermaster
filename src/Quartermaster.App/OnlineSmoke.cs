@@ -1,48 +1,42 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using Quartermaster.Core;
 using Quartermaster.Render;
-using Quartermaster.Relay;
 
 namespace Quartermaster.App;
 
 /// <summary>
-/// --smoke-online &lt;seconds&gt; [--screenshot-online &lt;png&gt;]: an in-process relay on a free loopback port; a host window creates a lobby for
-/// the given module and rules pack (invented Red/Blue sides), the Online lobby window lists it, a second window joins it as a guest,
-/// chooses Blue, sends one intent (a dice roll) and a chat line, and the host leaves. Screenshots: <c>-lobby</c>, <c>-host</c>, <c>-guest</c>.
-/// Needs QUARTERMASTER_LAYOUT_ROOT (everything it writes stays there) and --smoke N.
+/// --smoke-online &lt;seconds&gt; [--screenshot-online &lt;png&gt;]: starts the relay (the solution's Quartermaster.Relay build, as a child
+/// process) on a free loopback port; a host window creates a lobby for the given module and rules pack (invented Red/Blue sides), the
+/// Online lobby window lists it, a second window joins it as a guest, chooses Blue, sends one intent (a dice roll) and a chat line, and the
+/// host leaves. Screenshots: <c>-lobby</c>, <c>-host</c>, <c>-guest</c>. Needs QUARTERMASTER_LAYOUT_ROOT (everything it writes stays there)
+/// and --smoke N. The relay is found through <see cref="RelayExeVar"/> or next to / above the App's output.
 /// </summary>
 static class OnlineSmoke
 {
     const string Password = "red-and-blue";
     const string LobbyName = "Smoke lobby";
+    public const string RelayExeVar = "QUARTERMASTER_RELAY_EXE";
 
     public static void Run(StartupOptions opts)
     {
-        WebApplication? relay = null;
+        Process? relay = null;
         try
         {
             if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(AppDataRoot.EnvVar)))
                 throw new InvalidOperationException("QUARTERMASTER_LAYOUT_ROOT must be set for the online smoke.");
             if (opts.ModulePath == null || opts.RulesPath == null || !opts.Smoke)
                 throw new InvalidOperationException("--smoke-online needs a module path, --rules <pack> and --smoke N.");
+            var exe = FindRelay() ?? throw new InvalidOperationException(
+                $"The relay was not found. Build Quartermaster.Relay (dotnet build Quartermaster.slnx) or set {RelayExeVar} to Quartermaster.Relay.exe or .dll.");
             var port = FreePort();
             var dataDir = Path.Combine(AppDataRoot.Path, "smoke-relay");
-            relay = RelayApp.Build([], b =>
-            {
-                b.Logging.ClearProviders();
-                b.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Relay:Port"] = port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["Relay:DataDir"] = dataDir,
-                });
-            });
-            var app = relay;
-            Task.Run(() => app.StartAsync()).GetAwaiter().GetResult();
-            Program.AppLog($"smoke: relay listening on 127.0.0.1:{port}");
+            relay = StartRelay(exe, port, dataDir);
+            if (!WaitForPort(relay, port, TimeSpan.FromSeconds(30)))
+                throw new InvalidOperationException(relay.HasExited ? $"The relay exited at start (code {relay.ExitCode})." : "The relay did not start listening within 30 s.");
+            Program.AppLog($"smoke: relay ({Path.GetFileName(exe)}) listening on 127.0.0.1:{port}");
             Exercise(opts, port, TimeSpan.FromSeconds(Math.Clamp(opts.SmokeOnline ?? 60, 10, 600)));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -52,12 +46,68 @@ static class OnlineSmoke
         }
         finally
         {
-            if (relay is { } r)
+            if (relay != null)
             {
-                try { Task.Run(async () => { await r.StopAsync(); await r.DisposeAsync(); }).Wait(TimeSpan.FromSeconds(10)); }
+                try { if (!relay.HasExited) { relay.Kill(entireProcessTree: true); relay.WaitForExit(10_000); } }
                 catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("smoke: relay stop: " + ex.Message); }
+                relay.Dispose();
             }
         }
+    }
+
+    /// <summary>The relay binary: the env var, the App's own folder, or the solution's Relay build found above the App's output.</summary>
+    static string? FindRelay()
+    {
+        if (Environment.GetEnvironmentVariable(RelayExeVar) is { Length: > 0 } env)
+            return File.Exists(env) ? Path.GetFullPath(env) : null;
+        var here = AppContext.BaseDirectory;
+        foreach (var name in new[] { "Quartermaster.Relay.exe", "Quartermaster.Relay.dll" })
+            if (File.Exists(Path.Combine(here, name))) return Path.Combine(here, name);
+        for (var dir = new DirectoryInfo(here); dir != null; dir = dir.Parent)
+        {
+            var relayBin = Path.Combine(dir.FullName, "src", "Quartermaster.Relay", "bin");
+            if (!Directory.Exists(relayBin)) continue;
+            return Directory.EnumerateFiles(relayBin, "Quartermaster.Relay.exe", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(relayBin, "Quartermaster.Relay.dll", SearchOption.AllDirectories))
+                .Select(f => new FileInfo(f)).OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()?.FullName;
+        }
+        return null;
+    }
+
+    static Process StartRelay(string exe, int port, string dataDir)
+    {
+        var dll = exe.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+        var psi = new ProcessStartInfo(dll ? "dotnet" : exe)
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            WorkingDirectory = Path.GetDirectoryName(exe)!,
+        };
+        if (dll) psi.ArgumentList.Add(exe);
+        psi.ArgumentList.Add("--Relay:Port=" + port.ToString(CultureInfo.InvariantCulture));
+        psi.ArgumentList.Add("--Relay:DataDir=" + dataDir);
+        var p = Process.Start(psi) ?? throw new InvalidOperationException("The relay could not be started.");
+        // Drained (and dropped) so a full pipe never blocks the relay; its own log holds nothing secret but is not needed here.
+        p.OutputDataReceived += (_, _) => { };
+        p.ErrorDataReceived += (_, _) => { };
+        p.BeginOutputReadLine();
+        p.BeginErrorReadLine();
+        return p;
+    }
+
+    static bool WaitForPort(Process p, int port, TimeSpan max)
+    {
+        var until = DateTime.UtcNow + max;
+        while (DateTime.UtcNow < until && !p.HasExited)
+        {
+            try
+            {
+                using var c = new TcpClient();
+                c.Connect(IPAddress.Loopback, port);
+                return true;
+            }
+            catch (SocketException) { Thread.Sleep(100); }
+        }
+        return false;
     }
 
     static int FreePort()
@@ -181,6 +231,7 @@ static class OnlineSmoke
         // The host leaves: the guest is told, the host plays on locally.
         host.LeaveOnlineForSmoke();
         Check(host.HostOnline == null && host.Session?.Game != null, "host left and plays on locally");
+        Check(host.Session?.ViewSides == null && host.Session?.Game?.State.Players.Count == 0, "host back to solo with the full view");
         Pump(() => guest.GuestOnline?.State == GuestState.Refused, max);
         Check(guest.GuestOnline?.StatusText == HostSession.HostEndedText, $"guest told the host left ('{guest.GuestOnline?.StatusText}')");
         guest.Close();

@@ -111,13 +111,11 @@ sealed partial class MainForm
     /// </summary>
     async Task BeginHostingAsync(ModuleSession s, OnlineLaunch o)
     {
-        if (s.Game is not { } g) return;
+        if (s.Game == null) return;
         var hostSides = (o.HostSides ?? Array.Empty<string>()).ToList();
         if (OnlineLobbyModel.ValidateHostSides(s.Rules, hostSides) is { } bad) { OnlineFailed(bad); return; }
         var pack = s.Rules!;
         StopHotSeatForOnline();
-        // Launcher spec 4a.8: the host's choice wins; every other side is an open seat, whoever held it in the save.
-        if (g.State.Players.Count > 0) g.Execute(CommandLog.Prepare(new SetPlayers(new List<PlayerDef>()), g.State, s));
         var client = new RelayClient(RelayPrompts.Pins());
         string? down = null;
         void OnDown(string r) => down = r;
@@ -139,6 +137,9 @@ sealed partial class MainForm
             await client.CreateRoomAsync(code, verifier, draft);   // the relay keeps the host key for this room's life (rejoin)
             if (!StillCurrent(s, client)) return;
             client.Disconnected -= OnDown;
+            // Launcher spec 4a.8: the host's choice wins; every other side is an open seat, whoever held it in the save. Only now that
+            // the room exists, so a failed start leaves the saved game's players untouched.
+            if (s.Game is { } live && live.State.Players.Count > 0) live.Execute(CommandLog.Prepare(new SetPlayers(new List<PlayerDef>()), live.State, s));
             _transport = new RelayTransport(client, key);
             _host = new HostSession(s, new IntentExecutor(s, _phases!), _transport, password, code, draft, PostToUi);
             _host.SeatsChanged += UpdateOnlineUi;
@@ -189,6 +190,8 @@ sealed partial class MainForm
     async Task BeginGuestAsync(ModuleSession s, OnlineLaunch o)
     {
         if (o.Client is not { } client || o.Code is not { Length: > 0 } code) { OnlineFailed("The lobby did not hand over a joined connection.", guest: true); return; }
+        // The lobby window is gone: a changed certificate on a reconnect must be asked about over this window.
+        if (o.Trust != null) o.Trust.Ask = c => RelayPrompts.Trust(this, c);
         StopHotSeatForOnline();
         _relayClient = client;
         _online = o;
@@ -309,7 +312,7 @@ sealed partial class MainForm
         if (!Program.Smoke && MessageBox.Show(this,
                 "Leave the online game? The lobby closes and the other players are disconnected. The game continues here as a local game.",
                 "Leave Online Game", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
-        EndOnline(notifyGuests: true);
+        EndOnline(notifyGuests: true, backToLocal: true);
         RestartHotSeat();
         SetStatus("You left the online game; it continues here as a local game.");
     }
@@ -323,8 +326,9 @@ sealed partial class MainForm
     }
 
     /// <summary>Stops every online part (idempotent). The host tells its guests first; the relay drops the listing when the host's link closes.</summary>
-    void EndOnline(bool notifyGuests)
+    void EndOnline(bool notifyGuests, bool backToLocal = false)
     {
+        notifyGuests |= backToLocal;
         if (_leavingOnline) return;
         _leavingOnline = true;
         try
@@ -337,7 +341,13 @@ sealed partial class MainForm
             {
                 h.SeatsChanged -= UpdateOnlineUi;
                 h.ConnectionChanged -= UpdateOnlineUi;
-                if (notifyGuests) { try { h.EndGame(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("online: " + ex.Message); } }
+                try
+                {
+                    // Leaving to play on: back to a solo game with the full view (no lingering one-side filter). Closing: just tell the guests.
+                    if (backToLocal) h.Leave();
+                    else if (notifyGuests) h.EndGame();
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("online: " + ex.Message); }
                 h.Dispose();
             }
             if (_guest is { } g)

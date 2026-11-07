@@ -475,7 +475,7 @@ public sealed class ModuleSession : IDisposable
 
     // ---- online guest mode and viewer copies (spec 5, 8a.3) ----
 
-    public const string GuestSaveText = "Only the host can save the online game. Use Export viewer copy… to keep your view.";
+    public const string GuestSaveText = "Only the host can save the online game. Use Export Viewer Copy… to keep your view.";
     public const string GuestUndoText = "Only the host can undo";
     public const string ViewerCopyText = "Viewer copy — a player's view of an online game. It is read-only and cannot be continued.";
     public const string GuestBusyText = "Leave the online game first.";

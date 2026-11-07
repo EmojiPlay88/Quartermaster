@@ -177,6 +177,26 @@ public class GuestSessionTests : IDisposable
         return task.Result;
     }
 
+    [Fact]
+    public void ActionPortSwitch_AfterSwapToRemote_SendsToHost_NothingRunsLocally()
+    {
+        var r = Open();
+        var bob = Join(r);
+        Pick(r, bob);
+        Assert.Equal(GuestState.Playing, bob.G.State);
+        Func<GameCommand, GameState, GameCommand> prepare = (c, _) => c;
+        var pc = new PhaseController(bob.S, prepare);
+        var sw = new ActionPortSwitch(new LocalActions(bob.S, pc, new HistoryController(bob.S, pc, prepare)));
+        sw.Inner = bob.A;
+        var sent = bob.Raw.SentCount;
+        var localLog = bob.S.Game!.State.Log.Count;
+        sw.Chat("through the switch");
+        Assert.Equal(sent + 1, bob.Raw.SentCount);                  // went out to the host
+        Assert.Equal(localLog, bob.S.Game!.State.Log.Count);        // nothing executed on the guest's snapshot
+        r.D.Pump();
+        Assert.Contains(r.Host.Game!.State.Log, e => e.Text?.Contains("through the switch") == true);   // the host ran it
+    }
+
     // ---- privacy ----
 
     [Fact]

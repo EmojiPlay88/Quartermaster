@@ -140,6 +140,20 @@ public sealed class HostSession : IDisposable
             if (seat.MemberId is { } member) Send(member, new Kicked(HostEndedText));
     }
 
+    /// <summary>
+    /// The host leaves and plays on locally: guests are told (<see cref="EndGame"/>), the game goes back to solo (the seats' player
+    /// list is cleared with a logged SetPlayers) and the full view returns (no side filter), then the session is disposed.
+    /// </summary>
+    public void Leave()
+    {
+        if (_disposed) return;
+        EndGame();
+        Dispose();   // first, so the changes below send nothing
+        if (_s.Game is { } g && g.State.Players.Count > 0)
+            g.Execute(CommandLog.Prepare(CommandLog.Stamp(new SetPlayers(new List<PlayerDef>()), Seats.Host.PlayerId), g.State, _s));
+        _s.SetViewSides(null);
+    }
+
     public const string NoSuchSeatText = "That player is not in this game.";
     public const string SideHeldText = "That side is held by another player.";
 

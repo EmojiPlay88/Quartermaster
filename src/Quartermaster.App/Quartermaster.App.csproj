@@ -4,12 +4,6 @@
     <ProjectReference Include="..\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
     <ProjectReference Include="..\Quartermaster.Core\Quartermaster.Core.csproj" />
     <ProjectReference Include="..\Quartermaster.Render\Quartermaster.Render.csproj" />
-    <!-- In-process relay for the online smoke only. -->
-    <ProjectReference Include="..\Quartermaster.Relay\Quartermaster.Relay.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>

@@ -21,7 +21,8 @@ sealed class OnlineLobbyForm : Form
     readonly ModuleLibrary _library;
     readonly SettingsStore _store;
     readonly TextBox _relay = new() { Width = 260 };
-    readonly Label _state = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(8, 6, 3, 3) };
+    readonly Label _state = new() { AutoSize = true, MaximumSize = new Size(300, 18), AutoEllipsis = true, ForeColor = SystemColors.GrayText, Margin = new Padding(8, 6, 3, 3) };
+    readonly Button _close = new() { Text = "Close", DialogResult = DialogResult.Cancel, AutoSize = true, MinimumSize = new Size(75, 26) };
     readonly ListView _list = new()
     {
         Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false,
@@ -35,7 +36,7 @@ sealed class OnlineLobbyForm : Form
     RelayClient? _browser;
     Uri? _browserUri;
     string? _lastTrouble;
-    bool _busy, _closing, _lastOk;
+    bool _busy, _closing, _lastOk, _joining;
     IReadOnlyList<LobbyRow> _rows = Array.Empty<LobbyRow>();
 
     public LaunchRequest? Result { get; private set; }
@@ -68,18 +69,17 @@ sealed class OnlineLobbyForm : Form
         top.Controls.Add(_state);
         var listHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8, 4, 8, 0) };
         listHost.Controls.Add(_list);
-        var close = new Button { Text = "Close", DialogResult = DialogResult.Cancel, AutoSize = true, MinimumSize = new Size(75, 26) };
         var left = new FlowLayoutPanel { Dock = DockStyle.Left, AutoSize = true, WrapContents = false };
         left.Controls.AddRange(new Control[] { _join, _create, _hostSaved, _refresh });
         var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false };
-        right.Controls.Add(close);
+        right.Controls.Add(_close);
         var buttons = new Panel { Dock = DockStyle.Bottom, Height = 42, Padding = new Padding(8, 6, 8, 6) };
         buttons.Controls.Add(left);
         buttons.Controls.Add(right);
         Controls.Add(listHost);
         Controls.Add(top);
         Controls.Add(buttons);
-        CancelButton = close;
+        CancelButton = _close;
 
         _join.Click += async (_, _) => await GuardedAsync(JoinSelected);
         _list.DoubleClick += async (_, _) => await GuardedAsync(JoinSelected);
@@ -104,7 +104,13 @@ sealed class OnlineLobbyForm : Form
             if (_relay.Text.Trim().Length > 0) await GuardedAsync(() => RefreshAsync(manual: true));
             else SetState("Enter the relay address and press Refresh.");
         };
-        FormClosing += (_, _) => { _closing = true; _timer.Stop(); };
+        FormClosing += (_, e) =>
+        {
+            // A join in flight holds a relay connection that only this window can hand over or close: wait for it.
+            if (_joining && e.CloseReason == CloseReason.UserClosing && DialogResult != DialogResult.OK) { e.Cancel = true; return; }
+            _closing = true;
+            _timer.Stop();
+        };
     }
 
     protected override void Dispose(bool disposing)
@@ -160,6 +166,7 @@ sealed class OnlineLobbyForm : Form
         _join.Enabled = !_busy && sel != null && sel.CannotJoin == null;
         _create.Enabled = _hostSaved.Enabled = _refresh.Enabled = !_busy;
         _relay.Enabled = !_busy;
+        _close.Enabled = !_joining;
     }
 
     LobbyRow? Selected => _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as LobbyRow : null;
@@ -295,34 +302,44 @@ sealed class OnlineLobbyForm : Form
     public async Task<LaunchRequest?> JoinAsync(LobbyListing listing, string playerName, string password)
     {
         if (RelayUri(true) is not { } uri) return null;
+        var name = OnlineLobbyModel.CleanText(listing.Name);   // listings are untrusted: only cleaned text is shown
+        _joining = true;
         SetBusy(true);
         SetState("Joining…");
+        // The game window takes over the certificate question once it owns the client (a changed certificate on a reconnect).
+        var trust = new CertificateTrust { Ask = c => RelayPrompts.Trust(this, c) };
         var client = new RelayClient(RelayPrompts.Pins());
         string? down = null;
         void OnDown(string r) => down = r;
         client.Disconnected += OnDown;
         try
         {
-            await client.ConnectAsync(uri, c => RelayPrompts.Trust(this, c), CancellationToken.None);
+            await client.ConnectAsync(uri, trust.Check, CancellationToken.None);
             var code = GameCode.Normalize(listing.Code);
             var verifier = await Task.Run(() => Secrets.AuthVerifier(password ?? "", code));
             await client.JoinRoomAsync(code, verifier);
             client.Disconnected -= OnDown;
+            if (_closing || IsDisposed)
+            {
+                // The window went away while joining: nobody takes the connection, so it closes here.
+                await client.DisposeAsync();
+                return null;
+            }
             _store.Update(s => s with { PlayerName = playerName });
-            SetState("Joined " + listing.Name);
+            SetState("Joined " + name);
             return new LaunchRequest(_row.Entry.Path, null, LaunchKind.JoinOnline, null, null,
-                new OnlineLaunch(uri, playerName, password ?? "", null, null, code, listing, client));
+                new OnlineLaunch(uri, playerName, password ?? "", null, null, code, listing, client, trust));
         }
         catch (RelayException ex)
         {
             client.Disconnected -= OnDown;
             await client.DisposeAsync();
-            var msg = down != null && ex.Message == "Not connected to the relay." ? down : ex.Message;
+            var msg = OnlineLobbyModel.CleanText(down != null && ex.Message == "Not connected to the relay." ? down : ex.Message, 300);   // relay text is untrusted too
             SetState(msg);
-            Problem("Could not join " + listing.Name + ":\n" + msg);
+            Problem("Could not join " + name + ":\n" + msg);
             return null;
         }
-        finally { SetBusy(false); }
+        finally { _joining = false; SetBusy(false); }
     }
 
     // ---------- hosting ----------

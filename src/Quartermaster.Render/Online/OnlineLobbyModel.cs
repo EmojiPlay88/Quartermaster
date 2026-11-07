@@ -11,9 +11,32 @@ namespace Quartermaster.Render;
 /// game window connects and creates the room itself. Holds the password in memory only: <see cref="ToString"/> never prints it.
 /// </summary>
 public sealed record OnlineLaunch(Uri Relay, string PlayerName, string Password, string? LobbyName = null,
-    IReadOnlyList<string>? HostSides = null, string? Code = null, LobbyListing? Listing = null, RelayClient? Client = null)
+    IReadOnlyList<string>? HostSides = null, string? Code = null, LobbyListing? Listing = null, RelayClient? Client = null,
+    CertificateTrust? Trust = null)
 {
     public override string ToString() => $"OnlineLaunch {{ Relay = {Relay}, Code = {Code ?? "(new)"} }}";
+}
+
+/// <summary>
+/// The certificate question of a relay client, re-pointable: a client keeps the callback it connected with for its whole life
+/// (reconnects included), so the window that owns the client now (lobby window, then game window) is set here.
+/// </summary>
+public sealed class CertificateTrust
+{
+    private Func<CertificateCheck, bool> _ask = _ => false;
+
+    public Func<CertificateCheck, bool> Ask
+    {
+        get => _ask;
+        set => _ask = value ?? (_ => false);
+    }
+
+    /// <summary>The callback to connect with; never throws (a throwing question is a no).</summary>
+    public bool Check(CertificateCheck c)
+    {
+        try { return _ask(c); }
+        catch (Exception) { return false; }
+    }
 }
 
 /// <summary>One row of the Online lobby table.</summary>
@@ -86,7 +109,11 @@ public static class OnlineLobbyModel
 
     private static readonly HashSet<string> Hosted = new(StringComparer.Ordinal);
 
-    /// <summary>Remembers a code this program hosts, so its own lobby is never listed to itself (launcher spec 4a.7).</summary>
+    /// <summary>
+    /// Remembers a code this program hosts, so its own lobby is never listed to itself (launcher spec 4a.7). Per process on purpose:
+    /// nothing is stored, so a second copy of Quartermaster on the same computer (or a host restart) does see the lobby, exactly as
+    /// another player would.
+    /// </summary>
     public static void MarkHosted(string code) { lock (Hosted) Hosted.Add(GameCode.Normalize(code ?? "")); }
 
     public static void UnmarkHosted(string code) { lock (Hosted) Hosted.Remove(GameCode.Normalize(code ?? "")); }
@@ -104,14 +131,23 @@ public static class OnlineLobbyModel
         {
             if (l == null || !string.Equals(l.ModuleSha256, moduleSha, StringComparison.OrdinalIgnoreCase)) continue;
             if (ownCodes != null && ownCodes.Contains(GameCode.Normalize(l.Code ?? ""))) continue;
+            // Listings are untrusted (anyone can publish one): every shown text is cleaned and bounded.
             var free = (l.FreeSides ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            var freeText = string.Join(", ", free.Take(MaxFreeSidesShown).Select(x => Clip(x, 40)));
+            if (free.Count > MaxFreeSidesShown) freeText += ", …";
             rows.Add(new LobbyRow(l, Clip(l.Name, NewGameRules.MaxLobbyName), Clip(l.HostName, ChatText.MaxName),
-                free.Count == 0 ? "—" : string.Join(", ", free.Select(x => Clip(x, 40))),
+                free.Count == 0 ? "—" : freeText,
                 $"{Math.Max(0, l.Players).ToString(CultureInfo.InvariantCulture)}/{Math.Max(0, l.MaxPlayers).ToString(CultureInfo.InvariantCulture)}",
                 l.Locked, CannotJoin(l)));
         }
-        return rows.OrderBy(r => r.CannotJoin == null ? 0 : 1).ThenBy(r => r.Lobby, StringComparer.CurrentCultureIgnoreCase).ToList();
+        return rows.OrderBy(r => r.CannotJoin == null ? 0 : 1).ThenBy(r => r.Lobby, StringComparer.CurrentCultureIgnoreCase).Take(MaxRows).ToList();
     }
+
+    /// <summary>Most rows the table shows; most free sides one row names.</summary>
+    public const int MaxRows = 200, MaxFreeSidesShown = 16;
+
+    /// <summary>Text from a listing (or another player) made safe to show: control characters removed, at most <paramref name="max"/> characters.</summary>
+    public static string CleanText(string? s, int max = NewGameRules.MaxLobbyName) => Clip(s, max);
 
     /// <summary>Why this lobby cannot be joined now (null = it can): another network version, or no free side / no free place.</summary>
     public static string? CannotJoin(LobbyListing l)
