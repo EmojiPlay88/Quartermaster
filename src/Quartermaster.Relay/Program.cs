@@ -43,14 +43,14 @@ namespace Quartermaster.Relay
                 KeepAliveInterval = TimeSpan.FromSeconds(15),
                 KeepAliveTimeout = TimeSpan.FromSeconds(30),
             });
-            app.Map(EndpointPath, (HttpContext ctx, Rooms rooms, TimeProvider time) => Serve(ctx, rooms, time, log));
+            app.Map(EndpointPath, (HttpContext ctx, Rooms rooms, TimeProvider time) => Serve(ctx, rooms, time, log, options));
             return app;
         }
 
         private static bool IsNetworkError(Exception e) =>
             e is WebSocketException or OperationCanceledException or IOException or ObjectDisposedException or ConnectionResetException;
 
-        private static async Task Serve(HttpContext ctx, Rooms rooms, TimeProvider time, ILogger log)
+        private static async Task Serve(HttpContext ctx, Rooms rooms, TimeProvider time, ILogger log, RelayOptions options)
         {
             if (!ctx.WebSockets.IsWebSocketRequest)
             {
@@ -64,13 +64,17 @@ namespace Quartermaster.Relay
                 ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 return;
             }
-            try { await ServeAdmitted(ctx, rooms, time, log, bucket); }
+            try { await ServeAdmitted(ctx, rooms, time, log, bucket, options); }
             finally { rooms.Release(bucket); }
         }
 
-        private static async Task ServeAdmitted(HttpContext ctx, Rooms rooms, TimeProvider time, ILogger log, string bucket)
+        private static async Task ServeAdmitted(HttpContext ctx, Rooms rooms, TimeProvider time, ILogger log, string bucket, RelayOptions options)
         {
-            var conn = new Connection(bucket, time);
+            var conn = new Connection(bucket, time)
+            {
+                HostMessagesPerSecond = Math.Max(Limits.MessagesPerSecond, options.HostMessagesPerSecond),
+                HostBurst = Math.Max(Limits.Burst, options.HostBurst),
+            };
             // Started before the handshake completes, so a client that never says Hello is always timed.
             using var helloTimer = time.CreateTimer(_ =>
             {

@@ -20,6 +20,12 @@ public sealed class RelayOptions
     /// <summary>Kestrel's limit on concurrent connections (all addresses together).</summary>
     public int MaxConnections { get; set; } = 2000;
 
+    /// <summary>Messages per second a room's host connection may send (guests: 50/s, burst 200).</summary>
+    public double HostMessagesPerSecond { get; set; } = Limits.HostMessagesPerSecond;
+
+    /// <summary>Burst size of a room's host connection.</summary>
+    public double HostBurst { get; set; } = Limits.HostBurst;
+
     /// <summary>Folder for the generated certificate (and later the mailbox).</summary>
     public string DataDir { get; set; } = "/data";
 }

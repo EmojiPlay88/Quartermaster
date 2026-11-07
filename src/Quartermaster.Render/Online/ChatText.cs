@@ -21,6 +21,38 @@ public static class ChatText
         return t.Length > MaxLength ? t[..MaxLength].TrimEnd() : t;
     }
 
+    /// <summary>Longest player name.</summary>
+    public const int MaxName = 40;
+
+    /// <summary>
+    /// A player name for comparing and display: NFKC-normalised, format characters (zero-width, bidi controls) removed, then as
+    /// <see cref="Clean"/>, at most <see cref="MaxName"/> characters. Null when nothing is left (or for null).
+    /// </summary>
+    public static string? CleanName(string? name)
+    {
+        if (name == null) return null;
+        string norm;
+        try { norm = name.Normalize(NormalizationForm.FormKC); }
+        catch (ArgumentException) { norm = name; }   // invalid UTF-16 (lone surrogates): stripped below
+        var sb = new StringBuilder(norm.Length);
+        for (var i = 0; i < norm.Length; i++)
+        {
+            var pair = char.IsSurrogatePair(norm, i);
+            if (!pair && char.IsSurrogate(norm[i])) continue;   // a lone surrogate
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(norm, i) != System.Globalization.UnicodeCategory.Format)
+            {
+                sb.Append(norm[i]);
+                if (pair) sb.Append(norm[i + 1]);
+            }
+            if (pair) i++;
+        }
+        var clean = Clean(sb.ToString());
+        if (clean == null) return null;
+        if (clean.Length <= MaxName) return clean;
+        var cut = char.IsHighSurrogate(clean[MaxName - 1]) ? MaxName - 1 : MaxName;   // never split a pair
+        return clean[..cut].TrimEnd();
+    }
+
     public static string Line(string? sender, string clean)
     {
         var name = Clean(sender);

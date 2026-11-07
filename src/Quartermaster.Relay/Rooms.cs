@@ -22,6 +22,9 @@ public static class Limits
     public static readonly TimeSpan HelloTimeout = TimeSpan.FromSeconds(10);
     public const double MessagesPerSecond = 50;
     public const double Burst = 200;
+    /// <summary>Default budget of a room's host connection (it sends snapshots and replies to every guest).</summary>
+    public const double HostMessagesPerSecond = 400;
+    public const double HostBurst = 1000;
     /// <summary>Bytes queued for one slow receiver before it is dropped.</summary>
     public const long MaxQueuedBytes = 4L * Framing.MaxFrame;
     public static readonly TimeSpan ListingMinRefresh = TimeSpan.FromSeconds(5);
@@ -110,11 +113,16 @@ public sealed class Connection
         while (_out.Reader.TryRead(out var f)) Interlocked.Add(ref _queuedBytes, -f.Length);
     }
 
-    /// <summary>Token bucket: 50 messages/s, burst 200.</summary>
+    /// <summary>Message budget while this connection is a room's host (configurable: <see cref="RelayOptions.HostMessagesPerSecond"/>).</summary>
+    public double HostMessagesPerSecond { get; init; } = Limits.HostMessagesPerSecond;
+    public double HostBurst { get; init; } = Limits.HostBurst;
+
+    /// <summary>Token bucket: 50 messages/s, burst 200; a room's host gets <see cref="HostMessagesPerSecond"/>, burst <see cref="HostBurst"/>.</summary>
     public bool TakeToken()
     {
         var now = _time.GetTimestamp();
-        _tokens = Math.Min(Limits.Burst, _tokens + _time.GetElapsedTime(_lastRefill, now).TotalSeconds * Limits.MessagesPerSecond);
+        var (rate, burst) = IsHost ? (HostMessagesPerSecond, HostBurst) : (Limits.MessagesPerSecond, Limits.Burst);
+        _tokens = Math.Min(burst, _tokens + _time.GetElapsedTime(_lastRefill, now).TotalSeconds * rate);
         _lastRefill = now;
         if (_tokens < 1) return false;
         _tokens -= 1;

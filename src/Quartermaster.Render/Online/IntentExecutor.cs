@@ -31,7 +31,8 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     /// <summary>Most pieces in one guest move.</summary>
     public const int MaxMovePieces = 1000;
 
-    public IntentResult Execute(string playerId, IReadOnlySet<string> sides, GameIntent intent)
+    /// <param name="name">The sender's display name for chat lines when it is not (yet) in the game's player list (a seat without a side).</param>
+    public IntentResult Execute(string playerId, IReadOnlySet<string> sides, GameIntent intent, string? name = null)
     {
         try
         {
@@ -50,7 +51,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
                 TickIntent t => Phase(held, who, () => c.Tick(t.Index, t.Ticked)),
                 AckIntent a => Phase(held, who, () => c.Acknowledge(a.Index)),
                 NextPhaseIntent => NextPhase(held, who),
-                ChatIntent ch => Chat(g, who, ch.Text),
+                ChatIntent ch => Chat(g, who, ch.Text, name),
                 HideAlertIntent => IntentResult.Refused(HostOnlyText),
                 _ => IntentResult.Refused(HostOnlyText),
             };
@@ -281,10 +282,10 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
 
     // ---- chat ----
 
-    private IntentResult Chat(GameSession g, string who, string? text)
+    private IntentResult Chat(GameSession g, string who, string? text, string? fallbackName)
     {
         if (ChatText.Clean(text) is not { } clean) return IntentResult.Refused("Type a message first.");
-        var name = g.State.Players.FirstOrDefault(p => p != null && p.Id == who)?.Name ?? who;
+        var name = g.State.Players.FirstOrDefault(p => p != null && p.Id == who)?.Name ?? fallbackName ?? who;
         g.Execute(CommandLog.Prepare(CommandLog.Stamp(new AddLogLine(LogKind.Chat, ChatText.Line(name, clean)), who), g.State, s));
         return IntentResult.Done();
     }

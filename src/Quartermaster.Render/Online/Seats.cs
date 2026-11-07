@@ -31,6 +31,9 @@ public sealed class Seat
     internal byte[]? TokenHash { get; }
     internal RateWindow Intents { get; } = new(Seats.MaxIntentsPerSecond);
     internal RateWindow Chats { get; } = new(Seats.MaxChatsPerSecond);
+    internal DateTime? LastSlowDown { get; set; }
+    internal DateTime? LastSnapshot { get; set; }
+    internal bool SnapshotDue { get; set; }
 
     internal PlayerDef ToPlayer() => new(PlayerId, Name, Sides.ToList());
 }
@@ -54,7 +57,7 @@ public sealed class Seats
 {
     public const int MaxIntentsPerSecond = 20;
     public const int MaxChatsPerSecond = 5;
-    public const int MaxName = 40;
+    public const int MaxName = ChatText.MaxName;
     public const string NotASideText = "That is not a side of this game.";
 
     private readonly List<Seat> _seats = new();
@@ -74,7 +77,12 @@ public sealed class Seats
 
     public Seat? ByPlayer(string? playerId) => playerId == null ? null : _seats.FirstOrDefault(x => x.PlayerId == playerId);
 
-    public Seat? ByName(string name) => _seats.FirstOrDefault(x => string.Equals(x.Name.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase));
+    /// <summary>The seat whose name matches after <see cref="ChatText.CleanName"/> (case-insensitive).</summary>
+    public Seat? ByName(string? name)
+    {
+        if (ChatText.CleanName(name) is not { } wanted) return null;
+        return _seats.FirstOrDefault(x => string.Equals(ChatText.CleanName(x.Name), wanted, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>The guest seat this rejoin token was issued for (constant-time hash comparison against every seat), or null.</summary>
     public Seat? ByToken(string? token)

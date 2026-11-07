@@ -21,6 +21,7 @@ public class HostSessionTests : IDisposable
 
     private const string SecretStock = "61616";      // red depot's private supply
     private const string SecretWater = "73737";      // red unit's private water
+    private const string SecretGreen = "52525";      // green depot's private supply
     private static readonly PlayerDef Alice = new("p1", "Alice", new[] { "red" });
 
     public HostSessionTests() => Directory.CreateDirectory(_tmp);
@@ -43,7 +44,24 @@ public class HostSessionTests : IDisposable
             {
                 new PropertyDef { Id = "supply", Name = "Supply", Scope = PropertyScope.Holders, Visibility = Visibility.Private },
             }).ToList(),
-            Holders = new() { new HolderDef { Id = "reddepot", Name = "Red Depot", SideId = "red" } },
+            Holders = new()
+            {
+                new HolderDef { Id = "reddepot", Name = "Red Depot", SideId = "red" },
+                new HolderDef { Id = "greendepot", Name = "Green Depot", SideId = "green" },
+            },
+            Formulas = p.Formulas.Concat(new[]
+            {
+                new FormulaDef
+                {
+                    Id = "f-mix", Name = "Mixed supply", Text = "W + S",
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                        new VariableBinding { Variable = "S", Kind = BindingKind.Holder, HolderId = "reddepot", Property = "supply" },
+                    },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                },
+            }).ToList(),
             Sides = new()
             {
                 new SideDef { Id = "red", Name = "Red", UnitFilter = "startsWith(name(), \"Red\")" },
@@ -53,30 +71,41 @@ public class HostSessionTests : IDisposable
         };
     }
 
-    private sealed record Rig(ModuleSession S, HostSession H, MemoryRelay Relay, QueueDispatcher D);
+    private sealed record Rig(ModuleSession S, HostSession H, MemoryRelay Relay, QueueDispatcher D)
+    {
+        private TimeSpan _offset;
 
-    private Rig Open(IReadOnlyList<PlayerDef>? players = null)
+        /// <summary>Moves the host's clock (rate limits, snapshot spacing) forward; real time keeps flowing underneath.</summary>
+        public void Advance(TimeSpan by) => _offset += by;
+
+        public void UseOffsetClock() => H.Now = () => DateTime.UtcNow + _offset;
+    }
+
+    private Rig Open(IReadOnlyList<PlayerDef>? players = null, Difficulty difficulty = Difficulty.FullyAuto, string hostName = "Alice")
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
         var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "cache" + _sessions.Count), Path.Combine(_tmp, "root" + _sessions.Count));
         _sessions.Add(s);
         s.SetRoller((n, _) => Enumerable.Repeat(4, n).ToList());
-        s.LoadSetup(s.Model.Setups[0], Difficulty.FullyAuto, players ?? new[] { Alice });
+        s.LoadSetup(s.Model.Setups[0], difficulty, players ?? new[] { Alice });
         s.NewRules("t");
         s.UpdateRules(_ => Pack(s.Archive.Sha256));
         var g = s.Game!;
         g.Execute(new LedgerDelta(LedgerKey.Holder("reddepot"), "supply", 0, double.Parse(SecretStock), "manual", null, null, null, null));
         g.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.RedOne), "water", 10, double.Parse(SecretWater), "manual", null, null, "secret", null));
+        g.Execute(new LedgerDelta(LedgerKey.Holder("greendepot"), "supply", 0, double.Parse(SecretGreen), "manual", null, null, null, null));
         var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
         var relay = new MemoryRelay();
         var d = new QueueDispatcher();
-        var listing = new LobbyListing("", "Test lobby", "Alice", s.Archive.Sha256, "Fixture", new[] { "Red", "Blue", "Green" },
+        var listing = new LobbyListing("", "Test lobby", hostName, s.Archive.Sha256, "Fixture", new[] { "Red", "Blue", "Green" },
             new[] { "Blue", "Green" }, 1, 3, false, Protocol.ProtocolVersion);
         var h = new HostSession(s, new IntentExecutor(s, c), relay.Host, "pw", "abc-234", listing, d.Post);
         _hosts.Add(h);
         d.Pump();
-        return new Rig(s, h, relay, d);
+        var rig = new Rig(s, h, relay, d);
+        rig.UseOffsetClock();
+        return rig;
     }
 
     private static void Send(Rig r, MemoryTransport guest, GamePayload p)
@@ -200,6 +229,7 @@ public class HostSessionTests : IDisposable
 
         var thief = r.Relay.Guest("m2");
         Send(r, thief, new JoinRequest("bob", null, r.S.Archive.Sha256));
+        r.Advance(TimeSpan.FromSeconds(3));   // one join per member per 2 s
         Send(r, thief, new JoinRequest("Bob", new string('1', 64), r.S.Archive.Sha256));
         var kicks = thief.Of<Kicked>().ToList();
         Assert.Equal(2, kicks.Count);
@@ -209,6 +239,7 @@ public class HostSessionTests : IDisposable
         var seat = r.H.Seats.ByPlayer(w.PlayerId)!;
         Assert.False(seat.Connected);
         // Someone else's name is refused too, even while the host is connected.
+        r.Advance(TimeSpan.FromSeconds(3));
         Send(r, thief, new JoinRequest("ALICE", null, r.S.Archive.Sha256));
         Assert.Equal(HostSession.NameTakenText("Alice"), thief.Of<Kicked>().Last().Reason);
     }
@@ -340,7 +371,11 @@ public class HostSessionTests : IDisposable
         var n = bob.Of<Snapshot>().Count();
         for (var i = 0; i < 5; i++) r.S.Game!.Execute(new AddLogLine(LogKind.System, "tick " + i));
         Assert.Equal(n, bob.Of<Snapshot>().Count());               // nothing yet: debounced
-        Assert.True(r.D.WaitAndPump(TimeSpan.FromSeconds(5)));      // the timer posts one flush
+        // The timer flushes (spaced at least 200 ms after the choice's snapshot): one coalesced snapshot.
+        var end = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (bob.Of<Snapshot>().Count() == n && DateTime.UtcNow < end) r.D.WaitAndPump(TimeSpan.FromSeconds(1));
+        Assert.Equal(n + 1, bob.Of<Snapshot>().Count());
+        r.D.WaitAndPump(TimeSpan.FromMilliseconds(400));
         Assert.Equal(n + 1, bob.Of<Snapshot>().Count());
         Assert.Contains("tick 4", SnapshotJson(bob.Of<Snapshot>().Last()));
     }
@@ -456,11 +491,13 @@ public class HostSessionTests : IDisposable
         for (var i = 0; i < 8; i++) Send(r, bob, new IntentMsg(Guid.NewGuid(), Intent(new ChatIntent("c" + i))));
         var chats = bob.Of<NetResult>().Skip(1).ToList();
         Assert.Equal(5, chats.Count(x => x.Ok));
-        Assert.Equal(3, chats.Count(x => !x.Ok && x.Message == HostSession.SlowDownText));
+        Assert.Equal(1, chats.Count(x => !x.Ok && x.Message == HostSession.SlowDownText));   // one "Slow down." per second; the rest unanswered
+        Assert.Equal(6, chats.Count);
 
         for (var i = 0; i < 20; i++) Send(r, bob, new IntentMsg(Guid.NewGuid(), Intent(new TickIntent(99, true))));
-        var slow = bob.Of<NetResult>().Skip(9).Count(x => x.Message == HostSession.SlowDownText);
-        Assert.Equal(20 - (Seats.MaxIntentsPerSecond - 9), slow);   // 9 slots used: 1 choice + 8 chat intents
+        var ticks = bob.Of<NetResult>().Skip(7).ToList();
+        Assert.Equal(Seats.MaxIntentsPerSecond - 9, ticks.Count);   // 9 slots used: 1 choice + 8 chat intents; the rest dropped
+        Assert.DoesNotContain(ticks, x => x.Message == HostSession.SlowDownText);
         Assert.True(r.H.Seats.ByPlayer(w.PlayerId)!.Connected);
         Assert.Empty(bob.Of<Kicked>());
 
@@ -469,6 +506,53 @@ public class HostSessionTests : IDisposable
         Assert.True(bob.Of<NetResult>().Last().Ok);
     }
 
+    [Fact]
+    public void Flood_BoundedHostSends()
+    {
+        var r = Open();
+        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        r.H.Now = () => now;
+        // An unseated member spamming joins: one answer per 2 s.
+        var spam = r.Relay.Guest("m5");
+        for (var i = 0; i < 50; i++) Send(r, spam, new JoinRequest("Spam" + i, null, r.S.Archive.Sha256));
+        Assert.Single(spam.Inbox);
+        // A seated guest spamming intents, chat and side choices for one second: at most 20 answers plus one "Slow down.".
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        var before = bob.Inbox.Count;
+        for (var i = 0; i < 300; i++)
+        {
+            Send(r, bob, new IntentMsg(Guid.NewGuid(), Intent(new TickIntent(99, true))));
+            Send(r, bob, new Net.Chat("x", "hi"));
+            Send(r, bob, new ChooseSides(new[] { "green" }));
+        }
+        Assert.InRange(bob.Inbox.Count - before, 1, Seats.MaxIntentsPerSecond + 1);
+        Assert.Empty(bob.Of<Kicked>());
+    }
+
+    [Fact]
+    public void Snapshots_SpacedPerGuest()
+    {
+        var r = Open();
+        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        r.H.Now = () => now;
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));   // snapshot at t0
+        var n = bob.Of<Snapshot>().Count();
+        r.S.Game!.Execute(new AddLogLine(LogKind.System, "one"));
+        r.H.FlushDue();
+        Assert.Equal(n, bob.Of<Snapshot>().Count());       // within 200 ms of the last one: waits
+        now = now.AddMilliseconds(150);
+        r.H.FlushDue();
+        Assert.Equal(n, bob.Of<Snapshot>().Count());
+        now = now.AddMilliseconds(60);
+        r.H.FlushDue();
+        Assert.Equal(n + 1, bob.Of<Snapshot>().Count());
+        r.H.FlushDue();                                     // nothing new: nothing sent
+        Assert.Equal(n + 1, bob.Of<Snapshot>().Count());
+    }
     [Fact]
     public void GarbageFrames_Dropped_NeverThrow()
     {
@@ -484,6 +568,134 @@ public class HostSessionTests : IDisposable
         Assert.True(r.H.Seats.All[1].Connected);
     }
 
+    [Fact]
+    public void ChooseSides_Again_Refused_KeepsSeat()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        var w = JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        Send(r, bob, new ChooseSides(new[] { "green" }));
+        var last = bob.Of<NetResult>().Last();
+        Assert.False(last.Ok);
+        Assert.Equal(HostSession.SidesFixedText, last.Message);
+        Assert.Equal(new[] { "blue" }, r.H.Seats.ByPlayer(w.PlayerId)!.Sides);
+        Assert.True(r.H.Seats.ByPlayer(w.PlayerId)!.Connected);
+        r.S.Game!.Execute(new AddLogLine(LogKind.System, "later"));
+        r.H.FlushSnapshots();
+        Assert.Equal(Json(PlayerView.For(r.S.Game!.State, r.S.Rules, r.S.Model, new HashSet<string> { "blue" })),
+            SnapshotJson(bob.Of<Snapshot>().Last()));
+        Assert.DoesNotContain(SecretGreen, AllReceivedText(bob));
+        Assert.DoesNotContain(SecretStock, AllReceivedText(bob));
+    }
+
+    [Fact]
+    public void NoSideYet_IntentsRefused_ChatAllowed()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        var before = Ledger.Get(r.S.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water");
+        Send(r, bob, new IntentMsg(Guid.NewGuid(), Intent(new LedgerEditIntent(LedgerKey.Piece(PhaseFixture.BlueOne), "water", 4, "x"))));
+        Send(r, bob, new IntentMsg(Guid.NewGuid(), Intent(new DiceIntent(new DiceSpec(1, 6, 0), "Roll"))));
+        Assert.All(bob.Of<NetResult>(), x => Assert.Equal(HostSession.ChooseSideFirstText, x.Message));
+        Assert.Equal(before, Ledger.Get(r.S.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+        Send(r, bob, new IntentMsg(Guid.NewGuid(), Intent(new ChatIntent("hello"))));
+        Assert.True(bob.Of<NetResult>().Last().Ok);
+        Assert.Contains(r.S.Game!.State.Log, l => l.Kind == LogKind.Chat && l.Text == "Bob: hello");
+    }
+
+    [Fact]
+    public void FreeSeat_ConnectedWithoutSides_Allowed()
+    {
+        var r = Open();
+        var carol = r.Relay.Guest("m2");
+        var w = JoinAs(r, carol, "Carol");
+        Assert.True(r.H.FreeSeat(w.PlayerId));
+        Assert.Equal(HostSession.SeatFreedText, carol.Of<Kicked>().Single().Reason);
+        Assert.Single(r.H.Seats.All);
+        Send(r, carol, new IntentMsg(Guid.NewGuid(), Intent(new ChatIntent("still here?"))));
+        Assert.DoesNotContain(r.S.Game!.State.Log, l => l.Kind == LogKind.Chat);
+    }
+
+    [Fact]
+    public void Rejoin_WhileOldConnectionBound_OldKicked()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        var w = JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        var again = r.Relay.Guest("m9");
+        var w2 = JoinAs(r, again, "Bob", w.RejoinToken);
+        Assert.Equal(w.PlayerId, w2.PlayerId);
+        Assert.Equal(HostSession.SignedInElsewhereText, bob.Of<Kicked>().Single().Reason);
+        Assert.Equal("m9", r.H.Seats.ByPlayer(w.PlayerId)!.MemberId);
+        Assert.Null(r.H.Seats.ByMember("m1"));
+        var dropped = r.H.Dropped;
+        Send(r, bob, new IntentMsg(Guid.NewGuid(), Intent(new ChatIntent("ghost"))));
+        Assert.Equal(dropped + 1, r.H.Dropped);
+        Assert.Single(again.Of<Snapshot>());
+    }
+
+    [Fact]
+    public void RulesApplied_SentToGuests_BeforeNextSnapshot()
+    {
+        var r = Open();
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        r.S.UpdateRules(p => p with { Name = "Edited rules" });
+        r.H.FlushSnapshots();
+        var msgs = bob.Messages.ToList();
+        var rc = msgs.FindLastIndex(m => m is RulesChanged);
+        Assert.True(rc >= 0);
+        Assert.Equal("Edited rules", RulesPackIo.FromBytes(((RulesChanged)msgs[rc]).RulesPack).Name);
+        Assert.True(msgs.FindLastIndex(m => m is Snapshot) > rc);
+    }
+
+    [Fact]
+    public void FormulaVerdict_HiddenInput_NoPrivateBytes()
+    {
+        var r = Open(difficulty: Difficulty.Hardcore);
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        var id = Guid.NewGuid();
+        Send(r, bob, new IntentMsg(id, Intent(new FormulaIntent("f-mix", PhaseFixture.BlueOne, null,
+            new Dictionary<string, string> { ["W"] = "999", ["S"] = "1" }, false))));
+        var res = bob.Of<NetResult>().Single(x => x.Id == id);
+        Assert.False(res.Ok);
+        var verdict = JsonSerializer.Deserialize<FormulaVerdict>(res.VerdictJson!, QuartermasterJson.Options)!;
+        Assert.Equal(FormulaBox.Hidden, verdict.Boxes.Single(b => b.Var == "S").State);
+        Assert.Equal(FormulaBox.Wrong, verdict.Boxes.Single(b => b.Var == "W").State);
+        r.H.FlushSnapshots();
+        var all = AllReceivedText(bob);
+        Assert.DoesNotContain(SecretStock, all);
+        Assert.DoesNotContain(SecretWater, all);
+        Assert.DoesNotContain(SecretGreen, all);
+    }
+
+    [Fact]
+    public void Names_NormalisedBeforeCompare_NullHostNameSafe()
+    {
+        var r = Open();
+        JoinAs(r, r.Relay.Guest("m1"), "Bob");
+        foreach (var (member, name) in new[] { ("m2", "B​ob"), ("m3", "Ｂｏｂ"), ("m4", "‮Bob‬") })
+        {
+            var g = r.Relay.Guest(member);
+            Send(r, g, new JoinRequest(name, null, r.S.Archive.Sha256));
+            Assert.Equal(HostSession.NameTakenText("Bob"), Assert.Single(g.Of<Kicked>()).Reason);
+        }
+        var zw = r.Relay.Guest("m5");
+        Send(r, zw, new JoinRequest("​‍", null, r.S.Archive.Sha256));
+        Assert.Equal(HostSession.NoNameText, Assert.Single(zw.Of<Kicked>()).Reason);
+        Assert.Equal("Carol", ChatText.CleanName("  Ca⁦rol⁩ "));
+        Assert.Equal(ChatText.MaxName, ChatText.CleanName(new string('x', 100))!.Length);
+        Assert.Null(ChatText.CleanName(null));
+
+        var anon = Open(hostName: null!);
+        Assert.Equal("Host", anon.H.Seats.Host.Name);
+    }
     [Fact]
     public void RelayTransport_TryOpen_DropsGarbage()
     {

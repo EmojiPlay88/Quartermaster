@@ -97,7 +97,7 @@ public sealed class RelayTransport : ITransport, IDisposable
         if (sealed_ == null || sealed_.Length == 0 || sealed_.Length > Framing.MaxFrame) return null;
         try
         {
-            var plain = Secrets.Open(key, sealed_);
+            var plain = Secrets.Open(key, sealed_, Framing.MaxFrame);   // bounded before inflating
             return plain.Length == 0 || plain.Length > Framing.MaxFrame ? null : plain;
         }
         catch (Exception e) when (e is CryptographicException or ArgumentException)

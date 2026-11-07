@@ -55,7 +55,10 @@ public static class Secrets
     }
 
     /// <summary>Throws CryptographicException on tamper, wrong key, short input, corrupt or over-large (MaxPlain) data.</summary>
-    public static byte[] Open(byte[] key, byte[] sealed_)
+    public static byte[] Open(byte[] key, byte[] sealed_) => Open(key, sealed_, MaxPlain);
+
+    /// <summary>As <see cref="Open(byte[], byte[])"/>, inflating at most <paramref name="maxPlain"/> bytes (CryptographicException beyond).</summary>
+    public static byte[] Open(byte[] key, byte[] sealed_, int maxPlain)
     {
         RequireKey(key);
         if (sealed_.Length < NonceSize + TagSize) throw new CryptographicException("Sealed data is too short.");
@@ -64,6 +67,6 @@ public static class Secrets
         using (var aes = new AesGcm(key, TagSize))
             aes.Decrypt(sealed_.AsSpan(0, NonceSize), sealed_.AsSpan(NonceSize, n),
                 sealed_.AsSpan(NonceSize + n, TagSize), packed);
-        return Gzip.DecompressBounded(packed, MaxPlain);
+        return Gzip.DecompressBounded(packed, Math.Clamp(maxPlain, 0, MaxPlain));
     }
 }

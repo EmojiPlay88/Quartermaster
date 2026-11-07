@@ -15,6 +15,12 @@ namespace Quartermaster.Render;
 /// <para>
 /// Replies: a refused join gets <see cref="Kicked"/>; a side choice is answered with an <see cref="NetIntentResult"/> whose id is
 /// <see cref="Guid.Empty"/> (then, when accepted, a snapshot); a refused <see cref="Net.Chat"/> payload is answered the same way.
+/// A rules pack applied by the host goes to every connected guest as <see cref="RulesChanged"/> before the next snapshot.
+/// </para>
+/// <para>
+/// Sends are bounded so a misbehaving guest cannot make the host exceed its relay budget: joins are taken at most once per
+/// <see cref="JoinInterval"/> per member (the rest dropped), at most one <see cref="SlowDownText"/> per seat per second (the rest dropped
+/// without reply), and scheduled snapshots reach each guest at most once per <see cref="MinSnapshotInterval"/> (coalesced).
 /// </para>
 /// </summary>
 public sealed class HostSession : IDisposable
@@ -24,10 +30,18 @@ public sealed class HostSession : IDisposable
     public const string FullText = "This game is full.";
     public const string NoRulesText = "The host has no rules pack loaded.";
     public const string SlowDownText = "Slow down.";
+    public const string SidesFixedText = "Only the host can change sides (Game → Players…).";
+    public const string ChooseSideFirstText = "Choose your side first.";
+    public const string SignedInElsewhereText = "Signed in elsewhere.";
+    public const string SeatFreedText = "The host freed your seat.";
     public static string NameTakenText(string name) => $"A player named {name} is already in this game.";
 
     public static readonly TimeSpan SnapshotDelay = TimeSpan.FromMilliseconds(100);
+    public static readonly TimeSpan MinSnapshotInterval = TimeSpan.FromMilliseconds(200);
+    public static readonly TimeSpan JoinInterval = TimeSpan.FromSeconds(2);
+    public static readonly TimeSpan SlowDownInterval = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan ListingInterval = TimeSpan.FromSeconds(30);
+    private const int MaxJoinMemory = 256;
 
     private readonly ModuleSession _s;
     private readonly IntentExecutor _exec;
@@ -37,6 +51,7 @@ public sealed class HostSession : IDisposable
     private readonly bool _locked;
     private readonly Timer _snapshotTimer;
     private readonly Timer _listingTimer;
+    private readonly Dictionary<string, DateTime> _lastJoin = new();
     private bool _snapshotDue;
     private bool _disposed;
     private long _version;
@@ -53,9 +68,13 @@ public sealed class HostSession : IDisposable
         _post = post ?? throw new ArgumentNullException(nameof(post));
         ArgumentNullException.ThrowIfNull(listing);
         _locked = !string.IsNullOrEmpty(password);
-        _draft = listing with { Code = GameCode.Normalize(code ?? listing.Code) };
+        _draft = listing with { Code = GameCode.Normalize(code ?? listing.Code ?? "") };
         Seats = new Seats(HostPlayer());
+        SyncPlayers();
 
+        // Started last, so a failure above leaves nothing subscribed or running.
+        _snapshotTimer = new Timer(_ => Post(FlushDue), null, Timeout.Infinite, Timeout.Infinite);
+        _listingTimer = new Timer(_ => Post(PublishListing), null, Timeout.Infinite, Timeout.Infinite);
         _t.Received += OnReceived;
         _t.MemberLeft += OnMemberLeft;
         _t.MembersListed += OnMembersListed;
@@ -63,11 +82,9 @@ public sealed class HostSession : IDisposable
         _t.Reconnected += OnReconnected;
         _s.ViewChanged += OnViewChanged;
         _s.GameReplaced += OnGameReplaced;
-
-        _snapshotTimer = new Timer(_ => Post(FlushSnapshots), null, Timeout.Infinite, Timeout.Infinite);
-        _listingTimer = new Timer(_ => Post(PublishListing), null, ListingInterval, ListingInterval);
-        SyncPlayers();
+        _s.RulesApplied += OnRulesApplied;
         PublishListing();
+        _listingTimer.Change(ListingInterval, ListingInterval);
     }
 
     public Seats Seats { get; }
@@ -83,13 +100,13 @@ public sealed class HostSession : IDisposable
     /// <summary>The version of the last snapshot sent (monotonic for this session).</summary>
     public long SnapshotVersion => _version;
 
-    /// <summary>Payloads dropped: undecodable, from members without a seat, or out of place.</summary>
+    /// <summary>Payloads dropped: undecodable, from members without a seat, out of place, or over a rate limit.</summary>
     public int Dropped => _dropped;
 
-    /// <summary>The public listing as last published.</summary>
+    /// <summary>The public listing for the current seats (what the next publish sends).</summary>
     public LobbyListing Listing => BuildListing();
 
-    /// <summary>Test hook: the clock used for rate limits.</summary>
+    /// <summary>Test hook: the clock used for rate limits and snapshot spacing.</summary>
     internal Func<DateTime> Now { get; set; } = () => DateTime.UtcNow;
 
     // ---- host-side actions (owning thread) ----
@@ -98,21 +115,48 @@ public sealed class HostSession : IDisposable
     public IntentResult Chat(string text) =>
         _exec.Execute(Seats.Host.PlayerId, Seats.Host.Sides.ToHashSet(), new ChatIntent(text));
 
-    /// <summary>Frees a disconnected guest's seat (the host's Players dialog); its sides become open seats. False when not allowed.</summary>
+    /// <summary>
+    /// Frees a guest's seat from the host's Players dialog: a disconnected seat, or a connected one that holds no side yet (that guest is
+    /// told and unbound). Its sides become open seats. False when not allowed.
+    /// </summary>
     public bool FreeSeat(string playerId)
     {
-        if (Seats.ByPlayer(playerId) is not { IsHost: false, Connected: false } seat) return false;
+        if (Seats.ByPlayer(playerId) is not { IsHost: false } seat) return false;
+        if (seat.Connected && seat.Sides.Count > 0) return false;
+        if (seat.MemberId is { } member) Send(member, new Kicked(SeatFreedText));
+        seat.MemberId = null;
         Seats.Remove(seat);
         AfterSeatChange();
         return true;
     }
 
-    /// <summary>Sends every pending snapshot now (normally run <see cref="SnapshotDelay"/> after the last change).</summary>
+    /// <summary>Sends every guest its snapshot now, ignoring the spacing (normally run <see cref="SnapshotDelay"/> after the last change).</summary>
     public void FlushSnapshots()
     {
         if (_disposed) return;
         _snapshotDue = false;
         foreach (var seat in Seats.Guests.ToList()) SendSnapshot(seat);
+    }
+
+    /// <summary>The timer's flush: guests marked due get a snapshot unless they had one within <see cref="MinSnapshotInterval"/>; those wait.</summary>
+    internal void FlushDue()
+    {
+        if (_disposed) return;
+        _snapshotDue = false;
+        var now = Now();
+        TimeSpan? wait = null;
+        foreach (var seat in Seats.Guests.ToList())
+        {
+            if (!seat.SnapshotDue) continue;
+            if (seat.LastSnapshot is { } last && now - last < MinSnapshotInterval)
+            {
+                var left = MinSnapshotInterval - (now - last);
+                wait = wait is { } w && w < left ? w : left;
+                continue;
+            }
+            SendSnapshot(seat);
+        }
+        if (wait is { } delay) Arm(delay);
     }
 
     // ---- transport events (any thread) → owning thread ----
@@ -145,11 +189,27 @@ public sealed class HostSession : IDisposable
 
     private void OnGameReplaced() => Post(SyncPlayers);
 
+    /// <summary>Raised on the owning thread before the view changes: the new pack goes out ahead of the next snapshot.</summary>
+    private void OnRulesApplied() => Guard(() =>
+    {
+        if (PackBytes() is not { } pack) return;
+        foreach (var seat in Seats.Guests)
+            if (seat.MemberId is { } to) Send(to, new RulesChanged(pack));
+        ScheduleSnapshots();
+    });
+
     private void ScheduleSnapshots()
     {
-        if (_disposed || _snapshotDue) return;
+        if (_disposed) return;
+        foreach (var seat in Seats.Guests) seat.SnapshotDue = true;
+        if (_snapshotDue) return;
+        Arm(SnapshotDelay);
+    }
+
+    private void Arm(TimeSpan delay)
+    {
         _snapshotDue = true;
-        try { _snapshotTimer.Change(SnapshotDelay, Timeout.InfiniteTimeSpan); }
+        try { _snapshotTimer.Change(delay, Timeout.InfiniteTimeSpan); }
         catch (ObjectDisposedException) { }
     }
 
@@ -170,8 +230,21 @@ public sealed class HostSession : IDisposable
         }
     }
 
+    /// <summary>One join per member per <see cref="JoinInterval"/>; the memory of past joins is bounded.</summary>
+    private bool JoinAllowed(string from)
+    {
+        var now = Now();
+        if (_lastJoin.TryGetValue(from, out var last) && now - last < JoinInterval) return false;
+        if (_lastJoin.Count >= MaxJoinMemory)
+            foreach (var old in _lastJoin.Where(kv => now - kv.Value >= JoinInterval).Select(kv => kv.Key).ToList()) _lastJoin.Remove(old);
+        if (_lastJoin.Count >= MaxJoinMemory) return false;
+        _lastJoin[from] = now;
+        return true;
+    }
+
     private void Join(string from, JoinRequest j)
     {
+        if (!JoinAllowed(from)) { _dropped++; return; }
         if (j.ProtocolVersion != Protocol.ProtocolVersion) { Send(from, new Kicked(Protocol.MismatchMessage(j.ProtocolVersion))); return; }
         if (!string.Equals(j.ModuleSha256, _s.Archive.Sha256, StringComparison.OrdinalIgnoreCase)) { Send(from, new Kicked(DifferentModuleText)); return; }
         if (PackBytes() is not { } pack) { Send(from, new Kicked(NoRulesText)); return; }
@@ -186,9 +259,8 @@ public sealed class HostSession : IDisposable
         }
         if (Seats.ByMember(from) != null) { _dropped++; return; }   // already seated on this connection
 
-        var name = ChatText.Clean(j.Name);
+        var name = ChatText.CleanName(j.Name);
         if (name == null) { Send(from, new Kicked(NoNameText)); return; }
-        if (name.Length > Seats.MaxName) name = name[..Seats.MaxName].TrimEnd();
         if (Seats.ByName(name) is { } other) { Send(from, new Kicked(NameTakenText(other.Name))); return; }
         if (Seats.All.Count >= MaxPlayers || Seats.FreeSides(_s.Rules).Count == 0) { Send(from, new Kicked(FullText)); return; }
 
@@ -199,17 +271,31 @@ public sealed class HostSession : IDisposable
         AfterSeatChange(sync: false);
     }
 
+    /// <summary>Binds the seat to this connection; a previous connection of the seat is told and loses it.</summary>
     private void Bind(Seat seat, string memberId)
     {
         foreach (var other in Seats.All)
             if (!ReferenceEquals(other, seat) && other.MemberId == memberId) other.MemberId = null;
+        if (seat.MemberId is { } old && old != memberId) Send(old, new Kicked(SignedInElsewhereText));
         seat.MemberId = memberId;
+        seat.LastSnapshot = null;
+    }
+
+    /// <summary>"Slow down." at most once per seat per <see cref="SlowDownInterval"/>; further over-limit requests get no reply.</summary>
+    private void SlowDown(Seat seat, string to, Guid id)
+    {
+        var now = Now();
+        if (seat.LastSlowDown is { } last && now - last < SlowDownInterval) { _dropped++; return; }
+        seat.LastSlowDown = now;
+        Reply(to, id, IntentResult.Refused(SlowDownText));
     }
 
     private void Choose(string from, ChooseSides c)
     {
         if (Seats.ByMember(from) is not { IsHost: false } seat) { _dropped++; return; }
-        if (!seat.Intents.TryTake(Now())) { Reply(from, Guid.Empty, IntentResult.Refused(SlowDownText)); return; }
+        if (!seat.Intents.TryTake(Now())) { SlowDown(seat, from, Guid.Empty); return; }
+        // Spec 8a.10: once seated with sides, only the host's Players dialog changes them.
+        if (seat.Sides.Count > 0) { Reply(from, Guid.Empty, IntentResult.Refused(SidesFixedText)); return; }
         if (_s.Game == null || _s.Rules is not { } pack) { Reply(from, Guid.Empty, IntentResult.Refused(IntentExecutor.NoGameText)); return; }
         var sides = (c.Sides ?? Array.Empty<string>()).Distinct().ToList();
         if (Seats.CheckChoice(seat, sides, pack) is { } why) { Reply(from, Guid.Empty, IntentResult.Refused(why)); return; }
@@ -222,14 +308,15 @@ public sealed class HostSession : IDisposable
     private void Intent(string from, IntentMsg m)
     {
         if (Seats.ByMember(from) is not { IsHost: false } seat) { _dropped++; return; }
-        if (!seat.Intents.TryTake(Now())) { Reply(from, m.Id, IntentResult.Refused(SlowDownText)); return; }
+        if (!seat.Intents.TryTake(Now())) { SlowDown(seat, from, m.Id); return; }
         GameIntent? intent;
         try { intent = JsonSerializer.Deserialize<GameIntent>(m.IntentJson, QuartermasterJson.Options); }
         catch (Exception e) when (e is JsonException or NotSupportedException or InvalidOperationException or ArgumentException)
         { intent = null; }
         if (intent == null) { Reply(from, m.Id, IntentResult.Refused(IntentExecutor.NotUnderstoodText)); return; }
-        if (intent is ChatIntent && !seat.Chats.TryTake(Now())) { Reply(from, m.Id, IntentResult.Refused(SlowDownText)); return; }
-        var r = _exec.Execute(seat.PlayerId, seat.Sides.ToHashSet(), intent);
+        if (intent is ChatIntent && !seat.Chats.TryTake(Now())) { SlowDown(seat, from, m.Id); return; }
+        if (intent is not ChatIntent && seat.Sides.Count == 0) { Reply(from, m.Id, IntentResult.Refused(ChooseSideFirstText)); return; }
+        var r = _exec.Execute(seat.PlayerId, seat.Sides.ToHashSet(), intent, seat.Name);
         Reply(from, m.Id, r);
         if (r.Ok) ScheduleSnapshots();
     }
@@ -237,8 +324,8 @@ public sealed class HostSession : IDisposable
     private void ChatPayload(string from, Net.Chat c)
     {
         if (Seats.ByMember(from) is not { IsHost: false } seat) { _dropped++; return; }
-        if (!seat.Intents.TryTake(Now()) || !seat.Chats.TryTake(Now())) { Reply(from, Guid.Empty, IntentResult.Refused(SlowDownText)); return; }
-        var r = _exec.Execute(seat.PlayerId, seat.Sides.ToHashSet(), new ChatIntent(c.Text));
+        if (!seat.Intents.TryTake(Now()) || !seat.Chats.TryTake(Now())) { SlowDown(seat, from, Guid.Empty); return; }
+        var r = _exec.Execute(seat.PlayerId, seat.Sides.ToHashSet(), new ChatIntent(c.Text), seat.Name);
         if (!r.Ok) Reply(from, Guid.Empty, r);
         else ScheduleSnapshots();
     }
@@ -284,16 +371,17 @@ public sealed class HostSession : IDisposable
     {
         var st = _s.Game?.State;
         var players = st?.Players ?? new List<PlayerDef>();
+        var hostName = ChatText.CleanName(_draft.HostName);
         if (players.Count > 0)
         {
-            var p = players.FirstOrDefault(x => string.Equals(x.Name?.Trim(), _draft.HostName?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? players[0];
+            var p = players.FirstOrDefault(x => hostName != null && string.Equals(ChatText.CleanName(x.Name), hostName, StringComparison.OrdinalIgnoreCase))
+                ?? players[0];
             return p with { Sides = (p.Sides ?? Array.Empty<string>()).ToList() };
         }
         var free = new HashSet<string>(_draft.FreeSides ?? Array.Empty<string>(), StringComparer.Ordinal);
         var sides = (_s.Rules?.Sides ?? new List<SideDef>())
             .Where(x => x?.Id != null && !free.Contains(x.Id) && !free.Contains(x.Name ?? "")).Select(x => x.Id).ToList();
-        var name = ChatText.Clean(_draft.HostName) ?? "Host";
-        return new PlayerDef("host", name.Length > Seats.MaxName ? name[..Seats.MaxName] : name, sides);
+        return new PlayerDef("host", hostName ?? "Host", sides);
     }
 
     private static bool Same(IReadOnlyList<PlayerDef> a, IReadOnlyList<PlayerDef> b) =>
@@ -342,10 +430,12 @@ public sealed class HostSession : IDisposable
     /// <summary>The guest's filtered view, if it is connected and holds a side (never without a rules pack: no pack means no filter).</summary>
     private void SendSnapshot(Seat seat)
     {
+        seat.SnapshotDue = false;
         if (seat.IsHost || seat.MemberId is not { } to || seat.Sides.Count == 0) return;
         if (_s.Game?.State is not { } full || _s.Rules is not { } pack) return;
         var view = PlayerView.For(full, pack, _s.Model, seat.Sides.ToHashSet());
         var json = JsonSerializer.SerializeToUtf8Bytes(view, QuartermasterJson.Options);
+        seat.LastSnapshot = Now();
         Send(to, new Snapshot(++_version, Gzip.Compress(json)));
     }
 
@@ -382,6 +472,7 @@ public sealed class HostSession : IDisposable
         _t.Reconnected -= OnReconnected;
         _s.ViewChanged -= OnViewChanged;
         _s.GameReplaced -= OnGameReplaced;
+        _s.RulesApplied -= OnRulesApplied;
         _snapshotTimer.Dispose();
         _listingTimer.Dispose();
     }

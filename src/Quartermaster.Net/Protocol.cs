@@ -84,6 +84,7 @@ public sealed record Pong : RelayMessage;
 [JsonDerivedType(typeof(Chat), "Chat")]
 [JsonDerivedType(typeof(Kicked), "Kicked")]
 [JsonDerivedType(typeof(Paused), "Paused")]
+[JsonDerivedType(typeof(RulesChanged), "RulesChanged")]
 public abstract record GamePayload;
 
 /// <summary>ProtocolVersion: the guest's network version (the host refuses another with <see cref="Protocol.MismatchMessage"/>).</summary>
@@ -97,6 +98,8 @@ public sealed record IntentResult(Guid Id, bool Ok, string? Message, string? Ver
 public sealed record Chat(string From, string Text) : GamePayload;
 public sealed record Kicked(string Reason) : GamePayload;
 public sealed record Paused(string Reason) : GamePayload;
+/// <summary>Host → guest: the host applied another rules pack (zip bytes); sent before the next snapshot.</summary>
+public sealed record RulesChanged(byte[] RulesPack) : GamePayload;
 
 public static class Framing
 {

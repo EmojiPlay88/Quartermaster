@@ -111,7 +111,7 @@ public class NetTests
             new JoinRequest("Ann", null, "sha"), new Welcome("p1", "tok", new byte[] { 5 }, new[] { "Red" }),
             new ChooseSides(new[] { "Red" }), new Snapshot(7, new byte[] { 1 }),
             new IntentMsg(id, "{\"a\":1}"), new IntentResult(id, true, null, "{}"),
-            new Chat("Ann", "hi"), new Kicked("bye"), new Paused("wait"),
+            new Chat("Ann", "hi"), new Kicked("bye"), new Paused("wait"), new RulesChanged(new byte[] { 4, 2 }),
         };
         foreach (var m in game)
         {
@@ -121,6 +121,18 @@ public class NetTests
         }
         var im = (IntentMsg)Framing.Decode<GamePayload>(Framing.Encode(new IntentMsg(id, "{\"a\":1}")));
         Assert.Equal(id, im.Id);
+        Assert.Equal(new byte[] { 4, 2 }, ((RulesChanged)Framing.Decode<GamePayload>(Framing.Encode(new RulesChanged(new byte[] { 4, 2 })))).RulesPack);
+        var jr = (JoinRequest)Framing.Decode<GamePayload>(System.Text.Encoding.UTF8.GetBytes("{\"$t\":\"JoinRequest\",\"Name\":\"Ann\",\"RejoinToken\":null,\"ModuleSha256\":\"s\"}"));
+        Assert.Equal(Protocol.ProtocolVersion, jr.ProtocolVersion);   // older guests omit the field
+    }
+
+    [Fact]
+    public void Open_MaxPlain_Bounded()
+    {
+        var key = Secrets.GameKey("pw", "ABC234");
+        var s = Secrets.Seal(key, new byte[1000]);
+        Assert.Equal(1000, Secrets.Open(key, s, 1000).Length);
+        Assert.ThrowsAny<CryptographicException>(() => Secrets.Open(key, s, 999));
     }
 
     [Fact]

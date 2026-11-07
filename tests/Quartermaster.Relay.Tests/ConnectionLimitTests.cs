@@ -67,6 +67,33 @@ public class ConnectionLimitTests
     }
 
     [Fact]
+    public async Task HostConnection_HasLargerMessageBudget_GuestsUnchanged()
+    {
+        await using var relay = await Start();
+        var host = await relay.Connect("host");
+        var code = await CreateRoom(host);
+        relay.Time.Advance(TimeSpan.FromSeconds(5));   // the host's bucket refills to its burst
+        Assert.Equal(1000, new RelayOptions().HostBurst);
+        for (int i = 0; i < 900; i++) await host.Send(new Ping());   // far over a guest's 200 burst
+        for (int i = 0; i < 900; i++) await host.Receive<Pong>();
+
+        var guest = await relay.Connect("guest", "198.51.100.7");
+        await guest.Send(new JoinRoom(code, Verifier("pw", code)));
+        await guest.Receive<Joined>();
+        relay.Time.Advance(TimeSpan.FromSeconds(5));
+        for (int i = 0; i < 300; i++)
+        {
+            try { await guest.Send(new Ping()); }
+            catch (Exception) { break; }
+        }
+        RelayMessage? m;
+        int pongs = 0;
+        while ((m = await guest.ReceiveOrClose()) is Pong) pongs++;
+        Assert.Null(m);                                 // closed: "Too many messages."
+        Assert.True(pongs <= (int)Quartermaster.Relay.Limits.Burst, $"{pongs} pongs");
+    }
+
+    [Fact]
     public void SlowReceiver_Aborted_QueueDropped()
     {
         var c = new Connection("x", TimeProvider.System);
