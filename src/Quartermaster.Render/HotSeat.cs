@@ -79,7 +79,7 @@ public sealed class HotSeat
             if (Pending == null || Current == null || _s.Game is not { } g || ActingPlayer(g.State)?.Id != Current.Id) return;
             Pending = null;
             _s.SetViewSides(new HashSet<string>(Current.Sides));
-            HandoverCancelled?.Invoke();
+            RaiseCancelled();
             return;
         }
         _s.SetViewSides(new HashSet<string>());   // the leaving player's data goes behind the screen too
@@ -88,11 +88,19 @@ public sealed class HotSeat
         HandoverRequired?.Invoke(due);
     }
 
-    private void OnRewound()
+    private void OnRewound() => Reconcile();
+
+    /// <summary>After a player-list change or a rewind: re-checks the handover, and dismisses a pending one that is no longer due.</summary>
+    private void Reconcile()
     {
         // An undo may cross a player-list change; it is handled exactly like the command itself.
-        if (PlayersChanged()) return;
-        CheckHandover();
+        var had = Pending != null;
+        var cancels = _cancels;
+        if (!PlayersChanged()) CheckHandover();
+        if (!had || Pending != null || _cancels != cancels || HandoverDue() != null) return;
+        // An edit cleared the pending handover (say, the side went back to the player at the screen): the screen goes away.
+        if (Active && Current != null) _s.SetViewSides(new HashSet<string>(Current.Sides));
+        RaiseCancelled();
     }
 
     private void Hook()
@@ -105,7 +113,7 @@ public sealed class HotSeat
 
     private void OnCommand(GameCommand c)
     {
-        if (c is SetPlayers && !PlayersChanged()) CheckHandover();
+        if (c is SetPlayers) Reconcile();
     }
 
     private void OnGameRewound() => PlayersChanged();
@@ -123,7 +131,7 @@ public sealed class HotSeat
             Current = null;
             Pending = null;
             _s.SetViewSides(null);
-            if (hadPending) HandoverCancelled?.Invoke();
+            if (hadPending) RaiseCancelled();
             CurrentChanged?.Invoke();
             return true;
         }
@@ -164,6 +172,14 @@ public sealed class HotSeat
         return false;
     }
 
+    private int _cancels;
+
+    private void RaiseCancelled()
+    {
+        _cancels++;
+        HandoverCancelled?.Invoke();
+    }
+
     private static bool Same(PlayerDef a, PlayerDef b) => a.Name == b.Name && a.Sides.SequenceEqual(b.Sides);
 
     private void OnGameReplaced()
@@ -182,7 +198,7 @@ public sealed class HotSeat
         }
         else
         {
-            if (hadPending) HandoverCancelled?.Invoke();
+            if (hadPending) RaiseCancelled();
             CurrentChanged?.Invoke();
         }
     }

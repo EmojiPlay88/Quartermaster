@@ -233,22 +233,32 @@ public sealed class ModuleSession : IDisposable
         }
     }
 
-    public void StartNewGame(Difficulty? difficulty = null)
+    /// <param name="players">The player list the game starts with (part of its start, not an undoable command); null or one player = solo.</param>
+    public void StartNewGame(Difficulty? difficulty = null, IReadOnlyList<PlayerDef>? players = null)
     {
         var state = NewGameBuilder.FromSetupStacks(Model, Log);
         if (difficulty is { } d) state.Difficulty = d;
+        SetStartPlayers(state, players);
         Replace(state, $"New game: {state.Pieces.Count} pieces");
     }
 
-    public void LoadSetup(SetupDef s, Difficulty? difficulty = null)
+    private static void SetStartPlayers(GameState state, IReadOnlyList<PlayerDef>? players)
     {
-        if (s.FileEntry == null) { StartNewGame(difficulty); return; }
+        var clean = Players.Clean(players);
+        state.Players = clean.Count >= 2 ? clean : new List<PlayerDef>();
+    }
+
+    /// <param name="players">The player list the game starts with (part of its start, not an undoable command); null or one player = solo.</param>
+    public void LoadSetup(SetupDef s, Difficulty? difficulty = null, IReadOnlyList<PlayerDef>? players = null)
+    {
+        if (s.FileEntry == null) { StartNewGame(difficulty, players); return; }
         if (!Archive.HasEntry(s.FileEntry))
             throw new InvalidDataException($"Setup '{s.Name}' refers to '{s.FileEntry}', which is not in the module.");
         using var entry = Archive.OpenEntry(s.FileEntry);
         var save = SaveFileReader.Read(entry);
         var state = SaveImporter.Import(save, Model, Log).State;
         if (difficulty is { } d) state.Difficulty = d;
+        SetStartPlayers(state, players);
         Replace(state, $"Setup \"{s.Name}\" loaded: {state.Pieces.Count} pieces");
     }
 

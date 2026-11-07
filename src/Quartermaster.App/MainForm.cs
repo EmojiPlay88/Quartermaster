@@ -581,9 +581,9 @@ sealed partial class MainForm : Form
         using var dlg = new SetupChooserDialog(s.Model, _settings.Current.LastDifficulty, preselectNew, preselect, s.Rules);
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         if (dlg.SelectedDifficulty != _settings.Current.LastDifficulty) _settings.Save(_settings.Current with { LastDifficulty = dlg.SelectedDifficulty });
-        if (dlg.Selected is { } setup) s.LoadSetup(setup, dlg.SelectedDifficulty); else s.StartNewGame(dlg.SelectedDifficulty);
-        // Two or more players: the first handover screen follows at once (hot-seat).
-        if (dlg.SelectedPlayers.Count >= 2) SetGamePlayers(dlg.SelectedPlayers);
+        // The players are part of the game's start (not an undoable command); two or more bring up the first handover screen.
+        var players = dlg.SelectedPlayers.Count >= 2 ? dlg.SelectedPlayers : null;
+        if (dlg.Selected is { } setup) s.LoadSetup(setup, dlg.SelectedDifficulty, players); else s.StartNewGame(dlg.SelectedDifficulty, players);
     }
 
     void LoadSetupDialog()

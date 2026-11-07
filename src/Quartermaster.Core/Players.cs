@@ -10,7 +10,7 @@ public static class Players
     public const int MaxPlayers = 6;
 
     /// <summary>Copy without null players, null side lists or null side entries (never throws).</summary>
-    internal static List<PlayerDef> Clean(IEnumerable<PlayerDef?>? players) =>
+    public static List<PlayerDef> Clean(IEnumerable<PlayerDef?>? players) =>
         (players ?? Array.Empty<PlayerDef?>())
             .Where(p => p != null && p.Id != null && p.Name != null)
             .Select(p => p! with { Sides = (p.Sides ?? Array.Empty<string>()).Where(x => x != null).ToList() })

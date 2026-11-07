@@ -326,4 +326,79 @@ public class HotSeatTests : IDisposable
         Assert.Equal(new[] { "blue" }, s.ViewSides!.ToArray());
         Assert.Equal(new[] { "blue" }, hs.Current!.Sides.ToArray());
     }
+
+    [Fact]
+    public void PlayerListEdit_ClearsStaleHandover_RaisesCancelled()
+    {
+        var (s, c, _, hs) = Make(true);
+        c.Start(); c.Advance();                              // Supply (red)
+        hs.TakeOver(Alice);
+        var raised = Track(hs);
+        var cancelled = TrackCancel(hs);
+        s.Game!.Execute(new SetPlayers(new[] { Alice with { Sides = new[] { "blue" } }, Bob with { Sides = new[] { "red" } } }));
+        Assert.Equal(new[] { "p2" }, raised);                // red went to Bob: Bob is due
+        Assert.Empty(s.ViewSides!);
+        s.Game!.Execute(new SetPlayers(new[] { Alice, Bob })); // red back to Alice: nothing to hand over
+        Assert.Single(cancelled);
+        Assert.Null(hs.Pending);
+        Assert.Null(hs.HandoverDue());
+        Assert.Equal(new[] { "red" }, s.ViewSides!.ToArray());
+        Assert.Equal("p1", hs.Current?.Id);
+    }
+
+    [Fact]
+    public void PlayerListEdit_RemovesCurrentPlayer_HandsOverToNewHolder()
+    {
+        var (s, c, _, hs) = Make(true);
+        c.Start(); c.Advance();                              // Supply (red)
+        hs.TakeOver(Alice);
+        var raised = Track(hs);
+        var carol = new PlayerDef("p3", "Carol", new[] { "red" });
+        s.Game!.Execute(new SetPlayers(new[] { carol, Bob }));
+        Assert.Null(hs.Current);
+        Assert.Equal(new[] { "p3" }, raised);
+        Assert.Empty(s.ViewSides!);
+    }
+
+    [Fact]
+    public void Rewind_ToNoActingSide_KeepsPendingHandover()
+    {
+        var (s, c, h, hs) = Make(true);
+        c.Start();                                           // first phase: no acting side
+        hs.TakeOver(Bob);
+        var raised = Track(hs);
+        var cancelled = TrackCancel(hs);
+        c.Advance();                                         // Supply (red): Alice due
+        Assert.Equal(new[] { "p1" }, raised);
+        h.Undo();                                            // back where no side acts
+        Assert.Empty(cancelled);
+        Assert.Equal("p1", hs.Pending?.Id);
+        Assert.Empty(s.ViewSides!);
+    }
+
+    [Fact]
+    public void NewGame_WithPlayers_PartOfGenesis_NotUndoable()
+    {
+        var fx = PhaseFixture.Module();
+        _fixtures.Add(fx);
+        var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "c-new"), Path.Combine(_tmp, "r-new"));
+        _sessions.Add(s);
+        s.LoadSetup(s.Model.Setups[0], Difficulty.FullyAuto);
+        s.NewRules("t");
+        s.UpdateRules(_ => PhaseFixture.Pack(s.Archive.Sha256));
+        Func<GameCommand, GameState, GameCommand> prepare = (cmd, _) => cmd;
+        var phases = new PhaseController(s, prepare);
+        var history = new HistoryController(s, phases, prepare);
+        var hs = new HotSeat(s, phases);
+        hs.Watch(history);
+        var raised = Track(hs);
+        s.StartNewGame(Difficulty.FullyAuto, new[] { Alice, Bob });
+        Assert.Equal(new[] { "p1", "p2" }, s.Game!.Genesis.Players.Select(p => p.Id).ToArray());
+        Assert.False(history.CanUndo);
+        Assert.Equal(new[] { "p1" }, raised);
+        Assert.Empty(s.ViewSides!);
+        s.LoadSetup(s.Model.Setups[0], Difficulty.FullyAuto, new[] { Alice, Bob });
+        Assert.Equal(2, s.Game!.Genesis.Players.Count);
+        Assert.False(history.CanUndo);
+    }
 }

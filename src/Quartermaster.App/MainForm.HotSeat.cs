@@ -126,7 +126,8 @@ sealed partial class MainForm
         Guard(ShowHandoverWhenFree);
     }
 
-    bool ModalOpen() => Application.OpenForms.Cast<Form>().ToList().Any(f => f != this && f is not HandoverForm && f.Modal && f.Visible);
+    /// <summary>A modal dialog is up: one of ours, or a native one (message box, file dialog), which disables the main window.</summary>
+    bool ModalOpen() => !Enabled || Application.OpenForms.Cast<Form>().ToList().Any(f => f != this && f is not HandoverForm && f.Modal && f.Visible);
 
     /// <summary>Hides every Quartermaster window (not just covers it) and shows the handover screen in the main window's place.</summary>
     void ShowHandover(PlayerDef p)

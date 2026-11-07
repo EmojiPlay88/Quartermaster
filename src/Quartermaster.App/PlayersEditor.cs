@@ -55,10 +55,14 @@ sealed class PlayersEditor : UserControl
 
     public int RowCount => _list.Count;
 
+    readonly HashSet<string> _usedIds = new();
+    int _nextId = 1;
+
+    /// <summary>A fresh id, never one used before in this editor (a removed player's id is not handed to someone else).</summary>
     string NewId()
     {
-        for (var i = 1; ; i++)
-            if (_list.All(r => r.Id != "p" + i)) return "p" + i;
+        while (_usedIds.Contains("p" + _nextId)) _nextId++;
+        return "p" + _nextId++;
     }
 
     void AddRow(string id, string name, IReadOnlyList<string> held)
@@ -75,6 +79,7 @@ sealed class PlayersEditor : UserControl
         var remove = new Button { Text = "Remove", AutoSize = true, FlatStyle = FlatStyle.System, Margin = new Padding(8, 2, 3, 2) };
         panel.Controls.Add(remove);
         var row = new Row { Id = id, Panel = panel, Name = box, Sides = checks, Remove = remove };
+        _usedIds.Add(id);
         remove.Click += (_, _) =>
         {
             if (_list.Count <= 1) return;
