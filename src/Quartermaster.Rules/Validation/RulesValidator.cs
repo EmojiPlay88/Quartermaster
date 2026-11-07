@@ -11,7 +11,7 @@ public sealed record RulesIssue(RulesIssueSeverity Severity, string EntityId, st
 /// <summary>Checks a rules pack for problems. Never throws on bad user data.</summary>
 public static class RulesValidator
 {
-    public static IReadOnlyList<RulesIssue> Validate(RulesPack pack)
+    public static IReadOnlyList<RulesIssue> Validate(RulesPack pack, IReadOnlyCollection<string>? knownMapIds = null)
     {
         var issues = new List<RulesIssue>();
         try
@@ -36,6 +36,7 @@ public static class RulesValidator
             foreach (var ph in pack.Phases) Guarded(issues, ph.Id, ph.Name, () => CheckPhase(pack, ph, issues));
             CheckBlocks(pack, issues);
             CheckAlerts(pack, issues);
+            CheckOwners(pack, knownMapIds, issues);
         }
         catch (Exception ex)
         {
@@ -117,6 +118,23 @@ public static class RulesValidator
             CheckPhaseExpr(pack, w.Condition, who, "warning condition", Err);
             if (string.IsNullOrWhiteSpace(w.Message)) Err($"{who}: warning message is empty");
         }
+    }
+
+    private static void CheckOwners(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, List<RulesIssue> issues)
+    {
+        foreach (var h in pack.Holders)
+            if (!string.IsNullOrEmpty(h.SideId) && pack.ById<SideDef>(h.SideId!) is null)
+                Add(issues, RulesIssueSeverity.Error, h.Id, h.Name, $"Holder \"{h.Name}\": side \"{h.SideId}\" does not exist");
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var m in pack.MapOwners)
+            Guarded(issues, m.MapId, m.MapId, () =>
+            {
+                void Err(string msg) => Add(issues, RulesIssueSeverity.Error, m.MapId, m.MapId, msg);
+                string who = $"Map owner \"{m.MapId}\"";
+                if (pack.ById<SideDef>(m.SideId) is null) Err($"{who}: side \"{m.SideId}\" does not exist");
+                if (knownMapIds != null && !knownMapIds.Contains(m.MapId)) Err($"{who}: map does not exist in the module");
+                if (!seen.Add(m.MapId)) Err($"{who}: map has more than one owner");
+            });
     }
 
     private static void CheckAlerts(RulesPack pack, List<RulesIssue> issues)

@@ -37,6 +37,29 @@ public class ValidatorTests
     private static VariableBinding In(string v) => new() { Variable = v, Kind = BindingKind.Input };
 
     [Fact]
+    public void Validator_FlagsBadOwners()
+    {
+        var sides = new List<SideDef> { new() { Id = "s1", Name = "Red" } };
+        var ok = Clean() with { Sides = sides, MapOwners = new() { new MapOwner { MapId = "m1", SideId = "s1" } } };
+        Assert.Empty(RulesValidator.Validate(ok, new[] { "m1" }));
+        Assert.Empty(RulesValidator.Validate(ok)); // no module: map ids unchecked
+
+        var badHolder = Clean() with { Sides = sides, Holders = new() { new HolderDef { Id = "h1", Name = "Depot", SideId = "zz" } } };
+        var i1 = Assert.Single(RulesValidator.Validate(badHolder));
+        Assert.Equal("h1", i1.EntityId);
+        Assert.Equal("Holder \"Depot\": side \"zz\" does not exist", i1.Message);
+
+        var badSide = ok with { MapOwners = new() { new MapOwner { MapId = "m1", SideId = "zz" } } };
+        Assert.Equal("Map owner \"m1\": side \"zz\" does not exist", Assert.Single(RulesValidator.Validate(badSide, new[] { "m1" })).Message);
+
+        var badMap = RulesValidator.Validate(ok, new[] { "other" });
+        Assert.Equal("Map owner \"m1\": map does not exist in the module", Assert.Single(badMap).Message);
+
+        var dupe = ok with { MapOwners = new() { new MapOwner { MapId = "m1", SideId = "s1" }, new MapOwner { MapId = "m1", SideId = "s1" } } };
+        Assert.Equal("Map owner \"m1\": map has more than one owner", Assert.Single(RulesValidator.Validate(dupe)).Message);
+    }
+
+    [Fact]
     public void Validator_FlagsBadAlert()
     {
         AlertDef A(string id, string name, string cond, string? side = null) =>

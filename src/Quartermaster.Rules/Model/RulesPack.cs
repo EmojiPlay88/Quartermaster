@@ -4,6 +4,9 @@ public enum PropertyScope { Pieces, Holders, Both }
 
 public enum OutlinerAggregate { None, Sum, Min, Average }
 
+/// <summary>Whether every player sees a property's value (Public) or only the players holding the owning side (Private).</summary>
+public enum Visibility { Private, Public }
+
 public enum AlertSeverity { Info, Warning, Critical }
 
 public sealed record AlertDef
@@ -30,6 +33,15 @@ public sealed record PropertyDef
     public string? Notes { get; init; }
     /// <summary>How the outliner aggregates this property per group.</summary>
     public OutlinerAggregate Outliner { get; init; } = OutlinerAggregate.None;
+    /// <summary>New properties are Private; packs of format 1-3 load with every property Public.</summary>
+    public Visibility Visibility { get; init; } = Visibility.Private;
+}
+
+/// <summary>Marks a map as belonging to one side; other players do not see its pieces.</summary>
+public sealed record MapOwner
+{
+    public string MapId { get; init; } = "";
+    public string SideId { get; init; } = "";
 }
 
 public sealed record HolderDef
@@ -39,6 +51,8 @@ public sealed record HolderDef
     public string Id { get; init; } = "";
     public string Name { get; init; } = "";
     public string? Notes { get; init; }
+    /// <summary>Side that owns this holder's ledger; null = public.</summary>
+    public string? SideId { get; init; }
 }
 
 public sealed record RuleRef
@@ -64,6 +78,7 @@ public sealed record RulesPack
     public List<PhaseDef> Phases { get; init; } = new();
     public List<PhaseBlock> Blocks { get; init; } = new();
     public List<AlertDef> Alerts { get; init; } = new();
+    public List<MapOwner> MapOwners { get; init; } = new();
 
     public TableDef? TableByName(string name) => Tables.FirstOrDefault(t => Eq(t.Name, name));
     public PropertyDef? PropertyByName(string name) => Properties.FirstOrDefault(p => Eq(p.Name, name));

@@ -13,7 +13,7 @@ namespace Quartermaster.Rules;
 /// </summary>
 public static class RulesPackIo
 {
-    public const int CurrentFormat = 3;
+    public const int CurrentFormat = 4;
     private const string PackEntry = "pack.json";
 
     public static JsonSerializerOptions JsonOptions { get; } = new()
@@ -175,7 +175,11 @@ public static class RulesPackIo
         Id = p.Id ?? "",
         Name = p.Name ?? "",
         ModuleSha256 = p.ModuleSha256 ?? "",
-        Properties = (p.Properties ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),
+        // Packs older than format 4 had no visibility setting: everything stays visible.
+        Properties = (p.Properties ?? new()).Where(x => x != null)
+            .Select(x => x with { Name = x.Name ?? "", Visibility = p.Format < 4 ? Visibility.Public : x.Visibility }).ToList(),
+        MapOwners = (p.MapOwners ?? new()).Where(x => x != null)
+            .Select(x => x with { MapId = x.MapId ?? "", SideId = x.SideId ?? "" }).ToList(),
         Holders = (p.Holders ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),
         RuleRefs = (p.RuleRefs ?? new()).Where(x => x != null)
             .Select(x => x with { Label = x.Label ?? "", DocumentEntry = x.DocumentEntry ?? "" }).ToList(),

@@ -41,4 +41,6 @@ public sealed record FormulaDef
     public string? AppliesTo { get; init; }
     public string? RuleRefId { get; init; }
     public string? Notes { get; init; }
+    /// <summary>When true, dice results of this formula are shown only to the rolling side's players.</summary>
+    public bool PrivateRolls { get; init; } = false;
 }
