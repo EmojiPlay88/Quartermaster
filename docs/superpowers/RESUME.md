@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-06, after piece 3 was merged and pushed. A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-07, after piece 4 was built (merged locally, not yet pushed). A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -31,8 +31,8 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Core`: command-log game state and deterministic replay.
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
-- Tests: xUnit under `tests/`. 755 tests are green on `master` (ee23e65 plus a docs commit).
-- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 3 is **pushed** (`master` in sync with `origin/master`). Push again only when the user asks.
+- Tests: xUnit under `tests/`. 838 tests are green after piece 4 (169 Rules, 116 Vassal, 179 Core, 374 Render).
+- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 3 is **pushed**; piece 4 is merged locally and not pushed. Push only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
 - Commit messages end with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -46,8 +46,17 @@ The engine ships **no content from any real game**: no rules text, tables, formu
 | 2 | Rules packs, ledgers, formula runner, layout-C formula dialog, Ledger window, Rules Workbench, multi-monitor pop-outs | `plans/…piece2…` |
 | 2b | Charts/Tables trees, dice tools, LOS, overview, notes, inventory, map export, Settings + autosave, game-master counter palette, log panel | `specs/…piece2b…`, `plans/…piece2b…` |
 | 3 | Turn sequencer + difficulty modes (below) | `specs/2026-11-06-piece3-sequencer-difficulty-design.md`, `plans/…piece3…` |
+| 4 | Undo / Redo and Step Back by truncate-and-replay of the command log (below) | `specs/2026-11-07-piece4-undo-design.md`, `plans/…piece4…` |
 
 All rulings and deferred minors for every piece are in `docs/superpowers/piece1-followups.md`.
+
+### Piece 4 in one paragraph
+The command log is the history. Undo, Redo and Step Back rewind by cutting the log and replaying it from the start (with cached snapshots), so a rewound state is JSON-identical to the state recorded at that point. Commands are grouped into actions (one drag, one Next Phase with everything it triggered), and phase or turn boundaries are checkpoints.
+- **Edit menu and toolbar:** Undo, Redo (Ctrl+Z, Ctrl+Y), Step Back to Start of Phase (Ctrl+Left), Step Back To... (a list of checkpoints with a plain-words preview of what would be undone).
+- **Step back** logs a "Stepped back" line, undoes dice rolled after the checkpoint (rolling again gives new results), and autosaves first.
+- **Saves:** format 5 stores the action marks and checkpoints. Formats 1-4 still load; undo then starts at the load point.
+- **Autosave** keeps the last 20 per module plus the first of each turn.
+- **Smokes:** `--smoke-undo` and `--screenshot-stepback <png>` (run on a fully automatic game).
 
 ### Piece 3 in one paragraph
 Phases come from the rules pack and are authored in the Rules Workbench → Phases tab. A rules pack defines sides with a unit filter, phases, and repeating blocks.
@@ -81,7 +90,9 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-1. **The user hands-on tests piece 3** with the test pack. Checklist:
+1. **The user hands-on tests piece 4** with the test pack: Ctrl+Z and Ctrl+Y after a drag and after Next Phase; Step Back to Start of Phase and Step Back To...; redo after a step back; dice after a step back; an old (format 1-4) save and the greyed-out Undo tooltip; difficulty switch then undo; Open Autosave of a turn-boundary snapshot. Fix whatever they find.
+
+   Still open from piece 3, if not yet done: hands-on test of piece 3 with the test pack. Checklist:
    - Start game ▶.
    - Next Phase with open decisions.
    - Hardcore red box + Calculate.
@@ -94,12 +105,11 @@ How the formula window behaves:
    - Load a phase-boundary autosave.
 
    Fix whatever they find.
-2. **README is out of date in one place:** the "Status" line (and Roadmap) still says the turn sequencer and difficulty modes aren't built. Offer to fix and push. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
-3. **Next piece: undecided.** Candidates from the master spec:
+2. The README Status line and Roadmap are current as of piece 4. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
+3. **Next piece: undecided.** After piece 4 is tested, ask the user to choose from:
    - HOI4-style accessibility layer (number tooltips, alerts, outliner) — §10;
-   - hot-seat / live online multiplayer with chat (master spec §11, "pieces 4–5");
-   - OCR for scanned rulebooks — §8.3;
-   - step back / undo to a phase checkpoint — §9.5, deferred from piece 3.
+   - hot-seat / live online multiplayer with chat (master spec §11);
+   - OCR for scanned rulebooks — §8.3.
 
    Ask the user which, then: brainstorm → spec → plan → build. Use the superpowers skills.
 4. Residual piece-3 minors are listed at the end of `piece1-followups.md`.

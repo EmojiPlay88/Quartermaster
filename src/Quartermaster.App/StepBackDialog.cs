@@ -68,6 +68,13 @@ sealed class StepBackDialog : Form
                     r.Turn.ToString(), r.Stage ?? "", r.Side ?? "", r.Phase,
                     r.At is { } at ? at.ToLocalTime().ToString("HH:mm") : "", r.ActionsSince.ToString(),
                 }));
+            // The Phase column takes whatever width the other columns leave, so the list has no blank band on the right.
+            void FitPhase()
+            {
+                var others = _list.Columns.Cast<ColumnHeader>().Where(c => c.Index != 3).Sum(c => c.Width);
+                _list.Columns[3].Width = Math.Max(150, _list.ClientSize.Width - others);
+            }
+            _list.Resize += (_, _) => FitPhase();
             var listHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8, 8, 8, 4) };
             listHost.Controls.Add(_list);
             Controls.Add(listHost);

@@ -174,3 +174,29 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - The Settings → Game hint doesn't mention that switching difficulty closes open formula windows and batch grids.
 - `MainForm.OnDifficultyChanged` has no `InvokeRequired` guard (its only caller is on the UI thread today).
 - Not covered by any smoke (check by hand): batch-grid key dropdowns, debounced Phases-tab commits, setup chooser on tree double-click, windows closing on a difficulty switch.
+
+## Piece 4 (undo and step back) — rulings and deferred minors
+
+### Rulings made during execution
+- Rewinding to any log index is allowed. If the cut falls in the middle of an action, the cut-off tail becomes its own redo entry with the same label, ahead of the later actions. Folding commands (ledger seeds, "Stepped back" lines) can join an action after its checkpoint, so mid-action checkpoint indices do exist.
+- Rewinding while a gesture's action scope is open throws; the UI cannot reach that state.
+- Tasks that needed `GameSession` helpers (`DropTail`, `ClearRedo`) were allowed to edit it.
+- The log always keeps one "Stepped back" line that covers everything on the redo stack. A second step back sums the totals; Undo after a step back re-logs one merged line; the first Redo drops it. A plain Undo with no step-back tail adds no line.
+- The relocation that follows a rewind (when the current phase was deleted) is part of that rewind. One Undo goes back through the relocation and the action before it, and the relocation does not clear that Undo's redo. Only the relocation made by the latest rewind belongs to its tail.
+- Saving the rules pack no longer clears redo; only reseeds and reconciles that change the game do.
+- The step-back line's totals count everything on the redo stack, so it may also mention plainly undone actions.
+- Three small UI issues from the Task 7 review were fixed in Task 8: the "Undone"/"Redone"/"Stepped back" status and the closing of formula windows now happen only when a rewind really ran; "&" in an action label is escaped in menu captions; toolbar tooltips refresh after a shortcut change.
+- The MSB3277 WebView2/WindowsBase warning in the App build is a pre-existing package reference conflict, left as is.
+
+### Spec gap to surface to the user
+- A plain Undo of an action that rolled dice, followed by a reroll, leaves no trace in the log (spec 6.4 says Undo adds no line). Not changed.
+
+### Deferred minors
+- Autosaver: an empty catch around the turn provider is not reported through `onError`; the turn key uses an odd `TrimStart('0')`; no test for the pruning of a `-t{n}-2` collision twin; Open Autosave may list the twin before the original.
+- Core history: Redo pops before it replays, so a partial failure would lose the entry (the reducer is pure, so the risk is low); orphan commands before the first action are swept into the first action's redo; `RewindTo` throws on a bad index, so callers keep it behind a guard; a checkpoint's time and label can come from different commands when one action holds both an `AdvancePhase` and a `SetTurn`; a mid-action cut after `AdvancePhase` loses that checkpoint on redo of the tail (only arbitrary-index callers); `ActionLabels.For` has an unused count parameter; the singular "1 dice roll" label is untested.
+- `GameSession`: `RebasedOnLoad` lost its doc comment (summaries stacked above `LoadDiagnostic`).
+- Native save: the `Need` helper is duplicated; a `.tmp` file is left if the write fails.
+- History controller: the preview puts display names in `PropertyId`; dropping the rewind tail shares a try block with the rewind, so an exception path can lose the line; the rewind tail lives in memory only, so after a reload a trailing "Stepped back" line counts as plain history; view-only folding commands after a rewind are dropped with the tail; the preview of a row does not subtract the tail's dice; the Step Back confirmation preview can be smaller than the logged line; later `SetStackExpanded` commands can be dropped with a step-back tail; an early return inside the Next Phase scope can leave a relocation-only "Next Phase" action; the `RulesChanged` subscription is never removed.
+- App: the `Changed`/`Rewound` lambdas in `MainForm` are duplicated, and the notes window's `OnRewound` duplicates `OnGameChanged`; the shortcut-gate tests pass trivially; no automated menu-state tests (checked by the smoke screenshots and by hand).
+- Smoke: `--smoke-undo` runs on a fully automatic game only; the Edit-menu and confirm-dialog pictures are written next to the `--screenshot-stepback` file with `-menu` and `-confirm` suffixes.
+

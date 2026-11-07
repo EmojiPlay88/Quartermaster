@@ -11,6 +11,8 @@ sealed partial class MainForm
     ToolStripMenuItem? _editUndo, _editRedo, _editStepBack, _editStepBackTo;
     ToolStripButton? _tbUndo, _tbRedo, _tbStepBack;
     bool _historyRefreshQueued;
+    /// <summary>Status text for the rewind about to run; consumed by <see cref="OnHistoryRewound"/>, so nothing closes when the controller declined to rewind.</summary>
+    string? _rewindStatus;
 
     /// <summary>The Edit menu, between File and View. Items stay disabled until a game with history exists.</summary>
     ToolStripMenuItem BuildEditMenu()
@@ -58,8 +60,8 @@ sealed partial class MainForm
 
             var undoText = h?.UndoText ?? "Undo";
             var redoText = h?.RedoText ?? "Redo";
-            Set(_editUndo, "&" + undoText, undo, "edit.undo", !undo && floor ? FloorTip : null);
-            Set(_editRedo, "&" + redoText, redo, "edit.redo", null);
+            Set(_editUndo, "&" + Mnemonic(undoText), undo, "edit.undo", !undo && floor ? FloorTip : null);
+            Set(_editRedo, "&" + Mnemonic(redoText), redo, "edit.redo", null);
             Set(_editStepBack, "Step &Back to Start of Phase", start != null, "phase.stepBack", start == null && floor ? FloorTip : null);
             Set(_editStepBackTo, "Step Back &To...", any, "phase.stepBackTo", !any && floor ? FloorTip : null);
 
@@ -89,8 +91,14 @@ sealed partial class MainForm
         string Tip(string text, string cmd) => ShortcutText(cmd) is { Length: > 0 } k ? $"{text} ({k})" : text;
     }
 
+    /// <summary>Escapes "&" so an action label cannot turn into a menu mnemonic.</summary>
+    static string Mnemonic(string text) => text.Replace("&", "&&", StringComparison.Ordinal);
+
     void OnHistoryRewound()
     {
+        var status = _rewindStatus ?? "Rewound";
+        _rewindStatus = null;
+        CloseFormulaWindows(status);
         RefreshPhaseViews();
         RefreshStrip();
         RefreshHistoryUi();
@@ -99,15 +107,15 @@ sealed partial class MainForm
     void DoUndo()
     {
         if (_history is not { CanUndo: true } h) return;
-        h.Undo();
-        CloseFormulaWindows("Undone");
+        _rewindStatus = "Undone";
+        try { h.Undo(); } finally { _rewindStatus = null; }
     }
 
     void DoRedo()
     {
         if (_history is not { CanRedo: true } h) return;
-        h.Redo();
-        CloseFormulaWindows("Redone");
+        _rewindStatus = "Redone";
+        try { h.Redo(); } finally { _rewindStatus = null; }
     }
 
     void DoStepBackToStart()
@@ -140,8 +148,8 @@ sealed partial class MainForm
         {
             Program.AppLog("step back autosave: " + ex.Message);
         }
-        h.StepBack(row);
-        CloseFormulaWindows("Stepped back — reopen from the phase panel");
+        _rewindStatus = "Stepped back — reopen from the phase panel";
+        try { h.StepBack(row); } finally { _rewindStatus = null; }
     }
 
     /// <summary>Open formula dialogs, batch grids and cheat sheets belong to the state before a rewind or a difficulty change, so they close.

@@ -47,6 +47,7 @@ sealed partial class MainForm
         _shortcutText = text;
         foreach (var (id, mi) in _cmdItems) mi.ShortcutKeyDisplayString = ShortcutText(id);
         if (_dice != null) _dice.ShortcutText = ShortcutText;
+        RefreshHistoryUi();
     }
 
     /// <summary>

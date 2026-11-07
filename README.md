@@ -2,7 +2,7 @@
 
 Quartermaster is a desktop engine for playing tabletop wargames, a small alternative to [VASSAL](https://vassalengine.org) aimed at the heaviest board games. It opens the VASSAL modules you already have and then takes the paperwork off your hands. It runs the game's procedures for you, does the arithmetic, rolls the dice, and keeps count of everything a big game asks you to track, from fuel and ammunition to whose turn it is. Go ahead and close that spreadsheet. It's been open since the last campaign and it deserves a rest.
 
-> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes and the tools below work. Undo, multiplayer and the rest of the [Roadmap](#roadmap) are not built yet.
+> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes and the tools below work. Multiplayer and the rest of the [Roadmap](#roadmap) are not built yet.
 
 ## What it does
 
@@ -26,6 +26,12 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
   - *Fully automatic*: the engine runs the formulas at the right phase and on moves, and writes every calculation to the log.
 - A wrong value never reaches a ledger. Formulas that run per unit open as one batch grid.
 
+**Undo and step back**
+- Undo and Redo (Ctrl+Z, Ctrl+Y) work on whole actions: a drag, a Next Phase with everything it triggered, a formula Apply. The Edit menu and toolbar name the action, for example "Undo move of 3 pieces".
+- Step Back returns to the start of the current phase, or to any earlier phase or turn in a list that shows what each step would undo. Dice rolled after that point are undone too, so rolling again gives new results. The log keeps a "Stepped back" line.
+- Both rewind by replaying the game's command log, so the state after an undo is exactly the state you had.
+- Autosave keeps the last 20 snapshots per module, plus the first autosave of each turn. A save made before this feature loads normally; undo just starts at the point you loaded.
+
 **Tabletop tools**
 - Dice: 1d6, 2d6, custom expressions (`3d6+2`), special dice and multi-rolls. Every roll goes into the log.
 - Log panel: filter by kind and export. Double-click an entry to centre the map on that piece.
@@ -37,7 +43,7 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
 - Every window can pop out onto another monitor and dock back.
 - Separate Charts/Module and Tables trees.
 - A Settings window: display, map, dice, toolbar, rebindable keyboard shortcuts with conflict checks, cache folders.
-- Autosave keeps the last 10 snapshots per module, with File → Open Autosave… to recover one.
+- Autosave keeps the last 20 snapshots per module plus the first of each turn, with File → Open Autosave… to recover one.
 - Every change to the game is a logged command, so saves are deterministic and replayable.
 
 ## Content policy
@@ -92,7 +98,6 @@ Design documents and implementation plans are in [`docs/superpowers`](docs/super
 
 ## Roadmap
 
-- **Step back**: undo back to an earlier phase.
 - Accessibility in the style of grand strategy games: tooltips that explain every number, alerts, an outliner.
 - OCR for scanned rulebooks in the workbench.
 - Hot-seat, live online multiplayer (host-authoritative, with chat in the log) and play by turn files.

@@ -168,6 +168,7 @@ sealed partial class MainForm
         if (_opts.ScreenshotNextPhase != null) Guard(SmokeNextPhaseDialog);
         if (_opts.ScreenshotSetup != null) Guard(SmokeSetupDialog);
         if (_opts.SmokePhases || _opts.ScreenshotPhases != null) Guard(SmokePhases);
+        if (_opts.SmokeUndo || _opts.ScreenshotStepBack != null) Guard(SmokeUndo);
         if (_opts.GameMaster || _opts.ScreenshotPalette != null) Guard(SmokePalette);
         if (_opts.ScreenshotSettings != null) Guard(SmokeSettings);
         Guard(SmokeOverview);
