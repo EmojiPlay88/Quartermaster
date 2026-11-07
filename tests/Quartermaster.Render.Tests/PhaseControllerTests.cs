@@ -689,6 +689,22 @@ public class PhaseControllerTests : IDisposable
     }
 
     [Fact]
+    public void ApplyFormula_RefusesUnitOfSideNotHeld()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto);
+        c.Start();
+        s.SetViewSides(BlueOnly);
+        var none = new Dictionary<string, string>();
+        var trace = s.Runner!.Run(s.Game!.State, new RunRequest("f-water", "r1", none, none, new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.NotNull(trace.Result);
+        Assert.False(c.ApplyFormula(null, "r1", trace, false));
+        Assert.Equal(10, Water(s, "r1"));
+        s.SetViewSides(RedOnly);
+        Assert.True(c.ApplyFormula(null, "r1", trace, false));
+        Assert.Equal(9, Water(s, "r1"));
+    }
+
+    [Fact]
     public void AutoPhaseStart_StampsActingSide_SoloStampsNothing()
     {
         var (s, c) = Make(Difficulty.FullyAuto);

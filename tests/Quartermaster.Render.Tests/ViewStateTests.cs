@@ -137,6 +137,21 @@ public class ViewStateTests : IDisposable
     }
 
     [Fact]
+    public void CanAct_HeldOrUnownedUnitsOnly()
+    {
+        var s = Make();
+        Assert.True(s.CanAct("b1"));
+        Assert.True(s.CanAct(null));
+        s.SetViewSides(Red);
+        Assert.True(s.CanAct("r1"));
+        Assert.False(s.CanAct("b1"));
+        Assert.False(s.CanAct("gone"));
+        Assert.True(s.CanAct(null));             // unit-less runs are stamped with the actor side
+        s.UpdateRules(p => p with { Sides = p.Sides.Take(1).ToList() });   // Blue 1 no longer belongs to any side
+        Assert.True(s.CanAct("b1"));
+    }
+
+    [Fact]
     public void SetViewSides_CopiesTheSet()
     {
         var s = Make();

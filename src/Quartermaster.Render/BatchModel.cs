@@ -120,6 +120,14 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
 
     private BatchRowView Build(int i, PendingUnit u)
     {
+        if (!s.CanAct(u.PieceId))
+        {
+            // Hot-seat: another side's unit. Nothing of it is evaluated or shown, and it cannot be applied.
+            var n = Variables.Count;
+            var label = u.PieceId != null && s.CanSee(u.PieceId) ? u.Label : ModuleSession.HiddenText;
+            return new BatchRowView(u.PieceId, label, Enumerable.Repeat(ModuleSession.HiddenText, n).ToList(), new bool[n],
+                ModuleSession.HiddenText, "", ModuleSession.OtherSideText, false, false);
+        }
         var model = ModelFor(i);
         var dv = model.Evaluate(s.Game!.State);
         var vars = Variables;
@@ -131,7 +139,7 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
     /// <summary>The (ledger key, property id) pairs a pending row would write; empty for an applied row or a failed run.</summary>
     public IReadOnlyList<(string Key, string PropertyId)> OutputsOf(int row)
     {
-        if (Unit(row) is not { Applied: false } || s.Game == null) return Array.Empty<(string, string)>();
+        if (Unit(row) is not { Applied: false } u || s.Game == null || !s.CanAct(u.PieceId)) return Array.Empty<(string, string)>();
         try
         {
             var dv = ModelFor(row).Evaluate(s.Game.State);
@@ -206,7 +214,7 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
 
     private bool ApplyOne(int row)
     {
-        if (s.Game == null || Unit(row) is not { Applied: false } u) return false;
+        if (s.Game == null || Unit(row) is not { Applied: false } u || !s.CanAct(u.PieceId)) return false;
         var model = ModelFor(row);
         var trace = model.Run(s.Game.State);
         var dv = model.View(trace);

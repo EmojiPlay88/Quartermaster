@@ -119,6 +119,26 @@ public sealed class ModuleSession : IDisposable
         return sides.OrderBy(x => x, StringComparer.Ordinal).First();
     }
 
+    /// <summary>Shown in place of a value the current viewer may not see.</summary>
+    public const string HiddenText = "hidden";
+
+    /// <summary>Why a formula on another side's unit was refused.</summary>
+    public const string OtherSideText = "belongs to a side you don't hold";
+
+    /// <summary>
+    /// True when the current viewer may run and apply formulas on this unit: always in solo; for a unit-less run (null); else only for a
+    /// visible unit that belongs to a held side or to no side.
+    /// </summary>
+    public bool CanAct(string? pieceId)
+    {
+        var sides = _viewSides;
+        if (sides == null || pieceId == null) return true;
+        if (_game?.State is not { } st || !st.Pieces.TryGetValue(pieceId, out var p) || p == null || !CanSee(pieceId)) return false;
+        if (Rules is not { } pack) return true;
+        var side = Ownership.SideOfPiece(p, st, pack);
+        return side == null || sides.Contains(side);
+    }
+
     public bool CanSeeMap(string mapId)
     {
         if (_viewSides == null || Rules == null) return true;

@@ -226,6 +226,8 @@ sealed partial class MainForm
         if (run == null) { SetStatus("That calculation is no longer waiting."); return; }
         var open = run.Units.Where(u => !u.Applied).ToList();
         if (open.Count == 0) return;
+        // Hot-seat: a run with no unit of a held side (or of no side) is not this player's to calculate.
+        if (!open.Any(u => _session.CanAct(u.PieceId))) { SetStatus("That calculation " + ModuleSession.OtherSideText + "."); return; }
         if (game.State.Difficulty == Difficulty.FullyAuto)
         {
             OpenPendingRunAutomatic(run);

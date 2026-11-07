@@ -67,6 +67,18 @@ public class MissingInputsTests : IDisposable
     }
 
     [Fact]
+    public void ApplyAll_SkipsUnitsOfSidesNotHeld()
+    {
+        var (s, c, run) = Make();
+        s.SetViewSides(new HashSet<string> { "blue" });
+        var (applied, failed) = MissingInputs.ApplyAll(s, c, run, new Dictionary<string, string> { ["Terrain"] = "Sand" });
+        Assert.Equal(0, applied);
+        Assert.Equal(2, failed.Count);
+        Assert.All(failed, f => Assert.EndsWith(ModuleSession.OtherSideText, f));
+        Assert.Equal(40, Ledger.Get(s.Game!.State, LedgerKey.Piece(PhaseFixture.RedOne), "fuel"));
+    }
+
+    [Fact]
     public void ApplyAll_AppliesTheValueToEveryUnitAndResolvesTheRun()
     {
         var (s, c, run) = Make();

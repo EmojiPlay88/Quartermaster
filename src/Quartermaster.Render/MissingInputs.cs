@@ -23,7 +23,7 @@ public static class MissingInputs
             var none = new Dictionary<string, string>();
             var noRolls = new Dictionary<string, IReadOnlyList<int>>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var u in Open(s, run))
+            foreach (var u in Open(s, run).Where(u => s.CanAct(u.PieceId)))
             {
                 var trace = runner.Run(game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
                 foreach (var v in trace.Variables)
@@ -56,6 +56,11 @@ public static class MissingInputs
         using var action = s.Game.BeginAction(BatchModel.ActionLabel(run.FormulaName, units.Count));
         foreach (var u in units)
         {
+            if (!s.CanAct(u.PieceId))
+            {
+                failed.Add($"{(s.CanSee(u.PieceId!) ? u.Label : "A unit")}: {ModuleSession.OtherSideText}");
+                continue;
+            }
             try
             {
                 var trace = runner.Run(s.Game.State, new RunRequest(run.FormulaId, u.PieceId, typed, none, noRolls, u.Moved, true));

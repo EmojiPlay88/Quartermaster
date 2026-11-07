@@ -183,6 +183,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (trace.Error != null || trace.Result == null) return false;   // a failed trace changes nothing and keeps the run pending
         // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
         if (runId != null && !IsPending(runId, pieceId)) return false;
+        if (!s.CanAct(pieceId)) return false;   // hot-seat: only the units of the sides held (or of no side)
         var name = UnitName(pieceId);
         var unit = name ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
