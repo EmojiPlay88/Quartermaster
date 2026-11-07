@@ -6,6 +6,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="PdfPig" Version="0.1.16" />
     <PackageReference Include="SkiaSharp" Version="4.154.0" />
     <PackageReference Include="Svg.Skia" Version="5.2.3" />
   </ItemGroup>
