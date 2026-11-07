@@ -454,7 +454,7 @@ public sealed class ModuleSession : IDisposable
     /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
     public void SeedLedgers()
     {
-        if (Game == null || Rules == null || IsGuest || IsViewerCopy || IsReplaying) return;   // a turn being replayed stays the sender's   // guests never execute commands; a viewer copy is read-only
+        if (Game == null || Rules == null || IsGuest || IsViewerCopy || IsReplaying) return;   // guests never execute; a viewer copy is read-only; a replayed turn stays the sender's
         try
         {
             var seed = LedgerSeeder.BuildSeeds(Game.State, Rules, _ => true, Model, Log);
@@ -583,8 +583,8 @@ public sealed class ModuleSession : IDisposable
 
     /// <summary>
     /// True while a received turn is being replayed step by step (<see cref="TurnReplayModel"/>): every action through
-    /// <see cref="LocalActions"/> is refused with <see cref="ReplayingText"/>. Autosave stays allowed (the game is consistent after each
-    /// step). Cleared when the replay finishes or fails, and whenever another game replaces the replayed one.
+    /// <see cref="LocalActions"/> is refused with <see cref="ReplayingText"/>. Saving is off meanwhile (<see cref="CanSave"/> is false), so a half-replayed
+    /// game is never saved. Cleared when the replay finishes or fails, and whenever another game replaces the replayed one.
     /// </summary>
     public bool IsReplaying { get; private set; }
 
