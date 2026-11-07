@@ -620,6 +620,8 @@ sealed partial class MapCanvas : SKControl
         string? stackId = null;
         if (PieceAt(p) is { } id && State is { } st && st.Pieces.TryGetValue(id, out var pc)) stackId = pc.StackId;
         if (stackId == _hoverStack) return;
+        // The popup is click-through away from its ledger lines, so the map sees the pointer crossing it on the way to a line: keep it up.
+        if (_popup is { Interactive: true } pop && pop.Bounds.Contains(Cursor.Position)) return;
         _hoverStack = stackId;
         _hoverTimer.Stop();
         if (stackId == null && _popup is { Interactive: true }) _graceTimer.Start(); // keep it up briefly so the pointer can reach it
@@ -635,7 +637,16 @@ sealed partial class MapCanvas : SKControl
         HidePopup();
         _popup = CounterDetailPopup.Create(_s, st, stack, _pieces, DeviceDpi / 96f);
         _popup.PointerEntered += _graceTimer.Stop;
-        _popup.PointerLeft += () => { if (!IsDisposed) BeginInvoke(() => { _hoverStack = null; HidePopup(); }); };
+        _popup.PointerLeft += () =>
+        {
+            if (IsDisposed) return;
+            BeginInvoke(() =>
+            {
+                // Leaving a ledger line for the popup's click-through area hands the pointer back to the map's hover logic.
+                if (_popup != null && _popup.Bounds.Contains(Cursor.Position)) return;
+                _hoverStack = null; HidePopup();
+            });
+        };
         _popup.ShowAt(Cursor.Position);
     }
 

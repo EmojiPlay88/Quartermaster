@@ -7,15 +7,15 @@ using SkiaSharp.Views.Desktop;
 namespace Quartermaster.App;
 
 /// <summary>
-/// Borderless, non-activating, mouse-transparent window listing every piece of a stack at 100% with its name and properties.
-/// The content is rendered once with Skia into a bitmap.
+/// Borderless, non-activating window listing every piece of a stack at 100% with its name and properties. It is mouse-transparent except over
+/// its ledger value lines (which show their breakdown on hover) and is never placed under the cursor. The content is rendered once with Skia into a bitmap.
 /// </summary>
 sealed class CounterDetailPopup : Form
 {
     const int MaxRows = 12;
     const int Pad = 6;
     Bitmap? _image;
-    // Ledger value lines: pixel rectangle -> breakdown, shown with the shared tip on hover. Without any, the popup stays click-through.
+    // Ledger value lines: pixel rectangle -> breakdown, shown with the shared tip on hover. Everywhere else the popup is click-through.
     readonly List<(Rectangle Rect, Breakdown Tip)> _hot = new();
     readonly BreakdownTip _tip = new();
 
@@ -46,8 +46,18 @@ sealed class CounterDetailPopup : Form
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == 0x0084 && _hot.Count == 0) { m.Result = new IntPtr(-1); return; } // WM_NCHITTEST -> HTTRANSPARENT
+        // WM_NCHITTEST -> HTTRANSPARENT everywhere but on the ledger lines, so a click or drag over the rest of the popup reaches the map.
+        if (m.Msg == 0x0084 && !OnHotLine(m.LParam)) { m.Result = new IntPtr(-1); return; }
         base.WndProc(ref m);
+    }
+
+    bool OnHotLine(IntPtr lParam)
+    {
+        if (_hot.Count == 0) return false;
+        var v = unchecked((int)(long)lParam);
+        var p = PointToClient(new Point((short)(v & 0xFFFF), (short)((v >> 16) & 0xFFFF)));
+        foreach (var (rect, _) in _hot) if (rect.Contains(p)) return true;
+        return false;
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -98,10 +108,8 @@ sealed class CounterDetailPopup : Form
 
     public void ShowAt(Point screen)
     {
-        var area = Screen.FromPoint(screen).WorkingArea;
-        var x = Math.Min(screen.X + 16, area.Right - Width);
-        var y = Math.Min(screen.Y + 16, area.Bottom - Height);
-        Location = new Point(Math.Max(area.Left, x), Math.Max(area.Top, y));
+        // Never under the cursor: a click or drag right after the hover must land on the map, not on the popup.
+        Location = PopupPlacement.Place(screen, Size, Screen.FromPoint(screen).WorkingArea);
         Show();
     }
 
