@@ -32,13 +32,13 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
 - Tests: xUnit under `tests/`. 898 tests are green after piece 5 (173 Rules, 116 Vassal, 207 Core, 402 Render).
-- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 4 is **pushed**. Piece 5 is on branch `piece5-access`, to be merged into master; push only when the user asks.
+- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 4 is **pushed**. Piece 5 and a small undo fix are merged into local `master` but **not pushed**; push only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
 - Commit messages end with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Never commit `startapp.cmd`.** It is untracked, names a private file path, and the repo is public. `.claude/` is excluded locally via `.git/info/exclude`.
 
-## Done so far (pieces 1-4 merged to master; piece 5 on branch `piece5-access`)
+## Done so far (pieces 1-5 merged to master)
 
 | Piece | What | Docs |
 |---|---|---|
@@ -100,7 +100,7 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-1. **The user hands-on tests piece 5** with the test pack: hover numbers in the Ledger, inventory and a unit popup; add a user alert in the Workbench Alerts tab and watch the bar and chips; set an outliner aggregate on a property and use the outliner dock; Help, Interface Tour; step back and check the bar and outliner follow. Then merge `piece5-access` into master. Fix whatever they find.
+1. **The user hands-on tests piece 5** with the test pack: hover numbers in the Ledger, inventory and a unit popup; add a user alert in the Workbench Alerts tab and watch the bar and chips; set an outliner aggregate on a property and use the outliner dock; Help, Interface Tour; step back and check the bar and outliner follow. Fix whatever they find. Known open issue: the map hover popup can stay open if the pointer leaves it past the map edge onto a docked panel (fix: poll cursor against the popup bounds after the early return in MapCanvas).
 
    Still open from piece 4: hands-on test with the test pack: Ctrl+Z and Ctrl+Y after a drag and after Next Phase; Step Back to Start of Phase and Step Back To...; redo after a step back; dice after a step back; an old (format 1-4) save and the greyed-out Undo tooltip; difficulty switch then undo; Open Autosave of a turn-boundary snapshot. Fix whatever they find.
 
