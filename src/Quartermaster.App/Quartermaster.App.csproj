@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
     <ProjectReference Include="..\Quartermaster.Core\Quartermaster.Core.csproj" />
     <ProjectReference Include="..\Quartermaster.Render\Quartermaster.Render.csproj" />
+    <ProjectReference Include="..\Quartermaster.Ocr\Quartermaster.Ocr.csproj" />
   </ItemGroup>
 
   <ItemGroup>
