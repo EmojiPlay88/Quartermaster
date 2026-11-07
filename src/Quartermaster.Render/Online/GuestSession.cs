@@ -336,6 +336,7 @@ public sealed class GuestSession : IDisposable
             return;
         }
         PlayerId = w.PlayerId;
+        NoAnswer = false;   // a late welcome: the host did answer after all
         if (!string.IsNullOrEmpty(w.RejoinToken) && w.RejoinToken != _token)
         {
             _token = w.RejoinToken;

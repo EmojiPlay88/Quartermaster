@@ -530,14 +530,15 @@ public sealed class HostSession : IDisposable
         byte[] bytes;
         try { bytes = Framing.Encode<GamePayload>(new Snapshot(++_version, Gzip.Compress(json))); }
         catch (ProtocolException) { TooLarge(seat, to, size); return; }
-        seat.TooLarge = false;
         try
         {
+            // The too-large flag clears only once a view actually went through: a transport that keeps refusing pauses the guest once.
             _t.Send(to, bytes).ContinueWith(t =>
             {
-                if (t.Exception?.InnerException is ProtocolException) Post(() => { if (seat.MemberId == to) TooLarge(seat, to, size); });
+                if (t.IsCompletedSuccessfully) Post(() => { if (seat.MemberId == to) seat.TooLarge = false; });
+                else if (t.Exception?.InnerException is ProtocolException) Post(() => { if (seat.MemberId == to) TooLarge(seat, to, size); });
                 else _ = t.Exception;
-            }, TaskContinuationOptions.OnlyOnFaulted);
+            }, TaskScheduler.Default);
         }
         catch (Exception) { }
     }

@@ -933,6 +933,32 @@ public class GuestSessionTests : IDisposable
         Assert.Equal(GuestState.Joining, g.State);
         Assert.Equal(GuestSession.MaxJoinTries + 1, t.Sends);
     }
+
+    [Fact]
+    public void Join_LateWelcomeAfterNoAnswer_ClearsIt_HostLeftIsHostGone()
+    {
+        var r = Open();
+        var s = Session(r.ModulePath, "slow");
+        var t = new LossyTransport(new SealingTransport(new MemoryRelay().Guest("m1"), r.Key), dropFirst: int.MaxValue);
+        var g = new GuestSession(s, t, Code, "Bob", r.D.Post, new RejoinTokens(Path.Combine(_tmp, "tokens-slow")));
+        _online.Add(g);
+        g.JoinRetry = TimeSpan.FromMilliseconds(20);
+        r.D.Pump();
+        var end = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!g.NoAnswer && DateTime.UtcNow < end) r.D.WaitAndPump(TimeSpan.FromMilliseconds(200));
+        Assert.True(g.NoAnswer);
+
+        // The host's welcome arrives after all: no longer "didn't answer".
+        t.Inner.InjectPlain(Framing.Encode<GamePayload>(new Welcome("p9", new string('a', 64), RulesPackIo.ToBytes(r.Host.Rules!), new[] { "blue" })));
+        r.D.Pump();
+        Assert.False(g.NoAnswer);
+        Assert.Equal(GuestState.ChoosingSide, g.State);
+        t.Inner.RaiseHostLeft();
+        r.D.Pump();
+        Assert.Equal(GuestState.Paused, g.State);
+        Assert.Equal(GuestSession.HostGoneText, g.StatusText);
+        Assert.False(g.NoAnswer);
+    }
 }
 
 /// <summary>An <see cref="ITransport"/> that loses the first N payloads it is asked to send (a host that never saw them).</summary>

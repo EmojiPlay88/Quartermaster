@@ -81,7 +81,8 @@ public class HostSessionTests : IDisposable
         public void UseOffsetClock() => H.Now = () => HostSession.MonotonicNow() + _offset;
     }
 
-    private Rig Open(IReadOnlyList<PlayerDef>? players = null, Difficulty difficulty = Difficulty.FullyAuto, string hostName = "Alice")
+    private Rig Open(IReadOnlyList<PlayerDef>? players = null, Difficulty difficulty = Difficulty.FullyAuto, string hostName = "Alice",
+        Func<MemoryTransport, ITransport>? transport = null)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
@@ -100,7 +101,7 @@ public class HostSessionTests : IDisposable
         var d = new QueueDispatcher();
         var listing = new LobbyListing("", "Test lobby", hostName, s.Archive.Sha256, "Fixture", new[] { "Red", "Blue", "Green" },
             new[] { "Blue", "Green" }, 1, 3, false, Protocol.ProtocolVersion);
-        var h = new HostSession(s, new IntentExecutor(s, c), relay.Host, "pw", "abc-234", listing, d.Post);
+        var h = new HostSession(s, new IntentExecutor(s, c), transport?.Invoke(relay.Host) ?? relay.Host, "pw", "abc-234", listing, d.Post);
         _hosts.Add(h);
         d.Pump();
         var rig = new Rig(s, h, relay, d);
@@ -907,5 +908,80 @@ public class HostSessionTests : IDisposable
         var onward = req.WithoutPassword();
         Assert.Null(onward.Password);
         Assert.Equal("Lobby", onward.LobbyName);
+    }
+
+    /// <summary>Pumps the dispatcher while continuations of sends (thread pool) post their results.</summary>
+    private static void Settle(Rig r)
+    {
+        var end = DateTime.UtcNow + TimeSpan.FromMilliseconds(300);
+        while (DateTime.UtcNow < end) { r.D.Pump(); Thread.Sleep(10); }
+        r.D.Pump();
+    }
+
+    [Fact]
+    public void Snapshot_TransportTooLarge_PausesOnce_UntilAViewGoesThrough()
+    {
+        FaultingTransport? ft = null;
+        var r = Open(transport: m => ft = new FaultingTransport(m));
+        var bob = r.Relay.Guest("m1");
+        JoinAs(r, bob, "Bob");
+        ft!.FaultSnapshots = true;
+        Send(r, bob, new ChooseSides(new[] { "blue" }));
+        Settle(r);
+        Assert.Equal(HostSession.TooLargeText, Assert.Single(bob.Of<Paused>()).Reason);
+        for (var i = 0; i < 3; i++) { r.H.FlushSnapshots(); Settle(r); }
+        Assert.True(ft.Faulted >= 4, $"faulted {ft.Faulted}");
+        Assert.Single(bob.Of<Paused>());   // once, not on every snapshot
+        Assert.Single(r.S.Log.Items, e => e.Category == "online" && e.Message.Contains("too large", StringComparison.Ordinal));
+
+        ft.FaultSnapshots = false;   // a view goes through: the next refusal pauses again
+        r.H.FlushSnapshots();
+        Settle(r);
+        Assert.Single(bob.Of<Snapshot>());
+        ft.FaultSnapshots = true;
+        r.H.FlushSnapshots();
+        Settle(r);
+        Assert.Equal(2, bob.Of<Paused>().Count());
+    }
+
+    /// <summary>The host's transport, refusing snapshot payloads as too large (as <see cref="RelayTransport"/> does when they would not fit).</summary>
+    private sealed class FaultingTransport : ITransport
+    {
+        private readonly MemoryTransport _inner;
+
+        public FaultingTransport(MemoryTransport inner)
+        {
+            _inner = inner;
+            inner.Received += (f, p) => Received?.Invoke(f, p);
+            inner.MemberLeft += id => MemberLeft?.Invoke(id);
+            inner.Disconnected += why => Disconnected?.Invoke(why);
+            inner.Reconnected += () => Reconnected?.Invoke();
+            inner.MembersListed += ids => MembersListed?.Invoke(ids);
+            inner.HostLeft += () => HostLeft?.Invoke();
+            inner.HostBack += () => HostBack?.Invoke();
+        }
+
+        public bool FaultSnapshots { get; set; }
+        public int Faulted { get; private set; }
+
+        public Task Send(string? to, byte[] payload)
+        {
+            if (FaultSnapshots && Framing.Decode<GamePayload>(payload) is Snapshot)
+            {
+                Faulted++;
+                return Task.FromException(new ProtocolException("Message is too large."));
+            }
+            return _inner.Send(to, payload);
+        }
+
+        public Task UpdateListing(LobbyListing listing) => _inner.UpdateListing(listing);
+
+        public event Action<string, byte[]>? Received;
+        public event Action<string>? MemberLeft;
+        public event Action<string>? Disconnected;
+        public event Action? Reconnected;
+        public event Action<IReadOnlyList<string>>? MembersListed;
+        public event Action? HostLeft;
+        public event Action? HostBack;
     }
 }
