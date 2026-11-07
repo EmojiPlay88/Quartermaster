@@ -203,3 +203,23 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - App: the `Changed`/`Rewound` lambdas in `MainForm` are duplicated, and the notes window's `OnRewound` duplicates `OnGameChanged`; the shortcut-gate tests pass trivially; no automated menu-state tests (checked by the smoke screenshots and by hand).
 - Smoke: `--smoke-undo` runs on a fully automatic game only; the Edit-menu and confirm-dialog pictures are written next to the `--screenshot-stepback` file with `-menu` and `-confirm` suffixes.
 
+## Piece 5 (accessibility) — rulings and deferred minors
+
+### Rulings made during execution
+- Breakdown line order is: earlier-turns line, "Start of turn N", an "N more changes" line when history is long, then entries oldest first. This is accepted over the order in the spec example. The earlier-turns line reads "Earlier turns: net +N" without a "seeded" note, so it carries slightly less information.
+- The "more changes" line shows the net amount of the hidden entries. A manual change with no note has no trailing space. The ledger and the breakdown share one source label.
+- An alert limited to one side is hidden unless that side is acting, whenever phases exist (strict reading of the spec). Side alerts are therefore invisible in neutral phases such as a weather phase.
+- A tooltip's first line uses the alert name when the message contains the `{unit}` token.
+- The outliner keeps its own 250 ms debounce rather than listening to the alert bar's refresh, at the cost of a second timer.
+- The tour smoke reads the saved first-run setting before opening the tour and restores it in a `finally` block, so a smoke run never changes it. The tour also closes when the session closes or the game is replaced.
+- The command-line doc comment now lists the new smoke flags.
+
+### Deferred minors
+- Rules pack: a duplicate alert id also produces duplicate-name validator noise; no test of the lowercase outliner enum spelling in the file.
+- Breakdown: the Where column is ragged; a deleted formula is labelled "deleted formula"; an unused model parameter; the format-5 test does not check undo, re-save or the load notice; entries from future turns count as earlier.
+- Alert engine: an unused model parameter; a warning with no pieces yields no hit; swallowed errors are silent; warnings with no current phase are untested.
+- Tooltips: the tip can overlap a popup's lines and can land under the cursor near a screen edge; the tip text is slightly brown on yellow; a batch grid tip covers only the first output; the " · " separator is not a shared constant; a test contains a literal tab character.
+- Outliner: the set of excluded sides is per side; the collector re-walks the pieces; arrays are shared between nodes; an empty side filter swallows the rest; the Decisions text can read "Weather roll — Weather roll" when a unit label equals the formula name (fixture data); "1 decisions left" keeps the piece 3 wording; a callback runs inline off the UI thread before the handle exists; Flush does nothing while the panel is hidden.
+- Alert bar: a stale hover reference; severity is shown by colour and name only; chip gap and padding are not DPI-scaled; the overflow menu is untested.
+- Notes and headers: header and strip tooltips go stale after an automatic pop-out; the formula dialog's notes tooltip shows only on the group box border; alert match status is recomputed on every keystroke without debounce; the Formulas tab commits twice per flush; test breadth is thin.
+- Tour: cancelling the setup chooser means no automatic tour; the arrow clamp is repeated; the handle check is strict.

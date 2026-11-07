@@ -2,7 +2,7 @@
 
 Quartermaster is a desktop engine for playing tabletop wargames, a small alternative to [VASSAL](https://vassalengine.org) aimed at the heaviest board games. It opens the VASSAL modules you already have and then takes the paperwork off your hands. It runs the game's procedures for you, does the arithmetic, rolls the dice, and keeps count of everything a big game asks you to track, from fuel and ammunition to whose turn it is. Go ahead and close that spreadsheet. It's been open since the last campaign and it deserves a rest.
 
-> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes and the tools below work. Multiplayer and the rest of the [Roadmap](#roadmap) are not built yet.
+> **Status:** early, hobby project, under active development. Map play, rules packs, formulas, ledgers, the turn sequencer, difficulty modes, undo and step back, and the readable-at-a-glance tools below work. Multiplayer and the rest of the [Roadmap](#roadmap) are not built yet.
 
 ## What it does
 
@@ -31,6 +31,14 @@ Quartermaster is a desktop engine for playing tabletop wargames, a small alterna
 - Step Back returns to the start of the current phase, or to any earlier phase or turn in a list that shows what each step would undo. Dice rolled after that point are undone too, so rolling again gives new results. The log keeps a "Stepped back" line.
 - Both rewind by replaying the game's command log, so the state after an undo is exactly the state you had.
 - Autosave keeps the last 20 snapshots per module, plus the first autosave of each turn. A save made before this feature loads normally; undo just starts at the point you loaded.
+
+**Readable at a glance**
+- Hover any number in a ledger, the inventory or a unit popup to see where it came from: the value at the start of the turn, then each change with its formula, rule reference and phase. It only ever shows history, so Hardcore stays hard.
+- An alert bar under the toolbar shows what needs attention, as red, amber and blue chips. Built-in alerts cover negative values, missing inputs, pending calculations and phase warnings. You can write your own in the Rules Workbench, for example `Fuel < 50`. Click a chip to select the pieces it points at, right-click to hide it for the turn.
+- A "what now" line says what the current phase expects of you.
+- An outliner lists units by map or organisation display with totals for the properties you choose (sum, minimum or average), and marks units that have alerts.
+- A short interface tour starts the first time you open a game, and is always available from Help.
+- Notes can be attached to properties, formulas, tables and alerts, and show as tooltips.
 
 **Tabletop tools**
 - Dice: 1d6, 2d6, custom expressions (`3d6+2`), special dice and multi-rolls. Every roll goes into the log.
@@ -98,7 +106,6 @@ Design documents and implementation plans are in [`docs/superpowers`](docs/super
 
 ## Roadmap
 
-- Accessibility in the style of grand strategy games: tooltips that explain every number, alerts, an outliner.
 - OCR for scanned rulebooks in the workbench.
 - Hot-seat, live online multiplayer (host-authoritative, with chat in the log) and play by turn files.
 

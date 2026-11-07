@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-07, after piece 4 was merged and pushed. A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-07, after piece 5 was finished on its branch. A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -31,14 +31,14 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Core`: command-log game state and deterministic replay.
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
-- Tests: xUnit under `tests/`. 846 tests are green after piece 4 (169 Rules, 116 Vassal, 182 Core, 379 Render).
-- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 4 is **pushed**. Push again only when the user asks.
+- Tests: xUnit under `tests/`. 898 tests are green after piece 5 (173 Rules, 116 Vassal, 207 Core, 402 Render).
+- Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 4 is **pushed**. Piece 5 is on branch `piece5-access`, to be merged into master; push only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
 - Commit messages end with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Never commit `startapp.cmd`.** It is untracked, names a private file path, and the repo is public. `.claude/` is excluded locally via `.git/info/exclude`.
 
-## Done so far (all merged to master)
+## Done so far (pieces 1-4 merged to master; piece 5 on branch `piece5-access`)
 
 | Piece | What | Docs |
 |---|---|---|
@@ -47,8 +47,18 @@ The engine ships **no content from any real game**: no rules text, tables, formu
 | 2b | Charts/Tables trees, dice tools, LOS, overview, notes, inventory, map export, Settings + autosave, game-master counter palette, log panel | `specs/…piece2b…`, `plans/…piece2b…` |
 | 3 | Turn sequencer + difficulty modes (below) | `specs/2026-11-06-piece3-sequencer-difficulty-design.md`, `plans/…piece3…` |
 | 4 | Undo / Redo and Step Back by truncate-and-replay of the command log (below) | `specs/2026-11-07-piece4-undo-design.md`, `plans/…piece4…` |
+| 5 | Accessibility layer: breakdown tooltips, alert bar, what-now line, outliner, interface tour, notes (below) | `specs/2026-11-07-piece5-accessibility-design.md`, `plans/…piece5…` |
 
 All rulings and deferred minors for every piece are in `docs/superpowers/piece1-followups.md`.
+
+### Piece 5 in one paragraph
+Numbers explain themselves, using only history (nothing previews a formula result, so Hardcore stays hard).
+- **Breakdown tooltips** on ledger cells, the inventory, unit popups and batch grids: earlier-turns net, "Start of turn N", then each change with its source, rule reference and phase.
+- **Alert bar** with built-in alerts (negative values, missing inputs, pending calculations, phase warnings) and user alerts defined in the Rules Workbench Alerts tab (a boolean expression per unit, a severity, an optional side). Chips click through to the pieces and can be hidden for the turn; the "what now" line sits beside the bar.
+- **Outliner** dock: units grouped by map or organisation display, with Sum/Min/Average columns chosen per property in the Properties tab, and alert markers.
+- **Interface tour** (Help, and once on first game open) and notes on properties, formulas, tables and alerts.
+- **Formats:** rules pack format 3, save format 6 (format 5 saves keep full undo). Hidden alerts are stored in the save.
+- **Smokes:** `--screenshot-breakdown`, `--screenshot-alerts`, `--screenshot-outliner`, `--screenshot-tour` (the tour smoke restores the user's first-run setting).
 
 ### Piece 4 in one paragraph
 The command log is the history. Undo, Redo and Step Back rewind by cutting the log and replaying it from the start (with cached snapshots), so a rewound state is JSON-identical to the state recorded at that point. Commands are grouped into actions (one drag, one Next Phase with everything it triggered), and phase or turn boundaries are checkpoints.
@@ -90,7 +100,9 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-1. **The user hands-on tests piece 4** with the test pack: Ctrl+Z and Ctrl+Y after a drag and after Next Phase; Step Back to Start of Phase and Step Back To...; redo after a step back; dice after a step back; an old (format 1-4) save and the greyed-out Undo tooltip; difficulty switch then undo; Open Autosave of a turn-boundary snapshot. Fix whatever they find.
+1. **The user hands-on tests piece 5** with the test pack: hover numbers in the Ledger, inventory and a unit popup; add a user alert in the Workbench Alerts tab and watch the bar and chips; set an outliner aggregate on a property and use the outliner dock; Help, Interface Tour; step back and check the bar and outliner follow. Then merge `piece5-access` into master. Fix whatever they find.
+
+   Still open from piece 4: hands-on test with the test pack: Ctrl+Z and Ctrl+Y after a drag and after Next Phase; Step Back to Start of Phase and Step Back To...; redo after a step back; dice after a step back; an old (format 1-4) save and the greyed-out Undo tooltip; difficulty switch then undo; Open Autosave of a turn-boundary snapshot. Fix whatever they find.
 
    Still open from piece 3, if not yet done: hands-on test of piece 3 with the test pack. Checklist:
    - Start game ▶.
@@ -105,13 +117,8 @@ How the formula window behaves:
    - Load a phase-boundary autosave.
 
    Fix whatever they find.
-2. The README Status line and Roadmap are current as of piece 4. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
-3. **Next piece: undecided.** After piece 4 is tested, ask the user to choose from:
-   - HOI4-style accessibility layer (number tooltips, alerts, outliner) — §10;
-   - hot-seat / live online multiplayer with chat (master spec §11);
-   - OCR for scanned rulebooks — §8.3.
-
-   Ask the user which, then: brainstorm → spec → plan → build. Use the superpowers skills.
+2. The README Status line and Roadmap are current as of piece 5. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
+3. **Next piece: multiplayer** (master spec section 11): hot-seat, live online with chat in the log, and play by turn files. After that, OCR for scanned rulebooks (section 8.3). Brainstorm, spec, plan, build, using the superpowers skills.
 4. Residual piece-3 minors are listed at the end of `piece1-followups.md`.
 
 ## How the user likes to work

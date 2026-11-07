@@ -62,32 +62,38 @@ sealed partial class MainForm
         if (_session?.Game == null) { SmokeFail("tour smoke needs a game"); return; }
         CloseFormulaDialogs();
         Application.DoEvents();
-        var steps = TourOverlay.VisibleSteps(ResolveTourTarget);
-        ShowTour();
-        if (_tour is not { } tour) { SmokeFail("tour did not open (no visible steps)"); return; }
-        Application.DoEvents();
-        var path = _opts.ScreenshotTour!;
-        ShotWithBalloon(path);
-        var log = $"smoke: tour opened on '{tour.CurrentTitle}' with {steps.Count} visible steps ({string.Join(", ", steps.Select(s => s.Id))})";
-        var alertIdx = steps.ToList().FindIndex(s => s.Id == "alertBar");
-        if (alertIdx > 0)
+        var saved = _settings.Current.TourShown; // read before anything can change it
+        try
         {
-            tour.Go(alertIdx);
+            var steps = TourOverlay.VisibleSteps(ResolveTourTarget);
+            ShowTour();
+            if (_tour is not { } tour) { SmokeFail("tour did not open (no visible steps)"); return; }
             Application.DoEvents();
-            ShotWithBalloon(Path.ChangeExtension(path, null) + "-alerts.png");
-            log += $"; second shot on '{tour.CurrentTitle}'";
+            var path = _opts.ScreenshotTour!;
+            ShotWithBalloon(path);
+            var log = $"smoke: tour opened on '{tour.CurrentTitle}' with {steps.Count} visible steps ({string.Join(", ", steps.Select(s => s.Id))})";
+            var alertIdx = steps.ToList().FindIndex(s => s.Id == "alertBar");
+            if (alertIdx > 0)
+            {
+                tour.Go(alertIdx);
+                Application.DoEvents();
+                ShotWithBalloon(Path.ChangeExtension(path, null) + "-alerts.png");
+                log += $"; second shot on '{tour.CurrentTitle}'";
+            }
+            tour.Go(steps.Count - 1);
+            Application.DoEvents();
+            ShotWithBalloon(Path.ChangeExtension(path, null) + "-last.png");
+            if (saved) _settings.Save(_settings.Current with { TourShown = false }); // repeatable regardless of prior state
+            tour.Close();
+            Application.DoEvents();
+            var ok = _settings.Current.TourShown;
+            Program.AppLog($"{log}; skip sets TourShown {(ok ? "ok" : "FAILED")}");
+            if (!ok) Program.ExitCode = 1;
         }
-        tour.Go(steps.Count - 1);
-        Application.DoEvents();
-        ShotWithBalloon(Path.ChangeExtension(path, null) + "-last.png");
-        var saved = _settings.Current.TourShown;
-        if (saved) _settings.Save(_settings.Current with { TourShown = false }); // repeatable regardless of prior state
-        tour.Close();
-        Application.DoEvents();
-        var ok = _settings.Current.TourShown;
-        _settings.Save(_settings.Current with { TourShown = saved }); // a smoke run must not change the real first-run state
-        Program.AppLog($"{log}; skip sets TourShown {(ok ? "ok" : "FAILED")}");
-        if (!ok) Program.ExitCode = 1;
+        finally
+        {
+            if (_settings.Current.TourShown != saved) _settings.Save(_settings.Current with { TourShown = saved }); // a smoke run must not change the real first-run state
+        }
     }
 
     /// <summary>Main window drawn off-screen (so other windows cannot cover it), then the balloon drawn over it through its pointer-shaped region.</summary>
