@@ -1,6 +1,7 @@
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Quartermaster.Render;
+using Quartermaster.Render.Search;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.App;
@@ -24,7 +25,11 @@ sealed class PdfViewerControl : UserControl
     WebView2? _web;
     string? _file;
     int _page = 1;
+    string? _search;
     bool _rebuildWeb, _loading;
+    readonly Panel? _usedPanel;
+    readonly ListBox? _used;
+    readonly List<(string Kind, string Id)> _usedIds = new();
 
     /// <param name="toolbar">Show the document combo and page controls.</param>
     /// <param name="allowWeb">False in smoke runs: PDF/HTML show a placeholder instead of starting WebView2.</param>
@@ -49,7 +54,15 @@ sealed class PdfViewerControl : UserControl
         _bar.Items.Add(new ToolStripControlHost(_pageBox));
         _bar.Items.Add(prev);
         _bar.Items.Add(next);
+        // "Used on this page" sits under the toolbar (docked before it); hidden until the host turns it on.
+        _used = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None, BackColor = SystemColors.Control };
+        _usedPanel = new Panel { Dock = DockStyle.Top, Height = 50, Visible = false, Padding = new Padding(4, 0, 4, 2) };
+        _usedPanel.Controls.Add(_used);
+        _usedPanel.Controls.Add(new Label { Text = "Used on this page", Dock = DockStyle.Top, Height = 16, Font = new Font(Font, FontStyle.Bold) });
+        Controls.Add(_usedPanel);
         Controls.Add(_bar);
+        _used.DoubleClick += (_, _) => ActivateUsed();
+        _used.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { ActivateUsed(); e.Handled = e.SuppressKeyPress = true; } };
         prev.Click += (_, _) => GoToPage(_page - 1);
         next.Click += (_, _) => GoToPage(_page + 1);
         _pageBox.ValueChanged += (_, _) => { if (!_loading) GoToPage((int)_pageBox.Value); };
@@ -68,15 +81,27 @@ sealed class PdfViewerControl : UserControl
 
     public event Action<int>? PageChanged;
 
-    public void Open(DocumentDef d, int page = 1)
+    /// <summary>Another document was opened (the page may be unchanged).</summary>
+    public event Action? DocumentOpened;
+
+    /// <summary>A "Used on this page" line was opened: kind (Formula, Table, Phase) and id.</summary>
+    public event Action<string, string>? UsedItemActivated;
+
+    /// <summary>The term the viewer was last asked to highlight (<c>#search=</c>), null when none.</summary>
+    public string? SearchTerm => _search;
+
+    /// <summary>Opens the document at a page; <paramref name="search"/> asks the PDF viewer to highlight a term where it can.</summary>
+    public void Open(DocumentDef d, int page = 1, string? search = null)
     {
         if (IsDisposed || Disposing) return;
         page = Math.Clamp(page, 1, 9999);
         if (Equals(Document, d) && _file != null && _web != null)
         {
-            GoToPage(page);
+            GoToPage(page, search);
             return;
         }
+        _search = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+        var newDoc = !Equals(Document, d);
         Document = d;
         var changed = page != _page;
         _page = page;
@@ -92,6 +117,7 @@ sealed class PdfViewerControl : UserControl
                     Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false,
                     Font = new Font("Consolas", 9f), Text = File.ReadAllText(_file), BackColor = SystemColors.Window,
                 });
+                if (newDoc) DocumentOpened?.Invoke();
                 if (changed) PageChanged?.Invoke(_page);
                 return;
             }
@@ -100,23 +126,26 @@ sealed class PdfViewerControl : UserControl
         {
             _file = null;
             Fail("This document could not be opened: " + ex.Message, ex);
+            if (newDoc) DocumentOpened?.Invoke();
             return;
         }
-        if (!_allowWeb) ShowText($"{d.Title} (page {_page})\r\n\r\nThe document viewer is not started in smoke mode.");
+        if (!_allowWeb) ShowText($"{d.Title} (page {_page})" + (_search != null ? $" — find \"{_search}\"" : "") + "\r\n\r\nThe document viewer is not started in smoke mode.");
         else
         {
             AddWeb();
             StartInit();
         }
+        if (newDoc) DocumentOpened?.Invoke();
         if (changed) PageChanged?.Invoke(_page);
     }
 
-    /// <summary>Re-navigates to the given 1-based page (PDF only).</summary>
-    public void GoToPage(int page)
+    /// <summary>Re-navigates to the given 1-based page (PDF only); <paramref name="search"/> as in <see cref="Open"/> (a plain page move clears it).</summary>
+    public void GoToPage(int page, string? search = null)
     {
         page = Math.Clamp(page, 1, 9999);
         var changed = page != _page;
         _page = page;
+        _search = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
         SyncBar();
         Navigate();
         if (changed) PageChanged?.Invoke(_page);
@@ -209,10 +238,45 @@ sealed class PdfViewerControl : UserControl
         {
             if (_web?.CoreWebView2 == null || _file == null || Document == null) return;
             var uri = new Uri(_file).AbsoluteUri;
-            if (Document.Kind == DocumentKind.Pdf) uri += "#page=" + _page;
+            if (Document.Kind == DocumentKind.Pdf) uri += SearchPanelModel.ViewerFragment(_page, _search);
             _web.CoreWebView2.Navigate(uri);
         }
         catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or System.Runtime.InteropServices.COMException) { }
+    }
+
+    // ---------- used on this page ----------
+
+    /// <summary>Shows the "Used on this page" list under the toolbar (workbench only).</summary>
+    public void EnableUsedOnPage()
+    {
+        if (_usedPanel != null) _usedPanel.Visible = true;
+    }
+
+    /// <summary>Fills "Used on this page" with (kind, id, text) lines; an empty list shows a greyed note.</summary>
+    public void SetUsedOnPage(IReadOnlyList<(string Kind, string Id, string Text)> items)
+    {
+        if (_used == null) return;
+        _used.BeginUpdate();
+        try
+        {
+            _used.Items.Clear();
+            _usedIds.Clear();
+            foreach (var (kind, id, text) in items) { _usedIds.Add((kind, id)); _used.Items.Add(text); }
+            _used.ForeColor = items.Count == 0 ? SystemColors.GrayText : SystemColors.ControlText;
+            if (items.Count == 0) _used.Items.Add(Document == null ? "No document open." : "Nothing in the rules pack points here.");
+        }
+        finally { _used.EndUpdate(); }
+    }
+
+    /// <summary>The "Used on this page" lines (empty when nothing points here); for smoke checks.</summary>
+    public IReadOnlyList<string> UsedOnPageLines =>
+        _used == null || _usedIds.Count == 0 ? Array.Empty<string>() : _used.Items.Cast<object>().Select(o => o.ToString() ?? "").ToList();
+
+    void ActivateUsed()
+    {
+        if (_used == null || _used.SelectedIndex < 0 || _used.SelectedIndex >= _usedIds.Count) return;
+        var (kind, id) = _usedIds[_used.SelectedIndex];
+        UsedItemActivated?.Invoke(kind, id);
     }
 
     // ---------- messages ----------

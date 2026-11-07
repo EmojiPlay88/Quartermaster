@@ -1,6 +1,7 @@
 using Quartermaster.Render;
 using Quartermaster.Rules;
 using Quartermaster.Vassal;
+using Quartermaster.Render.Search;
 
 namespace Quartermaster.App;
 
@@ -8,7 +9,7 @@ namespace Quartermaster.App;
 /// Phases editor of the rules workbench: the turn's phases in order, the sides they belong to, repeating blocks, and per-phase fields.
 /// Everything is typed by the user. Edits go through UpdateRules; text fields commit 400 ms after the last keystroke, grids commit at once.
 /// </summary>
-sealed class PhasesTab : UserControl
+sealed class PhasesTab : UserControl, IRuleRefEditor
 {
     const string None = "(none)";
     const string MissingText = "(missing)";
@@ -29,9 +30,10 @@ sealed class PhasesTab : UserControl
     readonly ComboBox _side = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
     readonly TextBox _instr = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, WordWrap = true };
     readonly TextBox _notes = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, WordWrap = true };
-    readonly Label _refLabel = new() { AutoSize = true, Padding = new Padding(0, 5, 8, 0) };
+    readonly LinkLabel _refLabel = RuleRefLink.Create();
     readonly Button _link = new() { Text = "Link to current page", AutoSize = true };
-    readonly Button _showRefBtn = new() { Text = "Show", AutoSize = true };
+    readonly Button _find = RuleRefLink.FindButton();
+    TextBox? _lastEdit;
     readonly ListBox _check = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     readonly DataGridView _start = FormulasTab.NewGrid();
     readonly DataGridView _move = FormulasTab.NewGrid();
@@ -49,7 +51,6 @@ sealed class PhasesTab : UserControl
         _s = s;
         _linkCurrentPage = linkCurrentPage;
         _showRef = showRef;
-        _showRefBtn.Visible = showRef != null;
 
         // ----- left: sides above phases -----
         var bSideAdd = new Button { Text = "Add…", Width = 52 };
@@ -124,7 +125,7 @@ sealed class PhasesTab : UserControl
 
         var refRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
         refRow.Controls.Add(new Label { Text = "Rule ref:", AutoSize = true, Padding = new Padding(0, 5, 2, 0) });
-        refRow.Controls.AddRange(new Control[] { _refLabel, _link, _showRefBtn });
+        refRow.Controls.AddRange(new Control[] { _refLabel, _link, _find });
         AddRow(refRow, 30);
 
         var bCheckAdd = new Button { Text = "Add…", Width = 52 };
@@ -179,7 +180,10 @@ sealed class PhasesTab : UserControl
         _cellTimer.Tick += (_, _) => Run(CommitDirtyCells);
         _side.SelectionChangeCommitted += (_, _) => Run(OnSideChosen);
         _link.Click += (_, _) => Run(LinkPage);
-        _showRefBtn.Click += (_, _) => Run(ShowRef);
+        _refLabel.LinkClicked += (_, _) => Run(ShowRef);
+        _find.Click += (_, _) => Run(Find);
+        _instr.Enter += (_, _) => _lastEdit = _instr;
+        _notes.Enter += (_, _) => _lastEdit = _notes;
 
         bCheckAdd.Click += (_, _) => Run(AddCheck);
         bCheckDel.Click += (_, _) => Run(RemoveCheck);
@@ -597,9 +601,45 @@ sealed class PhasesTab : UserControl
     void ShowRefLabel(PhaseDef? ph)
     {
         var r = ph?.RuleRefId == null ? null : _s.Rules?.ById<RuleRef>(ph.RuleRefId);
-        _refLabel.Text = r == null ? None : $"{r.Label}, page {r.Page}";
-        _showRefBtn.Enabled = r != null;
-        _link.Enabled = ph != null;
+        RuleRefLink.Show(_refLabel, r, DescribeRef);
+        _link.Enabled = _find.Enabled = ph != null;
+    }
+
+    // ---------- rulebook search ----------
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Action<string>? FindInRulebook
+    {
+        get => _findInRulebook;
+        set { _findInRulebook = value; _find.Visible = value != null; }
+    }
+    Action<string>? _findInRulebook;
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Func<RuleRef?, RefDisplay>? DescribeRef { get; set; }
+
+    public bool CanUseRuleRef => Current != null && Enabled && _link.Enabled;
+
+    public bool UseRuleRef(Func<string, RuleRef?> make)
+    {
+        if (!CanUseRuleRef || Current is not { } ph) return false;
+        Flush();
+        var r = make(ph.Name);
+        if (r == null) return false;
+        CommitPhase(x => x with { RuleRefId = r.Id });
+        ShowRefLabel(Current);
+        return true;
+    }
+
+    public void RefreshRuleRef() => ShowRefLabel(Current);
+
+    /// <summary>"Find in rulebook": the text selected in the instructions or notes, else the phase's name.</summary>
+    void Find()
+    {
+        if (Current is not { } ph || _findInRulebook == null) return;
+        var box = _lastEdit is { SelectionLength: > 0 } ? _lastEdit : _instr.SelectionLength > 0 ? _instr : _notes.SelectionLength > 0 ? _notes : null;
+        var q = SearchPanelModel.FindText(box?.SelectedText, ph.Name);
+        if (q.Length > 0) _findInRulebook(q);
     }
 
     void LinkPage()

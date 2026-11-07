@@ -76,6 +76,31 @@ sealed partial class MainForm
         }
     }
 
+    /// <summary>
+    /// Smoke (--smoke-search): opens the workbench, waits for the rulebook index, searches, opens a hit, uses it as a formula's rule ref
+    /// and checks "Used on this page"; --screenshot-search saves the workbench afterwards.
+    /// </summary>
+    void SmokeSearch()
+    {
+        if (_session?.Rules == null) { Program.AppLog("smoke: search FAILED: no rules pack is loaded"); Program.ExitCode = 1; return; }
+        ShowWorkbench();
+        if (!_benches.TryGetValue("workbench", out var w) || w.IsDisposed || w is not WorkbenchWindow wb)
+        {
+            Program.AppLog("smoke: search FAILED: the workbench did not open");
+            Program.ExitCode = 1;
+            return;
+        }
+        var problem = wb.SearchSmoke();
+        Program.AppLog("smoke: rulebook search " + (problem == null ? "ok" : "FAILED: " + problem));
+        if (problem != null) Program.ExitCode = 1;
+        if (_opts.ScreenshotSearch == null) return;
+        Program.AppLog($"smoke: search workbench {wb.WindowState} {wb.Size} mdi {wb.MdiParent != null}");
+        wb.WindowState = FormWindowState.Normal;
+        wb.Size = new Size(1100, 720); // room for the PDF pane, results and editor
+        Program.AppLog($"smoke: search workbench resized to {wb.Size}");
+        wb.SaveScreenshot(_opts.ScreenshotSearch);
+    }
+
     /// <summary>Smoke: the Tables tree must list exactly the pack's tables and formulas.</summary>
     void SmokeTablesTree()
     {
@@ -181,6 +206,7 @@ sealed partial class MainForm
         if (_opts.ScreenshotPlayerView != null) Guard(SmokePlayerView);
         if (_opts.ScreenshotExport != null) Guard(SmokeExport);
         if (_opts.SmokeTurns || _opts.ScreenshotTurns != null) Guard(SmokeTurns);
+        if (_opts.SmokeSearch || _opts.ScreenshotSearch != null) Guard(SmokeSearch);
         if (_opts.SmokeLauncher) BackToLauncher(); else Close();
     }
 
