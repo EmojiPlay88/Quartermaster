@@ -22,6 +22,12 @@ public static class LogKind
     public const string Calc = "calc";
     /// <summary>A player's chat message ("{name}: {text}"); public, never filtered by <see cref="PlayerView"/>.</summary>
     public const string Chat = "chat";
+
+    /// <summary>
+    /// <see cref="LogEntry.FormulaId"/> of a calc line that shows no formula working (a summary, a skipped trigger). A calc line with no
+    /// formula id at all (made before formula ids were logged) may show working, so <see cref="PlayerView"/> hides its text.
+    /// </summary>
+    public const string NoWorking = "-";
 }
 
 public sealed record TurnState(int Turn, string? Phase);

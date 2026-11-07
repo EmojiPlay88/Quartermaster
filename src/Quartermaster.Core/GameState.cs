@@ -157,7 +157,8 @@ public sealed class GameState
     void BatchSummary(PendingRun r, IReadOnlyList<PendingUnit> units, string? who, DateTimeOffset? at)
     {
         if (units.Count > 1)
-            Log.Add(LogBuilder.Line(this, LogKind.Calc, $"{r.FormulaName}: {units.Count} units, {units.Count(u => u?.Applied == true)} applied", who, at));
+            Log.Add(LogBuilder.Line(this, LogKind.Calc, $"{r.FormulaName}: {units.Count} units, {units.Count(u => u?.Applied == true)} applied", who, at,
+                formulaId: LogKind.NoWorking));
     }
 
     void DoAdvance(AdvancePhase a)
@@ -171,7 +172,7 @@ public sealed class GameState
             {
                 var labels = string.Join(", ", open.Take(3).Select(u => u.Label));
                 if (open.Count > 3) labels += $" +{open.Count - 3} more";
-                Log.Add(LogBuilder.Line(this, LogKind.Calc, $"skipped: {r.FormulaName}, {labels}", a.Who, a.At));
+                Log.Add(LogBuilder.Line(this, LogKind.Calc, $"skipped: {r.FormulaName}, {labels}", a.Who, a.At, formulaId: LogKind.NoWorking));
             }
             BatchSummary(r, r.Units, a.Who, a.At);
         }

@@ -292,6 +292,26 @@ public class GuestSessionTests : IDisposable
         Assert.DoesNotContain("424242", Json(s.View));
     }
 
+    [Fact]
+    public void PlayerView_LegacyCalcLineWithoutFormulaId_FailsClosed()
+    {
+        var r = Open();
+        var s = r.Host;
+        var g = s.Game!;
+        // A calc line as saved before formula ids were logged (pre-6b hot-seat save): its text may hold a hidden input.
+        g.Execute(new AddLogLine(LogKind.Calc, "Depot check: 424242 * 1 = 424242", SideId: "blue"));
+        g.Execute(new AddLogLine(LogKind.Calc, "Depot check: 2 units, 2 applied", SideId: "blue", FormulaId: LogKind.NoWorking));
+        Assert.Null(g.State.Log[^2].FormulaId);
+
+        var blueView = PlayerView.For(g.State, s.Rules, s.Model, new HashSet<string> { "blue" });
+        Assert.DoesNotContain("424242", Json(blueView));
+        Assert.Contains(blueView.Log, l => l.Kind == LogKind.Calc && l.Text == "Formula: calculated (inputs hidden)");
+        Assert.Contains(blueView.Log, l => l.Text == "Depot check: 2 units, 2 applied");   // a summary without working stays
+        // A viewer holding every side sees the line as written.
+        Assert.Contains(PlayerView.For(g.State, s.Rules, s.Model, new HashSet<string> { "red", "blue" }).Log,
+            l => l.Text == "Depot check: 424242 * 1 = 424242");
+    }
+
     // ---- guest mode ----
 
     [Fact]

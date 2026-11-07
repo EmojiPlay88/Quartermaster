@@ -311,8 +311,10 @@ public static class PlayerView
                     var line = log[i];
                     if (entryOfLine[i] is { } e && HidesInput(e) && line.Text is { } t)
                         line = line with { Text = t.Replace(e.Working!, $"{e.PropertyId} {Num(e.Before)} → {Num(e.After)}", StringComparison.Ordinal) };
-                    else if (entryOfLine[i] == null && line.FormulaId != null && FormulaHidesInput(line.FormulaId))
-                        line = line with { Text = HiddenWorkingText(line.FormulaId) };   // an output-less run's working line
+                    else if (entryOfLine[i] == null && line.Kind == LogKind.Calc && line.FormulaId != LogKind.NoWorking
+                             && FormulaHidesInput(line.FormulaId))
+                        // An output-less run's working line; a legacy calc line without a formula id fails closed.
+                        line = line with { Text = HiddenWorkingText(line.FormulaId) };
                     lines.Add(line);
                 }
                 else if (o == Outcome.Redact) lines.Add(log[i] with { Text = text!, PieceId = null });

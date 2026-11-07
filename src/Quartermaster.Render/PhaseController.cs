@@ -337,7 +337,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                     var (cells, problem) = MoveMeasure.Cells(s.Model, rec.FromMap, rec.From, p.MapId, p.Pos);
                     d = cells;
                     distances[p.Id] = d;
-                    if (problem != null) Calc($"{PieceInfo.Name(p)}: moved distance counted as 0 ({problem})", p.Id);
+                    if (problem != null) Calc($"{PieceInfo.Name(p)}: moved distance counted as 0 ({problem})", p.Id, LogKind.NoWorking);
                 }
                 units.Add(new Unit(p.Id, PieceInfo.Name(p), d));
             }
@@ -349,7 +349,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private FormulaDef? FindFormula(PhaseDef phase, string id)
     {
         var f = s.Rules!.ById<FormulaDef>(id);
-        if (f == null) Calc($"{phase.Name}: formula \"{id}\" not found — skipped");
+        if (f == null) Calc($"{phase.Name}: formula \"{id}\" not found — skipped", formulaId: LogKind.NoWorking);
         return f;
     }
 
@@ -362,7 +362,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             try { Parser.Parse(src); }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Calc($"{phase.Name}: filter \"{src}\" is not valid — skipped");
+                Calc($"{phase.Name}: filter \"{src}\" is not valid — skipped", formulaId: LogKind.NoWorking);
                 return true;
             }
         }
@@ -389,13 +389,13 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         foreach (var u in units)
         {
             var trace = s.Runner.Run(s.Game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
-            if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId); continue; }
+            if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id); continue; }   // hidden like its working
             if (trace.Result == null) { needInput.Add(u); continue; }
             foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, Stamp())) Exec(c);
             LogWorking(trace, u.Label, "auto");
             applied++;
         }
-        if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied");
+        if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied", formulaId: LogKind.NoWorking);
         if (needInput.Count > 0)
         {
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,
