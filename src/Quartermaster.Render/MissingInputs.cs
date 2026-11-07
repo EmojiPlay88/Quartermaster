@@ -53,7 +53,7 @@ public static class MissingInputs
         var none = new Dictionary<string, string>();
         var typed = new Dictionary<string, string>(values);
         var units = Open(s, run).ToList();
-        using var action = s.Game.BeginAction(BatchModel.ActionLabel(run.FormulaName, units.Count));
+        using var action = s.Game.BeginAction(BatchModel.ActionLabel(run.FormulaName, units.Count(u => s.CanAct(u.PieceId))));
         foreach (var u in units)
         {
             if (!s.CanAct(u.PieceId))

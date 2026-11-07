@@ -9,6 +9,7 @@ sealed class MapWindow : Form
 {
     readonly ModuleSession _s;
     readonly CancellationTokenSource _cts = new();
+    GameSession? _attached;
     bool _tilingStarted;
 
     public MapWindow(ModuleSession s, MapDef map)
@@ -29,7 +30,9 @@ sealed class MapWindow : Form
         {
             if (Host is { } mf && mf.IsActiveDocument(this)) { mf.SetLocationText(loc); mf.SetZoomText(zoom); }
         };
+        s.GameReplaced += OnGameReplaced;
         s.ViewChanged += OnViewChanged;
+        Attach();
     }
 
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -45,8 +48,49 @@ sealed class MapWindow : Form
 
     // ---------- game wiring ----------
 
-    /// <summary>The player's view changed (a game change, undo, another game, a rules edit or a new viewer): drop what is gone and repaint.</summary>
-    void OnViewChanged() => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
+    void Attach()
+    {
+        if (_attached != null) _attached.Changed -= OnGameChanged;
+        if (_attached != null) _attached.Rewound -= OnRewound;
+        _attached = _s.Game;
+        if (_attached != null) _attached.Changed += OnGameChanged;
+        if (_attached != null) _attached.Rewound += OnRewound;
+    }
+
+    void OnGameReplaced()
+    {
+        Attach();
+        OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
+    }
+
+    void OnGameChanged(GameCommand _) => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
+    void OnRewound() => OnUi(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
+
+    IReadOnlySet<string>? _lastSides;
+    bool _viewQueued;
+
+    /// <summary>
+    /// Hot-seat only: a new viewer or a rules edit can hide what is selected or hovered. Coalesced into one UI-thread refresh. In solo
+    /// (no view sides now or before) it does nothing, so rules edits never prune the selection or cancel a drag.
+    /// </summary>
+    void OnViewChanged()
+    {
+        var sides = _s.ViewSides;
+        if (sides == null && _lastSides == null) return;
+        _lastSides = sides;
+        if (_viewQueued || IsDisposed || !IsHandleCreated) return;
+        _viewQueued = true;
+        try
+        {
+            BeginInvoke(() =>
+            {
+                _viewQueued = false;
+                if (IsDisposed) return;
+                Run(() => { Canvas.PruneSelection(); Canvas.RefreshLastMoved(); });
+            });
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { _viewQueued = false; }
+    }
 
     void OnUi(Action a)
     {
@@ -156,7 +200,10 @@ sealed class MapWindow : Form
         if (_closed) { base.OnFormClosed(e); return; }
         _closed = true;
         _cts.Cancel();
+        _s.GameReplaced -= OnGameReplaced;
         _s.ViewChanged -= OnViewChanged;
+        if (_attached != null) _attached.Changed -= OnGameChanged;
+        if (_attached != null) _attached.Rewound -= OnRewound;
         if (Host is { } mf)
         {
             mf.GridVisibleChanged -= OnGridVisibleChanged;

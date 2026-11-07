@@ -112,7 +112,8 @@ public sealed class ModuleSession : IDisposable
         var sides = _viewSides;
         if (sides == null || sides.Count == 0) return null;
         var pack = Rules;
-        if (pack != null && _game?.State is { } st && Sequencer.Current(pack, st)?.SideId is { Length: > 0 } acting && sides.Contains(acting))
+        if (pack != null && _game?.State is { } st && Sequencer.Current(pack, st) is { } phase
+            && Sequencer.ActingSide(pack, phase)?.Id is { Length: > 0 } acting && sides.Contains(acting))
             return acting;
         foreach (var sd in pack?.Sides ?? new List<SideDef>())
             if (sd != null && sd.Id != null && sides.Contains(sd.Id)) return sd.Id;

@@ -197,6 +197,25 @@ public class ViewStateTests : IDisposable
     }
 
     [Fact]
+    public void HistoryLabels_HiddenPieces_ShowPlainUndoRedo()
+    {
+        var s = Make(blueOwnsMap: true);
+        var h = new HistoryController(s, new PhaseController(s, (c, _) => c), (c, _) => c);
+        using (s.Game!.BeginAction("move of Blue 1")) s.Game.Execute(new MovePieces(new[] { "b1" }, "Main Map", new PointD(80, 50), null));
+        Assert.Equal("Undo move of Blue 1", h.UndoText);
+        s.SetViewSides(Red);
+        Assert.Equal("Undo", h.UndoText);
+        h.Undo();
+        Assert.Equal("Redo", h.RedoText);
+        s.SetViewSides(null);
+        Assert.Equal("Redo move of Blue 1", h.RedoText);
+        h.Redo();
+        using (s.Game.BeginAction("Turn 3")) s.Game.Execute(new SetTurn(3, null));
+        s.SetViewSides(Red);
+        Assert.Equal("Undo Turn 3", h.UndoText);   // touches no piece
+    }
+
+    [Fact]
     public void SetViewSides_CopiesTheSet()
     {
         var s = Make();

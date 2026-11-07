@@ -725,6 +725,34 @@ public class PhaseControllerTests : IDisposable
     }
 
     [Fact]
+    public void AutoPhaseStart_InOtherSidesPhase_StampsThatPhasesSide()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto, p => WithPhase(PrivateWeather(p), "ph-combat", ph => ph with
+        {
+            OnStart = new()
+            {
+                new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once },
+                new StartEntry { FormulaId = "f-water", ForEach = ForEachMode.Units },
+            },
+        }));
+        s.SetViewSides(RedOnly);   // Red is at the table when Next Phase enters Blue's phase
+        ToMovement(c);
+        var mark = s.Game!.Log.Count;
+        c.Advance();               // Combat: Blue's phase
+        Assert.Equal("ph-combat", s.Game.State.Position!.PhaseId);
+        var added = s.Game.Log.Skip(mark).ToList();
+        Assert.Equal("blue", added.OfType<RollDice>().Single().SideId);
+        Assert.All(added.OfType<AddLogLine>(), l => Assert.Equal("blue", l.SideId));
+        var red = PlayerView.For(s.Game.State, s.Rules, s.Model, RedOnly);
+        Assert.Contains(red.Log, l => l.Text == "Blue rolled dice");
+        Assert.Empty(red.DiceHistory[^1].Results);
+        var blue = PlayerView.For(s.Game.State, s.Rules, s.Model, BlueOnly);
+        Assert.NotEmpty(blue.DiceHistory[^1].Results);
+        Assert.Contains(blue.Log, l => l.PieceId == "b1" && l.Kind is LogKind.Formula or LogKind.Ledger or LogKind.Calc);
+        Assert.Equal(9, Ledger.Get(blue, LedgerKey.Piece("b1"), "water"));
+    }
+
+    [Fact]
     public void AutoPhaseStart_StampsActingSide_SoloStampsNothing()
     {
         var (s, c) = Make(Difficulty.FullyAuto);

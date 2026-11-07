@@ -383,9 +383,9 @@ sealed partial class FormulasTab : UserControl
 
     void RefreshPieces()
     {
-        var game = _s.Game;
+        var game = _s.View;   // hot-seat: only units this player may see and act on
         var maps = _s.Model.Maps;
-        var entries = game == null ? Array.Empty<PieceEntry>() : PieceChoices.Entries(game.State, id => maps.FirstOrDefault(m => m.Id == id)?.Name ?? id).ToArray();
+        var entries = game == null ? Array.Empty<PieceEntry>() : PieceChoices.Entries(game, id => maps.FirstOrDefault(m => m.Id == id)?.Name ?? id).Where(e => _s.CanAct(e.PieceId)).ToArray();
         _loadingUi = true;
         try
         {

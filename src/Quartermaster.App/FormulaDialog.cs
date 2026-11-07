@@ -155,7 +155,23 @@ sealed class FormulaDialog : Form
     void OnGameReplaced() => OnUi(() => { HookGame(); CheckPieceThenRefresh(); });
 
     /// <summary>Hot-seat: once the unit belongs to a side the new viewer does not hold, its dialog closes (nothing of it stays on screen).</summary>
-    void OnViewChanged() => OnUi(() => { if (!_previewOnly && !_embedded && !_s.CanAct(_pieceId)) Close(); });
+    void OnViewChanged()
+    {
+        if (_previewOnly || _embedded || _s.ViewSides == null || _viewQueued || IsDisposed || _closing || !IsHandleCreated) return;   // solo: nothing to do
+        _viewQueued = true;   // coalesced: one check per burst of changes
+        try
+        {
+            BeginInvoke(() =>
+            {
+                _viewQueued = false;
+                if (IsDisposed || _closing) return;
+                Guarded(() => { if (!_s.CanAct(_pieceId)) Close(); });
+            });
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { _viewQueued = false; }
+    }
+
+    bool _viewQueued;
 
     void CheckPieceThenRefresh()
     {

@@ -243,7 +243,7 @@ public sealed class BatchModel(ModuleSession s, PhaseController phases, string r
         if (s.Game is { } g && Run is { } run)
         {
             // One undoable action for the whole grid. The label is fixed when the action opens, so it names the units still open.
-            var open = run.Units.Count(u => u is { Applied: false });
+            var open = run.Units.Count(u => u is { Applied: false } && s.CanAct(u.PieceId));   // hot-seat: only units this player may apply
             using var action = g.BeginAction(ActionLabel(run.FormulaName, open));
             for (var i = 0; i < n; i++)
                 if (ApplyOne(i)) applied++;
