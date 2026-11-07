@@ -115,6 +115,44 @@ public sealed class TurnIdentity
     /// <summary>Start hashes of turns already replayed here (newest last; capped at <see cref="MaxPlayed"/>).</summary>
     public IReadOnlySet<string> PlayedStartHashes => _playedSet;
 
+    private readonly List<string> _sent = new();
+    private readonly HashSet<string> _sentSet = new(StringComparer.Ordinal);
+
+    /// <summary>Start hashes of turns this computer sent (newest last; capped at <see cref="MaxPlayed"/>): such a turn coming back is an older position.</summary>
+    public IReadOnlySet<string> SentStartHashes => _sentSet;
+
+    /// <summary>Remembers that the turn starting at <paramref name="startHash"/> was sent from here (the oldest beyond the cap are dropped).</summary>
+    public void RecordSent(string startHash)
+    {
+        ArgumentNullException.ThrowIfNull(startHash);
+        Remember(_sent, _sentSet, startHash);
+    }
+
+    private static void Remember(List<string> list, HashSet<string> set, string hash)
+    {
+        if (!set.Add(hash)) return;
+        list.Add(hash);
+        while (list.Count > MaxPlayed)
+        {
+            set.Remove(list[0]);
+            list.RemoveAt(0);
+        }
+    }
+
+    /// <summary>Union of what is on disk and in memory (newest last), capped; the in-memory list becomes that union.</summary>
+    private static List<string> Merge(IEnumerable<string>? onDisk, List<string> list, HashSet<string> set)
+    {
+        var merged = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var h in (onDisk ?? Array.Empty<string>()).Concat(list))
+            if (h != null && seen.Add(h)) merged.Add(h);
+        if (merged.Count > MaxPlayed) merged.RemoveRange(0, merged.Count - MaxPlayed);
+        list.Clear();
+        set.Clear();
+        foreach (var h in merged) Remember(list, set, h);
+        return merged;
+    }
+
     /// <summary>&lt;AppDataRoot&gt;/turns (honours QUARTERMASTER_LAYOUT_ROOT).</summary>
     public static string DefaultRoot => AppDataRoot.Sub("turns");
 
@@ -140,6 +178,8 @@ public sealed class TurnIdentity
         id.ProtectedPassword = dto.ProtectedPassword;
         foreach (var h in dto.PlayedStartHashes ?? new List<string>())
             if (h != null) id.RecordPlayed(h);
+        foreach (var h in dto.SentStartHashes ?? new List<string>())
+            if (h != null) id.RecordSent(h);
         return id;
     }
 
@@ -165,15 +205,10 @@ public sealed class TurnIdentity
     public void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        var played = new List<string>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var h in (ReadDto(FilePath)?.PlayedStartHashes ?? new List<string>()).Concat(_played))
-            if (h != null && seen.Add(h)) played.Add(h);
-        if (played.Count > MaxPlayed) played.RemoveRange(0, played.Count - MaxPlayed);
-        _played.Clear();
-        _playedSet.Clear();
-        foreach (var h in played) RecordPlayed(h);
-        var dto = new Dto(LocalPlayerId, Relay, UseMailbox, ProtectedPassword, played);
+        var disk = ReadDto(FilePath);
+        var played = Merge(disk?.PlayedStartHashes, _played, _playedSet);
+        var sent = Merge(disk?.SentStartHashes, _sent, _sentSet);
+        var dto = new Dto(LocalPlayerId, Relay, UseMailbox, ProtectedPassword, played, sent.Count == 0 ? null : sent);
         var tmp = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -191,13 +226,7 @@ public sealed class TurnIdentity
     public void RecordPlayed(string startHash)
     {
         ArgumentNullException.ThrowIfNull(startHash);
-        if (!_playedSet.Add(startHash)) return;
-        _played.Add(startHash);
-        while (_played.Count > MaxPlayed)
-        {
-            _playedSet.Remove(_played[0]);
-            _played.RemoveAt(0);
-        }
+        Remember(_played, _playedSet, startHash);
     }
 
     /// <summary>Saves a mailbox password (protected); null or empty clears it. False (nothing saved, never throws) when it cannot be protected.</summary>
@@ -224,5 +253,8 @@ public sealed class TurnIdentity
         catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
     }
 
-    private sealed record Dto(string? LocalPlayerId, string? Relay, bool UseMailbox, byte[]? ProtectedPassword, List<string>? PlayedStartHashes);
+    /// <summary>SentStartHashes is optional (files written before it existed read as none) and omitted when empty.</summary>
+    private sealed record Dto(string? LocalPlayerId, string? Relay, bool UseMailbox, byte[]? ProtectedPassword, List<string>? PlayedStartHashes,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        List<string>? SentStartHashes = null);
 }

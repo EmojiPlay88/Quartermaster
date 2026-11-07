@@ -604,6 +604,51 @@ public class TurnTests : IDisposable
     }
 
     [Fact]
+    public void OwnSentTurn_ComingBack_IsOlderPosition()
+    {
+        var red = NewGame();
+        var gid = red.Game!.State.GameId!;
+        MoveBy(red.Game!, AnyPiece(red.Game!), 4);
+        var redId = Identity("alice", gid, Alice.Id);
+        var t1 = TurnSender.Build(red, Bob.Id, redId);
+        TurnSender.AfterSend(red);
+        redId.RecordSent(t1.StartHash);
+        redId.Save();
+
+        var blue = Open();
+        blue.OpenTurn(t1, Bob.Id, Identity("bob", gid)).PlayAll();
+        MoveBy(blue.Game!, AnyPiece(blue.Game!), 2);
+        var t2 = TurnSender.Build(blue, Alice.Id, Identity("bob", gid, Bob.Id));
+        TurnSender.AfterSend(blue);
+        Assert.Equal(TurnCheck.Ok, TurnOpener.Check(red, t2, Identity("alice", gid)));
+        var m2 = red.OpenTurn(t2, Alice.Id, Identity("alice", gid));
+        m2.PlayAll();
+        Assert.True(m2.EndMatches);
+
+        // Red opens her own first turn again: nothing local since Blue's turn, but it is hers and older.
+        Assert.Contains(t1.StartHash, Identity("alice", gid).SentStartHashes);   // kept through the replay's identity save
+        Assert.Equal(TurnCheck.OlderPosition, TurnOpener.Check(red, t1, Identity("alice", gid)));
+        // Even on a computer that did not record it: a turn not addressed to the local player is not Ok.
+        Assert.Equal(TurnCheck.OlderPosition, TurnOpener.Check(red, t1, Identity("elsewhere", gid, Alice.Id)));
+        Assert.Equal(TurnCheck.OlderPosition, TurnOpener.Check(red, t1, Identity("nobody", gid)));
+    }
+
+    [Fact]
+    public void Identity_SentHashes_MergeOnSave()
+    {
+        var gid = Guid.NewGuid().ToString("N");
+        var a = Identity("merge", gid);
+        var b = Identity("merge", gid);
+        a.RecordSent("s1");
+        a.Save();
+        b.RecordSent("s2");
+        b.Save();
+        Assert.Equal(new[] { "s1", "s2" }, Identity("merge", gid).SentStartHashes.Order(StringComparer.Ordinal).ToArray());
+        for (var i = 0; i < TurnIdentity.MaxPlayed + 10; i++) b.RecordSent("x" + i);
+        Assert.Equal(TurnIdentity.MaxPlayed, b.SentStartHashes.Count);
+    }
+
+    [Fact]
     public void Check_GameAtStart_IsOk_EvenWhenAlreadyPlayed()
     {
         var alice = NewGame();

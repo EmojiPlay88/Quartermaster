@@ -28,9 +28,9 @@ public static class TurnOpener
 
     /// <summary>
     /// In order: another module; the open game of this id is exactly at the turn's start (Ok, even when the turn was played before:
-    /// a replayed turn whose result was never saved can be played again); already played; no game of this id open (a new game); the
-    /// open game has no local moves since its turn base (Ok: nothing local is lost, e.g. the third player's turn in a chain); else an
-    /// older position (the receiver's own moves would be replaced).
+    /// a replayed turn whose result was never saved can be played again); already played; no game of this id open (a new game); a turn
+    /// this computer sent (older position); a turn for the local player from someone else while the open game has no local moves since
+    /// its turn base (Ok: nothing local is lost, e.g. the third player's turn in a chain); else an older position.
     /// </summary>
     /// <param name="identity">The game's identity; null = <see cref="TurnIdentity.Load(string)"/> of the turn's game id.</param>
     /// <exception cref="InvalidDataException">The turn's game id is not a valid id, or its start does not match its start hash.</exception>
@@ -46,7 +46,11 @@ public static class TurnOpener
         if (same && string.Equals(StateHash.Of(s.Game!.State), t.StartHash, StringComparison.Ordinal)) return TurnCheck.Ok;
         if (id.PlayedStartHashes.Contains(t.StartHash)) return TurnCheck.AlreadyPlayed;
         if (!same) return TurnCheck.NewGame;
+        if (id.SentStartHashes.Contains(t.StartHash)) return TurnCheck.OlderPosition;   // a turn this computer sent, coming back
         var open = s.Game!;
-        return open.Log.Count == open.TurnBase && !open.RebasedOnLoad ? TurnCheck.Ok : TurnCheck.OlderPosition;
+        var me = id.LocalPlayerId;
+        var forMe = !string.IsNullOrEmpty(me) && string.Equals(t.ToPlayerId, me, StringComparison.Ordinal)
+            && !string.Equals(t.FromPlayerId, me, StringComparison.Ordinal);
+        return forMe && open.Log.Count == open.TurnBase && !open.RebasedOnLoad ? TurnCheck.Ok : TurnCheck.OlderPosition;
     }
 }

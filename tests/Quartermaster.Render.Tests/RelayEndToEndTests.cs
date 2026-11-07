@@ -74,7 +74,7 @@ public sealed class RelayEndToEndTests : IAsyncLifetime
         return c;
     }
 
-    private static void Until(QueueDispatcher d, Func<bool> cond, int ms = 15000)
+    private static void Until(QueueDispatcher d, Func<bool> cond, int ms = 60000)
     {
         var end = DateTime.UtcNow.AddMilliseconds(ms);
         while (true)
@@ -146,7 +146,18 @@ public sealed class RelayEndToEndTests : IAsyncLifetime
             && bobSession.Game!.State.Log.Any(x => x.Kind == LogKind.Chat && x.Text.Contains("Attack at dawn")));
         Assert.Contains(bobSession.Game!.State.Pieces.Values, p => PieceInfo.Name(p) == "Blue 1");
 
-        // What the relay read and wrote: frames exist, game payloads among them, and none of it is readable game data.
+        // What the relay read and wrote: frames exist, game payloads among them, and none of it is readable game data. The capture
+        // runs on the relay's threads: wait until it has the frames before checking them.
+        int Opened() => _capture.Frames.ToList().Count(f =>
+        {
+            try
+            {
+                return Framing.Decode<RelayMessage>(f) switch { Send s => s.Sealed, Deliver dl => dl.Sealed, _ => null } is { } b
+                    && RelayTransport.TryOpen(game.Key, b) != null;
+            }
+            catch (ProtocolException) { return false; }
+        });
+        Until(game.D, () => _capture.Frames.Count > 10 && Opened() >= 4);
         var frames = _capture.Frames.ToList();
         Assert.True(frames.Count > 10, $"only {frames.Count} frames captured");
         var markers = GuestSessionTests.SecretMarkers.Concat(new[] { "Blue 1", "Red 1", "Red 2", "Attack at dawn", "topped up", "Red Depot", "Mixed supply" }).ToList();

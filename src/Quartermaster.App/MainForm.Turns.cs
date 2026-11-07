@@ -44,6 +44,9 @@ sealed partial class MainForm
         _mailbox = new MailboxService(_ => new RelayClient(RelayPrompts.Pins()), PostToUi, null, c => RelayPrompts.Trust(this, c));
         _mailbox.TurnWaiting += OnTurnWaiting;
         _mailbox.Status += OnMailboxStatus;
+        // A played turn whose replayed game was lost (the open game is back at its start) is raised again, not deleted.
+        _mailbox.OpenGameHash = gid => _session is { Game: { } g, IsReplaying: false }
+            && string.Equals(g.State.GameId, gid, StringComparison.OrdinalIgnoreCase) ? StateHash.Of(g.State) : null;
     }
 
     // ---------- state of the open game ----------
@@ -149,6 +152,8 @@ sealed partial class MainForm
         var players = g.State.Players.Where(p => p != null).ToList();
         if (players.Count < 2) { ShowError(TurnUiModel.NeedPlayersText); return; }
         var id = TurnIdentity.Load(g.State.GameId);   // InvalidDataException → Guard shows it
+        // The previous turn's mailbox send is seen through first (its failure would otherwise never be shown).
+        if (!ConfirmSendDone("The previous turn is still being sent through the relay. Send another turn anyway?")) return;
         FlushNotes();   // pending note text becomes a command before the turn is built
         if (Program.Smoke) return;
         if (!TurnUiModel.KnowsLocalPlayer(players, id.LocalPlayerId))
@@ -192,6 +197,7 @@ sealed partial class MainForm
         // Written: only now do this computer's choices for the game change.
         ApplyMailbox(id, mailbox, relay, password);
         TurnSender.AfterSend(s);
+        id.RecordSent(t.StartHash);   // this turn coming back here is an older position
         SaveIdentity(id);
         // The turns received for this one are part of what was just sent: their local copies go.
         var pruned = ReceivedTurns.Prune(t.GameId);
@@ -283,7 +289,8 @@ sealed partial class MainForm
     /// Before the window closes, goes Back to the launcher or discards the game: a turn still being sent gets up to 15 s ("Sending
     /// turn…"); its outcome is then handled (Retry waits again). Still not through: asks whether to go anyway. False = stay.
     /// </summary>
-    bool ConfirmSendDone()
+    /// <param name="question">Asked when the send is still running after the wait (Yes = go on anyway).</param>
+    bool ConfirmSendDone(string question = "The turn is still being sent through the relay. Leave anyway?")
     {
         while (_sendAttempt is { } attempt && _pendingSend is { } p)
         {
@@ -305,7 +312,7 @@ sealed partial class MainForm
             if (!attempt.IsCompleted)
             {
                 if (Program.Smoke) return true;
-                return MessageBox.Show(this, "The turn is still being sent through the relay. Leave anyway?\n" + SendElsewhereText(p.Path),
+                return MessageBox.Show(this, question + "\n" + SendElsewhereText(p.Path),
                     "Send Turn", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
             }
             SendAttemptDone(attempt);   // Retry starts another attempt: the loop waits for it too
@@ -618,7 +625,11 @@ sealed partial class MainForm
         if (IsDisposed || _session?.Game is not { } g) return;   // also mid-replay: the notice waits (opening it then says to finish first)
         if (!string.Equals(g.State.GameId, t.GameId, StringComparison.OrdinalIgnoreCase)) return;
         // A copy stays on this computer until the next turn is sent: the relay item goes once the replayed game is saved.
-        if (ReceivedTurns.Keep(t, itemId, out var why) == null) Program.AppLog("turns: could not keep a copy of the received turn: " + why);
+        _ = Task.Run(() =>
+        {
+            // Off the UI thread: a large turn takes a moment to compress and write.
+            if (ReceivedTurns.Keep(t, itemId, out var why) == null) Program.AppLog("turns: could not keep a copy of the received turn: " + why);
+        });
         _waiting = (t, itemId);
         var text = TurnUiModel.NewTurnWaitingText(t.FromName);
         _alertBar.SetNotice(text);
@@ -734,8 +745,7 @@ sealed partial class MainForm
         var rm = sender.OpenTurn(TurnFiles.Read(toRed), red.Id, senderId);
         rm.PlayAll();
         Check(rm.Done && rm.Error == null && rm.EndMatches && StateHash.Of(sender.Game!.State) == StateHash.Of(g.State), "round trip (the sender replays the pass)");
-        // No local moves since the send: reopening loses nothing (a chain of three or more players never warns for this).
-        Check(TurnOpener.Check(s, TurnFiles.Read(toRed)) == TurnCheck.Ok, "own turn back with no local moves is Ok");
+        Check(TurnOpener.Check(s, TurnFiles.Read(toRed)) == TurnCheck.OlderPosition, "own turn back is an older position");
     }
 
     static void Pump(int times)

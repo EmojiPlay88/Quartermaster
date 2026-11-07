@@ -332,6 +332,39 @@ public sealed class MailboxServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PlayedTurn_RaisedNotDeleted_WhenOpenGameIsBackAtItsStart()
+    {
+        await StartRelay();
+        var (alice, _) = Service();
+        Assert.True(await alice.SendAsync(Identity("alice", "p1"), Turn(startHash: "start-1"), "pw"));
+        var id = Identity("bob", "p2");
+        id.RecordPlayed("start-1");
+        var (bob, bp) = Service(new FakeTimeProvider());
+        bob.OpenGameHash = g => g == _gameId ? "start-1" : null;   // the replayed game was lost: Bob is back at the turn's start
+        bob.Watch(_gameId, id, "pw");
+        await Until(() => !bp.Turns.IsEmpty);
+        Assert.Equal("start-1", Assert.Single(bp.Turns).T.StartHash);
+        await using var raw = await RawClient();
+        Assert.Single(await raw.MailboxListAsync([BoxOf("p2")]));
+    }
+
+    [Fact]
+    public async Task Delete_ThenStop_DeleteStillGoesThrough()
+    {
+        await StartRelay();
+        var (alice, _) = Service();
+        Assert.True(await alice.SendAsync(Identity("alice", "p1"), Turn(), "pw"));
+        var (bob, bp) = Service(new FakeTimeProvider());
+        bob.Watch(_gameId, Identity("bob", "p2"), "pw");
+        await Until(() => !bp.Turns.IsEmpty);
+        var delete = bob.DeleteAsync(Assert.Single(bp.Turns).Item);
+        bob.Stop();   // cancels and disposes the watch's token source: the delete asked for before still runs
+        await delete;
+        await using var raw = await RawClient();
+        Assert.Empty(await raw.MailboxListAsync([BoxOf("p2")]));
+    }
+
+    [Fact]
     public async Task Stop_RightAfterWatch_NoStatus_NoTurn_NoThrow()
     {
         await StartRelay();

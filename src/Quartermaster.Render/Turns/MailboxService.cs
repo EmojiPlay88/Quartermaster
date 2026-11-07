@@ -131,6 +131,7 @@ public sealed class MailboxService : IDisposable
         if (string.IsNullOrWhiteSpace(id.Relay)) { Report(Failure.Setup, NoRelayText); return; }
         if (uri == null) { Report(Failure.Setup, err ?? NoRelayText); return; }
         var w = new WatchState(gameId, id, id.Relay!, uri, id.LocalPlayerId!, password ?? "");
+        w.CaptureToken();
         lock (_gate)
         {
             _watch = w;
@@ -193,7 +194,8 @@ public sealed class MailboxService : IDisposable
         try
         {
             var box = w.Box();
-            var (ok, problem) = await WithClient(w.Relay, w.Uri, w, w.Cts.Token, async c =>
+            // Not tied to the watch: a delete asked for goes through even if the watch stops meanwhile (its CTS may be disposed).
+            var (ok, problem) = await WithClient(w.Relay, w.Uri, null, CancellationToken.None, async c =>
             {
                 try { await c.MailboxDeleteAsync(box, itemId).ConfigureAwait(false); }
                 catch (RelayException ex) when (ex.Message == MailboxLimits.NoSuchItem) { }
@@ -207,6 +209,18 @@ public sealed class MailboxService : IDisposable
         {
             if (!w.Stopped) Report(Failure.Unreachable, "Turn mailbox: " + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// The open game's state hash for a game id (null when another game or none is open); runs on the app's thread. Set by the app so a
+    /// played turn whose replayed game was lost is raised again instead of deleted. Null = never.
+    /// </summary>
+    public Func<string, string?>? OpenGameHash { get; set; }
+
+    private bool IsOpenGameAt(string gameId, string startHash)
+    {
+        try { return OpenGameHash?.Invoke(gameId) is { } h && string.Equals(h, startHash, StringComparison.Ordinal); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
     }
 
     private void StartPoll(WatchState w)
@@ -224,7 +238,7 @@ public sealed class MailboxService : IDisposable
         {
             var box = w.Box();
             var unreadable = false;
-            var (ok, failure) = await WithClient(w.Relay, w.Uri, w, w.Cts.Token, async c =>
+            var (ok, failure) = await WithClient(w.Relay, w.Uri, w, w.Token, async c =>
             {
                 var items = await c.MailboxListAsync([box]).ConfigureAwait(false);
                 if (w.Stopped) return 0;
@@ -254,8 +268,10 @@ public sealed class MailboxService : IDisposable
                     Post(() =>
                     {
                         if (w.Stopped) return;
-                        // Played start hashes change on the app's thread, so they are read there.
-                        if (w.Identity.PlayedStartHashes.Contains(t.StartHash)) _ = Task.Run(() => DeleteCore(w, itemId));
+                        // Played start hashes change on the app's thread, so they are read there. A played turn is deleted unless
+                        // the open game is exactly at its start (the replayed game was lost): then it is raised again.
+                        if (w.Identity.PlayedStartHashes.Contains(t.StartHash) && !IsOpenGameAt(w.GameId, t.StartHash))
+                            _ = Task.Run(() => DeleteCore(w, itemId));
                         else TurnWaiting?.Invoke(t, itemId);
                     });
                 }
@@ -377,6 +393,9 @@ public sealed class MailboxService : IDisposable
         public string Relay { get; } = relay;
         public Uri Uri { get; } = uri;
         public CancellationTokenSource Cts { get; } = new();
+        /// <summary>Captured at creation: still readable after <see cref="Cts"/> is disposed by Stop.</summary>
+        public CancellationToken Token { get; private set; }
+        public void CaptureToken() => Token = Cts.Token;
         /// <summary>Items raised, deleted or skipped this session (touched only by the one poll in flight).</summary>
         public HashSet<string> Seen { get; } = new(StringComparer.Ordinal);
         public ITimer? Timer { get; set; }
