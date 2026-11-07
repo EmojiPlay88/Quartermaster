@@ -36,6 +36,27 @@ public class ValidatorTests
         new() { Id = "f1", Name = "Fuel Use", Text = text, Bindings = b.ToList() };
     private static VariableBinding In(string v) => new() { Variable = v, Kind = BindingKind.Input };
 
+    [Fact]
+    public void Validator_FlagsBadAlert()
+    {
+        AlertDef A(string id, string name, string cond, string? side = null) =>
+            new() { Id = id, Name = name, Condition = cond, Message = "m", SideId = side };
+        RulesIssue One(AlertDef a) => Assert.Single(RulesValidator.Validate(Clean() with { Alerts = new() { a } }));
+
+        Assert.Empty(RulesValidator.Validate(Clean() with { Alerts = new() { A("a1", "Low", "Fuel < 3") } }));
+        var parse = One(A("a1", "Low", "Fuel < < 3"));
+        Assert.Equal(RulesIssueSeverity.Error, parse.Severity);
+        Assert.Equal("a1", parse.EntityId);
+        Assert.StartsWith("Alert \"Low\": condition ", parse.Message);
+        Assert.Equal("Alert \"Low\": condition refers to unknown property \"Ammo\"", One(A("a1", "Low", "Ammo < 3")).Message);
+        Assert.Equal("Alert \"Low\": side \"zz\" does not exist", One(A("a1", "Low", "Fuel < 3", "zz")).Message);
+        Assert.Equal("Alert has no name", One(A("a1", "", "Fuel < 3")).Message);
+        Assert.Equal("Alert \"Low\": condition is empty", One(A("a1", "Low", " ")).Message);
+        var dup = RulesValidator.Validate(Clean() with { Alerts = new() { A("a1", "X", "Fuel<1"), A("a1", "x", "Fuel<1") } });
+        Assert.Contains(dup, i => i.Message.Contains("another alert already has this name"));
+        Assert.Contains(dup, i => i.Message.Contains("duplicate id"));
+    }
+
     [Fact] public void Validate_CleanPack_NoIssues() => Assert.Empty(RulesValidator.Validate(Clean()));
 
     [Fact]

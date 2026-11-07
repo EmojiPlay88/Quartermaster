@@ -41,6 +41,7 @@ public sealed record PhaseDef
     public List<StartEntry> OnStart { get; init; } = new();
     public List<MoveEntry> OnMove { get; init; } = new();
     public List<PhaseWarning> Warnings { get; init; } = new();
+    public string? Notes { get; init; }
 }
 
 public sealed record PhaseBlock

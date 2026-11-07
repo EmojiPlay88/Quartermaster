@@ -35,6 +35,7 @@ public static class RulesValidator
             foreach (var s in pack.Sides) Guarded(issues, s.Id, s.Name, () => CheckSide(s, pack, issues));
             foreach (var ph in pack.Phases) Guarded(issues, ph.Id, ph.Name, () => CheckPhase(pack, ph, issues));
             CheckBlocks(pack, issues);
+            CheckAlerts(pack, issues);
         }
         catch (Exception ex)
         {
@@ -116,6 +117,25 @@ public static class RulesValidator
             CheckPhaseExpr(pack, w.Condition, who, "warning condition", Err);
             if (string.IsNullOrWhiteSpace(w.Message)) Err($"{who}: warning message is empty");
         }
+    }
+
+    private static void CheckAlerts(RulesPack pack, List<RulesIssue> issues)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in pack.Alerts)
+            Guarded(issues, a.Id, a.Name, () =>
+            {
+                string who = $"Alert \"{a.Name}\"";
+                void Err(string m) => Add(issues, RulesIssueSeverity.Error, a.Id, a.Name, m);
+                if (!ids.Add(a.Id)) Err($"{who}: duplicate id \"{a.Id}\"");
+                if (string.IsNullOrWhiteSpace(a.Name)) Err("Alert has no name");
+                else if (!names.Add(a.Name)) Err($"Alert \"{a.Name}\": another alert already has this name");
+                if (string.IsNullOrWhiteSpace(a.Condition)) Err($"{who}: condition is empty");
+                else CheckPhaseExpr(pack, a.Condition, who, "condition", Err);
+                if (!string.IsNullOrEmpty(a.SideId) && pack.ById<SideDef>(a.SideId!) is null)
+                    Err($"{who}: side \"{a.SideId}\" does not exist");
+            });
     }
 
     private static void CheckBlocks(RulesPack pack, List<RulesIssue> issues)

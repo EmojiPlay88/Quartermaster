@@ -2,6 +2,21 @@ namespace Quartermaster.Rules;
 
 public enum PropertyScope { Pieces, Holders, Both }
 
+public enum OutlinerAggregate { None, Sum, Min, Average }
+
+public enum AlertSeverity { Info, Warning, Critical }
+
+public sealed record AlertDef
+{
+    public string Id { get; init; } = "";
+    public string Name { get; init; } = "";
+    public string Condition { get; init; } = "";
+    public string Message { get; init; } = "";
+    public AlertSeverity Severity { get; init; } = AlertSeverity.Warning;
+    public string? SideId { get; init; }
+    public string? Notes { get; init; }
+}
+
 public sealed record PropertyDef
 {
     public string Id { get; init; } = "";
@@ -13,6 +28,8 @@ public sealed record PropertyDef
     /// <summary>Optional boolean expression limiting which pieces get the property.</summary>
     public string? AppliesTo { get; init; }
     public string? Notes { get; init; }
+    /// <summary>How the outliner aggregates this property per group.</summary>
+    public OutlinerAggregate Outliner { get; init; } = OutlinerAggregate.None;
 }
 
 public sealed record HolderDef
@@ -46,12 +63,13 @@ public sealed record RulesPack
     public List<SideDef> Sides { get; init; } = new();
     public List<PhaseDef> Phases { get; init; } = new();
     public List<PhaseBlock> Blocks { get; init; } = new();
+    public List<AlertDef> Alerts { get; init; } = new();
 
     public TableDef? TableByName(string name) => Tables.FirstOrDefault(t => Eq(t.Name, name));
     public PropertyDef? PropertyByName(string name) => Properties.FirstOrDefault(p => Eq(p.Name, name));
     public HolderDef? HolderByName(string name) => Holders.FirstOrDefault(h => Eq(h.Name, name));
 
-    /// <summary>Finds an entity by exact id. Supported: PropertyDef, HolderDef, TableDef, FormulaDef, RuleRef, SideDef, PhaseDef.</summary>
+    /// <summary>Finds an entity by exact id. Supported: PropertyDef, HolderDef, TableDef, FormulaDef, RuleRef, SideDef, PhaseDef, AlertDef.</summary>
     public T? ById<T>(string id) where T : class
     {
         if (typeof(T) == typeof(PropertyDef)) return Properties.FirstOrDefault(x => x.Id == id) as T;
@@ -61,6 +79,7 @@ public sealed record RulesPack
         if (typeof(T) == typeof(RuleRef)) return RuleRefs.FirstOrDefault(x => x.Id == id) as T;
         if (typeof(T) == typeof(SideDef)) return Sides.FirstOrDefault(x => x.Id == id) as T;
         if (typeof(T) == typeof(PhaseDef)) return Phases.FirstOrDefault(x => x.Id == id) as T;
+        if (typeof(T) == typeof(AlertDef)) return Alerts.FirstOrDefault(x => x.Id == id) as T;
         return null;
     }
 

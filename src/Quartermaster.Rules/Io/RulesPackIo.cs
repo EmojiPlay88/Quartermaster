@@ -13,7 +13,7 @@ namespace Quartermaster.Rules;
 /// </summary>
 public static class RulesPackIo
 {
-    public const int CurrentFormat = 2;
+    public const int CurrentFormat = 3;
     private const string PackEntry = "pack.json";
 
     public static JsonSerializerOptions JsonOptions { get; } = new()
@@ -117,6 +117,7 @@ public static class RulesPackIo
         CheckDupes("ruleRef", pack.RuleRefs.Select(x => x.Id));
         CheckDupes("side", pack.Sides.Select(x => x.Id));
         CheckDupes("phase", pack.Phases.Select(x => x.Id));
+        CheckDupes("alert", pack.Alerts.Select(x => x.Id));
         CheckDupes("table", pack.Tables.Select(x => x.Id));
         CheckDupes("formula", pack.Formulas.Select(x => x.Id));
         return pack;
@@ -146,6 +147,7 @@ public static class RulesPackIo
         foreach (var x in p.RuleRefs) Req("pack.json ruleRef", x.Id);
         foreach (var x in p.Sides) Req("pack.json side", x.Id);
         foreach (var x in p.Phases) Req("pack.json phase", x.Id);
+        foreach (var x in p.Alerts) Req("pack.json alert", x.Id);
     }
 
     private static void CheckDupes(string kind, IEnumerable<string> ids)
@@ -177,6 +179,8 @@ public static class RulesPackIo
         Holders = (p.Holders ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),
         RuleRefs = (p.RuleRefs ?? new()).Where(x => x != null)
             .Select(x => x with { Label = x.Label ?? "", DocumentEntry = x.DocumentEntry ?? "" }).ToList(),
+        Alerts = (p.Alerts ?? new()).Where(x => x != null)
+            .Select(x => x with { Name = x.Name ?? "", Condition = x.Condition ?? "", Message = x.Message ?? "" }).ToList(),
         Sides = (p.Sides ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),
         Blocks = (p.Blocks ?? new()).Where(x => x != null)
             .Select(x => x with { FirstPhaseId = x.FirstPhaseId ?? "", LastPhaseId = x.LastPhaseId ?? "", Label = x.Label ?? "" }).ToList(),
@@ -263,6 +267,7 @@ public static class RulesPackIo
         Dupes("ruleRef", pack.RuleRefs.Select(x => x.Id), StringComparer.Ordinal);
         Dupes("side", pack.Sides.Select(x => x.Id), StringComparer.Ordinal);
         Dupes("phase", pack.Phases.Select(x => x.Id), StringComparer.Ordinal);
+        Dupes("alert", pack.Alerts.Select(x => x.Id), StringComparer.Ordinal);
         foreach (var t in pack.Tables) SafeName(t.Id ?? "");
         foreach (var f in pack.Formulas) SafeName(f.Id ?? "");
         // Entries are compared case-insensitively because zips extract onto case-insensitive file systems.

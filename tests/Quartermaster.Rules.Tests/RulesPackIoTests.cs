@@ -229,7 +229,7 @@ public class RulesPackIoTests : IDisposable
         var zip = Path.Combine(_dir, "p.qrules");
         RulesPackIo.Save(p, zip);
         var l = RulesPackIo.Load(zip);
-        Assert.Equal(2, l.Format);
+        Assert.Equal(3, l.Format);
         Assert.Equal(new[] { "C", "A", "B" }, l.Phases.Select(x => x.Id));
         Assert.Equal(new[] { "z", "a" }, l.Sides.Select(x => x.Id));
         Assert.Equal(J(p with { Tables = p.Tables.OrderBy(t => t.Id).ToList() }), J(l));
@@ -250,10 +250,56 @@ public class RulesPackIoTests : IDisposable
     }
 
     [Fact]
-    public void Format3_Rejected_NewerThanSupported()
+    public void Format3_RoundTrip_AlertsOutlinerNotes()
     {
-        var f = FolderWith("{\"format\":3,\"id\":\"x\"}");
-        Assert.Equal("pack.json: pack format 3 is newer than supported format 2",
+        var p = Sample() with
+        {
+            Properties = new() { new PropertyDef { Id = "p1", Name = "Fuel", Outliner = OutlinerAggregate.Sum } },
+            Phases = new() { Ph("A") with { Notes = "phase note" } },
+            Alerts = new()
+            {
+                new AlertDef { Id = "a1", Name = "Low fuel", Condition = "Fuel < 3", Message = "Fuel low", Severity = AlertSeverity.Critical, SideId = "s1", Notes = "n" },
+                new AlertDef { Id = "a2", Name = "Plain", Condition = "Fuel > 0", Message = "m" },
+            },
+        };
+        var zip = Path.Combine(_dir, "f3.qrules");
+        RulesPackIo.Save(p, zip);
+        var l = RulesPackIo.Load(zip);
+        Assert.Equal(3, l.Format);
+        Assert.Equal(new[] { "a1", "a2" }, l.Alerts.Select(a => a.Id));
+        Assert.Equal(AlertSeverity.Critical, l.Alerts[0].Severity);
+        Assert.Equal(AlertSeverity.Warning, l.Alerts[1].Severity);
+        Assert.Equal("s1", l.ById<AlertDef>("a1")!.SideId);
+        Assert.Equal(OutlinerAggregate.Sum, l.Properties[0].Outliner);
+        Assert.Equal("phase note", l.Phases[0].Notes);
+        Assert.Equal(J(p with { Tables = p.Tables.OrderBy(t => t.Id).ToList() }), J(l));
+    }
+
+    [Fact]
+    public void Format2Pack_LoadsWithDefaults()
+    {
+        var f = FolderWith("{\"format\":2,\"id\":\"x\",\"properties\":[{\"id\":\"p\",\"name\":\"Fuel\"}],\"phases\":[{\"id\":\"h\",\"name\":\"H\"}]}");
+        var p = RulesPackIo.Load(f);
+        Assert.Empty(p.Alerts);
+        Assert.Equal(OutlinerAggregate.None, p.Properties[0].Outliner);
+        Assert.Null(p.Phases[0].Notes);
+    }
+
+    [Fact]
+    public void Alerts_NullFieldsAndDuplicates()
+    {
+        var f = FolderWith("{\"format\":3,\"id\":\"x\",\"alerts\":[{\"id\":\"a\"}]}");
+        var a = RulesPackIo.Load(f).Alerts[0];
+        Assert.Equal("", a.Name); Assert.Equal("", a.Condition); Assert.Equal("", a.Message);
+        var d = FolderWith("{\"format\":3,\"id\":\"x\",\"alerts\":[{\"id\":\"a\"},{\"id\":\"a\"}]}");
+        Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(d));
+    }
+
+    [Fact]
+    public void Format4Pack_Rejected()
+    {
+        var f = FolderWith("{\"format\":4,\"id\":\"x\"}");
+        Assert.Equal("pack.json: pack format 4 is newer than supported format 3",
             Assert.Throws<InvalidDataException>(() => RulesPackIo.Load(f)).Message);
     }
 
