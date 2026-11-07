@@ -196,17 +196,16 @@ sealed class MapDragController : IDisposable
         if (Incoming) ClearIncoming(); else End();
         if (groups.Count == 0) return;
         var moves = groups.Select(g => new MovePieces(g.Ids, _map.Id, g.Pos, g.StackOnto)).ToList();
-        // Every group of one drop is one move gesture: the phase controller executes them and fires the phase's OnMove formulas.
-        // One scope per gesture so a multi-group drop undoes as a single action.
+        // Every group of one drop is one move gesture: the action port executes them (one undoable action) and fires the phase's OnMove
+        // formulas. Without a port (no main window), plain logged moves in one scope.
+        if (Actions?.Invoke() is { } port) { _guard(() => port.Move(moves)); return; }
         using var scope = game!.BeginAction();
-        if (Phases?.Invoke() is { } phases) _guard(() => phases.ExecuteMove(moves));
-        else
-            foreach (var move in moves)
-                _guard(() => game.Execute(CommandLog.Prepare(move, game.State, _s)));
+        foreach (var move in moves)
+            _guard(() => game.Execute(CommandLog.Prepare(move, game.State, _s)));
     }
 
-    /// <summary>The main window's phase controller, when there is one; move gestures go through it.</summary>
-    public Func<PhaseController?>? Phases { get; set; }
+    /// <summary>The main window's action port, when there is one; move gestures go through it.</summary>
+    public Func<IActionPort?>? Actions { get; set; }
 
     /// <summary>Leaves captured drag mode and frees the snapshot and sprites.</summary>
     public void End()

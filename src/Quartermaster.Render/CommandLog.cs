@@ -1,15 +1,14 @@
 using Quartermaster.Core;
-using Quartermaster.Render;
 using Quartermaster.Rules;
 using Quartermaster.Vassal;
 
-namespace Quartermaster.App;
+namespace Quartermaster.Render;
 
 /// <summary>
 /// Turns commands issued by the UI into logged commands: stamps At/Who (the reducer stays pure) and writes readable LogText
 /// from piece names and board-local grid locations. Never throws; on any problem the reducer's default text is used.
 /// </summary>
-static class CommandLog
+public static class CommandLog
 {
     public const string LocalUser = "local";
 
@@ -19,29 +18,30 @@ static class CommandLog
         catch (Exception ex) when (ex is not OutOfMemoryException) { return Stamp(c); }
     }
 
-    /// <summary>Sets At/Who where the command carries them and they are not set yet.</summary>
-    public static GameCommand Stamp(GameCommand c)
+    /// <summary>Sets At/Who where the command carries them and they are not set yet (Who defaults to <see cref="LocalUser"/>, At to now).</summary>
+    public static GameCommand Stamp(GameCommand c, string? who = null, DateTimeOffset? when = null)
     {
-        var at = DateTimeOffset.UtcNow;
+        var at = when ?? DateTimeOffset.UtcNow;
+        var w = who ?? LocalUser;
         return c switch
         {
-            AddPiece a => a with { At = a.At ?? at, Who = a.Who ?? LocalUser },
-            MovePieces m => m with { At = m.At ?? at, Who = m.Who ?? LocalUser },
-            RemovePiece r => r with { At = r.At ?? at, Who = r.Who ?? LocalUser },
-            RollDice d => d with { At = d.At ?? at, Who = d.Who ?? LocalUser },
-            LedgerDelta l => l with { At = l.At ?? at, Who = l.Who ?? LocalUser },
-            SetNotes n => n with { At = n.At ?? at, Who = n.Who ?? LocalUser },
-            SetTurn t => t with { At = t.At ?? at, Who = t.Who ?? LocalUser },
-            SetPlayers sp => sp with { At = sp.At ?? at, Who = sp.Who ?? LocalUser },
-            AdvancePhase a => a with { At = a.At ?? at, Who = a.Who ?? LocalUser },
-            SetDifficulty d => d with { At = d.At ?? at, Who = d.Who ?? LocalUser },
-            TickChecklist t => t with { At = t.At ?? at, Who = t.Who ?? LocalUser },
-            AcknowledgeWarning w => w with { At = w.At ?? at, Who = w.Who ?? LocalUser },
-            QueueRuns q => q with { At = q.At ?? at, Who = q.Who ?? LocalUser },
-            ResolveRun r => r with { At = r.At ?? at, Who = r.Who ?? LocalUser },
-            SteppedBack b => b with { At = b.At ?? at, Who = b.Who ?? LocalUser },
-            HideAlert h => h with { At = h.At ?? at, Who = h.Who ?? LocalUser },
-            AddLogLine l => l with { At = l.At ?? at, Who = l.Who ?? LocalUser },
+            AddPiece a => a with { At = a.At ?? at, Who = a.Who ?? w },
+            MovePieces m => m with { At = m.At ?? at, Who = m.Who ?? w },
+            RemovePiece r => r with { At = r.At ?? at, Who = r.Who ?? w },
+            RollDice d => d with { At = d.At ?? at, Who = d.Who ?? w },
+            LedgerDelta l => l with { At = l.At ?? at, Who = l.Who ?? w },
+            SetNotes n => n with { At = n.At ?? at, Who = n.Who ?? w },
+            SetTurn t => t with { At = t.At ?? at, Who = t.Who ?? w },
+            SetPlayers sp => sp with { At = sp.At ?? at, Who = sp.Who ?? w },
+            AdvancePhase a => a with { At = a.At ?? at, Who = a.Who ?? w },
+            SetDifficulty d => d with { At = d.At ?? at, Who = d.Who ?? w },
+            TickChecklist t => t with { At = t.At ?? at, Who = t.Who ?? w },
+            AcknowledgeWarning aw => aw with { At = aw.At ?? at, Who = aw.Who ?? w },
+            QueueRuns q => q with { At = q.At ?? at, Who = q.Who ?? w },
+            ResolveRun r => r with { At = r.At ?? at, Who = r.Who ?? w },
+            SteppedBack b => b with { At = b.At ?? at, Who = b.Who ?? w },
+            HideAlert h => h with { At = h.At ?? at, Who = h.Who ?? w },
+            AddLogLine l => l with { At = l.At ?? at, Who = l.Who ?? w },
             _ => c,
         };
     }

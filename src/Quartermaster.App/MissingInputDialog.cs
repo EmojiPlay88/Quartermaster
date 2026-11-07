@@ -10,7 +10,7 @@ namespace Quartermaster.App;
 sealed class MissingInputDialog : Form
 {
     readonly ModuleSession _s;
-    readonly PhaseController _controller;
+    readonly IActionPort _actions;
     readonly PendingRun _run;
     readonly Dictionary<string, Control> _inputs = new(StringComparer.Ordinal);
     readonly Button _ok = new() { Text = "OK", Width = 75, Height = 25, Enabled = false };
@@ -18,10 +18,10 @@ sealed class MissingInputDialog : Form
     readonly Button _cancel = new() { Text = "Cancel", Width = 75, Height = 25, DialogResult = DialogResult.Cancel };
     readonly Label _message = new() { AutoSize = true, MaximumSize = new Size(380, 0), ForeColor = Color.Firebrick, Margin = new Padding(0, 6, 0, 0) };
 
-    public MissingInputDialog(ModuleSession s, PhaseController controller, PendingRun run)
+    public MissingInputDialog(ModuleSession s, IActionPort actions, PendingRun run)
     {
         _s = s;
-        _controller = controller;
+        _actions = actions;
         _run = run;
         Text = run.FormulaName;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -81,7 +81,7 @@ sealed class MissingInputDialog : Form
     void Accept()
     {
         var values = _inputs.ToDictionary(kv => kv.Key, kv => kv.Value.Text.Trim(), StringComparer.Ordinal);
-        var (applied, failed) = MissingInputs.ApplyAll(_s, _controller, _run, values);
+        var (applied, failed) = _actions.ApplyMissingInputs(_run, values);
         if (failed.Count == 0) { DialogResult = DialogResult.OK; return; }
         _message.Text = $"{applied} applied; {failed.Count} failed. " + string.Join("; ", failed.Take(3)) + (failed.Count > 3 ? "…" : "");
     }

@@ -106,16 +106,16 @@ sealed partial class MainForm
 
     void DoUndo()
     {
-        if (_history is not { CanUndo: true } h) return;
+        if (_history is not { CanUndo: true }) return;
         _rewindStatus = "Undone";
-        try { h.Undo(); } finally { _rewindStatus = null; }
+        try { _actions!.Undo(); } finally { _rewindStatus = null; }
     }
 
     void DoRedo()
     {
-        if (_history is not { CanRedo: true } h) return;
+        if (_history is not { CanRedo: true }) return;
         _rewindStatus = "Redone";
-        try { h.Redo(); } finally { _rewindStatus = null; }
+        try { _actions!.Redo(); } finally { _rewindStatus = null; }
     }
 
     void DoStepBackToStart()
@@ -139,7 +139,7 @@ sealed partial class MainForm
     /// <summary>Autosaves first (a failure is logged and does not block), then steps back and closes the dialogs that belonged to the old state.</summary>
     void StepBackTo(CheckpointRow row)
     {
-        if (_history is not { } h) return;
+        if (_history == null) return;
         try
         {
             if (_autosaver?.SaveForced(DateTimeOffset.UtcNow) != null) _autosavedSeq = _changeSeq;
@@ -149,7 +149,7 @@ sealed partial class MainForm
             Program.AppLog("step back autosave: " + ex.Message);
         }
         _rewindStatus = "Stepped back — reopen from the phase panel";
-        try { h.StepBack(row); } finally { _rewindStatus = null; }
+        try { _actions!.StepBack(row); } finally { _rewindStatus = null; }
     }
 
     /// <summary>Open formula dialogs, batch grids and cheat sheets belong to the state before a rewind or a difficulty change, so they close.

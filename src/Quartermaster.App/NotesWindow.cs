@@ -8,15 +8,17 @@ namespace Quartermaster.App;
 sealed class NotesWindow : Form
 {
     readonly ModuleSession _s;
+    readonly Func<IActionPort?>? _actions;
     readonly TextBox _box = new() { Multiline = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true, AcceptsTab = false, Font = new Font("Consolas", 9f), WordWrap = true };
     readonly System.Windows.Forms.Timer _commitTimer = new() { Interval = 1000 };
     GameSession? _game;
     bool _closing;
     bool _loading;
 
-    public NotesWindow(ModuleSession s)
+    public NotesWindow(ModuleSession s, Func<IActionPort?>? actions = null)
     {
         _s = s;
+        _actions = actions;
         Text = "Notes";
         Size = new Size(420, 360);
         Controls.Add(_box);
@@ -68,7 +70,8 @@ sealed class NotesWindow : Form
         if (_game == null || IsDisposed || _s.Disposed || !ReferenceEquals(_game, _s.Game)) return;
         var text = _box.Text;
         if (!NotesSync.ShouldCommit(text, _game.State.Notes)) return;
-        _game.Execute(CommandLog.Stamp(new SetNotes(text)));
+        if (_actions?.Invoke() is { } port) port.SetNotes(text);
+        else _game.Execute(CommandLog.Stamp(new SetNotes(text)));
     }
 
     /// <summary>Commits pending text now; MainForm calls this before anything that replaces or closes the game.</summary>

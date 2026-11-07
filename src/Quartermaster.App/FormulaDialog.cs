@@ -410,9 +410,9 @@ sealed class FormulaDialog : Form
         // Hot-seat: the viewer may have changed while the dialog was open; another side's unit is refused.
         if (!_s.CanAct(_pieceId)) { _status.Text = "This unit " + ModuleSession.OtherSideText + "."; _apply.Enabled = false; return; }
         // v.Trace is the engine's own (expected) run: typed values only gate Apply, so a wrong formula can never reach the ledger.
-        if (HostForm?.Phases is { } phases)
+        if (HostForm?.Actions is { } port)
         {
-            if (!phases.ApplyFormula(_link?.RunId, _pieceId, v.Trace, _model.AutoCalculated))
+            if (!port.ApplyTrace(_link?.RunId, _pieceId, v.Trace, _model.AutoCalculated))
             {
                 _status.Text = "This calculation is no longer waiting.";
                 _apply.Enabled = false;

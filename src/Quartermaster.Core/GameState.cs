@@ -242,7 +242,8 @@ public sealed class GameState
         Log.Add(LogBuilder.Place(this, a));
     }
 
-    static List<string> DecodeState(string typeString, string stateString)
+    /// <summary>Splits a piece state string into per-trait states as the reducer does (one entry with the raw text when the type cannot be read).</summary>
+    public static List<string> DecodeState(string typeString, string stateString)
     {
         if (string.IsNullOrEmpty(stateString)) return new();
         try

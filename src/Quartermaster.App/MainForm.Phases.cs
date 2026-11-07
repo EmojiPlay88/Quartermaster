@@ -22,6 +22,7 @@ sealed partial class MainForm
     readonly ToolStripMenuItem _viewPhases = new("&Phase panel");
     PhaseDock? _phaseDock;
     PhaseController? _phases;
+    LocalActions? _actions;
     PhaseWatcher? _stripWatch;
 
     void BuildRightStack()
@@ -69,9 +70,10 @@ sealed partial class MainForm
         _phases = c;
         _history = new HistoryController(session, c, (cmd, st) => CommandLog.Prepare(cmd, st, session));
         _history.Rewound += OnHistoryRewound;
+        _actions = new LocalActions(session, c, _history);
         CreateHotSeat(session, c, _history);
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);
-        _phaseDock!.Create(new PhasePanel(session, c, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
+        _phaseDock!.Create(new PhasePanel(session, c, _actions, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
         CreateAlerts(session);
         RefreshStrip();
         UpdatePhaseUi();
@@ -87,6 +89,7 @@ sealed partial class MainForm
         _phases = null;
         if (_history != null) _history.Rewound -= OnHistoryRewound;
         _history = null;
+        _actions = null;
         RefreshHistoryUi();
         _strip.Visible = false;
         DestroyAlerts();
@@ -164,7 +167,7 @@ sealed partial class MainForm
         if (v.PlayingText is { } playing) { SetStatus(playing); return; }   // hot-seat: another side's phase
         if (v.BeforeStart)
         {
-            _phases.Start();
+            _actions?.NextPhase();
             RefreshPhaseViews();
             return;
         }
@@ -181,7 +184,7 @@ sealed partial class MainForm
                 }
             }
         }
-        if (_phases.Advance() is { } pass) SetStatus(pass);
+        if (_actions?.NextPhase() is { } pass) SetStatus(pass);
         RefreshPhaseViews();
     }
 
@@ -204,6 +207,9 @@ sealed partial class MainForm
 
     /// <summary>The session's phase controller (null without a game); map windows route move gestures through it.</summary>
     public PhaseController? Phases => _phases;
+
+    /// <summary>The session's action port (null without a session): every user action that changes the game goes through it.</summary>
+    public IActionPort? Actions => _actions;
 
     /// <summary>Triggers queued runs: each opens its calculation UI at once. Always on the UI thread, never throws.</summary>
     void OnRunsQueued(IReadOnlyList<PendingRun> runs)
@@ -247,12 +253,12 @@ sealed partial class MainForm
         if (MissingInputs.For(_session, run).Count == 0)
         {
             // Nothing to ask (for example a run left over from a manual mode): finish it from the auto values, no window.
-            var (applied, failed) = MissingInputs.ApplyAll(_session, _phases, run, new Dictionary<string, string>());
+            var (applied, failed) = _actions!.ApplyMissingInputs(run, new Dictionary<string, string>());
             SetStatus($"{run.FormulaName}: {applied} unit(s) calculated automatically" + (failed.Count > 0 ? $", {failed.Count} could not be" : ""));
             return;
         }
         if (Program.Smoke) { Program.AppLog($"smoke: run {run.FormulaName} needs input; dialog skipped in smoke"); return; }
-        using var dlg = new MissingInputDialog(_session, _phases, run);
+        using var dlg = new MissingInputDialog(_session, _actions!, run);
         if (dlg.ShowDialog(this) == DialogResult.Retry
             && _session?.Game?.State.Pending.FirstOrDefault(r => r.Id == run.Id) is { } fresh   // re-read: the dialog may have applied some units
             && fresh.Units.Where(u => !u.Applied).ToList() is { Count: > 0 } left)
@@ -265,7 +271,7 @@ sealed partial class MainForm
         if (_session == null || _phases == null) return;
         if (open.Count > 1)
         {
-            var model = new BatchModel(_session, _phases, run.Id);
+            var model = new BatchModel(_session, _actions!, run.Id);
             OpenChild(_docs, "batch:" + run.Id, () => new BatchGridWindow(model, _session, run.Id, row => Guard(() => OpenBatchRow(run.Id, row))));
         }
         else OpenUnitDialog(run, open[0]);
@@ -609,7 +615,7 @@ sealed partial class MainForm
         var formula = _session.Rules?.Formulas.FirstOrDefault();
         if (piece == null || formula == null) return;
         var run = new PendingRun("smoke", formula.Id, formula.Name, "move", new[] { new PendingUnit(piece.Id, PieceInfo.Name(piece), null, false) }, true);
-        using var dlg = new MissingInputDialog(_session, _phases, run);
+        using var dlg = new MissingInputDialog(_session, _actions!, run);
         Program.AppLog($"smoke: missing input dialog built ({dlg.AskedVariables.Count} input(s), {dlg.Controls.Count} control(s))");
     }
 

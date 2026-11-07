@@ -155,7 +155,7 @@ sealed class DiceTools : IDisposable
         if (_session() is not { Game: { } game } s) return false;
         var results = Results(s, spec.Count, spec.Sides);
         if (results == null) return false;
-        game.Execute(CommandLog.Stamp(new RollDice(purpose, spec.Count, spec.Sides, results, DiceExpr.Format(spec), null, spec.Modifier)));
+        Record(game, new RollDice(purpose, spec.Count, spec.Sides, results, DiceExpr.Format(spec), null, spec.Modifier));
         if (!quiet && ShowLastRoll) ShowResult(game.State.Log.LastOrDefault()?.Text);
         return true;
     }
@@ -166,9 +166,24 @@ sealed class DiceTools : IDisposable
         var results = Results(s, 1, die.Faces.Count);
         if (results == null) return false;
         var face = die.Faces[results[0] - 1];
-        game.Execute(CommandLog.Stamp(new RollDice(die.Name, 1, die.Faces.Count, results, null, new[] { face })));
+        Record(game, new RollDice(die.Name, 1, die.Faces.Count, results, null, new[] { face }));
         if (ShowLastRoll) ShowResult(game.State.Log.LastOrDefault()?.Text);
         return true;
+    }
+
+    /// <summary>The main window's action port; null = execute directly.</summary>
+    public Func<IActionPort?>? Actions { get; set; }
+
+    void Record(GameSession game, RollDice roll)
+    {
+        if (Actions?.Invoke() is { } port) port.RecordRoll(roll);
+        else game.Execute(CommandLog.Stamp(roll));
+    }
+
+    void ChangeTurn(GameSession game, int turn, string? phase)
+    {
+        if (Actions?.Invoke() is { } port) port.SetTurn(turn, phase);
+        else game.Execute(CommandLog.Stamp(new SetTurn(turn, phase)));
     }
 
     IReadOnlyList<int>? Results(ModuleSession s, int n, int sides)
@@ -217,14 +232,14 @@ sealed class DiceTools : IDisposable
         var cur = game.State.Turn;
         var n = Math.Max(1, cur.Turn + delta);
         if (n == cur.Turn) return;
-        game.Execute(CommandLog.Stamp(new SetTurn(n, null)));
+        ChangeTurn(game, n, null);
     }
 
     void SetTurnDialog()
     {
         if (_session()?.Game is not { } game) return;
         if (TurnDialog.Ask(_owner, game.State.Turn) is not { } r) return;
-        game.Execute(CommandLog.Stamp(new SetTurn(r.Turn, string.IsNullOrWhiteSpace(r.Phase) ? null : r.Phase.Trim())));
+        ChangeTurn(game, r.Turn, string.IsNullOrWhiteSpace(r.Phase) ? null : r.Phase.Trim());
     }
 }
 

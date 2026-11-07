@@ -14,14 +14,20 @@ static class PaletteDrop
     public static PieceSlotDef? FromData(ModuleSession s, IDataObject? data) =>
         data?.GetDataPresent(PaletteModel.DragFormat) == true ? Find(s, data.GetData(PaletteModel.DragFormat) as string) : null;
 
-    public static (bool Placed, string Message) Place(ModuleSession s, MapDef map, PieceSlotDef slot, PointD mapPoint, bool snap)
+    /// <param name="actions">The main window's action port (it executes the AddPiece and seeds); null = execute directly.</param>
+    public static (bool Placed, string Message) Place(ModuleSession s, MapDef map, PieceSlotDef slot, PointD mapPoint, bool snap, IActionPort? actions = null)
     {
         if (s.Game is not { } game) return (false, "No game is running");
         if (PaletteModel.ResolveDrop(game.State, map, mapPoint, s.Images, snap) is not { } t) return (false, "Drop onto a board");
         var (type, state) = PieceFactory.FromSlot(s.Model, slot, t.MapId, t.Pos);
         var id = "p:" + Guid.NewGuid().ToString("N");
-        game.Execute(CommandLog.Prepare(new AddPiece(id, type, state, t.MapId, t.Pos, t.StackOnto), game.State, s));
-        s.SeedLedgers();
+        var add = new AddPiece(id, type, state, t.MapId, t.Pos, t.StackOnto);
+        if (actions != null) actions.PieceCommand(add);
+        else
+        {
+            game.Execute(CommandLog.Prepare(add, game.State, s));
+            s.SeedLedgers();
+        }
         return (true, $"Placed {PaletteModel.PieceName(slot)}");
     }
 }

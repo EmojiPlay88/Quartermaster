@@ -22,7 +22,7 @@ sealed class MapWindow : Form
         Controls.Add(Canvas);
         Controls.Add(BuildToolbar());
         Canvas.Guarded = Run;
-        Canvas.Phases = () => Host?.Phases;
+        Canvas.Actions = () => Host?.Actions;
 
         Canvas.ContextRequested += OnContext;
         Canvas.DropMessage += m => Host?.SetStatus(m);
@@ -361,24 +361,10 @@ sealed class MapWindow : Form
     void Execute(IEnumerable<GameCommand> commands)
     {
         if (_s.Game is not { } game) return;
-        var phases = Host?.Phases;
-        var gesture = new List<MovePieces>();
-        void FlushMoves()
-        {
-            if (gesture.Count == 0) return;
-            var moves = gesture.ToList();
-            gesture.Clear();
-            phases!.ExecuteMove(moves);
-        }
-        using var scope = game.BeginAction();   // one undoable action per call; label comes from the first command
-        foreach (var c in commands)
-        {
-            // Move commands (Send to, keyboard moves) are move gestures: consecutive ones go through the phase controller as one call.
-            if (phases != null && c is MovePieces m) { gesture.Add(m); continue; }
-            FlushMoves();
-            game.Execute(CommandLog.Prepare(c, game.State, _s));
-        }
-        FlushMoves();
+        // One undoable action per call; consecutive moves (Send to, keyboard moves) are one move gesture with its OnMove formulas.
+        if (Host?.Actions is { } port) { port.PieceCommands(commands.ToList()); return; }
+        using var scope = game.BeginAction();   // no main window: plain logged commands; label comes from the first command
+        foreach (var c in commands) game.Execute(CommandLog.Prepare(c, game.State, _s));
     }
 
     void RunAction(PieceAction action, PieceInstance clicked)
@@ -452,6 +438,9 @@ sealed class MapWindow : Form
         if (index < 0) return;
         var rows = PieceActions.ReadSheet(piece, index);
         using var dlg = new PropertySheetDialog(action.Label, rows, name => ManagedSheetValue(piece, game, name));
-        if (dlg.ShowDialog(this) == DialogResult.OK) game.Execute(PieceActions.WriteSheet(piece, index, dlg.Values));
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        var write = PieceActions.WriteSheet(piece, index, dlg.Values);
+        if (Host?.Actions is { } port) port.PieceCommand(write);
+        else game.Execute(write);
     }
 }

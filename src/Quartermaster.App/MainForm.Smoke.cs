@@ -270,7 +270,7 @@ sealed partial class MainForm
         var b = map.Boards[0];
         var places = game.State.Log.Count(e => e.Kind == LogKind.Place);
         var pieces = game.State.Pieces.Count;
-        var (placed, msg) = PaletteDrop.Place(_session, map, slot, new PointD(b.Offset.X + b.Width / 2.0, b.Offset.Y + b.Height / 2.0), _settings.Current.SnapOnDrop);
+        var (placed, msg) = PaletteDrop.Place(_session, map, slot, new PointD(b.Offset.X + b.Width / 2.0, b.Offset.Y + b.Height / 2.0), _settings.Current.SnapOnDrop, _actions);
         var newPlaces = game.State.Log.Count(e => e.Kind == LogKind.Place) - places;
         var ok = placed && newPlaces == 1 && game.State.Pieces.Count == pieces + 1 && game.State.Log[^1].Text.Contains(" placed", StringComparison.Ordinal);
         Program.AppLog($"smoke: palette drop {(ok ? "ok" : "FAILED")} ('{msg}'; {newPlaces} place entr(y/ies); last log '{game.State.Log[^1].Text}')");

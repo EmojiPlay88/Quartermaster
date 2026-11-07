@@ -41,7 +41,46 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private void Exec(GameCommand c)
     {
         if (s.Game is not { } g) return;
+        if (_actorWho != null) c = CommandLog.Stamp(c, _actorWho);
         g.Execute(prepare(c, g.State));
+    }
+
+    // Online host: a guest's intent runs for the guest's sides (not the host's view) and its commands carry the guest as Who.
+    private bool _actorSet;
+    private IReadOnlySet<string>? _actorSides;
+    private string? _actorWho;
+
+    /// <summary>The sides the current action is run for: the guest's while <see cref="ActingFor"/> is open, else the session's view.</summary>
+    private IReadOnlySet<string>? ActorSides => _actorSet ? _actorSides : s.ViewSides;
+
+    /// <summary>Optional thread-affinity check for <see cref="ActingFor"/> (debug assert); the online host sets it to "not InvokeRequired".</summary>
+    public Func<bool>? IsOwnerThread { get; set; }
+
+    /// <summary>
+    /// Until disposed, actions run for a player holding <paramref name="sides"/>: formula stamps, OnMove trigger stamps and the
+    /// "may act on this unit" check use them instead of the session's view; commands are stamped with <paramref name="who"/>.
+    /// Used by the online host to execute a guest's intent. Not reentrant (a nested call throws <see cref="InvalidOperationException"/>).
+    /// Like every game change it must run on the thread that owns the game (the host's UI thread); <see cref="IsOwnerThread"/> lets the
+    /// host check that in debug builds.
+    /// </summary>
+    public IDisposable ActingFor(IReadOnlySet<string> sides, string? who)
+    {
+        System.Diagnostics.Debug.Assert(IsOwnerThread?.Invoke() ?? true, "PhaseController.ActingFor called off the game's owning thread.");
+        if (_actorSet) throw new InvalidOperationException("ActingFor is already open.");
+        _actorSet = true;
+        _actorSides = sides;
+        _actorWho = who;
+        return new ActorScope(this);
+    }
+
+    private sealed class ActorScope(PhaseController owner) : IDisposable
+    {
+        public void Dispose()
+        {
+            owner._actorSet = false;
+            owner._actorSides = null;
+            owner._actorWho = null;
+        }
     }
 
     private void Calc(string text, string? pieceId = null) => Exec(new AddLogLine(LogKind.Calc, text, pieceId, SideId: Stamp()));
@@ -51,10 +90,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private bool _inTrigger;
     private string? _triggerSide;
 
-    private string? Stamp() => _inTrigger ? _triggerSide : s.ActorSide();
+    private string? Stamp() => _inTrigger ? _triggerSide : s.ActorSideFor(ActorSides);
 
     private string? TriggerSide(PhaseDef phase) =>
-        s.ViewSides == null || s.Rules is not { } pack ? null : Sequencer.ActingSide(pack, phase)?.Id ?? s.ActorSide();
+        ActorSides == null || s.Rules is not { } pack ? null : Sequencer.ActingSide(pack, phase)?.Id ?? s.ActorSideFor(ActorSides);
 
     /// <summary>Runs an automatic trigger with the phase's stamp (nested calls keep the outer one).</summary>
     private T AsTrigger<T>(PhaseDef phase, Func<T> run)
@@ -208,7 +247,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (trace.Error != null || trace.Result == null) return false;   // a failed trace changes nothing and keeps the run pending
         // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
         if (runId != null && !IsPending(runId, pieceId)) return false;
-        if (!s.CanAct(pieceId)) return false;   // hot-seat: only the units of the sides held (or of no side)
+        if (!s.CanActFor(pieceId, ActorSides)) return false;   // hot-seat: only the units of the sides held (or of no side)
         var name = UnitName(pieceId);
         var unit = name ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
