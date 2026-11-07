@@ -198,7 +198,8 @@ static class Program
     /// <summary>The module the game window had open when it went Back to launcher (selected there whatever the setting says).</summary>
     public static string? JustPlayedModule { get; private set; }
 
-    static string LogDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
+    /// <summary>app.log and crash.log live here; QUARTERMASTER_LAYOUT_ROOT redirects them with everything else (<see cref="AppDataRoot"/>).</summary>
+    static string LogDir => AppDataRoot.Path;
 
     /// <summary>Appends a line to app.log (used instead of dialogs in smoke mode).</summary>
     public static void AppLog(string text)

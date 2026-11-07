@@ -131,7 +131,35 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     }
 
     /// <summary>Drops the pinned roll for a key so the next run rolls it again.</summary>
-    public void Reroll(string key) => _fixedRolls.Remove(key);
+    public void Reroll(string key)
+    {
+        if (HostCalculates) return;   // a guest's dice are the host's: no re-rolling
+        _fixedRolls.Remove(key);
+    }
+
+    /// <summary>The pinned dice by roll key (what the next run reuses).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<int>> PinnedRolls => _fixedRolls;
+
+    /// <summary>Pins these dice (the host reusing a preview's rolls for the same sender).</summary>
+    public void PinRolls(IReadOnlyDictionary<string, IReadOnlyList<int>> rolls)
+    {
+        if (rolls == null) return;
+        var merged = new Dictionary<string, IReadOnlyList<int>>(_fixedRolls, StringComparer.Ordinal);
+        foreach (var kv in rolls) if (kv.Key != null && kv.Value != null) merged[kv.Key] = kv.Value.ToList();
+        _fixedRolls = merged;
+    }
+
+    /// <summary>Roll keys whose dice came from the host (guest). Until then a guest's dice boxes say the host rolls.</summary>
+    private readonly HashSet<string> _hostRolls = new(StringComparer.Ordinal);
+
+    /// <summary>A guest's dice box before the host rolled it.</summary>
+    public const string HostRollsText = "rolled by the host";
+
+    /// <summary>
+    /// Which ledger outputs the viewer may see (set by <see cref="FormulaMasking.Configure"/>); null = all (solo). Only those decide the
+    /// "(negative)" mark: another side's value going negative is not shown.
+    /// </summary>
+    public Func<string, bool>? OutputVisible { get; set; }
 
     private Dictionary<string, string> PhysicalRollOverrides()
     {
@@ -193,8 +221,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         var vars = t.Variables;
         var boxes = vars.Select(v => Box(v, t)).ToList();
-        var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal))
+        var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || _hostRolls.Contains(kv.Key)))
             .Select(kv => new InlineRollView(kv.Key, DiceText(kv.Value))).ToList();
+        // A guest's local run rolls its own dice; until the host's are in, no result built on them is shown.
+        var localDice = HostCalculates && t.RollsByKey.Keys.Any(k => !_hostRolls.Contains(k));
         var masked = _hidden.Count > 0;
         var missing = vars.Where(v => v.MissingReason != null && !IsHidden(v.Variable)).Select(v => v.Variable).ToList();
         var wrong = boxes.Where(b => b.Wrong).Select(b => b.Variable).ToList();
@@ -208,7 +238,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
                 && vars.All(v => !IsCheckedBox(v.Variable) || exp.Variables.FirstOrDefault(e => e.Variable == v.Variable)?.Value != null);
             canApply = canApply && wrong.Count == 0 && missing.Count == 0 && verifiable;
         }
-        var negative = t.Error == null && t.Outputs.Any(o => o.After < 0);
+        var negative = t.Error == null && t.Outputs.Any(o => o.After < 0 && (OutputVisible == null || OutputVisible(o.Key)));
         var status = wrong.Count > 0 ? "Doesn't match: " + string.Join(", ", wrong)
             : t.Error != null ? (masked ? FormulaMasking.ErrorHiddenText : t.Error)
             : missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing)
@@ -217,7 +247,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (_verdictMessage != null) status = _verdictMessage;
         // The working line shows every input's value: with a hidden input it is replaced (the logged working is redacted by PlayerView).
         var working = masked ? (t.Result != null ? FormulaMasking.WorkingHiddenText : "") : t.Working;
-        return new DialogView(boxes, inline, t.Result?.Display() ?? "", working + (negative ? " (negative)" : ""), negative, status,
+        var result = t.Result?.Display() ?? "";
+        if (localDice) { working = ""; result = ""; negative = false; }
+        return new DialogView(boxes, inline, result, working + (negative ? " (negative)" : ""), negative, status,
             canApply, t);
     }
 
@@ -235,10 +267,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
                 false, choices);
         var text = v.Value?.Display() ?? "";
         string? reroll = null;
+        if (binding?.Kind == BindingKind.Roll && HostCalculates && !_hostRolls.Contains(v.Variable))
+            return new BoxView(v.Variable, HostRollsText, BoxBackground.Auto, "", false, null, null);
         if (binding?.Kind == BindingKind.Roll && t.RollsByKey.TryGetValue(v.Variable, out var dice))
         {
             text = DiceText(dice);
-            reroll = v.Variable;
+            reroll = HostCalculates ? null : v.Variable;
         }
         return new BoxView(v.Variable, text, BoxBackground.Auto, "", true, reason, reroll);
     }
@@ -280,7 +314,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// What an online guest sends for this dialog: the typed Input boxes, and in the manual modes the typed checked boxes (never a hidden
     /// box, an override of the fully automatic mode or a dice value). The host runs it with the full game.
     /// </summary>
-    public FormulaIntent Intent(string? runId, bool calculate)
+    public FormulaIntent Intent(string? runId, bool calculate, bool preview = false)
     {
         var typed = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var b in formula.Bindings)
@@ -289,7 +323,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             if (b.Kind == BindingKind.Input && _typed.TryGetValue(b.Variable, out var t)) typed[b.Variable] = t;
             else if (Checked && IsCheckedKind(b.Kind) && _overrides.TryGetValue(b.Variable, out var o)) typed[b.Variable] = o;
         }
-        return new FormulaIntent(formula.Id, pieceId, runId, typed, calculate);
+        return new FormulaIntent(formula.Id, pieceId, runId, typed, calculate, preview);
     }
 
     /// <summary>The host's verdict: its wrong boxes are marked (until edited) and its message becomes the status. States only, never values.</summary>
@@ -300,13 +334,31 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (verdict == null) return;
         foreach (var b in verdict.Boxes ?? Array.Empty<FormulaBox>())
             if (b?.Var != null && b.State != null && !IsHidden(b.Var)) _verdict[b.Var] = b.State;
-        _verdictMessage = verdict.Applied ? null : verdict.Message ?? (_verdict.ContainsValue(FormulaBox.Wrong) ? null : FormulaMasking.ErrorHiddenText);
+        var preview = verdict.Values != null || verdict.Rolls != null;
+        _verdictMessage = verdict.Applied || preview ? verdict.Message
+            : verdict.Message ?? (_verdict.ContainsValue(FormulaBox.Wrong) ? null : FormulaMasking.ErrorHiddenText);
+        if (!preview) return;
+        // A preview (the guest's Calculate): fill the boxes as Calculate does in solo, with the host's values and dice.
+        foreach (var (variable, text) in verdict.Values ?? new Dictionary<string, string>())
+        {
+            if (variable == null || text == null || IsHidden(variable) || Binding(variable) is not { } b) continue;
+            if (b.Kind == BindingKind.Input) _typed[variable] = text;
+            else if (Checked && IsCheckedKind(b.Kind)) _overrides[variable] = text;
+        }
+        if (verdict.Rolls != null)
+        {
+            PinRolls(verdict.Rolls);
+            foreach (var k in verdict.Rolls.Keys) if (k != null) _hostRolls.Add(k);
+        }
+        AutoCalculated = true;
     }
 
     /// <summary>The host's state of a box from the last verdict (<see cref="FormulaBox.Ok"/> or <see cref="FormulaBox.Wrong"/>), or null.</summary>
     public string? VerdictState(string variable) => _verdict.GetValueOrDefault(variable);
 
     /// <summary>Full-precision invariant text for a value, so a Calculate-then-Apply compares exactly.</summary>
+    public static string ExactText(Value v) => Exact(v);
+
     private static string Exact(Value v) =>
         v.Kind == ValueKind.Number ? v.Number.ToString("R", System.Globalization.CultureInfo.InvariantCulture) : v.Display();
 

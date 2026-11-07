@@ -176,8 +176,7 @@ sealed class PdfViewerControl : UserControl
         StartInit();
     }
 
-    static string UserDataFolder =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster", "webview2");
+    static string UserDataFolder => AppDataRoot.Sub("webview2");
 
     bool Stale(WebView2 web, int ticket) =>
         IsDisposed || Disposing || !_gate.IsCurrent(ticket) || !ReferenceEquals(web, _web);

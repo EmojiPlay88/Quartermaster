@@ -63,6 +63,24 @@ public class FormulaMaskingTests : IDisposable
             {
                 new FormulaDef
                 {
+                    Id = "f-dice", Name = "Supply roll", Text = "W + R + S",
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                        new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 },
+                        new VariableBinding { Variable = "S", Kind = BindingKind.Holder, HolderId = "reddepot", Property = "supply" },
+                    },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
+                    // Writes Blue's private depot below zero: Red's dialog must not mark it negative.
+                    Id = "f-drain", Name = "Drain", Text = "W - 1000000",
+                    Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" } },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Holder, HolderId = "bluedepot", Property = "supply", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
                     Id = "f-mix", Name = "Mixed supply", Text = "W + S",
                     Bindings = new()
                     {
@@ -74,6 +92,30 @@ public class FormulaMaskingTests : IDisposable
             }).ToList(),
         };
     }
+
+    private static string Json(GameState st) => JsonSerializer.Serialize(st, QuartermasterJson.Options);
+
+    /// <summary>A guest holding Blue: only its filtered snapshot of the host's game and the rules pack.</summary>
+    private ModuleSession Guest(ModuleSession host)
+    {
+        var fx = PhaseFixture.Module();
+        _fixtures.Add(fx);
+        var guest = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "gcache" + _sessions.Count), Path.Combine(_tmp, "groot" + _sessions.Count));
+        _sessions.Add(guest);
+        guest.EnterGuestMode();
+        guest.LoadGuestRules(host.Rules!);
+        guest.ApplySnapshot(PlayerView.For(host.Game!.State, host.Rules, host.Model, Blue), Blue);
+        return guest;
+    }
+
+    /// <summary>A remote port answered by the host's executor for Bob ("p2"), the verdict travelling as JSON.</summary>
+    private static HostPort PortTo(IntentExecutor executor) => new(intent =>
+    {
+        var r = executor.Execute("p2", Blue, intent);
+        var json = JsonSerializer.Serialize(r.Verdict ?? FormulaVerdict.Refused(r.Message ?? ""), QuartermasterJson.Options);
+        Assert.DoesNotContain(RedText, json);
+        return JsonSerializer.Deserialize<FormulaVerdict>(json, QuartermasterJson.Options)!;
+    });
 
     private (ModuleSession S, PhaseController C) Open(Difficulty d, IReadOnlyList<PlayerDef>? players = null)
     {
@@ -286,6 +328,139 @@ public class FormulaMaskingTests : IDisposable
         check.Evaluate(s.Game!.State);
         var sheet = CheatSheetModel.Build(check.LastExpected!, s.Rules!, check.Hidden);
         Assert.Contains(sheet, r => r.Variable == "S" && r.ValueText == RedText);
+    }
+
+    [Fact]
+    public async Task Guest_Calculate_IsPreview_SameDice_ApplyUsesPinnedDice()
+    {
+        var (host, hc) = Open(Difficulty.Hardcore, new[] { Alice, Bob });
+        var next = 0;
+        host.SetRoller((n, _) => Enumerable.Range(0, n).Select(_ => next++ % 6 + 1).ToList());   // every roll differs from the last
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);
+        var m = Dialog(guest, "f-dice", PhaseFixture.BlueOne, check: true);
+        var first = m.Evaluate(guest.Game!.State);
+        Assert.Equal(FormulaDialogModel.HostRollsText, first.Boxes.Single(b => b.Variable == "R").Text);   // no local dice for a guest
+        Assert.Equal("", first.ResultText);
+
+        // Calculate is a preview: nothing executes on the host; the visible boxes fill as in solo.
+        var before = Json(host.Game!.State);
+        var p1 = await FormulaMasking.SendAsync(port, m, null, calculate: true, preview: true);
+        Assert.False(p1.Applied);
+        Assert.Equal(before, Json(host.Game!.State));
+        Assert.NotNull(p1.Values);
+        Assert.False(p1.Values!.ContainsKey("S"));
+        Assert.Equal("10", p1.Values["W"]);
+        Assert.DoesNotContain(RedText, string.Join("|", p1.Values.Values));
+        var roll = Assert.Single(p1.Rolls!["R"]);
+        var shown = m.Evaluate(guest.Game!.State);
+        Assert.Equal("10", shown.Boxes.Single(b => b.Variable == "W").Text);
+        Assert.Equal(roll.ToString(CultureInfo.InvariantCulture), shown.Boxes.Single(b => b.Variable == "R").Text);
+        Assert.Equal(FormulaMasking.HostCalculatesText, shown.Boxes.Single(b => b.Variable == "S").Text);
+        Assert.Null(shown.Boxes.Single(b => b.Variable == "R").RerollKey);
+        Assert.DoesNotContain(RedText, Shown(shown));
+
+        // Calculate again: the same roll, no fishing.
+        var p2 = await FormulaMasking.SendAsync(port, m, null, calculate: true, preview: true);
+        Assert.Equal(roll, Assert.Single(p2.Rolls!["R"]));
+        Assert.Equal(before, Json(host.Game!.State));
+        Assert.Equal(1, executor.Pins.Count("p2"));
+
+        // Apply uses the pinned roll (once).
+        var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.True(applied.Applied, applied.Message);
+        Assert.Equal(10 + roll + RedSecret, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+        Assert.Equal(new[] { roll }, host.Game!.State.DiceHistory.Last().Results);
+        Assert.Equal(0, executor.Pins.Count("p2"));
+    }
+
+    [Fact]
+    public void Pins_Expire_AreCapped_AndFollowTheRules()
+    {
+        var (s, _) = Open(Difficulty.Hardcore);
+        var pins = new FormulaPins();
+        var now = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        pins.Clock = () => now;
+        var rolls = new Dictionary<string, IReadOnlyList<int>> { ["R"] = new[] { 5 } };
+        for (var i = 0; i < FormulaPins.MaxPerSender + 1; i++)
+            pins.Put(new FormulaPins.Key("p2", "f-dice", "u" + i, null), s.Game!, s.Rules!, rolls, null);
+        Assert.Equal(FormulaPins.MaxPerSender, pins.Count("p2"));
+        Assert.Null(pins.Find(new FormulaPins.Key("p2", "f-dice", "u0", null), s.Game!, s.Rules!));   // oldest evicted
+        var key = new FormulaPins.Key("p2", "f-dice", "u1", null);
+        Assert.NotNull(pins.Find(key, s.Game!, s.Rules!));
+        Assert.Null(pins.Find(new FormulaPins.Key("p3", "f-dice", "u1", null), s.Game!, s.Rules!));   // per sender
+        s.UpdateRules(p => p with { Name = "Edited" });
+        Assert.Null(pins.Find(key, s.Game!, s.Rules!));   // the rules changed
+        var key2 = new FormulaPins.Key("p2", "f-dice", "u2", null);
+        var pack = s.Rules!;
+        pins.Put(key2, s.Game!, pack, rolls, null);
+        now += TimeSpan.FromMinutes(9);
+        pins.Put(key2, s.Game!, pack, rolls, pins.Find(key2, s.Game!, pack)!.Created);   // re-preview does not extend
+        now += TimeSpan.FromMinutes(2);
+        Assert.Null(pins.Find(key2, s.Game!, pack));
+    }
+
+    [Fact]
+    public void HotSeat_BatchGrid_AppliedRows_HiddenAfterViewerSwitch()
+    {
+        var (s, c) = Open(Difficulty.SemiAuto);
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.RedOne), "fuel", 0, 5150, "manual", null, null, null, null));
+        s.SetViewSides(Red);
+        c.Start(); c.Advance(); c.Advance();   // Movement
+        c.ExecuteMove(new[]
+        {
+            new MovePieces(new[] { PhaseFixture.RedOne }, "Main Map", new PointD(130, 50), null),
+            new MovePieces(new[] { "r2" }, "Main Map", new PointD(180, 50), null),
+        });
+        var b = new BatchModel(s, c, s.Game!.State.Pending.Single().Id);
+        b.CalculateAll();
+        Assert.Contains("5150", Shown(b.Row(0)));   // Red sees its own fuel
+        Assert.True(b.ApplyRow(0));
+        Assert.Contains("5150", Shown(b.Row(0)));   // the applied snapshot, still Red's view
+        s.SetViewSides(Blue);
+        for (var i = 0; i < b.RowCount; i++)
+        {
+            Assert.DoesNotContain("5150", Shown(b.Row(i)));
+            Assert.DoesNotContain(BlueText, Shown(b.Row(i)));
+        }
+        Assert.All(b.Row(0).Cells, cell => Assert.Equal(ModuleSession.HiddenText, cell));
+    }
+
+    [Fact]
+    public void HotSeat_Negative_OnlyForVisibleOutputs()
+    {
+        var (s, _) = Open(Difficulty.FullyAuto);
+        var drain = s.Rules!.ById<FormulaDef>("f-drain")!;
+        Assert.True(new FormulaDialogModel(s.Runner!, drain, PhaseFixture.RedOne).Evaluate(s.Game!.State).WorkingNegative);   // solo
+        s.SetViewSides(Red);
+        var red = new FormulaDialogModel(s.Runner!, drain, PhaseFixture.RedOne);
+        FormulaMasking.Configure(red, s);
+        var v = red.Evaluate(s.Game!.State);
+        Assert.False(v.WorkingNegative);
+        Assert.DoesNotContain("(negative)", v.WorkingText);
+    }
+
+    [Fact]
+    public void AppDataRoot_WithOverride_NothingUnderTheProfile()
+    {
+        var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
+        Assert.Equal(profile, AppDataRoot.Resolve(null));
+        var old = Environment.GetEnvironmentVariable(AppDataRoot.EnvVar);
+        try
+        {
+            Environment.SetEnvironmentVariable(AppDataRoot.EnvVar, _tmp);
+            foreach (var path in new[]
+                     {
+                         AppDataRoot.Path, AppDataRoot.Sub("webview2"), RulesMemory.DefaultRoot, SettingsStore.DefaultRoot, RejoinTokens.DefaultRoot,
+                         ModuleSession.DefaultCacheRoot,
+                     })
+            {
+                Assert.StartsWith(_tmp, path, StringComparison.OrdinalIgnoreCase);
+                Assert.False(path.StartsWith(profile, StringComparison.OrdinalIgnoreCase), path);
+            }
+        }
+        finally { Environment.SetEnvironmentVariable(AppDataRoot.EnvVar, old); }
     }
 
     /// <summary>A port whose formula intents are answered by the given host function; nothing else is used by these tests.</summary>

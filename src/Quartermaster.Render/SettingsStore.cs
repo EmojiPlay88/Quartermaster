@@ -15,7 +15,7 @@ public sealed class SettingsStore(string root)
     static readonly Regex Hex = new("^#[0-9A-Fa-f]{6}$", RegexOptions.Compiled);
 
     /// <summary>%LOCALAPPDATA%\Quartermaster, redirected by QUARTERMASTER_LAYOUT_ROOT.</summary>
-    public static string DefaultRoot => RulesMemory.DefaultRoot;
+    public static string DefaultRoot => AppDataRoot.Path;
 
     /// <summary>The folder holding <c>settings.json</c> (and, beside it, the rules index and autosaves).</summary>
     public string Root => root;

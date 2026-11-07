@@ -139,9 +139,7 @@ sealed partial class MainForm : Form
     }
 
     /// <summary>Layout files live here; QUARTERMASTER_LAYOUT_ROOT redirects them (used by smoke runs).</summary>
-    static string LayoutRoot =>
-        Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT") is { Length: > 0 } r ? r
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
+    static string LayoutRoot => AppDataRoot.Path;
 
     void ApplyLeftSplit()
     {

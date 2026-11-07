@@ -112,16 +112,33 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
             FormulaMasking.Configure(model, s);
             _models[row] = model;
         }
-        // Hot-seat: another viewer (or a rules change, handled above) masks every row again; hidden boxes drop what was typed into them.
-        var viewer = (object?)FormulaMasking.ViewerSides(s);
-        if (!ReferenceEquals(viewer, _maskedFor))
-        {
-            _maskedFor = viewer;
-            foreach (var m in _models.Values) FormulaMasking.Configure(m, s);
-        }
+        CheckViewer();
         // Defence in depth: the mode is read again on every access, so a difficulty switch while a grid is open can never leave a row unchecked.
         model.Checked = s.Game!.State.Difficulty != Difficulty.FullyAuto;
         return model;
+    }
+
+    /// <summary>
+    /// Hot-seat: another viewer masks every row again (hidden boxes drop what was typed into them) and drops every row view built for the
+    /// previous viewer, including the snapshots of applied rows (they showed what that viewer could see).
+    /// </summary>
+    private void CheckViewer()
+    {
+        var viewer = (object?)FormulaMasking.ViewerSides(s);
+        if (ReferenceEquals(viewer, _maskedFor)) return;
+        _maskedFor = viewer;
+        foreach (var m in _models.Values) FormulaMasking.Configure(m, s);
+        _views.Clear();
+        _appliedSnapshots.Clear();
+    }
+
+    /// <summary>The row of a unit the current viewer may not act on: nothing of it is shown.</summary>
+    private BatchRowView HiddenRow(PendingUnit u)
+    {
+        var n = Variables.Count;
+        var label = u.PieceId != null && s.CanSee(u.PieceId) ? u.Label : ModuleSession.HiddenText;
+        return new BatchRowView(u.PieceId, label, Enumerable.Repeat(ModuleSession.HiddenText, n).ToList(), new bool[n],
+            ModuleSession.HiddenText, "", ModuleSession.OtherSideText, u.Applied, false);
     }
 
     /// <summary>Drops cached row views and warning hits (the game state or rules changed). Typed values are kept.</summary>
@@ -134,6 +151,8 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     public BatchRowView Row(int i)
     {
         if (Unit(i) is not { } u) return new BatchRowView(null, "", Array.Empty<string>(), Array.Empty<bool>(), "", "", "", false, false);
+        CheckViewer();
+        if (!s.CanAct(u.PieceId)) return HiddenRow(u);   // applied or not: another side's unit shows nothing
         if (u.Applied) return _appliedSnapshots.TryGetValue(i, out var snap) ? snap : Done(u);
         if (_views.TryGetValue(i, out var cached)) return cached;
         var view = Build(i, u);
@@ -149,14 +168,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
 
     private BatchRowView Build(int i, PendingUnit u)
     {
-        if (!s.CanAct(u.PieceId))
-        {
-            // Hot-seat: another side's unit. Nothing of it is evaluated or shown, and it cannot be applied.
-            var n = Variables.Count;
-            var label = u.PieceId != null && s.CanSee(u.PieceId) ? u.Label : ModuleSession.HiddenText;
-            return new BatchRowView(u.PieceId, label, Enumerable.Repeat(ModuleSession.HiddenText, n).ToList(), new bool[n],
-                ModuleSession.HiddenText, "", ModuleSession.OtherSideText, false, false);
-        }
+        if (!s.CanAct(u.PieceId)) return HiddenRow(u);   // hot-seat: another side's unit is never evaluated or shown
         var model = ModelFor(i);
         var dv = model.Evaluate(s.Game!.State);
         var vars = Variables;
@@ -194,7 +206,9 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     private string ExceptionsFor(PendingUnit u, DialogView dv)
     {
         var parts = new List<string>();
-        if (dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0)) parts.Add("goes negative");
+        var sides = FormulaMasking.ViewerSides(s);
+        if (dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (sides == null || s.CanEditLedgerFor(o.Key, sides))))
+            parts.Add("goes negative");   // only for values the viewer may see
         if (u.PieceId != null && WarningsByPiece().TryGetValue(u.PieceId, out var names)) parts.AddRange(names);
         return string.Join("; ", parts);
     }
@@ -271,7 +285,8 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     /// Online guest: sends each open row the guest may act on to the host as a formula intent (typed cells, or Calculate) and shows the
     /// host's verdict on the row. Returns how many the host applied and the last refusal message (null when none).
     /// </summary>
-    public async Task<(int Applied, string? Message)> SendRowsAsync(IReadOnlyList<int> rows, bool calculate)
+    /// <param name="preview">Calculate all: the host only previews each row (fills the cells, pins its dice); nothing is applied.</param>
+    public async Task<(int Applied, string? Message)> SendRowsAsync(IReadOnlyList<int> rows, bool calculate, bool preview = false)
     {
         if (_port == null || rows == null) return (0, null);
         var applied = 0;
@@ -279,7 +294,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         foreach (var row in rows)
         {
             if (s.Game == null || Unit(row) is not { Applied: false } u || !s.CanAct(u.PieceId)) continue;
-            var v = await FormulaMasking.SendAsync(_port, ModelFor(row), runId, calculate).ConfigureAwait(true);
+            var v = await FormulaMasking.SendAsync(_port, ModelFor(row), runId, calculate, preview).ConfigureAwait(true);
             _views.Remove(row);
             if (v.Applied) applied++;
             else if (v.Message != null) message = v.Message;

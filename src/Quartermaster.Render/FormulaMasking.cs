@@ -48,6 +48,8 @@ public static class FormulaMasking
     {
         m.Hidden = HiddenFor(s, m.Formula, m.PieceId);
         m.HostCalculates = s.IsGuest;
+        var sides = ViewerSides(s);
+        m.OutputVisible = sides == null ? null : key => s.CanEditLedgerFor(key, sides);
     }
 
     /// <summary>
@@ -98,11 +100,12 @@ public static class FormulaMasking
     /// Online guest: sends the dialog's typed values (or Calculate) to the host through the port, waits for its verdict and shows it on
     /// the model. Nothing is computed locally from hidden data; the verdict carries states, never values.
     /// </summary>
-    public static async Task<FormulaVerdict> SendAsync(IActionPort port, FormulaDialogModel m, string? runId, bool calculate)
+    /// <param name="preview">The guest's Calculate: the host only runs it and sends back the visible values and its (pinned) dice.</param>
+    public static async Task<FormulaVerdict> SendAsync(IActionPort port, FormulaDialogModel m, string? runId, bool calculate, bool preview = false)
     {
         ArgumentNullException.ThrowIfNull(port);
         ArgumentNullException.ThrowIfNull(m);
-        var verdict = await port.ApplyFormulaAsync(m.Intent(runId, calculate)).ConfigureAwait(true)
+        var verdict = await port.ApplyFormulaAsync(m.Intent(runId, calculate, preview)).ConfigureAwait(true)
             ?? FormulaVerdict.Refused(GuestSession.NoAnswerText);
         m.ApplyVerdict(verdict);
         return verdict;

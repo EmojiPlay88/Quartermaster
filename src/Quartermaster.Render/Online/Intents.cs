@@ -26,8 +26,13 @@ public sealed record MoveIntent(IReadOnlyList<MovePieces> Moves) : GameIntent;
 /// <summary>A piece command (trait state, add / remove piece, trail toggle, mark unmoved); accepted by type, everything else is refused.</summary>
 public sealed record PieceCommandIntent(GameCommand Command) : GameIntent;
 
-/// <summary>Run formula X on unit Y with these typed values, or with the engine's values when <paramref name="Calculate"/>; apply when it checks out.</summary>
-public sealed record FormulaIntent(string FormulaId, string? PieceId, string? RunId, IReadOnlyDictionary<string, string> Typed, bool Calculate) : GameIntent;
+/// <summary>
+/// Run formula X on unit Y with these typed values, or with the engine's values when <paramref name="Calculate"/>; apply when it checks out.
+/// With <paramref name="Preview"/> the host only runs it (nothing is executed, never applied) and answers with the visible values and the
+/// dice it rolled; those dice are pinned for the sender's next Apply of the same formula on the same unit/run (the dialog's Calculate).
+/// </summary>
+public sealed record FormulaIntent(string FormulaId, string? PieceId, string? RunId, IReadOnlyDictionary<string, string> Typed, bool Calculate,
+    bool Preview = false) : GameIntent;
 
 /// <summary>A manual ledger change with its (required) note.</summary>
 public sealed record LedgerEditIntent(string Key, string PropertyId, double After, string Note) : GameIntent;
@@ -55,8 +60,13 @@ public sealed record FormulaBox(string Var, string State)
     public const string Hidden = "hidden";
 }
 
-/// <summary>The host's answer to a formula intent. Never carries a hidden value, in the boxes or in the message.</summary>
-public sealed record FormulaVerdict(bool Applied, IReadOnlyList<FormulaBox> Boxes, string? Message)
+/// <summary>
+/// The host's answer to a formula intent. Never carries a hidden value, in the boxes, the message or <paramref name="Values"/>. A preview
+/// carries <paramref name="Values"/> (the visible variables' values, invariant text) and <paramref name="Rolls"/> (the pinned dice by roll
+/// key) so the guest's boxes fill as in solo.
+/// </summary>
+public sealed record FormulaVerdict(bool Applied, IReadOnlyList<FormulaBox> Boxes, string? Message,
+    IReadOnlyDictionary<string, string>? Values = null, IReadOnlyDictionary<string, IReadOnlyList<int>>? Rolls = null)
 {
     public static FormulaVerdict Refused(string message) => new(false, Array.Empty<FormulaBox>(), message);
 }

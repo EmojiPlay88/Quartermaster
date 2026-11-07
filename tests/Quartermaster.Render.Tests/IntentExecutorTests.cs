@@ -227,6 +227,7 @@ public class IntentExecutorTests : IDisposable
     [Fact]
     public void FormulaIntent_Calculate_Applies_StampsGuestSide()
     {
+        // Calculate without Preview still applies (back-compat). The dialog's Calculate sends Preview instead: see FormulaMaskingTests.
         var (s, _, x) = Open(Difficulty.Hardcore, stock: 5);
         var g = s.Game!;
         Assert.Null(s.ActorSide());   // the host holds nothing in its own view

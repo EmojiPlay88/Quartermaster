@@ -11,7 +11,7 @@ public sealed class RejoinTokens(string root)
     private const int MaxToken = 256;
 
     /// <summary>%LOCALAPPDATA%\Quartermaster, redirected by QUARTERMASTER_LAYOUT_ROOT.</summary>
-    public static string DefaultRoot => RulesMemory.DefaultRoot;
+    public static string DefaultRoot => AppDataRoot.Path;
 
     public string Root => root;
 

@@ -246,8 +246,8 @@ public sealed class ModuleSession : IDisposable
     /// <summary>Rolls n dice with the given sides using the session roller (the same one formulas use).</summary>
     public IReadOnlyList<int> Roll(int n, int sides) => _roller(n, sides);
 
-    public static string DefaultCacheRoot =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster", "cache");
+    /// <summary>%LOCALAPPDATA%\Quartermaster\cache, redirected by QUARTERMASTER_LAYOUT_ROOT (<see cref="AppDataRoot"/>).</summary>
+    public static string DefaultCacheRoot => AppDataRoot.Sub("cache");
 
     public static ModuleSession Open(string vmodPath) => Open(vmodPath, DefaultCacheRoot, RulesMemory.DefaultRoot);
 

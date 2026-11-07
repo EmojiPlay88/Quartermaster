@@ -9,9 +9,7 @@ namespace Quartermaster.Render;
 public static class RulesMemory
 {
     /// <summary>%LOCALAPPDATA%\Quartermaster, redirected by QUARTERMASTER_LAYOUT_ROOT (same as window layout).</summary>
-    public static string DefaultRoot =>
-        Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT") is { Length: > 0 } r ? r
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Quartermaster");
+    public static string DefaultRoot => AppDataRoot.Path;
 
     private static string IndexPath(string root) => Path.Combine(root, "rules-index.json");
 

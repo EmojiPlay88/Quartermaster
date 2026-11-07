@@ -128,6 +128,7 @@ sealed class FormulaDialog : Form
         _physical.CheckedChanged += (_, _) => { _model.PhysicalDice = _physical.Checked; Recalc(); };
         _ruleRef.Enabled = formula.RuleRefId != null && rules.ById<RuleRef>(formula.RuleRefId) != null;
         _apply.Visible = !previewOnly;
+        _physical.Visible = !s.IsGuest;   // the host rolls a guest's dice
         AcceptButton = _apply;
         CancelButton = _cancel;
         s.RulesChanged += OnRulesChanged;
@@ -281,7 +282,7 @@ sealed class FormulaDialog : Form
     void CalculateAll()
     {
         _debounce.Stop();
-        if (_s.IsGuest) { SendToHost(calculate: true); return; }   // the host calculates: a guest has no hidden data
+        if (_s.IsGuest) { SendToHost(calculate: true, preview: true); return; }   // a preview on the host: fills the boxes, applies nothing
         _model.Calculate(_s.Game?.State ?? new GameState());
         Recalc();
     }
@@ -399,7 +400,7 @@ sealed class FormulaDialog : Form
         foreach (var r in v.InlineRolls)
         {
             var key = r.Key;
-            var b = new Button { Text = "↻ " + r.Text, AutoSize = true, Margin = new Padding(0, 2, 6, 0) };
+            var b = new Button { Text = "↻ " + r.Text, AutoSize = true, Margin = new Padding(0, 2, 6, 0), Enabled = !_s.IsGuest };   // a guest's dice are the host's
             b.Click += (_, _) => { _model.Reroll(key); Recalc(); };
             _inline.Controls.Add(b);
         }
@@ -440,7 +441,7 @@ sealed class FormulaDialog : Form
     /// Online guest: Calculate / Apply go to the host as a formula intent. Awaited on the UI thread without blocking it; the boxes then
     /// show the host's verdict (states only). Closes when the host applied it; a host that doesn't answer is reported in the status line.
     /// </summary>
-    async void SendToHost(bool calculate)
+    async void SendToHost(bool calculate, bool preview = false)
     {
         if (_sending || _previewOnly || IsDisposed || _closing) return;
         if (HostForm?.Actions is not { IsRemote: true } port) { _status.Text = RemoteActions.LocalOnlyText; return; }
@@ -448,7 +449,7 @@ sealed class FormulaDialog : Form
         _apply.Enabled = _calc.Enabled = false;
         _status.Text = "Asking the host…";
         FormulaVerdict v;
-        try { v = await FormulaMasking.SendAsync(port, _model, _link?.RunId, calculate); }
+        try { v = await FormulaMasking.SendAsync(port, _model, _link?.RunId, calculate, preview); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Program.AppLog("formula intent failed: " + ex.Message);

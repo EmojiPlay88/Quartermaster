@@ -14,6 +14,9 @@ namespace Quartermaster.Render;
 /// </summary>
 public sealed class IntentExecutor(ModuleSession s, PhaseController c)
 {
+    /// <summary>Dice of formula previews, pinned per sender for its next Apply (no fishing for a better roll).</summary>
+    internal FormulaPins Pins { get; } = new();
+
     public const string HostOnlyText = "Only the host can do that.";
     public const string NoGameText = "No game is running.";
     public const string NotUnderstoodText = "That request was not understood.";
@@ -212,7 +215,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     private IntentResult Formula(IReadOnlySet<string> sides, string who, FormulaIntent f)
     {
         FormulaVerdict v;
-        using (c.ActingFor(sides, who)) v = FormulaIntentRunner.Run(s, c, sides, f, guest: true);
+        using (c.ActingFor(sides, who)) v = FormulaIntentRunner.Run(s, c, sides, f, guest: true, who, Pins);
         return new IntentResult(v.Applied, v.Message, v);
     }
 
@@ -309,7 +312,10 @@ internal static class FormulaIntentRunner
         k is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Table or BindingKind.Location or BindingKind.Moved;
 
     /// <param name="guest">True for a guest's intent (host-side rules on outputs and unit-less runs apply).</param>
-    public static FormulaVerdict Run(ModuleSession s, PhaseController c, IReadOnlySet<string>? sides, FormulaIntent i, bool guest)
+    /// <param name="who">The sender (pins are per sender).</param>
+    /// <param name="pins">Where a preview's dice are pinned and an Apply finds them; null = no pinning (the host's own dialog pins in its model).</param>
+    public static FormulaVerdict Run(ModuleSession s, PhaseController c, IReadOnlySet<string>? sides, FormulaIntent i, bool guest,
+        string? who = null, FormulaPins? pins = null)
     {
         if (s.Game is not { } g || s.Runner is not { } runner || s.Rules is not { } pack) return FormulaVerdict.Refused(IntentExecutor.NoGameText);
         if (i == null || i.FormulaId == null || i.FormulaId.Length > IntentExecutor.MaxId || (i.RunId?.Length ?? 0) > IntentExecutor.MaxId
@@ -348,12 +354,28 @@ internal static class FormulaIntentRunner
             var accept = b != null && (b.Kind == BindingKind.Input || (model.Checked && IsCheckedKind(b.Kind)));
             if (accept) model.SetBoxText(variable, text ?? "");
         }
+        // The dice of this sender's last preview of the same formula on the same unit/run: re-shown by a new preview, used by Apply.
+        var pinKey = new FormulaPins.Key(who ?? "", f.Id, i.PieceId, i.RunId);
+        var pin = pins?.Find(pinKey, g, pack);
+        if (pin != null) model.PinRolls(pin.Rolls);
         if (i.Calculate) model.Calculate(full);
         var dv = model.Evaluate(full);
         var boxes = dv.Boxes.Select(b => new FormulaBox(b.Variable,
             hidden.Contains(b.Variable) ? FormulaBox.Hidden : b.Wrong ? FormulaBox.Wrong : FormulaBox.Ok)).ToList();
-        if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));
-        if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated)) return new FormulaVerdict(false, boxes, NotWaitingText);
+        if (i.Preview)
+        {
+            // Nothing is executed. The visible values and the dice go back; the dice stay pinned for this sender's Apply.
+            pins?.Put(pinKey, g, pack, model.PinnedRolls, pin?.Created);
+            var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var v in source.Variables)
+                if (v?.Variable != null && !hidden.Contains(v.Variable) && v.Value is { } val) values[v.Variable] = FormulaDialogModel.ExactText(val);
+            return new FormulaVerdict(false, boxes, dv.CanApply ? null : SafeStatus(dv, hidden), values,
+                model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal));
+        }
+        if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));   // the pin stays for a corrected Apply
+        if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated || pin != null)) return new FormulaVerdict(false, boxes, NotWaitingText);
+        pins?.Remove(pinKey);   // single use
         return new FormulaVerdict(true, boxes, null);
     }
 
@@ -402,4 +424,57 @@ internal static class FormulaIntentRunner
         if (hidden.Count == 0 && dv.Trace.Error is { Length: > 0 } err) return err;
         return "The formula could not be calculated.";
     }
+}
+
+/// <summary>
+/// Dice of guest formula previews, pinned per (sender, formula, unit, run) so pressing Calculate again shows the same roll and the next
+/// Apply uses it: no fishing for a better roll. A pin is used once (a successful Apply removes it), expires after <see cref="Lifetime"/>
+/// (counted from the first preview, so re-previewing does not extend it), and is dropped when the game or the rules pack is replaced or the
+/// run is no longer waiting (the runner refuses those first). At most <see cref="MaxPerSender"/> per sender; the oldest goes first.
+/// </summary>
+internal sealed class FormulaPins
+{
+    public const int MaxPerSender = 64;
+    public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
+
+    public readonly record struct Key(string Who, string FormulaId, string? PieceId, string? RunId);
+
+    public sealed record Pin(Key Key, GameSession Game, RulesPack Pack, DateTime Created, IReadOnlyDictionary<string, IReadOnlyList<int>> Rolls);
+
+    private readonly Dictionary<string, List<Pin>> _bySender = new(StringComparer.Ordinal);
+
+    /// <summary>Test hook: the clock (UTC).</summary>
+    public Func<DateTime> Clock { get; set; } = () => DateTime.UtcNow;
+
+    private bool Valid(Pin p, GameSession g, RulesPack pack) =>
+        ReferenceEquals(p.Game, g) && ReferenceEquals(p.Pack, pack) && Clock() - p.Created < Lifetime;
+
+    /// <summary>The live pin for this key (an expired or stale one is dropped), or null.</summary>
+    public Pin? Find(Key key, GameSession g, RulesPack pack)
+    {
+        if (!_bySender.TryGetValue(key.Who, out var list)) return null;
+        var pin = list.FirstOrDefault(p => p.Key == key);
+        if (pin == null) return null;
+        if (Valid(pin, g, pack)) return pin;
+        list.Remove(pin);
+        return null;
+    }
+
+    /// <summary>Pins (or re-pins) a preview's dice. <paramref name="created"/> keeps the first preview's time.</summary>
+    public void Put(Key key, GameSession g, RulesPack pack, IReadOnlyDictionary<string, IReadOnlyList<int>> rolls, DateTime? created)
+    {
+        if (!_bySender.TryGetValue(key.Who, out var list)) _bySender[key.Who] = list = new();
+        list.RemoveAll(p => p.Key == key || !Valid(p, g, pack));
+        if (rolls.Count == 0) return;
+        list.Add(new Pin(key, g, pack, created ?? Clock(), new Dictionary<string, IReadOnlyList<int>>(rolls, StringComparer.Ordinal)));
+        while (list.Count > MaxPerSender) list.RemoveAt(0);
+    }
+
+    public void Remove(Key key)
+    {
+        if (_bySender.TryGetValue(key.Who, out var list)) list.RemoveAll(p => p.Key == key);
+    }
+
+    /// <summary>Pins held for a sender (tests).</summary>
+    public int Count(string who) => _bySender.TryGetValue(who, out var list) ? list.Count : 0;
 }

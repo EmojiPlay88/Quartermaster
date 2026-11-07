@@ -180,7 +180,7 @@ sealed class BatchGridWindow : Form
     void CalculateAll()
     {
         if (!_grid.EndEdit()) return;
-        if (_model.HostCalculates) { SendToHost(_model.OpenRows(), calculate: true); return; }
+        if (_model.HostCalculates) { SendToHost(_model.OpenRows(), calculate: true, preview: true); return; }
         using (WaitCursor())
         {
             _model.CalculateAll();
@@ -219,7 +219,7 @@ sealed class BatchGridWindow : Form
     bool _sending;
 
     /// <summary>Online guest: the rows go to the host as formula intents, awaited without blocking the UI; the grid shows its verdicts.</summary>
-    async void SendToHost(IReadOnlyList<int> rows, bool calculate)
+    async void SendToHost(IReadOnlyList<int> rows, bool calculate, bool preview = false)
     {
         if (_sending || IsDisposed) return;
         _sending = true;
@@ -227,9 +227,10 @@ sealed class BatchGridWindow : Form
         _status.Text = "Asking the host…";
         try
         {
-            var (applied, message) = await _model.SendRowsAsync(rows, calculate);
+            var (applied, message) = await _model.SendRowsAsync(rows, calculate, preview);
             if (IsDisposed) return;
-            _status.Text = $"The host applied {applied} of {rows.Count} row(s)." + (message != null ? " " + message : "");
+            _status.Text = (preview ? $"The host calculated {rows.Count} row(s)." : $"The host applied {applied} of {rows.Count} row(s).")
+                + (message != null ? " " + message : "");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
