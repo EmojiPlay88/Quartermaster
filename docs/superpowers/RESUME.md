@@ -31,7 +31,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
   - `Quartermaster.Core`: command-log game state and deterministic replay.
   - `Quartermaster.Render`: UI-free models.
   - `Quartermaster.App`: the WinForms app.
-- Tests: xUnit under `tests/`. All green after 6b: 1266 tests (6c adds more).
+- Tests: xUnit under `tests/`. All green after 6b: 1370 tests after 6c (1 Linux-only skip).
 - Remote `origin` is **public**: https://github.com/EmojiPlay88/Quartermaster. Everything through piece 5 is **pushed**. everything through piece 6a is pushed; push again only when the user asks.
 - Before any push: check commit emails are the noreply address, `startapp.cmd` is not staged, and docs contain no absolute personal paths (use `%USERPROFILE%`) and no real-game content.
 - Commit identity is repo-local, with the noreply email `80044157+EmojiPlay88@users.noreply.github.com`. Never use the user's gmail.
