@@ -578,12 +578,11 @@ sealed partial class MainForm : Form
     /// <summary>Shows the setup chooser (with the difficulty choice), remembers the difficulty, and starts the chosen game.</summary>
     void ChooseAndStart(ModuleSession s, bool preselectNew, SetupDef? preselect = null)
     {
-        using var dlg = new SetupChooserDialog(s.Model, _settings.Current.LastDifficulty, preselectNew, preselect, s.Rules);
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        if (dlg.SelectedDifficulty != _settings.Current.LastDifficulty) _settings.Save(_settings.Current with { LastDifficulty = dlg.SelectedDifficulty });
+        using var dlg = new SetupChooserDialog(s.Model, GameMode.Offline, _settings.Current.LastDifficulty, s.Rules, preselectNew, preselect);
+        if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Request is not { } req) return;
+        if (req.Difficulty != _settings.Current.LastDifficulty) _settings.Save(_settings.Current with { LastDifficulty = req.Difficulty });
         // The players are part of the game's start (not an undoable command); two or more bring up the first handover screen.
-        var players = dlg.SelectedPlayers.Count >= 2 ? dlg.SelectedPlayers : null;
-        if (dlg.Selected is { } setup) s.LoadSetup(setup, dlg.SelectedDifficulty, players); else s.StartNewGame(dlg.SelectedDifficulty, players);
+        if (req.Setup is { } setup) s.LoadSetup(setup, req.Difficulty, req.Players); else s.StartNewGame(req.Difficulty, req.Players);
     }
 
     void LoadSetupDialog()

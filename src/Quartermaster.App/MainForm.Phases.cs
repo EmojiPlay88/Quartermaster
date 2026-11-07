@@ -617,7 +617,7 @@ sealed partial class MainForm
     void SmokeSetupDialog()
     {
         if (_session == null) return;
-        using var dlg = new SetupChooserDialog(_session.Model, _settings.Current.LastDifficulty, preselectNew: true, pack: _session.Rules);
+        using var dlg = new SetupChooserDialog(_session.Model, GameMode.Offline, _settings.Current.LastDifficulty, _session.Rules, preselectNew: true);
         dlg.StartPosition = FormStartPosition.Manual;
         dlg.Location = new Point(-20000, -20000);
         dlg.Show();

@@ -28,22 +28,26 @@ sealed class SetupChooserDialog : Form
     readonly Button _back = new() { Text = "< &Back", Width = 75, Visible = false };
     readonly Button _nextPage = new() { Text = "&Next >", Width = 75 };
 
-    public SetupDef? Selected { get; private set; }
+    readonly GameMode _mode;
+    readonly RulesPack? _pack;
+    readonly TextBox _lobbyName = new() { Width = 200, MaxLength = NewGameRules.MaxLobbyName };
+    readonly TextBox _password = new() { Width = 200, UseSystemPasswordChar = true };
+    readonly Panel _lobbyPanel = new() { Dock = DockStyle.Bottom, Height = 52, Visible = false };
+    readonly Difficulty _difficulty;
 
-    /// <summary>The players chosen on the Players page; empty = solo (one player holding every side).</summary>
-    public IReadOnlyList<PlayerDef> SelectedPlayers { get; private set; } = Array.Empty<PlayerDef>();
-
-    /// <summary>The difficulty chosen in the dialog (also written back to <see cref="Settings.LastDifficulty"/> by the caller).</summary>
-    public Difficulty SelectedDifficulty { get; private set; }
+    /// <summary>The choice made in the dialog (valid after OK). The caller writes <see cref="NewGameRequest.Difficulty"/> back to <see cref="Settings.LastDifficulty"/>.</summary>
+    public NewGameRequest? Request { get; private set; }
 
     /// <param name="preselect">Selects this setup (the one double-clicked in the window tree).</param>
     /// <param name="preselectNew">Selects "New game from module" instead of the first setup.</param>
     /// <param name="pack">The rules pack whose sides the Players page offers (null: one player plays everything).</param>
-    public SetupChooserDialog(ModuleModel model, Difficulty defaultDifficulty = Difficulty.SemiAuto, bool preselectNew = false, SetupDef? preselect = null, RulesPack? pack = null)
+    public SetupChooserDialog(ModuleModel model, GameMode mode, Difficulty defaultDifficulty = Difficulty.SemiAuto, RulesPack? pack = null, bool preselectNew = false, SetupDef? preselect = null)
     {
+        _mode = mode;
+        _pack = pack;
         _players = new PlayersEditor(pack, Array.Empty<PlayerDef>()) { Dock = DockStyle.Fill };
-        SelectedDifficulty = defaultDifficulty;
-        Text = "Start Game";
+        _difficulty = defaultDifficulty;
+        Text = "New game";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = MaximizeBox = ShowInTaskbar = false;
@@ -81,8 +85,14 @@ sealed class SetupChooserDialog : Form
             flow.Controls.Add(new Label { Text = Modes[i].Hint, AutoSize = false, Width = 380, Height = 17, ForeColor = SystemColors.GrayText, Margin = new Padding(20, 0, 3, 0) });
         }
         group.Controls.Add(flow);
+        _lobbyPanel.Controls.Add(new Label { Text = "Lobby name:", Left = 8, Top = 4, Width = 80, AutoSize = false });
+        _lobbyName.Left = 92; _lobbyName.Top = 0; _lobbyPanel.Controls.Add(_lobbyName);
+        _lobbyPanel.Controls.Add(new Label { Text = "Password:", Left = 8, Top = 28, Width = 80, AutoSize = false });
+        _password.Left = 92; _password.Top = 24; _lobbyPanel.Controls.Add(_password);
+        _lobbyPanel.Visible = mode == GameMode.Online;
         _gamePage.Controls.Add(_list);
         _gamePage.Controls.Add(group);
+        _gamePage.Controls.Add(_lobbyPanel);
         _playersPage.Controls.Add(_players);
         Controls.Add(_gamePage);
         Controls.Add(_playersPage);
@@ -102,9 +112,20 @@ sealed class SetupChooserDialog : Form
                 e.Cancel = true;
                 return;
             }
-            SelectedPlayers = _players.Result;
-            Selected = _list.SelectedIndex >= 0 ? _items[_list.SelectedIndex] : null;
-            for (var i = 0; i < _radios.Length; i++) if (_radios[i].Checked) SelectedDifficulty = Modes[i].D;
+            if (DialogResult != DialogResult.OK) return;
+            var diff = _difficulty;
+            for (var i = 0; i < _radios.Length; i++) if (_radios[i].Checked) diff = Modes[i].D;
+            var online = _mode == GameMode.Online;
+            var req = new NewGameRequest(_mode, _list.SelectedIndex >= 0 ? _items[_list.SelectedIndex] : null, diff,
+                _players.Result.Count >= 2 ? _players.Result : null,
+                online ? _lobbyName.Text.Trim() : null, online ? _password.Text : null);
+            if (NewGameRules.Validate(req, _pack) is { } bad)
+            {
+                MessageBox.Show(this, bad, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                e.Cancel = true;
+                return;
+            }
+            Request = req;
         };
     }
 

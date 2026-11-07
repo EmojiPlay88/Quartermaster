@@ -280,4 +280,37 @@ public class LauncherTests : IDisposable
         Assert.Equal("ok.vmod", Assert.Single(tolerant.Modules).Path);
         Assert.Equal(new[] { "p" }, tolerant.RecentSaves["a"]);
     }
+
+    static NewGameRequest Req(GameMode m, string? lobby = null, string? pw = null, IReadOnlyList<PlayerDef>? players = null) =>
+        new(m, null, Difficulty.SemiAuto, players, lobby, pw);
+
+    [Fact]
+    public void Validate_Offline_RejectsLobbyFields()
+    {
+        Assert.Null(NewGameRules.Validate(Req(GameMode.Offline), null));
+        Assert.NotNull(NewGameRules.Validate(Req(GameMode.Offline, lobby: "x"), null));
+        Assert.NotNull(NewGameRules.Validate(Req(GameMode.Offline, pw: "x"), null));
+    }
+
+    [Fact]
+    public void Validate_Online_LobbyNameRules()
+    {
+        Assert.Null(NewGameRules.Validate(Req(GameMode.Online, lobby: "  Table 1 "), null));
+        Assert.NotNull(NewGameRules.Validate(Req(GameMode.Online), null));
+        Assert.NotNull(NewGameRules.Validate(Req(GameMode.Online, lobby: "   "), null));
+        Assert.Null(NewGameRules.Validate(Req(GameMode.Online, lobby: new string('a', 40)), null));
+        Assert.NotNull(NewGameRules.Validate(Req(GameMode.Online, lobby: new string('a', 41)), null));
+    }
+
+    [Fact]
+    public void Validate_Players_UsesPlayersValidate()
+    {
+        var pack = new Quartermaster.Rules.RulesPack { Sides = { new() { Id = "a", Name = "A" }, new() { Id = "b", Name = "B" } } };
+        var bad = new[] { new PlayerDef("1", "X", new[] { "a" }), new PlayerDef("2", "Y", new[] { "a" }) };
+        var good = new[] { new PlayerDef("1", "X", new[] { "a" }), new PlayerDef("2", "Y", new[] { "b" }) };
+        Assert.Equal(Players.Validate(bad, pack), NewGameRules.Validate(Req(GameMode.Offline, players: bad), pack));
+        Assert.NotNull(NewGameRules.Validate(Req(GameMode.Offline, players: bad), pack));
+        Assert.Null(NewGameRules.Validate(Req(GameMode.Offline, players: good), pack));
+        Assert.Null(NewGameRules.Validate(Req(GameMode.Offline, players: bad), null));
+    }
 }
