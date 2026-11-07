@@ -302,10 +302,16 @@ public class GuestSessionTests : IDisposable
         g.Execute(new AddLogLine(LogKind.Calc, "Depot check: 424242 * 1 = 424242", SideId: "blue"));
         g.Execute(new AddLogLine(LogKind.Calc, "Depot check: 2 units, 2 applied", SideId: "blue", FormulaId: LogKind.NoWorking));
         Assert.Null(g.State.Log[^2].FormulaId);
+        // A formula-kind line with no ledger entry behind it (and no formula id) fails closed the same way.
+        g.Execute(new AddLogLine(LogKind.Formula, "Mixed supply: 7 + 424242 = 424249", SideId: "blue"));
+        // A formula-kind line naming a formula without hidden inputs stays readable.
+        g.Execute(new AddLogLine(LogKind.Formula, "Daily water: 10 - 1 = 9", SideId: "blue", FormulaId: "f-water"));
 
         var blueView = PlayerView.For(g.State, s.Rules, s.Model, new HashSet<string> { "blue" });
         Assert.DoesNotContain("424242", Json(blueView));
         Assert.Contains(blueView.Log, l => l.Kind == LogKind.Calc && l.Text == "Formula: calculated (inputs hidden)");
+        Assert.Contains(blueView.Log, l => l.Kind == LogKind.Formula && l.Text == "Formula: calculated (inputs hidden)");
+        Assert.Contains(blueView.Log, l => l.Text == "Daily water: 10 - 1 = 9");
         Assert.Contains(blueView.Log, l => l.Text == "Depot check: 2 units, 2 applied");   // a summary without working stays
         // A viewer holding every side sees the line as written.
         Assert.Contains(PlayerView.For(g.State, s.Rules, s.Model, new HashSet<string> { "red", "blue" }).Log,

@@ -146,8 +146,9 @@ public static class NativeSave
             foreach (var c in f.Log) replay.Apply(c);
             if (JsonSerializer.Serialize(replay, QuartermasterJson.Options) != JsonSerializer.Serialize(f.Snapshot, QuartermasterJson.Options))
             {
-                // Format-5 saves predate LedgerEntry.Turn/Phase: tolerate that difference only, and keep the replayed state.
-                if (f.Format >= 6 || StripTurns(replay) != StripTurns(f.Snapshot)) { why = "replay mismatch"; return false; }
+                // Tolerated differences only, keeping the replayed state: format-5 saves predate LedgerEntry.Turn/Phase, and saves made
+                // before calc lines were stamped have no LogKind.NoWorking formula id on reducer-written summary lines.
+                if (Normalized(replay, f.Format < 6) != Normalized(f.Snapshot, f.Format < 6)) { why = "replay mismatch"; return false; }
                 session.ReplaceState(replay);
             }
             session.RestoreHistory(genesis, actions, cps);
@@ -156,10 +157,11 @@ public static class NativeSave
         catch (Exception ex) when (ex is not OutOfMemoryException) { why = ex.GetType().Name + ": " + ex.Message; return false; }
     }
 
-    static string StripTurns(GameState s)
+    static string Normalized(GameState s, bool stripTurns)
     {
         var copy = s.DeepClone();
-        copy.LedgerHistory = copy.LedgerHistory.Select(e => e with { Turn = null, Phase = null }).ToList();
+        if (stripTurns) copy.LedgerHistory = copy.LedgerHistory.Select(e => e with { Turn = null, Phase = null }).ToList();
+        copy.Log = copy.Log.Select(l => l.FormulaId == LogKind.NoWorking ? l with { FormulaId = null } : l).ToList();
         return JsonSerializer.Serialize(copy, QuartermasterJson.Options);
     }
 }

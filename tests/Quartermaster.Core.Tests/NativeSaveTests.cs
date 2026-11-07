@@ -181,6 +181,48 @@ public class NativeSaveTests
     }
 
     [Fact]
+    public void OlderSave_SummaryLinesWithoutFormulaId_KeepsHistory()
+    {
+        // Calc summaries written by the reducer (batch resolve, phase advance past a pending run) are now stamped LogKind.NoWorking;
+        // a save made before that has no formulaId on them and must still pass the replay check.
+        var st = new GameState { GameId = "g" }; st.MapOrder.Add("m1");
+        var g = new GameSession(st, "sha");
+        using (g.BeginAction())
+        {
+            g.Execute(new AddPiece("a", "piece;;;a.png;a", "", "m1", new PointD(1, 2), null));
+            g.Execute(new AddPiece("b", "piece;;;a.png;b", "", "m1", new PointD(3, 2), null));
+        }
+        var units = new[] { new PendingUnit("a", "a", null, false), new PendingUnit("b", "b", null, false) };
+        using (g.BeginAction())
+            g.Execute(new QueueRuns(new[] { new PendingRun("r1", "f1", "Supply", "start", units, true), new PendingRun("r2", "f2", "Water", "start", units, true) }));
+        using (g.BeginAction()) g.Execute(new ResolveRun("r1", new string?[] { "a", "b" }));
+        using (g.BeginAction())
+            g.Execute(new AdvancePhase(new PhasePosition(1, 1, "a", 0), new PhasePosition(1, 1, "b", 1), "Alpha", "Supply", null, null));
+        var stamped = g.State.Log.Count(l => l.FormulaId == LogKind.NoWorking);
+        Assert.True(stamped >= 2, $"only {stamped} stamped summary lines");
+
+        var path = Tmp();
+        try
+        {
+            NativeSave.Write(path, g);
+            var text = File.ReadAllText(path);
+            var old = text.Replace(",\"formulaId\":\"-\"", "");
+            Assert.NotEqual(text, old);
+            Assert.DoesNotContain("formulaId\":\"-", old);
+            File.WriteAllText(path, old);
+            var back = NativeSave.Read(path);
+            Assert.False(back.RebasedOnLoad);
+            Assert.Null(back.LoadNotice);
+            Assert.True(back.CanUndo);
+            Assert.Equal(g.Actions, back.Actions);
+            Assert.Equal(stamped, back.State.Log.Count(l => l.FormulaId == LogKind.NoWorking));   // the replayed state is kept
+            back.RewindTo(0);
+            Assert.Empty(back.State.Pending);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void Format4File_LoadsWithFloorAtLoadPoint()
     {
         var path = Tmp();

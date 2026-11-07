@@ -309,11 +309,19 @@ public static class PlayerView
                 if (o == Outcome.Keep)
                 {
                     var line = log[i];
-                    if (entryOfLine[i] is { } e && HidesInput(e) && line.Text is { } t)
-                        line = line with { Text = t.Replace(e.Working!, $"{e.PropertyId} {Num(e.Before)} → {Num(e.After)}", StringComparison.Ordinal) };
-                    else if (entryOfLine[i] == null && line.Kind == LogKind.Calc && line.FormulaId != LogKind.NoWorking
+                    if (entryOfLine[i] is { } e && HidesInput(e))
+                    {
+                        var plain = $"{e.PropertyId} {Num(e.Before)} → {Num(e.After)}";
+                        // Fail closed: when the working is not found verbatim, the whole line is replaced.
+                        line = line with
+                        {
+                            Text = line.Text is { } t && t.Contains(e.Working!, StringComparison.Ordinal)
+                                ? t.Replace(e.Working!, plain, StringComparison.Ordinal) : plain,
+                        };
+                    }
+                    else if (entryOfLine[i] == null && line.Kind is LogKind.Calc or LogKind.Formula && line.FormulaId != LogKind.NoWorking
                              && FormulaHidesInput(line.FormulaId))
-                        // An output-less run's working line; a legacy calc line without a formula id fails closed.
+                        // An output-less run's working line, or an unpaired formula/calc line (legacy lines without a formula id fail closed).
                         line = line with { Text = HiddenWorkingText(line.FormulaId) };
                     lines.Add(line);
                 }
