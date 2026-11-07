@@ -44,7 +44,8 @@ sealed class OutlinerPanel : UserControl
     OutlinerTree _tree = new(Array.Empty<OutlinerColumn>(), Array.Empty<OutlinerNode>());
     OutlinerGrouping _mode;
     GameSession? _game;
-    bool _loading, _closing;
+    bool _loading, _closing, _dirty, _noPhases = true;
+    Font? _bold;
     int _headerCol = -1;
 
     public OutlinerPanel(ModuleSession s, Func<PhaseController?> phases, OutlinerGrouping grouping, Action<OutlinerGrouping> saveGrouping,
@@ -68,8 +69,12 @@ sealed class OutlinerPanel : UserControl
         _pop.Click += (_, _) => PopToggleRequested?.Invoke();
         _bar.Items.Add(_pop);
 
-        _now.DoubleClick += (_, _) => Guard(JumpSelected);
-        _now.Click += (_, _) => Guard(JumpSelected);
+        _now.MouseDoubleClick += (_, e) => Guard(() =>
+        {
+            var i = _now.IndexFromPoint(e.Location);
+            if (i >= 0 && i < _decisions.Count) _jump(_decisions[i]);
+        });
+        VisibleChanged += (_, _) => { if (Visible && _dirty) Guard(Reload); };
         _grid.CellDoubleClick += (_, e) => Guard(() => Activate(e.RowIndex, e.ColumnIndex));
         _grid.CellMouseClick += (_, e) => Guard(() => { if (e.ColumnIndex == NameCol && e.RowIndex >= 0 && e.X < 14 + 12 * Depth(e.RowIndex)) Toggle(e.RowIndex); });
         _grid.KeyDown += (_, e) => Guard(() =>
@@ -105,6 +110,8 @@ sealed class OutlinerPanel : UserControl
     public int VisibleRowCount => _rows.Count;
     public int ValueColumnCount => _tree.Columns.Count;
     public int NowCount => _decisions.Count;
+    public bool NowVisible => _now.Visible;
+    public string? CellText(int row, int col) => row >= 0 && row < _grid.RowCount && col < _grid.ColumnCount ? _grid.Rows[row].Cells[col].Value as string : null;
 
     /// <summary>Smoke: opens every folder and group.</summary>
     public void ExpandAll()
@@ -133,11 +140,17 @@ sealed class OutlinerPanel : UserControl
 
     void OnUi(Action a)
     {
-        if (IsDisposed || _closing || !IsHandleCreated) return;
+        if (IsDisposed || _closing) return;
         if (InvokeRequired) BeginInvoke(() => { if (!IsDisposed && !_closing) a(); }); else a();
     }
 
-    void Kick() { _debounce.Stop(); _debounce.Start(); }
+    /// <summary>Marks the view stale; the (debounced) recompute only runs while the panel is actually showing.</summary>
+    void Kick()
+    {
+        _dirty = true;
+        if (!Visible) return;
+        _debounce.Stop(); _debounce.Start();
+    }
 
     void HookGame()
     {
@@ -154,11 +167,14 @@ sealed class OutlinerPanel : UserControl
     void Reload()
     {
         if (_closing || IsDisposed) return;
+        if (!Visible) { _dirty = true; return; }
+        _dirty = false;
         var game = _s.Game;
         if (game == null)
         {
             _tree = new OutlinerTree(Array.Empty<OutlinerColumn>(), Array.Empty<OutlinerNode>());
             _decisions = Array.Empty<Decision>();
+            _noPhases = true;
             Rebuild();
             return;
         }
@@ -180,6 +196,7 @@ sealed class OutlinerPanel : UserControl
             _tree = new OutlinerTree(Array.Empty<OutlinerColumn>(), Array.Empty<OutlinerNode>());
         }
         _decisions = view?.Decisions ?? Array.Empty<Decision>();
+        _noPhases = view == null || view.NoPhases;
         // New folders start open, groups start closed; what the user opened or closed is remembered by key.
         foreach (var n in Flatten(_tree.Roots))
             if (_seen.Add(n.Key) && n.Kind == OutlinerNodeKind.Folder) _open.Add(n.Key);
@@ -205,6 +222,7 @@ sealed class OutlinerPanel : UserControl
             foreach (var d in _decisions) _now.Items.Add(d.Text);
             if (_decisions.Count == 0) _now.Items.Add("(nothing waiting)");
             _now.EndUpdate();
+            _now.Visible = _nowLabel.Visible = !_noPhases;
             _nowLabel.Text = _decisions.Count == 0 ? "Now" : $"Now — {_decisions.Count}";
 
             _rows.Clear();
@@ -238,7 +256,7 @@ sealed class OutlinerPanel : UserControl
                 row.Cells[UnitsCol].Value = n.Units.ToString(CultureInfo.InvariantCulture);
                 for (var c = 0; c < _tree.Columns.Count && c < n.Values.Count; c++)
                     row.Cells[FirstValueCol + c].Value = n.Values[c] is { } v ? v.ToString("0.##", CultureInfo.InvariantCulture) : "";
-                if (n.Kind != OutlinerNodeKind.Piece) row.DefaultCellStyle.Font = new Font(Font, FontStyle.Bold);
+                if (n.Kind != OutlinerNodeKind.Piece) row.DefaultCellStyle.Font = (_bold ??= new Font(Font, FontStyle.Bold));
                 if (cur != null && n.Key == cur) { _grid.CurrentCell = row.Cells[NameCol]; }
             }
             if (first >= 0 && first < _grid.RowCount) { try { _grid.FirstDisplayedScrollingRowIndex = first; } catch (InvalidOperationException) { } }
@@ -272,12 +290,6 @@ sealed class OutlinerPanel : UserControl
             if (map != null && map.IsOrgDisplay) { _openMap(map); return; }
         }
         if (n.Children.Count > 0) Toggle(row);
-    }
-
-    void JumpSelected()
-    {
-        var i = _now.SelectedIndex;
-        if (i >= 0 && i < _decisions.Count) _jump(_decisions[i]);
     }
 
     static Color SeverityColor(AlertSeverity s) => s switch
@@ -377,6 +389,7 @@ sealed class OutlinerPanel : UserControl
             _game = null;
             _debounce.Dispose();
             _tip.Dispose();
+            _bold?.Dispose();
             _headerTip.Dispose();
         }
         base.Dispose(disposing);

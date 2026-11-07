@@ -1,4 +1,4 @@
-using Quartermaster.Core;
+﻿using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Rules;
 
@@ -34,29 +34,46 @@ sealed partial class MainForm
 
     void SmokeOutliner()
     {
-        if (_phases == null || _session?.Game is not { } game || _session.Rules == null || _outlinerDock?.Panel is not { } panel)
-        { SmokeFail("outliner smoke needs a game with a rules pack"); return; }
+        if (_phases == null || _session?.Game == null || _session.Rules == null || _outlinerDock?.Panel is not { } panel || _session.Model.Setups.Count == 0)
+        { SmokeFail("outliner smoke needs a game with a rules pack and a setup"); return; }
         CloseFormulaDialogs();
         if (_phases.View().BeforeStart) { _phases.Start(); Application.DoEvents(); }
+        var fails = new List<string>();
         // The fixture's properties may not feature in the outliner; make the first two do so in the in-memory pack.
         _session.UpdateRules(p =>
         {
             var props = p.Properties.Select((x, i) => i < 2 ? x with { Outliner = OutlinerAggregate.Sum, Notes = x.Notes ?? "Smoke note for " + x.Name } : x).ToList();
             return p with { Properties = props };
         });
-        var pieces = game.State.Pieces.Values.Take(3).ToList();
         var first = _session.Rules.Properties.FirstOrDefault();
+
+        // Hidden panel: replace the game and change data while it is not showing, then show it. No Flush.
+        _outlinerDock.Wanted = false;
+        _outlinerDock.Apply();
+        Application.DoEvents();
+        _session.LoadSetup(_session.Model.Setups[0], _opts.Difficulty);
+        Application.DoEvents();
+        var game = _session.Game!;
+        if (_phases.View().BeforeStart) { _phases.Start(); Application.DoEvents(); }
+        double expected = 0;
         if (first != null)
-            foreach (var pc in pieces)
+        {
+            foreach (var pc in game.State.Pieces.Values.Take(3))
             {
                 var key = LedgerKey.Piece(pc.Id);
                 var before = Ledger.Get(game.State, key, first.Id) ?? 0;
                 game.Execute(new LedgerDelta(key, first.Id, before, before + 5, "manual", null, null, "smoke supply", null));
             }
+            expected = game.State.Pieces.Values.Sum(pc => Ledger.Get(game.State, LedgerKey.Piece(pc.Id), first.Id) ?? 0);
+        }
+        Application.DoEvents();
         _outlinerDock.Wanted = true;
         _outlinerDock.Apply();
         Application.DoEvents();
-        panel.Flush();
+        var shown = panel.CellText(0, 3);
+        if (panel.VisibleRowCount == 0 || !double.TryParse(shown, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var got) || Math.Abs(got - expected) > 0.01)
+            fails.Add($"hidden replace: shown '{shown}', expected {expected}");
+
         panel.ExpandAll();
         Application.DoEvents();
         var rows = panel.VisibleRowCount;
@@ -64,13 +81,24 @@ sealed partial class MainForm
         var breakdowns = 0;
         for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) if (panel.BreakdownFor(r, 3 + c) != null) breakdowns++;
         panel.SaveScreenshot(_opts.ScreenshotOutliner!);
-        var ok = _outlinerDock.Host.Visible && rows > 0 && cols > 0 && breakdowns > 0;
-        Program.AppLog($"smoke: outliner screenshot saved to {_opts.ScreenshotOutliner} (rows {rows}, columns {cols}, now {panel.NowCount}, breakdowns {breakdowns})");
-        if (!ok) { Program.ExitCode = 1; Program.AppLog("smoke: outliner check FAILED"); }
+        if (!(_outlinerDock.Host.Visible && rows > 0 && cols > 0 && breakdowns > 0)) fails.Add("rows/columns/breakdowns missing");
+        if (_phases.View().NoPhases || !panel.NowVisible) fails.Add("Now should show while the pack has phases");
+
         _outlinerDock.PopOut();
         var floated = _outlinerDock.Float != null && _wm.IsFloating(_outlinerDock.Float);
         _outlinerDock.DockBack();
         var docked = _outlinerDock.Float == null && _outlinerDock.Host.Visible && panel.Parent == _outlinerDock.Host;
-        if (!floated || !docked) { Program.ExitCode = 1; Program.AppLog($"smoke: outliner pop-out round trip FAILED (floated {floated}, docked {docked})"); }
+        if (!floated || !docked) fails.Add($"pop-out round trip (floated {floated}, docked {docked})");
+
+        // No phases: the Now section disappears.
+        _session.UpdateRules(p => p with { Phases = new() });
+        Application.DoEvents();
+        panel.Flush();
+        var hidden = !panel.NowVisible;
+        panel.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotOutliner!, null) + "-nophases.png");
+        if (!hidden) fails.Add("Now still visible without phases");
+
+        Program.AppLog($"smoke: outliner screenshot saved to {_opts.ScreenshotOutliner} (rows {rows}, columns {cols}, breakdowns {breakdowns}, hidden-replace shown '{shown}' expected {expected}, now hidden without phases {hidden})");
+        if (fails.Count > 0) { Program.ExitCode = 1; Program.AppLog("smoke: outliner check FAILED: " + string.Join("; ", fails)); }
     }
 }

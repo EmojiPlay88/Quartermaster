@@ -14,6 +14,7 @@ sealed partial class MainForm
     readonly Panel _rightHost = new() { Dock = DockStyle.Right, Width = 0 };
     readonly Splitter _rightSplitter = new() { Dock = DockStyle.Right, Width = 4, Visible = false };
     readonly Splitter _stackSplit = new() { Dock = DockStyle.Top, Height = 4, Visible = false };
+    bool _outlinerWasShown;
     readonly Splitter _stackSplit2 = new() { Dock = DockStyle.Top, Height = 4, Visible = false };
     readonly Panel _outlinerHost = new() { Dock = DockStyle.Top, Height = 300, Visible = false };
     readonly Panel _phaseHost = new() { Dock = DockStyle.Top, Height = 330, Visible = false };
@@ -44,8 +45,10 @@ sealed partial class MainForm
         _stackSplit2.Visible = _outlinerHost.Visible && _paletteHost.Visible;
         var any = hosts.Count > 0;
         _rightSplitter.Visible = any;
-        var want = _outlinerHost.Visible ? 440 : 300;
-        if (any && (_rightHost.Width < 50 || (_outlinerHost.Visible && _rightHost.Width < want))) _rightHost.Width = want;
+        var outShown = _outlinerHost.Visible && !_outlinerWasShown;
+        _outlinerWasShown = _outlinerHost.Visible;
+        if (any && _rightHost.Width < 50) _rightHost.Width = _outlinerHost.Visible ? 440 : 300;
+        else if (outShown && _rightHost.Width < 440) _rightHost.Width = 440;
         else if (!any) _rightHost.Width = 0;
     }
 
