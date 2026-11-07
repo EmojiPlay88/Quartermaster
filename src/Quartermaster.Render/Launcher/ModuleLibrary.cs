@@ -94,6 +94,7 @@ public sealed class ModuleLibrary(SettingsStore store)
             return done;
         }, ct).ConfigureAwait(false);
         if (results.Count == 0) return;
+        ct.ThrowIfCancellationRequested(); // a cancelled refresh never writes settings
         Mutate(l =>
         {
             foreach (var (old, now) in results)

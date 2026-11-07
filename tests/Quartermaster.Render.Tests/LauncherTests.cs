@@ -244,6 +244,17 @@ public class LauncherTests : IDisposable
     }
 
     [Fact]
+    public async Task Refresh_CancelledAfterHashing_DoesNotWriteSettings()
+    {
+        var lib = new ModuleLibrary(NewStore());
+        using var cts = new CancellationTokenSource();
+        lib.Hasher = p => { var h = Sha(p); cts.Cancel(); return h; };
+        lib.Add(Module("a"));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lib.RefreshAsync(null, cts.Token));
+        Assert.Null(lib.Rows[0].Entry.Sha256);
+    }
+
+    [Fact]
     public void Rows_SortedByLastPlayedThenTitle()
     {
         var lib = new ModuleLibrary(NewStore());

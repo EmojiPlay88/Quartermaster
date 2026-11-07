@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-07, after piece 6a (hot-seat) was finished on its branch. A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-07, after piece 6a (hot-seat) and the launcher were finished on their branches. A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -49,6 +49,7 @@ The engine ships **no content from any real game**: no rules text, tables, formu
 | 4 | Undo / Redo and Step Back by truncate-and-replay of the command log (below) | `specs/2026-11-07-piece4-undo-design.md`, `plans/…piece4…` |
 | 5 | Accessibility layer: breakdown tooltips, alert bar, what-now line, outliner, interface tour, notes (below) | `specs/2026-11-07-piece5-accessibility-design.md`, `plans/…piece5…` |
 | 6a | Multiplayer base: players, rules-pack visibility, player view filter, hot-seat (below) | `specs/2026-11-07-piece6-multiplayer-design.md`, `plans/2026-11-07-piece6a-hotseat.md` |
+| Launcher | VASSAL-style launcher: module list (Add/Remove, rules pack per module), Play offline (Continue, recent saves, New game…, Open saved game…), shared New game setup dialog, launcher <-> game window loop with File → Back to launcher; Online lobby is a greyed-out button until 6b. Smokes: `--screenshot-launcher`, `--screenshot-offline`, `--smoke-launcher <module>` (with `--smoke N`) | `specs/2026-11-07-launcher-design.md`, `plans/2026-11-07-launcher.md` |
 
 All rulings and deferred minors for every piece are in `docs/superpowers/piece1-followups.md`.
 
@@ -128,7 +129,7 @@ How the formula window behaves:
 2. The README Status line and Roadmap are current as of piece 5. The intro paragraph was rewritten by the user's request (plain tone, with a jokey closing line about closing the spreadsheet); keep that wording.
 3. **Piece 6a (hot-seat) is merged and pushed (user tested OK).** Next:
    1. The user hands-on tests hot-seat: two players on the setup page, play through a phase change and the handover screen, mark a property private in the Workbench Visibility tab, step back across a side change, save and load.
-   2. Piece 6b: live online play (through a relay server). It includes the input masking for formula dialogs left open by 6a.
+   2. The launcher is built (all five tasks are on its branch; the user's hands-on check is pending). Next: **revise the 6b plan for lobbies** (the launcher's Online lobby button and the setup dialog's online mode are already stubbed), then **build 6b**: live online play through a relay server. It includes the input masking for formula dialogs left open by 6a.
    3. Piece 6c: play by turn files.
    After that, OCR for scanned rulebooks (section 8.3). Brainstorm, spec, plan, build, using the superpowers skills.
 4. Residual piece-3 minors are listed at the end of `piece1-followups.md`.

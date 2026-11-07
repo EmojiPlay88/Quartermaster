@@ -180,7 +180,7 @@ sealed partial class MainForm
         if (_opts.ScreenshotHandover != null) Guard(SmokeHandover);
         if (_opts.ScreenshotPlayerView != null) Guard(SmokePlayerView);
         if (_opts.ScreenshotExport != null) Guard(SmokeExport);
-        Close();
+        if (_opts.SmokeLauncher) BackToLauncher(); else Close();
     }
 
     /// <summary>Docks the floating window back as a tab and pops it out again, checking the tab strip each time.</summary>

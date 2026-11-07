@@ -73,6 +73,15 @@ The tests use small, invented modules and rules packs.
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - Microsoft Edge WebView2 Runtime (included with Windows 11), for viewing PDFs
 
+## Getting started
+
+1. Start Quartermaster. The launcher opens with your module list. Use **Add module…** to list a `.vmod` file (the file is not copied or changed; Remove only takes it off the list).
+2. Pick a module. The line under the list shows its rules pack; **change…** lets you point it at another one.
+3. Press **Play offline ▶**. From there, **Continue** reopens the newest autosave, the recent games list reopens a saved game, **Open saved game…** browses for a file, and **New game…** opens the setup dialog (choose a start, difficulty and players).
+4. **File → Back to launcher** closes the game (asking about unsaved changes as usual) and returns to the module list. Closing the window ends the program.
+
+**Online lobby ▶** is greyed out for now; online play comes with a later update. Opening a module from the command line, or with File → Open Module, skips the launcher.
+
 ## Build and run
 
 ```powershell

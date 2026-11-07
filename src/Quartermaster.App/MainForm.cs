@@ -436,7 +436,7 @@ sealed partial class MainForm : Form
         if (_opts.FloatMainMap && Program.Smoke && FirstMap() is { } fm) _wm.PopOut(fm);
         MaybeAutoTour();
         RememberModule(path);
-        if (!Program.Smoke) Guard(() => LaunchBookkeeping.ModuleOpened(_library, path, DateTimeOffset.UtcNow));
+        if (!Program.Smoke || _opts.SmokeLauncher) Guard(() => LaunchBookkeeping.ModuleOpened(_library, path, DateTimeOffset.UtcNow));
         return true;
     }
 

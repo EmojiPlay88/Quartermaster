@@ -260,3 +260,24 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - Small counts: a move of several pieces says "{n} pieces moved" and the step-back preview counts actions and dice for everyone, so another side can learn how many pieces moved or how many actions a step back undoes.
 - Alerts: how alerts should behave during another side's phase is not decided yet.
 - Smokes: `--screenshot-playerview` makes one property private in memory when the pack has none (older packs load everything Public); it never saves the pack.
+
+## Launcher — rulings and deferred minors
+
+### Rulings made during execution
+- The settings store has one `Update(Func)` with a single lock and unique temp file names, because the background module check and the game window both write settings. Changed events may fire on the calling thread.
+- App settings writes use `SettingsStore.Update` instead of saving a copy of the current settings.
+- The Back to launcher flag is set when the window has really closed (after the unsaved-changes prompt), not when the menu item is clicked. The menu item is hidden when there is no launcher.
+- The launcher reads a fresh settings store each time it opens, so it shows what the game window just wrote (last played, recent saves).
+- The "Reopen last module" setting now means "Select the last module in the launcher". It never skips the launcher.
+- The Continue line drops the turn or phase part when the autosave has none (turn 0, empty phase).
+- A cancelled module check never writes settings: cancellation is checked again right before the final write.
+- Play offline: while a module loads or the setup dialog is open, the window's buttons are disabled, so a second click cannot start another run.
+- The "file was not found" hint on the disabled Play button is shown through a host panel, like the Online lobby hint, since a disabled button gets no mouse events.
+- Smokes: `--smoke-launcher <module> --smoke N` starts a blank new game from the launcher, goes back to the launcher and checks that the module shows a last-played time. The two screenshot flags take a module path and set up a scratch library (one module listed, one missing; for the offline window also an autosave and recent saves). Always run with `QUARTERMASTER_LAYOUT_ROOT` pointing at a scratch folder.
+
+### Deferred minors
+- Setup dialog: players are not validated when the module has no rules pack (a test documents this).
+- The Online lobby panel height in the setup dialog is not tuned yet (6b).
+- A module that fails to open from the launcher leaves an empty game window.
+- A whitespace-only module path is not handled specially.
+- Opening a module by command-line path does not record it as last played in the launcher list.

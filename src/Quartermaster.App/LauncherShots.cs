@@ -12,6 +12,7 @@ static class LauncherShots
             var root = SettingsStore.DefaultRoot;
             var store = new SettingsStore(root);
             store.Load(null);
+            if (opts.ModulePath != null) Seed(store, root, opts.ModulePath, opts.ScreenshotOffline != null);
             if (opts.ScreenshotLauncher is { } l) ShotLauncher(store, root, l);
             if (opts.ScreenshotOffline is { } o) ShotOffline(store, root, o);
         }
@@ -20,6 +21,62 @@ static class LauncherShots
             Program.AppLog("launcher screenshot failed: " + ex.Message);
             Program.ExitCode = 1;
         }
+    }
+
+    /// <summary>Screenshot fixture: lists the given module plus a copy that is then deleted (shown as missing); for the offline window also writes an autosave and a recent save.</summary>
+    static void Seed(SettingsStore store, string root, string modulePath, bool withGames)
+    {
+        var lib = new ModuleLibrary(store);
+        lib.Add(modulePath);
+        var gone = Path.Combine(root, "gone", "Vanished Module.vmod");
+        Directory.CreateDirectory(Path.GetDirectoryName(gone)!);
+        File.Copy(modulePath, gone, true);
+        lib.Add(gone);
+        File.Delete(gone);
+        Task.Run(() => lib.RefreshAsync(null, CancellationToken.None)).GetAwaiter().GetResult();
+        if (!withGames) return;
+        var sha = lib.Rows.First(r => !r.Missing).Entry.Sha256!;
+        var dir = Path.Combine(Autosaver.AutosaveRoot(root), sha);
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "autosave-20260101-000000000-t3.qsave"),
+            "{\"format\":7,\"moduleSha256\":\"" + sha + "\",\"snapshot\":{\"turn\":{\"turn\":3,\"phase\":\"Movement\"},\"pieces\":{}},\"log\":[]}");
+        var save = Path.Combine(root, "saves", "Campaign one.qsave");
+        Directory.CreateDirectory(Path.GetDirectoryName(save)!);
+        File.WriteAllText(save, "{}");
+        new RecentGames(store, root).Add(sha, save);
+        new RecentGames(store, root).Add(sha, Path.Combine(root, "saves", "Old game.qsave")); // not on disk: shown as not found
+    }
+
+    /// <summary>--smoke-launcher: the first launcher visit starts a blank new game on the module, the second one checks that it lists a last-played time and ends the app.</summary>
+    public static Func<LaunchRequest?> SmokeHook(string modulePath)
+    {
+        var visits = 0;
+        return () =>
+        {
+            var root = SettingsStore.DefaultRoot;
+            var store = new SettingsStore(root);
+            store.Load(null);
+            if (++visits == 1)
+            {
+                var lib = new ModuleLibrary(store);
+                lib.Add(modulePath);
+                Task.Run(() => lib.RefreshAsync(null, CancellationToken.None)).GetAwaiter().GetResult();
+                Program.AppLog("smoke: launcher listed " + lib.Rows.Count + " module(s); starting a new game");
+                return new LaunchRequest(Path.GetFullPath(modulePath), null, LaunchKind.NewGame,
+                    new NewGameRequest(GameMode.Offline, null, store.Current.LastDifficulty, null, null, null), null);
+            }
+            using var form = new LauncherForm(store, root);
+            form.StartPosition = FormStartPosition.Manual;
+            form.Location = new Point(-20000, -20000);
+            form.Show();
+            Pump(() => form.RefreshTask.IsCompleted);
+            var text = form.FirstLastPlayedText;
+            var ok = !string.IsNullOrWhiteSpace(text);
+            Program.AppLog($"smoke: launcher after the game {(ok ? "ok" : "FAILED")} (last played '{text}')");
+            if (!ok) Program.ExitCode = 1;
+            form.Hide();
+            return null;
+        };
     }
 
     static void Pump(Func<bool> done, int maxMs = 15000)

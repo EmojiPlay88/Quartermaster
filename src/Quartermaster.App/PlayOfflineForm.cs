@@ -154,7 +154,23 @@ sealed class PlayOfflineForm : Form
         if (dlg.ShowDialog(this) == DialogResult.OK) Finish(LaunchKind.OpenSave, null, dlg.FileName);
     }
 
+    /// <summary>Disables the action buttons while a module loads or the setup dialog is open (no second click can start another run).</summary>
+    void SetBusy(bool busy)
+    {
+        if (IsDisposed) return;
+        _new.Enabled = _open.Enabled = _back.Enabled = !busy;
+        _continueBtn.Enabled = !busy && _continue != null;
+        _openSel.Enabled = !busy && SelectedSave is { Missing: false };
+    }
+
     async Task NewGame()
+    {
+        SetBusy(true);
+        try { await NewGameCore(); }
+        finally { SetBusy(false); }
+    }
+
+    async Task NewGameCore()
     {
         var rules = Safe(() => _library.RulesPackFor(_row.Entry), null);
         ModuleSession? session = null;
@@ -192,6 +208,7 @@ sealed class PlayOfflineForm : Form
         }
         using (session!)
         {
+            if (IsDisposed) return;
             using var dlg = new SetupChooserDialog(session!.Model, GameMode.Offline, _store.Current.LastDifficulty, session.Rules, preselectNew: false);
             if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Request is not { } req) return;
             _store.Update(cur => cur with { LastDifficulty = req.Difficulty });

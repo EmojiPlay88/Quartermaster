@@ -27,6 +27,7 @@ sealed class LauncherForm : Form
     readonly Button _play = new() { Text = "Play offline ▶", AutoSize = true, MinimumSize = new Size(110, 26) };
     readonly Label _progress = new() { AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = SystemColors.GrayText };
     readonly ToolTip _tip = new();
+    readonly Panel _playHost = new() { AutoSize = true, Margin = new Padding(3), Padding = Padding.Empty };
     readonly CancellationTokenSource _cts = new();
     Task _refresh = Task.CompletedTask;
     bool _closing;
@@ -35,6 +36,9 @@ sealed class LauncherForm : Form
 
     /// <summary>The refresh started when the window opened (screenshots wait on it).</summary>
     public Task RefreshTask => _refresh;
+
+    /// <summary>The Last played cell of the first row (smoke checks).</summary>
+    public string? FirstLastPlayedText => _list.Items.Count > 0 ? _list.Items[0].SubItems[3].Text : null;
 
     public bool OnlineEnabled => _online.Enabled;
 
@@ -50,10 +54,10 @@ sealed class LauncherForm : Form
         AutoScaleMode = AutoScaleMode.Font;
         ShowIcon = false;
 
-        _list.Columns.Add("Module", 220);
+        _list.Columns.Add("Module", 200);
         _list.Columns.Add("Version", 70);
-        _list.Columns.Add("File", 190);
-        _list.Columns.Add("Last played", 130);
+        _list.Columns.Add("File", 240);
+        _list.Columns.Add("Last played", 120);
 
         // Disabled buttons get no mouse messages, so the tooltip hangs on a host panel around the button as well.
         var onlineHost = new Panel { AutoSize = true, Margin = new Padding(3), Padding = Padding.Empty };
@@ -71,7 +75,8 @@ sealed class LauncherForm : Form
         left.Controls.Add(_remove);
         var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false };
         right.Controls.Add(onlineHost);
-        right.Controls.Add(_play);
+        _playHost.Controls.Add(_play);
+        right.Controls.Add(_playHost);
         var buttons = new Panel { Dock = DockStyle.Top, Height = 42, Padding = new Padding(8, 6, 8, 6) };
         buttons.Controls.Add(right);
         buttons.Controls.Add(left);
@@ -99,6 +104,12 @@ sealed class LauncherForm : Form
         };
         Load += (_, _) => Guarded(OnLoaded);
         FormClosing += (_, _) => { _closing = true; try { _cts.Cancel(); } catch (ObjectDisposedException) { } };
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { _closing = true; try { _cts.Cancel(); } catch (ObjectDisposedException) { } _cts.Dispose(); _tip.Dispose(); }
+        base.Dispose(disposing);
     }
 
     /// <summary>Runs a handler so that nothing it throws reaches the message loop.</summary>
@@ -214,7 +225,9 @@ sealed class LauncherForm : Form
             var pack = _library.RulesPackFor(row.Entry);
             _rules.Text = "Rules pack: " + (string.IsNullOrEmpty(pack) ? "(none)" : SafeFileName(pack.TrimEnd('\\', '/')));
         }
-        _tip.SetToolTip(_play, row is { Missing: true } ? "This module's file was not found. Remove it or add it again." : "");
+        var hint = row is { Missing: true } ? "This module's file was not found. Remove it or add it again." : "";
+        _tip.SetToolTip(_playHost, hint);
+        _tip.SetToolTip(_play, hint);
     }
 
     void AddModules()
