@@ -29,7 +29,74 @@ public sealed class ModuleSession : IDisposable
     public DiagnosticLog Log { get; }
     public ImageSource Images { get; }
     public BoardTiler Tiler { get; }
-    public GameSession? Game { get; private set; }
+    public GameSession? Game
+    {
+        get => _game;
+        private set
+        {
+            if (ReferenceEquals(_game, value)) return;
+            if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnGameRewound; }
+            _game = value;
+            if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnGameRewound; }
+            _view = null;
+        }
+    }
+    private GameSession? _game;
+    private GameState? _view;
+    private bool _viewValid;
+    private IReadOnlySet<string>? _viewSides;
+
+    private void OnGameChanged(GameCommand _) => InvalidateView();
+    private void OnGameRewound() => InvalidateView();
+
+    private void InvalidateView()
+    {
+        _view = null;
+        _viewValid = false;
+        ViewChanged?.Invoke();
+    }
+
+    /// <summary>Raised once per view invalidation (game change, rewind, rules change, game replaced, sides changed). UIs debounce.</summary>
+    public event Action? ViewChanged;
+
+    /// <summary>The sides whose information is shown; null = everything (solo, or all sides held).</summary>
+    public IReadOnlySet<string>? ViewSides => _viewSides;
+
+    public void SetViewSides(IReadOnlySet<string>? sides)
+    {
+        _viewSides = sides;
+        InvalidateView();
+    }
+
+    /// <summary>What the current viewer may see: the game state itself when <see cref="ViewSides"/> is null, else a cached filtered copy
+    /// (computed lazily on first access after an invalidation).</summary>
+    public GameState? View
+    {
+        get
+        {
+            if (_game == null) return null;
+            if (_viewSides == null) return _game.State;
+            if (!_viewValid)
+            {
+                _view = PlayerView.For(_game.State, Rules, Model, _viewSides);
+                _viewValid = true;
+            }
+            return _view;
+        }
+    }
+
+    public bool CanSee(string pieceId)
+    {
+        var v = View;
+        return v != null && pieceId != null && v.Pieces.ContainsKey(pieceId);
+    }
+
+    public bool CanSeeMap(string mapId)
+    {
+        if (_viewSides == null || Rules == null) return true;
+        var owner = Ownership.SideOfMap(mapId, Rules);
+        return owner == null || _viewSides.Contains(owner);
+    }
     public string CacheDir { get; }
 
     public RulesPack? Rules { get; private set; }
@@ -112,6 +179,7 @@ public sealed class ModuleSession : IDisposable
         WarnIfSaveRulesDiffer(loaded);
         SeedLedgers();
         GameReplaced?.Invoke();
+        InvalidateView();
     }
 
     public void SaveNative(string path)
@@ -147,6 +215,7 @@ public sealed class ModuleSession : IDisposable
         if (Game != null) Game.RulesSha256 = hash;
         Remember(target);
         RulesChanged?.Invoke();
+        InvalidateView();
     }
 
     /// <summary>Applies the edit first; nothing changes (and no event fires) if it throws.</summary>
@@ -166,6 +235,7 @@ public sealed class ModuleSession : IDisposable
         SeedLedgers();
         if (Game != null) RulesApplied?.Invoke();
         RulesChanged?.Invoke();
+        InvalidateView();
     }
 
     private void Commit(RulesPack pack, string? path, bool dirty)
@@ -182,6 +252,7 @@ public sealed class ModuleSession : IDisposable
             RulesApplied?.Invoke();
         }
         RulesChanged?.Invoke();
+        InvalidateView();
     }
 
     private void Remember(string path)
@@ -244,6 +315,7 @@ public sealed class ModuleSession : IDisposable
         SeedLedgers();
         Game.Rebase();   // the start seed is part of genesis, not an undoable action
         GameReplaced?.Invoke();
+        InvalidateView();
     }
 
     public bool Disposed { get; private set; }
