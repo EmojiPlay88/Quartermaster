@@ -58,7 +58,9 @@ public sealed class HistoryController
         try
         {
             var hadLine = false;
-            if (!Try("undo", () => { hadLine = DropRewindTail(g); g.Undo(); })) return;
+            // A "Stepped back" line inside the undone action (folded into it, or kept as history after a rules change) would
+            // otherwise leave the log with it; re-log one so a later action cannot drop those dice without a trace.
+            if (!Try("undo", () => { hadLine = DropRewindTail(g); hadLine |= g.Undo().Any(a => a.Commands.Any(c => c is SteppedBack)); })) return;
             Finish(g, hadLine ? PositionText(g) : null, -1);
         }
         finally { _busy = false; }
@@ -176,9 +178,12 @@ public sealed class HistoryController
         {
             if (lineTarget != null)
             {
+                // Everything on the redo stack, plus what earlier "Stepped back" lines inside it record (their actions are gone).
                 var redo = g.RedoActions;
-                var dice = redo.Sum(a => a.Commands.Count(c => c is RollDice));
-                g.Execute(_prepare(new SteppedBack(toIndex < 0 ? start : toIndex, redo.Count, dice, lineTarget), g.State));
+                var nested = redo.SelectMany(a => a.Commands).OfType<SteppedBack>().ToList();
+                var actions = redo.Count + nested.Sum(x => x.ActionsUndone);
+                var dice = redo.Sum(a => a.Commands.Count(c => c is RollDice)) + nested.Sum(x => x.DiceUndone);
+                g.Execute(_prepare(new SteppedBack(toIndex < 0 ? start : toIndex, actions, dice, lineTarget), g.State));
             }
             Settle(g);
         });

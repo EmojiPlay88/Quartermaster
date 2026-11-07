@@ -192,7 +192,7 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 
 ### Open spec gaps for the user
 - A plain Ctrl+Z of an action that rolled dice, followed by a reroll, leaves no trace in the log (spec 6.4 says a plain Undo adds no line). Not changed.
-- The "Stepped back" line joins the action before it. Once that step back is no longer the latest one, undoing that earlier action takes the line with it (it moves to Redo, and is lost if a new action is made). Not changed.
+- Fixed 2026-11-07: undoing an action that carries a "Stepped back" line now re-logs a line, and every new line also counts the actions and dice recorded by earlier lines inside the redo stack, so a step back followed by a rules change and an Undo or another step back keeps its dice in the log.
 - Autosave keeps "the first of each turn" per module, not per game, so two games of the same module share that retention. Not changed.
 
 ### Deferred minors

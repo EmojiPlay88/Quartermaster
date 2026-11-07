@@ -505,10 +505,54 @@ public class HistoryControllerTests : IDisposable
         Assert.True(line.DiceUndone > 0);
 
         AddSeededProperty(s);
-        h.Undo();   // the line folds into the action before it and goes down with it, unchanged (not re-counted)
+        var before = Json(s.Game.State);
+        var undoneDice = After(s.Game.Log.ToList(), s.Game.Actions.ToList(), s.Game.Actions[^1].Start).Dice;
+        h.Undo();   // the line folds into the action before it and goes down with it, unchanged...
 
-        Assert.DoesNotContain(s.Game.Log, x => x is SteppedBack);
         Assert.Equal(line, Assert.Single(s.Game.RedoActions.SelectMany(a => a.Commands).OfType<SteppedBack>()));
+        // ...and a new line keeps the trace of its dice (plus the undone action's) in the log
+        var relog = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+        Assert.Equal(line.DiceUndone + undoneDice, relog.DiceUndone);
+        Assert.Equal(line.ActionsUndone + 1, relog.ActionsUndone);
+
+        h.Redo();   // the re-logged line goes; the action comes back with its original line
+        Assert.Equal(line, Assert.Single(s.Game.Log.OfType<SteppedBack>()));
+        Assert.Equal(before, Json(s.Game.State));
+    }
+
+    [Fact]
+    public void RulesChangeAfterStepBack_ThenUndo_ThenNewAction_KeepsDiceTrace()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        PlayIntoTurnTwo(s, c);
+        h.StepBack(Row(h, "End", 1));
+        var line = Assert.Single(s.Game!.Log.OfType<SteppedBack>());
+        Assert.True(line.DiceUndone > 0);
+
+        AddSeededProperty(s);
+        h.Undo();
+        c.Advance();   // a new action clears redo: the discarded dice must still be mentioned in the log
+
+        Assert.Contains(s.Game.Log.OfType<SteppedBack>(), x => x.DiceUndone >= line.DiceUndone);
+    }
+
+    [Fact]
+    public void RulesChangeAfterStepBack_ThenStepBackFurther_CountsEarlierDice()
+    {
+        var (s, c, h) = Make(Difficulty.FullyAuto);
+        PlayIntoTurnTwo(s, c);
+        h.StepBack(Row(h, "End", 1));
+        var line = Assert.Single(s.Game!.Log.OfType<SteppedBack>());
+        Assert.True(line.DiceUndone > 0);
+
+        AddSeededProperty(s);
+        var row = Row(h, "Supply", 1);
+        var (actions, dice) = After(s.Game.Log.ToList(), s.Game.Actions.ToList(), row.LogIndex);
+        h.StepBack(row);
+
+        var relog = Assert.Single(s.Game.Log.OfType<SteppedBack>());
+        Assert.Equal(line.DiceUndone + dice, relog.DiceUndone);
+        Assert.Equal(line.ActionsUndone + actions, relog.ActionsUndone);
     }
 
     [Fact]
