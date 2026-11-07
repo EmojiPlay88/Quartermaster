@@ -1,0 +1,24 @@
+# Quartermaster relay: `docker compose up -d` in this folder.
+# The certificate fingerprint players compare: `docker compose logs relay`.
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: src/Quartermaster.Relay/Dockerfile
+    # Name given to the locally built image. `docker compose build` (re)builds it from source.
+    # To use `docker compose pull` instead, push a built image to your own registry and put its full
+    # name here, e.g. `your-registry.example/quartermaster-relay:1.0`; pull fetches that tag.
+    image: quartermaster-relay
+    ports:
+      - "47820:47820"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    environment:
+      # The port inside the container; change the left side of "ports" to publish another one.
+      Relay__Port: "47820"
+      # Optional own certificate (e.g. Let's Encrypt). Put the files under ./data and point to them.
+      # Empty = a self-signed certificate is created in /data on first run.
+      Relay__CertificatePath: ""
+      Relay__CertificateKeyPath: ""
+      Relay__CertificatePassword: ""

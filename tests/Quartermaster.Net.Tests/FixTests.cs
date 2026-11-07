@@ -26,7 +26,7 @@ public class FixTests
         Assert.Throws<ProtocolException>(() => Framing.Decode<RelayMessage>(B("{\"$t\":\"Hello\",\"Role\":\"host\"}")));
         Assert.Throws<ProtocolException>(() => Framing.Decode<RelayMessage>(B("{\"$t\":\"Deliver\",\"FromMemberId\":\"m\",\"Sealed\":\"!!notbase64\"}")));
         Assert.Throws<ProtocolException>(() => Framing.Decode<GamePayload>(B("{\"$t\":\"IntentMsg\",\"Id\":\"nope\",\"IntentJson\":\"{}\"}")));
-        var json = Encoding.UTF8.GetString(Framing.Encode(new CreateRoom("ABC234", "v", L))).Replace("\"Red\"", "null");
+        var json = Encoding.UTF8.GetString(Framing.Encode(new CreateRoom("ABC234", "v", "k", L))).Replace("\"Red\"", "null");
         Assert.Throws<ProtocolException>(() => Framing.Decode<RelayMessage>(B(json)));
     }
 

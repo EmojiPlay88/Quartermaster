@@ -1,0 +1,8 @@
+# Docker build context is the repository root; only the relay and what it needs go in.
+*
+!Directory.Build.props
+!src/Quartermaster.Net/
+!src/Quartermaster.Relay/
+**/bin/
+**/obj/
+src/Quartermaster.Relay/data/

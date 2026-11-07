@@ -38,6 +38,8 @@ public sealed record LobbyListing(
 [JsonDerivedType(typeof(Deliver), "Deliver")]
 [JsonDerivedType(typeof(MemberLeft), "MemberLeft")]
 [JsonDerivedType(typeof(HostLeft), "HostLeft")]
+[JsonDerivedType(typeof(HostBack), "HostBack")]
+[JsonDerivedType(typeof(Members), "Members")]
 [JsonDerivedType(typeof(Ping), "Ping")]
 [JsonDerivedType(typeof(Pong), "Pong")]
 public abstract record RelayMessage;
@@ -46,7 +48,11 @@ public abstract record RelayMessage;
 public sealed record Hello(int Version, string Role) : RelayMessage;
 public sealed record ReserveCode : RelayMessage;
 public sealed record CodeReserved(string Code) : RelayMessage;
-public sealed record CreateRoom(string Code, string AuthVerifier, LobbyListing Draft) : RelayMessage;
+/// <summary>
+/// HostKey: a random 32-byte hex secret (<see cref="Secrets.NewHostKey"/>) the host generates and keeps for the room's life.
+/// The relay stores its hash; re-attaching to an existing room as host needs the same verifier AND the same HostKey.
+/// </summary>
+public sealed record CreateRoom(string Code, string AuthVerifier, string HostKey, LobbyListing Draft) : RelayMessage;
 public sealed record RoomCreated(string Code) : RelayMessage;
 public sealed record UpdateListing(LobbyListing Listing) : RelayMessage;
 public sealed record ListLobbies(string ModuleSha256) : RelayMessage;
@@ -59,6 +65,10 @@ public sealed record Send(string? ToMemberId, byte[] Sealed) : RelayMessage;
 public sealed record Deliver(string FromMemberId, byte[] Sealed) : RelayMessage;
 public sealed record MemberLeft(string MemberId) : RelayMessage;
 public sealed record HostLeft : RelayMessage;
+/// <summary>Relay → each guest when the host re-attaches to the room.</summary>
+public sealed record HostBack : RelayMessage;
+/// <summary>Relay → host right after a re-attach: the guests still in the room.</summary>
+public sealed record Members(IReadOnlyList<string> MemberIds) : RelayMessage;
 public sealed record Ping : RelayMessage;
 public sealed record Pong : RelayMessage;
 
