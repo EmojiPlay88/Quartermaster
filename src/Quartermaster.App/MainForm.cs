@@ -75,6 +75,7 @@ sealed partial class MainForm : Form
         _logDock = new LogDock(this, _wm, _logHost, _logSplitter, _viewLog, CentreOnPiece, Guard);
         _paletteDock = new PaletteDock(this, _wm, _paletteHost, _paletteSplitter, Guard);
         InitPhases();
+        InitAlertBar();
         RegisterCommands();
         InitLos();
         _cmdItems["view.log"] = _viewLog;
@@ -95,6 +96,7 @@ sealed partial class MainForm : Form
         Controls.Add(_leftSplit);
         Controls.Add(_status);
         Controls.Add(_toolbar);
+        Controls.Add(_alertBar);
         Controls.Add(_strip); // the phase tracker sits directly under the toolbar
         Controls.Add(_menu);
         // Explicit z-order (highest index docks first): menu, toolbar, then the phase strip, so the strip sits under the toolbar.

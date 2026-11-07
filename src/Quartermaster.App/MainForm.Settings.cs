@@ -90,6 +90,7 @@ sealed partial class MainForm
         });
         Step(() => _logDock.Panel?.ApplySettings(s));
         Step(() => { _paletteDock.SetGameMaster(GameMaster); _viewPalette.Checked = _paletteDock.Shown; });
+        Step(UpdateAlertBarVisible);
         Step(() => SettingsApplied?.Invoke(s));
     }
 

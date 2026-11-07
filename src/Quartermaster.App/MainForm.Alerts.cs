@@ -1,0 +1,142 @@
+using Quartermaster.Core;
+using Quartermaster.Render;
+using Quartermaster.Vassal;
+
+namespace Quartermaster.App;
+
+/// <summary>
+/// The alert bar wiring. <see cref="AlertsUpdated"/> is the shared hub: after every game change, rewind, rules change or game replacement
+/// (debounced 250 ms, on the UI thread, never on the drag path since a drag only raises Changed on drop) the alerts are evaluated once and
+/// published here. Other windows that need the active alerts (the outliner) subscribe instead of running their own evaluation; <see cref="AlertHits"/>
+/// holds the latest result.
+/// </summary>
+sealed partial class MainForm
+{
+    const int AlertDebounceMs = 250;
+    const int MenuMatches = 15;
+
+    readonly AlertBar _alertBar = new();
+    PhaseWatcher? _alertWatch;
+    readonly Dictionary<string, int> _alertCycle = new();
+    IReadOnlyList<AlertHit> _alertHits = Array.Empty<AlertHit>();
+
+    /// <summary>Raised on the UI thread each time the alerts were re-evaluated (also with an empty list).</summary>
+    public event Action<IReadOnlyList<AlertHit>>? AlertsUpdated;
+
+    /// <summary>The latest evaluated alerts (Critical first).</summary>
+    public IReadOnlyList<AlertHit> AlertHits => _alertHits;
+
+    void InitAlertBar()
+    {
+        _alertBar.BannerClicked += () => Guard(() => _phaseDock?.Reveal());
+        _alertBar.ChipClicked += h => Guard(() => GoToAlert(h));
+        _alertBar.ChipContext += (h, at) => Guard(() => ShowAlertMenu(h, at));
+    }
+
+    void CreateAlerts(ModuleSession session)
+    {
+        _alertWatch = new PhaseWatcher(this, session, RecomputeAlerts, AlertDebounceMs);
+        RecomputeAlerts();
+    }
+
+    void DestroyAlerts()
+    {
+        _alertWatch?.Dispose();
+        _alertWatch = null;
+        _alertCycle.Clear();
+        _alertHits = Array.Empty<AlertHit>();
+        _alertBar.SetHits(_alertHits);
+        _alertBar.Visible = false;
+        AlertsUpdated?.Invoke(_alertHits);
+    }
+
+    void UpdateAlertBarVisible()
+    {
+        _alertBar.Visible = _settings.Current.AlertBarVisible && _session?.Game != null && _session.Rules != null && _phases != null;
+    }
+
+    void RecomputeAlerts()
+    {
+        if (_session?.Game is not { } game || _phases == null)
+        {
+            _alertHits = Array.Empty<AlertHit>();
+            AlertsUpdated?.Invoke(_alertHits);
+            return;
+        }
+        var pack = _session.Rules;
+        var view = _phases.View();
+        var acting = pack != null && view.Current != null ? Sequencer.ActingSide(pack, view.Current)?.Id : null;
+        _alertHits = AlertEngine.Evaluate(game.State, pack, _session.Model, view.Current, acting);
+        var (text, tip) = Banner.For(view);
+        _alertBar.SetBanner(text, tip);
+        _alertBar.SetHits(_alertHits);
+        UpdateAlertBarVisible();
+        AlertsUpdated?.Invoke(_alertHits);
+    }
+
+    /// <summary>Chip click: cycles through the matches that can be shown (pieces centre on the map, holders select in the Ledger window).</summary>
+    void GoToAlert(AlertHit h)
+    {
+        var targets = h.Matches.Where(m => m.PieceId != null || m.HolderId != null).ToList();
+        if (targets.Count == 0) return;
+        var next = _alertCycle.TryGetValue(h.Id, out var at) ? (at + 1) % targets.Count : 0;
+        _alertCycle[h.Id] = next;
+        GoToMatch(targets[next]);
+    }
+
+    void GoToMatch(AlertMatch m)
+    {
+        if (m.PieceId != null) CentreOnPiece(m.PieceId);
+        else if (m.HolderId != null && _session != null)
+        {
+            ShowLedger();
+            if (_ledgers.TryGetValue("ledger", out var f) && !f.IsDisposed && f is LedgerWindow lw) lw.SelectHolder(m.HolderId);
+        }
+    }
+
+    void ShowAlertMenu(AlertHit h, Point at)
+    {
+        var menu = new ContextMenuStrip();
+        menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
+        foreach (var m in h.Matches.Take(MenuMatches))
+        {
+            var mm = m;
+            var item = new ToolStripMenuItem(m.Text) { Enabled = m.PieceId != null || m.HolderId != null };
+            item.Click += (_, _) => Guard(() => GoToMatch(mm));
+            menu.Items.Add(item);
+        }
+        if (h.Matches.Count > MenuMatches) menu.Items.Add(new ToolStripMenuItem($"… and {h.Matches.Count - MenuMatches} more") { Enabled = false });
+        if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
+        var hide = new ToolStripMenuItem("Hide this alert until next turn");
+        hide.Click += (_, _) => Guard(() => HideAlert(h.Id));
+        menu.Items.Add(hide);
+        menu.Show(_alertBar, new Point(at.X, _alertBar.Height));
+    }
+
+    void HideAlert(string alertId)
+    {
+        if (_session?.Game is not { } game) return;
+        var cmd = CommandLog.Prepare(new HideAlert(alertId), game.State, _session.Model);
+        game.Execute(cmd);
+        _alertWatch?.Flush();
+    }
+
+    /// <summary>Smoke (--screenshot-alerts): a piece with a negative ledger value gives a chip; screenshots the main window.</summary>
+    void SmokeAlerts()
+    {
+        if (_phases == null || _session?.Game is not { } game || _session.Rules == null) { SmokeFail("alerts smoke needs a game with a rules pack"); return; }
+        CloseFormulaDialogs();
+        if (_phases.View().BeforeStart) { _phases.Start(); Application.DoEvents(); }
+        var piece = game.State.Pieces.Values.FirstOrDefault(p => p.StackId != null && game.State.Stacks.ContainsKey(p.StackId));
+        if (piece == null) { SmokeFail("no piece in a stack"); return; }
+        var key = LedgerKey.Piece(piece.Id);
+        var prop = _session.Rules.Properties.FirstOrDefault()?.Id ?? "fuel";
+        game.Execute(new LedgerDelta(key, prop, Ledger.Get(game.State, key, prop) ?? 0, -3, "manual", null, null, "smoke", null));
+        _alertWatch?.Flush();
+        Application.DoEvents();
+        var ok = _alertHits.Count > 0 && _alertBar.Visible && _alertBar.ChipTexts.Count > 0;
+        SaveScreenshot(this, _opts.ScreenshotAlerts!, true);
+        Program.AppLog($"smoke: alerts {(ok ? "ok" : "FAILED")} (banner '{_alertBar.BannerText}', chips {string.Join(" | ", _alertBar.ChipTexts)})");
+        if (!ok) Program.ExitCode = 1;
+    }
+}

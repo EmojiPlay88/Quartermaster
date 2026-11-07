@@ -37,6 +37,7 @@ static class CommandLog
             QueueRuns q => q with { At = q.At ?? at, Who = q.Who ?? LocalUser },
             ResolveRun r => r with { At = r.At ?? at, Who = r.Who ?? LocalUser },
             SteppedBack b => b with { At = b.At ?? at, Who = b.Who ?? LocalUser },
+            HideAlert h => h with { At = h.At ?? at, Who = h.Who ?? LocalUser },
             AddLogLine l => l with { At = l.At ?? at, Who = l.Who ?? LocalUser },
             _ => c,
         };
