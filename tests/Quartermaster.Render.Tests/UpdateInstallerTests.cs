@@ -58,7 +58,17 @@ public class UpdateInstallerTests : IDisposable
         ("Quartermaster.Updater.exe", [1, 2, 3]),
         ("runtimes/win-x64/native/TEST.dll", [4, 5]),
         ("readme.txt", "TEST"u8.ToArray()),
+        ("quartermaster-files.txt", "Quartermaster.App.exe\nQuartermaster.Updater.exe\nruntimes/win-x64/native/TEST.dll\nreadme.txt\nquartermaster-files.txt\n"u8.ToArray()),
     ];
+
+    [Fact]
+    public async Task Download_NoFileList_RefusedAndFolderRemoved()
+    {
+        var u = Publish(GoodEntries().Where(e => e.Item1 != "quartermaster-files.txt"));
+        var ex = await Assert.ThrowsAsync<UpdateRefused>(() => UpdateInstaller.Download(new FolderFeed(Feed), u, Updates, null, default));
+        Assert.Contains("quartermaster-files.txt", ex.Message);
+        Assert.False(Directory.Exists(VersionDir));
+    }
 
     string VersionDir => Path.Combine(Updates, Ver);
 
@@ -347,6 +357,7 @@ public class UpdateInstallerTests : IDisposable
     {
         var app = Directory.CreateDirectory(Path.Combine(_tmp, "app")).FullName;
         File.WriteAllBytes(Path.Combine(app, "Quartermaster.Updater.exe"), [7, 7, 7]);
+        File.WriteAllText(Path.Combine(app, UpdateInstaller.ManifestName), "Quartermaster.Updater.exe\n");
         var s = FakeStaged();
         var marker = UpdateInstaller.MarkerPath(Updates, s.Version);
         Assert.Equal(Path.Combine(Updates, "started-0.2.0"), marker);
@@ -379,6 +390,80 @@ public class UpdateInstallerTests : IDisposable
         Assert.False(File.Exists(Path.Combine(Updates, "started-0.1.0")));
         UpdateInstaller.CleanupOld(Path.Combine(_tmp, "missing"), new Version(0, 2, 0)); // no folder: no throw
     }
+
+    [Fact]
+    public void LaunchHelper_AppFolderWithoutFileList_Refused_HelperNotStarted()
+    {
+        var app = Directory.CreateDirectory(Path.Combine(_tmp, "app")).FullName;
+        File.WriteAllBytes(Path.Combine(app, "Quartermaster.Updater.exe"), [7, 7, 7]);
+        Assert.False(UpdateInstaller.CanSelfUpdate(app));
+        var ex = Assert.Throws<UpdateRefused>(() => UpdateInstaller.LaunchHelper(FakeStaged(), app, 1234, _ => throw new InvalidOperationException("must not start")));
+        Assert.Equal("This copy of Quartermaster can't update itself; download the new version from the release page.", ex.Message);
+        Assert.False(Directory.Exists(Path.Combine(Updates, "0.2.0", "helper")));
+    }
+
+    // ---------- CleanupAfterUpdate ----------
+
+    [Fact]
+    public void CleanupAfterUpdate_KeepsNewestBackupsAndHelper_DeletesOldDownloadsAndBackups()
+    {
+        var parent = Path.Combine(_tmp, "games");
+        var app = Path.Combine(parent, "Quartermaster");
+        Directory.CreateDirectory(app);
+        foreach (var d in new[] { "Quartermaster.backup-0.1.0", "Quartermaster.backup-0.2.0", "Quartermaster.backup-0.10.0", "Quartermaster.backup-x", "Quartermaster.backup-0.1.0.TEST", "Other TEST" })
+            Directory.CreateDirectory(Path.Combine(parent, d, "inner"));
+        foreach (var d in new[] { "backup-0.1.0", "backup-0.2.0", "backup-notes" }) Directory.CreateDirectory(Path.Combine(Updates, d, "inner"));
+        var cur = new Version(0, 11, 0);
+        var curDir = Path.Combine(Updates, "0.11.0");
+        Directory.CreateDirectory(Path.Combine(curDir, "staged"));
+        Directory.CreateDirectory(Path.Combine(curDir, "helper"));
+        File.WriteAllText(Path.Combine(curDir, "Quartermaster-0.11.0-win-x64.zip"), "zip");
+        File.WriteAllText(Path.Combine(curDir, "keep TEST.txt"), "x");
+        Directory.CreateDirectory(Path.Combine(Updates, "0.10.0", "staged"));
+
+        UpdateInstaller.CleanupAfterUpdate(Updates, app, cur);
+
+        Assert.False(Directory.Exists(Path.Combine(parent, "Quartermaster.backup-0.1.0")));
+        Assert.False(Directory.Exists(Path.Combine(parent, "Quartermaster.backup-0.2.0")));
+        Assert.True(Directory.Exists(Path.Combine(parent, "Quartermaster.backup-0.10.0"))); // most recent (by version, not text)
+        Assert.True(Directory.Exists(Path.Combine(parent, "Quartermaster.backup-x")));
+        Assert.True(Directory.Exists(Path.Combine(parent, "Quartermaster.backup-0.1.0.TEST")));
+        Assert.True(Directory.Exists(Path.Combine(parent, "Other TEST")));
+        Assert.True(Directory.Exists(app));
+        Assert.False(Directory.Exists(Path.Combine(Updates, "backup-0.1.0")));
+        Assert.True(Directory.Exists(Path.Combine(Updates, "backup-0.2.0")));
+        Assert.True(Directory.Exists(Path.Combine(Updates, "backup-notes")));
+        Assert.False(Directory.Exists(Path.Combine(curDir, "staged")));
+        Assert.False(File.Exists(Path.Combine(curDir, "Quartermaster-0.11.0-win-x64.zip")));
+        Assert.True(Directory.Exists(Path.Combine(curDir, "helper")));
+        Assert.True(File.Exists(Path.Combine(curDir, "keep TEST.txt")));
+        Assert.False(Directory.Exists(Path.Combine(Updates, "0.10.0")));
+    }
+
+    [Fact]
+    public void CleanupAfterUpdate_NothingThere_NoThrow()
+    {
+        UpdateInstaller.CleanupAfterUpdate(Path.Combine(_tmp, "missing"), Path.Combine(_tmp, "missing-app"), new Version(0, 2, 0));
+        UpdateInstaller.CleanupAfterUpdate(Path.Combine(_tmp, "missing"), null, new Version(0, 2, 0));
+    }
+
+    // ---------- RunningCopies ----------
+
+    [Fact]
+    public void RunningCopies_OnlyOtherProcessesFromTheSameExe()
+    {
+        var exe = Path.Combine(_tmp, "app", "Quartermaster.App.exe");
+        string? asked = null;
+        IEnumerable<(int, string?)> Procs(string name, params (int, string?)[] ps) { asked = name; return ps; }
+        Assert.False(RunningCopies.OthersRunning(exe, 10, n => Procs(n, (10, exe), (11, null), (12, Path.Combine(_tmp, "other", "Quartermaster.App.exe")))));
+        Assert.Equal("Quartermaster.App", asked);
+        Assert.True(RunningCopies.OthersRunning(exe, 10, n => Procs(n, (13, exe.ToUpperInvariant()))));
+        Assert.Equal("Close every other Quartermaster window first.", RunningCopies.CloseOthersText);
+    }
+
+    [Fact]
+    public void RunningCopies_RealListerFindsNoOtherCopyOfThisTestHost() =>
+        Assert.False(RunningCopies.OthersRunning(Path.Combine(_tmp, "nowhere", "Quartermaster.App.exe"), Environment.ProcessId));
 
     sealed class SyncProgress(Action<double> a) : IProgress<double>
     {

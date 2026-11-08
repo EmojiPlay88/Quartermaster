@@ -13,6 +13,9 @@ public static class UpdateInstaller
 {
     public const string AppExe = "Quartermaster.App.exe";
     public const string HelperExe = "Quartermaster.Updater.exe";
+    /// <summary>The release's file list (written at publish time). The helper only moves files it names; a folder without one can't self-update.</summary>
+    public const string ManifestName = "quartermaster-files.txt";
+    public const string NoManifestText = "This copy of Quartermaster can't update itself; download the new version from the release page.";
     const int MaxShaBytes = 4096;
     const long MaxUnpackedBytes = 4L * 1024 * 1024 * 1024;
 
@@ -43,6 +46,8 @@ public static class UpdateInstaller
             ct.ThrowIfCancellationRequested();
             Extract(zipPath, staged);
             CheckExe(staged, u.Version);
+            if (!File.Exists(Path.Combine(staged, ManifestName)))
+                throw new UpdateRefused($"The update has no file list ({ManifestName}); it was not installed.");
             return new StagedUpdate(u.Version, staged, root);
         }
         catch
@@ -213,6 +218,7 @@ public static class UpdateInstaller
     {
         var source = Path.Combine(appDir, HelperExe);
         if (!File.Exists(source)) throw new UpdateRefused("The updater helper is missing; download the new version from the release page.");
+        if (!CanSelfUpdate(appDir)) throw new UpdateRefused(NoManifestText);
         var root = Path.GetFullPath(s.Root);
         var helperDir = Path.Combine(root, "helper");
         Directory.CreateDirectory(helperDir);
@@ -230,6 +236,51 @@ public static class UpdateInstaller
                  })
             psi.ArgumentList.Add(a);
         start(psi)?.Dispose();
+    }
+
+    /// <summary>True when the app folder carries the release's file list (<see cref="ManifestName"/>), so the helper knows which files are Quartermaster's.</summary>
+    public static bool CanSelfUpdate(string appDir) => File.Exists(Path.Combine(appDir, ManifestName));
+
+    /// <summary>
+    /// After a confirmed start of <paramref name="current"/> (spec Part C step 6), best effort: <see cref="CleanupOld"/>, then the current
+    /// version's downloaded zip and <c>staged</c> folder (its helper, which may still be running, is left), then every
+    /// <c>Quartermaster.backup-&lt;v&gt;</c> beside <paramref name="appDir"/> and every <c>backup-&lt;v&gt;</c> in the updates folder except the
+    /// most recent (highest version) of each. Only names that match those patterns exactly are touched.
+    /// </summary>
+    public static void CleanupAfterUpdate(string updatesRoot, string? appDir, Version current)
+    {
+        CleanupOld(updatesRoot, current);
+        var cur = Path.Combine(updatesRoot, AppVersion.Format(current));
+        var zip = Path.Combine(cur, UpdateChecker.ZipName(current));
+        TryDelete(() => DeleteDir(Path.Combine(cur, "staged")));
+        TryDelete(() => File.Delete(zip));
+        TryDelete(() => File.Delete(zip + ".part"));
+        PruneBackups(updatesRoot, "backup-");
+        if (appDir != null && Path.GetDirectoryName(Path.GetFullPath(Path.TrimEndingDirectorySeparator(appDir))) is { } parent)
+            PruneBackups(parent, "Quartermaster.backup-");
+    }
+
+    /// <summary>Deletes folders in <paramref name="dir"/> named exactly <paramref name="prefix"/> + a version, except the highest version.</summary>
+    static void PruneBackups(string dir, string prefix)
+    {
+        List<(string Path, Version V)> found;
+        try
+        {
+            if (!Directory.Exists(dir)) return;
+            found = Directory.GetDirectories(dir)
+                .Select(d => (Path: d, Name: Path.GetFileName(d)))
+                .Where(x => x.Name.StartsWith(prefix, StringComparison.Ordinal) && IsVersionName(x.Name[prefix.Length..]))
+                .Select(x => (x.Path, Version.Parse(x.Name[prefix.Length..])))
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
+        foreach (var (path, _) in found.OrderByDescending(x => x.V).Skip(1))
+            TryDelete(() => DeleteDir(path));
+    }
+
+    static void TryDelete(Action a)
+    {
+        try { a(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>Best effort: deletes <c>&lt;version&gt;</c> folders and <c>started-&lt;version&gt;</c> markers of every version but <paramref name="current"/>; other names are left alone.</summary>

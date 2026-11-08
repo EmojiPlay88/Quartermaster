@@ -36,7 +36,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
             switch (a)
             {
                 case "--new": newGame = true; break;
-                case "--updated-from" or "--update-failed" or "--screenshot-update-bar": // updater options live in AppUpdates
+                case "--updated-from" or "--update-failed" or "--update-refused" or "--screenshot-update-bar": // updater options live in AppUpdates
                     if (i + 1 < args.Length) AppUpdates.Arg(a, args[++i]);
                     else warn($"{a} needs a value; ignored.");
                     break;
@@ -287,7 +287,7 @@ static class Program
         try
         {
             var opts = StartupOptions.Parse(args, AppLog);
-            AppUpdates.OnStart(); // after an update: the start marker first, the helper is waiting for it
+            AppUpdates.OnStart(); // after an update: the notice only; the start marker waits for the launcher to be shown
             Smoke = opts.Smoke;
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.SetDefaultFont(new Font("Tahoma", 8.25f));

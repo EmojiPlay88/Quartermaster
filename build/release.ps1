@@ -31,6 +31,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
+if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "-Version must be a plain semantic version x.y.z (for example 0.1.0), not '$Version'." }
+# The linux relay downloads must be .tar.gz (their names are fixed); there is no zip fallback.
+if (-not (Get-Command tar -ErrorAction SilentlyContinue)) { throw 'tar was not found on PATH (Windows 10 1803+ ships it as tar.exe); it is needed for the linux relay .tar.gz downloads.' }
+
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $OutRoot) { $OutRoot = Join-Path $repo 'artifacts' }
 $releaseDir = Join-Path $OutRoot "release\$Version"
@@ -118,16 +122,42 @@ function Write-Sha256([string]$File) {
     return $h
 }
 
+# The user name and the user-profile folder name (they can differ), each only when long enough to be a meaningful needle.
+$script:UserNames = New-Object System.Collections.Generic.List[string]
+foreach ($u in @($env:USERNAME, $(if ($env:USERPROFILE) { Split-Path -Leaf $env:USERPROFILE } else { $null }))) {
+    if ($u -and $u.Length -ge 3 -and -not ($script:UserNames -contains $u)) { $script:UserNames.Add($u) }
+}
+
+# The app zip's quartermaster-files.txt must list exactly the zip's files (the updater only moves listed files).
+function Test-AppManifest([string]$Archive) {
+    $problems = New-Object System.Collections.Generic.List[string]
+    $leaf = Split-Path -Leaf $Archive
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
+    try {
+        $files = @($zip.Entries | Where-Object { -not $_.FullName.EndsWith('/') } | ForEach-Object { $_.FullName })
+        $entry = $zip.GetEntry('quartermaster-files.txt')
+        if (-not $entry) { $problems.Add("$leaf has no quartermaster-files.txt"); return , $problems }
+        $reader = New-Object System.IO.StreamReader($entry.Open())
+        try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $zip.Dispose() }
+    $listed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($line in ($text -split "`r?`n")) { $l = $line.Trim(); if ($l) { [void]$listed.Add($l) } }
+    foreach ($f in $files) { if (-not $listed.Contains($f)) { $problems.Add("$leaf entry '$f' is not in quartermaster-files.txt") } }
+    $inZip = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($f in $files) { [void]$inZip.Add($f) }
+    foreach ($l in $listed) { if (-not $inZip.Contains($l)) { $problems.Add("$leaf quartermaster-files.txt lists '$l', which is not in the zip") } }
+    return , $problems
+}
+
 $script:TextExt = @('.json', '.xml', '.txt', '.config', '.md', '.manifest', '.props', '.targets', '.yml', '.yaml', '.cmd', '.ps1', '.sh', '.html', '.css', '.js')
 
 # Returns the list of problems found in one archive ($Kind 'zip' or 'tar.gz'); empty list = clean.
 function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [string[]]$Required) {
     $problems = New-Object System.Collections.Generic.List[string]
     $leaf = Split-Path -Leaf $Archive
-    $user = $env:USERNAME
     $needles = New-Object System.Collections.Generic.List[string]
     foreach ($n in @('C:\Users\', 'C:\\Users\\', '.vmod', '.qrules', 'startapp.cmd')) { $needles.Add($n) }
-    if ($user -and $user.Length -ge 3) { $needles.Add($user) }
+    foreach ($u in $script:UserNames) { $needles.Add($u) }
 
     # 1. Entry names.
     $names = @()
@@ -160,8 +190,8 @@ function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [stri
             if ($LASTEXITCODE -ne 0) { throw "tar could not extract $leaf." }
         }
         $binPatterns = @()
-        if ($user -and $user.Length -ge 3) {
-            $p = ('C:\Users\' + $user).ToLowerInvariant()
+        foreach ($u in $script:UserNames) {
+            $p = ('C:\Users\' + $u).ToLowerInvariant()
             $binPatterns += , ([System.Text.Encoding]::UTF8.GetBytes($p))
             $binPatterns += , ([System.Text.Encoding]::Unicode.GetBytes($p))
         }
@@ -223,24 +253,21 @@ $common = @('-c', 'Release', "-p:Version=$Version", '-p:DebugType=none', '-p:Deb
 Write-Step 'Publish app (win-x64, self-contained)'
 $appDir = Join-Path $workDir 'app'
 Invoke-Dotnet (@('publish', (Join-Path $repo 'src\Quartermaster.App\Quartermaster.App.csproj'), '-r', 'win-x64', '--self-contained', '-o', $appDir) + $common)
-foreach ($must in @('Quartermaster.App.exe', 'Quartermaster.Updater.exe')) {
+# The App project's publish also copies LICENSE and THIRD-PARTY-NOTICES.md and writes quartermaster-files.txt (the release file list).
+foreach ($must in @('Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'quartermaster-files.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $appDir $must))) { throw "Publish output has no $must." }
 }
-foreach ($doc in @('LICENSE', 'THIRD-PARTY-NOTICES.md')) { Copy-Item -LiteralPath (Join-Path $repo $doc) -Destination $appDir }
 $appZip = Join-Path $releaseDir $appZipName
 New-ZipFromFolder $appDir $appZip
 
 # 4. Relay, one archive per platform.
 $relayArchives = @()
-$tarOk = [bool](Get-Command tar -ErrorAction SilentlyContinue)
-if (-not $tarOk) { Write-Warning 'tar was not found: the linux relay archives will be .zip instead of .tar.gz.' }
 foreach ($t in $relayTargets) {
     $rid = $t.Rid
     Write-Step "Publish relay ($rid)"
     $dir = Join-Path $workDir "relay-$rid"
     Invoke-Dotnet (@('publish', (Join-Path $repo 'src\Quartermaster.Relay\Quartermaster.Relay.csproj'), '-r', $rid, '--self-contained', '-p:PublishSingleFile=true', '-o', $dir) + $common)
     $kind = $t.Kind
-    if ($kind -eq 'tar.gz' -and -not $tarOk) { $kind = 'zip' }
     $name = "QuartermasterRelay-$Version-$rid.$kind"
     $out = Join-Path $releaseDir $name
     if ($kind -eq 'zip') { New-ZipFromFolder $dir $out }
@@ -258,7 +285,8 @@ foreach ($t in $relayTargets) {
 # 5. Archive checks.
 Write-Step 'Check archives'
 $allProblems = New-Object System.Collections.Generic.List[string]
-foreach ($p in (Test-Archive $appZip 'zip' 'Quartermaster.Relay*' @('Quartermaster.App.exe', 'Quartermaster.Updater.exe'))) { $allProblems.Add($p) }
+foreach ($p in (Test-Archive $appZip 'zip' 'Quartermaster.Relay*' @('Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'quartermaster-files.txt'))) { $allProblems.Add($p) }
+foreach ($p in (Test-AppManifest $appZip)) { $allProblems.Add($p) }
 foreach ($r in $relayArchives) {
     foreach ($p in (Test-Archive $r.Path $r.Kind 'Quartermaster.App*' @())) { $allProblems.Add($p) }
 }
@@ -266,7 +294,7 @@ if ($allProblems.Count -gt 0) {
     $allProblems | ForEach-Object { Write-Host "  FAIL: $_" -ForegroundColor Red }
     throw "Archive check failed with $($allProblems.Count) problem(s). Nothing should be released."
 }
-Write-Host 'Archive checks passed (no local paths, user name, .vmod, .qrules or startapp.cmd; app and relay kept apart).' -ForegroundColor Green
+Write-Host 'Archive checks passed (no local paths, user or profile name, .vmod, .qrules or startapp.cmd; app and relay kept apart; quartermaster-files.txt lists exactly the app zip).' -ForegroundColor Green
 
 # 6. Checksums.
 Write-Step 'Checksums'

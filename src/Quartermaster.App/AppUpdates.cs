@@ -43,32 +43,40 @@ static class AppUpdates
     /// <summary>"Updated to 0.2.0." / "The update to 0.2.0 didn't start…": shown once by the first launcher.</summary>
     public static UpdateNotice? Notice { get; set; }
 
-    static string? _updatedFrom, _updateFailed;
+    static string? _updatedFrom, _updateFailed, _updateRefused;
+    static bool _confirmed;
 
     /// <summary>--screenshot-update-bar &lt;png&gt;.</summary>
     public static string? ScreenshotBarPath { get; private set; }
 
-    /// <summary>Takes the updater's command-line options (<c>--updated-from</c>, <c>--update-failed</c>, <c>--screenshot-update-bar</c>).</summary>
+    /// <summary>Takes the updater's command-line options (<c>--updated-from</c>, <c>--update-failed</c>, <c>--update-refused</c>, <c>--screenshot-update-bar</c>).</summary>
     public static void Arg(string name, string value)
     {
         switch (name)
         {
             case "--updated-from": _updatedFrom = value; break;
             case "--update-failed": _updateFailed = value; break;
+            case "--update-refused": _updateRefused = value; break;
             case "--screenshot-update-bar": ScreenshotBarPath = value; break;
         }
     }
 
     /// <summary>
-    /// Run first thing at start. After an update the helper waits for the start marker (and rolls back without it), so it is written
-    /// before anything else; then older downloads are removed and the launcher will say "Updated to …".
+    /// Run at start, after the arguments: sets the notice the launcher shows ("Updated to …" / "The update … didn't start …"). The start
+    /// marker the helper waits for is NOT written here but in <see cref="OnLauncherShown"/>, so a version that fails while starting up
+    /// is still rolled back.
     /// </summary>
     public static void OnStart()
     {
         if (_updatedFrom != null)
         {
-            Notice = UpdateStartup.ConfirmStarted(UpdatesRoot, AppVersion.Current, Program.AppLog);
+            Notice = UpdateStartup.Updated(AppVersion.Current);
             Program.AppLog($"update: started {AppVersion.Text} after updating from {_updatedFrom}");
+        }
+        else if (_updateRefused != null)
+        {
+            Notice = UpdateStartup.Refused(_updateRefused);
+            Program.AppLog("update: " + Notice.Text);
         }
         else if (_updateFailed != null)
         {
@@ -79,6 +87,22 @@ static class AppUpdates
             Program.AppLog("update: " + Notice.Text);
         }
     }
+
+    /// <summary>
+    /// The launcher's Shown event: the first time after <c>--updated-from</c>, writes the start marker (the app really is up) and then
+    /// removes older downloads and backups.
+    /// </summary>
+    public static void OnLauncherShown()
+    {
+        if (_updatedFrom == null || _confirmed) return;
+        _confirmed = true;
+        UpdateStartup.ConfirmStarted(UpdatesRoot, AppDir, AppVersion.Current, Program.AppLog);
+        Program.AppLog($"update: start of {AppVersion.Text} confirmed");
+    }
+
+    /// <summary>True while another Quartermaster process runs from this exe (it may hold a game the swap would break).</summary>
+    static bool OtherCopiesRunning() =>
+        Environment.ProcessPath is { } exe && RunningCopies.OthersRunning(exe, Environment.ProcessId);
 
     /// <summary>True while a game window is open (the launcher never updates then).</summary>
     public static bool GameOpen => Application.OpenForms.OfType<MainForm>().Any(f => !f.IsDisposed);
@@ -107,6 +131,11 @@ static class AppUpdates
             MessageBox.Show(owner, "Close the game and use the launcher to update.", "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+        if (OtherCopiesRunning())
+        {
+            MessageBox.Show(owner, RunningCopies.CloseOthersText, "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         var appDir = AppDir;
         if (!UpdateInstaller.AppFolderWritable(appDir))
         {
@@ -118,6 +147,11 @@ static class AppUpdates
             OfferPage(owner, info, $"Quartermaster can't update itself: {UpdateInstaller.HelperExe} is missing from its folder. Open the download page?");
             return;
         }
+        if (!UpdateInstaller.CanSelfUpdate(appDir))
+        {
+            OfferPage(owner, info, UpdateInstaller.NoManifestText + " Open the download page?");
+            return;
+        }
 
         using var dlg = new UpdateDialog(Feed, info, UpdatesRoot);
         var r = dlg.ShowDialog(owner);
@@ -127,6 +161,12 @@ static class AppUpdates
             return;
         }
         if (r != DialogResult.OK || dlg.Staged is not { } staged) return;
+        if (GameOpen || OtherCopiesRunning()) // the download took a while: check again right before handing over
+        {
+            MessageBox.Show(owner, GameOpen ? "Close the game and use the launcher to update." : RunningCopies.CloseOthersText,
+                "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
 
         try
         {

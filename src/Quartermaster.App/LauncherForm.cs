@@ -137,6 +137,7 @@ sealed class LauncherForm : Form
             if (e.KeyCode == Keys.Delete) { e.Handled = true; Guarded(RemoveSelected); }
         };
         Load += (_, _) => Guarded(OnLoaded);
+        Shown += (_, _) => Guarded(AppUpdates.OnLauncherShown); // after an update: the start marker, once the launcher is really up
         FormClosing += (_, _) => { _closing = true; try { _cts.Cancel(); } catch (ObjectDisposedException) { } };
     }
 

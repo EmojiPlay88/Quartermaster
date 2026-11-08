@@ -17,22 +17,39 @@ public class UpdateStartupTests : IDisposable
     public void ConfirmStarted_writes_the_marker_the_helper_waits_for()
     {
         var v = new Version(0, 2, 0);
-        var n = UpdateStartup.ConfirmStarted(_root, v);
+        UpdateStartup.ConfirmStarted(_root, null, v);
         Assert.True(File.Exists(UpdateInstaller.MarkerPath(_root, v)));
+        var n = UpdateStartup.Updated(v);
         Assert.Equal("Updated to 0.2.0.", n.Text);
         Assert.Null(n.Link);
     }
 
     [Fact]
-    public void ConfirmStarted_removes_older_downloads_and_keeps_the_current_one()
+    public void ConfirmStarted_removes_older_downloads_and_backups_and_keeps_the_current_helper()
     {
         Directory.CreateDirectory(Path.Combine(_root, "0.1.0", "staged"));
         Directory.CreateDirectory(Path.Combine(_root, "0.2.0", "helper"));
+        Directory.CreateDirectory(Path.Combine(_root, "0.2.0", "staged"));
         File.WriteAllText(Path.Combine(_root, "started-0.1.0"), "x");
-        UpdateStartup.ConfirmStarted(_root, new Version(0, 2, 0));
+        var parent = Path.Combine(Path.GetDirectoryName(_root)!, "apps");
+        var app = Directory.CreateDirectory(Path.Combine(parent, "Quartermaster")).FullName;
+        Directory.CreateDirectory(Path.Combine(parent, "Quartermaster.backup-0.0.9"));
+        Directory.CreateDirectory(Path.Combine(parent, "Quartermaster.backup-0.1.0"));
+        UpdateStartup.ConfirmStarted(_root, app, new Version(0, 2, 0));
         Assert.False(Directory.Exists(Path.Combine(_root, "0.1.0")));
         Assert.True(Directory.Exists(Path.Combine(_root, "0.2.0", "helper")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "0.2.0", "staged")));
         Assert.False(File.Exists(Path.Combine(_root, "started-0.1.0")));
+        Assert.False(Directory.Exists(Path.Combine(parent, "Quartermaster.backup-0.0.9")));
+        Assert.True(Directory.Exists(Path.Combine(parent, "Quartermaster.backup-0.1.0")));
+    }
+
+    [Fact]
+    public void Refused_says_nothing_changed_and_links_the_release_page()
+    {
+        var n = UpdateStartup.Refused("0.2.0");
+        Assert.StartsWith("The update to 0.2.0 was not installed; nothing was changed.", n.Text);
+        Assert.Equal("https://github.com/EmojiPlay88/Quartermaster/releases/tag/quartermaster-v0.2.0", n.Link!.ToString());
     }
 
     [Fact]
@@ -42,8 +59,7 @@ public class UpdateStartupTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(_root)!);
         File.WriteAllText(_root, "not a folder");
         var logged = new List<string>();
-        var n = UpdateStartup.ConfirmStarted(_root, new Version(0, 2, 0), logged.Add);
-        Assert.Equal("Updated to 0.2.0.", n.Text);
+        UpdateStartup.ConfirmStarted(_root, null, new Version(0, 2, 0), logged.Add);
         Assert.Single(logged);
     }
 

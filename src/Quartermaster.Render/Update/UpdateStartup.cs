@@ -9,11 +9,15 @@ public static class UpdateStartup
     /// <summary>The helper's swap journal; it stays in the updates folder when a rollback failed.</summary>
     public const string JournalName = "swap-journal.json";
 
+    /// <summary><c>--updated-from &lt;old&gt;</c>: the line the launcher shows, "Updated to {current}."</summary>
+    public static UpdateNotice Updated(Version current) => new($"Updated to {AppVersion.Format(current)}.");
+
     /// <summary>
-    /// <c>--updated-from &lt;old&gt;</c>: writes the marker the helper waits for (so it does not roll back), then removes older downloads
-    /// and markers. Returns "Updated to {current}." Writing the marker never throws; a failure is reported through <paramref name="log"/>.
+    /// Once the launcher is shown after <c>--updated-from</c>: writes the marker the helper waits for (so it does not roll back), then
+    /// removes older downloads, markers and backups (<see cref="UpdateInstaller.CleanupAfterUpdate"/>). Never throws; a marker that cannot be
+    /// written is reported through <paramref name="log"/>.
     /// </summary>
-    public static UpdateNotice ConfirmStarted(string updatesRoot, Version current, Action<string>? log = null)
+    public static void ConfirmStarted(string updatesRoot, string? appDir, Version current, Action<string>? log = null)
     {
         try
         {
@@ -24,9 +28,13 @@ public static class UpdateStartup
         {
             log?.Invoke("update: could not write the start marker: " + ex.Message);
         }
-        UpdateInstaller.CleanupOld(updatesRoot, current);
-        return new UpdateNotice($"Updated to {AppVersion.Format(current)}.");
+        UpdateInstaller.CleanupAfterUpdate(updatesRoot, appDir, current);
     }
+
+    /// <summary><c>--update-refused &lt;version&gt;</c>: the helper refused before touching anything (another copy running, or no file list).</summary>
+    public static UpdateNotice Refused(string attempted) =>
+        new($"The update to {attempted} was not installed; nothing was changed. Close every other Quartermaster window and try again, or download it from the release page.",
+            ReleasePage(attempted), "Release page");
 
     /// <summary>
     /// <c>--update-failed &lt;version&gt;</c>: the helper went back to the old version. When its journal is still there (the rollback itself

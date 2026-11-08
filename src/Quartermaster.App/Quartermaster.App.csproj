@@ -39,4 +39,25 @@
     <Message Importance="high" Text="Updater helper published to $(_QmHelperPublishDir)Quartermaster.Updater.exe" />
   </Target>
 
+  <!--
+    quartermaster-files.txt: every file of the publish folder (relative, forward slashes, the list itself included). The updater helper only
+    ever moves or deletes files named in it, so a user's own files in the app folder are left alone; a folder without it can't self-update.
+    Runs after the helper and the licence files are in the publish folder, so build/release.ps1 gets it too.
+  -->
+  <Target Name="WriteReleaseFileList" AfterTargets="PublishUpdaterHelper" Condition="'$(RuntimeIdentifier)' != ''">
+    <PropertyGroup>
+      <_QmPubDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_QmPubDir>
+      <_QmListName>quartermaster-files.txt</_QmListName>
+    </PropertyGroup>
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\..\LICENSE;$(MSBuildThisFileDirectory)..\..\THIRD-PARTY-NOTICES.md" DestinationFolder="$(_QmPubDir)"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\LICENSE') And Exists('$(MSBuildThisFileDirectory)..\..\THIRD-PARTY-NOTICES.md')" />
+    <ItemGroup>
+      <_QmPubFile Include="$(_QmPubDir)**\*" Exclude="$(_QmPubDir)$(_QmListName)" />
+      <_QmPubLine Include="@(_QmPubFile->'%(RecursiveDir)%(Filename)%(Extension)'->Replace('\', '/'))" />
+      <_QmPubLine Include="$(_QmListName)" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_QmPubDir)$(_QmListName)" Lines="@(_QmPubLine)" Overwrite="true" WriteOnlyWhenDifferent="false" />
+    <Message Importance="high" Text="Release file list written to $(_QmPubDir)$(_QmListName)" />
+  </Target>
+
 </Project>
