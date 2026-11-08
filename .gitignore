@@ -8,3 +8,6 @@ obj/
 *.user
 src/Quartermaster.Relay/data/
 artifacts/
+# The invented wiki demo module and rules pack are generated and committed (tools/Quartermaster.DemoModule).
+!docs/wiki/demo/*.vmod
+!docs/wiki/demo/*.qrules
