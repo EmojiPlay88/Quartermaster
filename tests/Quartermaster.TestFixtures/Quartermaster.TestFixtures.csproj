@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <PackageReference Include="SkiaSharp" Version="4.154.0" />
+    <!-- Linux native for test projects that get SkiaSharp only through this fixture (Core.Tests, Vassal.Tests) on ubuntu CI. -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
   </ItemGroup>
 
   <ItemGroup>
