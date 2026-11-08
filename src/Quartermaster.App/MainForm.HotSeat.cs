@@ -335,8 +335,16 @@ sealed partial class MainForm
         Program.AppLog($"smoke: playerview {(ok ? "ok" : "FAILED")} (owners seeing the marker: {seeing.Count}, {viewer.Name}'s view leaks: {leaked})");
         if (!ok) Program.ExitCode = 1;
         ShowLedger();
-        for (var i = 0; i < 12; i++) { Thread.Sleep(50); Application.DoEvents(); } // let the debounced view refresh run
-        if (_ledgers.TryGetValue("ledger", out var w) && !w.IsDisposed && w is LedgerWindow lw) lw.SaveScreenshot(Path.ChangeExtension(shot, null) + "-ledger.png");
+        for (var i = 0; i < 40; i++) { Thread.Sleep(50); Application.DoEvents(); } // let the debounced view refresh run and the ledger and map draw
+        if (_ledgers.TryGetValue("ledger", out var w) && !w.IsDisposed && w is LedgerWindow lw)
+        {
+            lw.Activate(); lw.Update(); Application.DoEvents();
+            lw.SaveScreenshot(Path.ChangeExtension(shot, null) + "-ledger.png");
+            lw.Close(); // the main window picture below shows the map, not the ledger
+            Application.DoEvents();
+            FirstMap()?.Activate();
+        }
+        for (var i = 0; i < 40; i++) { Thread.Sleep(50); Application.DoEvents(); } // the map redraws its tiles after the view change
         SaveScreenshot(this, shot, true);
         SetGamePlayers(Array.Empty<PlayerDef>());
         Application.DoEvents();

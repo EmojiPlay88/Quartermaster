@@ -862,7 +862,7 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
             if (!_viewer.Visible || _scan.Visible) return ("Back to PDF did not show the PDF viewer", null);
 
             // A PDF opened with Open scan… joins the rulebook search for the session, and its hits open in the scan pane.
-            var opened = Path.Combine(AppDataRoot.Sub("smoke-ocr"), "opened-rules.pdf");
+            var opened = Path.Combine(AppDataRoot.Sub("smoke-ocr"), "extra-rulebook.pdf");
             File.Copy(cached, opened, true);
             var o = OpenScanFile(opened);
             Pump(() => o.IsCompleted && _scan.Loading.IsCompleted, 30);
@@ -885,15 +885,15 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
             var t2 = _s.Rules!.ById<TableDef>(made.Id);
             var r2 = t2?.RuleRefId == null ? null : _s.Rules.ById<RuleRef>(t2.RuleRefId);
             Program.AppLog($"smoke: rule ref from the opened PDF's hit: '{r2?.DocumentEntry}' p. {r2?.Page}");
-            if (r2 == null || r2.DocumentEntry != ScanSessionModel.ScanRefPrefix + "opened-rules.pdf" || r2.Page != 2)
-                return ("Use as rule ref on the opened PDF's hit did not store scan:opened-rules.pdf p. 2", null);
+            if (r2 == null || r2.DocumentEntry != ScanSessionModel.ScanRefPrefix + "extra-rulebook.pdf" || r2.Page != 2)
+                return ("Use as rule ref on the opened PDF's hit did not store scan:extra-rulebook.pdf p. 2", null);
             if (_s.Rules.RuleRefs.Any(x => RulesValidator.IsLocalPath(x.DocumentEntry))) return ("a rule ref stores a local path", null);
             var shown2 = SearchPanelModel.DescribeRef(r2, RefDocs, _index?.Documents);
             Program.AppLog($"smoke: opened PDF rule ref reads '{shown2.Text}' (link {shown2.IsLink})");
             if (!shown2.IsLink) return ("the opened PDF's rule ref is not a link", null);
             RefreshUsed();
             var usedScan = SearchPanelModel.UsedOnPageRows(_s.Rules, r2.DocumentEntry, 2).Select(u => u.Text).ToList();
-            Program.AppLog("smoke: used on scan:opened-rules.pdf p. 2: " + string.Join(" | ", usedScan));
+            Program.AppLog("smoke: used on scan:extra-rulebook.pdf p. 2: " + string.Join(" | ", usedScan));
             if (!usedScan.Contains("Table: " + t2!.Name)) return ("Used on this page does not list the table for the opened PDF's page", null);
             if (_viewer.UsedOnPageLines.Contains("Table: " + t2.Name)) return ("Used on this page lists the scan ref on the module PDF", null);
         }

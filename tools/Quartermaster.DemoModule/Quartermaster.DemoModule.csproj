@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\tests\Quartermaster.TestFixtures\Quartermaster.TestFixtures.csproj" />
     <ProjectReference Include="..\..\src\Quartermaster.Rules\Quartermaster.Rules.csproj" />
     <ProjectReference Include="..\..\src\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />

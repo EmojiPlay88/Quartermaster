@@ -166,6 +166,7 @@ sealed partial class MainForm
         _alertWatch?.Flush();
         Application.DoEvents();
         var ok = _alertHits.Count > 0 && _alertBar.Visible && _alertBar.ChipTexts.Count > 0;
+        ClearWindowsForShot();
         SaveScreenshot(this, _opts.ScreenshotAlerts!, true);
         Program.AppLog($"smoke: alerts {(ok ? "ok" : "FAILED")} (banner '{_alertBar.BannerText}', chips {string.Join(" | ", _alertBar.ChipTexts)})");
         if (!ok) Program.ExitCode = 1;

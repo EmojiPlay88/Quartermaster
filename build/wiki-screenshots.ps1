@@ -30,17 +30,22 @@ $proj = Join-Path $repo 'src\Quartermaster.App\Quartermaster.App.csproj'
 if (-not $SkipBuild) {
     & dotnet build $proj -c Release --nologo -v q
     if ($LASTEXITCODE -ne 0) { throw 'build failed' }
-    # the online screenshot starts the relay found next to / above the App output
-    & dotnet build (Join-Path $repo 'src\Quartermaster.Relay\Quartermaster.Relay.csproj') -c Release --nologo -v q
-    if ($LASTEXITCODE -ne 0) { throw 'relay build failed' }
 }
 $exe = Get-ChildItem (Join-Path $repo 'src\Quartermaster.App\bin\Release') -Recurse -Filter Quartermaster.App.exe | Select-Object -First 1 -ExpandProperty FullName
 if (-not $exe) { throw 'Quartermaster.App.exe (Release) not found' }
 New-Item -ItemType Directory -Force $images | Out-Null
 
-# NOTE: no outliner, batch or online entries - their smokes assume the test fixture (a saved Setup, a Red/Blue pack), not the demo.
+# NOTE: no outliner, batch, online or playerview entries - their smokes assume the test fixture (a saved Setup, a Red/Blue pack) or leave the map unpainted after the hot-seat hand-over; Task 7 hand-shoots them.
 # Name = output png (images/<Name>.png); Flag; Extra args; Smoke = seconds for --smoke (0 = the flag needs none);
-# NoRules = no --rules; Online = uses --smoke-online instead of --smoke.
+# NoRules = no --rules; Docs = leave the sample chart/rules-text windows open (default: --no-smoke-documents keeps them out of the picture).
+# A non-zero exit code is a failure, because the app's own self-checks failed. These runs are allowed to exit 1, each for the stated reason;
+# the picture was checked by eye and shows the intended state.
+$allowedExit1 = @{
+    'float'       = 'the focus-gate self-check assumes a docked map; this run floats it on purpose'
+    'ledger-tabs' = 'the counter-pictures-drawn self-check races the picture worker; the shot itself waits for them'
+    'phases'      = 'the turn-wrap and batch self-checks expect the test fixture''s phase names; the shots are taken before them'
+    'cheatsheet'  = 'same turn-wrap and batch self-checks as phases; the cheat sheet shots are taken before them'
+}
 $shots = @(
     @{ Name = 'main-window';     Flag = '--screenshot';             Smoke = 8 }
     @{ Name = 'float';           Flag = '--screenshot-float';       Smoke = 8; Extra = @('--float-main-map') }
@@ -68,7 +73,6 @@ $shots = @(
     @{ Name = 'formula';         Flag = '--screenshot-formula';     Smoke = 8 }
     @{ Name = 'breakdown';       Flag = '--screenshot-breakdown';   Smoke = 8 }
     @{ Name = 'handover';        Flag = '--screenshot-handover';    Smoke = 12 }
-    @{ Name = 'playerview';      Flag = '--screenshot-playerview';  Smoke = 12 }
     @{ Name = 'tour';            Flag = '--screenshot-tour';        Smoke = 12 }
     @{ Name = 'stepback';        Flag = '--screenshot-stepback';    Smoke = 12 }
     @{ Name = 'nextphase';       Flag = '--screenshot-nextphase';   Smoke = 12 }
@@ -83,22 +87,27 @@ if ($Only) { $Only = $Only -split ","; $shots = $shots | Where-Object { $Only -c
 
 # Under ProgramData, not the temp folder: Settings > Folders draws this path, and the temp folder sits inside a user profile.
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'
+$marker = Join-Path $demoRoot '.quartermaster-demo-root'
 $failed = @()
+if (-not $Only) { Get-ChildItem $images -Filter *.png -ErrorAction SilentlyContinue | Remove-Item -Force } # no stale pictures from earlier runs
+function Reset-DemoRoot {
+    # only ever delete a folder this script made (it holds the marker file)
+    if ((Test-Path $demoRoot) -and -not (Test-Path $marker)) { throw "$demoRoot exists but was not made by this script; remove it by hand." }
+    if (Test-Path $demoRoot) { Remove-Item $demoRoot -Recurse -Force }
+}
 foreach ($s in $shots) {
     # a fresh, empty profile for every run
-    if (Test-Path $demoRoot) { Remove-Item $demoRoot -Recurse -Force }
+    Reset-DemoRoot
     foreach ($d in 'AppData\Roaming', 'AppData\Local', 'Documents', 'layout') { New-Item -ItemType Directory -Force (Join-Path $demoRoot $d) | Out-Null }
-    $expect = if ($s.Expect) { $s.Expect } else { $s.Name }
-    $png = Join-Path $images ($expect + '.png')
-    $arg = Join-Path $images ($s.Name + '.png')
+    Set-Content -Path $marker -Value 'made by build/wiki-screenshots.ps1' -Encoding ascii
+    $png = Join-Path $images ($s.Name + '.png')
     if (Test-Path $png) { Remove-Item $png -Force }
 
     $argList = @($vmod)
     if (-not $s.NoRules) { $argList += '--rules'; $argList += $rules }
-    $argList += $s.Flag; $argList += $arg
+    $argList += $s.Flag; $argList += $png
     if ($s.Extra) { $argList += $s.Extra }
-    if ($s.Online) { $argList += '--smoke-online'; $argList += "$($s.Smoke)"; $argList += '--smoke'; $argList += "$($s.Smoke)" }
-    elseif ($s.Smoke -gt 0) { $argList += '--smoke'; $argList += "$($s.Smoke)" }
+    if ($s.Smoke -gt 0) { $argList += '--smoke'; $argList += "$($s.Smoke)"; if (-not $s.Docs) { $argList += '--no-smoke-documents' } }
 
     $psi = [Diagnostics.ProcessStartInfo]::new($exe)
     $psi.Arguments = ($argList | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
@@ -107,6 +116,8 @@ foreach ($s in $shots) {
     $psi.EnvironmentVariables['LOCALAPPDATA'] = Join-Path $demoRoot 'AppData\Local'
     $psi.EnvironmentVariables['USERPROFILE'] = $demoRoot
     $psi.EnvironmentVariables['QUARTERMASTER_LAYOUT_ROOT'] = Join-Path $demoRoot 'layout'
+    # same number and date formats on every machine (no "1,20" from a local culture)
+    $psi.EnvironmentVariables['DOTNET_SYSTEM_GLOBALIZATION_INVARIANT'] = '1'
     $p = [Diagnostics.Process]::Start($psi)
     if (-not $p.WaitForExit($TimeoutSeconds * 1000)) {
         try { & taskkill /PID $p.Id /T /F | Out-Null } catch { }
@@ -114,9 +125,13 @@ foreach ($s in $shots) {
         $failed += $s.Name; continue
     }
     $ok = (Test-Path $png) -and ((Get-Item $png).Length -gt 0)
-    if (-not $ok) { Write-Warning "$($s.Name): no PNG produced (exit $($p.ExitCode))"; $failed += $s.Name }
-    else { Write-Host ("{0,-22} ok  exit {1}  {2} bytes" -f $s.Name, $p.ExitCode, (Get-Item $png).Length) }
+    if (-not $ok) { Write-Warning "$($s.Name): no PNG produced (exit $($p.ExitCode))"; $failed += $s.Name; continue }
+    if ($p.ExitCode -ne 0 -and -not ($p.ExitCode -eq 1 -and $allowedExit1.ContainsKey($s.Name))) {
+        Write-Warning "$($s.Name): the app exited with code $($p.ExitCode) (a self-check failed)"; $failed += $s.Name; continue
+    }
+    $note = if ($p.ExitCode -ne 0) { '  exit 1 allowed: ' + $allowedExit1[$s.Name] } else { '' }
+    Write-Host ("{0,-22} ok  {1} bytes{2}" -f $s.Name, (Get-Item $png).Length, $note)
 }
-if (Test-Path $demoRoot) { Remove-Item $demoRoot -Recurse -Force }
+Reset-DemoRoot
 Write-Host ("Images in {0}: {1}" -f $images, (Get-ChildItem $images -Filter *.png | Measure-Object).Count)
 if ($failed.Count) { Write-Warning ("Problems: " + ($failed -join ', ')); exit 1 }

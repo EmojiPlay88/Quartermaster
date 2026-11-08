@@ -66,6 +66,8 @@ sealed partial class MainForm
         if (_benches.TryGetValue("workbench", out var w) && !w.IsDisposed && w is WorkbenchWindow wb)
         {
             wb.SelectTabForSmoke(_opts.WorkbenchTab);
+            wb.WindowState = FormWindowState.Normal;
+            wb.Size = new Size(1100, 720); // room for the editors (the default size crops them)
             Program.AppLog($"smoke: workbench opened; selected table {wb.SelectedTableForSmoke ?? "(none)"}; {wb.IssueCountForSmoke} issue(s)");
             wb.SaveScreenshot(_opts.ScreenshotWorkbench);
         }
@@ -170,6 +172,15 @@ sealed partial class MainForm
 
     bool _smokeExtrasOpened;
 
+    /// <summary>Clean screenshot runs: the ledger and workbench the checks above opened would show through the later pictures of this window, so they are closed.</summary>
+    void CloseSmokeWindows()
+    {
+        foreach (var w in _ledgers.Values.Concat(_benches.Values).Where(w => !w.IsDisposed).ToList()) w.Close();
+        Application.DoEvents();
+        FirstMap()?.Activate();
+        Application.DoEvents();
+    }
+
     /// <summary>Opens the first chart and first text document so the tab strip shows several tabs (no PDF/WebView2 in smoke).</summary>
     void OpenSmokeDocuments()
     {
@@ -193,7 +204,7 @@ sealed partial class MainForm
             _smokeTimer.Start();
             return;
         }
-        if (!_smokeExtrasOpened) { _smokeExtrasOpened = true; Guard(OpenSmokeDocuments); }
+        if (!_smokeExtrasOpened) { _smokeExtrasOpened = true; if (!_opts.NoSmokeDocuments) Guard(OpenSmokeDocuments); }
         if (pending) Program.AppLog("smoke: tiling did not finish within 60 s.");
         else Program.AppLog($"smoke: tiling finished {(DateTime.UtcNow - _smokeStartedAt).TotalSeconds:F1} s after window start.");
         Program.AppLog($"smoke: peak working set {System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64 / (1024 * 1024)} MB");
@@ -204,6 +215,7 @@ sealed partial class MainForm
         Guard(SmokeFocusGate);
         Guard(SmokeFloatShortcut);
         Guard(SmokeWorkbench);
+        if (_opts.NoSmokeDocuments) Guard(CloseSmokeWindows);
         if (_opts.Screenshot != null) Guard(() => SaveScreenshot(this, _opts.Screenshot, true));
         if (_opts.ScreenshotFloat != null)
         {
@@ -271,7 +283,7 @@ sealed partial class MainForm
             Program.ExitCode = 1;
             return;
         }
-        game.Execute(CommandLog.Stamp(new RollDice("Smoke attack", 2, 6, new[] { 3, 4 })));
+        game.Execute(CommandLog.Stamp(new RollDice("Attack roll", 2, 6, new[] { 3, 4 })));
         if (_dice != null)
         {
             var rolled = _dice.RollSpec(new DiceSpec(2, 6, 0), "Roll");
@@ -390,7 +402,7 @@ sealed partial class MainForm
         if (FirstMap() is not { } map || _session?.Game == null) detail = "no map or game";
         else
         {
-            var err = MapExport.RunWhole(_session, map.Canvas, 0.25, path, null, CancellationToken.None);
+            var err = MapExport.RunWhole(_session, map.Canvas, 1.0, path, null, CancellationToken.None);
             if (err != null) detail = err;
             else
             {

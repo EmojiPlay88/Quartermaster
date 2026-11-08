@@ -348,7 +348,8 @@ sealed partial class FormulasTab : UserControl, IRuleRefEditor
                 var asked = FormulaEdit.Unused(f).Where(FormulaEdit.IsConfigured).Where(b => !_declined.Contains(id + "|" + b.Variable)).ToList();
                 if (asked.Count == 0) return;
                 var names = string.Join(", ", asked.Select(b => b.Variable));
-                if (MessageBox.Show(this, $"In \"{f.Name}\", the variable(s) {names} are no longer in the formula. Remove their settings (kind, target, details)?", "Remove unused bindings",
+                if (Program.Smoke) Program.AppLog($"smoke: skipped the box asking to remove unused bindings of {f.Name}: {names}");
+                if (!Program.Smoke && MessageBox.Show(this, $"In \"{f.Name}\", the variable(s) {names} are no longer in the formula. Remove their settings (kind, target, details)?", "Remove unused bindings",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
                 {
                     CommitFor(id, FormulaEdit.RemoveUnused);

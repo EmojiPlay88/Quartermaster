@@ -23,8 +23,8 @@ sealed partial class MainForm
         {
             Tabs = new[]
             {
-                new UserLedgerTab("Supply TEST", "Fuel < 1000", new[] { "fuel" }, true, "Invented smoke tab"),
-                new UserLedgerTab("Broken TEST", "Fuel <", Array.Empty<string>(), false, null),
+                new UserLedgerTab("Supply", "Fuel < 1000", new[] { "fuel" }, true, "Units that still have fuel"),
+                new UserLedgerTab("Ammo check", "Fuel <", Array.Empty<string>(), false, null),
             },
             LastTab = "units", ShowCounters = true, Grouping = LedgerGrouping.Map,
         });
@@ -37,13 +37,13 @@ sealed partial class MainForm
         var titles = lw.TabTitlesForSmoke;
         Program.AppLog("smoke: ledger tabs " + string.Join(" | ", titles));
         Check(titles.Count == 6 && titles[0].StartsWith("Units (") && titles[1].StartsWith("Depots & Global (") && titles[2] == "Everything"
-            && titles[3] == "★ Supply TEST" && titles[4] == "★ Broken TEST" && titles[5] == "+", "tab titles");
+            && titles[3] == "★ Supply" && titles[4] == "★ Ammo check" && titles[5] == "+", "tab titles");
         Check(lw.CurrentTabKeyForSmoke == "units", "opens on the last tab (units)");
 
-        lw.SelectTabForSmoke("user:Supply TEST");
-        Program.AppLog($"smoke: Supply TEST tab has {lw.RowCountForSmoke} row(s)");
+        lw.SelectTabForSmoke("user:Supply");
+        Program.AppLog($"smoke: Supply tab has {lw.RowCountForSmoke} row(s)");
         Check(lw.RowCountForSmoke > 0 && !lw.BannerShownForSmoke, "user tab rows");
-        lw.SelectTabForSmoke("user:Broken TEST");
+        lw.SelectTabForSmoke("user:Ammo check");
         Check(lw.RowCountForSmoke == 0 && lw.BannerShownForSmoke, "broken filter shows the banner and no rows");
         lw.SelectTabForSmoke("units");
         Check(LedgerTabStore.Load(AppDataRoot.Path, sha).LastTab == "units", "last tab remembered");
@@ -68,7 +68,7 @@ sealed partial class MainForm
             Program.AppLog($"smoke: counter preview shown {r.Width}x{r.Height}");
             Check(Math.Max(r.Width, r.Height) >= 200, "preview is about 200 px");
             using var bmp = new Bitmap(r.Width, r.Height);
-            using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(r.Location, Point.Empty, r.Size);
+            tip.DrawToBitmap(bmp); // drawn from the window itself, never copied off the screen (other programs may be behind it)
             var path = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(LedgerTabsShot!)) ?? ".", Path.GetFileNameWithoutExtension(LedgerTabsShot!) + "-preview.png");
             bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
             Program.AppLog("smoke: counter preview saved to " + path);

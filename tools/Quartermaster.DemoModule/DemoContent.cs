@@ -70,7 +70,8 @@ public static class DemoContent
             fx.WithBuildFile(BuildFile(grid));
             fx.AddFile("images/riverland-map.svg", Utf8(BoardSvg(grid)));
             foreach (var c in Counters) fx.AddFile("images/" + c.Image, Utf8(CounterSvg(c)));
-            fx.AddFile("riverland-rules.txt", Utf8(RulesText));
+            fx.AddFile("riverland-rules.txt", new UTF8Encoding(false).GetBytes(RulesText.Replace("\r\n", "\n").Replace("\n", "\r\n"))); // CRLF: the text window shows LF-only files on one line
+            fx.AddFile("riverland-rulebook.pdf", RulebookPdf());
             File.Copy(fx.Build(), vmodPath, overwrite: true);
         }
 
@@ -278,6 +279,7 @@ public static class DemoContent
         sb.Append("  </VASSAL.build.module.PlayerRoster>\n");
         sb.Append("  <VASSAL.build.module.Documentation>\n");
         sb.Append("    <VASSAL.build.module.documentation.HelpFile fileName=\"riverland-rules.txt\" fileType=\"archive\" title=\"Riverland Rules\"/>\n");
+        sb.Append("    <VASSAL.build.module.documentation.HelpFile fileName=\"riverland-rulebook.pdf\" fileType=\"archive\" title=\"Riverland Rulebook\"/>\n");
         sb.Append("  </VASSAL.build.module.Documentation>\n");
         sb.Append("  <VASSAL.build.module.PieceWindow hidden=\"false\" name=\"Counters\" scale=\"1.0\" text=\"Counters\" tooltip=\"\">\n");
         sb.Append("    <VASSAL.build.widget.TabWidget entryName=\"Counters\">\n");
@@ -471,6 +473,63 @@ public static class DemoContent
         This game is made up for documentation and is free to use.
 
         """;
+
+    private static readonly string[][] RulebookPages =
+    {
+        new[]
+        {
+            "RIVERLAND RULEBOOK", "An invented game for the Quartermaster wiki.", "",
+            "1. Sides and turns", "",
+            "Two sides, the Northern League and the Southern Compact, face each other across a river.",
+            "Each turn the Northern League plays its Supply, Movement and Combat phases, then the",
+            "Southern Compact plays its own. After both sides have played, the turn marker moves on.", "",
+            "2. Weather", "",
+            "At the start of each turn roll one die. On a 5 or 6 the weather is mud; otherwise it is dry.",
+            "Mud doubles the fuel cost of movement for the whole turn.",
+        },
+        new[]
+        {
+            "3. Supply", "",
+            "One die of supplies arrives at your depot. A depot holds at most 30 supplies.",
+            "Then every unit receives fuel and ammo by its distance in hexes to its own depot:", "",
+            "   0 hexes away: 3 points      1-2 hexes: 2 points      3-4 hexes: 1 point      5 or more: none", "",
+            "Fuel is capped at 6 points and ammo at 4 points. A unit that is cut off from its depot",
+            "receives no supply until the road is open again.",
+        },
+        new[]
+        {
+            "4. Movement", "",
+            "Every two hexes moved cost one fuel point (rounded up). In mud the cost is doubled.",
+            "A unit with no fuel cannot move. Depots never move.", "",
+            "5. Combat", "",
+            "Roll one die and add half the attacker's readiness (rounded down). A total of 6 or more wins.",
+            "Firing uses one ammo point. A unit with no ammo cannot attack.", "",
+            "6. Hidden information", "",
+            "Readiness is secret: only the side that owns a unit may see it.",
+        },
+    };
+
+    /// <summary>The three-page invented rulebook as a PDF (PdfPig builder; fixed content so the module stays reproducible).</summary>
+    private static byte[] RulebookPdf()
+    {
+        var b = new UglyToad.PdfPig.Writer.PdfDocumentBuilder();
+        var font = b.AddStandard14Font(UglyToad.PdfPig.Fonts.Standard14Fonts.Standard14Font.Helvetica);
+        foreach (var lines in RulebookPages)
+        {
+            var pg = b.AddPage(UglyToad.PdfPig.Content.PageSize.A4);
+            double y = 780;
+            foreach (var l in lines)
+            {
+                if (l.Length > 0) pg.AddText(l, 11, new UglyToad.PdfPig.Core.PdfPoint(50, y), font);
+                y -= 18;
+            }
+        }
+        // PdfPig writes a random trailer /ID; swap it for a fixed value of the same length (offsets stay valid) so the module is byte-stable.
+        var text = Encoding.Latin1.GetString(b.Build());
+        text = System.Text.RegularExpressions.Regex.Replace(text, "/ID \\[ <[0-9A-F]{32}><[0-9A-F]{32}>\\]",
+            "/ID [ <52495645524C414E44000000000000AA><52495645524C414E44000000000000BB>]");
+        return Encoding.Latin1.GetBytes(text);
+    }
 
     // ---- helpers ----
 
