@@ -131,7 +131,7 @@ public class DemoModuleTests : IDisposable
         return d;
     }
 
-    private static string RepoRoot()
+    internal static string RepoRoot()
     {
         for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
             if (File.Exists(Path.Combine(d.FullName, "Quartermaster.slnx"))) return d.FullName;
