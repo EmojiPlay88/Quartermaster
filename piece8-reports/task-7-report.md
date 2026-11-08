@@ -25,3 +25,15 @@ src/Quartermaster.Updater/{Quartermaster.Updater.csproj,Program.cs,Swapper.cs}; 
 - `--update-failed` / `--updated-from` handling and marker writing belong to the app task (Task 8). Marker path is deleted by the helper before launching, so a stale marker cannot fool it.
 - Helper does not restart the old app when the pid-wait times out (app presumably still running).
 - Backup folder is overwritten if a stale one with the same name exists.
+
+## Fix round 1 (review findings C1, C2, I1, I2, I3)
+Changes (Swapper.cs, Program.cs):
+- Journal now stores appDir, backupDir, stagedDir, version. Swapper has a `Version` property (runner sets it). Resume/Rollback use the journal's paths (I2).
+- C1: `Rollback()` is a no-op without a journal. It only clears the app folder (steps install/done/rollback-clear) when the backup exists and is non-empty, else throws InvalidOperationException and touches nothing.
+- C2: new journal steps `rollback-clear` and `rollback-restore`, written before clearing / restoring. Crash in `rollback-restore` resumes by restoring only (no clearing); `rollback-clear` re-clears safely since nothing was restored yet.
+- I1: when rollback throws, the journal is kept, old app start is still attempted, exit code 5 (`RollbackFailed`).
+- I3: `Resume()` compares journal version and staged dir with the request. Mismatching journals are brought to a consistent folder (done: left as is; install/backup/rollback: rolled back), deleted, and return `ResumeOutcome.Stale`; the runner then applies the requested update. Matching journals behave as before.
+Tests added (8 new cases, 26 total): Rollback_NoJournal_LeavesAppUntouched, Rollback_DoneJournalButBackupMissing_Throws_AppUntouched, Apply_StaleBackupLocked_AppUntouched (C1); Resume_AfterCrashInRollback_RestoresOld x2 steps (C2); Main_RollbackFails_KeepsJournalAndDoesNotWipeApp (I1); Resume_UsesJournalPaths_NotConstructorBackup (I2); Main_StaleDoneJournalFromOtherVersion_StillAppliesRequestedUpdate (I3). Existing Main_CrashedJournalInBackup test now writes the version into its journal.
+Command: `dotnet test tests/Quartermaster.Updater.Tests`
+Output: `Passed!  - Failed: 0, Passed: 26, Skipped: 0, Total: 26`
+Note: this round I wrote the fix before the tests (no separate RED run). The disk was full at the start of the round; I only removed my own bin/obj folders in the worktree to continue.

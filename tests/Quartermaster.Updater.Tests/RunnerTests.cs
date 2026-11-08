@@ -89,7 +89,7 @@ public class RunnerTests
     {
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         var oldSnap = TempArea.Snapshot(t.App);
-        t.WriteJournal("backup");
+        t.WriteJournal("backup", version: "2.0.0");
         Directory.CreateDirectory(t.Backup);
         File.Move(Path.Combine(t.App, "a.dll"), Path.Combine(t.Backup, "a.dll"));
         var host = new FakeHost();
@@ -126,5 +126,30 @@ public class RunnerTests
         Assert.Equal(@"C:\d\swap-journal.json", o.JournalPath);
         Assert.Equal(@"C:\d\helper.log", o.LogPath);
         Assert.Null(UpdateOptions.Parse(["--app", @"C:\a"]));
+    }
+
+    [Fact]
+    public void Main_RollbackFails_KeepsJournalAndDoesNotWipeApp()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        var host = new FakeHost();
+        host.OnStart = (s, _) => { if (s.Args.StartsWith("--updated-from")) Directory.Delete(t.Backup, true); };
+        var code = new UpdateRunner(Opts(t, markerSec: 1), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.RollbackFailed, code);
+        Assert.True(File.Exists(t.Journal));
+        Assert.Equal("new", File.ReadAllText(Path.Combine(t.App, "Quartermaster.App.exe")));
+    }
+
+    [Fact]
+    public void Main_StaleDoneJournalFromOtherVersion_StillAppliesRequestedUpdate()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        t.WriteJournal("done", version: "1.5.0");
+        var host = new FakeHost();
+        host.OnStart = (s, _) => { if (s.Args.StartsWith("--updated-from")) File.WriteAllText(t.Marker, "ok"); };
+        var code = new UpdateRunner(Opts(t), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.Ok, code);
+        Assert.Equal("new", File.ReadAllText(Path.Combine(t.App, "Quartermaster.App.exe")));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(t.Backup, "Quartermaster.App.exe")));
     }
 }

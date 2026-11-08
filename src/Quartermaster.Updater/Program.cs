@@ -4,7 +4,7 @@ namespace Quartermaster.Updater;
 
 public static class ExitCodes
 {
-    public const int Ok = 0, BadArgs = 1, PidTimeout = 2, RolledBack = 3, SwapFailed = 4;
+    public const int Ok = 0, BadArgs = 1, PidTimeout = 2, RolledBack = 3, SwapFailed = 4, RollbackFailed = 5;
 }
 
 public sealed class UpdateOptions
@@ -104,7 +104,7 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         var journalPath = o.JournalPath ?? Path.Combine(markerFolder, "swap-journal.json");
         var backup = o.BackupDir ?? ChooseBackupDir(o.AppDir, o.OldVersion, markerFolder);
         var appExe = Path.Combine(o.AppDir, "Quartermaster.App.exe");
-        var swapper = new Swapper(o.AppDir, o.StagedDir, backup, journalPath);
+        var swapper = new Swapper(o.AppDir, o.StagedDir, backup, journalPath) { Version = o.Version };
 
         log($"Waiting up to {o.ExitTimeout.TotalSeconds:0}s for app pid {o.Pid} to exit");
         var deadline = DateTime.UtcNow + o.ExitTimeout;
@@ -121,12 +121,18 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
             var outcome = swapper.Resume();
             log($"Journal resume outcome: {outcome}");
             if (outcome == ResumeOutcome.RolledBack) return Failed(swapper, appExe, rollback: false);
-            if (outcome == ResumeOutcome.None) { log("Applying update"); swapper.Apply(); }
+            if (outcome is ResumeOutcome.None or ResumeOutcome.Stale) { log("Applying update"); swapper.Apply(); }
         }
         catch (Exception ex)
         {
             log("Swap failed: " + ex.Message);
-            try { swapper.Rollback(); } catch (Exception ex2) { log("Rollback failed: " + ex2.Message); }
+            try { swapper.Rollback(); }
+            catch (Exception ex2)
+            {
+                log("Rollback failed, journal kept for recovery: " + ex2.Message);
+                Launch(appExe, "--update-failed " + o.Version);
+                return ExitCodes.RollbackFailed;
+            }
             Launch(appExe, "--update-failed " + o.Version);
             swapper.DeleteJournal();
             return ExitCodes.SwapFailed;
@@ -151,7 +157,12 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         if (rollback)
         {
             try { swapper.Rollback(); }
-            catch (Exception ex) { log("Rollback failed: " + ex.Message); }
+            catch (Exception ex)
+            {
+                log("Rollback failed, journal kept for recovery: " + ex.Message);
+                Launch(appExe, "--update-failed " + o.Version);
+                return ExitCodes.RollbackFailed;
+            }
         }
         Launch(appExe, "--update-failed " + o.Version);
         swapper.DeleteJournal();

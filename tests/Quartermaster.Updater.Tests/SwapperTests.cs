@@ -37,8 +37,8 @@ public sealed class TempArea : IDisposable
                 .Order(StringComparer.Ordinal)
             : []);
 
-    public void WriteJournal(string step) =>
-        File.WriteAllText(Journal, JsonSerializer.Serialize(new { step, appDir = App, backupDir = Backup }));
+    public void WriteJournal(string step, string? version = null, string? backupDir = null, string? stagedDir = null) =>
+        File.WriteAllText(Journal, JsonSerializer.Serialize(new { step, appDir = App, backupDir = backupDir ?? Backup, stagedDir, version }));
 
     public void Dispose() { try { Directory.Delete(Root, true); } catch { } }
 }
@@ -137,5 +137,70 @@ public class SwapperTests
     {
         using var t = new TempArea();
         Assert.False(Startup.WaitForMarker(t.Marker, () => true, TimeSpan.FromMilliseconds(400)));
+    }
+
+    [Fact]
+    public void Rollback_NoJournal_LeavesAppUntouched()
+    {
+        using var t = new TempArea(); t.SeedOld();
+        var before = TempArea.Snapshot(t.App);
+        t.Swapper().Rollback();
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Rollback_DoneJournalButBackupMissing_Throws_AppUntouched()
+    {
+        using var t = new TempArea();
+        t.Put(t.App, "Quartermaster.App.exe", "current");
+        t.WriteJournal("done");
+        Assert.Throws<InvalidOperationException>(() => t.Swapper().Rollback());
+        Assert.Equal("Quartermaster.App.exe=current", TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Apply_StaleBackupLocked_AppUntouched()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        t.Put(t.Backup, "stale.dll", "stale");
+        var before = TempArea.Snapshot(t.App);
+        using var fs = new FileStream(Path.Combine(t.Backup, "stale.dll"), FileMode.Open, FileAccess.Read, FileShare.None);
+        var s = t.Swapper(); s.RetryWindow = TimeSpan.FromMilliseconds(300);
+        Assert.ThrowsAny<IOException>(() => s.Apply());
+        s.Rollback();
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Theory]
+    [InlineData("rollback-restore")]
+    [InlineData("rollback-clear")]
+    public void Resume_AfterCrashInRollback_RestoresOld(string step)
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        var before = TempArea.Snapshot(t.App);
+        t.Swapper().Apply();
+        t.WriteJournal(step);
+        if (step == "rollback-restore")
+        {
+            // new files cleared, one old file already moved back
+            foreach (var e in Directory.GetFileSystemEntries(t.App)) { if (Directory.Exists(e)) Directory.Delete(e, true); else File.Delete(e); }
+            File.Move(Path.Combine(t.Backup, "a.dll"), Path.Combine(t.App, "a.dll"));
+        }
+        Assert.Equal(ResumeOutcome.RolledBack, t.Swapper().Resume());
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+        t.Swapper().Rollback(); // a second rollback must not delete the restored files
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Resume_UsesJournalPaths_NotConstructorBackup()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        var before = TempArea.Snapshot(t.App);
+        var realBackup = Path.Combine(t.Root, "real-backup");
+        new Swapper(t.App, t.Staged, realBackup, t.Journal).Apply();
+        // a later helper run computes a different backup path; the journal's path must win
+        new Swapper(t.App, t.Staged, t.Backup, t.Journal).Rollback();
+        Assert.Equal(before, TempArea.Snapshot(t.App));
     }
 }
