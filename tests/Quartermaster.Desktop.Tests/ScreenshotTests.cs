@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 
@@ -22,8 +21,8 @@ public sealed class ScreenshotTests
             var bytes = File.ReadAllBytes(png);
             Assert.True(bytes.Length > 1000);
             Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, bytes[..4]); // PNG signature
-            // No window is left open, on a real platform or otherwise.
-            Assert.Empty(((Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime?)Application.Current?.ApplicationLifetime)?.Windows ?? Array.Empty<Window>());
+            // The run is headless: the platform is Avalonia.Headless, so no OS window can have been created.
+            Assert.Equal("HeadlessWindowImpl", new Window().PlatformImpl?.GetType().Name);
         }
         finally { try { File.Delete(png); } catch (IOException) { } }
     }

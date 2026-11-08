@@ -64,7 +64,8 @@ static class Program
             frame.Save(png, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
             return File.Exists(png) && new FileInfo(png).Length > 0 ? 0 : 1;
         }
-        catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException
+            or DllNotFoundException or TypeInitializationException or TimeoutException or NotSupportedException)
         {
             Console.Error.WriteLine(e.Message);
             return 1;

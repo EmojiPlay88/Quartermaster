@@ -23,8 +23,8 @@
       </Grid>
     </Border>
     <Grid x:Name="Body" ColumnDefinitions="*,0,0">
-      <!-- WinForms SystemColors.AppWorkspace behind the map tabs -->
-      <Border Background="#ABABAB">
+      <!-- Classic control colour behind the tab strip (WinForms DocumentTabStrip); the AppWorkspace grey is the MapView's own "no game" backdrop -->
+      <Border Background="{DynamicResource Classic.FaceBrush}">
         <shell:MapTabs x:Name="Maps" />
       </Border>
       <GridSplitter x:Name="PaletteSplitter" Grid.Column="1" ResizeDirection="Columns" IsVisible="False" />

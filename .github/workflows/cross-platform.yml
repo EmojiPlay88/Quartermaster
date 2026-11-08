@@ -4,6 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     name: ${{ matrix.os }}
@@ -11,12 +18,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # macos-latest is Apple silicon (arm64) on GitHub, so the osx-arm64 build below runs natively there.
         os: [windows-latest, macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
+          # The repo targets net10.0 (released SDK, no global.json, no preview quality needed).
           dotnet-version: '10.0.x'
 
       # Skia needs fontconfig and a GL library at load time; the classic theme falls back to DejaVu Sans when Tahoma is missing.
@@ -24,7 +33,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfontconfig1 libgl1 fonts-dejavu-core
+          sudo apt-get install -y libfontconfig1 libfreetype6 libharfbuzz0b libgl1 fonts-dejavu-core
 
       # Headless UI tests only: Avalonia.Headless never opens a window on any OS.
       - name: Test
