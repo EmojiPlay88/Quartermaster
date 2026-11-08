@@ -24,6 +24,11 @@ internal sealed class LruImageCache(long capBytes)
         }
     }
 
+    public void Clear()
+    {
+        lock (_gate) { _map.Clear(); _order.Clear(); _bytes = 0; }
+    }
+
     public void Put(string key, SKImage image)
     {
         var bytes = (long)image.Width * image.Height * 4;
