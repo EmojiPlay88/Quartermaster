@@ -160,7 +160,7 @@ The Game menu appears once a game is open.
 | Log | Ctrl+Shift+L | Shows or hides the [log](Window-Log-and-Panels#log) under the map |
 | Phase panel | | Shows or hides the [phase panel](Window-Phases#phase-panel) (needs a rules pack with phases) |
 | Outliner | | Shows or hides the [outliner](Window-Log-and-Panels#outliner) |
-| Ledger | Ctrl+L | Opens the [Ledger](Window-Ledger) (needs a rules pack) |
+| Ledger | Ctrl+L | Opens the [Ledger](Window-Ledger) (needs a rules pack). With counters selected on the active map it also selects their rows ([Show in Ledger](Window-Ledger#show-in-ledger)) |
 | Overview | | Opens the [overview](Window-Map#overview) of the active map |
 | Counter palette | | Only in game master mode: shows or hides the [counter palette](Window-Log-and-Panels#counter-palette) |
 
@@ -223,6 +223,7 @@ These are the default shortcuts. Every one of them can be changed in [Settings](
 Notes:
 
 - **Next turn** (Ctrl+Right) does **Next Phase** when the rules pack has phases. Without phases it adds one to the turn counter.
+- **Ledger** (Ctrl+L) with counters selected on the active map also selects their rows in the Ledger; the same command is **Show in Ledger** on a counter's right-click menu (see [Map](Window-Map#counter-menu)).
 - **H** and **L** are single keys, so they only work while the map has the focus (click the map first). They hide the counters and switch line of sight on the active map.
 - While you type in a box, shortcuts that would edit text there (arrows, Ctrl+Z, Ctrl+C and so on) go to the box instead.
 

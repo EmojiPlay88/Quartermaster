@@ -38,6 +38,17 @@ The Ledger lists every tracked value of the game, one row per unit or depot and 
 
 ![The large counter preview over NL 1 Rifles](images/ledger-tabs-preview.png)
 
+## Show in Ledger
+
+To find a counter's row, select the counter on the map and press **Ctrl+L**, or right-click it and choose **Show in Ledger**. The Ledger opens (or comes to the front) with the row selected. With several counters selected, all their rows are selected and the list scrolls to the first one.
+
+- If the row is not on the current tab, or the **Side:** choice hides it, the Ledger moves to the first tab that shows it.
+- If the **Filter:** text hides it, the Ledger moves to **Everything** and clears the filter.
+- A counter with no ledger values has no row while **Show units without values** is off; the status bar says so.
+- You only get rows you may see: a counter of a side hidden from you is never shown.
+
+With nothing selected, Ctrl+L just opens the Ledger.
+
 ## Your own tabs
 
 **Edit tabs…** (or the **+** tab) opens the **Edit Ledger tabs** dialog. Your tabs are kept on this computer for this module. They are never saved in the rules pack, a saved game or a turn file.
