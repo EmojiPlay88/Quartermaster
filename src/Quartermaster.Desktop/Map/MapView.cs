@@ -188,7 +188,7 @@ public sealed partial class MapView : Control
             Dispatcher.UIThread.Post(CancelDrag); // release the pointer outside the render pass
         }
         if (_drag.Active) _drag.Draw(c, View, st);
-        else _renderer.Draw(c, Map, _tiles, st, Session.Model, View, size, Options(null));
+        else _renderer.Draw(c, Map, _tiles, st, Session.Model, View, size, Options(null, _hoverStack));
         DrawBand(c);
         if (Preparing is { } p) Message(c, size, $"Preparing map… {(int)Math.Round(p * 100)}%");
     }
@@ -213,6 +213,7 @@ public sealed partial class MapView : Control
         base.OnPointerWheelChanged(e);
         e.Handled = true;
         if (_drag.Active) return; // zoom/pan is ignored mid-drag: the snapshot is only valid for the view the drag started in
+        HidePopup();
         var d = e.Delta;
         if (ShortcutGestures.IsMac && (e.KeyModifiers & KeyModifiers.Meta) == 0)
         {
@@ -242,6 +243,7 @@ public sealed partial class MapView : Control
     {
         e.Handled = true;
         if (_drag.Active || !(1 + e.Delta.X > 0)) return;
+        HidePopup();
         var at = e.GetPosition(this);
         View.ZoomAt(new SKPoint((float)at.X, (float)at.Y), (float)(1 + e.Delta.X));
         ViewChanged();
@@ -253,6 +255,7 @@ public sealed partial class MapView : Control
         AddHandler(PointerTouchPadGestureMagnifyEvent, OnMagnify);
         _topLevel = TopLevel.GetTopLevel(this);
         if (_topLevel != null) _topLevel.ScalingChanged += OnScalingChanged;
+        HookPointerWatch(_topLevel, true);
         lock (_viewLock) _lastSides = Session.ViewSides;
         Session.ViewChanged += OnSessionViewChanged;
         Session.GameReplaced += OnGameReplaced;
@@ -262,6 +265,9 @@ public sealed partial class MapView : Control
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         RemoveHandler(PointerTouchPadGestureMagnifyEvent, OnMagnify);
+        HidePopup();
+        _hoverStack = null;
+        HookPointerWatch(_topLevel, false);
         if (_topLevel != null) _topLevel.ScalingChanged -= OnScalingChanged;
         _topLevel = null;
         Session.ViewChanged -= OnSessionViewChanged;
@@ -272,5 +278,9 @@ public sealed partial class MapView : Control
     }
 
     /// <summary>Moved to a monitor with another scaling: redraw with tiles and SVG rasters for the new device resolution.</summary>
-    void OnScalingChanged(object? sender, EventArgs e) => InvalidateVisual();
+    void OnScalingChanged(object? sender, EventArgs e)
+    {
+        HidePopup();
+        InvalidateVisual();
+    }
 }

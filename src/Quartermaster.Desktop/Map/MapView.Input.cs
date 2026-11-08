@@ -136,6 +136,7 @@ public sealed partial class MapView
         var st = State;
         var removed = _selected.RemoveWhere(id => st == null || !st.Pieces.ContainsKey(id));
         if (_drag.Active) CancelDrag(); else _drag.ClearIncoming();
+        HidePopup();
         if (removed > 0) SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
@@ -215,12 +216,13 @@ public sealed partial class MapView
         ViewRefreshRuns++;
         if (_topLevel == null) return;   // detached meanwhile
         if (sidesChanged) { PruneSelection(); return; }
+        HidePopup();   // WinForms prunes on every view change, which closes the popup
         var st = State;
         if (_selected.RemoveWhere(id => st == null || !st.Pieces.ContainsKey(id)) > 0) SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
 
-    MapDrawOptions Options(IReadOnlySet<string>? hidden) => new(ShowGrid, _selected, null, hidden, DeviceScale: DeviceScale);
+    MapDrawOptions Options(IReadOnlySet<string>? hidden, string? hover = null) => new(ShowGrid, _selected, hover, hidden, DeviceScale: DeviceScale);
 
     void DrawBand(SKCanvas c)
     {
@@ -262,6 +264,7 @@ public sealed partial class MapView
         if (_drag.Active) return; // a drag owns the pointer until it ends
         _contextPress = false;    // a menu press released outside the view is forgotten
         Focus();
+        HidePopup();
         var pt = e.GetCurrentPoint(this);
         var props = pt.Properties;
         _downPos = pt.Position;
@@ -307,6 +310,7 @@ public sealed partial class MapView
             _bandStart = _bandNow = MapPoint(pt.Position);
             e.Pointer.Capture(this);
         }
+        if (e.ClickCount == 2) ToggleStack(pt.Position);
         InvalidateVisual();
     }
 
@@ -341,7 +345,10 @@ public sealed partial class MapView
         {
             BeginDrag(p, e.Pointer);
             e.Handled = true;
+            return;
         }
+        var props = e.GetCurrentPoint(this).Properties;
+        if (!props.IsLeftButtonPressed && !props.IsRightButtonPressed && !props.IsMiddleButtonPressed) UpdateHover(p);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -451,6 +458,8 @@ public sealed partial class MapView
         if (State is not { } st || _downPiece == null) return;
         var grabbed = _downPiece;
         _downPiece = null;
+        HidePopup();
+        _hoverStack = null;
         if (!_drag.Begin(st, grabbed, _selected, MapPoint(_downPos), View, ClientSize, RenderWithout, DeviceScale)) { InvalidateVisual(); return; }
         _dragPointer = pointer;
         pointer.Capture(this);
