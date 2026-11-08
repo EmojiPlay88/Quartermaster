@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Quartermaster</AssemblyName>
+    <RootNamespace>Quartermaster.Desktop</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Quartermaster.Core\Quartermaster.Core.csproj" />
+    <ProjectReference Include="..\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
+    <ProjectReference Include="..\Quartermaster.Render\Quartermaster.Render.csproj" />
+  </ItemGroup>
+
+  <!--
+    Version gate (port stage 1, Task 1): Avalonia.Skia 12.1.5 asks for SkiaSharp >= 3.119.4, but Render already runs on SkiaSharp 4.154.0 and
+    only one native libSkiaSharp may live in a process. SkiaSharp and every native-asset package Avalonia pulls in are pinned to 4.154.0 here;
+    Quartermaster.Desktop.Tests (SkiaInteropTests) proves Avalonia's Skia backend and Render.MapRenderer share that one native library.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Skia" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Themes.Simple" Version="12.1.5" />
+    <PackageReference Include="SkiaSharp" Version="4.154.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.WebAssembly" Version="4.154.0" />
+    <PackageReference Include="HarfBuzzSharp" Version="14.2.0" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="14.2.0" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.WebAssembly" Version="14.2.0" />
+  </ItemGroup>
+
+</Project>
