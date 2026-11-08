@@ -287,30 +287,83 @@ public sealed class PieceInteractionTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void Cannot_move_unactable_piece()
+    public void Move_locked_piece_does_not_move()
     {
-        var (view, window, _) = Open(rules: true);
-        S.SetViewSides(new HashSet<string> { "north" });
-        var theirs = LonePieces(view, id => S.CanSee(id) && !S.CanAct(id));
-        var mine = LonePieces(view, id => S.CanAct(id) && St.Pieces[id].MapId == view.Map.Id);
-        Assert.NotEmpty(theirs);
-        Assert.NotEmpty(mine);
-        var (id, at) = theirs[0];
-        var pos = St.Pieces[id].Pos;
+        var (view, window, _) = Open();
+        var (id, at) = LonePieces(view)[0];
+        // Wrap the demo counter in a move-locked Immobile trait (VASSAL "immob;;V"), as a module would define it.
+        var p = St.Pieces[id];
+        p.TypeString = PieceTypeParser.EncodeState(new[] { "immob;;V", p.TypeString });
+        p.TraitStates.Insert(0, "");
+        Assert.False(PieceActions.CanMove(p));
+        var pos = p.Pos;
         var log = St.Log.Count;
 
         Drag(window, at, EmptySpotNear(view, at));
+        window.Close();
+
+        Assert.False(view.IsDragging);
         Assert.Equal(pos, St.Pieces[id].Pos);
         Assert.Equal(log, St.Log.Count);
+    }
 
-        // Selected together with an own piece: only the own piece moves.
-        Click(window, mine[0].At);
-        Click(window, at, RawInputModifiers.Control);
-        var minePos = St.Pieces[mine[0].Id].Pos;
-        Drag(window, mine[0].At, EmptySpotNear(view, mine[0].At));
+    [AvaloniaFact]
+    public void Other_sides_piece_moves_in_hot_seat()
+    {
+        // Parity with WinForms: the map never filters drags by side; only move-locked pieces and the action port do.
+        var (view, window, _) = Open(rules: true);
+        S.SetViewSides(new HashSet<string> { "north" });
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        var theirs = LonePieces(view, id => S.CanSee(id) && !S.CanAct(id));
+        Assert.NotEmpty(theirs);
+        var (id, at) = theirs[0];
+        var pos = St.Pieces[id].Pos;
+
+        Drag(window, at, EmptySpotNear(view, at));
         window.Close();
-        Assert.NotEqual(minePos, St.Pieces[mine[0].Id].Pos);
-        Assert.Equal(pos, St.Pieces[id].Pos);
+
+        Assert.NotEqual(pos, St.Pieces[id].Pos);
+    }
+
+    [AvaloniaFact]
+    public void A_burst_of_game_changes_queues_one_refresh()
+    {
+        var (view, window, _) = Open();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        var runs = view.ViewRefreshRuns;
+        for (var i = 0; i < 10; i++) S.Game!.Execute(new AddLogLine(LogKind.Chat, "line " + i));
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        window.Close();
+        Assert.Equal(runs + 1, view.ViewRefreshRuns);
+    }
+
+    [AvaloniaFact]
+    public void Game_change_during_drag_keeps_it_but_view_sides_change_cancels()
+    {
+        var (view, window, _) = Open(rules: true);
+        var (id, at) = LonePieces(view)[0];
+        var to = EmptySpotNear(view, at);
+        var pos = St.Pieces[id].Pos;
+
+        Drag(window, at, to, release: false);
+        S.Game!.Execute(new AddLogLine(LogKind.Chat, "from elsewhere"));
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.True(view.IsDragging);
+        window.MouseUp(to, MouseButton.Left);
+        Assert.NotEqual(pos, St.Pieces[id].Pos);
+
+        // A new viewer (hot-seat hand-over) may not see what is dragged: the drag is cancelled.
+        var (id2, at2) = LonePieces(view)[0];
+        var pos2 = St.Pieces[id2].Pos;
+        var to2 = EmptySpotNear(view, at2);
+        Drag(window, at2, to2, release: false);
+        Assert.True(view.IsDragging);
+        S.SetViewSides(new HashSet<string> { "north" });
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.False(view.IsDragging);
+        window.MouseUp(to2, MouseButton.Left);
+        window.Close();
+        Assert.Equal(pos2, St.Pieces[id2].Pos);
     }
 
     [AvaloniaFact]

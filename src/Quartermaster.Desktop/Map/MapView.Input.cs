@@ -12,7 +12,8 @@ namespace Quartermaster.Desktop.Map;
 /// <summary>
 /// Pointer and key input copied from the WinForms MapCanvas: pan (middle button, Space + left), click selection, add-to-selection with
 /// Ctrl (Cmd on macOS), rubber band on empty map, dragging the selection with snapping and stacking (<see cref="MapDragController"/>),
-/// Esc to cancel a drag. Only pieces the viewer may act on (<see cref="ModuleSession.CanAct"/>) move.
+/// Esc to cancel a drag. As in WinForms, what moves is filtered only by <see cref="MapDragController.MovableIds"/> (move-locked
+/// Immobile pieces stay) and by the action port (<see cref="LocalActions"/> blocks viewer copies and replays) — never by side.
 /// </summary>
 public sealed partial class MapView
 {
@@ -84,11 +85,48 @@ public sealed partial class MapView
         SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>The game, the view sides or the rules changed (any thread): prune and repaint on the UI thread.</summary>
+    IReadOnlySet<string>? _lastSides;
+    bool _viewQueued;
+    bool _sidesChanged;
+
+    /// <summary>Handler runs of the coalesced view refresh (tests).</summary>
+    internal int ViewRefreshRuns { get; private set; }
+
+    /// <summary>
+    /// The game, the view sides or the rules changed (any thread). As WinForms MapWindow.OnViewChanged: bursts coalesce into one queued
+    /// UI-thread run. Only a real view-sides change (hot-seat: a new viewer) prunes the selection and cancels a drag; any other change
+    /// (a command, a rewind, a rules edit) just repaints and forgets selected pieces that are gone, leaving a running drag alone.
+    /// </summary>
     void OnSessionViewChanged()
     {
-        if (Dispatcher.UIThread.CheckAccess()) PruneSelection();
-        else Dispatcher.UIThread.Post(PruneSelection);
+        var sides = Session.ViewSides;
+        if (!ReferenceEquals(sides, _lastSides)) { _sidesChanged = true; _lastSides = sides; }
+        if (_viewQueued) return;
+        _viewQueued = true;
+        Dispatcher.UIThread.Post(RefreshFromSession);
+    }
+
+    /// <summary>A new or loaded game: the selection and any drag belong to the old one (WinForms MapWindow.OnGameReplaced).</summary>
+    void OnGameReplaced()
+    {
+        _sidesChanged = true;
+        OnSessionViewChanged();
+    }
+
+    void RefreshFromSession()
+    {
+        _viewQueued = false;
+        ViewRefreshRuns++;
+        if (_topLevel == null) return;   // detached meanwhile
+        if (_sidesChanged)
+        {
+            _sidesChanged = false;
+            PruneSelection();
+            return;
+        }
+        var st = State;
+        if (_selected.RemoveWhere(id => st == null || !st.Pieces.ContainsKey(id)) > 0) SelectionChanged?.Invoke(this, EventArgs.Empty);
+        InvalidateVisual();
     }
 
     MapDrawOptions Options(IReadOnlySet<string>? hidden) => new(ShowGrid, _selected, null, hidden, DeviceScale: DeviceScale);
@@ -311,10 +349,7 @@ public sealed partial class MapView
         if (State is not { } st || _downPiece == null) return;
         var grabbed = _downPiece;
         _downPiece = null;
-        // Another side's piece never moves; from a mixed selection only the pieces this viewer may act on are dragged.
-        if (!Session.CanAct(grabbed)) { InvalidateVisual(); return; }
-        var movable = _selected.Where(Session.CanAct).ToList();
-        if (!_drag.Begin(st, grabbed, movable, MapPoint(_downPos), View, ClientSize, RenderWithout, DeviceScale)) { InvalidateVisual(); return; }
+        if (!_drag.Begin(st, grabbed, _selected, MapPoint(_downPos), View, ClientSize, RenderWithout, DeviceScale)) { InvalidateVisual(); return; }
         _dragPointer = pointer;
         pointer.Capture(this);
         _drag.Update(st, MapPoint(at));
