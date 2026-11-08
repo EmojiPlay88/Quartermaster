@@ -10,7 +10,7 @@ public class WalkthroughFormulaTests
 {
     private static string WikiDir => Path.Combine(DemoModuleTests.RepoRoot(), "docs", "wiki");
 
-    private static readonly Regex BlockRx = new(@"^```formula[ \t]*\r?\n(?<body>.*?)\r?\n```[ \t]*$", RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.Singleline);
+    private static readonly Regex BlockRx = new(@"^```formula[ \t]*\r?\n(?<body>.*?)\r?\n```[ \t]*\r?$", RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.Singleline);
 
     private static IEnumerable<(string Page, string Body)> Blocks(string? onlyPage = null)
     {
