@@ -28,6 +28,7 @@ sealed class BatchGridWindow : Form
     readonly Label _status = new() { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(12, 8, 3, 3) };
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 120 };
     readonly CheatSheetWindow? _cheat;
+    readonly CounterCellImages _counters;
     GameSession? _attached;
     int _varCount;
     int _shownRows = -1;
@@ -42,6 +43,8 @@ sealed class BatchGridWindow : Form
         ShowIcon = false;
         ClientSize = new Size(900, 520);
 
+        _grid.RowTemplate.Height = RowHeight;
+        _counters = new CounterCellImages(s.Counters, ImageSize, _grid, () => _grid.Invalidate());
         BuildColumns();
         var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 38, Padding = new Padding(6, 4, 6, 4), WrapContents = false };
         bar.Controls.AddRange(new Control[] { _calcAll, _applyAll, _applyRow, _status });
@@ -59,6 +62,7 @@ sealed class BatchGridWindow : Form
         _grid.CellValueNeeded += (_, e) => Safe(() => OnValueNeeded(e));
         _grid.CellValuePushed += (_, e) => Safe(() => OnValuePushed(e));
         _grid.CellFormatting += (_, e) => Safe(() => OnFormatting(e));
+        _grid.CellPainting += (_, e) => Safe(() => OnPaintImage(e));
         _grid.CellToolTipTextNeeded += (_, e) => Safe(() => OnToolTip(e));
         _tip.Track(_grid, LedgerTip);
         _grid.ShowCellToolTips = true; // native tips stay on for the "doesn't match" hint; OnToolTip returns nothing for the Ledger column, so they never overlap the breakdown
@@ -89,7 +93,8 @@ sealed class BatchGridWindow : Form
     void BuildColumns()
     {
         _grid.Columns.Clear();
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Unit", ReadOnly = true, Width = 150, SortMode = DataGridViewColumnSortMode.NotSortable });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Unit", ReadOnly = true, Width = 150 + ImageSize.Width + 8, SortMode = DataGridViewColumnSortMode.NotSortable,
+            DefaultCellStyle = new DataGridViewCellStyle { Padding = new Padding(ImageSize.Width + 8, 0, 0, 0) } });   // the counter picture is painted in the padding
         foreach (var v in _model.Variables)
         {
             if (_model.ChoicesFor(v) is { Count: > 0 } keys)
@@ -110,6 +115,29 @@ sealed class BatchGridWindow : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Result", ReadOnly = true, Width = 90, SortMode = DataGridViewColumnSortMode.NotSortable });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Ledger", ReadOnly = true, Width = 200, SortMode = DataGridViewColumnSortMode.NotSortable });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Exceptions", ReadOnly = true, Width = 160, SortMode = DataGridViewColumnSortMode.NotSortable });
+    }
+
+    const int RowHeight = 52;
+    static readonly Size ImageSize = new(64, 48);
+
+    /// <summary>The unit's counter in the left of the Unit cell: lazy (placeholder box until a worker has drawn it), from the viewed state only.</summary>
+    void OnPaintImage(DataGridViewCellPaintingEventArgs e)
+    {
+        if (e.ColumnIndex != 0 || e.RowIndex < 0 || e.RowIndex >= _model.RowCount || e.Graphics == null) return;
+        e.Paint(e.CellBounds, DataGridViewPaintParts.All);
+        e.Handled = true;
+        var first = Math.Max(0, _grid.FirstDisplayedScrollingRowIndex);
+        _counters.SetVisible(first, first + Math.Max(1, _grid.DisplayedRowCount(true)) - 1);
+        var box = new Rectangle(e.CellBounds.Left + 2, e.CellBounds.Top + (e.CellBounds.Height - ImageSize.Height) / 2, ImageSize.Width, ImageSize.Height);
+        var id = _model.Row(e.RowIndex).PieceId;
+        if (id == null || _s.View?.Pieces.TryGetValue(id, out var piece) != true || piece == null) return;   // hidden or gone: no picture
+        if (_counters.Get(piece, e.RowIndex) is { } bmp)
+            e.Graphics.DrawImage(bmp, box.Left, box.Top, bmp.Width, bmp.Height);
+        else
+        {
+            using var pen = new Pen(Color.Silver) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
+            e.Graphics.DrawRectangle(pen, box.Left, box.Top, box.Width - 1, box.Height - 1);
+        }
     }
 
     /// <summary>The cheat sheet takes a share of the width that suits a narrow document area as well as a wide one.</summary>
@@ -285,6 +313,7 @@ sealed class BatchGridWindow : Form
         if (IsDisposed) return;
         if (!RunExists) { Close(); return; }       // finished, or the game was replaced
         _model.Invalidate();
+        _counters.Reset();   // the viewed state changed: pictures may differ
         var n = _model.RowCount;
         if (n != _shownRows) { _shownRows = n; _grid.RowCount = n; }
         Text = _model.Title;
@@ -320,6 +349,7 @@ sealed class BatchGridWindow : Form
             _s.ViewChanged -= QueueRefresh;
             if (_attached != null) _attached.Changed -= OnGameChanged;
             _debounce.Dispose();
+            _counters.Dispose();
             _tip.Dispose();
         }
         base.Dispose(disposing);

@@ -22,6 +22,7 @@ public sealed class ModuleSession : IDisposable
         CacheDir = cacheDir;
         Images = new ImageSource(archive, cacheDir, log);
         Tiler = new BoardTiler(archive, cacheDir, log);
+        Counters = new CounterImages(Images);
     }
 
     public VmodArchive Archive { get; }
@@ -29,6 +30,9 @@ public sealed class ModuleSession : IDisposable
     public DiagnosticLog Log { get; }
     public ImageSource Images { get; }
     public BoardTiler Tiler { get; }
+
+    /// <summary>The one cache of counter images for this module (palette, batch grid, outliner, ledger); cleared when the game is replaced.</summary>
+    public CounterImages Counters { get; }
     public GameSession? Game
     {
         get => _game;
@@ -59,6 +63,7 @@ public sealed class ModuleSession : IDisposable
         // Session-owned so subscriber order never matters: a multi-player game starts public-only until a player takes over.
         if (_game != null) _viewSides = ViewSidesFor(_game);
         ResetView();
+        Counters.Clear();
         GameReplaced?.Invoke();
         ViewChanged?.Invoke();
     }
