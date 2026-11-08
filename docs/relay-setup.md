@@ -134,7 +134,44 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 2. Run it as a plain program (without Docker)
 
-### 2.1 Publish
+### 2.0 Download a relay binary
+
+Each release on <https://github.com/EmojiPlay88/Quartermaster/releases> has the relay as a separate
+download from the app. Pick the one for your server (replace `0.1.0` with the release you want):
+
+| System | File |
+| --- | --- |
+| Linux, 64-bit Intel/AMD | `QuartermasterRelay-0.1.0-linux-x64.tar.gz` |
+| Linux, ARM (Raspberry Pi 4/5, ARM VPS) | `QuartermasterRelay-0.1.0-linux-arm64.tar.gz` |
+| Windows, 64-bit | `QuartermasterRelay-0.1.0-win-x64.zip` |
+| macOS, Apple silicon | `QuartermasterRelay-0.1.0-osx-arm64.zip` |
+
+Each file has a matching `.sha256` next to it. The checksum only guards against a corrupt download; the
+files are not code-signed. Check it on Linux with `sha256sum -c QuartermasterRelay-0.1.0-linux-x64.tar.gz.sha256`,
+on Windows with `Get-FileHash <file> -Algorithm SHA256` (compare with the text in the `.sha256` file).
+
+The builds are self-contained: no .NET needs to be installed on the server. Linux example:
+
+```sh
+sudo mkdir -p /opt/quartermaster-relay /var/lib/quartermaster-relay
+sudo tar -xzf QuartermasterRelay-0.1.0-linux-x64.tar.gz -C /opt/quartermaster-relay
+sudo chmod +x /opt/quartermaster-relay/Quartermaster.Relay
+Relay__DataDir=/var/lib/quartermaster-relay /opt/quartermaster-relay/Quartermaster.Relay
+```
+
+On Windows unzip the archive and run `Quartermaster.Relay.exe` (set `Relay__DataDir` first, see 2.2 and 2.4).
+On macOS unzip, run `chmod +x Quartermaster.Relay` and start `./Quartermaster.Relay` (the first start may need
+System Settings, Privacy & Security, Open Anyway because the file is unsigned).
+
+The relay listens on all interfaces by default; set `Relay__BindAddress=loopback` to accept only local
+connections (for example behind a reverse proxy), see the settings table in 2.2. For a service, use the
+systemd unit in 2.3 with `ExecStart` pointing at the extracted `Quartermaster.Relay`.
+
+**Updating a downloaded relay:** stop it, download the new archive, extract it over the same folder
+(keep the data folder, it holds the certificate and the fingerprint players already trust), start it again.
+With Docker: `docker compose pull && docker compose up -d` if you use a published image, otherwise see 1.8.
+
+### 2.1 Publish (build it yourself)
 
 On any machine with the .NET 10 SDK, from the repository root:
 

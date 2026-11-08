@@ -80,8 +80,20 @@ The tests use small, invented modules and rules packs.
 ## Requirements
 
 - Windows 10 or 11
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - Microsoft Edge WebView2 Runtime (included with Windows 11), for viewing PDFs
+- The [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) only if you build from source; the release download is self-contained
+
+## Install / Update
+
+1. Download `Quartermaster-<version>-win-x64.zip` from the [Releases page](https://github.com/EmojiPlay88/Quartermaster/releases) and unzip it into a folder you can write to, for example `%USERPROFILE%\Quartermaster`. Not inside `Program Files`: the updater needs to replace the files in that folder.
+2. Run `Quartermaster.App.exe`.
+3. **SmartScreen:** Windows may say "Windows protected your PC" because the program is new and unsigned. Choose **More info**, then **Run anyway**. There is no code signing. The `.sha256` file next to each download only guards against a corrupt download; it does not prove who made it. If you want to be sure, build from source (below).
+4. **Updates:** the launcher checks GitHub for a newer release about once a day and shows an update bar. **Update now** downloads the zip, checks it against the release's `.sha256`, closes Quartermaster, swaps the files and starts the new version. If the new version does not start, the old one is put back. Updating never happens while a game is open and never without you clicking. The launcher's **Check for updates** link checks on demand, and **Skip this version** hides one release. Your modules, rules packs, saves and settings live outside the program folder and are not touched.
+5. To update by hand, unzip the new zip over the old folder, or into a new one.
+
+The online-play relay is a separate download (`QuartermasterRelay-<version>-<platform>`), only needed by whoever hosts games; see [docs/relay-setup.md](docs/relay-setup.md).
+
+Maintainers: `build/release.ps1 -Version <version>` builds, checks and checksums the downloads into `artifacts/release/<version>/` and prints the `gh release create` command; it creates nothing itself.
 
 ## Getting started
 

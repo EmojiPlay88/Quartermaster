@@ -332,3 +332,14 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - OCR grid: the "empty cell" message also shows for cells that are meant to be blank. A merged anchor-plus-digit cell stays empty with a message.
 - Scan cache pruning can race with a file check. The test `RelayClientTests.MemberId_Exposed_AndUpdatedOnRejoin` is flaky under heavy parallel load.
 - Small text is read natively first and again at 2x only when words look small or nothing was found, so it can cost two OCR passes. PdfPig is also referenced from the OCR tests (a deviation from the spec).
+
+## Piece 8 (ledger images and tabs, updater, release script): parked items
+
+- Ledger tab store: adding a tab uses add-then-RemoveAt; a tab with only unknown column ids falls back to the Units columns; Save overwrites an unparseable root settings file and loses every module's tabs (keep a `.bak`); a null column-widths entry skips the whole write silently.
+- Counter images: six small items (see the task 3 review), including a dead generation counter in `CounterImages`; null renders are not negative-cached (re-queued on every paint); the pending set is not pruned; Reset runs on every refresh; SetVisible runs per cell paint; no unit test for `CounterCellImages`.
+- Ledger tabs window: seven small items (see the task 4 review): renaming the current tab jumps back to Units; widths are stored by position; holder rows leave an empty image gap; the breakdown tip may fall back to the full state (pre-existing, judge the hidden-information impact). Not tried by hand: real hover and double-click, and the OK path of Edit tabs.
+- Updater, download side: IO failures in extract and launch-helper escape as `IOException` instead of `UpdateRefused`; `UpdateFeeds.Default` accepts a redirecting client (callers must use `GitHubFeed.CreateClient()`); the env-var test is not in a serial test collection; the tolerant-load test does not assert warnings.
+- Updater helper: a "rolledback" journal with the same version makes a retry report failure without trying; a journal without a step is treated as an install; a stale-rollback failure is retried twice.
+- Update dialog (task 8): see the task 8 review minors: the finishing step can race the launcher closing, a failed check does not stamp `LastUpdateCheckUtc`, and the App has no test project for the dialog.
+- `VersionNotice` sits between the `NotAPlayerText` doc comment and its constant in `TurnReplayModel.cs` (about line 296).
+- Release script: Linux and macOS archives are built on Windows, so the executable bit is not stored; the docs say `chmod +x`. The archive check looks for the literal `C:\Users\<user name>` in binaries only, not for other absolute paths. The script was only run under Windows PowerShell 5.1 here.
