@@ -19,50 +19,76 @@
           <Color x:Key="Classic.Highlight">#0078D4</Color>
           <Color x:Key="Classic.HighlightText">#FFFFFF</Color>
           <Color x:Key="Classic.Border">#ABADB3</Color>
-          <!-- Simple theme slots -->
-          <Color x:Key="ThemeBackgroundColor">#FFFFFF</Color>
-          <Color x:Key="ThemeForegroundColor">#000000</Color>
-          <Color x:Key="ThemeForegroundLowColor">#6D6D6D</Color>
-          <Color x:Key="ThemeBorderLowColor">#ABADB3</Color>
-          <Color x:Key="ThemeBorderMidColor">#ABADB3</Color>
+          <Color x:Key="Classic.ButtonFace">#E1E1E1</Color>
+          <Color x:Key="Classic.ButtonBorder">#ADADAD</Color>
+          <Color x:Key="Classic.ButtonHover">#E5F1FB</Color>
+          <Color x:Key="Classic.Checked">#CCE8FF</Color>
+          <Color x:Key="Classic.Separator">#A0A0A0</Color>
+          <Color x:Key="Classic.Page">#F9F9F9</Color>
+          <Color x:Key="Classic.PopupBorder">#808080</Color>
+          <Color x:Key="Classic.PopupFace">#FCFCFC</Color>
+          <Color x:Key="Classic.ScrollThumb">#CDCDCD</Color>
+          <Color x:Key="Classic.ScrollGlyph">#606060</Color>
+          <Color x:Key="Classic.TreeBox">#919191</Color>
+          <Color x:Key="Classic.TreeGlyph">#4B63A7</Color>
+          <Color x:Key="Classic.TreeLine">#6D6D6D</Color>
+          <Color x:Key="Classic.CheckOn">#005FB8</Color>
+          <Color x:Key="Classic.CheckBorder">#8B8B8B</Color>
+          <!-- Simple theme slots map onto the Classic colours -->
+          <StaticResource x:Key="ThemeBackgroundColor" ResourceKey="Classic.Window" />
+          <StaticResource x:Key="ThemeForegroundColor" ResourceKey="Classic.Text" />
+          <StaticResource x:Key="ThemeForegroundLowColor" ResourceKey="Classic.GrayText" />
+          <StaticResource x:Key="ThemeBorderLowColor" ResourceKey="Classic.Border" />
+          <!-- Simple draws popup/menu frames with ThemeBorderMid; the Classic popup frame is 808080 (stepback-menu.png (100,0)). -->
+          <StaticResource x:Key="ThemeBorderMidColor" ResourceKey="Classic.PopupBorder" />
+          <StaticResource x:Key="ThemeControlLowColor" ResourceKey="Classic.Face" />
+          <StaticResource x:Key="ThemeControlMidColor" ResourceKey="Classic.ButtonFace" />
+          <StaticResource x:Key="ThemeControlMidHighColor" ResourceKey="Classic.ButtonBorder" />
+          <StaticResource x:Key="ThemeControlHighColor" ResourceKey="Classic.Separator" />
+          <StaticResource x:Key="ThemeControlHighlightLowColor" ResourceKey="Classic.ButtonHover" />
+          <StaticResource x:Key="ThemeControlHighlightMidColor" ResourceKey="Classic.ButtonHover" />
+          <StaticResource x:Key="ThemeControlHighlightHighColor" ResourceKey="Classic.Highlight" />
+          <StaticResource x:Key="ThemeAccentColor" ResourceKey="Classic.Highlight" />
           <Color x:Key="ThemeBorderHighColor">#7A7A7A</Color>
-          <Color x:Key="ThemeControlLowColor">#F0F0F0</Color>
-          <Color x:Key="ThemeControlMidColor">#E1E1E1</Color>
-          <Color x:Key="ThemeControlMidHighColor">#ADADAD</Color>
-          <Color x:Key="ThemeControlHighColor">#A0A0A0</Color>
           <Color x:Key="ThemeControlVeryHighColor">#696969</Color>
-          <Color x:Key="ThemeControlHighlightLowColor">#E5F1FB</Color>
-          <Color x:Key="ThemeControlHighlightMidColor">#E5F1FB</Color>
-          <Color x:Key="ThemeControlHighlightHighColor">#0078D4</Color>
-          <Color x:Key="ThemeAccentColor">#0078D4</Color>
           <Color x:Key="ThemeDisabledColor">#CCCCCC</Color>
-          <SolidColorBrush x:Key="ThemeBackgroundBrush" Color="#FFFFFF" />
-          <SolidColorBrush x:Key="ThemeForegroundBrush" Color="#000000" />
-          <SolidColorBrush x:Key="ThemeForegroundLowBrush" Color="#6D6D6D" />
-          <SolidColorBrush x:Key="ThemeBorderLowBrush" Color="#ABADB3" />
-          <SolidColorBrush x:Key="ThemeBorderMidBrush" Color="#ABADB3" />
-          <SolidColorBrush x:Key="ThemeBorderHighBrush" Color="#7A7A7A" />
-          <SolidColorBrush x:Key="ThemeControlLowBrush" Color="#F0F0F0" />
-          <SolidColorBrush x:Key="ThemeControlMidBrush" Color="#E1E1E1" />
-          <SolidColorBrush x:Key="ThemeControlMidHighBrush" Color="#ADADAD" />
-          <SolidColorBrush x:Key="ThemeControlHighBrush" Color="#A0A0A0" />
-          <SolidColorBrush x:Key="ThemeControlVeryHighBrush" Color="#696969" />
-          <SolidColorBrush x:Key="ThemeControlHighlightLowBrush" Color="#E5F1FB" />
-          <SolidColorBrush x:Key="ThemeControlHighlightMidBrush" Color="#E5F1FB" />
-          <SolidColorBrush x:Key="ThemeControlHighlightHighBrush" Color="#0078D4" />
-          <SolidColorBrush x:Key="ThemeAccentBrush" Color="#0078D4" />
-          <SolidColorBrush x:Key="Classic.FaceBrush" Color="#F0F0F0" />
-          <SolidColorBrush x:Key="Classic.WindowBrush" Color="#FFFFFF" />
-          <SolidColorBrush x:Key="Classic.TextBrush" Color="#000000" />
-          <SolidColorBrush x:Key="Classic.GrayTextBrush" Color="#6D6D6D" />
-          <SolidColorBrush x:Key="Classic.HighlightBrush" Color="#0078D4" />
-          <SolidColorBrush x:Key="Classic.HighlightTextBrush" Color="#FFFFFF" />
-          <SolidColorBrush x:Key="Classic.BorderBrush" Color="#ABADB3" />
-          <SolidColorBrush x:Key="Classic.ButtonFaceBrush" Color="#E1E1E1" />
-          <SolidColorBrush x:Key="Classic.ButtonBorderBrush" Color="#ADADAD" />
-          <SolidColorBrush x:Key="Classic.ButtonHoverBrush" Color="#E5F1FB" />
-          <SolidColorBrush x:Key="Classic.CheckedBrush" Color="#CCE8FF" />
-          <SolidColorBrush x:Key="Classic.SeparatorBrush" Color="#A0A0A0" />
+          <SolidColorBrush x:Key="ThemeBackgroundBrush" Color="{StaticResource ThemeBackgroundColor}" />
+          <SolidColorBrush x:Key="ThemeForegroundBrush" Color="{StaticResource ThemeForegroundColor}" />
+          <SolidColorBrush x:Key="ThemeForegroundLowBrush" Color="{StaticResource ThemeForegroundLowColor}" />
+          <SolidColorBrush x:Key="ThemeBorderLowBrush" Color="{StaticResource ThemeBorderLowColor}" />
+          <SolidColorBrush x:Key="ThemeBorderMidBrush" Color="{StaticResource ThemeBorderMidColor}" />
+          <SolidColorBrush x:Key="ThemeControlLowBrush" Color="{StaticResource ThemeControlLowColor}" />
+          <SolidColorBrush x:Key="ThemeControlMidBrush" Color="{StaticResource ThemeControlMidColor}" />
+          <SolidColorBrush x:Key="ThemeControlMidHighBrush" Color="{StaticResource ThemeControlMidHighColor}" />
+          <SolidColorBrush x:Key="ThemeControlHighBrush" Color="{StaticResource ThemeControlHighColor}" />
+          <SolidColorBrush x:Key="ThemeControlHighlightLowBrush" Color="{StaticResource ThemeControlHighlightLowColor}" />
+          <SolidColorBrush x:Key="ThemeControlHighlightMidBrush" Color="{StaticResource ThemeControlHighlightMidColor}" />
+          <SolidColorBrush x:Key="ThemeControlHighlightHighBrush" Color="{StaticResource ThemeControlHighlightHighColor}" />
+          <SolidColorBrush x:Key="ThemeAccentBrush" Color="{StaticResource ThemeAccentColor}" />
+          <SolidColorBrush x:Key="ThemeBorderHighBrush" Color="{StaticResource ThemeBorderHighColor}" />
+          <SolidColorBrush x:Key="ThemeControlVeryHighBrush" Color="{StaticResource ThemeControlVeryHighColor}" />
+          <SolidColorBrush x:Key="Classic.FaceBrush" Color="{StaticResource Classic.Face}" />
+          <SolidColorBrush x:Key="Classic.WindowBrush" Color="{StaticResource Classic.Window}" />
+          <SolidColorBrush x:Key="Classic.TextBrush" Color="{StaticResource Classic.Text}" />
+          <SolidColorBrush x:Key="Classic.GrayTextBrush" Color="{StaticResource Classic.GrayText}" />
+          <SolidColorBrush x:Key="Classic.HighlightBrush" Color="{StaticResource Classic.Highlight}" />
+          <SolidColorBrush x:Key="Classic.HighlightTextBrush" Color="{StaticResource Classic.HighlightText}" />
+          <SolidColorBrush x:Key="Classic.BorderBrush" Color="{StaticResource Classic.Border}" />
+          <SolidColorBrush x:Key="Classic.ButtonFaceBrush" Color="{StaticResource Classic.ButtonFace}" />
+          <SolidColorBrush x:Key="Classic.ButtonBorderBrush" Color="{StaticResource Classic.ButtonBorder}" />
+          <SolidColorBrush x:Key="Classic.ButtonHoverBrush" Color="{StaticResource Classic.ButtonHover}" />
+          <SolidColorBrush x:Key="Classic.CheckedBrush" Color="{StaticResource Classic.Checked}" />
+          <SolidColorBrush x:Key="Classic.SeparatorBrush" Color="{StaticResource Classic.Separator}" />
+          <SolidColorBrush x:Key="Classic.PageBrush" Color="{StaticResource Classic.Page}" />
+          <SolidColorBrush x:Key="Classic.PopupBorderBrush" Color="{StaticResource Classic.PopupBorder}" />
+          <SolidColorBrush x:Key="Classic.PopupFaceBrush" Color="{StaticResource Classic.PopupFace}" />
+          <SolidColorBrush x:Key="Classic.ScrollThumbBrush" Color="{StaticResource Classic.ScrollThumb}" />
+          <SolidColorBrush x:Key="Classic.ScrollGlyphBrush" Color="{StaticResource Classic.ScrollGlyph}" />
+          <SolidColorBrush x:Key="Classic.TreeBoxBrush" Color="{StaticResource Classic.TreeBox}" />
+          <SolidColorBrush x:Key="Classic.TreeGlyphBrush" Color="{StaticResource Classic.TreeGlyph}" />
+          <SolidColorBrush x:Key="Classic.TreeLineBrush" Color="{StaticResource Classic.TreeLine}" />
+          <SolidColorBrush x:Key="Classic.CheckOnBrush" Color="{StaticResource Classic.CheckOn}" />
+          <SolidColorBrush x:Key="Classic.CheckBorderBrush" Color="{StaticResource Classic.CheckBorder}" />
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
       <!-- Replaced at startup with ClassicFonts.Current (Tahoma, with per-OS fallbacks). -->
@@ -146,25 +172,61 @@
     <Setter Property="Background" Value="{DynamicResource Classic.CheckedBrush}" />
   </Style>
 
-  <!-- Tabs: flat, white selected tab on a grey strip -->
+  <!-- Tabs: raised tabs over a bordered page (WinForms TabControl) -->
   <Style Selector="TabControl">
-    <Setter Property="Background" Value="{DynamicResource Classic.WindowBrush}" />
+    <Setter Property="Background" Value="{DynamicResource Classic.PageBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Classic.BorderBrush}" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <DockPanel>
+          <ItemsPresenter Name="PART_ItemsPresenter" DockPanel.Dock="Top" ZIndex="1" Margin="2,0,0,-1"
+                          ItemsPanel="{TemplateBinding ItemsPanel}" />
+          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+            <ContentPresenter Name="PART_SelectedContentHost" Margin="{TemplateBinding Padding}"
+                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                              Content="{TemplateBinding SelectedContent}"
+                              ContentTemplate="{TemplateBinding SelectedContentTemplate}" />
+          </Border>
+        </DockPanel>
+      </ControlTemplate>
+    </Setter>
   </Style>
   <Style Selector="TabItem">
     <Setter Property="FontSize" Value="{DynamicResource Classic.FontSize}" />
     <Setter Property="Background" Value="{DynamicResource Classic.FaceBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource Classic.TextBrush}" />
-    <Setter Property="Padding" Value="6,3" />
-  </Style>
-  <Style Selector="TabItem:selected">
-    <Setter Property="Background" Value="{DynamicResource Classic.WindowBrush}" />
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="Margin" Value="0,2,0,0" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="PART_LayoutRoot" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Classic.BorderBrush}"
+                BorderThickness="1" Padding="{TemplateBinding Padding}">
+          <ContentPresenter Name="headerPresenter" Content="{TemplateBinding Header}"
+                            ContentTemplate="{TemplateBinding HeaderTemplate}" Foreground="{TemplateBinding Foreground}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
   </Style>
   <Style Selector="TabItem:pointerover">
     <Setter Property="Background" Value="{DynamicResource Classic.ButtonHoverBrush}" />
   </Style>
+  <Style Selector="TabItem:selected">
+    <Setter Property="Background" Value="{DynamicResource Classic.PageBrush}" />
+    <Setter Property="Margin" Value="-2,0,-2,0" />
+    <Setter Property="Padding" Value="8,4,8,3" />
+    <Setter Property="ZIndex" Value="2" />
+  </Style>
+  <Style Selector="TabItem:selected /template/ Border#PART_LayoutRoot">
+    <Setter Property="BorderThickness" Value="1,1,1,0" />
+  </Style>
+  <Style Selector="TabItem:disabled">
+    <Setter Property="Foreground" Value="{DynamicResource Classic.GrayTextBrush}" />
+  </Style>
 
-  <!-- Menus and status bar: grey, no shadows or rounding -->
+  <!-- Menus: pale popup with a grey frame, pale blue hover -->
   <Style Selector="Menu">
     <Setter Property="Background" Value="{DynamicResource Classic.FaceBrush}" />
   </Style>
@@ -173,15 +235,16 @@
     <Setter Property="Foreground" Value="{DynamicResource Classic.TextBrush}" />
     <Setter Property="Padding" Value="6,3" />
   </Style>
-  <Style Selector="MenuItem:selected">
+  <Style Selector="MenuItem:selected /template/ Border#root">
     <Setter Property="Background" Value="{DynamicResource Classic.CheckedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Classic.CheckedBrush}" />
   </Style>
   <Style Selector="MenuItem:disabled">
     <Setter Property="Foreground" Value="{DynamicResource Classic.GrayTextBrush}" />
   </Style>
   <Style Selector="ContextMenu">
-    <Setter Property="Background" Value="{DynamicResource Classic.WindowBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource Classic.SeparatorBrush}" />
+    <Setter Property="Background" Value="{DynamicResource Classic.PopupFaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Classic.PopupBorderBrush}" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
   <Style Selector="Separator">
@@ -192,18 +255,155 @@
     <Setter Property="BorderBrush" Value="{DynamicResource Classic.BorderBrush}" />
   </Style>
 
-  <!-- Splitters and scrollbars: flat grey -->
+  <!-- Splitters: flat grey -->
   <Style Selector="GridSplitter">
     <Setter Property="Background" Value="{DynamicResource Classic.FaceBrush}" />
   </Style>
+
+  <!-- Scrollbars: classic 17px bar with arrow buttons -->
   <Style Selector="ScrollBar">
     <Setter Property="Background" Value="{DynamicResource Classic.FaceBrush}" />
     <Setter Property="AllowAutoHide" Value="False" />
   </Style>
+  <Style Selector="ScrollBar:vertical">
+    <Setter Property="Width" Value="17" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Grid RowDefinitions="17,*,17" Background="{TemplateBinding Background}">
+          <RepeatButton Name="PART_LineUpButton" Grid.Row="0" Classes="classicScroll" Focusable="False">
+            <Path Data="M0,4 L4,0 L8,4 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </RepeatButton>
+          <Track Grid.Row="1" Orientation="Vertical" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
+                 Value="{TemplateBinding Value, Mode=TwoWay}" ViewportSize="{TemplateBinding ViewportSize}"
+                 IsDirectionReversed="True">
+            <Track.DecreaseButton><RepeatButton Name="PART_PageUpButton" Classes="classicTrack" Focusable="False" /></Track.DecreaseButton>
+            <Thumb Name="thumb" Classes="classicThumb" />
+            <Track.IncreaseButton><RepeatButton Name="PART_PageDownButton" Classes="classicTrack" Focusable="False" /></Track.IncreaseButton>
+          </Track>
+          <RepeatButton Name="PART_LineDownButton" Grid.Row="2" Classes="classicScroll" Focusable="False">
+            <Path Data="M0,0 L4,4 L8,0 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </RepeatButton>
+        </Grid>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="ScrollBar:horizontal">
+    <Setter Property="Height" Value="17" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Grid ColumnDefinitions="17,*,17" Background="{TemplateBinding Background}">
+          <RepeatButton Name="PART_LineUpButton" Grid.Column="0" Classes="classicScroll" Focusable="False">
+            <Path Data="M4,0 L0,4 L4,8 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </RepeatButton>
+          <Track Grid.Column="1" Orientation="Horizontal" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
+                 Value="{TemplateBinding Value, Mode=TwoWay}" ViewportSize="{TemplateBinding ViewportSize}">
+            <Track.DecreaseButton><RepeatButton Name="PART_PageUpButton" Classes="classicTrack" Focusable="False" /></Track.DecreaseButton>
+            <Thumb Name="thumb" Classes="classicThumb" />
+            <Track.IncreaseButton><RepeatButton Name="PART_PageDownButton" Classes="classicTrack" Focusable="False" /></Track.IncreaseButton>
+          </Track>
+          <RepeatButton Name="PART_LineDownButton" Grid.Column="2" Classes="classicScroll" Focusable="False">
+            <Path Data="M0,0 L4,4 L0,8 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </RepeatButton>
+        </Grid>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="RepeatButton.classicScroll">
+    <Setter Property="Background" Value="{DynamicResource Classic.FaceBrush}" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"><ContentPresenter Content="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="RepeatButton.classicScroll:pointerover">
+    <Setter Property="Background" Value="{DynamicResource Classic.ScrollThumbBrush}" />
+  </Style>
+  <Style Selector="RepeatButton.classicScroll:pressed">
+    <Setter Property="Background" Value="{DynamicResource Classic.ScrollGlyphBrush}" />
+  </Style>
+  <Style Selector="RepeatButton.classicTrack">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Template">
+      <ControlTemplate><Border Background="{TemplateBinding Background}" /></ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="Thumb.classicThumb">
+    <Setter Property="Background" Value="{DynamicResource Classic.ScrollThumbBrush}" />
+    <Setter Property="Template">
+      <ControlTemplate><Border Background="{TemplateBinding Background}" Margin="1" /></ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="Thumb.classicThumb:pointerover">
+    <Setter Property="Background" Value="{DynamicResource Classic.SeparatorBrush}" />
+  </Style>
 
-  <!-- Checkbox: crisp blue tick like the Windows one -->
-  <Style Selector="CheckBox:checked /template/ Border#NormalRectangle">
-    <Setter Property="Background" Value="{DynamicResource Classic.HighlightBrush}" />
+  <!-- Checkbox: own template (13px box like WinForms); part names differ from Simple so its states do not apply -->
+  <Style Selector="CheckBox">
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Grid ColumnDefinitions="Auto,*" Background="Transparent">
+          <Border Name="box" Width="13" Height="13" Margin="0,0,6,0" VerticalAlignment="Center"
+                  Background="{DynamicResource Classic.WindowBrush}" BorderBrush="{DynamicResource Classic.CheckBorderBrush}" BorderThickness="1">
+            <Panel>
+              <Path Name="tick" Data="M2,5.5 L4.5,8 L9,3" Stroke="{DynamicResource Classic.HighlightTextBrush}" StrokeThickness="1.6" IsVisible="False" />
+              <Rectangle Name="mixed" Width="5" Height="5" Fill="{DynamicResource Classic.CheckOnBrush}" IsVisible="False" />
+            </Panel>
+          </Border>
+          <ContentPresenter Name="PART_ContentPresenter" Grid.Column="1" Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}" Foreground="{TemplateBinding Foreground}"
+                            RecognizesAccessKey="True" VerticalAlignment="Center" />
+        </Grid>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="CheckBox:pointerover /template/ Border#box">
     <Setter Property="BorderBrush" Value="{DynamicResource Classic.HighlightBrush}" />
+  </Style>
+  <Style Selector="CheckBox:checked /template/ Border#box">
+    <Setter Property="Background" Value="{DynamicResource Classic.CheckOnBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Classic.CheckOnBrush}" />
+  </Style>
+  <Style Selector="CheckBox:checked /template/ Path#tick">
+    <Setter Property="IsVisible" Value="True" />
+  </Style>
+  <Style Selector="CheckBox:indeterminate /template/ Rectangle#mixed">
+    <Setter Property="IsVisible" Value="True" />
+  </Style>
+  <Style Selector="CheckBox:disabled">
+    <Setter Property="Foreground" Value="{DynamicResource Classic.GrayTextBrush}" />
+  </Style>
+
+  <!-- Tree: 9px +/- boxes -->
+  <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron">
+    <Setter Property="Width" Value="9" />
+    <Setter Property="Height" Value="9" />
+    <Setter Property="Margin" Value="4,0" />
+    <Setter Property="RenderTransform" Value="none" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{DynamicResource Classic.WindowBrush}" BorderBrush="{DynamicResource Classic.TreeBoxBrush}" BorderThickness="1">
+          <Panel>
+            <Path Name="Horizontal" Data="M2,4 L7,4" Stroke="{DynamicResource Classic.TreeGlyphBrush}" StrokeThickness="1" />
+            <Path Name="Vertical" Data="M4.5,2 L4.5,7" Stroke="{DynamicResource Classic.TreeGlyphBrush}" StrokeThickness="1" />
+          </Panel>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron:checked">
+    <Setter Property="RenderTransform" Value="none" />
+  </Style>
+  <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron:checked /template/ Path#Vertical">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="TreeViewItem:selected /template/ Border#SelectionBorder">
+    <Setter Property="Background" Value="{DynamicResource Classic.HighlightBrush}" />
+  </Style>
+  <Style Selector="TreeViewItem:pointerover:not(:selected) /template/ Border#SelectionBorder">
+    <Setter Property="Background" Value="{DynamicResource Classic.CheckedBrush}" />
+  </Style>
+  <Style Selector="TreeViewItem:selected /template/ ContentPresenter#PART_HeaderPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource Classic.HighlightTextBrush}" />
   </Style>
 </Styles>
