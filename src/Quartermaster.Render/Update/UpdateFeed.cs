@@ -150,7 +150,8 @@ public sealed class GitHubFeed(HttpClient http) : IUpdateFeed
 
 /// <summary>
 /// A local test feed (tests and the hands-on update test): <c>release.json</c> in the GitHub API shape plus the asset files. An asset
-/// address resolves to its last path segment (the file name) inside the folder; anything that would leave the folder is refused.
+/// address resolves to its last path segment (the file name) inside the folder; anything that would leave the folder, or is not a file name
+/// on every OS (a '/' or '\' anywhere, ':' and the other characters Windows forbids), is refused, the same on every OS.
 /// </summary>
 public sealed class FolderFeed(string folder) : IUpdateFeed
 {
@@ -167,7 +168,8 @@ public sealed class FolderFeed(string folder) : IUpdateFeed
     {
         ct.ThrowIfCancellationRequested();
         var name = asset.IsAbsoluteUri ? Uri.UnescapeDataString(asset.Segments[^1]) : asset.OriginalString;
-        if (name.Length == 0 || name is "." or ".." || name != Path.GetFileName(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        // Portable rules, not this OS's: '\' is a separator on Windows only, so "..\x" must be refused everywhere, as on Windows.
+        if (name.Length == 0 || name is "." or ".." || PortableFileName.HasInvalidChars(name) || name != Path.GetFileName(name))
             throw new UpdateRefused($"Refused test-feed asset name '{name}'.");
         return Task.FromResult<Stream>(new FileStream(Path.Combine(folder, name), FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true));
     }
