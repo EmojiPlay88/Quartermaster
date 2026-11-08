@@ -25,16 +25,11 @@ static class LauncherShots
         }
     }
 
-    /// <summary>Screenshot fixture: lists the given module plus a copy that is then deleted (shown as missing); for the offline window also writes an autosave and a recent save.</summary>
+    /// <summary>Screenshot fixture: lists the given module; for the offline window also writes an autosave and a recent save.</summary>
     static void Seed(SettingsStore store, string root, string modulePath, bool withGames)
     {
         var lib = new ModuleLibrary(store);
         lib.Add(modulePath);
-        var gone = Path.Combine(root, "gone", "Vanished Module.vmod");
-        Directory.CreateDirectory(Path.GetDirectoryName(gone)!);
-        File.Copy(modulePath, gone, true);
-        lib.Add(gone);
-        File.Delete(gone);
         Task.Run(() => lib.RefreshAsync(null, CancellationToken.None)).GetAwaiter().GetResult();
         if (!withGames) return;
         var sha = lib.Rows.First(r => !r.Missing).Entry.Sha256!;
@@ -46,7 +41,6 @@ static class LauncherShots
         Directory.CreateDirectory(Path.GetDirectoryName(save)!);
         File.WriteAllText(save, "{}");
         new RecentGames(store, root).Add(sha, save);
-        new RecentGames(store, root).Add(sha, Path.Combine(root, "saves", "Old game.qsave")); // not on disk: shown as not found
     }
 
     /// <summary>--smoke-launcher: the first launcher visit starts a blank new game on the module, the second one checks that it lists a last-played time and ends the app.</summary>

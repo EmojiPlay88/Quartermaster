@@ -4,8 +4,8 @@
 .DESCRIPTION
   Builds Quartermaster.App (Release), then runs it once per --screenshot-* flag against
   docs/wiki/demo/Riverland-Demo.vmod and .qrules. APPDATA, LOCALAPPDATA and USERPROFILE (and
-  QUARTERMASTER_LAYOUT_ROOT, which holds all of the app's own files) point at a fresh temp folder named
-  Quartermaster-Demo, so no recent files, paths or user names appear. Some flags write extra pictures next
+  QUARTERMASTER_LAYOUT_ROOT, which holds all of the app's own files) point at a fresh profile folder, C:\ProgramData\Quartermaster-Demo (wiped before every run),
+  so no recent files, paths or user names appear. Some flags write extra pictures next
   to the named one (for example <name>-panel.png); those are kept too.
 .PARAMETER Only
   Optional list of image names (for example 'ledger','settings-display') to re-shoot instead of all.
@@ -133,7 +133,7 @@ foreach ($s in $shots) {
     $note = ''
     if ($p.ExitCode -ne 0) {
         $known = $allowedExit1[$s.Name]
-        $log = Join-Path (Join-Path $demoRoot 'layout') 'app.log' #pp.log'
+        $log = Join-Path (Join-Path $demoRoot 'layout') 'app.log'
         $fails = if (Test-Path $log) { @(Get-Content $log | Where-Object { $_ -match 'FAILED' }) } else { @() }
         $unknown = if ($known) { @($fails | Where-Object { $line = $_; -not ($known.Lines | Where-Object { $line -match $_ }) }) } else { $fails }
         if ($p.ExitCode -ne 1 -or -not $known -or $fails.Count -eq 0 -or $unknown.Count -gt 0) {

@@ -12,7 +12,7 @@ There are three ways to play with other people:
 
 Players share one computer. Set the players and the sides each one holds on the new game page, or later in Settings, on the Game tab. When the turn passes to another player a hand-over screen hides every window ("Pass to Player 1 (Northern League)") until they press **Continue**. See [Your First Game](Your-First-Game) for the screens.
 
-Each player sees only their own side's secrets. In the Rules Workbench's Visibility tab you mark which properties are private, which organisation displays and maps belong to a side, and which formulas roll their dice in private. Other players see lines such as "Red ledger changed" or "Red rolled dice" in the log, never the numbers. Hot-seat is honour-based: the information is hidden on screen but still in memory.
+Each player sees only their own side's secrets. In the Rules Workbench's Visibility tab you mark which properties are private, which organisation displays and maps belong to a side, and which formulas roll their dice in private. Other players see lines such as "Northern League ledger changed" or "Southern Compact rolled dice" in the log, never the numbers. Hot-seat is honour-based: the information is hidden on screen but still in memory.
 
 ## Live online play
 

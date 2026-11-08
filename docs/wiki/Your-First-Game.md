@@ -55,7 +55,7 @@ Choose **Start game** to begin turn 1.
 
 Drag a counter with the mouse. Drag a selection or a stack and it moves together, keeping its shape. Every move goes into the log under the map. The toolbar's **1d6**, **2d6** and **Dice** buttons roll dice, and each roll is logged too.
 
-In Riverland, moving a unit during North Movement or South Movement (and only then) uses up fuel. The rules pack's "Fuel for movement" formula takes away half the number of hexes moved, multiplied by the weather, rounded up. It only applies to units that have Fuel. What you see depends on the difficulty. On Hardcore and Semi-automatic, a formula dialog opens as soon as you drop the counter, with an empty box for the hexes moved: type the number (or choose Calculate to fill it in from your drag) and choose Apply. On Fully automatic, no dialog appears: the fuel is taken off straight away and the calculation goes into the log. If the weather has not been set yet (the demo rolls it in North Supply), the dialog asks for it.
+In Riverland, moving a unit during North Movement or South Movement (and only then) uses up fuel. The rules pack's "Fuel for movement" formula takes away half the number of hexes moved, multiplied by the weather, rounded up. It only applies to units that have Fuel. What you see depends on the difficulty. On Hardcore and Semi-automatic, a formula dialog opens as soon as you drop the counter, with an empty box for the hexes moved: type the number (or choose Calculate to fill it in from your drag) and choose Apply. On Fully automatic, no dialog appears: the fuel is taken off straight away and the calculation goes into the log. The weather starts at 1 (dry) and the demo rolls it again in North Supply, so the dialog already knows it.
 
 ## Undo and step back
 
