@@ -35,9 +35,8 @@ sealed partial class MainForm : Form
     readonly ToolStripProgressBar _sbTiling = new() { Visible = false, AutoSize = false, Width = 100 };
     readonly ToolStripMenuItem _showGrid = new("Show &Grid") { Checked = false, CheckOnClick = true };
     readonly ToolStripMenuItem _viewTree = new("Module &Tree") { Checked = true, CheckOnClick = true };
-    readonly List<ToolStripItem> _needsModule = new();
-    readonly List<ToolStripItem> _needsGame = new();
-    readonly List<ToolStripItem> _needsRules = new();
+    /// <summary>Gated menu items and toolbar buttons by gate id; <see cref="CommandAvailability"/> is the one copy of the rules.</summary>
+    readonly List<(string Id, ToolStripItem Item)> _gated = new();
     readonly Dictionary<string, MapWindow> _maps = new();
     readonly Dictionary<string, Form> _charts = new();
     readonly Dictionary<string, Form> _docs = new();
@@ -183,51 +182,51 @@ sealed partial class MainForm : Form
 
     // ---------- construction ----------
 
-    ToolStripMenuItem Item(ToolStripItemCollection into, string text, Action act, string? cmd = null, bool needsModule = false, bool needsGame = false)
+    T Gate<T>(string id, T item) where T : ToolStripItem
+    {
+        _gated.Add((id, item));
+        return item;
+    }
+
+    ToolStripMenuItem Item(ToolStripItemCollection into, string text, Action act, string? cmd = null, string? gate = null)
     {
         var mi = new ToolStripMenuItem(text);
         if (cmd != null) _cmdItems[cmd] = mi;
         mi.Click += (_, _) => Guard(act);
         into.Add(mi);
-        if (needsModule) _needsModule.Add(mi);
-        if (needsGame) _needsGame.Add(mi);
+        if (gate != null) Gate(gate, mi);
         return mi;
     }
 
-    ToolStripButton Tool(string id, string text, Action act, bool needsModule = false, bool needsGame = false)
+    ToolStripButton Tool(string id, string text, Action act, bool gated = false)
     {
         var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = id };
         b.Click += (_, _) => Guard(act);
         _toolbar.Items.Add(b);
-        if (needsModule) _needsModule.Add(b);
-        if (needsGame) _needsGame.Add(b);
+        if (gated) Gate(id, b);
         return b;
     }
 
     void BuildMenu()
     {
         var file = new ToolStripMenuItem("&File");
-        _guestBlocked.Add(Item(file.DropDownItems, "&Open Module...", OpenModuleDialog, "file.openModule"));
+        Item(file.DropDownItems, "&Open Module...", OpenModuleDialog, "file.openModule", "file.openModule");
         file.DropDownItems.Add(new ToolStripSeparator());
-        _guestBlocked.Add(Item(file.DropDownItems, "&New Game", NewGame, "file.newGame", needsModule: true));
-        _guestBlocked.Add(Item(file.DropDownItems, "Load &Setup...", LoadSetupDialog, needsModule: true));
-        _guestBlocked.Add(Item(file.DropDownItems, "Open &Game...", OpenGameDialog, "file.openGame", needsModule: true));
-        _guestBlocked.Add(Item(file.DropDownItems, "Open Auto&save...", OpenAutosaveDialog, needsModule: true));
-        _guestBlocked.Add(_openTurn = Item(file.DropDownItems, "Open &Turn File…", OpenTurnFileDialog, needsModule: true));
+        Item(file.DropDownItems, "&New Game", NewGame, "file.newGame", "file.newGame");
+        Item(file.DropDownItems, "Load &Setup...", LoadSetupDialog, null, "file.loadSetup");
+        Item(file.DropDownItems, "Open &Game...", OpenGameDialog, "file.openGame", "file.openGame");
+        Item(file.DropDownItems, "Open Auto&save...", OpenAutosaveDialog, null, "file.openAutosave");
+        _openTurn = Item(file.DropDownItems, "Open &Turn File…", OpenTurnFileDialog, null, "file.openTurn");
         file.DropDownItems.Add(new ToolStripSeparator());
-        _needsSave.Add(Item(file.DropDownItems, "&Save Game", () => SaveGame(false), "file.saveGame", needsGame: true));
-        _needsSave.Add(Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), "file.saveGameAs", needsGame: true));
+        Item(file.DropDownItems, "&Save Game", () => SaveGame(false), "file.saveGame", "file.saveGame");
+        Item(file.DropDownItems, "Save Game &As...", () => SaveGame(true), "file.saveGameAs", "file.saveGameAs");
         _exportViewer = Item(file.DropDownItems, "&Export Viewer Copy…", ExportViewerCopy);
         _exportViewer.Visible = false;
         file.DropDownItems.Add(new ToolStripSeparator());
-        _guestBlocked.Add(Blocked(Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, needsModule: true)));
-        _guestBlocked.Add(Blocked(Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, needsModule: true)));
-        var saveRules = Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false));
-        var saveRulesAs = Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true));
-        _needsRules.Add(saveRules);
-        _needsRules.Add(saveRulesAs);
-        _guestBlocked.Add(saveRules);
-        _guestBlocked.Add(saveRulesAs);
+        Item(file.DropDownItems, "New &Rules Pack...", NewRulesPack, null, "file.newRules");
+        Item(file.DropDownItems, "Open Rules &Pack...", OpenRulesDialog, null, "file.openRules");
+        Item(file.DropDownItems, "Save Rules Pac&k", () => SaveRulesPack(false), null, "file.saveRules");
+        Item(file.DropDownItems, "Save Rules Pack A&s...", () => SaveRulesPack(true), null, "file.saveRulesAs");
         file.DropDownItems.Add(new ToolStripSeparator());
         Item(file.DropDownItems, "&Back to launcher", BackToLauncher).Visible = Program.LauncherHook != null;
         Item(file.DropDownItems, "E&xit", Close);
@@ -236,23 +235,23 @@ sealed partial class MainForm : Form
 
         var view = new ToolStripMenuItem("&View");
         view.DropDownItems.Add(_viewTree);
-        Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, "view.diagnostics", needsModule: true);
+        Item(view.DropDownItems, "&Diagnostics", ShowDiagnostics, "view.diagnostics", "view.diagnostics");
         view.DropDownItems.Add(_showGrid);
-        _needsGame.Add(_viewLog);
+        Gate("view.log", _viewLog);
         view.DropDownItems.Add(_viewLog);
         view.DropDownItems.Add(_viewPhases);
-        _needsGame.Add(_viewOutliner);
+        Gate("view.outliner", _viewOutliner);
         view.DropDownItems.Add(_viewOutliner);
-        _needsRules.Add(Item(view.DropDownItems, "&Ledger", ShowLedger, "view.ledger"));
-        Item(view.DropDownItems, "&Overview", ShowOverview, needsGame: true);
+        Item(view.DropDownItems, "&Ledger", ShowLedger, "view.ledger", "view.ledger");
+        Item(view.DropDownItems, "&Overview", ShowOverview, null, "view.overview");
         _viewPalette.Click += (_, _) => Guard(TogglePalette);
-        _needsGame.Add(_viewPalette);
+        Gate("view.palette", _viewPalette);
         view.DropDownItems.Add(_viewPalette);
 
         var tools = _toolsMenu = new ToolStripMenuItem("&Tools");
-        Blocked(Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", needsModule: true));
-        Item(tools.DropDownItems, "&Inventory", ShowInventory, needsGame: true);
-        Item(tools.DropDownItems, "&Notes", ShowNotes, needsGame: true);
+        Item(tools.DropDownItems, "&Rules Workbench", ShowWorkbench, "tools.workbench", "tools.workbench");
+        Item(tools.DropDownItems, "&Inventory", ShowInventory, null, "tools.inventory");
+        Item(tools.DropDownItems, "&Notes", ShowNotes, null, "tools.notes");
 
         var window = new ToolStripMenuItem("&Window");
         Item(window.DropDownItems, "&Cascade", () => Arrange(MdiLayout.Cascade));
@@ -267,7 +266,7 @@ sealed partial class MainForm : Form
         window.DropDownOpening += (_, _) => _popOutActive.Enabled = ActiveMdiChild is { IsDisposed: false };
 
         var help = new ToolStripMenuItem("&Help");
-        Item(help.DropDownItems, "Interface &Tour", ShowTour, null, needsGame: true);
+        Item(help.DropDownItems, "Interface &Tour", ShowTour, null, "help.tour");
         Item(help.DropDownItems, "Check for &updates…", CheckForUpdates).Visible = Program.LauncherHook != null;
         Item(help.DropDownItems, "&About", () => Info($"Quartermaster {AppVersion.Text}\nA VASSAL module reader and engine.", "About Quartermaster"));
 
@@ -275,29 +274,22 @@ sealed partial class MainForm : Form
         _menu.MdiWindowListItem = window;
     }
 
-    /// <summary>Registers an item that changes the game or its rules: it is off while a received turn replays.</summary>
-    ToolStripMenuItem Blocked(ToolStripMenuItem mi)
-    {
-        _replayBlocked.Add(mi);
-        return mi;
-    }
-
     void BuildToolbar()
     {
-        _guestBlocked.Add(Tool("tool.openModule", "Open Module", OpenModuleDialog));
-        _guestBlocked.Add(Tool("tool.newGame", "New Game", NewGame, needsModule: true));
-        _guestBlocked.Add(Tool("tool.loadSetup", "Load Setup", LoadSetupDialog, needsModule: true));
-        _guestBlocked.Add(Tool("tool.openGame", "Open Game", OpenGameDialog, needsModule: true));
-        _needsSave.Add(Tool("tool.saveGame", "Save Game", () => SaveGame(false), needsGame: true));
+        Tool("tool.openModule", "Open Module", OpenModuleDialog, gated: true);
+        Tool("tool.newGame", "New Game", NewGame, gated: true);
+        Tool("tool.loadSetup", "Load Setup", LoadSetupDialog, gated: true);
+        Tool("tool.openGame", "Open Game", OpenGameDialog, gated: true);
+        Tool("tool.saveGame", "Save Game", () => SaveGame(false), gated: true);
         _toolbar.Items.Add(new ToolStripSeparator());
-        Tool("tool.diagnostics", "Diagnostics", ShowDiagnostics, needsModule: true);
-        Tool("tool.notes", "Notes", ShowNotes, needsGame: true);
-        Tool("tool.overview", "Overview", ShowOverview, needsGame: true);
-        Tool("tool.inventory", "Inventory", ShowInventory, needsGame: true);
-        Tool("tool.palette", "Palette", TogglePalette, needsGame: true); // shown in game master mode only (ApplySettings)
-        Tool("tool.los", "LOS", () => { if (_handlers.TryGetValue("tool.los", out var h)) h(); }, needsGame: true);
+        Tool("tool.diagnostics", "Diagnostics", ShowDiagnostics, gated: true);
+        Tool("tool.notes", "Notes", ShowNotes, gated: true);
+        Tool("tool.overview", "Overview", ShowOverview, gated: true);
+        Tool("tool.inventory", "Inventory", ShowInventory, gated: true);
+        Tool("tool.palette", "Palette", TogglePalette, gated: true); // shown in game master mode only (ApplySettings)
+        Tool("tool.los", "LOS", () => { if (_handlers.TryGetValue("tool.los", out var h)) h(); }, gated: true);
         BuildHistoryToolbar();
-        _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, _needsGame);
+        _dice = new DiceTools(this, () => _session, Guard, _toolbar, _toolsMenu!, _sbMessage, (id, it) => Gate(id, it));
         _dice.Actions = () => Actions;
         SetCommandHandler("dice.1d6", () => _dice!.RollSpec(new DiceSpec(1, 6, 0), "Roll"));
         SetCommandHandler("dice.2d6", () => _dice!.RollSpec(new DiceSpec(2, 6, 0), "Roll"));
@@ -376,15 +368,35 @@ sealed partial class MainForm : Form
 
     void UpdateUi()
     {
-        foreach (var i in _needsModule) i.Enabled = _session != null;
-        foreach (var i in _needsGame) i.Enabled = _session?.Game != null;
-        foreach (var i in _needsRules) i.Enabled = _session?.Rules != null;
+        ApplyGates(full: true);
         _dice?.Refresh();
         UpdatePhaseUi();
         RefreshHistoryUi();
         UpdatePlayerButton();
         ApplyGuestLimits();
     }
+
+    /// <summary>
+    /// Drives Enabled and the reason tooltip of every gated item from <see cref="CommandAvailability"/>. <paramref name="full"/> sets Enabled
+    /// both ways (UpdateUi); otherwise it only switches items off, as the guest and replay refreshes always did.
+    /// </summary>
+    void ApplyGates(bool full)
+    {
+        var avail = CommandAvailability.For(_session, IsOnline || _onlineStarting);
+        foreach (var (id, item) in _gated)
+        {
+            var (enabled, reason) = avail[id];
+            if (full) item.Enabled = enabled;
+            else if (!enabled) item.Enabled = false;
+            if (!CommandAvailability.OwnsTooltip(id)) continue;
+            // Only our own tooltips are set or cleared; others (shortcut hints) stay.
+            if (reason != null) item.ToolTipText = reason;
+            else if (CommandAvailability.IsOwnText(item.ToolTipText)) item.ToolTipText = null;
+        }
+    }
+
+    IEnumerable<ToolStripItem> ReplayBlockedItems() =>
+        _gated.Where(g => CommandAvailability.ReplayBlockedIds.Contains(g.Id)).Select(g => g.Item);
 
     void UpdateTitle()
     {

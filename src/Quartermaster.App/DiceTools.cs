@@ -33,7 +33,7 @@ sealed class DiceTools : IDisposable
     };
 
     public DiceTools(Form owner, Func<ModuleSession?> session, Action<Action> guard, ToolStrip toolbar,
-        ToolStripMenuItem toolsMenu, ToolStripStatusLabel message, List<ToolStripItem> needsGame)
+        ToolStripMenuItem toolsMenu, ToolStripStatusLabel message, Func<string, ToolStripItem, ToolStripItem> gate)
     {
         _owner = owner; _session = session; _guard = guard; _message = message;
         _clear.Tick += (_, _) =>
@@ -44,22 +44,22 @@ sealed class DiceTools : IDisposable
         };
 
         toolbar.Items.Add(new ToolStripSeparator());
-        AddButton(toolbar, "dice.1d6", "1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll"), needsGame);
-        AddButton(toolbar, "dice.2d6", "2d6", () => RollSpec(new DiceSpec(2, 6, 0), "Roll"), needsGame);
+        AddButton(toolbar, "dice.1d6", "1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll"), gate);
+        AddButton(toolbar, "dice.2d6", "2d6", () => RollSpec(new DiceSpec(2, 6, 0), "Roll"), gate);
         var dd = new ToolStripDropDownButton("Dice") { Name = "dice.menu", DisplayStyle = ToolStripItemDisplayStyle.Text };
         dd.DropDownOpening += (_, _) => _guard(() => BuildDiceItems(dd.DropDownItems));
         dd.DropDownItems.Add("(no game)").Enabled = false;
         toolbar.Items.Add(dd);
-        needsGame.Add(dd);
+        gate("dice.menu", dd);
         _items.Add(dd);
-        AddButton(toolbar, "turn.next", "Next turn", () => StepTurn(1), needsGame);
+        AddButton(toolbar, "turn.next", "Next turn", () => StepTurn(1), gate);
 
         toolsMenu.DropDownItems.Add(new ToolStripSeparator());
         var dice = new ToolStripMenuItem("&Dice");
         dice.DropDownOpening += (_, _) => _guard(() => BuildDiceItems(dice.DropDownItems));
         dice.DropDownItems.Add("(no game)").Enabled = false;
         toolsMenu.DropDownItems.Add(dice);
-        needsGame.Add(dice);
+        gate("tools.dice", dice);
         _items.Add(dice);
 
         var turn = new ToolStripMenuItem("&Turn");
@@ -72,7 +72,7 @@ sealed class DiceTools : IDisposable
         turn.DropDownItems.AddRange(new ToolStripItem[] { next, _prev, set });
         turn.DropDownOpening += (_, _) => _guard(() => _prev.Enabled = CurrentTurn.Turn > 1);
         toolsMenu.DropDownItems.Add(turn);
-        needsGame.Add(turn);
+        gate("tools.turn", turn);
         _items.Add(turn);
     }
 
@@ -91,12 +91,12 @@ sealed class DiceTools : IDisposable
         return true;
     }
 
-    void AddButton(ToolStrip bar, string id, string text, Action act, List<ToolStripItem> needsGame)
+    void AddButton(ToolStrip bar, string id, string text, Action act, Func<string, ToolStripItem, ToolStripItem> gate)
     {
         var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = id };
         b.Click += (_, _) => _guard(act);
         bar.Items.Add(b);
-        needsGame.Add(b);
+        gate(id, b);
         _items.Add(b);
     }
 
