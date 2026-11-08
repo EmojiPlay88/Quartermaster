@@ -1,12 +1,11 @@
 using System.Globalization;
-using Quartermaster.Render;
 using Quartermaster.Vassal;
 using SkiaSharp;
 
-namespace Quartermaster.App;
+namespace Quartermaster.Render;
 
 /// <summary>Line of sight / range: a drag from one snapped grid location to another, measured in grid cells. Never touches game state.</summary>
-sealed class LosTool(MapDef map)
+public sealed class LosTool(MapDef map)
 {
     PointD? _a, _b;
 
@@ -20,13 +19,16 @@ sealed class LosTool(MapDef map)
         Dragging = true;
     }
 
+    /// <summary>Moves the far end of the line to the snapped map point while dragging; ignored otherwise.</summary>
     public void Update(PointD p)
     {
         if (Dragging) _b = Snap(p);
     }
 
+    /// <summary>Finishes the drag; the line stays until <see cref="Cancel"/> or the next <see cref="Begin"/>.</summary>
     public void End() => Dragging = false;
 
+    /// <summary>Removes the line.</summary>
     public void Cancel()
     {
         Dragging = false;
@@ -77,6 +79,7 @@ sealed class LosTool(MapDef map)
         return head + px.ToString(CultureInfo.InvariantCulture) + " px";
     }
 
+    /// <summary>Draws the line, its end dots and the distance label (map coordinates through <paramref name="vp"/>).</summary>
     public void Draw(SKCanvas c, Viewport vp)
     {
         if (_a is not { } a || _b is not { } b) return;
