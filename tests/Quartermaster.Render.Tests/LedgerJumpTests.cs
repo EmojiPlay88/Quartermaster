@@ -204,6 +204,33 @@ public class LedgerJumpTests
     }
 
     [Fact]
+    public void CanSeeThatThrows_FailsClosed()
+    {
+        var plan = Plan(new[] { "a1", "b1" }, canSee: id => id == "a1" ? throw new InvalidOperationException("test fault") : true);
+        Assert.Equal(new[] { P("b1") }, plan.RowKeys);
+        Assert.Equal(1, plan.Missing);
+    }
+
+    [Fact]
+    public void TextFilterKept_WhenAnotherTabShowsTheRowUnderIt()
+    {
+        // The side hides a1 on Units; Everything still shows it with the text filter, so the filter is not cleared.
+        var plan = Plan(new[] { "a1" }, filter: "Anvil", side: "b");
+        Assert.Equal("all", plan.TabKey);
+        Assert.False(plan.ClearFilter);
+        Assert.Equal(new[] { P("a1") }, plan.RowKeys);
+    }
+
+    [Fact]
+    public void CurrentUserTabWithAFilterError_MovesToUnits()
+    {
+        var broken = new UserLedgerTab("Broken TEST", "Fuel <", Array.Empty<string>(), false, null);
+        var plan = Plan(new[] { "a1" }, current: "user:Broken TEST", user: new[] { broken });
+        Assert.Equal("units", plan.TabKey);
+        Assert.Equal(new[] { P("a1") }, plan.RowKeys);
+    }
+
+    [Fact]
     public void PieceWithNoRow_NoTabAndAHint()
     {
         var plan = Plan(new[] { "e1" });   // no ledger values, units without values hidden

@@ -289,8 +289,8 @@ sealed partial class LedgerWindow : Form
         var plan = LedgerJump.Plan(pieceIds, _tabDefs, _tab.Key, view, pack, _s.Model, _filter.Text, _prefs.Side, _showEmpty.Checked, _s.CanSee);
         if (plan.TabKey == null) return plan;
         if (plan.ClearFilter && _filter.Text.Length > 0) _filter.Text = "";
-        if (plan.TabKey != _tab.Key) SelectTab(plan.TabKey);
-        Reload();
+        if (plan.TabKey != _tab.Key) SelectTab(plan.TabKey);   // reloads
+        else Reload();
         _debounce.Stop();   // the cleared filter's pending reload is done
         var keys = plan.RowKeys.ToHashSet(StringComparer.Ordinal);
         var first = _rows.FindIndex(r => keys.Contains(r.Row.Key));

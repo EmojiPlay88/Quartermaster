@@ -158,7 +158,7 @@ sealed partial class MainForm
             if (_opts.ScreenshotLedger != null) { Program.AppLog("smoke: --screenshot-ledger given but no rules pack is loaded."); Program.ExitCode = 1; }
             return;
         }
-        ShowLedger();
+        OpenLedger();
         if (_ledgers.TryGetValue("ledger", out var w) && !w.IsDisposed && w is LedgerWindow lw)
         {
             Program.AppLog($"smoke: ledger window opened with {lw.RowCountForSmoke} row(s)");

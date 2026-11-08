@@ -55,6 +55,23 @@ sealed partial class MainForm
         else if (got.Count != 1 || !got.Contains(want)) Fail("the counter's row is not the selected row");
         else Program.AppLog("smoke: show in ledger ok");
 
+        // A depot alert opens the Ledger at the holder's row; it must not jump to the counters selected on the map.
+        if (pack.Holders?.FirstOrDefault() is { } holder)
+        {
+            map.Activate();
+            map.Canvas.SelectOnly(id);
+            const string sentinel = "smoke: alert sentinel";
+            SetStatus(sentinel);
+            GoToMatch(new AlertMatch(null, holder.Id, "smoke"));
+            Application.DoEvents();
+            var sel = lw.IsDisposed ? new List<string>() : lw.SelectedKeysForSmoke.ToList();
+            Program.AppLog($"smoke: show in ledger: depot alert selected {string.Join(",", sel)}, status '{_sbMessage.Text}'");
+            if (_sbMessage.Text != sentinel) Fail("the depot alert ran Show in Ledger for the map selection");
+            else if (sel.Count != 1 || sel[0] != LedgerKey.Holder(holder.Id)) Fail("the depot alert did not select the holder's row");
+            else Program.AppLog("smoke: show in ledger: depot alert does not jump, ok");
+        }
+        else Program.AppLog("smoke: show in ledger: no holder in the rules pack, depot alert check skipped");
+
         map.Canvas.SelectOnly(null);
         map.Canvas.Invalidate();
         if (!lw.IsDisposed) lw.Close();

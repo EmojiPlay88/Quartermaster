@@ -28,7 +28,7 @@ sealed partial class MainForm
             },
             LastTab = "units", ShowCounters = true, Grouping = LedgerGrouping.Map,
         });
-        ShowLedger();
+        OpenLedger();
         if (!_ledgers.TryGetValue("ledger", out var w) || w.IsDisposed || w is not LedgerWindow lw) { SmokeFail("the ledger did not open"); return; }
         lw.Size = new Size(900, 560);
         var ok = true;

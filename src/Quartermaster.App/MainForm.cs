@@ -894,6 +894,7 @@ sealed partial class MainForm : Form
         OpenLedger();
     }
 
+    /// <summary>Opens (or activates) the ledger window without touching its rows; for callers that select rows themselves (alerts, smokes).</summary>
     LedgerWindow? OpenLedger()
     {
         if (_session?.Rules == null) return null;
