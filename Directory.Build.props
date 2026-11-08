@@ -1,5 +1,7 @@
 <Project>
   <PropertyGroup>
+    <!-- The one app version (Help > About, launcher footer, updater). Release tag quartermaster-v$(Version). -->
+    <Version>0.1.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>

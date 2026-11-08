@@ -119,6 +119,13 @@ public sealed class SettingsStore(string root)
             AutosaveMinutes = r.Int("AutosaveMinutes", d.AutosaveMinutes, 0, 240),
             ConfirmDelete = r.Bool("ConfirmDelete", d.ConfirmDelete),
             GameMasterMode = r.Bool("GameMasterMode", d.GameMasterMode),
+            CheckUpdatesOnStart = r.Bool("CheckUpdatesOnStart", d.CheckUpdatesOnStart),
+            LastUpdateCheckUtc = r.NullableStr("LastUpdateCheckUtc") is { } lastCheck
+                ? DateTime.TryParse(lastCheck, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var lc) ? lc : WarnNull<DateTime?>(log, "LastUpdateCheckUtc", "is not a date and time")
+                : null,
+            SkippedVersion = r.NullableStr("SkippedVersion") is { } skipped
+                ? skipped.Length <= 40 && Version.TryParse(skipped, out var sv) && sv.Build >= 0 && sv.Revision < 0 ? skipped : WarnNull<string>(log, "SkippedVersion", "is not a version like 0.2.0")
+                : null,
             GridDefault = r.Enum("GridDefault", d.GridDefault),
             LabelFontSize = r.Int("LabelFontSize", d.LabelFontSize, 6, 20),
             HighlightColor = r.Str("HighlightColor", d.HighlightColor, s => TryParseColor(s, out _) ? s.ToUpperInvariant() : null),
@@ -187,6 +194,12 @@ public sealed class SettingsStore(string root)
         if (s.Length == 0 || s.Length > 40) return null;
         try { _ = DateTime.Now.ToString(s, CultureInfo.InvariantCulture); return s; }
         catch (FormatException) { return null; }
+    }
+
+    static T? WarnNull<T>(DiagnosticLog? log, string field, string what)
+    {
+        Warn(log, field, what);
+        return default;
     }
 
     static void Warn(DiagnosticLog? log, string field, string what) =>
@@ -360,6 +373,9 @@ public sealed class SettingsStore(string root)
         ["AutosaveMinutes"] = s.AutosaveMinutes,
         ["ConfirmDelete"] = s.ConfirmDelete,
         ["GameMasterMode"] = s.GameMasterMode,
+        ["CheckUpdatesOnStart"] = s.CheckUpdatesOnStart,
+        ["LastUpdateCheckUtc"] = s.LastUpdateCheckUtc?.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture),
+        ["SkippedVersion"] = s.SkippedVersion,
         ["GridDefault"] = s.GridDefault.ToString(),
         ["LastDifficulty"] = s.LastDifficulty.ToString(),
         ["LabelFontSize"] = s.LabelFontSize,

@@ -20,6 +20,12 @@ public sealed record Settings
     public int AutosaveMinutes { get; init; } = 5;
     public bool ConfirmDelete { get; init; } = true;
     public bool GameMasterMode { get; init; }
+    /// <summary>Check GitHub for a new version when the launcher starts (at most once per 24 h).</summary>
+    public bool CheckUpdatesOnStart { get; init; } = true;
+    /// <summary>When the last update check ran (UTC); null = never.</summary>
+    public DateTime? LastUpdateCheckUtc { get; init; }
+    /// <summary>"Skip this version": never offer this version ("0.2.0") again; null = none skipped.</summary>
+    public string? SkippedVersion { get; init; }
 
     // Display
     public GridMode GridDefault { get; init; } = GridMode.ModuleDefault;
