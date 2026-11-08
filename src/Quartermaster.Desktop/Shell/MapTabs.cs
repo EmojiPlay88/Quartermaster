@@ -46,6 +46,12 @@ public sealed class MapTabs : TabControl
     /// <summary>The views in tab order.</summary>
     public IReadOnlyList<MapView> Views => _views;
 
+    /// <summary>Selects the tab of a view.</summary>
+    public void Activate(MapView v)
+    {
+        if (Items.OfType<TabItem>().FirstOrDefault(t => ViewOf(t) == v) is { } tab) SelectedItem = tab;
+    }
+
     /// <summary>The selected tab's view.</summary>
     public MapView? ActiveView => ViewOf(SelectedItem as TabItem);
 

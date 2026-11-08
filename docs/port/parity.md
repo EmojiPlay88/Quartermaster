@@ -65,7 +65,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
 | View > Module Tree | 2 |  |  |  |  |
 | View > Diagnostics | 3 |  |  |  |  |
-| View > Log | 2 |  |  |  |  |
+| View > Log | 2 | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable); floating is 2b |
 | View > Phase panel | 2 |  |  |  |  |
 | View > Outliner | 3 |  |  |  |  |
 | View > Ledger | 3 |  |  |  |  |
@@ -149,7 +149,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 |---|---|---|---|---|---|
 | FormulaDialog, FormulaFormView, CheatSheetWindow, BatchGridWindow, MissingInputDialog | 2 |  |  |  |  |
 | DiceTools, DiceDialog, TurnDialog | 2 | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
-| LogPanel, LogDock, LogFloatForm, ChatBox | 2 |  |  |  |  |
+| LogPanel, LogDock, LogFloatForm, ChatBox | 2 | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / LogFloatForm wait for 2b; the chat line shows only online (stage 5) |
 | OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 |  |  |  |  |
 | PhaseWatcher | 2 |  |  |  |  |
 

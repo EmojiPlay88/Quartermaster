@@ -37,6 +37,9 @@ public partial class MainWindow : Window
     readonly List<(string Id, Control Item)> _gated = new();   // menu items and toolbar buttons whose state comes from CommandAvailability
     static readonly FileFilter RulesFilter = new("Rules packs (*.qrules)", "*.qrules");
     readonly MenuItem _showGrid;
+    readonly MenuItem _viewLog;
+    LogPanel? _log;
+    bool _logWanted = true;   // View > Log: whether the user wants the bottom dock shown
     MenuItem? _editUndo, _editRedo;
     Button? _tbUndo, _tbRedo;
     readonly DiceTools _dice;
@@ -66,6 +69,7 @@ public partial class MainWindow : Window
         _rulesRoot = rulesRoot;
         InitializeComponent();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
+        _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         _router.Guard = Guard;
         _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
@@ -153,6 +157,7 @@ public partial class MainWindow : Window
         CreatePhases(next);
         Maps.Bind(next, () => _actions);
         PaletteHost.Bind(next);
+        CreateLog(next);
         SbModule.Text = $"{next.Model.Name} {next.Model.Version}".Trim();
         SbLocation.Text = "-";
         SbZoom.Text = "-";
@@ -260,6 +265,7 @@ public partial class MainWindow : Window
         // The map tools act on the selected tab (WinForms: the active map window). Letter shortcuts only fire with the map focused.
         _router.SetHandler("tool.los", () => Available(Maps.ActiveView != null && Avail("tool.los"), () => Maps.ActiveView!.ToggleLos()));
         _router.SetHandler("view.hideCounters", () => Available(Maps.ActiveView != null, () => Maps.ActiveView!.ToggleHideCounters()));
+        _router.SetHandler("view.log", () => Available(Avail("view.log"), ToggleLog));
         _router.SetHandler("file.openModule", () => RunAsync(OpenModuleDialogAsync));
         _router.SetHandler("file.newGame", () => Available(Avail("file.newGame"), () => RunAsync(NewGameAsync)));
         _router.SetHandler("file.openGame", () => Available(Avail("file.openGame"), () => RunAsync(OpenGameDialogAsync)));
@@ -346,6 +352,11 @@ public partial class MainWindow : Window
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _showGrid.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) Maps.ShowGrid = _showGrid.IsChecked; };
         view.Items.Add(_showGrid);
+        // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.
+        _viewLog.InputGesture = _router.Gesture("view.log");
+        _viewLog.Click += (_, _) => _router.Execute("view.log");
+        Gate("view.log", _viewLog);
+        view.Items.Add(_viewLog);
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
         Item(view, "Zoom 100%", () => Maps.ActiveView?.ZoomCentered(1f), needsModule: true);
@@ -696,6 +707,7 @@ public partial class MainWindow : Window
     {
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
+        DestroyLog();
         UnhookGame();
         if (_history != null) _history.Rewound -= RequestHistoryRefresh;
         _history = null;
@@ -713,6 +725,58 @@ public partial class MainWindow : Window
         SbLocation.Text = "-";
         SbZoom.Text = "-";
         SetTilingProgress(null);
+    }
+
+    // ---------- log panel (see LogPanel) ----------
+
+    /// <summary>The log panel of the open module; null without one.</summary>
+    public LogPanel? Log => _log;
+
+    /// <summary>True while the log dock is shown (View > Log checked).</summary>
+    public bool LogShown => _log != null && _logWanted;
+
+    void CreateLog(ModuleSession s)
+    {
+        _log = new LogPanel(s, CentreOnPiece, _dialogs, () => this);
+        LogHost.Child = _log;
+        ApplyLog();
+    }
+
+    void DestroyLog()
+    {
+        _log?.Detach();
+        _log = null;
+        LogHost.Child = null;
+        ApplyLog();
+    }
+
+    /// <summary>View > Log: show or collapse the bottom panel.</summary>
+    void ToggleLog()
+    {
+        if (_log == null) return;
+        _logWanted = !_logWanted;
+        ApplyLog();
+    }
+
+    void ApplyLog()
+    {
+        var shown = LogShown;
+        LogHost.IsVisible = LogSplitter.IsVisible = shown;
+        BodyAndLog.RowDefinitions[1].Height = new GridLength(shown ? 4 : 0);
+        if (shown) { if (BodyAndLog.RowDefinitions[2].Height.Value < 1) BodyAndLog.RowDefinitions[2].Height = new GridLength(170); }
+        else BodyAndLog.RowDefinitions[2].Height = new GridLength(0);
+        _viewLog.IsChecked = shown;
+    }
+
+    /// <summary>Scrolls the map holding the piece to it and selects it (WinForms MainForm.CentreOnPiece); only pieces this player may see.</summary>
+    public void CentreOnPiece(string pieceId)
+    {
+        if (_session?.View is not { } seen || !seen.Pieces.TryGetValue(pieceId, out var piece)) return;
+        var view = Maps.Views.FirstOrDefault(v => v.Map.Id == piece.MapId) ?? Maps.Views.FirstOrDefault(v => v.Map.Name == piece.MapId);
+        if (view == null) return;
+        Maps.Activate(view);
+        view.CentreOn(piece.Pos);
+        view.SelectOnly(pieceId);
     }
 
     void HookGame()
