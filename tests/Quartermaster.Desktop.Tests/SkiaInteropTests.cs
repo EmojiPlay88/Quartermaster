@@ -15,7 +15,7 @@ namespace Quartermaster.Desktop.Tests;
 
 /// <summary>
 /// Version gate guard: Avalonia's Skia backend and Render.MapRenderer share one SkiaSharp (4.154.0) and one native libSkiaSharp.
-/// A map drawn through Avalonia's own SKCanvas must come out pixel-identical to the same map drawn into a plain SKBitmap.
+/// A map drawn through Avalonia's own SKCanvas must come out pixel-identical to the same map drawn into a plain SKBitmap of the same colour type.
 /// </summary>
 public sealed class SkiaInteropTests : IDisposable
 {
@@ -68,7 +68,7 @@ public sealed class SkiaInteropTests : IDisposable
         var options = new MapDrawOptions(false, new HashSet<string>(), null);
         void Draw(SKCanvas c) => renderer.Draw(c, map, tiles, state, s.Model, view, size, options);
 
-        using var expected = new SKBitmap(new SKImageInfo(W, H, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using var expected = TestHelpers.ReferenceBitmap(W, H);
         using (var c = new SKCanvas(expected)) { c.Clear(SKColors.Magenta); Draw(c); }
 
         var control = new SkiaHost(Draw);
@@ -80,21 +80,15 @@ public sealed class SkiaInteropTests : IDisposable
         Assert.NotNull(frame);
         Assert.True(control.Leases >= 1, "Avalonia never handed out its SKCanvas");
         Assert.Null(control.Error);
+        // The reference must use the surface's colour type (see TestHelpers.ReferenceBitmap): Skia's filtered image draws differ between
+        // Bgra8888 and Rgba8888 destinations, and the native type differs by OS (Bgra8888 on Windows/Linux, Rgba8888 on macOS).
+        Assert.Equal((SKImageInfo.PlatformColorType, SKAlphaType.Premul), (control.SurfaceColorType, control.SurfaceAlphaType));
         var actual = TestHelpers.Pixels(frame!);
         Assert.Equal(W, actual.Width);
         Assert.Equal(H, actual.Height);
-        var colours = new HashSet<SKColor>();
-        var diff = 0;
-        for (var y = 0; y < H; y++)
-            for (var x = 0; x < W; x++)
-            {
-                var a = actual.Px[y * W + x];
-                var e = expected.GetPixel(x, y);
-                colours.Add(a);
-                if (a != e) diff++;
-            }
-        Assert.True(colours.Count > 50, $"frame has only {colours.Count} colours: the map did not draw");
-        Assert.Equal(0, diff);
+        var colours = actual.Px.Distinct().Count();
+        Assert.True(colours > 50, $"frame has only {colours} colours: the map did not draw");
+        TestHelpers.AssertSamePixels(actual, expected, 0);
     }
 
     sealed class SkiaHost(Action<SKCanvas> draw) : Control
@@ -102,6 +96,8 @@ public sealed class SkiaInteropTests : IDisposable
         readonly Action<SKCanvas> _draw = draw;
         public int Leases;
         public Exception? Error;
+        public SKColorType? SurfaceColorType;
+        public SKAlphaType? SurfaceAlphaType;
 
         public override void Render(DrawingContext context) => context.Custom(new Op(this, new Rect(Bounds.Size)));
 
@@ -119,6 +115,11 @@ public sealed class SkiaInteropTests : IDisposable
                     var lease = context.TryGetFeature<ISkiaSharpApiLeaseFeature>() ?? throw new InvalidOperationException("no Skia lease");
                     using var api = lease.Lease();
                     host.Leases++;
+                    using (var px = api.SkSurface?.PeekPixels())
+                    {
+                        host.SurfaceColorType = px?.ColorType;
+                        host.SurfaceAlphaType = px?.AlphaType;
+                    }
                     host._draw(api.SkCanvas);
                 }
                 catch (Exception ex) { host.Error = ex; }

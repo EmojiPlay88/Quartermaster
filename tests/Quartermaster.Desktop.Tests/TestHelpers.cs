@@ -23,6 +23,40 @@ public static class TestHelpers
         frame.Dispose();
     }
 
+    /// <summary>
+    /// A bitmap for the reference render, in the colour type Avalonia.Skia draws into: the platform's native 8888 type
+    /// (<see cref="SKImageInfo.PlatformColorType"/>: Bgra8888 on Windows and Linux, Rgba8888 on macOS), premultiplied. Skia's output for
+    /// filtered (scaled) image draws depends on the destination colour type, so the reference must match the surface, not the captured
+    /// frame (which headless Avalonia always hands back as Rgba8888). SkiaInteropTests checks Avalonia's surface really is this type.
+    /// </summary>
+    public static SKBitmap ReferenceBitmap(int width, int height) =>
+        new(new SKImageInfo(width, height, SKImageInfo.PlatformColorType, SKAlphaType.Premul));
+
+    /// <summary>
+    /// Asserts every pixel of <paramref name="actual"/> is within <paramref name="tolerance"/> (per channel) of <paramref name="expected"/>.
+    /// On failure the message says how many pixels differ, by how much at most, where, and a few samples.
+    /// </summary>
+    public static void AssertSamePixels((int Width, int Height, SKColor[] Px) actual, SKBitmap expected, int tolerance)
+    {
+        Assert.Equal((expected.Width, expected.Height), (actual.Width, actual.Height));
+        int diff = 0, maxDelta = 0, minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1;
+        var samples = new List<string>();
+        for (var y = 0; y < actual.Height; y++)
+            for (var x = 0; x < actual.Width; x++)
+            {
+                var a = actual.Px[y * actual.Width + x];
+                var e = expected.GetPixel(x, y);
+                var d = Math.Max(Math.Max(Math.Abs(a.Red - e.Red), Math.Abs(a.Green - e.Green)), Math.Max(Math.Abs(a.Blue - e.Blue), Math.Abs(a.Alpha - e.Alpha)));
+                if (d <= tolerance) continue;
+                diff++;
+                maxDelta = Math.Max(maxDelta, d);
+                minX = Math.Min(minX, x); minY = Math.Min(minY, y); maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y);
+                if (samples.Count < 5) samples.Add($"({x},{y}) {a} vs {e}");
+            }
+        Assert.True(diff == 0, $"{diff} of {actual.Width * actual.Height} pixels differ by more than {tolerance} (max {maxDelta}) " +
+                               $"in [{minX},{minY}]-[{maxX},{maxY}]; actual vs expected: {string.Join("; ", samples)}");
+    }
+
     /// <summary>The captured frame as SKColors (headless frames are Rgba8888).</summary>
     public static (int Width, int Height, SKColor[] Px) Pixels(Bitmap frame)
     {

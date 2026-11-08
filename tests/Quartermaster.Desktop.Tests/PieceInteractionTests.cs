@@ -438,7 +438,7 @@ public sealed class PieceInteractionTests : IDisposable
         // Expected: the scene natively at 2x without the piece, plus the ghost rendered at zoom 2 placed at the cursor.
         var pieces = new PieceRenderer(S.Images);
         using var sprite = pieces.RenderSprite(pc, view.View.Zoom * k, PieceDrawFlags.Ghost);
-        using var expected = new SKBitmap(new SKImageInfo((int)(W * k), (int)(H * k), SKColorType.Bgra8888, SKAlphaType.Premul));
+        using var expected = TestHelpers.ReferenceBitmap((int)(W * k), (int)(H * k));
         using (var c = new SKCanvas(expected))
         {
             c.Save();
