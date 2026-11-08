@@ -41,6 +41,9 @@ public interface IDialogs
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
 public sealed class Dialogs : IDialogs
 {
+    /// <summary>Shown when a picker returns a location without a local path (e.g. a cloud or portal item).</summary>
+    public const string NotLocalText = "This location can't be opened directly; choose a file on this computer.";
+
     public async Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters)
     {
         var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -49,7 +52,10 @@ public sealed class Dialogs : IDialogs
             AllowMultiple = false,
             FileTypeFilter = filters.Select(Type).ToList(),
         });
-        return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+        if (files.Count == 0) return null;
+        if (files[0].TryGetLocalPath() is { } path) return path;
+        await MessageBox.ShowAsync(owner, NotLocalText, "Quartermaster", yesNo: false);
+        return null;
     }
 
     public async Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension)
@@ -61,7 +67,12 @@ public sealed class Dialogs : IDialogs
             FileTypeChoices = new[] { Type(filter) },
             ShowOverwritePrompt = true,
         });
-        if (file?.TryGetLocalPath() is not { } path) return null;
+        if (file == null) return null;
+        if (file.TryGetLocalPath() is not { } path)
+        {
+            await MessageBox.ShowAsync(owner, NotLocalText, "Quartermaster", yesNo: false);
+            return null;
+        }
         return Path.HasExtension(path) ? path : path + "." + defaultExtension;
     }
 

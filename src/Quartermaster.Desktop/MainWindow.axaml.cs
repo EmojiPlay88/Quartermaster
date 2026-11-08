@@ -22,6 +22,8 @@ public partial class MainWindow : Window
     const string Caption = "Quartermaster";
     const string UnsavedText = "The current game has unsaved changes. Discard them?";
     const string AbandonReplayText = "Abandon this replay?";
+    /// <summary>WinForms MainForm.History.FloorTip.</summary>
+    internal const string FloorTip = "Undo stops here: this game was loaded from a save without undo history.";
     static readonly FileFilter ModuleFilter = new("VASSAL modules (*.vmod)", "*.vmod");
     static readonly FileFilter SaveFilter = new("Quartermaster saves (*.qsave)", "*.qsave");
     static readonly FileFilter AllFiles = new("All files (*.*)", "*");
@@ -342,20 +344,27 @@ public partial class MainWindow : Window
         try
         {
             var s = _session;
-            var h = s == null || s.IsGuest || s.IsReplaying ? null : _history;
+            var guest = s?.IsGuest == true;
+            var replaying = s?.IsReplaying == true;   // the sender's turn cannot be undone; nothing may change it mid-replay
+            var h = s == null || guest || replaying ? null : _history;
             var undo = s != null && h != null && HistoryCommands.CanUndo(s, h);
             var redo = s != null && h != null && HistoryCommands.CanRedo(s, h);
-            Set(_editUndo, h?.UndoText ?? "Undo", undo);
-            Set(_editRedo, h?.RedoText ?? "Redo", redo);
+            // Why an item is off (WinForms MainForm.History.RefreshHistoryUi).
+            var why = guest ? ModuleSession.GuestUndoText : replaying ? ModuleSession.ReplayingText
+                : h?.UndoBlockedBySentTurn == true ? HistoryController.AlreadySentText : h?.AtFloorFromOldSave == true ? FloorTip : null;
+            Set(_editUndo, h?.UndoText ?? "Undo", undo, !undo ? why : null);
+            Set(_editRedo, h?.RedoText ?? "Redo", redo, guest || replaying ? why : null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             System.Diagnostics.Trace.WriteLine("refresh history ui: " + ex.Message);
         }
 
-        static void Set(MenuItem? mi, string text, bool enabled)
+        static void Set(MenuItem? mi, string text, bool enabled, string? tip)
         {
             if (mi == null) return;
+            ToolTip.SetTip(mi, tip);
+            ToolTip.SetShowOnDisabled(mi, true);
             // "&" + the action label with its own ampersands escaped, so it cannot become a mnemonic (WinForms Mnemonic).
             mi.Header = MenuText.FromWinForms("&" + text.Replace("&", "&&", StringComparison.Ordinal));
             mi.IsEnabled = enabled;
@@ -403,9 +412,9 @@ public partial class MainWindow : Window
 
     async Task OpenGameDialogAsync()
     {
-        if (_session == null || !await ConfirmDiscardAsync()) return;
+        if (_session is not { } s || !await ConfirmDiscardAsync()) return;
         var path = await _dialogs.OpenFileAsync(this, "Open Game", new[] { SaveFilter, AllFiles });
-        if (path == null) return;
+        if (path == null || !ReferenceEquals(s, _session)) return;   // the module changed while the picker was open
         OpenGame(path);
     }
 

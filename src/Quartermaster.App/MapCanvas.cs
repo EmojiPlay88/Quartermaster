@@ -496,22 +496,8 @@ sealed partial class MapCanvas : SKControl
 
     void ReportStatus(Point? at)
     {
-        var loc = "-";
-        if (at is { } p)
-        {
-            var m = MapPoint(p);
-            loc = $"{(int)Math.Round(m.X)}, {(int)Math.Round(m.Y)}";
-            foreach (var b in Map.Boards)
-            {
-                var lx = m.X - b.Offset.X;
-                var ly = m.Y - b.Offset.Y;
-                if (lx < 0 || ly < 0 || lx >= b.Width || ly >= b.Height) continue;
-                var name = b.Grid?.LocationName(new PointD(lx, ly)) ?? "";
-                if (name.Length > 0) loc += "  " + name;
-                break;
-            }
-        }
-        StatusChanged?.Invoke(loc, $"{Math.Round(View.Zoom * 100)}%");
+        var loc = at is { } p ? MapStatusText.Location(Map, MapPoint(p)) : "-";
+        StatusChanged?.Invoke(loc, MapStatusText.Zoom(View.Zoom));
     }
 
     // ---------- drag and drop ----------
@@ -614,7 +600,7 @@ sealed partial class MapCanvas : SKControl
         {
             Guard(() =>
             {
-                var (_, msg) = PaletteDrop.Place(_s, Map, slot, MapPoint(PointToClient(new Point(e.X, e.Y))), _drag.Snap, Actions?.Invoke());
+                var (_, msg) = PaletteModel.Place(_s, Map, slot, MapPoint(PointToClient(new Point(e.X, e.Y))), _drag.Snap, Actions?.Invoke());
                 DropMessage?.Invoke(msg);
             });
             Invalidate();

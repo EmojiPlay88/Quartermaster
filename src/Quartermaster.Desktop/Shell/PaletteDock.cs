@@ -14,17 +14,13 @@ using SkiaSharp;
 
 namespace Quartermaster.Desktop.Shell;
 
-/// <summary>
-/// Places a palette counter on a map, as WinForms PaletteDrop: resolve the drop, build the piece from its slot, run a logged AddPiece
-/// through the action port (which seeds its ledgers), and say what happened.
-/// </summary>
+/// <summary>Palette drag payloads on Avalonia, and placing a dropped counter through the shared <see cref="PaletteModel.Place"/>.</summary>
 public static class PaletteDrop
 {
     /// <summary>The drag payload: the slot key (<see cref="PaletteModel.Key"/>) under <see cref="PaletteModel.DragFormat"/>.</summary>
     public static readonly DataFormat<string> Format = DataFormat.CreateStringApplicationFormat(PaletteModel.DragFormat);
 
-    public static PieceSlotDef? Find(ModuleSession s, string? key) =>
-        key == null ? null : s.Model.Slots.FirstOrDefault(x => PaletteModel.Key(x) == key);
+    public static PieceSlotDef? Find(ModuleSession s, string? key) => PaletteModel.Find(s.Model, key);
 
     /// <summary>The slot carried by a drag, or null when the data is not a palette drag of this module.</summary>
     public static PieceSlotDef? SlotFrom(ModuleSession s, IDataTransfer? data) =>
@@ -38,22 +34,9 @@ public static class PaletteDrop
         return data;
     }
 
-    /// <param name="actions">The main window's action port (it executes the AddPiece and seeds); null = execute directly.</param>
-    public static (bool Placed, string Message) Place(ModuleSession s, MapDef map, PieceSlotDef slot, PointD mapPoint, bool snap, IActionPort? actions = null)
-    {
-        if (s.Game is not { } game) return (false, "No game is running");
-        if (PaletteModel.ResolveDrop(game.State, map, mapPoint, s.Images, snap) is not { } t) return (false, "Drop onto a board");
-        var (type, state) = PieceFactory.FromSlot(s.Model, slot, t.MapId, t.Pos);
-        var id = "p:" + Guid.NewGuid().ToString("N");
-        var add = new AddPiece(id, type, state, t.MapId, t.Pos, t.StackOnto);
-        if (actions != null) actions.PieceCommand(add);
-        else
-        {
-            game.Execute(CommandLog.Prepare(add, game.State, s));
-            s.SeedLedgers();
-        }
-        return (true, $"Placed {PaletteModel.PieceName(slot)}");
-    }
+    /// <summary>Places the counter (shared with WinForms: <see cref="PaletteModel.Place"/>).</summary>
+    public static (bool Placed, string Message) Place(ModuleSession s, MapDef map, PieceSlotDef slot, PointD mapPoint, bool snap, IActionPort? actions = null) =>
+        PaletteModel.Place(s, map, slot, mapPoint, snap, actions);
 }
 
 /// <summary>

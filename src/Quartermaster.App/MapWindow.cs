@@ -177,7 +177,7 @@ sealed class MapWindow : Form
         Host?.NoteActiveMap(this);
         if (Host is { } mf)
         {
-            mf.SetZoomText($"{Math.Round(Canvas.View.Zoom * 100)}%");
+            mf.SetZoomText(MapStatusText.Zoom(Canvas.View.Zoom));
             mf.SetLocationText("-");
         }
     }

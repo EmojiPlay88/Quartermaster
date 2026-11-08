@@ -581,4 +581,108 @@ public sealed class MainWindowTests : IDisposable
         Assert.Equal(0, n.SelectedIndex);
         Assert.Equal(new SetupChoice(null, Difficulty.SemiAuto), n.Current);
     }
+
+    [AvaloniaFact]
+    public void Corrupt_or_missing_save_via_menu_warns_and_keeps_the_game()
+    {
+        var w = NewWindow();
+        w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.StartSetup(null);
+        Directory.CreateDirectory(_tmp);
+        var bad = Path.Combine(_tmp, "bad.qsave");
+        File.WriteAllText(bad, "{ not json");
+        var before = Json(w.Session!.Game!.State);
+        var game = w.Session.Game;
+
+        _dialogs.OpenFiles.Enqueue(bad);
+        w.Commands.Execute("file.openGame");
+        Pump();
+        var (msg, caption) = Assert.Single(_dialogs.Warnings);
+        Assert.StartsWith("Malformed save file: ", msg);
+        Assert.Equal("Quartermaster", caption);
+
+        _dialogs.OpenFiles.Enqueue(Path.Combine(_tmp, "missing.qsave"));
+        w.Commands.Execute("file.openGame");
+        Pump();
+        Assert.Equal(2, _dialogs.Warnings.Count);
+        Assert.Contains("missing.qsave", _dialogs.Warnings[1].Message);
+
+        Assert.Same(game, w.Session.Game);
+        Assert.Equal(before, Json(w.Session.Game!.State));
+        Assert.Null(w.SavePath);
+        Assert.Empty(_dialogs.Questions);   // nothing changed, so nothing was asked
+    }
+
+    [AvaloniaTheory]
+    [InlineData("file.openGame")]
+    [InlineData("file.openModule")]
+    [InlineData("Load &Setup...")]
+    public void Discard_question_guards_every_game_replacing_command(string command)
+    {
+        var w = NewWindow();
+        w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.StartSetup(null);
+        MoveAPiece(w);
+        var game = w.Session!.Game;
+        var before = Json(game!.State);
+        Directory.CreateDirectory(_tmp);
+        var other = Path.Combine(_tmp, "other.qsave");
+        w.SaveGame(other);
+        MoveAPiece(w);   // dirty again after the save
+        Assert.True(w.HasUnsavedChanges);
+        _dialogs.OpenFiles.Enqueue(command == "file.openModule" ? Demo("Riverland-Demo.vmod") : other);
+        _dialogs.Setup = new SetupChoice(null, Difficulty.FullyAuto);
+        _dialogs.Answer = false;
+
+        if (command.StartsWith("file.", StringComparison.Ordinal)) w.Commands.Execute(command); else w.ClickMenu(command);
+        Pump();
+
+        Assert.Equal(new[] { ("The current game has unsaved changes. Discard them?", "Quartermaster") }, _dialogs.Questions);
+        Assert.Same(game, w.Session.Game);   // No: the same game stays, still dirty
+        Assert.NotEqual(before, Json(w.Session.Game!.State));
+        Assert.True(w.HasUnsavedChanges);
+        Assert.Equal(0, _dialogs.SetupChooserShown);
+    }
+
+    [AvaloniaFact]
+    public void Undo_after_save_makes_the_game_dirty_again()
+    {
+        var w = NewWindow();
+        w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.StartSetup(null);
+        MoveAPiece(w);
+        Directory.CreateDirectory(_tmp);
+        w.SaveGame(Path.Combine(_tmp, "u.qsave"));
+        Assert.False(w.HasUnsavedChanges);
+        Assert.True(w.Commands.Execute("edit.undo"));
+        Pump();
+        Assert.True(w.HasUnsavedChanges);
+        Assert.EndsWith("*", w.Title);
+    }
+
+    [AvaloniaFact]
+    public void Undo_tooltip_says_why_it_is_off()
+    {
+        var w = NewWindow();
+        w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.StartSetup(null);
+        MoveAPiece(w);
+        Directory.CreateDirectory(_tmp);
+        var path = Path.Combine(_tmp, "t.qsave");
+        w.SaveGame(path);
+        var undo = w.FindMenuItem("&Undo", prefix: true)!;
+        Assert.Null(ToolTip.GetTip(undo));   // enabled: no reason shown
+
+        // A save rewritten without its undo history: undo stops at the loaded state and says so (WinForms FloorTip).
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        json.Remove("genesis"); json.Remove("actions"); json.Remove("checkpoints");
+        json["log"] = new System.Text.Json.Nodes.JsonArray();
+        File.WriteAllText(path, json.ToJsonString());
+        w.OpenGame(path);
+        Pump();
+        undo = w.FindMenuItem("&Undo", prefix: true)!;
+        Assert.False(undo.IsEnabled);
+        Assert.Equal(MainWindow.FloorTip, ToolTip.GetTip(undo));
+        Assert.True(ToolTip.GetShowOnDisabled(undo));
+    }
 }

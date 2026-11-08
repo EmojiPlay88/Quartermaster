@@ -8,27 +8,12 @@ using Quartermaster.Vassal;
 
 namespace Quartermaster.Desktop.Shell;
 
-/// <summary>Status-bar texts of a map view, as WinForms MapCanvas.ReportStatus.</summary>
+/// <summary>Status-bar texts of a map view (shared with WinForms: <see cref="MapStatusText"/>).</summary>
 public static class MapStatus
 {
-    /// <summary>"x, y" (rounded map pixels) plus two spaces and the grid location name of the board under the point, when it has one.</summary>
-    public static string Location(MapDef map, PointD m)
-    {
-        var loc = $"{(int)Math.Round(m.X)}, {(int)Math.Round(m.Y)}";
-        foreach (var b in map.Boards)
-        {
-            var lx = m.X - b.Offset.X;
-            var ly = m.Y - b.Offset.Y;
-            if (lx < 0 || ly < 0 || lx >= b.Width || ly >= b.Height) continue;
-            var name = b.Grid?.LocationName(new PointD(lx, ly)) ?? "";
-            if (name.Length > 0) loc += "  " + name;
-            break;
-        }
-        return loc;
-    }
+    public static string Location(MapDef map, PointD m) => MapStatusText.Location(map, m);
 
-    /// <summary>"75%".</summary>
-    public static string Zoom(Viewport v) => $"{Math.Round(v.Zoom * 100)}%";
+    public static string Zoom(Viewport v) => MapStatusText.Zoom(v.Zoom);
 }
 
 /// <summary>
@@ -42,7 +27,7 @@ public sealed class MapTabs : TabControl
     protected override Type StyleKeyOverride => typeof(TabControl);
 
     readonly List<MapView> _views = new();
-    readonly Dictionary<MapView, Task> _tiling = new();
+    readonly Dictionary<MapView, (Task Task, CancellationTokenSource Cts)> _tiling = new();
     ModuleSession? _s;
     Func<IActionPort?>? _actions;
     CancellationTokenSource _cts = new();
@@ -115,7 +100,8 @@ public sealed class MapTabs : TabControl
             views.Add(v);
             tabs.Add(Items.OfType<TabItem>().FirstOrDefault(t => t.Content == v) ?? new TabItem { Header = m.Name, Content = v });
         }
-        foreach (var gone in _views.Except(views).ToList()) _tiling.Remove(gone);
+        foreach (var gone in _views.Except(views).ToList())
+            if (_tiling.Remove(gone, out var t)) t.Cts.Cancel();   // a map the player may no longer see stops preparing its tiles
         _views.Clear();
         _views.AddRange(views);
         Items.Clear();
@@ -129,6 +115,7 @@ public sealed class MapTabs : TabControl
         _cts.Cancel();
         _cts.Dispose();
         _cts = new CancellationTokenSource();
+        foreach (var t in _tiling.Values) t.Cts.Dispose();
         _tiling.Clear();
         _views.Clear();
         Items.Clear();
@@ -137,7 +124,10 @@ public sealed class MapTabs : TabControl
     }
 
     /// <summary>Completes when every current view has its board tiles (or gave up on them).</summary>
-    public Task WhenTiled() => Task.WhenAll(_tiling.Values);
+    public Task WhenTiled() => Task.WhenAll(_tiling.Values.Select(t => t.Task));
+
+    /// <summary>True while the view's tile preparation may still run (false once cancelled, e.g. its tab was removed).</summary>
+    internal bool IsPreparingTiles(MapView v) => _tiling.TryGetValue(v, out var t) && !t.Cts.IsCancellationRequested && !t.Task.IsCompleted;
 
     MapView Create(ModuleSession s, MapDef map)
     {
@@ -151,7 +141,8 @@ public sealed class MapTabs : TabControl
         v.AddHandler(DragDrop.DragEnterEvent, (_, e) => OnDragOver(v, e));
         v.AddHandler(DragDrop.DragOverEvent, (_, e) => OnDragOver(v, e));
         v.AddHandler(DragDrop.DropEvent, (_, e) => OnDrop(v, e));
-        _tiling[v] = PrepareTilesAsync(s, v, _cts.Token);
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        _tiling[v] = (PrepareTilesAsync(s, v, cts.Token), cts);
         return v;
     }
 
