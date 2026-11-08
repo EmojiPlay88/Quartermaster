@@ -2,7 +2,36 @@ using System.Diagnostics;
 
 namespace Quartermaster.Docs.Tests;
 
-/// <summary>Runs build/publish-wiki.ps1 against local bare repos only (never github.com).</summary>
+/// <summary>
+/// A fact for build/publish-wiki.ps1, a Windows maintainer script run with Windows PowerShell (powershell.exe). Skipped, with the reason
+/// shown, anywhere else: off Windows, or when powershell.exe is not on PATH.
+/// </summary>
+public sealed class WindowsPowerShellFactAttribute : FactAttribute
+{
+    private static readonly Lazy<string?> SkipReason = new(() =>
+    {
+        if (!OperatingSystem.IsWindows()) return "publish-wiki.ps1 is a Windows maintainer script (Windows PowerShell); not run on this OS.";
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo("powershell", "-NoProfile -Command \"exit 0\"")
+                { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true })!;
+            p.WaitForExit();
+            return p.ExitCode == 0 ? null : "powershell.exe did not start cleanly.";
+        }
+        catch (System.ComponentModel.Win32Exception) { return "powershell.exe is not on PATH."; }
+    });
+
+    public WindowsPowerShellFactAttribute()
+    {
+        if (SkipReason.Value is { } reason) Skip = reason;
+    }
+}
+
+/// <summary>
+/// Runs build/publish-wiki.ps1 against local bare repos only (never github.com). The script takes its commit identity from git config;
+/// the tests hand it a test noreply identity through GIT_CONFIG_COUNT (git's command-line config scope, which wins over every config file),
+/// so they do not depend on the machine's own git identity and never change the script's noreply check.
+/// </summary>
 public class PublishWikiScriptTests : IDisposable
 {
     private readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-pub-" + Guid.NewGuid().ToString("N"));
@@ -20,10 +49,13 @@ public class PublishWikiScriptTests : IDisposable
         catch (UnauthorizedAccessException) { }
     }
 
-    private static (int Exit, string Output) Run(string exe, IEnumerable<string> args, string? cwd = null)
+    private const string TestEmail = "qm-test@users.noreply.github.com";
+
+    private static (int Exit, string Output) Run(string exe, IEnumerable<string> args, string? cwd = null, IDictionary<string, string>? env = null)
     {
         var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, WorkingDirectory = cwd ?? Environment.CurrentDirectory };
         foreach (var a in args) psi.ArgumentList.Add(a);
+        if (env != null) foreach (var (k, v) in env) psi.Environment[k] = v;
         using var p = Process.Start(psi)!;
         var err = p.StandardError.ReadToEndAsync();
         var outp = p.StandardOutput.ReadToEnd();
@@ -36,12 +68,6 @@ public class PublishWikiScriptTests : IDisposable
         var (code, output) = Run("git", args, cwd);
         Assert.True(code == 0, $"git {string.Join(' ', args)} failed: {output}");
         return output;
-    }
-
-    private static bool PowerShellAvailable()
-    {
-        try { return Run("powershell", new[] { "-NoProfile", "-Command", "exit 0" }).Exit == 0; }
-        catch (System.ComponentModel.Win32Exception) { return false; }
     }
 
     private string NewBare(bool seed)
@@ -63,19 +89,28 @@ public class PublishWikiScriptTests : IDisposable
 
     private static string ScriptPath() => Path.Combine(DemoModuleTests.RepoRoot(), "build", "publish-wiki.ps1");
 
-    private static (int Exit, string Output) Publish(string remote, params string[] flags)
+    /// <summary>git config as the command-line scope (git 2.31+): read by the script's <c>git config user.email</c> ahead of any file.</summary>
+    private static Dictionary<string, string> Identity(string email) => new()
+    {
+        ["GIT_CONFIG_COUNT"] = "2",
+        ["GIT_CONFIG_KEY_0"] = "user.name", ["GIT_CONFIG_VALUE_0"] = "Quartermaster test",
+        ["GIT_CONFIG_KEY_1"] = "user.email", ["GIT_CONFIG_VALUE_1"] = email,
+    };
+
+    private static (int Exit, string Output) Publish(string remote, params string[] flags) => PublishAs(TestEmail, remote, flags);
+
+    private static (int Exit, string Output) PublishAs(string email, string remote, params string[] flags)
     {
         var args = new List<string> { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ScriptPath(), "-Remote", remote };
         args.AddRange(flags);
-        return Run("powershell", args);
+        return Run("powershell", args, env: Identity(email));
     }
 
     private static string Head(string bare) => Git(bare, "rev-parse", "HEAD").Trim();
 
-    [Fact]
+    [WindowsPowerShellFact]
     public void Dry_run_with_pending_deletion_stops_with_exit_3()
     {
-        if (!PowerShellAvailable()) return; // powershell.exe not available on this machine
         var bare = NewBare(seed: true);
         var before = Head(bare);
         var (exit, output) = Publish(bare, "-DryRun");
@@ -85,10 +120,9 @@ public class PublishWikiScriptTests : IDisposable
         Assert.Equal(before, Head(bare));
     }
 
-    [Fact]
+    [WindowsPowerShellFact]
     public void Allow_delete_dry_run_changes_nothing()
     {
-        if (!PowerShellAvailable()) return;
         var bare = NewBare(seed: true);
         var before = Head(bare);
         var (exit, output) = Publish(bare, "-AllowDelete", "-DryRun");
@@ -97,10 +131,9 @@ public class PublishWikiScriptTests : IDisposable
         Assert.Equal(before, Head(bare));
     }
 
-    [Fact]
+    [WindowsPowerShellFact]
     public void Allow_delete_pushes_wiki_tree_without_demo()
     {
-        if (!PowerShellAvailable()) return;
         var bare = NewBare(seed: true);
         var (exit, output) = Publish(bare, "-AllowDelete");
         Assert.True(exit == 0, output);
@@ -117,13 +150,23 @@ public class PublishWikiScriptTests : IDisposable
         Assert.DoesNotContain("Old.md", actual);
 
         var author = Git(bare, "log", "-1", "--format=%ae").Trim();
-        Assert.EndsWith("@users.noreply.github.com", author);
+        Assert.Equal(TestEmail, author);
     }
 
-    [Fact]
+    [WindowsPowerShellFact]
+    public void Identity_that_is_not_noreply_is_refused_and_nothing_is_pushed()
+    {
+        var bare = NewBare(seed: true);
+        var before = Head(bare);
+        var (exit, output) = PublishAs("someone@example.com", bare, "-AllowDelete");
+        Assert.True(exit == 1, output);
+        Assert.Contains("Refusing to publish", output);
+        Assert.Equal(before, Head(bare));
+    }
+
+    [WindowsPowerShellFact]
     public void Empty_or_missing_remote_reports_empty_wiki_with_exit_2()
     {
-        if (!PowerShellAvailable()) return;
         var (exitEmpty, outEmpty) = Publish(NewBare(seed: false), "-DryRun");
         Assert.True(exitEmpty == 2, outEmpty);
         Assert.Contains("The wiki is empty", outEmpty);
