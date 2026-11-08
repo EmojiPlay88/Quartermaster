@@ -23,4 +23,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!--
+    The updater helper ships next to the app exe as a self-contained single-file Quartermaster.Updater.exe. It is published by its own
+    project into this publish folder after the app's publish (no ProjectReference, so its runtime never enters the app's deps.json).
+  -->
+  <Target Name="PublishUpdaterHelper" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">
+    <PropertyGroup>
+      <_QmHelperPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_QmHelperPublishDir>
+    </PropertyGroup>
+    <!-- Restore runs in its own evaluation (a fresh session id), as NuGet requires, then the publish. -->
+    <MSBuild Projects="..\Quartermaster.Updater\Quartermaster.Updater.csproj" Targets="Restore"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
+    <MSBuild Projects="..\Quartermaster.Updater\Quartermaster.Updater.csproj" Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishSingleFile=true;EnableCompressionInSingleFile=true;DebugType=none;PublishDir=$(_QmHelperPublishDir)" />
+    <Message Importance="high" Text="Updater helper published to $(_QmHelperPublishDir)Quartermaster.Updater.exe" />
+  </Target>
+
 </Project>

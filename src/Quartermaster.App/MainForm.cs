@@ -268,7 +268,8 @@ sealed partial class MainForm : Form
 
         var help = new ToolStripMenuItem("&Help");
         Item(help.DropDownItems, "Interface &Tour", ShowTour, null, needsGame: true);
-        Item(help.DropDownItems, "&About", () => Info("Quartermaster\nA VASSAL module reader and engine.", "About Quartermaster"));
+        Item(help.DropDownItems, "Check for &updates…", CheckForUpdates).Visible = Program.LauncherHook != null;
+        Item(help.DropDownItems, "&About", () => Info($"Quartermaster {AppVersion.Text}\nA VASSAL module reader and engine.", "About Quartermaster"));
 
         _menu.Items.AddRange(new ToolStripItem[] { file, editMenu, BuildGameMenu(), view, tools, window, help });
         _menu.MdiWindowListItem = window;
@@ -541,6 +542,20 @@ sealed partial class MainForm : Form
     {
         if (Program.Smoke) return;
         Guard(() => LaunchBookkeeping.SaveUsed(_recent, _session?.Archive.Sha256, path));
+    }
+
+    /// <summary>
+    /// Help → Check for updates…: updates happen in the launcher only. With a game open it says so and offers File → Back to launcher;
+    /// without one it goes back to the launcher, which checks at once.
+    /// </summary>
+    void CheckForUpdates()
+    {
+        if (Program.Smoke || Program.LauncherHook == null) return;
+        if (_session?.Game != null && MessageBox.Show(this, "Close the game and use the launcher to update.\n\nGo back to the launcher now (File → Back to launcher)?",
+                "Check for updates", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
+        AppUpdates.CheckOnNextLauncher = true;
+        BackToLauncher();
+        if (!ReturnToLauncher) AppUpdates.CheckOnNextLauncher = false; // the close was cancelled (unsaved changes kept)
     }
 
     void BackToLauncher()

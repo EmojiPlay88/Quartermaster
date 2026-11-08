@@ -36,6 +36,10 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
             switch (a)
             {
                 case "--new": newGame = true; break;
+                case "--updated-from" or "--update-failed" or "--screenshot-update-bar": // updater options live in AppUpdates
+                    if (i + 1 < args.Length) AppUpdates.Arg(a, args[++i]);
+                    else warn($"{a} needs a value; ignored.");
+                    break;
                 case "--screenshot-nextphase":
                     if (i + 1 < args.Length) shotNext = args[++i];
                     else warn("--screenshot-nextphase needs a file path; ignored.");
@@ -279,6 +283,7 @@ static class Program
         try
         {
             var opts = StartupOptions.Parse(args, AppLog);
+            AppUpdates.OnStart(); // after an update: the start marker first, the helper is waiting for it
             Smoke = opts.Smoke;
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.SetDefaultFont(new Font("Tahoma", 8.25f));
@@ -303,7 +308,7 @@ static class Program
                 OnlineSmoke.Run(opts);
                 return ExitCode;
             }
-            if (opts.ScreenshotLauncher != null || opts.ScreenshotOffline != null)
+            if (opts.ScreenshotLauncher != null || opts.ScreenshotOffline != null || AppUpdates.ScreenshotBarPath != null)
             {
                 LauncherShots.Run(opts);
                 return ExitCode;

@@ -67,6 +67,7 @@ sealed class GeneralTab : SettingsTab
     readonly NumericUpDown _autosave = Num(0, 240);
     readonly CheckBox _confirmDelete = Check("Ask before deleting pieces");
     readonly CheckBox _gm = Check("Game master mode (shows the counter palette)");
+    readonly CheckBox _updates = Check("Check for updates on start (at most once a day, in the launcher)");
 
     public override string Title => "General";
 
@@ -77,6 +78,7 @@ sealed class GeneralTab : SettingsTab
         Row(t, "Autosave every (minutes, 0 = off):", _autosave);
         Full(t, _confirmDelete);
         Full(t, _gm);
+        Full(t, _updates);
         return t;
     }
 
@@ -86,11 +88,13 @@ sealed class GeneralTab : SettingsTab
         Set(_autosave, s.AutosaveMinutes);
         _confirmDelete.Checked = s.ConfirmDelete;
         _gm.Checked = s.GameMasterMode;
+        _updates.Checked = s.CheckUpdatesOnStart;
     }
 
     public override Settings Collect(Settings s) => s with
     {
         ReopenLastModule = _reopen.Checked, AutosaveMinutes = (int)_autosave.Value, ConfirmDelete = _confirmDelete.Checked, GameMasterMode = _gm.Checked,
+        CheckUpdatesOnStart = _updates.Checked,
     };
 }
 
