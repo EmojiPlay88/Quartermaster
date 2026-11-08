@@ -15,57 +15,93 @@ public interface IRulesPackUi
     void Warn(string text);
 }
 
-/// <summary>New / Open / Save / confirm-saved for the rules pack of one session. UI-free: all prompts go through <see cref="IRulesPackUi"/>.</summary>
+/// <summary>Async form of <see cref="IRulesPackUi"/> for front ends whose dialogs are asynchronous (Avalonia).</summary>
+public interface IRulesPackUiAsync
+{
+    Task<bool?> AskSaveChangesAsync(string packName);
+    Task<string?> PickOpenAsync();
+    Task<string?> PickSaveAsync(string suggestedName);
+    Task<string?> AskNameAsync(string title, string prompt, string def);
+    Task WarnAsync(string text);
+}
+
+/// <summary>New / Open / Save / confirm-saved for the rules pack of one session. UI-free: all prompts go through the UI interface. One async core; the sync API runs it over completed tasks.</summary>
 public sealed class RulesPackFlow
 {
+    private sealed class SyncAdapter : IRulesPackUiAsync
+    {
+        private readonly IRulesPackUi _ui;
+        public SyncAdapter(IRulesPackUi ui) => _ui = ui;
+        public Task<bool?> AskSaveChangesAsync(string packName) => Task.FromResult(_ui.AskSaveChanges(packName));
+        public Task<string?> PickOpenAsync() => Task.FromResult(_ui.PickOpen());
+        public Task<string?> PickSaveAsync(string suggestedName) => Task.FromResult(_ui.PickSave(suggestedName));
+        public Task<string?> AskNameAsync(string title, string prompt, string def) => Task.FromResult(_ui.AskName(title, prompt, def));
+        public Task WarnAsync(string text) { _ui.Warn(text); return Task.CompletedTask; }
+    }
+
     private readonly ModuleSession _s;
-    private readonly IRulesPackUi _ui;
+    private readonly IRulesPackUiAsync _ui;
     private readonly string? _rulesMemoryRoot;
 
-    public RulesPackFlow(ModuleSession s, IRulesPackUi ui, string? rulesMemoryRoot)
+    public RulesPackFlow(ModuleSession s, IRulesPackUi ui, string? rulesMemoryRoot) : this(s, new SyncAdapter(ui), rulesMemoryRoot) { }
+
+    public RulesPackFlow(ModuleSession s, IRulesPackUiAsync ui, string? rulesMemoryRoot)
     {
         _s = s;
         _ui = ui;
         _rulesMemoryRoot = rulesMemoryRoot;
     }
 
+    // Sync API: only for UIs whose tasks are already complete (SyncAdapter); never blocks on an incomplete task.
+    public bool ConfirmSaved() => Done(ConfirmSavedAsync());
+    public void New() => Done(NewAsync());
+    public void Open() => Done(OpenAsync());
+    public bool Save(bool saveAs) => Done(SaveAsync(saveAs));
+
+    private static T Done<T>(Task<T> t) => t.IsCompleted ? t.GetAwaiter().GetResult() : throw new InvalidOperationException("The sync rules flow needs a synchronous UI.");
+    private static void Done(Task t)
+    {
+        if (!t.IsCompleted) throw new InvalidOperationException("The sync rules flow needs a synchronous UI.");
+        t.GetAwaiter().GetResult();
+    }
+
     /// <summary>Offers to save an edited rules pack. Returns false when the user cancels (or cancels the save).</summary>
-    public bool ConfirmSaved()
+    public async Task<bool> ConfirmSavedAsync()
     {
         if (_s is not { RulesDirty: true }) return true;
-        var r = _ui.AskSaveChanges(_s.Rules?.Name ?? "");
+        var r = await _ui.AskSaveChangesAsync(_s.Rules?.Name ?? "");
         if (r == null) return false;
         if (r == false) return true;
-        try { return Save(false); }
+        try { return await SaveAsync(false); }
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            _ui.Warn(ex.Message);
+            await _ui.WarnAsync(ex.Message);
             return false;
         }
     }
 
-    public void New()
+    public async Task NewAsync()
     {
-        if (!ConfirmSaved()) return;
-        var name = _ui.AskName("New Rules Pack", "Name of the new rules pack:", "Rules");
+        if (!await ConfirmSavedAsync()) return;
+        var name = await _ui.AskNameAsync("New Rules Pack", "Name of the new rules pack:", "Rules");
         if (!string.IsNullOrWhiteSpace(name)) _s.NewRules(name.Trim());
     }
 
-    public void Open()
+    public async Task OpenAsync()
     {
-        if (!ConfirmSaved()) return;
-        var path = _ui.PickOpen();
+        if (!await ConfirmSavedAsync()) return;
+        var path = await _ui.PickOpenAsync();
         if (path != null) _s.OpenRules(path);
     }
 
     /// <summary>Saves the pack; returns false when the user cancelled the file dialog.</summary>
-    public bool Save(bool saveAs)
+    public async Task<bool> SaveAsync(bool saveAs)
     {
         if (_s.Rules == null) return true;
         string? path = null;
         if (saveAs || _s.RulesPath == null)
         {
-            path = _ui.PickSave(_s.Rules.Name);
+            path = await _ui.PickSaveAsync(_s.Rules.Name);
             if (path == null) return false;
         }
         _s.SaveRules(path);

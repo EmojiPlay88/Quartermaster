@@ -420,7 +420,7 @@ public partial class MainWindow : Window
     async Task OpenModuleDialogAsync()
     {
         var path = await _dialogs.OpenFileAsync(this, "Open Module", new[] { ModuleFilter, AllFiles });
-        if (path == null || !await ConfirmDiscardAsync() || !ConfirmRulesSaved()) return;
+        if (path == null || !await ConfirmDiscardAsync() || !await ConfirmRulesSavedAsync()) return;
         if (OpenModule(path)) await ChooseAndStartAsync(preselectNew: false);
     }
 
@@ -480,45 +480,53 @@ public partial class MainWindow : Window
 
     RulesPackFlow? RulesFlow() => _session == null ? null : new RulesPackFlow(_session, new RulesUi(this), null);
 
-    void NewRulesPack() => RulesFlow()?.New();
-    void OpenRulesPack() => RulesFlow()?.Open();
+    bool _rulesFlowBusy;
+
+    /// <summary>
+    /// Runs one rules-pack flow (New / Open / Save) at a time: while a dialog of one is open, a second request is ignored.
+    /// Errors become a warning box, as the other menu flows.
+    /// </summary>
+    async Task RulesFlowAsync(Func<RulesPackFlow, Task> run)
+    {
+        if (_rulesFlowBusy || RulesFlow() is not { } flow) return;
+        _rulesFlowBusy = true;
+        try { await run(flow); }
+        catch (Exception ex) when (IsUserError(ex)) { ShowError(ex.Message); }
+        finally { _rulesFlowBusy = false; }
+    }
+
+    void NewRulesPack() => RunAsync(() => RulesFlowAsync(f => f.NewAsync()));
+    void OpenRulesPack() => RunAsync(() => RulesFlowAsync(f => f.OpenAsync()));
 
     void SaveRulesPack(bool saveAs)
     {
         if (_session?.Rules == null) return;
-        RulesFlow()!.Save(saveAs);
+        RunAsync(() => RulesFlowAsync(f => f.SaveAsync(saveAs)));
     }
 
     /// <summary>Offers to save an edited rules pack; false when the user cancels (WinForms ConfirmRulesSaved).</summary>
-    bool ConfirmRulesSaved() => _session is not { RulesDirty: true } || RulesFlow()!.ConfirmSaved();
+    async Task<bool> ConfirmRulesSavedAsync()
+    {
+        if (_session is not { RulesDirty: true } || RulesFlow() is not { } flow) return true;
+        if (_rulesFlowBusy) return false;   // another rules dialog is open: not now
+        _rulesFlowBusy = true;
+        try { return await flow.ConfirmSavedAsync(); }
+        finally { _rulesFlowBusy = false; }
+    }
 
-    /// <summary>
-    /// <see cref="IRulesPackUi"/> over <see cref="IDialogs"/>. The flow is synchronous (shared with WinForms) and the dialogs are not,
-    /// so each answer is waited for with <see cref="Wait{T}"/>, which keeps the UI running (a modal loop) while a real dialog is open.
-    /// </summary>
-    sealed class RulesUi : IRulesPackUi
+    /// <summary><see cref="IRulesPackUiAsync"/> over <see cref="IDialogs"/>.</summary>
+    sealed class RulesUi : IRulesPackUiAsync
     {
         readonly MainWindow _w;
         public RulesUi(MainWindow w) => _w = w;
 
-        public bool? AskSaveChanges(string packName) =>
-            Wait(_w._dialogs.AskYesNoCancelAsync(_w, $"Save changes to the rules pack '{packName}'?", Caption));
-        public string? PickOpen() => Wait(_w._dialogs.OpenFileAsync(_w, "Open Rules Pack", new[] { RulesFilter, AllFiles }));
-        public string? PickSave(string suggestedName) => Wait(_w._dialogs.SaveFileAsync(_w, "Save Rules Pack", RulesFilter, "qrules"));
-        public string? AskName(string title, string prompt, string def) => Wait(_w._dialogs.AskTextAsync(_w, title, prompt, def));
-        public void Warn(string text) => Wait(_w._dialogs.ShowWarningAsync(_w, text, Caption).ContinueWith(_ => 0, TaskScheduler.Default));
-    }
-
-    /// <summary>The result of a dialog task. A task that is already done (tests' fakes) is read at once; otherwise a nested UI loop runs until it ends.</summary>
-    static T Wait<T>(Task<T> task)
-    {
-        if (!task.IsCompleted)
-        {
-            var frame = new DispatcherFrame();
-            task.ContinueWith(_ => frame.Continue = false, TaskScheduler.Default);
-            Dispatcher.UIThread.PushFrame(frame);
-        }
-        return task.GetAwaiter().GetResult();
+        public Task<bool?> AskSaveChangesAsync(string packName) =>
+            _w._dialogs.AskYesNoCancelAsync(_w, $"Save changes to the rules pack '{packName}'?", Caption);
+        public Task<string?> PickOpenAsync() => _w._dialogs.OpenFileAsync(_w, "Open Rules Pack", new[] { RulesFilter, AllFiles });
+        public Task<string?> PickSaveAsync(string suggestedName) =>
+            _w._dialogs.SaveFileAsync(_w, "Save Rules Pack", RulesFilter, "qrules", suggestedName);
+        public Task<string?> AskNameAsync(string title, string prompt, string def) => _w._dialogs.AskTextAsync(_w, title, prompt, def);
+        public Task WarnAsync(string text) => _w._dialogs.ShowWarningAsync(_w, text, Caption);
     }
 
     /// <summary>The question to ask before the game goes away, or null when nothing would be lost (WinForms ConfirmDiscard).</summary>
@@ -549,7 +557,7 @@ public partial class MainWindow : Window
         _closeAsking = true;
         bool yes;
         // WinForms: ConfirmDiscard, then ConfirmRulesSaved.
-        try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption)) && ConfirmRulesSaved(); }
+        try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption)) && await ConfirmRulesSavedAsync(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("close question: " + ex); yes = false; }
         finally { _closeAsking = false; }
         if (!yes) return;

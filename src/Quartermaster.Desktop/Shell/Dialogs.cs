@@ -26,7 +26,7 @@ public interface IDialogs
     Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters);
 
     /// <summary>A path to save to (with <paramref name="defaultExtension"/> added when the name has none), or null when cancelled.</summary>
-    Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension);
+    Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null);
 
     /// <summary>A Yes/No question with No as the default (WinForms MessageBoxDefaultButton.Button2). True = Yes.</summary>
     Task<bool> AskYesNoAsync(Window owner, string message, string caption);
@@ -64,12 +64,13 @@ public sealed class Dialogs : IDialogs
         return null;
     }
 
-    public async Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension)
+    public async Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null)
     {
         var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = title,
             DefaultExtension = defaultExtension,
+            SuggestedFileName = suggestedFileName,
             FileTypeChoices = new[] { Type(filter) },
             ShowOverwritePrompt = true,
         });
@@ -175,6 +176,6 @@ sealed class TextPrompt : Window
         panel.Children.Add(box);
         panel.Children.Add(buttons);
         Content = panel;
-        Opened += (_, _) => { box.Focus(); box.SelectAll(); };
+        Opened += (_, _) => ok.Focus();   // as WinForms InputDialog: OK has TabIndex 0 and so the focus
     }
 }

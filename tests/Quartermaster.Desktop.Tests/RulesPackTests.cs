@@ -253,4 +253,88 @@ public sealed class RulesPackTests : IDisposable
         StartupArgs.Parse(new[] { "--rules" }, warnings.Add);
         Assert.Equal(new[] { "--rules needs a path; ignored." }, warnings);
     }
+
+    [AvaloniaFact]
+    public void Save_picker_gets_the_pack_name_as_suggested_file_name()
+    {
+        var w = NewWindow();
+        Assert.True(w.OpenModule(Demo()));
+        _dialogs.Texts.Enqueue("Mine");
+        w.ClickMenu("New &Rules Pack...");
+        _dialogs.SaveFiles.Enqueue(TmpFile("s.qrules"));
+        w.ClickMenu("Save Rules Pac&k");
+        Assert.Equal(new[] { "Mine" }, _dialogs.SuggestedNames);
+    }
+
+    [AvaloniaFact]
+    public void Second_rules_flow_is_ignored_while_one_is_open()
+    {
+        var w = NewWindow();
+        Assert.True(w.OpenModule(Demo()));
+        _dialogs.Texts.Enqueue("Mine");
+        w.ClickMenu("New &Rules Pack...");
+
+        var gate = new TaskCompletionSource<string?>();
+        _dialogs.SaveGate = gate;
+        w.ClickMenu("Save Rules Pac&k");           // picker stays open
+        _dialogs.SaveFiles.Enqueue(TmpFile("second.qrules"));
+        w.ClickMenu("Save Rules Pack A&s...");     // ignored: no second picker
+        _dialogs.Texts.Enqueue("Other");
+        w.ClickMenu("New &Rules Pack...");         // ignored too
+        Assert.Equal(1, _dialogs.PickerTitles.Count(t => t == "Save Rules Pack"));
+        Assert.Single(_dialogs.SaveFiles);
+        Assert.Single(_dialogs.Texts);
+        Assert.Equal("Mine", w.Session!.Rules!.Name);
+
+        var path = TmpFile("first.qrules");
+        gate.SetResult(path);
+        Pump();
+        Assert.True(File.Exists(path));
+        Assert.Equal(path, w.Session.RulesPath);
+
+        // Free again afterwards.
+        _dialogs.Texts.Clear();
+        _dialogs.Texts.Enqueue("Next");
+        w.ClickMenu("New &Rules Pack...");
+        Assert.Equal("Next", w.Session.Rules!.Name);
+    }
+
+    [AvaloniaFact]
+    public void Close_with_dirty_game_and_dirty_rules_asks_both_in_winforms_order()
+    {
+        var w = NewWindow();
+        Assert.True(w.OpenModule(Demo()));
+        w.StartSetup(0);
+        var g = w.Session!.Game!;
+        var p = g.State.Pieces.Values.First();
+        w.Actions!.Move(new[] { new MovePieces(new[] { p.Id }, p.MapId, new PointD(p.Pos.X + 40, p.Pos.Y + 40), null) });
+        Pump();
+        Assert.True(w.HasUnsavedChanges);
+        _dialogs.Texts.Enqueue("Mine");
+        w.ClickMenu("New &Rules Pack...");
+
+        _dialogs.Answer = true;
+        _dialogs.YesNoCancel.Enqueue(false);
+        w.Close();
+        Pump();
+        Pump();
+        Assert.Equal(new[] { "The current game has unsaved changes. Discard them?", "Save changes to the rules pack 'Mine'?" },
+            _dialogs.Questions.Select(q => q.Message));
+        Assert.False(w.IsVisible);
+
+        // Answering No to the game question never reaches the pack question.
+        var d2 = new FakeDialogs { Answer = false };
+        var w2 = NewWindow(d2);
+        Assert.True(w2.OpenModule(Demo()));
+        w2.StartSetup(0);
+        var p2 = w2.Session!.Game!.State.Pieces.Values.First();
+        w2.Actions!.Move(new[] { new MovePieces(new[] { p2.Id }, p2.MapId, new PointD(p2.Pos.X + 40, p2.Pos.Y + 40), null) });
+        Pump();
+        d2.Texts.Enqueue("Mine");
+        w2.ClickMenu("New &Rules Pack...");
+        w2.Close();
+        Pump();
+        Assert.Single(d2.Questions);
+        Assert.True(w2.IsVisible);
+    }
 }

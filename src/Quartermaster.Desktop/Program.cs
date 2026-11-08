@@ -81,7 +81,7 @@ static class Program
     sealed class QuietDialogs : IDialogs
     {
         public Task<string?> OpenFileAsync(Avalonia.Controls.Window owner, string title, IReadOnlyList<FileFilter> filters) => Task.FromResult<string?>(null);
-        public Task<string?> SaveFileAsync(Avalonia.Controls.Window owner, string title, FileFilter filter, string defaultExtension) => Task.FromResult<string?>(null);
+        public Task<string?> SaveFileAsync(Avalonia.Controls.Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null) => Task.FromResult<string?>(null);
         public Task<bool> AskYesNoAsync(Avalonia.Controls.Window owner, string message, string caption) => Task.FromResult(false);
         public Task<bool?> AskYesNoCancelAsync(Avalonia.Controls.Window owner, string message, string caption) => Task.FromResult<bool?>(null);
         public Task<string?> AskTextAsync(Avalonia.Controls.Window owner, string title, string prompt, string initial) => Task.FromResult<string?>(null);
