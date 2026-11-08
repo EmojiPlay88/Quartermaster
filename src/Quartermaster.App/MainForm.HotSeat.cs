@@ -334,7 +334,7 @@ sealed partial class MainForm
         var ok = seeing.Count == 1 && !leaked && _session.ViewSides is { } vs && vs.SetEquals(viewer.Sides);
         Program.AppLog($"smoke: playerview {(ok ? "ok" : "FAILED")} (owners seeing the marker: {seeing.Count}, {viewer.Name}'s view leaks: {leaked})");
         if (!ok) Program.ExitCode = 1;
-        ShowLedger();
+        OpenLedger();
         for (var i = 0; i < 40; i++) { Thread.Sleep(50); Application.DoEvents(); } // let the debounced view refresh run and the ledger and map draw
         if (_ledgers.TryGetValue("ledger", out var w) && !w.IsDisposed && w is LedgerWindow lw)
         {

@@ -30,7 +30,7 @@ sealed partial class MainForm
     public void SetCommandHandler(string id, Func<bool> handler) => _handlers[id] = handler;
 
     /// <summary>Text for menu items: the effective shortcut of a command, empty when unbound.</summary>
-    string ShortcutText(string id) => _shortcutText.TryGetValue(id, out var s) ? s : "";
+    internal string ShortcutText(string id) => _shortcutText.TryGetValue(id, out var s) ? s : "";
 
     /// <summary>Recomputes the key map and menu captions from the settings overrides.</summary>
     void ApplyShortcuts(Settings s)

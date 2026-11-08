@@ -60,7 +60,7 @@ sealed partial class LedgerWindow : Form
         _grid.AllowUserToDeleteRows = false;
         _grid.AllowUserToResizeRows = false;
         _grid.RowHeadersVisible = false;
-        _grid.MultiSelect = false;
+        _grid.MultiSelect = true;   // Show in Ledger selects the rows of several counters
         _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
         _grid.BackgroundColor = SystemColors.AppWorkspace;
@@ -275,6 +275,34 @@ sealed partial class LedgerWindow : Form
         }
         catch (InvalidOperationException) { }
     }
+
+    /// <summary>
+    /// Show in Ledger: moves to the tab that shows the counters' rows (see <see cref="LedgerJump"/>), clearing the text filter when it hides them,
+    /// then selects those rows and scrolls to the first one shown. Only rows of the player's view; returns the plan (its message tells what was not found).
+    /// </summary>
+    public LedgerJumpPlan ShowPieces(IReadOnlyCollection<string> pieceIds)
+    {
+        if (_s.Rules is not { } pack || _s.Game == null || _s.View is not { } view)
+            return new LedgerJumpPlan(null, false, Array.Empty<string>(), pieceIds.Count, "The Ledger needs a game with a rules pack.");
+        if (_grid.IsCurrentCellInEditMode)
+            return new LedgerJumpPlan(null, false, Array.Empty<string>(), pieceIds.Count, "Finish editing the Ledger cell first.");
+        var plan = LedgerJump.Plan(pieceIds, _tabDefs, _tab.Key, view, pack, _s.Model, _filter.Text, _prefs.Side, _showEmpty.Checked, _s.CanSee);
+        if (plan.TabKey == null) return plan;
+        if (plan.ClearFilter && _filter.Text.Length > 0) _filter.Text = "";
+        if (plan.TabKey != _tab.Key) SelectTab(plan.TabKey);   // reloads
+        else Reload();
+        _debounce.Stop();   // the cleared filter's pending reload is done
+        var keys = plan.RowKeys.ToHashSet(StringComparer.Ordinal);
+        var first = _rows.FindIndex(r => keys.Contains(r.Row.Key));
+        if (first < 0) return plan;
+        try { _grid.CurrentCell = _grid.Rows[first].Cells[0]; }   // keyboard focus on the first row; also scrolls it into view
+        catch (InvalidOperationException) { }
+        Restore(keys, _rows[first].Row.Key);
+        return plan;
+    }
+
+    /// <summary>Smoke: the keys of the selected rows.</summary>
+    public IReadOnlyCollection<string> SelectedKeysForSmoke => SelectedKeys();
 
     void Restore(HashSet<string> keys, string? firstKey)
     {

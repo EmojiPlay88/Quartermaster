@@ -72,6 +72,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Phase panel | 2 |  |  |  |  |
 | View > Outliner | 3 |  |  |  |  |
 | View > Ledger | 3 |  |  |  |  |
+| Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3 |  |  |  |  | comes with the Desktop Ledger; decision logic already shared (`LedgerJump` in Quartermaster.Render) |
 | View > Overview | 3 |  |  |  |  |
 | View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | always visible in Desktop |
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |

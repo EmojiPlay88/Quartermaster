@@ -93,7 +93,7 @@ sealed partial class MainForm
         if (m.PieceId != null) CentreOnPiece(m.PieceId);
         else if (m.HolderId != null && _session != null)
         {
-            ShowLedger();
+            OpenLedger();   // not ShowLedger: a depot alert must not jump to the counters selected on the map
             if (_ledgers.TryGetValue("ledger", out var f) && !f.IsDisposed && f is LedgerWindow lw) lw.SelectHolder(m.HolderId);
         }
     }
