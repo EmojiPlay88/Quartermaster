@@ -29,6 +29,8 @@ public sealed class DiceTools
     readonly List<Control> _items = new();
     readonly MenuItem _next, _prev, _set;
     string? _shown;
+    /// <summary>The session the Dice menu items were last built for.</summary>
+    ModuleSession? _builtFor;
 
     public DiceTools(Window owner, Func<ModuleSession?> session, Func<IActionPort?> actions, IDialogs dialogs, CommandRouter router,
         Action<Action> guard, Action<Func<Task>> runAsync, Action<string> setStatus, Func<string> status)
@@ -44,6 +46,12 @@ public sealed class DiceTools
 
         DiceMenu = new MenuItem { Header = MenuText.FromWinForms("&Dice") };
         RebuildDiceMenu();
+        // As WinForms DropDownOpening: the items are rebuilt when the menu opens, never under a click (a roll changes the game, and a
+        // rebuild from the game-change refresh cleared the items inside the clicked item's own handler, so the menu did not close).
+        DiceMenu.SubmenuOpened += (_, e) =>
+        {
+            if (ReferenceEquals(e.Source, DiceMenu)) _guard(RebuildDiceMenu);
+        };
         Track(DiceMenu);
 
         TurnMenu = new MenuItem { Header = MenuText.FromWinForms("&Turn") };
@@ -77,7 +85,8 @@ public sealed class DiceTools
 
     /// <summary>
     /// As WinForms DiceTools.Refresh, after the gates were applied: blocked items go off with the reason; the reason tooltip is cleared once
-    /// the block is over (<paramref name="baseTip"/> gives an item's own tooltip back). Also rebuilds the Dice menu and Previous turn.
+    /// the block is over (<paramref name="baseTip"/> gives an item's own tooltip back), and Previous turn. Cheap: the Dice menu is rebuilt only
+    /// when the session (module) changed; otherwise it is rebuilt when it opens.
     /// </summary>
     public void Refresh(Func<Control, object?> baseTip)
     {
@@ -92,7 +101,7 @@ public sealed class DiceTools
             }
             else if (ToolTip.GetTip(i) is ModuleSession.ReplayingText or ModuleSession.ViewerCopyText) ToolTip.SetTip(i, baseTip(i));
         }
-        RebuildDiceMenu();
+        if (!ReferenceEquals(_builtFor, _session())) RebuildDiceMenu();
         _prev.IsEnabled = Core.CanStepBack;
     }
 
@@ -103,10 +112,13 @@ public sealed class DiceTools
 
     void RebuildDiceMenu()
     {
-        DiceMenu.Items.Clear();
-        var any = false;
-        foreach (var c in BuildDiceItems()) { DiceMenu.Items.Add(c); any = true; }
-        if (!any) DiceMenu.Items.Add(new MenuItem { Header = NoGameText, IsEnabled = false });
+        _builtFor = _session();
+        var items = BuildDiceItems().ToList();
+        if (items.Count == 0) items.Add(new MenuItem { Header = NoGameText, IsEnabled = false });
+        // New items first, then the old ones go: the menu never has zero items, so an open submenu stays open.
+        var old = DiceMenu.Items.Count;
+        foreach (var c in items) DiceMenu.Items.Add(c);
+        for (var i = 0; i < old; i++) DiceMenu.Items.RemoveAt(0);
     }
 
     /// <summary>

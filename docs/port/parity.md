@@ -18,7 +18,6 @@ How to read the columns:
 - Mouse wheel on macOS pans and Cmd+wheel zooms (deliberate: trackpad convention). On Windows and Linux the wheel zooms, as WinForms. Pinch zoom is for macOS trackpads.
 - The look is the classic grey theme on all three systems, with Tahoma 11px where present, else Verdana, DejaVu Sans.
 - Shortcuts use Cmd instead of Ctrl on macOS. There is no native macOS menu bar; the menu bar sits in the window.
-- Only the File, Edit and View menus exist, with the items listed below.
 - Saves are written and read by the same ModuleSession.SaveNative / LoadNative calls as WinForms, so each app opens the other's saves. Desktop tests cover the Desktop side; open a WinForms save in Desktop (and back) is on the Mac checklist.
 
 ### Map behaviour not yet ported
@@ -43,6 +42,10 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 - Rules-pack file pickers and prompts are the Avalonia ones (async); the dirty-pack question is asked only on module change and close, as WinForms.
 - Masked counters cannot be right-clicked in either app (shared hit test); left as is.
 - WinForms draws popup counters scale-squared at more than 100% Windows scaling; Desktop draws them at the intended size. Identical at 100%.
+- The main toolbar order follows the WinForms window (MainForm.BuildToolbar), not the order of `ToolbarIds.All`.
+- The popup and tip fonts (Tahoma, Consolas) fall back to other fonts off Windows; the fallback is unchecked on macOS.
+- Opening a rules pack made for another module only logs a warning, as WinForms.
+- The map toolbar's zoom drop-down button reads "Zoom ▾" (WinForms "Zoom" with a drawn drop-down arrow, which Avalonia buttons do not draw).
 - Real dialogs, menu placement and pointer positions were only exercised headless; see `docs/port/stage2a-mac-checklist.md`.
 
 ## Before the stage release
@@ -145,8 +148,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MapCanvas: Last moved highlight | 2a | ✔ |  |  | toolbar toggle; follows moves, undo and new games |
 | Cross-window drag preview and drops (OLE) | - |  |  |  | Windows-specific |
 | PropertySheetDialog | 2a | ✔ |  |  |  |
-| BreakdownTip | 3 | ✔ |  |  | on the popup's ledger lines; the ledger and inventory grid tips come with those windows (stage 3) |
-| CounterDetailPopup interactive ledger lines | 3 | ✔ |  |  | click-through away from the lines, as WinForms |
+| BreakdownTip | 2a | ✔ |  |  | on the popup's ledger lines; the ledger and inventory grid tips come with those windows (stage 3) |
+| CounterDetailPopup interactive ledger lines | 2a | ✔ |  |  | click-through away from the lines, as WinForms; the ledger and inventory tips come with those windows (stage 3) |
 | InputDialog | 2a | ✔ |  |  | also the rules-pack name prompt |
 | ExportChoiceDialog, ExportProgressDialog, MapExport (save the map as a picture) | 3 |  |  |  |  |
 | OverviewWindow | 3 |  |  |  |  |

@@ -66,7 +66,7 @@ The app is not signed, so macOS blocks it the first time (again, because this is
 28. **Tools > Dice**: it lists 1d6, 2d6, the module's dice, Custom and Multi-roll. Roll **1d6** from the menu. The status bar shows the roll for a few seconds.
 29. Press **F5** (1d6) and **F6** (2d6). **On Mac keyboards the F keys often control brightness or volume by default, so you may need fn+F5 and fn+F6**, or switch "Use F1, F2, etc. keys as standard function keys" on in System Settings > Keyboard. Say what was needed. Do the menu shortcut hints match the keys?
 30. Try **Custom** and **Multi-roll** from Tools > Dice: a dialog asks for the dice; roll something and cancel once.
-31. **Tools > Turn**: Next, Previous and Set. The status bar shows "Turn N". Press **Cmd+Right** (the Mac form of Ctrl+Right, as shown next to the menu item): it should step the turn. (With the demo rules pack, which has no phases, this works; with a phased pack the key does nothing until stage 2b.)
+31. **Tools > Turn**: Next, Previous and Set. The status bar shows "Turn N". Click the map first, then press **Cmd+Right** (the menu item shows "⌘→"): it should step the turn. It does nothing while you are typing in the log Search box. (With the demo rules pack, which has no phases, this works; with a phased pack the key does nothing until stage 2b.)
 32. The **main toolbar** under the menu bar: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, 1d6, 2d6, Dice, Next turn. Click a few. Are buttons that cannot work right now greyed (for example Undo before any move)?
 
 ## H. Log panel

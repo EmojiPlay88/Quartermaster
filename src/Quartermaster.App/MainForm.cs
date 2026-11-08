@@ -824,7 +824,7 @@ sealed partial class MainForm : Form
         else if (_opts.NewRulesName != null) s.NewRules(_opts.NewRulesName);
     }
 
-    RulesPackFlow? RulesFlow() => _session == null ? null : new RulesPackFlow(_session, new RulesUi(this), null);
+    RulesPackFlow? RulesFlow() => _session == null ? null : new RulesPackFlow(_session, new RulesUi(this));
 
     /// <summary>The WinForms dialogs behind <see cref="RulesPackFlow"/>.</summary>
     sealed class RulesUi : IRulesPackUi

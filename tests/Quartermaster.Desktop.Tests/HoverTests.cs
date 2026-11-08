@@ -118,13 +118,17 @@ public sealed class HoverTests : IDisposable
     [AvaloniaFact]
     public void Hover_shows_popup_after_delay()
     {
-        var (view, window) = Open(hoverDelayMs: 400);
+        const int delay = 400;
+        var (view, window) = Open(hoverDelayMs: delay);
         var (id, at) = LonePieces(view)[0];
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         window.MouseMove(at);
         Assert.Equal(St.Pieces[id].StackId, view.HoverStackId);
-        Pump(150);
-        Assert.Null(view.Popup);                                   // not before the delay
-        Assert.True(WaitFor(() => view.Popup != null));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Null(view.Popup);                                   // not at once
+        // Not before the delay, however slow the machine: the popup shows up only once the delay has passed (generous upper bound).
+        Assert.True(WaitFor(() => view.Popup != null, 15000), "the popup did not open");
+        Assert.True(clock.ElapsedMilliseconds >= delay - 20, "opened after " + clock.ElapsedMilliseconds + " ms");
         var popup = view.Popup!;
         Assert.IsType<OverlayLayer>(popup.GetVisualParent());      // an overlay of the window, never a window of its own
         Assert.Equal(id, popup.Layout.Details[0].PieceId);

@@ -41,15 +41,13 @@ public sealed class RulesPackFlow
 
     private readonly ModuleSession _s;
     private readonly IRulesPackUiAsync _ui;
-    private readonly string? _rulesMemoryRoot;
 
-    public RulesPackFlow(ModuleSession s, IRulesPackUi ui, string? rulesMemoryRoot) : this(s, new SyncAdapter(ui), rulesMemoryRoot) { }
+    public RulesPackFlow(ModuleSession s, IRulesPackUi ui) : this(s, new SyncAdapter(ui)) { }
 
-    public RulesPackFlow(ModuleSession s, IRulesPackUiAsync ui, string? rulesMemoryRoot)
+    public RulesPackFlow(ModuleSession s, IRulesPackUiAsync ui)
     {
         _s = s;
         _ui = ui;
-        _rulesMemoryRoot = rulesMemoryRoot;
     }
 
     // Sync API: only for UIs whose tasks are already complete (SyncAdapter); never blocks on an incomplete task.
@@ -106,12 +104,5 @@ public sealed class RulesPackFlow
         }
         _s.SaveRules(path);
         return true;
-    }
-
-    /// <summary>Remembers the current pack path as this module's last rules pack (no-op without a root or a saved/opened path).</summary>
-    public void RememberCurrent()
-    {
-        if (_rulesMemoryRoot != null && _s.RulesPath != null && !_s.IsGuest)
-            RulesMemory.Remember(_rulesMemoryRoot, _s.Archive.Sha256, _s.RulesPath);
     }
 }

@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Input.Raw;
 using Avalonia.Interactivity;
 using Avalonia.LogicalTree;
 using Avalonia.Threading;
@@ -312,6 +313,70 @@ public sealed class ContextMenuTests : IDisposable
         RightClick(window, empty);
         Click(Item(view.OpenMenu!, "Mark All Unmoved"));
         Assert.DoesNotContain(S.Log.Items, e => e.Severity == DiagnosticSeverity.Error);
+        window.Close();
+    }
+
+    /// <summary>Runs the dispatcher loop (timers included) for a while.</summary>
+    static void Pump(int ms)
+    {
+        var end = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < end)
+        {
+            Dispatcher.UIThread.RunJobs();
+            using var slice = new CancellationTokenSource(10);
+            Dispatcher.UIThread.MainLoop(slice.Token);
+        }
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
+    public void Hidden_counters_are_not_interactive()
+    {
+        // As WinForms MapCanvas (PieceAt and the band check _hideCounters): with counters hidden via the map menu, the pointer finds no
+        // counter: no hover or popup, no click selection, no drag, the empty-map menu on a counter, and no rubber-band selection.
+        var (view, window) = Open();
+        view.HoverDelayMs = 30;
+        var (id, at) = LonePieces(view)[0];
+        var pos = St.Pieces[id].Pos;
+        var mapMenu = Shape(MapContextMenu.Build(view, null)!.Items);
+
+        RightClick(window, EmptySpot(view));
+        Click(Item(view.OpenMenu!, "Hide counters"));
+        Assert.True(view.HideCounters);
+
+        window.MouseMove(at);
+        Pump(200);
+        Assert.Null(view.HoverStackId);
+        Assert.Null(view.Popup);
+
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseUp(at, MouseButton.Left);
+        Assert.Empty(view.SelectedPieceIds);
+
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseMove(new Point(at.X + 40, at.Y + 40), RawInputModifiers.LeftMouseButton);
+        Assert.False(view.IsDragging);
+        window.MouseUp(new Point(at.X + 40, at.Y + 40), MouseButton.Left);
+        Assert.Equal(pos, St.Pieces[id].Pos);
+        Assert.Empty(view.SelectedPieceIds);   // nor did the band started there pick the counter up
+
+        window.MouseDown(new Point(at.X - 30, at.Y - 30), MouseButton.Left);
+        window.MouseMove(new Point(at.X + 30, at.Y + 30), RawInputModifiers.LeftMouseButton);
+        window.MouseUp(new Point(at.X + 30, at.Y + 30), MouseButton.Left);
+        Assert.Empty(view.SelectedPieceIds);
+
+        RightClick(window, at);
+        Assert.Empty(view.SelectedPieceIds);
+        var menu = Assert.IsType<ContextMenu>(view.OpenMenu);
+        Assert.Equal(mapMenu, Shape(menu.Items));
+        Assert.True(Item(menu, "Hide counters").IsChecked);
+        Click(Item(menu, "Hide counters"));
+        Assert.False(view.HideCounters);
+
+        // Shown again: the same counter is interactive.
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseUp(at, MouseButton.Left);
+        Assert.Equal(new[] { id }, view.SelectedPieceIds);
         window.Close();
     }
 

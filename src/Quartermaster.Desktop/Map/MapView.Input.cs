@@ -246,9 +246,11 @@ public sealed partial class MapView
     /// <summary>The add-to-selection modifier: Ctrl on Windows/Linux, Cmd on macOS.</summary>
     static bool AddModifier(KeyModifiers m) => (m & (ShortcutGestures.IsMac ? KeyModifiers.Meta : KeyModifiers.Control)) != 0;
 
+    /// <summary>The counter under <paramref name="p"/>; none while counters are hidden (WinForms MapCanvas.PieceAt): no hover, selection,
+    /// drag or counter menu then.</summary>
     string? PieceAt(Point p)
     {
-        if (State is not { } st) return null;
+        if (State is not { } st || _hideCounters) return null;
         try
         {
             return HitTester.PieceAt(st, Map, Session.Model, Session.Images, MapPoint(p), _pieces.Types);
@@ -391,7 +393,7 @@ public sealed partial class MapView
         {
             _bandActive = false;
             e.Pointer.Capture(null);
-            if (State is { } st && Math.Abs(p.X - _downPos.X) + Math.Abs(p.Y - _downPos.Y) >= 3)
+            if (State is { } st && !_hideCounters && Math.Abs(p.X - _downPos.X) + Math.Abs(p.Y - _downPos.Y) >= 3)
             {
                 var r = SelectionRect.FromCorners(_bandStart, _bandNow);
                 var added = false;

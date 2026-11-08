@@ -39,7 +39,7 @@ public class RulesPackFlowTests : IDisposable
         s.NewRules("Old");
         var path = Path.Combine(_tmp, "old.qrules");
         var ui = new FakeUi { SaveAnswer = true, SavePath = path };
-        Assert.True(new RulesPackFlow(s, ui, null).ConfirmSaved());
+        Assert.True(new RulesPackFlow(s, ui).ConfirmSaved());
         Assert.Equal(new[] { "Old" }, ui.Asked);
         Assert.True(File.Exists(path));
         Assert.False(s.RulesDirty);
@@ -52,7 +52,7 @@ public class RulesPackFlowTests : IDisposable
         using var s = Open(fx);
         s.NewRules("Old");
         var ui = new FakeUi { SaveAnswer = false };
-        Assert.True(new RulesPackFlow(s, ui, null).ConfirmSaved());
+        Assert.True(new RulesPackFlow(s, ui).ConfirmSaved());
         Assert.Empty(Directory.GetFiles(_tmp, "*.qrules"));
         Assert.True(s.RulesDirty);
     }
@@ -64,7 +64,7 @@ public class RulesPackFlowTests : IDisposable
         using var s = Open(fx);
         s.NewRules("Old");
         var ui = new FakeUi { SaveAnswer = null, Name = "Other" };
-        var flow = new RulesPackFlow(s, ui, null);
+        var flow = new RulesPackFlow(s, ui);
         Assert.False(flow.ConfirmSaved());
         flow.New();
         Assert.Equal("Old", s.Rules!.Name);
@@ -78,7 +78,7 @@ public class RulesPackFlowTests : IDisposable
         using var s = Open(fx);
         s.NewRules("Old");
         var ui = new FakeUi { SaveAnswer = true, SavePath = null };
-        Assert.False(new RulesPackFlow(s, ui, null).ConfirmSaved());
+        Assert.False(new RulesPackFlow(s, ui).ConfirmSaved());
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class RulesPackFlowTests : IDisposable
         using var fx = Fx();
         using var s = Open(fx);
         var ui = new FakeUi();
-        Assert.True(new RulesPackFlow(s, ui, null).ConfirmSaved());
+        Assert.True(new RulesPackFlow(s, ui).ConfirmSaved());
         Assert.Empty(ui.Asked);
     }
 
@@ -99,7 +99,7 @@ public class RulesPackFlowTests : IDisposable
         s.NewRules("Old");
         var bad = Path.Combine(_tmp, "no-such-dir", "x.qrules");
         var ui = new FakeUi { SaveAnswer = true, SavePath = bad };
-        Assert.False(new RulesPackFlow(s, ui, null).ConfirmSaved());
+        Assert.False(new RulesPackFlow(s, ui).ConfirmSaved());
         Assert.Single(ui.Warnings);
     }
 
@@ -109,7 +109,7 @@ public class RulesPackFlowTests : IDisposable
         using var fx = Fx();
         using var s = Open(fx);
         var ui = new FakeUi { Name = "  Mine  " };
-        var flow = new RulesPackFlow(s, ui, null);
+        var flow = new RulesPackFlow(s, ui);
         flow.New();
         Assert.Equal(("New Rules Pack", "Name of the new rules pack:", "Rules"), (ui.NameTitle, ui.NamePrompt, ui.NameDefault));
         Assert.Equal("Mine", s.Rules!.Name);
@@ -120,7 +120,7 @@ public class RulesPackFlowTests : IDisposable
     }
 
     [Fact]
-    public void Open_remembers_for_module()
+    public void Open_loads_the_picked_pack()
     {
         using var fx = Fx();
         using var s = Open(fx);
@@ -129,13 +129,10 @@ public class RulesPackFlowTests : IDisposable
         s.SaveRules(path);
         s.NewRules("Q");
         s.SaveRules(Path.Combine(_tmp, "q.qrules"));
-        var root = Path.Combine(_tmp, "root");
-        var ui = new FakeUi { OpenPath = path };
-        var flow = new RulesPackFlow(s, ui, root);
+        var flow = new RulesPackFlow(s, new FakeUi { OpenPath = path });
         flow.Open();
         Assert.Equal("P", s.Rules!.Name);
-        flow.RememberCurrent();
-        Assert.Equal(path, RulesMemory.LastFor(root, s.Archive.Sha256));
+        Assert.Equal(path, s.RulesPath);
     }
 
     [Fact]
@@ -146,12 +143,12 @@ public class RulesPackFlowTests : IDisposable
         s.NewRules("Pack");
         var path = Path.Combine(_tmp, "as.qrules");
         var ui = new FakeUi { SavePath = path };
-        Assert.True(new RulesPackFlow(s, ui, null).Save(saveAs: true));
+        Assert.True(new RulesPackFlow(s, ui).Save(saveAs: true));
         Assert.Equal("Pack", ui.SuggestedName);
         Assert.True(File.Exists(path));
         Assert.Equal(path, s.RulesPath);
         ui.SavePath = null;   // a plain save with a known path does not ask again
-        Assert.True(new RulesPackFlow(s, ui, null).Save(false));
+        Assert.True(new RulesPackFlow(s, ui).Save(false));
     }
 
     [Fact]
@@ -160,7 +157,7 @@ public class RulesPackFlowTests : IDisposable
         using var fx = Fx();
         using var s = Open(fx);
         s.NewRules("Pack");
-        Assert.False(new RulesPackFlow(s, new FakeUi(), null).Save(false));
+        Assert.False(new RulesPackFlow(s, new FakeUi()).Save(false));
     }
 
     [Fact]
@@ -168,6 +165,6 @@ public class RulesPackFlowTests : IDisposable
     {
         using var fx = Fx();
         using var s = Open(fx);
-        Assert.True(new RulesPackFlow(s, new FakeUi(), null).Save(false));
+        Assert.True(new RulesPackFlow(s, new FakeUi()).Save(false));
     }
 }

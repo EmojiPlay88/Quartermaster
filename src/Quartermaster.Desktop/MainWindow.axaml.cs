@@ -585,7 +585,7 @@ public partial class MainWindow : Window
 
     // ---------- rules packs ----------
 
-    RulesPackFlow? RulesFlow() => _session == null ? null : new RulesPackFlow(_session, new RulesUi(this), null);
+    RulesPackFlow? RulesFlow() => _session == null ? null : new RulesPackFlow(_session, new RulesUi(this));
 
     bool _rulesFlowBusy;
 

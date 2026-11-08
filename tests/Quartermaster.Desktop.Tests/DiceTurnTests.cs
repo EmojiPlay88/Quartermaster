@@ -1,9 +1,11 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Input;
 using Quartermaster.Desktop.Shell;
@@ -194,6 +196,79 @@ public sealed class DiceTurnTests : IDisposable
         var w2 = NewWindow();
         Assert.False(w2.FindMenuItem("&Dice")!.IsEnabled);
         Assert.Equal(new[] { "(no game)" }, Labels(w2.FindMenuItem("&Dice")!));
+    }
+
+    /// <summary>Opens Tools, then Tools → Dice, as the user does.</summary>
+    static MenuItem OpenDiceMenu(MainWindow w)
+    {
+        var tools = w.FindMenuItem("&Tools")!;
+        tools.IsSubMenuOpen = true;
+        Pump();
+        var dice = w.FindMenuItem("&Dice")!;
+        dice.IsSubMenuOpen = true;
+        Pump();
+        return dice;
+    }
+
+    /// <summary>Clicks a menu item with the pointer in its own popup (headless, never shown).</summary>
+    static void PointerClick(MenuItem item)
+    {
+        var top = TopLevel.GetTopLevel(item) ?? throw new InvalidOperationException("item not shown");
+        var at = item.TranslatePoint(new Avalonia.Point(item.Bounds.Width / 2, item.Bounds.Height / 2), top) ?? throw new InvalidOperationException("not in the tree");
+        top.MouseMove(at);
+        top.MouseDown(at, MouseButton.Left);
+        top.MouseUp(at, MouseButton.Left);
+        Pump();
+    }
+
+    [AvaloniaFact]
+    public void Dice_menu_click_closes_menu_and_keeps_items()
+    {
+        // WinForms rebuilds the Dice menu on DropDownOpening; rebuilding it on every game change cleared the items inside the clicked item's
+        // own Click handler.
+        var w = Game(face: 3);
+        var tools = w.FindMenuItem("&Tools")!;
+        var dice = OpenDiceMenu(w);
+        Assert.True(dice.IsSubMenuOpen);
+        var items = dice.Items.Cast<object>().ToList();
+        var d1 = dice.Items.OfType<MenuItem>().First(i => MenuText.ToWinForms((string)i.Header!) == "&1d6");
+        var before = w.Session!.Game!.Log.Count;
+
+        PointerClick(d1);
+        Assert.Equal(before + 1, w.Session.Game.Log.Count);
+        Assert.Equal("1d6", Assert.IsType<RollDice>(w.Session.Game.Log[^1]).Expression);
+        Assert.False(dice.IsSubMenuOpen);    // the menu closed normally
+        Assert.False(tools.IsSubMenuOpen);
+        Assert.Equal(items, dice.Items.Cast<object>());   // the items were not swapped under the click
+        Assert.Equal(new[] { "&1d6", "&2d6", "&Custom...", "&Multi-roll..." }, Labels(dice));
+
+        // Opening it again rolls again.
+        dice = OpenDiceMenu(w);
+        PointerClick(dice.Items.OfType<MenuItem>().First(i => MenuText.ToWinForms((string)i.Header!) == "&1d6"));
+        Assert.Equal(before + 2, w.Session.Game.Log.Count);
+        Assert.False(dice.IsSubMenuOpen);
+    }
+
+    [AvaloniaFact]
+    public void Dice_menu_follows_module_change()
+    {
+        var xml = FixtureModule.MinimalBuildFile().Replace("</VASSAL.build.GameModule>",
+            "<VASSAL.build.module.SpecialDiceButton name=\"Dice\">" +
+            "<VASSAL.build.module.SpecialDie name=\"Weather\"><VASSAL.build.module.SpecialDieFace text=\"Sun\"/><VASSAL.build.module.SpecialDieFace text=\"Rain\"/></VASSAL.build.module.SpecialDie>" +
+            "</VASSAL.build.module.SpecialDiceButton></VASSAL.build.GameModule>");
+        var fx = new FixtureModule().WithBuildFile(xml);
+        _fixtures.Add(fx);
+        var w = Game();
+        Assert.Equal(new[] { "&1d6", "&2d6", "&Custom...", "&Multi-roll..." }, Labels(OpenDiceMenu(w)));
+        w.FindMenuItem("&Tools")!.IsSubMenuOpen = false;
+        Pump();
+
+        Assert.True(w.OpenModule(fx.Build()));
+        w.StartSetup(null);
+        Pump();
+        var dice = OpenDiceMenu(w);
+        Assert.Equal(new[] { "&1d6", "&2d6", "Weather", "&Custom...", "&Multi-roll..." }, Labels(dice));
+        Assert.True(dice.IsSubMenuOpen);
     }
 
     [AvaloniaFact]
