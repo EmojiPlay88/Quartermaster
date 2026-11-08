@@ -99,6 +99,45 @@ public class DemoModuleTests : IDisposable
         Assert.Equal(File.ReadAllBytes(a.Rules), File.ReadAllBytes(b.Rules));
     }
 
+    /// <summary>
+    /// .NET writes the OS into each central-directory entry (host 0 and attributes 0 on Windows; host 3 and mode 0644 elsewhere). The rules
+    /// pack records the module's SHA-256, so the generator clears both: a Linux or macOS build must give the module a Windows build gives.
+    /// </summary>
+    [Fact]
+    public void Demo_module_zip_headers_do_not_depend_on_the_OS()
+    {
+        var bytes = File.ReadAllBytes(Build().Vmod);
+        var entries = CentralDirectory(bytes);
+        Assert.NotEmpty(entries);
+        Assert.All(entries, e => Assert.Equal((0, 0u), (bytes[e + 5], BitConverter.ToUInt32(bytes, e + 38))));
+
+        // What a Unix build wrote before normalising: host 3 (Unix), external attributes S_IFREG | 0644.
+        var unix = (byte[])bytes.Clone();
+        foreach (var e in entries)
+        {
+            unix[e + 5] = 3;
+            BitConverter.GetBytes(0x81A40000u).CopyTo(unix, e + 38);
+        }
+        Assert.NotEqual(bytes, unix);
+        Assert.Equal(bytes, DemoContent.NormalizeZipHost(unix));
+    }
+
+    /// <summary>Offsets of the central-directory file headers (the zip is small: no zip64, no comment).</summary>
+    private static List<int> CentralDirectory(byte[] z)
+    {
+        var eocd = z.Length - 22;
+        Assert.Equal(0x06054b50u, BitConverter.ToUInt32(z, eocd));
+        var list = new List<int>();
+        var at = (int)BitConverter.ToUInt32(z, eocd + 16);
+        for (var n = 0; n < BitConverter.ToUInt16(z, eocd + 10); n++)
+        {
+            Assert.Equal(0x02014b50u, BitConverter.ToUInt32(z, at));
+            list.Add(at);
+            at += 46 + BitConverter.ToUInt16(z, at + 28) + BitConverter.ToUInt16(z, at + 30) + BitConverter.ToUInt16(z, at + 32);
+        }
+        return list;
+    }
+
     /// <summary>Compares entry names and contents, not raw zip bytes, so another Deflate implementation cannot make it fail.</summary>
     [Fact]
     public void Committed_demo_is_current()
