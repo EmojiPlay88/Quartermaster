@@ -79,6 +79,16 @@ public class TurnFileTests
     }
 
     [Fact]
+    public void AppVersion_RoundTrips_AndIsNullWhenAbsent()
+    {
+        var g = TwoTurns();
+        Assert.Null(TurnFiles.FromBytes(TurnFiles.ToBytes(TurnFiles.Create(g, "red", "Ann", "blue"))).AppVersion);
+        var t = TurnFiles.FromBytes(TurnFiles.ToBytes(TurnFiles.Create(g, "red", "Ann", "blue", "9.9.9")));
+        Assert.Equal("9.9.9", t.AppVersion);
+        Assert.Equal(1, t.Version);
+    }
+
+    [Fact]
     public void Create_StartIsStateAtTurnBase_CommandsAfter()
     {
         var g = TwoTurns();

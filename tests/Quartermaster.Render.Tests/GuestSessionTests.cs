@@ -161,6 +161,21 @@ public class GuestSessionTests : IDisposable
         return new Guest(s, g, a, t, raw, notices);
     }
 
+    [Fact]
+    public void Welcome_HostOnOtherAppVersion_NoticeShown_SameVersion_Silent()
+    {
+        var r = Open();
+        r.H.AppVersionText = "7.7.7";
+        var bob = Join(r);
+        Assert.Equal("Host runs 7.7.7, you run " + AppVersion.Text + " — update first if anything misbehaves.", Assert.Single(bob.Notices));
+        Assert.Equal(bob.Notices[0], bob.G.VersionNotice);
+
+        var r2 = Open();
+        var carol = Join(r2, "m2", "Carol");
+        Assert.Empty(carol.Notices);
+        Assert.Null(carol.G.VersionNotice);
+    }
+
     private static void Pick(Rig r, Guest g, string side = "blue")
     {
         Assert.True(g.G.ChooseSides(new[] { side }));

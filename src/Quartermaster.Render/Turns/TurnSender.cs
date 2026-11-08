@@ -31,7 +31,7 @@ public static class TurnSender
             try { g.RulesSha256 = RulesPackIo.ComputeSha256(pack); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { }
         }
-        return TurnFiles.Create(g, from, name, toPlayerId);
+        return TurnFiles.Create(g, from, name, toPlayerId, AppVersion.Text);
     }
 
     /// <summary>The turn was sent: the local player's next turn starts here.</summary>

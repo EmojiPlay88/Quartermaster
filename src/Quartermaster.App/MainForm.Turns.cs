@@ -540,7 +540,7 @@ sealed partial class MainForm
         RefreshPhaseViews();
         var from = TurnUiModel.ShownName(m.Turn.FromName);
         Program.AppLog($"turns: replayed {m.Count} step(s) from {from}; end {(m.EndMatches ? "matches" : "DIFFERS")}");
-        SetStatus(m.ViewNotice ?? $"{from}'s turn is replayed. Your turn.");
+        SetStatus((m.ViewNotice ?? $"{from}'s turn is replayed. Your turn.") + (m.VersionNotice is { } vn ? " " + vn : ""));
         if (!m.EndMatches) ShowError(TurnReplayModel.EndMismatchText);
     }
 

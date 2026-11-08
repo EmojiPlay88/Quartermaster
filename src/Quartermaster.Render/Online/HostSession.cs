@@ -317,6 +317,9 @@ public sealed class HostSession : IDisposable
         return true;
     }
 
+    /// <summary>This copy's app version, told to guests in the welcome (they warn when theirs differs). Settable for tests.</summary>
+    public string AppVersionText { get; set; } = AppVersion.Text;
+
     private void Join(string from, JoinRequest j)
     {
         if (!JoinAllowed(from)) { _dropped++; return; }
@@ -328,7 +331,7 @@ public sealed class HostSession : IDisposable
         if (Seats.ByToken(j.RejoinToken) is { } mine)
         {
             Bind(mine, from);
-            Send(from, new Welcome(mine.PlayerId, j.RejoinToken!, pack, Seats.FreeSides(_s.Rules), mine.Sides.ToList()));
+            Send(from, new Welcome(mine.PlayerId, j.RejoinToken!, pack, Seats.FreeSides(_s.Rules), mine.Sides.ToList(), AppVersionText));
             SendSnapshot(mine);
             AfterSeatChange(sync: false);
             return;
@@ -343,7 +346,7 @@ public sealed class HostSession : IDisposable
         var taken = _s.Game?.State.Players.Select(p => p.Id) ?? Enumerable.Empty<string>();
         var (seat, token) = Seats.AddGuest(name, taken);
         Bind(seat, from);
-        Send(from, new Welcome(seat.PlayerId, token, pack, Seats.FreeSides(_s.Rules)));
+        Send(from, new Welcome(seat.PlayerId, token, pack, Seats.FreeSides(_s.Rules), HostAppVersion: AppVersionText));
         AfterSeatChange(sync: false);
     }
 

@@ -160,6 +160,17 @@ public class HostSessionTests : IDisposable
     }
 
     [Fact]
+    public void Join_DifferentAppVersion_Succeeds_WelcomeCarriesHostVersion()
+    {
+        var r = Open();
+        r.H.AppVersionText = "7.7.7";
+        var bob = r.Relay.Guest("m1");
+        Send(r, bob, new JoinRequest("Bob", null, r.S.Archive.Sha256, AppVersion: "1.2.3"));
+        Assert.Equal("7.7.7", Assert.Single(bob.Of<Welcome>()).HostAppVersion);
+        Assert.Empty(bob.Of<Kicked>());
+    }
+
+    [Fact]
     public void Join_ProtocolMismatch_Refused()
     {
         var r = Open();

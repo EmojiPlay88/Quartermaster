@@ -262,7 +262,7 @@ public sealed class GuestSession : IDisposable
     private void SendJoin()
     {
         _joinTries++;
-        Send(new JoinRequest(_name, _token, _s.Archive.Sha256));
+        Send(new JoinRequest(_name, _token, _s.Archive.Sha256, AppVersion: AppVersionText));
     }
 
     private void ArmJoinCheck(int round)
@@ -327,6 +327,12 @@ public sealed class GuestSession : IDisposable
         _s.LoadGuestRules(p.Pack);
     }
 
+    /// <summary>This copy's app version, sent in the join request. Settable for tests.</summary>
+    public string AppVersionText { get; set; } = AppVersion.Text;
+
+    /// <summary>Set when the host runs another app version (a gentle warning, never a block); null otherwise.</summary>
+    public string? VersionNotice { get; private set; }
+
     private void Welcomed(Welcome w)
     {
         if (ReadPack(w.RulesPack) is not { } pack)
@@ -336,6 +342,11 @@ public sealed class GuestSession : IDisposable
             return;
         }
         PlayerId = w.PlayerId;
+        if (VersionCheck.VersionWarning(AppVersionText, w.HostAppVersion, "Host") is { } vw && vw != VersionNotice)
+        {
+            VersionNotice = vw;
+            Notice?.Invoke(vw);
+        }
         NoAnswer = false;   // a late welcome: the host did answer after all
         if (!string.IsNullOrEmpty(w.RejoinToken) && w.RejoinToken != _token)
         {

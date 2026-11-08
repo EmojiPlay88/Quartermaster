@@ -9,7 +9,7 @@ namespace Quartermaster.Core;
 /// </summary>
 public sealed record TurnFile(
     int Version, string ModuleSha256, string? RulesSha256, string GameId, string FromPlayerId, string FromName, string? ToPlayerId,
-    DateTime CreatedUtc, GameState Start, string StartHash, IReadOnlyList<GameCommand> Commands, string EndHash);
+    DateTime CreatedUtc, GameState Start, string StartHash, IReadOnlyList<GameCommand> Commands, string EndHash, string? AppVersion = null);
 
 /// <summary>Creates, writes, reads and replays <see cref="TurnFile"/>s (JSON, gzip).</summary>
 public static class TurnFiles
@@ -22,7 +22,7 @@ public static class TurnFiles
     sealed record VersionProbe(int Version);
 
     /// <summary>The local player's turn so far: the state at <see cref="GameSession.TurnBase"/> plus every command since. <paramref name="g"/> is not changed.</summary>
-    public static TurnFile Create(GameSession g, string fromPlayerId, string fromName, string? toPlayerId)
+    public static TurnFile Create(GameSession g, string fromPlayerId, string fromName, string? toPlayerId, string? appVersion = null)
     {
         ArgumentNullException.ThrowIfNull(g);
         int from = g.TurnBase;
@@ -32,7 +32,7 @@ public static class TurnFiles
         if (commands.Count > MaxCommands) throw new InvalidOperationException("This turn has too many steps to send.");
         var start = g.StateAt(from);
         return new TurnFile(Version, g.ModuleSha256, g.RulesSha256, g.State.GameId ?? "", fromPlayerId, fromName, toPlayerId,
-            DateTime.UtcNow, start, StateHash.Of(start), commands, StateHash.Of(g.State));
+            DateTime.UtcNow, start, StateHash.Of(start), commands, StateHash.Of(g.State), appVersion);
     }
 
     public static byte[] ToBytes(TurnFile t)

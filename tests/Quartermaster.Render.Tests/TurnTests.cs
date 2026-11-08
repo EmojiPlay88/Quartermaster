@@ -224,6 +224,21 @@ public class TurnTests : IDisposable
     }
 
     [Fact]
+    public void Build_StampsAppVersion_ReplayWarnsOnlyWhenDifferent()
+    {
+        var (_, t) = AliceTurn();
+        Assert.Equal(AppVersion.Text, t.AppVersion);
+        var bob = Open();
+        var same = bob.OpenTurn(t, Bob.Id, Identity("bob", t.GameId));
+        Assert.Null(same.VersionNotice);
+        var carol = Open();
+        var other = carol.OpenTurn(t with { AppVersion = "9.9.9" }, Bob.Id, Identity("bob2", t.GameId));
+        Assert.Equal("This turn file was made with 9.9.9, you run " + AppVersion.Text + " — update first if anything misbehaves.", other.VersionNotice);
+        var dave = Open();
+        Assert.Null(dave.OpenTurn(t with { AppVersion = null }, Bob.Id, Identity("bob3", t.GameId)).VersionNotice);
+    }
+
+    [Fact]
     public void Replay_Done_ViewSidesAreLocalPlayers_TurnBaseMarked()
     {
         var (_, t) = AliceTurn();
