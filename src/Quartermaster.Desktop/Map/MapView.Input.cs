@@ -85,45 +85,75 @@ public sealed partial class MapView
         SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    // View refresh state, written from whichever thread raised Session.ViewChanged: guarded by _viewLock.
+    readonly object _viewLock = new();
     IReadOnlySet<string>? _lastSides;
     bool _viewQueued;
     bool _sidesChanged;
+    GameSession? _attachedGame;
 
     /// <summary>Handler runs of the coalesced view refresh (tests).</summary>
     internal int ViewRefreshRuns { get; private set; }
 
+    /// <summary>Runs on the UI thread: now when already there, else queued (WinForms MapWindow.OnUi).</summary>
+    static void OnUi(Action a)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) a(); else Dispatcher.UIThread.Post(a);
+    }
+
+    /// <summary>Follows the session's current game (WinForms MapWindow.Attach).</summary>
+    void HookGame()
+    {
+        if (_attachedGame != null) { _attachedGame.Changed -= OnGameChanged; _attachedGame.Rewound -= OnGameRewound; }
+        _attachedGame = _topLevel == null ? null : Session.Game;
+        if (_attachedGame != null) { _attachedGame.Changed += OnGameChanged; _attachedGame.Rewound += OnGameRewound; }
+    }
+
+    // As WinForms MapWindow.OnGameChanged / OnRewound: any game change (a command from anyone, an undo, a redo, a step back) prunes the
+    // selection and cancels a captured drag, whose snapshot is now stale. This view's own drop ends its drag before executing, so it is
+    // unaffected.
+    void OnGameChanged(GameCommand _) => OnUi(PruneIfAttached);
+    void OnGameRewound() => OnUi(PruneIfAttached);
+
+    /// <summary>A new or loaded game (WinForms MapWindow.OnGameReplaced): follow it, prune, cancel any drag.</summary>
+    void OnGameReplaced() => OnUi(() => { HookGame(); PruneIfAttached(); });
+
+    void PruneIfAttached()
+    {
+        if (_topLevel != null) PruneSelection();
+    }
+
     /// <summary>
-    /// The game, the view sides or the rules changed (any thread). As WinForms MapWindow.OnViewChanged: bursts coalesce into one queued
-    /// UI-thread run. Only a real view-sides change (hot-seat: a new viewer) prunes the selection and cancels a drag; any other change
-    /// (a command, a rewind, a rules edit) just repaints and forgets selected pieces that are gone, leaving a running drag alone.
+    /// As WinForms MapWindow.OnViewChanged (hot-seat only: a new viewer or a rules edit can hide what is selected). Does nothing in solo
+    /// (no view sides now or before). Bursts, from any thread, coalesce into one queued UI-thread run; that run prunes and cancels a drag
+    /// only when the view sides really changed, otherwise it repaints and forgets selected pieces the view no longer has.
     /// </summary>
     void OnSessionViewChanged()
     {
         var sides = Session.ViewSides;
-        if (!ReferenceEquals(sides, _lastSides)) { _sidesChanged = true; _lastSides = sides; }
-        if (_viewQueued) return;
-        _viewQueued = true;
+        lock (_viewLock)
+        {
+            if (sides == null && _lastSides == null) return;
+            if (!ReferenceEquals(sides, _lastSides)) _sidesChanged = true;
+            _lastSides = sides;
+            if (_viewQueued) return;
+            _viewQueued = true;
+        }
         Dispatcher.UIThread.Post(RefreshFromSession);
-    }
-
-    /// <summary>A new or loaded game: the selection and any drag belong to the old one (WinForms MapWindow.OnGameReplaced).</summary>
-    void OnGameReplaced()
-    {
-        _sidesChanged = true;
-        OnSessionViewChanged();
     }
 
     void RefreshFromSession()
     {
-        _viewQueued = false;
+        bool sidesChanged;
+        lock (_viewLock)
+        {
+            _viewQueued = false;
+            sidesChanged = _sidesChanged;
+            _sidesChanged = false;
+        }
         ViewRefreshRuns++;
         if (_topLevel == null) return;   // detached meanwhile
-        if (_sidesChanged)
-        {
-            _sidesChanged = false;
-            PruneSelection();
-            return;
-        }
+        if (sidesChanged) { PruneSelection(); return; }
         var st = State;
         if (_selected.RemoveWhere(id => st == null || !st.Pieces.ContainsKey(id)) > 0) SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();

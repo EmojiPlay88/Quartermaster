@@ -150,10 +150,16 @@ public sealed class PieceInteractionTests : IDisposable
         var offset = new PointD(before.Pieces[id].Pos.X - grab.X, before.Pieces[id].Pos.Y - grab.Y);
         var expected = DropResolver.ResolveFormation(before, view.Map, view.ScreenToMap(to), offset, id, new[] { id }, S.Images, snap: true);
 
+        var log = S.Game!.Log.Count;
         Drag(window, at, to);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
         window.Close();
 
+        // The view's own drop: one move, the drag ended normally, the moved piece stays selected.
         var p = St.Pieces[id];
+        Assert.Equal(log + 1, S.Game!.Log.Count);
+        Assert.IsType<MovePieces>(S.Game.Log[^1]);
+        Assert.Equal(new[] { id }, view.SelectedPieceIds);
         Assert.Equal(expected[0].Pos, p.Pos);
         Assert.Equal(view.Map.Id, p.MapId);
         Assert.NotEqual(view.ScreenToMap(to), p.Pos); // snapped to the grid, not the raw cursor point
@@ -326,19 +332,72 @@ public sealed class PieceInteractionTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void A_burst_of_game_changes_queues_one_refresh()
+    public void A_burst_of_view_changes_queues_one_refresh()
     {
-        var (view, window, _) = Open();
+        var (view, window, _) = Open(rules: true);
+        S.SetViewSides(new HashSet<string> { "north" });   // hot-seat: view refreshes only matter with view sides
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
         var runs = view.ViewRefreshRuns;
         for (var i = 0; i < 10; i++) S.Game!.Execute(new AddLogLine(LogKind.Chat, "line " + i));
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-        window.Close();
         Assert.Equal(runs + 1, view.ViewRefreshRuns);
+
+        // Solo (no view sides now or before): nothing is queued at all, as WinForms.
+        S.SetViewSides(null);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        runs = view.ViewRefreshRuns;
+        for (var i = 0; i < 10; i++) S.Game!.Execute(new AddLogLine(LogKind.Chat, "solo " + i));
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        window.Close();
+        Assert.Equal(runs, view.ViewRefreshRuns);
     }
 
     [AvaloniaFact]
-    public void Game_change_during_drag_keeps_it_but_view_sides_change_cancels()
+    public void Game_change_during_drag_cancels_it()
+    {
+        // WinForms MapWindow.OnGameChanged -> MapCanvas.PruneSelection: the drag snapshot is stale, so the drag is cancelled.
+        var (view, window, _) = Open();
+        var (id, at) = LonePieces(view)[0];
+        var to = EmptySpotNear(view, at);
+        var pos = St.Pieces[id].Pos;
+        var log = S.Game!.Log.Count;
+
+        Drag(window, at, to, release: false);
+        Assert.True(view.IsDragging);
+        S.Game.Execute(new AddLogLine(LogKind.Chat, "from elsewhere"));
+        Assert.False(view.IsDragging);
+        window.MouseUp(to, MouseButton.Left);
+        window.Close();
+
+        Assert.Equal(pos, St.Pieces[id].Pos);
+        Assert.Equal(log + 1, S.Game.Log.Count);   // only the other command; nothing from the drag
+        Assert.IsType<AddLogLine>(S.Game.Log[^1]);
+    }
+
+    [AvaloniaFact]
+    public void Undo_during_drag_cancels_it()
+    {
+        var (view, window, _) = Open();
+        var phases = new PhaseController(S, (c, st) => CommandLog.Prepare(c, st, S));
+        var history = new HistoryController(S, phases, (c, st) => CommandLog.Prepare(c, st, S));
+        var pieces = LonePieces(view);
+        var (a, atA) = pieces[0];
+        Drag(window, atA, EmptySpotNear(view, atA));
+        var (b, atB) = LonePieces(view).First(x => x.Id != a);
+        var posB = St.Pieces[b].Pos;
+
+        Drag(window, atB, EmptySpotNear(view, atB), release: false);
+        Assert.True(view.IsDragging);
+        history.Undo();
+        Assert.False(view.IsDragging);
+        window.MouseUp(atB, MouseButton.Left);
+        window.Close();
+        Assert.Equal(posB, St.Pieces[b].Pos);
+        Assert.False(history.CanUndo);
+    }
+
+    [AvaloniaFact]
+    public void View_sides_change_during_drag_cancels_it()
     {
         var (view, window, _) = Open(rules: true);
         var (id, at) = LonePieces(view)[0];
@@ -346,24 +405,13 @@ public sealed class PieceInteractionTests : IDisposable
         var pos = St.Pieces[id].Pos;
 
         Drag(window, at, to, release: false);
-        S.Game!.Execute(new AddLogLine(LogKind.Chat, "from elsewhere"));
-        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
         Assert.True(view.IsDragging);
-        window.MouseUp(to, MouseButton.Left);
-        Assert.NotEqual(pos, St.Pieces[id].Pos);
-
-        // A new viewer (hot-seat hand-over) may not see what is dragged: the drag is cancelled.
-        var (id2, at2) = LonePieces(view)[0];
-        var pos2 = St.Pieces[id2].Pos;
-        var to2 = EmptySpotNear(view, at2);
-        Drag(window, at2, to2, release: false);
-        Assert.True(view.IsDragging);
-        S.SetViewSides(new HashSet<string> { "north" });
+        S.SetViewSides(new HashSet<string> { "north" });   // hot-seat hand-over
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
         Assert.False(view.IsDragging);
-        window.MouseUp(to2, MouseButton.Left);
+        window.MouseUp(to, MouseButton.Left);
         window.Close();
-        Assert.Equal(pos2, St.Pieces[id2].Pos);
+        Assert.Equal(pos, St.Pieces[id].Pos);
     }
 
     [AvaloniaFact]

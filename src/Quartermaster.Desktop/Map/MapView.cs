@@ -248,9 +248,10 @@ public sealed partial class MapView : Control
         AddHandler(PointerTouchPadGestureMagnifyEvent, OnMagnify);
         _topLevel = TopLevel.GetTopLevel(this);
         if (_topLevel != null) _topLevel.ScalingChanged += OnScalingChanged;
-        _lastSides = Session.ViewSides;
+        lock (_viewLock) _lastSides = Session.ViewSides;
         Session.ViewChanged += OnSessionViewChanged;
         Session.GameReplaced += OnGameReplaced;
+        HookGame();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -260,6 +261,7 @@ public sealed partial class MapView : Control
         _topLevel = null;
         Session.ViewChanged -= OnSessionViewChanged;
         Session.GameReplaced -= OnGameReplaced;
+        HookGame();   // _topLevel is null: unhooks
         CancelDrag();
         base.OnDetachedFromVisualTree(e);
     }
