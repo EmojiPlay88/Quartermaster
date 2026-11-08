@@ -103,6 +103,21 @@ public static class DemoContent
                 Outliner = OutlinerAggregate.Average, Visibility = Visibility.Private,
                 Notes = "How ready the unit is to fight. Private: only the side that owns the unit sees it.",
             },
+            new PropertyDef
+            {
+                Id = "stores", Name = "Stores", Scope = PropertyScope.Holders, Default = 20, Visibility = Visibility.Public,
+                Notes = "Supplies waiting at a depot. Each side's depot gets a delivery at the start of its Supply phase (at most 30).",
+            },
+            new PropertyDef
+            {
+                Id = "weather", Name = "Weather", Scope = PropertyScope.Holders, Default = 1, Visibility = Visibility.Public,
+                Notes = "Kept on Global. 1 = dry, 2 = mud (movement costs twice the fuel). Rolled at the start of each turn.",
+            },
+        },
+        Holders = new()
+        {
+            new HolderDef { Id = "h-north-depot", Name = "North Depot", SideId = "north", Notes = "The Northern League's depot (the NL Depot counter)." },
+            new HolderDef { Id = "h-south-depot", Name = "South Depot", SideId = "south", Notes = "The Southern Compact's depot (the SC Depot counter)." },
         },
         Tables = new()
         {
@@ -137,10 +152,14 @@ public static class DemoContent
             },
             new FormulaDef
             {
-                Id = "f-move-fuel", Name = "Fuel for movement", Text = "ceil(Moved / 2)", AppliesTo = "has(Fuel)",
-                Bindings = new() { new VariableBinding { Variable = "Moved", Kind = BindingKind.Moved } },
+                Id = "f-move-fuel", Name = "Fuel for movement", Text = "ceil(Moved * Weather / 2)", AppliesTo = "has(Fuel)",
+                Bindings = new()
+                {
+                    new VariableBinding { Variable = "Moved", Kind = BindingKind.Moved },
+                    new VariableBinding { Variable = "Weather", Kind = BindingKind.Global, Property = "weather" },
+                },
                 Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "fuel", Op = OutputOp.Subtract } },
-                Notes = "One fuel per two hexes moved, rounded up.",
+                Notes = "One fuel per two hexes moved, rounded up; double in mud.",
             },
             new FormulaDef
             {
@@ -159,6 +178,21 @@ public static class DemoContent
                 Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "ammo", Op = OutputOp.Subtract } },
                 Notes = "Firing uses 1 ammo (nothing when the unit has none left).",
             },
+            new FormulaDef
+            {
+                Id = "f-weather", Name = "Weather roll", Text = "if(Die >= 5, 2, 1)",
+                Bindings = new() { new VariableBinding { Variable = "Die", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 } },
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "weather", Op = OutputOp.Set } },
+                Notes = "5 or 6: mud (2). Otherwise dry (1).",
+            },
+            Delivery("f-north-delivery", "North Depot delivery", "h-north-depot"),
+            Delivery("f-south-delivery", "South Depot delivery", "h-south-depot"),
+            new FormulaDef
+            {
+                Id = "f-position", Name = "Unit position", Text = "Where", AppliesTo = "has(Fuel)",
+                Bindings = new() { new VariableBinding { Variable = "Where", Kind = BindingKind.Location } },
+                Notes = "Shows the hex the unit is in (an example of a location variable).",
+            },
         },
         Sides = new()
         {
@@ -167,35 +201,60 @@ public static class DemoContent
         },
         Phases = new()
         {
-            new PhaseDef
-            {
-                Id = "ph-supply", Name = "Supply",
-                Instructions = "Every unit draws fuel and ammo from its own depot. The nearer the depot, the more it gets.",
-                OnStart = new()
-                {
-                    new StartEntry { FormulaId = "f-fuel-supply", ForEach = ForEachMode.Units, UnitFilter = "has(Fuel)" },
-                    new StartEntry { FormulaId = "f-ammo-supply", ForEach = ForEachMode.Units, UnitFilter = "has(Ammo)" },
-                },
-            },
-            new PhaseDef
-            {
-                Id = "ph-movement", Name = "Movement",
-                Instructions = "Move units. Every two hexes moved cost one fuel. Units with no fuel cannot move.",
-                OnMove = new() { new MoveEntry { FormulaId = "f-move-fuel", UnitFilter = "has(Fuel)" } },
-                Warnings = new() { new PhaseWarning { Condition = "Fuel <= 0", Message = "{unit} has no fuel and cannot move" } },
-            },
-            new PhaseDef
-            {
-                Id = "ph-combat", Name = "Combat",
-                Instructions = "Units next to an enemy may attack. Roll the Attack roll; 6 or more wins.",
-                Checklist = new() { "Choose attackers", "Run Attack roll for each attacker", "Run Ammo for firing for each attacker" },
-                Warnings = new() { new PhaseWarning { Condition = "Ammo <= 0", Message = "{unit} is out of ammo" } },
-            },
+            SupplyPhase("ph-north-supply", "North Supply", "north", "f-north-delivery", weather: true),
+            MovementPhase("ph-north-movement", "North Movement", "north"),
+            CombatPhase("ph-north-combat", "North Combat", "north"),
+            SupplyPhase("ph-south-supply", "South Supply", "south", "f-south-delivery", weather: false),
+            MovementPhase("ph-south-movement", "South Movement", "south"),
+            CombatPhase("ph-south-combat", "South Combat", "south"),
         },
         Alerts = new()
         {
             new AlertDef { Id = "a-low-fuel", Name = "Low fuel", Condition = "Fuel < 2", Message = "{unit} is low on fuel", Severity = AlertSeverity.Warning },
         },
+    };
+
+    private static FormulaDef Delivery(string id, string name, string holderId) => new()
+    {
+        Id = id, Name = name, Text = "min(Stores + Delivery, 30)",
+        Bindings = new()
+        {
+            new VariableBinding { Variable = "Stores", Kind = BindingKind.Holder, HolderId = holderId, Property = "stores" },
+            new VariableBinding { Variable = "Delivery", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 },
+        },
+        Outputs = new() { new FormulaOutput { Target = OutputTarget.Holder, HolderId = holderId, Property = "stores", Op = OutputOp.Set } },
+        Notes = "One die of supplies arrives at the depot, up to 30.",
+    };
+
+    private static PhaseDef SupplyPhase(string id, string name, string sideId, string deliveryId, bool weather)
+    {
+        var start = new List<StartEntry>();
+        if (weather) start.Add(new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once });
+        start.Add(new StartEntry { FormulaId = deliveryId, ForEach = ForEachMode.Once });
+        start.Add(new StartEntry { FormulaId = "f-fuel-supply", ForEach = ForEachMode.Units, UnitFilter = "has(Fuel)" });
+        start.Add(new StartEntry { FormulaId = "f-ammo-supply", ForEach = ForEachMode.Units, UnitFilter = "has(Ammo)" });
+        return new PhaseDef
+        {
+            Id = id, Name = name, SideId = sideId, OnStart = start,
+            Instructions = (weather ? "Roll the weather for this turn. " : "")
+                + "Supplies arrive at your depot, then every unit draws fuel and ammo from it. The nearer the depot, the more it gets.",
+        };
+    }
+
+    private static PhaseDef MovementPhase(string id, string name, string sideId) => new()
+    {
+        Id = id, Name = name, SideId = sideId,
+        Instructions = "Move your units. Every two hexes moved cost one fuel (twice that in mud). Units with no fuel cannot move.",
+        OnMove = new() { new MoveEntry { FormulaId = "f-move-fuel", UnitFilter = "has(Fuel)" } },
+        Warnings = new() { new PhaseWarning { Condition = "Fuel <= 0", Message = "{unit} has no fuel and cannot move" } },
+    };
+
+    private static PhaseDef CombatPhase(string id, string name, string sideId) => new()
+    {
+        Id = id, Name = name, SideId = sideId,
+        Instructions = "Your units next to an enemy may attack. Roll the Attack roll; 6 or more wins.",
+        Checklist = new() { "Choose attackers", "Run Attack roll for each attacker", "Run Ammo for firing for each attacker" },
+        Warnings = new() { new PhaseWarning { Condition = "Ammo <= 0", Message = "{unit} is out of ammo" } },
     };
 
     private static VariableBinding UnitVar(string name, string property) =>
@@ -398,11 +457,13 @@ public static class DemoContent
         RIVERLAND - invented demo rules for the Quartermaster wiki
 
         Two sides, the Northern League and the Southern Compact, face each other across a river.
-        Each turn has three phases: Supply, Movement and Combat.
+        Each turn the Northern League plays its Supply, Movement and Combat phases, then the Southern Compact plays its own.
 
-        Supply: every unit gets fuel and ammo from its own depot. 0 hexes away: 3 points;
-        1-2 hexes: 2; 3-4 hexes: 1; 5 or more: none. Fuel is capped at 6, ammo at 4.
-        Movement: every two hexes moved cost one fuel (rounded up). No fuel, no movement.
+        Weather: at the start of each turn roll one die. 5 or 6: mud; otherwise dry.
+        Supply: one die of supplies arrives at your depot (it holds at most 30). Then every unit gets
+        fuel and ammo by its distance to its depot. 0 hexes away: 3 points; 1-2 hexes: 2; 3-4 hexes: 1;
+        5 or more: none. Fuel is capped at 6, ammo at 4.
+        Movement: every two hexes moved cost one fuel (rounded up), twice that in mud. No fuel, no movement.
         Combat: roll one die and add half the unit's readiness (rounded down); 6 or more wins.
         Firing uses one ammo.
 

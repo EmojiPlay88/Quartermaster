@@ -3,7 +3,7 @@
 These files are the invented example game used throughout the Quartermaster wiki.
 
 - `Riverland-Demo.vmod` - a small VASSAL module: a hex map with a river, two sides (Northern League and Southern Compact), eight counters each, a turn track and a short rules text.
-- `Riverland-Demo.qrules` - a Quartermaster rules pack for it: Fuel, Ammo and Readiness for every unit, a supply table, five formulas, three phases (Supply, Movement, Combat), a Low fuel alert, and Readiness kept secret from the other side.
+- `Riverland-Demo.qrules` - a Quartermaster rules pack for it: Fuel, Ammo and Readiness for every unit, a depot for each side with its own Stores, a global Weather value, a supply table, formulas for supply, movement, combat and weather, phases for each side in turn (North Supply, North Movement, North Combat, then the same for South), a Low fuel alert, and Readiness kept secret from the other side.
 
 Riverland is made up for documentation. It is not based on any published game. The map, counters, names and numbers are invented example content, and you are free to use, copy and change them.
 

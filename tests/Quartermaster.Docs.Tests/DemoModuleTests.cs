@@ -47,6 +47,15 @@ public class DemoModuleTests : IDisposable
         var model = ModuleModelBuilder.Build(archive, new DiagnosticLog());
         var issues = RulesValidator.Validate(pack, model.Maps.Select(m => m.Id).ToList());
         Assert.Empty(issues);
+        // Every documented feature appears once: side-owned depot holders, a global property, side-tied phases, a location variable.
+        Assert.Equal(new[] { "north", "south" }, pack.Holders.Select(h => h.SideId));
+        Assert.Contains(pack.Properties, p => p.Scope == PropertyScope.Holders);
+        Assert.Contains(pack.Formulas, f => f.Outputs.Any(o => o.Target == OutputTarget.Holder));
+        Assert.Contains(pack.Formulas, f => f.Outputs.Any(o => o.Target == OutputTarget.Global));
+        Assert.Contains(pack.Formulas, f => f.Bindings.Any(b => b.Kind == BindingKind.Global));
+        Assert.Contains(pack.Formulas, f => f.Bindings.Any(b => b.Kind == BindingKind.Location));
+        Assert.All(pack.Phases, ph => Assert.NotNull(ph.SideId));
+        Assert.Equal(new[] { "north", "south" }, pack.Phases.Select(ph => ph.SideId).Distinct());
     }
 
     [Fact]
@@ -70,7 +79,11 @@ public class DemoModuleTests : IDisposable
                 Assert.True(t.Error == null, $"{who}: {t.Error}");
                 Assert.All(t.Variables, v => Assert.True(v.MissingReason == null, $"{who}: {v.Variable} {v.MissingReason}"));
                 Assert.NotNull(t.Result);
+                if (f.Outputs.Any(o => o.Target == OutputTarget.Holder))
+                    Assert.Contains(t.Outputs, o => o.Key.StartsWith("h:", StringComparison.Ordinal));
             }
+        Assert.Equal("0202", s.Runner!.Run(state, new RunRequest("f-position", units.First(u => PieceInfo.Name(u) == "NL 1 Rifles").Id,
+            new Dictionary<string, string>(), new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>())).Result!.Value.Display());
         // Every unit is seeded from its property sheet, and one starts low on fuel so the alert shows at once.
         Assert.All(units, u => Assert.NotNull(Ledger.Get(state, LedgerKey.Piece(u.Id), "fuel")));
         var hits = AlertEngine.Evaluate(state, pack, s.Model, null, null);
@@ -86,15 +99,36 @@ public class DemoModuleTests : IDisposable
         Assert.Equal(File.ReadAllBytes(a.Rules), File.ReadAllBytes(b.Rules));
     }
 
+    /// <summary>Compares entry names and contents, not raw zip bytes, so another Deflate implementation cannot make it fail.</summary>
     [Fact]
     public void Committed_demo_is_current()
     {
         var (vmod, rules) = Build();
         var demo = Path.Combine(RepoRoot(), "docs", "wiki", "demo");
-        Assert.True(File.ReadAllBytes(vmod).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(demo, DemoContent.VmodName))),
-            "docs/wiki/demo is stale: run dotnet run --project tools/Quartermaster.DemoModule -- docs/wiki/demo");
-        Assert.True(File.ReadAllBytes(rules).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(demo, DemoContent.RulesName))),
-            "docs/wiki/demo is stale: run dotnet run --project tools/Quartermaster.DemoModule -- docs/wiki/demo");
+        const string stale = "docs/wiki/demo is stale: run dotnet run --project tools/Quartermaster.DemoModule -- docs/wiki/demo";
+        Assert.True(SameEntries(vmod, Path.Combine(demo, DemoContent.VmodName)), stale);
+        Assert.True(SameEntries(rules, Path.Combine(demo, DemoContent.RulesName)), stale);
+    }
+
+    private static bool SameEntries(string a, string b)
+    {
+        var ea = Entries(a);
+        var eb = Entries(b);
+        return ea.Keys.SequenceEqual(eb.Keys) && ea.All(kv => kv.Value.AsSpan().SequenceEqual(eb[kv.Key]));
+    }
+
+    private static SortedDictionary<string, byte[]> Entries(string zipPath)
+    {
+        var d = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
+        using var z = System.IO.Compression.ZipFile.OpenRead(zipPath);
+        foreach (var e in z.Entries)
+        {
+            using var s = e.Open();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            d[e.FullName] = ms.ToArray();
+        }
+        return d;
     }
 
     private static string RepoRoot()
