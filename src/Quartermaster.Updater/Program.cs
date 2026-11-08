@@ -5,6 +5,8 @@ namespace Quartermaster.Updater;
 public static class ExitCodes
 {
     public const int Ok = 0, BadArgs = 1, PidTimeout = 2, RolledBack = 3, SwapFailed = 4, RollbackFailed = 5;
+    /// <summary>Nothing was touched: another copy runs from the app folder, or a folder has no usable quartermaster-files.txt.</summary>
+    public const int Refused = 6;
 }
 
 public sealed class UpdateOptions
@@ -53,6 +55,8 @@ public interface IProcessHost
     bool IsAlive(int pid);
     int Start(string exe, string args, string workDir);
     void Kill(int pid);
+    /// <summary>Running processes with this name and their main module path (null when it cannot be read).</summary>
+    IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName);
 }
 
 public sealed class RealProcessHost : IProcessHost
@@ -76,6 +80,23 @@ public sealed class RealProcessHost : IProcessHost
         try { using var p = Process.GetProcessById(pid); p.Kill(true); p.WaitForExit(5000); }
         catch (ArgumentException) { }
         catch (InvalidOperationException) { }
+    }
+
+    public IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName)
+    {
+        Process[] all;
+        try { all = Process.GetProcessesByName(processName); }
+        catch (InvalidOperationException) { return []; }
+        var list = new List<(int, string?)>();
+        foreach (var p in all)
+        {
+            string? path = null;
+            try { path = p.MainModule?.FileName; }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException) { }
+            list.Add((p.Id, path));
+            p.Dispose();
+        }
+        return list;
     }
 }
 
@@ -116,12 +137,23 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
 
         try { File.Delete(o.MarkerPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
 
+        if (OtherCopiesRunning(host, appExe, o.Pid))
+        {
+            log("Another Quartermaster runs from the app folder; refusing, nothing changed");
+            return Refused(appExe);
+        }
+
         try
         {
             var outcome = swapper.Resume();
             log($"Journal resume outcome: {outcome}");
             if (outcome == ResumeOutcome.RolledBack) return Failed(swapper, appExe, rollback: false);
             if (outcome is ResumeOutcome.None or ResumeOutcome.Stale) { log("Applying update"); swapper.Apply(); }
+        }
+        catch (ManifestMissingException ex)
+        {
+            log("Refusing, nothing changed: " + ex.Message);
+            return Refused(appExe);
         }
         catch (Exception ex)
         {
@@ -167,6 +199,20 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         Launch(appExe, "--update-failed " + o.Version);
         swapper.DeleteJournal();
         return ExitCodes.RolledBack;
+    }
+
+    /// <summary>True when a process other than <paramref name="selfPid"/> runs from <paramref name="appExe"/> (paths compared case-insensitively; unreadable paths ignored).</summary>
+    public static bool OtherCopiesRunning(IProcessHost host, string appExe, int selfPid)
+    {
+        var want = Path.GetFullPath(appExe);
+        return host.ProcessesNamed(Path.GetFileNameWithoutExtension(appExe))
+            .Any(p => p.Pid != selfPid && p.Path != null && string.Equals(Path.GetFullPath(p.Path), want, StringComparison.OrdinalIgnoreCase));
+    }
+
+    int Refused(string appExe)
+    {
+        Launch(appExe, "--update-refused " + o.Version);
+        return ExitCodes.Refused;
     }
 
     int Launch(string exe, string args)

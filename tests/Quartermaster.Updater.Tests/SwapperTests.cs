@@ -25,15 +25,37 @@ public sealed class TempArea : IDisposable
         File.WriteAllText(p, text);
     }
 
-    public void SeedOld() { Put(App, "Quartermaster.App.exe", "old"); Put(App, "a.dll", "old-a"); Put(App, "sub/b.dll", "old-b"); }
-    public void SeedNew() { Put(Staged, "Quartermaster.App.exe", "new"); Put(Staged, "a.dll", "new-a"); Put(Staged, "sub/c.dll", "new-c"); }
+    public const string ManifestName = "quartermaster-files.txt";
+
+    public void SeedOld()
+    {
+        Put(App, "Quartermaster.App.exe", "old"); Put(App, "a.dll", "old-a"); Put(App, "sub/b.dll", "old-b");
+        PutList(App, OldList);
+    }
+
+    public void SeedNew()
+    {
+        Put(Staged, "Quartermaster.App.exe", "new"); Put(Staged, "a.dll", "new-a"); Put(Staged, "sub/c.dll", "new-c");
+        PutList(Staged, NewList);
+    }
+
+    /// <summary>Writes a release file list; ';' in <paramref name="list"/> separates lines.</summary>
+    public void PutList(string dir, string list) => Put(dir, ManifestName, list.Replace(';', '\n') + "\n");
+
+    public const string OldList = "Quartermaster.App.exe;a.dll;sub/b.dll;" + ManifestName;
+    public const string NewList = "Quartermaster.App.exe;a.dll;sub/c.dll;" + ManifestName;
+
+    /// <summary>Files the user put in the app folder (not in any release list).</summary>
+    public void SeedUnlisted() { Put(App, "notes TEST.txt", "mine"); Put(App, "sub/mine TEST.txt", "mine-sub"); Put(App, "own/deep TEST.txt", "mine-own"); }
+
+    public static string Expected(params string[] entries) => string.Join("|", entries.Order(StringComparer.Ordinal));
 
     public Swapper Swapper() => new(App, Staged, Backup, Journal);
 
     public static string Snapshot(string dir) =>
         string.Join("|", Directory.Exists(dir)
             ? Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
-                .Select(f => Path.GetRelativePath(dir, f) + "=" + File.ReadAllText(f))
+                .Select(f => Path.GetRelativePath(dir, f) + "=" + File.ReadAllText(f).TrimEnd('\n').Replace('\n', ';'))
                 .Order(StringComparer.Ordinal)
             : []);
 
@@ -50,9 +72,144 @@ public class SwapperTests
     {
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         t.Swapper().Apply();
-        Assert.Equal("Quartermaster.App.exe=new|a.dll=new-a|sub\\c.dll=new-c".Split('|').Order(StringComparer.Ordinal).Aggregate((x, y) => x + "|" + y), TempArea.Snapshot(t.App));
-        Assert.Equal("Quartermaster.App.exe=old|a.dll=old-a|sub\\b.dll=old-b".Split('|').Order(StringComparer.Ordinal).Aggregate((x, y) => x + "|" + y), TempArea.Snapshot(t.Backup));
+        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=new", "a.dll=new-a", "sub\\c.dll=new-c", TempArea.ManifestName + "=" + TempArea.NewList), TempArea.Snapshot(t.App));
+        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=old", "a.dll=old-a", "sub\\b.dll=old-b", TempArea.ManifestName + "=" + TempArea.OldList), TempArea.Snapshot(t.Backup));
         Assert.Contains("\"done\"", File.ReadAllText(t.Journal));
+    }
+
+    // ---------- only listed files are moved ----------
+
+    [Fact]
+    public void Apply_UnlistedFilesStayInAppFolder()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew(); t.SeedUnlisted();
+        t.Swapper().Apply();
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(t.App, "notes TEST.txt")));
+        Assert.Equal("mine-sub", File.ReadAllText(Path.Combine(t.App, "sub", "mine TEST.txt")));
+        Assert.Equal("mine-own", File.ReadAllText(Path.Combine(t.App, "own", "deep TEST.txt")));
+        Assert.Equal("new", File.ReadAllText(Path.Combine(t.App, "Quartermaster.App.exe")));
+        Assert.False(File.Exists(Path.Combine(t.App, "sub", "b.dll")));
+        Assert.DoesNotContain("TEST", TempArea.Snapshot(t.Backup));
+    }
+
+    [Fact]
+    public void Apply_EmptiedListedSubfolderRemoved_UnlistedEmptyFolderKept()
+    {
+        using var t = new TempArea(); t.SeedOld();
+        t.Put(t.App, "old-only/x.dll", "old-x");
+        t.PutList(t.App, TempArea.OldList + ";old-only/x.dll");
+        Directory.CreateDirectory(Path.Combine(t.App, "empty TEST"));
+        t.SeedNew();
+        t.Swapper().Apply();
+        Assert.False(Directory.Exists(Path.Combine(t.App, "old-only")));
+        Assert.True(Directory.Exists(Path.Combine(t.App, "empty TEST")));
+    }
+
+    [Fact]
+    public void Rollback_UnlistedFilesSurvive_OldRestored()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew(); t.SeedUnlisted();
+        var before = TempArea.Snapshot(t.App);
+        var s = t.Swapper(); s.Apply(); s.Rollback();
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Resume_AfterCrashInBackup_UnlistedFilesSurvive()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew(); t.SeedUnlisted();
+        var before = TempArea.Snapshot(t.App);
+        t.WriteJournal("backup");
+        Directory.CreateDirectory(t.Backup);
+        File.Move(Path.Combine(t.App, "a.dll"), Path.Combine(t.Backup, "a.dll"));
+        Assert.Equal(ResumeOutcome.RolledBack, t.Swapper().Resume());
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Resume_AfterCrashInInstall_UnlistedFilesSurvive()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew(); t.SeedUnlisted();
+        var s = t.Swapper(); s.Apply();
+        // crash with one file not yet installed: put it back in the staged folder and rewind the journal step
+        File.Move(Path.Combine(t.App, "sub", "c.dll"), Path.Combine(t.Staged, "sub", "c.dll"));
+        File.WriteAllText(t.Journal, File.ReadAllText(t.Journal).Replace("\"done\"", "\"install\""));
+        Assert.Equal(ResumeOutcome.Completed, t.Swapper().Resume());
+        Assert.Equal("new-c", File.ReadAllText(Path.Combine(t.App, "sub", "c.dll")));
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(t.App, "notes TEST.txt")));
+        Assert.Equal("mine-sub", File.ReadAllText(Path.Combine(t.App, "sub", "mine TEST.txt")));
+        Assert.Equal("mine-own", File.ReadAllText(Path.Combine(t.App, "own", "deep TEST.txt")));
+    }
+
+    [Fact]
+    public void Resume_AfterCrashInRollbackClear_UnlistedFilesSurvive()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew(); t.SeedUnlisted();
+        var before = TempArea.Snapshot(t.App);
+        t.Swapper().Apply();
+        File.WriteAllText(t.Journal, File.ReadAllText(t.Journal).Replace("\"done\"", "\"rollback-clear\""));
+        File.Delete(Path.Combine(t.App, "a.dll")); // crash after one new file was removed
+        Assert.Equal(ResumeOutcome.RolledBack, t.Swapper().Resume());
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Apply_NewFileNamedLikeUnlistedFile_RollbackPutsUserFileBack()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        t.Put(t.App, "sub/c.dll", "user copy TEST"); // not in the old list, but the new release ships sub/c.dll
+        var before = TempArea.Snapshot(t.App);
+        var s = t.Swapper(); s.Apply();
+        Assert.Equal("new-c", File.ReadAllText(Path.Combine(t.App, "sub", "c.dll")));
+        s.Rollback();
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Apply_NoManifestInAppFolder_Refused_NothingTouched()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew(); t.SeedUnlisted();
+        File.Delete(Path.Combine(t.App, TempArea.ManifestName));
+        var before = TempArea.Snapshot(t.App); var staged = TempArea.Snapshot(t.Staged);
+        Assert.Throws<ManifestMissingException>(() => t.Swapper().Apply());
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+        Assert.Equal(staged, TempArea.Snapshot(t.Staged));
+        Assert.False(File.Exists(t.Journal));
+        Assert.False(Directory.Exists(t.Backup));
+    }
+
+    [Theory]
+    [InlineData("..\\outside.dll")]
+    [InlineData("C:\\Windows\\x.dll")]
+    [InlineData("/rooted.dll")]
+    [InlineData("a//b.dll")]
+    public void Apply_UnsafeManifestEntry_Refused(string entry)
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        t.PutList(t.App, TempArea.OldList + ";" + entry);
+        var before = TempArea.Snapshot(t.App);
+        Assert.Throws<ManifestMissingException>(() => t.Swapper().Apply());
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Apply_StagedListNamesMissingFile_Refused_NothingTouched()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        t.PutList(t.Staged, TempArea.NewList + ";gone.dll");
+        var before = TempArea.Snapshot(t.App);
+        Assert.Throws<ManifestMissingException>(() => t.Swapper().Apply());
+        Assert.Equal(before, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Resume_LeftoverRolledBackJournalSameVersion_StaleSoTheUpdateIsTriedAgain()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        t.WriteJournal("rolledback", version: "2.0.0");
+        var s = t.Swapper(); s.Version = "2.0.0";
+        Assert.Equal(ResumeOutcome.Stale, s.Resume());
+        Assert.False(File.Exists(t.Journal));
     }
 
     [Fact]

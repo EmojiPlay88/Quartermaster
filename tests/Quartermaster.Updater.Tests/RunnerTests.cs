@@ -17,6 +17,8 @@ sealed class FakeHost : IProcessHost
         return pid;
     }
     public void Kill(int pid) => Killed.Add(pid);
+    public List<(int Pid, string? Path)> Running = [];
+    public IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName) => Running;
 }
 
 public class RunnerTests
@@ -151,5 +153,68 @@ public class RunnerTests
         Assert.Equal(ExitCodes.Ok, code);
         Assert.Equal("new", File.ReadAllText(Path.Combine(t.App, "Quartermaster.App.exe")));
         Assert.Equal("old", File.ReadAllText(Path.Combine(t.Backup, "Quartermaster.App.exe")));
+    }
+
+    [Fact]
+    public void Main_OtherCopyRunningFromAppFolder_RefusedNothingChanged()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        var oldSnap = TempArea.Snapshot(t.App); var stagedSnap = TempArea.Snapshot(t.Staged);
+        var host = new FakeHost();
+        host.Running.Add((77, Path.Combine(t.App, "QUARTERMASTER.APP.EXE"))); // case-insensitive match
+        var code = new UpdateRunner(Opts(t), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.Refused, code);
+        Assert.Equal(oldSnap, TempArea.Snapshot(t.App));
+        Assert.Equal(stagedSnap, TempArea.Snapshot(t.Staged));
+        Assert.False(File.Exists(t.Journal));
+        Assert.Equal("--update-refused 2.0.0", Assert.Single(host.Started).Args);
+    }
+
+    [Fact]
+    public void OtherCopiesRunning_IgnoresSelfOtherFoldersAndUnreadablePaths()
+    {
+        using var t = new TempArea();
+        var exe = Path.Combine(t.App, "Quartermaster.App.exe");
+        var host = new FakeHost();
+        host.Running.AddRange([(1, exe), (2, null), (3, Path.Combine(t.Root, "elsewhere", "Quartermaster.App.exe"))]);
+        Assert.False(UpdateRunner.OtherCopiesRunning(host, exe, selfPid: 1));
+        host.Running.Add((4, exe));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, exe, selfPid: 1));
+    }
+
+    [Fact]
+    public void Main_NoManifestInAppFolder_RefusedNothingChanged()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew(); t.SeedUnlisted();
+        File.Delete(Path.Combine(t.App, TempArea.ManifestName));
+        var oldSnap = TempArea.Snapshot(t.App);
+        var host = new FakeHost();
+        var code = new UpdateRunner(Opts(t), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.Refused, code);
+        Assert.Equal(oldSnap, TempArea.Snapshot(t.App));
+        Assert.False(Directory.Exists(t.Backup));
+        Assert.Equal("--update-refused 2.0.0", Assert.Single(host.Started).Args);
+    }
+
+    [Fact]
+    public void Main_UnlistedFiles_SurviveUpdateAndRollback()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew(); t.SeedUnlisted();
+        var oldSnap = TempArea.Snapshot(t.App);
+        var code = new UpdateRunner(Opts(t, markerSec: 1), new FakeHost(), _ => { }).Run(); // no marker: rolls back
+        Assert.Equal(ExitCodes.RolledBack, code);
+        Assert.Equal(oldSnap, TempArea.Snapshot(t.App));
+    }
+
+    [Fact]
+    public void Main_LeftoverRolledBackJournalSameVersion_RetriesTheUpdate()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        t.WriteJournal("rolledback", version: "2.0.0", stagedDir: t.Staged);
+        var host = new FakeHost();
+        host.OnStart = (s, _) => { if (s.Args.StartsWith("--updated-from")) File.WriteAllText(t.Marker, "ok"); };
+        var code = new UpdateRunner(Opts(t), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.Ok, code);
+        Assert.Equal("new", File.ReadAllText(Path.Combine(t.App, "Quartermaster.App.exe")));
     }
 }
