@@ -47,7 +47,7 @@ public sealed class SkiaInteropTests : IDisposable
         window.Show();
         using var frame = window.CaptureRenderedFrame();
         window.Close();
-        var dark = Pixels(frame!).Px.Count(c => c.Red < 128 && c.Green < 128 && c.Blue < 128);
+        var dark = TestHelpers.Pixels(frame!).Px.Count(c => c.Red < 128 && c.Green < 128 && c.Blue < 128);
         Assert.True(dark > 50, $"only {dark} dark pixels: text did not render");
     }
 
@@ -80,7 +80,7 @@ public sealed class SkiaInteropTests : IDisposable
         Assert.NotNull(frame);
         Assert.True(control.Leases >= 1, "Avalonia never handed out its SKCanvas");
         Assert.Null(control.Error);
-        var actual = Pixels(frame!);
+        var actual = TestHelpers.Pixels(frame!);
         Assert.Equal(W, actual.Width);
         Assert.Equal(H, actual.Height);
         var colours = new HashSet<SKColor>();
@@ -95,22 +95,6 @@ public sealed class SkiaInteropTests : IDisposable
             }
         Assert.True(colours.Count > 50, $"frame has only {colours.Count} colours: the map did not draw");
         Assert.Equal(0, diff);
-    }
-
-    /// <summary>The captured frame as SKColors (headless frames are Rgba8888).</summary>
-    static (int Width, int Height, SKColor[] Px) Pixels(Bitmap frame)
-    {
-        Assert.Equal(PixelFormat.Rgba8888, frame.Format);
-        var w = frame.PixelSize.Width; var h = frame.PixelSize.Height;
-        var bytes = new byte[w * h * 4];
-        unsafe
-        {
-            fixed (byte* p = bytes)
-                frame.CopyPixels(new PixelRect(0, 0, w, h), (nint)p, bytes.Length, w * 4);
-        }
-        var px = new SKColor[w * h];
-        for (var i = 0; i < px.Length; i++) px[i] = new SKColor(bytes[i * 4], bytes[i * 4 + 1], bytes[i * 4 + 2], bytes[i * 4 + 3]);
-        return (w, h, px);
     }
 
     sealed class SkiaHost(Action<SKCanvas> draw) : Control
