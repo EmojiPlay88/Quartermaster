@@ -47,6 +47,22 @@ sealed class FakeDialogs : IDialogs
         return Task.FromResult(Answer);
     }
 
+    public readonly Queue<bool?> YesNoCancel = new();
+    public readonly Queue<string?> Texts = new();
+    public readonly List<string> TextPrompts = new();
+
+    public Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption)
+    {
+        Questions.Add((message, caption));
+        return Task.FromResult(YesNoCancel.Count > 0 ? YesNoCancel.Dequeue() : null);
+    }
+
+    public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial)
+    {
+        TextPrompts.Add($"{title}|{prompt}|{initial}");
+        return Task.FromResult(Texts.Count > 0 ? Texts.Dequeue() : null);
+    }
+
     public Task ShowWarningAsync(Window owner, string message, string caption)
     {
         Warnings.Add((message, caption));
@@ -129,7 +145,7 @@ public sealed class MainWindowTests : IDisposable
         var w = NewWindow();
         var menus = w.MenuLabels();
         Assert.Equal(new[] { "&File", "&Edit", "&View" }, menus.Keys);
-        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "E&xit" }, menus["&File"]);
+        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo" }, menus["&Edit"]);
         Assert.Equal(new[] { "Show &Grid", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
         Assert.Equal(new[] { "25%", "50%", "100%", "200%", "Fit" },

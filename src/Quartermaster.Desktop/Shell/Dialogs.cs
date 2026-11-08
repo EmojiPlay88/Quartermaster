@@ -31,6 +31,12 @@ public interface IDialogs
     /// <summary>A Yes/No question with No as the default (WinForms MessageBoxDefaultButton.Button2). True = Yes.</summary>
     Task<bool> AskYesNoAsync(Window owner, string message, string caption);
 
+    /// <summary>A Yes / No / Cancel question (WinForms MessageBoxButtons.YesNoCancel, Yes focused). Yes = true, No = false, Cancel = null.</summary>
+    Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption);
+
+    /// <summary>A one-line text prompt with OK / Cancel (WinForms InputDialog); the entered text, or null when cancelled.</summary>
+    Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial);
+
     /// <summary>A warning with an OK button.</summary>
     Task ShowWarningAsync(Window owner, string message, string caption);
 
@@ -84,6 +90,12 @@ public sealed class Dialogs : IDialogs
     public Task ShowWarningAsync(Window owner, string message, string caption) =>
         MessageBox.ShowAsync(owner, message, caption, yesNo: false);
 
+    public Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption) =>
+        MessageBox.ShowYesNoCancelAsync(owner, message, caption);
+
+    public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial) =>
+        new TextPrompt(title, prompt, initial).ShowDialog<string?>(owner);
+
     public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty) =>
         new SetupChooser(model, difficulty, preselectNew).ShowDialog<SetupChoice?>(owner);
 }
@@ -91,7 +103,7 @@ public sealed class Dialogs : IDialogs
 /// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>
 sealed class MessageBox : Window
 {
-    MessageBox(string message, string caption, bool yesNo)
+    MessageBox(string message, string caption, bool yesNo, bool cancel = false)
     {
         Title = caption;
         SizeToContent = SizeToContent.WidthAndHeight;
@@ -102,7 +114,7 @@ sealed class MessageBox : Window
         MaxWidth = 520;
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 6, Margin = new Thickness(10) };
-        Button Add(string text, bool result, bool isDefault = false, bool isCancel = false)
+        Button Add(string text, bool? result, bool isDefault = false, bool isCancel = false)
         {
             var b = new Button { Content = text, MinWidth = 75, IsDefault = isDefault, IsCancel = isCancel, HorizontalContentAlignment = HorizontalAlignment.Center };
             b.Click += (_, _) => Close(result);
@@ -110,7 +122,13 @@ sealed class MessageBox : Window
             return b;
         }
         Button focus;
-        if (yesNo)
+        if (cancel)
+        {
+            focus = Add("Yes", true, isDefault: true);
+            Add("No", false);
+            Add("Cancel", null, isCancel: true);
+        }
+        else if (yesNo)
         {
             Add("Yes", true);
             focus = Add("No", false, isDefault: true, isCancel: true);
@@ -127,4 +145,36 @@ sealed class MessageBox : Window
 
     public static async Task<bool> ShowAsync(Window owner, string message, string caption, bool yesNo) =>
         await new MessageBox(message, caption, yesNo).ShowDialog<bool?>(owner) == true;
+
+    /// <summary>Yes / No / Cancel; closing the window counts as Cancel.</summary>
+    public static Task<bool?> ShowYesNoCancelAsync(Window owner, string message, string caption) =>
+        new MessageBox(message, caption, yesNo: true, cancel: true).ShowDialog<bool?>(owner);
+}
+
+/// <summary>A small classic text prompt (WinForms InputDialog): prompt, one text box, OK / Cancel. Closes with the text, or null.</summary>
+sealed class TextPrompt : Window
+{
+    public TextPrompt(string title, string prompt, string initial)
+    {
+        Title = title;
+        SizeToContent = SizeToContent.Height;
+        Width = 320;
+        CanResize = false;
+        ShowInTaskbar = false;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        var box = new TextBox { Text = initial };
+        var ok = new Button { Content = "OK", MinWidth = 75, IsDefault = true, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var cancel = new Button { Content = "Cancel", MinWidth = 75, IsCancel = true, HorizontalContentAlignment = HorizontalAlignment.Center };
+        ok.Click += (_, _) => Close(box.Text ?? "");
+        cancel.Click += (_, _) => Close(null);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+        var panel = new StackPanel { Margin = new Thickness(8) };
+        panel.Children.Add(new TextBlock { Text = prompt, TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
+        panel.Children.Add(box);
+        panel.Children.Add(buttons);
+        Content = panel;
+        Opened += (_, _) => { box.Focus(); box.SelectAll(); };
+    }
 }

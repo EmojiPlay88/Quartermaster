@@ -52,9 +52,9 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Save Game | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+S |
 | Save Game As... | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+Shift+S |
 | Export Viewer Copy... | 5 |  |  |  |  |
-| New Rules Pack... | 2 |  |  |  |  |
-| Open Rules Pack... | 2 |  |  |  |  |
-| Save Rules Pack / Save Rules Pack As... | 2 |  |  |  |  |
+| New Rules Pack... | 2 | ✔ |  |  |  |
+| Open Rules Pack... | 2 | ✔ |  |  |  |
+| Save Rules Pack / Save Rules Pack As... | 2 | ✔ |  |  |  |
 | Back to launcher | 5 |  |  |  |  |
 | Exit | 1 | ✔ | ✔ | ✔ | asks about unsaved changes, as WinForms |
 
@@ -93,7 +93,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: error guard (warning box on a bad file) | 1 | ✔ | ✔ | ✔ |  |
-| MainForm: command line <vmod> --setup N / --new | 1 | ✔ | ✔ | ✔ | --rules and the other options come later |
+| MainForm: command line <vmod> --setup N / --new | 1 | ✔ | ✔ | ✔ | --rules and --new-rules too (stage 2a); the other options come later |
 | MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | user-editable keys come with Settings |
 | ModuleTreePanel | 2 |  |  |  |  |
 | TablesTreePanel | 2 |  |  |  |  |
@@ -143,7 +143,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 |---|---|---|---|---|---|
 | SetupChooserDialog: New game from module + setups, difficulty, double-click = OK | 1 | ✔ | ✔ | ✔ | no Players page, difficulty not saved |
 | PlayersEditor | 5 |  |  |  |  |
-| Remembered rules pack per module (RulesMemory) | 2 |  |  |  | stage 1 passes no rules folder |
+| Remembered rules pack per module (RulesMemory) | 2 | ✔ |  |  | the pack is loaded with the module; a missing file is ignored |
 
 ## Rules, formulas, dice, log
 

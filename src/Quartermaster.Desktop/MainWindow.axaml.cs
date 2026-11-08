@@ -34,6 +34,8 @@ public partial class MainWindow : Window
     readonly CommandRouter _router = new();
     readonly List<MenuItem> _needsModule = new();
     readonly List<MenuItem> _needsGame = new();
+    readonly List<(string Id, MenuItem Item)> _gated = new();   // menu items whose state comes from CommandAvailability
+    static readonly FileFilter RulesFilter = new("Rules packs (*.qrules)", "*.qrules");
     readonly MenuItem _showGrid;
     MenuItem? _editUndo, _editRedo;
 
@@ -193,6 +195,7 @@ public partial class MainWindow : Window
     public void ApplyStartup(StartupArgs args)
     {
         if (args.ModulePath is not { } path || !OpenModule(path)) return;
+        Guard(() => LoadRulesFromArgs(args));   // as WinForms: the pack is in place before the first game starts
         if (args.SetupIndex is { } idx) Guard(() => StartSetup(idx));
         else if (args.NewGame) Guard(() => StartSetup(null));
         else RunAsync(() => ChooseAndStartAsync(preselectNew: false));
@@ -231,16 +234,26 @@ public partial class MainWindow : Window
         Close();
     }
 
+    void LoadRulesFromArgs(StartupArgs args)
+    {
+        if (_session is not { } s) return;
+        if (args.RulesPath != null) s.OpenRules(args.RulesPath);
+        else if (args.NewRulesName != null) s.NewRules(args.NewRulesName);
+    }
+
     // ---------- menus and commands ----------
 
     void RegisterCommands()
     {
         _router.SetHandler("file.openModule", () => RunAsync(OpenModuleDialogAsync));
-        _router.SetHandler("file.newGame", () => Available(_session != null, () => RunAsync(NewGameAsync)));
-        _router.SetHandler("file.openGame", () => Available(_session != null, () => RunAsync(OpenGameDialogAsync)));
-        _router.SetHandler("file.saveGame", () => Available(_session?.Game != null, () => RunAsync(() => SaveGameAsync(false))));
-        _router.SetHandler("file.saveGameAs", () => Available(_session?.Game != null, () => RunAsync(() => SaveGameAsync(true))));
+        _router.SetHandler("file.newGame", () => Available(Avail("file.newGame"), () => RunAsync(NewGameAsync)));
+        _router.SetHandler("file.openGame", () => Available(Avail("file.openGame"), () => RunAsync(OpenGameDialogAsync)));
+        _router.SetHandler("file.saveGame", () => Available(Avail("file.saveGame"), () => RunAsync(() => SaveGameAsync(false))));
+        _router.SetHandler("file.saveGameAs", () => Available(Avail("file.saveGameAs"), () => RunAsync(() => SaveGameAsync(true))));
     }
+
+    /// <summary>Whether a gated command is available now (<see cref="CommandAvailability"/>, the WinForms rules).</summary>
+    bool Avail(string id) => CommandAvailability.For(_session).TryGetValue(id, out var a) && a.Enabled;
 
     /// <summary>Runs <paramref name="act"/> when the command is available (its menu item enabled); otherwise lets the key press through.</summary>
     static bool Available(bool enabled, Action act)
@@ -250,7 +263,7 @@ public partial class MainWindow : Window
         return true;
     }
 
-    MenuItem Item(MenuItem into, string label, Action act, string? cmd = null, bool needsModule = false, bool needsGame = false)
+    MenuItem Item(MenuItem into, string label, Action act, string? cmd = null, bool needsModule = false, bool needsGame = false, string? gate = null)
     {
         var mi = new MenuItem { Header = MenuText.FromWinForms(label) };
         if (cmd != null)
@@ -262,6 +275,8 @@ public partial class MainWindow : Window
         into.Items.Add(mi);
         if (needsModule) _needsModule.Add(mi);
         if (needsGame) _needsGame.Add(mi);
+        gate ??= cmd;
+        if (gate != null && CommandAvailability.Ids.Contains(gate)) _gated.Add((gate, mi));
         return mi;
     }
 
@@ -272,12 +287,17 @@ public partial class MainWindow : Window
         var file = Top("&File");
         Item(file, "&Open Module...", () => { }, "file.openModule");
         file.Items.Add(new Separator());
-        Item(file, "&New Game", () => { }, "file.newGame", needsModule: true);
-        Item(file, "Load &Setup...", () => RunAsync(LoadSetupAsync), needsModule: true);
-        Item(file, "Open &Game...", () => { }, "file.openGame", needsModule: true);
+        Item(file, "&New Game", () => { }, "file.newGame");
+        Item(file, "Load &Setup...", () => RunAsync(LoadSetupAsync), gate: "file.loadSetup");
+        Item(file, "Open &Game...", () => { }, "file.openGame");
         file.Items.Add(new Separator());
-        Item(file, "&Save Game", () => { }, "file.saveGame", needsGame: true);
-        Item(file, "Save Game &As...", () => { }, "file.saveGameAs", needsGame: true);
+        Item(file, "&Save Game", () => { }, "file.saveGame");
+        Item(file, "Save Game &As...", () => { }, "file.saveGameAs");
+        file.Items.Add(new Separator());
+        Item(file, "New &Rules Pack...", NewRulesPack, gate: "file.newRules");
+        Item(file, "Open Rules &Pack...", OpenRulesPack, gate: "file.openRules");
+        Item(file, "Save Rules Pac&k", () => SaveRulesPack(false), gate: "file.saveRules");
+        Item(file, "Save Rules Pack A&s...", () => SaveRulesPack(true), gate: "file.saveRulesAs");
         file.Items.Add(new Separator());
         Item(file, "E&xit", Close);
 
@@ -313,11 +333,27 @@ public partial class MainWindow : Window
     {
         foreach (var i in _needsModule) i.IsEnabled = _session != null;
         foreach (var i in _needsGame) i.IsEnabled = _session?.Game != null;
+        ApplyGates();
         var palette = _session?.Game != null;
         PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
         Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
         Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
         RefreshHistoryUi();
+    }
+
+    /// <summary>Enabled state and the reason tooltip of every gated menu item (WinForms ApplyGates); other tooltips are left alone.</summary>
+    void ApplyGates()
+    {
+        var av = CommandAvailability.For(_session);
+        foreach (var (id, mi) in _gated)
+        {
+            var (enabled, reason) = av[id];
+            mi.IsEnabled = enabled;
+            if (!CommandAvailability.OwnsTooltip(id)) continue;
+            if (reason != null) ToolTip.SetTip(mi, reason);
+            else if (CommandAvailability.IsOwnText(ToolTip.GetTip(mi) as string)) ToolTip.SetTip(mi, null);
+            ToolTip.SetShowOnDisabled(mi, true);
+        }
     }
 
     void UpdateTitle()
@@ -384,7 +420,7 @@ public partial class MainWindow : Window
     async Task OpenModuleDialogAsync()
     {
         var path = await _dialogs.OpenFileAsync(this, "Open Module", new[] { ModuleFilter, AllFiles });
-        if (path == null || !await ConfirmDiscardAsync()) return;
+        if (path == null || !await ConfirmDiscardAsync() || !ConfirmRulesSaved()) return;
         if (OpenModule(path)) await ChooseAndStartAsync(preselectNew: false);
     }
 
@@ -440,6 +476,51 @@ public partial class MainWindow : Window
         SaveGame(path);
     }
 
+    // ---------- rules packs ----------
+
+    RulesPackFlow? RulesFlow() => _session == null ? null : new RulesPackFlow(_session, new RulesUi(this), null);
+
+    void NewRulesPack() => RulesFlow()?.New();
+    void OpenRulesPack() => RulesFlow()?.Open();
+
+    void SaveRulesPack(bool saveAs)
+    {
+        if (_session?.Rules == null) return;
+        RulesFlow()!.Save(saveAs);
+    }
+
+    /// <summary>Offers to save an edited rules pack; false when the user cancels (WinForms ConfirmRulesSaved).</summary>
+    bool ConfirmRulesSaved() => _session is not { RulesDirty: true } || RulesFlow()!.ConfirmSaved();
+
+    /// <summary>
+    /// <see cref="IRulesPackUi"/> over <see cref="IDialogs"/>. The flow is synchronous (shared with WinForms) and the dialogs are not,
+    /// so each answer is waited for with <see cref="Wait{T}"/>, which keeps the UI running (a modal loop) while a real dialog is open.
+    /// </summary>
+    sealed class RulesUi : IRulesPackUi
+    {
+        readonly MainWindow _w;
+        public RulesUi(MainWindow w) => _w = w;
+
+        public bool? AskSaveChanges(string packName) =>
+            Wait(_w._dialogs.AskYesNoCancelAsync(_w, $"Save changes to the rules pack '{packName}'?", Caption));
+        public string? PickOpen() => Wait(_w._dialogs.OpenFileAsync(_w, "Open Rules Pack", new[] { RulesFilter, AllFiles }));
+        public string? PickSave(string suggestedName) => Wait(_w._dialogs.SaveFileAsync(_w, "Save Rules Pack", RulesFilter, "qrules"));
+        public string? AskName(string title, string prompt, string def) => Wait(_w._dialogs.AskTextAsync(_w, title, prompt, def));
+        public void Warn(string text) => Wait(_w._dialogs.ShowWarningAsync(_w, text, Caption).ContinueWith(_ => 0, TaskScheduler.Default));
+    }
+
+    /// <summary>The result of a dialog task. A task that is already done (tests' fakes) is read at once; otherwise a nested UI loop runs until it ends.</summary>
+    static T Wait<T>(Task<T> task)
+    {
+        if (!task.IsCompleted)
+        {
+            var frame = new DispatcherFrame();
+            task.ContinueWith(_ => frame.Continue = false, TaskScheduler.Default);
+            Dispatcher.UIThread.PushFrame(frame);
+        }
+        return task.GetAwaiter().GetResult();
+    }
+
     /// <summary>The question to ask before the game goes away, or null when nothing would be lost (WinForms ConfirmDiscard).</summary>
     string? DiscardQuestion()
     {
@@ -454,20 +535,21 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        if (!e.Cancel && !_closeConfirmed && DiscardQuestion() is { } q)
+        if (!e.Cancel && !_closeConfirmed && (DiscardQuestion() is not null || _session is { RulesDirty: true }))
         {
-            // Dialogs are asynchronous: keep the window, ask, and close again on Yes.
+            // Dialogs are asynchronous: keep the window, ask, and close again when everything is answered.
             e.Cancel = true;
-            if (!_closeAsking) AskThenClose(q);
+            if (!_closeAsking) AskThenClose(DiscardQuestion());
         }
         base.OnClosing(e);
     }
 
-    async void AskThenClose(string question)
+    async void AskThenClose(string? question)
     {
         _closeAsking = true;
         bool yes;
-        try { yes = await _dialogs.AskYesNoAsync(this, question, Caption); }
+        // WinForms: ConfirmDiscard, then ConfirmRulesSaved.
+        try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption)) && ConfirmRulesSaved(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("close question: " + ex); yes = false; }
         finally { _closeAsking = false; }
         if (!yes) return;
@@ -560,7 +642,7 @@ public partial class MainWindow : Window
     /// <summary>The player's view changed: maps another side owns lose their tab.</summary>
     void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(Maps.Rebuild));
 
-    void OnRulesChangedAnyThread() => OnUi(UpdateTitle);
+    void OnRulesChangedAnyThread() => OnUi(() => { UpdateUi(); UpdateTitle(); });
 
     static void OnUi(Action a)
     {
