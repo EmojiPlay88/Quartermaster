@@ -188,6 +188,29 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void Variables_used_only_in_a_table_row_or_column_expression_count_as_used()
+    {
+        var f = F("min(Ammo + Gain, 4)",
+            new VariableBinding { Variable = "Ammo", Kind = BindingKind.Unit, Property = "ammo" },
+            new VariableBinding { Variable = "Gain", Kind = BindingKind.Table, TableId = "t", RowExpr = "Hexes", ColExpr = "Terrain" },
+            new VariableBinding { Variable = "Hexes", Kind = BindingKind.Input, Min = 0, Max = 20 },
+            new VariableBinding { Variable = "Old", Kind = BindingKind.Input, Min = 0, Max = 1 });
+        Assert.Equal(new[] { "Ammo", "Gain", "Hexes", "Terrain" }, FormulaEdit.UsedVariables(f));
+        Assert.Equal(new[] { "Old" }, FormulaEdit.Unused(f).Select(b => b.Variable));
+        var g = FormulaEdit.RemoveUnused(f);
+        Assert.Equal(new[] { "Ammo", "Gain", "Hexes", "Terrain" }, g.Bindings.Select(b => b.Variable));
+        Assert.Equal(20, g.Bindings[2].Max);                       // the configured row variable is kept as it was
+        Assert.Equal(BindingKind.Input, g.Bindings[3].Kind);       // the new column variable gets a binding row
+    }
+
+    [Fact]
+    public void UsedVariables_ignores_a_bad_row_expression()
+    {
+        var f = F("Gain", new VariableBinding { Variable = "Gain", Kind = BindingKind.Table, TableId = "t", RowExpr = "Hexes +" });
+        Assert.Equal(new[] { "Gain" }, FormulaEdit.UsedVariables(f));
+    }
+
+    [Fact]
     public void NameRules_reject_empty_and_duplicate_names_case_insensitively()
     {
         var existing = new[] { "Fuel", "Ammo" };

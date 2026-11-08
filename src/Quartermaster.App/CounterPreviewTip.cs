@@ -24,6 +24,9 @@ sealed class CounterPreviewTip : IDisposable
     public bool Visible => _popup.Visible;
     public Rectangle Bounds => _popup.Bounds;
 
+    /// <summary>Smoke: draws the popup window into a bitmap of its size (no screen copy).</summary>
+    public void DrawToBitmap(Bitmap bmp) => _popup.DrawToBitmap(bmp, new Rectangle(Point.Empty, bmp.Size));
+
     /// <summary>Shows the piece's preview near <paramref name="screenAt"/>. Same piece and state as already shown: nothing happens.</summary>
     public void Show(PieceInstance piece, string name, Point screenAt)
     {

@@ -311,7 +311,7 @@ $notesText = @"
 Quartermaster $Version
 
 **Quartermaster-$Version-win-x64.zip** is the Windows app: unzip it anywhere and run Quartermaster.App.exe (see the README, Install / Update).
-**QuartermasterRelay-$Version-<platform>** is the online-play relay server, a separate download for the person who hosts games (see docs/relay-setup.md).
+**QuartermasterRelay-$Version-<platform>** is the online-play relay server, a separate download for the person who hosts games (see https://github.com/EmojiPlay88/Quartermaster/wiki/Hosting-a-Relay).
 
 The builds are not code-signed. Windows SmartScreen may warn on first start. The .sha256 files only guard against a corrupt download, they do not prove who made it.
 "@

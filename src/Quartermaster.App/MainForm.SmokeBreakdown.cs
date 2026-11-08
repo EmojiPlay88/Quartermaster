@@ -15,8 +15,8 @@ sealed partial class MainForm
         var piece = game.State.Pieces.Values.FirstOrDefault(p => p.StackId != null && game.State.Stacks.ContainsKey(p.StackId));
         if (piece == null) { SmokeFail("no piece in a stack"); return; }
         var key = LedgerKey.Piece(piece.Id);
-        game.Execute(new LedgerDelta(key, "fuel", Ledger.Get(game.State, key, "fuel") ?? 0, 40, "manual", null, null, "starting load", null));
-        game.Execute(new LedgerDelta(key, "fuel", 40, 31, "manual", null, null, "forced march", null));
+        game.Execute(new LedgerDelta(key, "fuel", Ledger.Get(game.State, key, "fuel") ?? 0, 6, "manual", null, null, "starting load", null));
+        game.Execute(new LedgerDelta(key, "fuel", 6, 4, "manual", null, null, "forced march", null));
         game.Execute(new LedgerDelta(key, "water", 10, 7, "manual", null, null, "heat", null));
         Application.DoEvents();
         var stack = game.State.Stacks[piece.StackId!];
@@ -28,11 +28,9 @@ sealed partial class MainForm
             Application.DoEvents();
             var hovered = popup.SmokeHoverFirstLine();
             for (var i = 0; i < 5; i++) { Application.DoEvents(); System.Threading.Thread.Sleep(120); }
-            var r = Rectangle.Inflate(popup.Bounds, 40, 40);
-            r.Width += 420; r.Height += 180;
-            r.Intersect(Screen.FromControl(this).Bounds);
-            using var bmp = new Bitmap(r.Width, r.Height);
-            using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(r.Location, Point.Empty, r.Size);
+            // Drawn from the popup window itself, never copied off the screen (other programs may be behind it); the breakdown tooltip is a native tooltip and is not part of it.
+            using var bmp = new Bitmap(popup.Width, popup.Height);
+            popup.DrawToBitmap(bmp, new Rectangle(Point.Empty, bmp.Size));
             var path = _opts.ScreenshotBreakdown!;
             var dir = Path.GetDirectoryName(Path.GetFullPath(path));
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);

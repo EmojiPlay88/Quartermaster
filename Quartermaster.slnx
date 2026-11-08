@@ -12,6 +12,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Quartermaster.Core.Tests/Quartermaster.Core.Tests.csproj" />
+    <Project Path="tests/Quartermaster.Docs.Tests/Quartermaster.Docs.Tests.csproj" />
     <Project Path="tests/Quartermaster.Net.Tests/Quartermaster.Net.Tests.csproj" />
     <Project Path="tests/Quartermaster.Ocr.Tests/Quartermaster.Ocr.Tests.csproj" />
     <Project Path="tests/Quartermaster.Relay.Tests/Quartermaster.Relay.Tests.csproj" />
@@ -20,5 +21,8 @@
     <Project Path="tests/Quartermaster.TestFixtures/Quartermaster.TestFixtures.csproj" />
     <Project Path="tests/Quartermaster.Updater.Tests/Quartermaster.Updater.Tests.csproj" />
     <Project Path="tests/Quartermaster.Vassal.Tests/Quartermaster.Vassal.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Quartermaster.DemoModule/Quartermaster.DemoModule.csproj" />
   </Folder>
 </Solution>

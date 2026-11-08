@@ -343,3 +343,8 @@ Engine notes only. No game content: phase names, order, formulas and warnings ar
 - Update dialog (task 8): see the task 8 review minors: the finishing step can race the launcher closing, a failed check does not stamp `LastUpdateCheckUtc`, and the App has no test project for the dialog.
 - `VersionNotice` sits between the `NotAPlayerText` doc comment and its constant in `TurnReplayModel.cs` (about line 296).
 - Release script: Linux and macOS archives are built on Windows, so the executable bit is not stored; the docs say `chmod +x`. The archive check looks for the literal `C:\Users\<user name>` in binaries only, not for other absolute paths. The script was only run under Windows PowerShell 5.1 here.
+
+## Found while writing the user wiki: parked items
+
+- The module rules/text window shows text with LF-only line endings all on one line (the demo module was changed to CRLF to avoid it); real modules will hit it. The window should normalise line endings.
+- The toolbar "Next turn" button and Tools > Turn > Next turn only step the turn counter, but the shortcut shown next to it, Ctrl+Right, does Next Phase when the pack has phases.

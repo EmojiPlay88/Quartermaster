@@ -353,16 +353,18 @@ sealed partial class MainForm
         Program.AppLog($"smoke: phases start {(startOk ? "ok" : "FAILED")} (autosaves {autosaves} -> {CountAutosaves()}, interval {_settings.Current.AutosaveMinutes} min)");
         if (!startOk) Program.ExitCode = 1;
 
-        using (var dlg = new NextPhaseDialog(new[] { new Decision(DecisionKind.Checklist, "Smoke item", 0, null, Array.Empty<string>()) }))
+        using (var dlg = new NextPhaseDialog(new[] { new Decision(DecisionKind.Checklist, "Check depot stores", 0, null, Array.Empty<string>()) }))
             Program.AppLog($"smoke: next phase dialog built with {dlg.Controls.Count} control(s)");
         if (_opts.ScreenshotPhases != null)
         {
+            ClearWindowsForShot();
             SaveScreenshot(this, Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started.png", true);
             _phaseDock?.Panel?.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-started-panel.png");
         }
         SmokeTurnWrap(pack);
         if (_opts.ScreenshotPhases != null)
         {
+            ClearWindowsForShot();
             SaveScreenshot(this, Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-wrapped.png", true);
             _phaseDock?.Panel?.SaveScreenshot(Path.ChangeExtension(_opts.ScreenshotPhases, null) + "-wrapped-panel.png");
         }
@@ -377,6 +379,7 @@ sealed partial class MainForm
     {
         if (_session?.Game is not { } game || _phases == null) return;
         Application.DoEvents();
+        PaintOpenWindowsForSmoke();
         foreach (var run in game.State.Pending.ToList())
         {
             if (_docs.TryGetValue("batch:" + run.Id, out var form) && form is BatchGridWindow { IsDisposed: false } win)
@@ -513,6 +516,29 @@ sealed partial class MainForm
         CloseFormulaDialogs();
     }
 
+    /// <summary>Smoke: draws every open window once into a scratch bitmap. Windows kept off-screen are never painted by the system, so their lazy parts (grid cells) would otherwise never be built.</summary>
+    void PaintOpenWindowsForSmoke()
+    {
+        foreach (var f in OwnedForms.Concat(MdiChildren).Where(f => !f.IsDisposed).ToList())
+        {
+            using var scratch = new Bitmap(Math.Max(f.Width, 1), Math.Max(f.Height, 1));
+            f.DrawToBitmap(scratch, new Rectangle(0, 0, scratch.Width, scratch.Height));
+        }
+        Application.DoEvents();
+    }
+
+    /// <summary>Screenshot runs: closes the calculation windows the phase flow opened (they would cover the picture), brings the map forward and redraws the phase views.</summary>
+    void ClearWindowsForShot()
+    {
+        CloseFormulaDialogs();
+        foreach (var b in _docs.Where(kv => kv.Key.StartsWith("batch:", StringComparison.Ordinal) && !kv.Value.IsDisposed).Select(kv => kv.Value).ToList()) b.Close();
+        Application.DoEvents();
+        FirstMap()?.Activate();
+        SyncTabs(null); // drop the tabs of the windows just closed
+        RefreshPhaseViews();
+        Application.DoEvents();
+    }
+
     void SmokeFail(string text)
     {
         Program.AppLog("smoke: move flow FAILED: " + text);
@@ -593,7 +619,7 @@ sealed partial class MainForm
             {
                 using var demo = new CheatSheetWindow { StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000) };
                 demo.Show();
-                demo.Render(new[] { new CheatRow("Smoke", "table " + table.Name, table.Cells[0][0], table, 0, 0) });
+                demo.Render(new[] { new CheatRow("Gain", "table " + table.Name, table.Cells[0][0], table, 0, 0) });
                 demo.Update();
                 var goldOk = demo.GoldCells == 1;
                 Program.AppLog($"smoke: cheat sheet table grid {(goldOk ? "ok" : "FAILED")} ({demo.GoldCells} gold cell(s))");
@@ -666,9 +692,9 @@ sealed partial class MainForm
         var none = Array.Empty<string>();
         using var dlg = new NextPhaseDialog(new[]
         {
-            new Decision(DecisionKind.Checklist, "Smoke checklist item", 0, null, none),
-            new Decision(DecisionKind.Pending, "Smoke formula — 2 of 3 applied", -1, "run1", none),
-            new Decision(DecisionKind.Warning, "Smoke warning — 2 units", 0, null, none),
+            new Decision(DecisionKind.Checklist, "Check depot stores", 0, null, none),
+            new Decision(DecisionKind.Pending, "Fuel supply — 2 of 3 applied", -1, "run1", none),
+            new Decision(DecisionKind.Warning, "Low fuel — 2 units", 0, null, none),
         });
         dlg.StartPosition = FormStartPosition.Manual;
         dlg.Location = new Point(-20000, -20000); // shown off-screen (modeless) so every child paints; never ShowDialog in smoke

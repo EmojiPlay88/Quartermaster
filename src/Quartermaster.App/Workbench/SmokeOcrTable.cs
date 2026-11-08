@@ -30,7 +30,7 @@ static class SmokeOcrTable
             using var font = new Font("Segoe UI", 11f, FontStyle.Regular, GraphicsUnit.Point);
             using var bold = new Font("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Point);
             using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString("Invented smoke chart", title, Brushes.Black, left, 50);
+            g.DrawString("Terrain chart", title, Brushes.Black, left, 50);
             for (var r = 0; r <= rows; r++)
                 for (var c = 0; c < header.Length; c++)
                     g.DrawString(expected[r][c], r == 0 ? bold : font, Brushes.Black, new RectangleF(left + c * cw, top + r * ch, cw, ch), fmt);
@@ -39,7 +39,7 @@ static class SmokeOcrTable
             for (var c = 0; c <= header.Length; c++) g.DrawLine(pen, left + c * cw, top, left + c * cw, top + (rows + 1) * ch);
         }
         Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, "invented-table.png");
+        var path = Path.Combine(folder, "terrain-chart.png");
         bmp.Save(path, ImageFormat.Png);
         var region = new Rectangle(left - 20, top - 20, cw * header.Length + 40, ch * (rows + 1) + 40);
         return (path, region, expected);

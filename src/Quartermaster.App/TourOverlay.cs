@@ -73,7 +73,8 @@ sealed class TourOverlay : Form
     {
         var step = _steps[_index];
         var target = _resolve(step.TargetId)!.Value;
-        var wa = Screen.FromRectangle(target).WorkingArea;
+        // Off-screen screenshot runs: the windows are far from every screen, so the owner window stands in for the screen (else the balloon is clamped to a real monitor).
+        var wa = OffscreenShots.Active && Owner is { } owner ? owner.Bounds : Screen.FromRectangle(target).WorkingArea;
         var bodyW = LogicalToDeviceUnits(BodyW);
         var arrow = LogicalToDeviceUnits(Arrow);
         var pad = LogicalToDeviceUnits(Pad);

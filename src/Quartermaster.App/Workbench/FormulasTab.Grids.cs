@@ -139,8 +139,13 @@ sealed partial class FormulasTab
             case 3:
                 var (nb, err) = FormulaEdit.ParseDetails(b, text);
                 if (err != null) { _err.Text = err; _goto.Visible = false; again = true; break; }
-                Commit(x => FormulaEdit.SetBinding(x, v, _ => nb));
-                again = FormulaEdit.FormatDetails(nb) != text;
+                // A table's row/column expression may use new variables: give them binding rows (Input) so they can be set up.
+                Commit(x =>
+                {
+                    var y = FormulaEdit.SetBinding(x, v, _ => nb);
+                    return nb.Kind == BindingKind.Table ? FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula : y;
+                });
+                again = FormulaEdit.FormatDetails(nb) != text || nb.Kind == BindingKind.Table;
                 break;
             case 4:
                 Commit(x => FormulaEdit.SetCaption(x, v, text));

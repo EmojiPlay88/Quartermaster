@@ -4,9 +4,9 @@ using Quartermaster.Render;
 
 namespace Quartermaster.App;
 
-/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--smoke-launcher] [--screenshot-launcher &lt;png&gt;] [--screenshot-offline &lt;png&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;] [--workbench-tab tables|formulas|properties|phases] [--gm] [--screenshot-palette &lt;png&gt;] [--screenshot-log &lt;png&gt;] [--screenshot-overview &lt;png&gt;] [--screenshot-export &lt;png&gt;] [--screenshot-inventory &lt;png&gt;] [--screenshot-notes &lt;png&gt;] [--screenshot-settings &lt;png&gt;] [--difficulty hardcore|semiauto|fullyauto] [--smoke-phases] [--smoke-undo] [--screenshot-stepback &lt;png&gt;] [--screenshot-breakdown &lt;png&gt;] [--screenshot-outliner &lt;png&gt;] [--screenshot-alerts &lt;png&gt;] [--screenshot-tour &lt;png&gt;] [--screenshot-handover &lt;png&gt;] [--screenshot-playerview &lt;png&gt;] [--screenshot-phases &lt;png&gt;] [--screenshot-nextphase &lt;png&gt;] [--screenshot-cheatsheet &lt;png&gt;] [--smoke-online &lt;seconds&gt;] [--screenshot-online &lt;png&gt;] [--smoke-turns] [--screenshot-turns &lt;png&gt;] [--smoke-search] [--screenshot-search &lt;png&gt;] [--smoke-ocr] [--screenshot-ocr &lt;png&gt;] [--settings-tab general|display|map|dice|toolbar|keyboard|folders].</summary>
+/// <summary>Command line: [&lt;vmod path&gt;] [--setup &lt;index&gt;|--new] [--smoke &lt;seconds&gt;] [--screenshot &lt;png&gt;] [--float-main-map] [--screenshot-float &lt;png&gt;] [--rules &lt;path&gt;|--new-rules &lt;name&gt;] [--smoke-launcher] [--screenshot-launcher &lt;png&gt;] [--screenshot-offline &lt;png&gt;] [--screenshot-formula &lt;png&gt;] [--screenshot-ledger &lt;png&gt;] [--screenshot-workbench &lt;png&gt;] [--workbench-tab tables|formulas|properties|phases] [--gm] [--screenshot-palette &lt;png&gt;] [--screenshot-log &lt;png&gt;] [--screenshot-overview &lt;png&gt;] [--screenshot-export &lt;png&gt;] [--screenshot-inventory &lt;png&gt;] [--screenshot-notes &lt;png&gt;] [--screenshot-settings &lt;png&gt;] [--difficulty hardcore|semiauto|fullyauto] [--smoke-phases] [--smoke-undo] [--screenshot-stepback &lt;png&gt;] [--screenshot-breakdown &lt;png&gt;] [--screenshot-outliner &lt;png&gt;] [--screenshot-alerts &lt;png&gt;] [--screenshot-tour &lt;png&gt;] [--screenshot-handover &lt;png&gt;] [--screenshot-playerview &lt;png&gt;] [--screenshot-phases &lt;png&gt;] [--screenshot-nextphase &lt;png&gt;] [--screenshot-cheatsheet &lt;png&gt;] [--smoke-online &lt;seconds&gt;] [--screenshot-online &lt;png&gt;] [--smoke-turns] [--screenshot-turns &lt;png&gt;] [--smoke-search] [--screenshot-search &lt;png&gt;] [--smoke-ocr] [--screenshot-ocr &lt;png&gt;] [--no-smoke-documents] [--settings-tab general|display|map|dice|toolbar|keyboard|folders].</summary>
 sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, int? SmokeSeconds, string? Screenshot = null, bool FloatMainMap = false, string? ScreenshotFloat = null,
-    string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null, string? ScreenshotWorkbench = null, string? WorkbenchTab = null, string? ScreenshotLog = null, string? ScreenshotSettings = null, string? SettingsTab = null, bool GameMaster = false, string? ScreenshotPalette = null, string? ScreenshotOverview = null, string? ScreenshotExport = null, string? ScreenshotInventory = null, string? ScreenshotNotes = null, Difficulty? Difficulty = null, bool SmokePhases = false, string? ScreenshotPhases = null, string? ScreenshotNextPhase = null, string? ScreenshotCheatSheet = null, string? ScreenshotBatch = null, string? ScreenshotSetup = null, bool SmokeUndo = false, string? ScreenshotStepBack = null, string? ScreenshotBreakdown = null, string? ScreenshotOutliner = null, string? ScreenshotAlerts = null, string? ScreenshotTour = null, string? ScreenshotHandover = null, string? ScreenshotPlayerView = null, string? ScreenshotLauncher = null, string? ScreenshotOffline = null, bool SmokeLauncher = false, int? SmokeOnline = null, string? ScreenshotOnline = null, bool SmokeTurns = false, string? ScreenshotTurns = null, bool SmokeSearch = false, string? ScreenshotSearch = null, bool SmokeOcr = false, string? ScreenshotOcr = null)
+    string? RulesPath = null, string? NewRulesName = null, string? ScreenshotFormula = null, string? ScreenshotLedger = null, string? ScreenshotWorkbench = null, string? WorkbenchTab = null, string? ScreenshotLog = null, string? ScreenshotSettings = null, string? SettingsTab = null, bool GameMaster = false, string? ScreenshotPalette = null, string? ScreenshotOverview = null, string? ScreenshotExport = null, string? ScreenshotInventory = null, string? ScreenshotNotes = null, Difficulty? Difficulty = null, bool SmokePhases = false, string? ScreenshotPhases = null, string? ScreenshotNextPhase = null, string? ScreenshotCheatSheet = null, string? ScreenshotBatch = null, string? ScreenshotSetup = null, bool SmokeUndo = false, string? ScreenshotStepBack = null, string? ScreenshotBreakdown = null, string? ScreenshotOutliner = null, string? ScreenshotAlerts = null, string? ScreenshotTour = null, string? ScreenshotHandover = null, string? ScreenshotPlayerView = null, string? ScreenshotLauncher = null, string? ScreenshotOffline = null, bool SmokeLauncher = false, int? SmokeOnline = null, string? ScreenshotOnline = null, bool SmokeTurns = false, string? ScreenshotTurns = null, bool SmokeSearch = false, string? ScreenshotSearch = null, bool SmokeOcr = false, string? ScreenshotOcr = null, bool NoSmokeDocuments = false)
 {
     public bool Smoke => SmokeSeconds != null;
 
@@ -26,6 +26,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
         string? shotSearch = null;
         var smokeOcr = false;
         string? shotOcr = null;
+        var noDocs = false;
         int? smokeOnline = null;
         string? shotOnline = null;
         var gm = false;
@@ -88,6 +89,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     if (i + 1 < args.Length) shotOffline = args[++i];
                     else warn("--screenshot-offline needs a file path; ignored.");
                     break;
+                case "--no-smoke-documents": noDocs = true; break; // screenshots: do not open the sample chart/rules text windows
                 case "--smoke-phases": smokePhases = true; break;
                 case "--smoke-undo": smokeUndo = true; break;
                 case "--smoke-launcher": smokeLauncher = true; break;
@@ -211,7 +213,7 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     break;
             }
         }
-        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat, rules, newRules, shotFormula, shotLedger, shotBench, benchTab, shotLog, shotSettings, settingsTab, gm, shotPalette, shotOverview, shotExport, shotInventory, shotNotes, difficulty, smokePhases, shotPhases, shotNext, shotCheat, shotBatch, shotSetup, smokeUndo, shotStepBack, shotBreakdown, shotOutliner, shotAlerts, shotTour, shotHandover, shotPlayerView, shotLauncher, shotOffline, smokeLauncher, smokeOnline, shotOnline, smokeTurns, shotTurns, smokeSearch, shotSearch, smokeOcr, shotOcr);
+        return new StartupOptions(path, setup, newGame, smoke, shot, floatMain, shotFloat, rules, newRules, shotFormula, shotLedger, shotBench, benchTab, shotLog, shotSettings, settingsTab, gm, shotPalette, shotOverview, shotExport, shotInventory, shotNotes, difficulty, smokePhases, shotPhases, shotNext, shotCheat, shotBatch, shotSetup, smokeUndo, shotStepBack, shotBreakdown, shotOutliner, shotAlerts, shotTour, shotHandover, shotPlayerView, shotLauncher, shotOffline, smokeLauncher, smokeOnline, shotOnline, smokeTurns, shotTurns, smokeSearch, shotSearch, smokeOcr, shotOcr, noDocs);
     }
 
     static Difficulty? ParseDifficulty(string s) => s.ToLowerInvariant() switch
@@ -292,6 +294,7 @@ static class Program
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.SetDefaultFont(new Font("Tahoma", 8.25f));
             ApplicationConfiguration.Initialize();
+            OffscreenShots.InstallIfRequested(); // screenshot runs only: no window ever shows on the desktop
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (_, e) => Crash(e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>

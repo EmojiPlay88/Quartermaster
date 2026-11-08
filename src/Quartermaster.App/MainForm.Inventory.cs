@@ -43,7 +43,7 @@ sealed partial class MainForm
         if (_docs.TryGetValue("notes", out var n) && n is NotesWindow nw && !nw.IsDisposed && _session?.Game is { } game)
         {
             var notes = game.State.Log.Count(e => e.Kind == LogKind.Note);
-            const string text = "Smoke notes: supply convoy arrives turn 3.";
+            const string text = "Bridge at 0304 is out; supply convoy arrives turn 3.";
             var got = nw.SetTextForSmoke(text);
             var again = nw.SetTextForSmoke(text); // unchanged text must not log again
             var added = game.State.Log.Count(e => e.Kind == LogKind.Note) - notes;

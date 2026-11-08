@@ -100,6 +100,7 @@ sealed partial class MainForm
         ShowOverview();
         if (_docs.TryGetValue("overview", out var f) && f is OverviewWindow ov && !ov.IsDisposed && FirstMap() is { } map)
         {
+            ov.Size = new Size(520, 480); // a usable picture size (the window is small by default)
             ov.Update();
             var follows = ReferenceEquals(ov.Target, map);
             var moved = ov.SmokeClick(0.25, 0.25);

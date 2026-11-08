@@ -687,13 +687,13 @@ sealed partial class MainForm
         var sg = sender.Game!;
         var senderId = TurnIdentity.Load(sg.State.GameId, Path.Combine(root, "sender"), null);
         senderId.LocalPlayerId = red.Id;
-        using (sg.BeginAction("Smoke roll")) sg.Execute(CommandLog.Stamp(new RollDice("Smoke attack", 2, 6, new[] { 3, 4 })));
+        using (sg.BeginAction("Smoke roll")) sg.Execute(CommandLog.Stamp(new RollDice("Attack roll", 2, 6, new[] { 3, 4 })));
         if (sg.State.Pieces.Values.FirstOrDefault() is { } piece)
         {
             using (sg.BeginAction("Smoke move"))
                 sg.Execute(CommandLog.Prepare(new MovePieces(new[] { piece.Id }, piece.MapId, new PointD(piece.Pos.X + 60, piece.Pos.Y), null), sg.State, sender));
         }
-        using (sg.BeginAction("Smoke roll")) sg.Execute(CommandLog.Stamp(new RollDice("Smoke defence", 1, 6, new[] { 5 })));
+        using (sg.BeginAction("Smoke roll")) sg.Execute(CommandLog.Stamp(new RollDice("Defence roll", 1, 6, new[] { 5 })));
         var t = TurnSender.Build(sender, blue.Id, senderId);
         var toBlue = Path.Combine(root, "to-blue.qturn");
         TurnFiles.Write(toBlue, t);

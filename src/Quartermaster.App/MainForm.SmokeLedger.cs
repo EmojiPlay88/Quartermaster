@@ -23,8 +23,8 @@ sealed partial class MainForm
         {
             Tabs = new[]
             {
-                new UserLedgerTab("Supply TEST", "Fuel < 1000", new[] { "fuel" }, true, "Invented smoke tab"),
-                new UserLedgerTab("Broken TEST", "Fuel <", Array.Empty<string>(), false, null),
+                new UserLedgerTab("Supply", "Fuel < 1000", new[] { "fuel" }, true, "Units that still have fuel"),
+                new UserLedgerTab("Fuel check", "Fuel <", Array.Empty<string>(), false, null),
             },
             LastTab = "units", ShowCounters = true, Grouping = LedgerGrouping.Map,
         });
@@ -37,13 +37,13 @@ sealed partial class MainForm
         var titles = lw.TabTitlesForSmoke;
         Program.AppLog("smoke: ledger tabs " + string.Join(" | ", titles));
         Check(titles.Count == 6 && titles[0].StartsWith("Units (") && titles[1].StartsWith("Depots & Global (") && titles[2] == "Everything"
-            && titles[3] == "★ Supply TEST" && titles[4] == "★ Broken TEST" && titles[5] == "+", "tab titles");
+            && titles[3] == "★ Supply" && titles[4] == "★ Fuel check" && titles[5] == "+", "tab titles");
         Check(lw.CurrentTabKeyForSmoke == "units", "opens on the last tab (units)");
 
-        lw.SelectTabForSmoke("user:Supply TEST");
-        Program.AppLog($"smoke: Supply TEST tab has {lw.RowCountForSmoke} row(s)");
+        lw.SelectTabForSmoke("user:Supply");
+        Program.AppLog($"smoke: Supply tab has {lw.RowCountForSmoke} row(s)");
         Check(lw.RowCountForSmoke > 0 && !lw.BannerShownForSmoke, "user tab rows");
-        lw.SelectTabForSmoke("user:Broken TEST");
+        lw.SelectTabForSmoke("user:Fuel check");
         Check(lw.RowCountForSmoke == 0 && lw.BannerShownForSmoke, "broken filter shows the banner and no rows");
         lw.SelectTabForSmoke("units");
         Check(LedgerTabStore.Load(AppDataRoot.Path, sha).LastTab == "units", "last tab remembered");
@@ -51,8 +51,8 @@ sealed partial class MainForm
         // Let the worker draw the visible counters before the picture is taken.
         var until = DateTime.UtcNow.AddSeconds(8);
         while (DateTime.UtcNow < until && (lw.VisibleUnitRowsForSmoke() == 0 || lw.ReadyCounterRowsForSmoke() < lw.VisibleUnitRowsForSmoke()))
-        { Application.DoEvents(); System.Threading.Thread.Sleep(50); }
-        for (var i = 0; i < 5; i++) { Application.DoEvents(); System.Threading.Thread.Sleep(40); }
+        { lw.PaintForSmoke(); System.Threading.Thread.Sleep(50); }
+        for (var i = 0; i < 5; i++) { lw.PaintForSmoke(); System.Threading.Thread.Sleep(40); }
         Program.AppLog($"smoke: ledger counters ready {lw.ReadyCounterRowsForSmoke()}/{lw.VisibleUnitRowsForSmoke()} visible unit row(s)");
         Check(lw.VisibleUnitRowsForSmoke() > 0 && lw.ReadyCounterRowsForSmoke() == lw.VisibleUnitRowsForSmoke(), "counter pictures drawn");
         lw.SaveScreenshot(LedgerTabsShot!);
@@ -61,14 +61,14 @@ sealed partial class MainForm
         var tip = lw.ShowPreviewForSmoke();
         until = DateTime.UtcNow.AddSeconds(5);
         while (DateTime.UtcNow < until && tip is { Visible: false }) { Application.DoEvents(); System.Threading.Thread.Sleep(50); }
-        for (var i = 0; i < 4; i++) { Application.DoEvents(); System.Threading.Thread.Sleep(40); }
+        for (var i = 0; i < 4; i++) { lw.PaintForSmoke(); System.Threading.Thread.Sleep(40); }
         if (tip is { Visible: true })
         {
             var r = tip.Bounds;
             Program.AppLog($"smoke: counter preview shown {r.Width}x{r.Height}");
             Check(Math.Max(r.Width, r.Height) >= 200, "preview is about 200 px");
             using var bmp = new Bitmap(r.Width, r.Height);
-            using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(r.Location, Point.Empty, r.Size);
+            tip.DrawToBitmap(bmp); // drawn from the window itself, never copied off the screen (other programs may be behind it)
             var path = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(LedgerTabsShot!)) ?? ".", Path.GetFileNameWithoutExtension(LedgerTabsShot!) + "-preview.png");
             bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
             Program.AppLog("smoke: counter preview saved to " + path);
@@ -83,7 +83,7 @@ sealed partial class MainForm
             dlg.StartPosition = FormStartPosition.Manual;
             dlg.Location = new Point(Left + 60, Top + 60);
             dlg.Show(this);
-            for (var i = 0; i < 5; i++) { Application.DoEvents(); System.Threading.Thread.Sleep(40); }
+            for (var i = 0; i < 5; i++) { lw.PaintForSmoke(); System.Threading.Thread.Sleep(40); }
             using var bmp = new Bitmap(dlg.Width, dlg.Height);
             dlg.DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
             var path = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(LedgerTabsShot!)) ?? ".", Path.GetFileNameWithoutExtension(LedgerTabsShot!) + "-dialog.png");
