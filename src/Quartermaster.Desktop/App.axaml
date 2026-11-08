@@ -4,5 +4,6 @@
              RequestedThemeVariant="Light">
   <Application.Styles>
     <SimpleTheme />
+    <StyleInclude Source="avares://Quartermaster/Theme/ClassicTheme.axaml" />
   </Application.Styles>
 </Application>
