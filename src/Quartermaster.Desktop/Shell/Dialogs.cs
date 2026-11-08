@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Quartermaster.Core;
+using Quartermaster.Render;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.Desktop.Shell;
@@ -15,6 +16,12 @@ public sealed record FileFilter(string Name, IReadOnlyList<string> Patterns)
 
 /// <summary>The setup chooser's answer: a predefined setup (null = "New game from module") and the difficulty.</summary>
 public sealed record SetupChoice(SetupDef? Setup, Difficulty Difficulty);
+
+/// <summary>The dice dialog's answer: the dice and how many times to roll them (1 except for Multi-roll).</summary>
+public sealed record DiceChoice(DiceSpec Spec, int Times);
+
+/// <summary>The Set Turn dialog's answer: the turn number and the phase as typed.</summary>
+public sealed record TurnChoice(int Turn, string Phase);
 
 /// <summary>
 /// Every dialog the main window shows: file pickers, Yes/No questions, warnings and the setup chooser. The window only talks to dialogs
@@ -47,6 +54,12 @@ public interface IDialogs
 
     /// <summary>The setup chooser (WinForms SetupChooserDialog); null when cancelled.</summary>
     Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty);
+
+    /// <summary>The dice expression prompt (WinForms DiceDialog), with Times when <paramref name="multi"/>; null when cancelled.</summary>
+    Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi);
+
+    /// <summary>The Set Turn dialog (WinForms TurnDialog) opened at <paramref name="current"/>; null when cancelled.</summary>
+    Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -108,6 +121,12 @@ public sealed class Dialogs : IDialogs
 
     public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty) =>
         new SetupChooser(model, difficulty, preselectNew).ShowDialog<SetupChoice?>(owner);
+
+    public Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi) =>
+        new DiceDialog(title, multi).ShowDialog<DiceChoice?>(owner);
+
+    public Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current) =>
+        new TurnDialog(current).ShowDialog<TurnChoice?>(owner);
 }
 
 /// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>

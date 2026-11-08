@@ -12,8 +12,8 @@ using Quartermaster.Vassal;
 namespace Quartermaster.Desktop;
 
 /// <summary>
-/// The main window shell, ported from WinForms MainForm (stage 1): File / Edit / View menus, one tab per visible map, the counter
-/// palette, open/save of native games, the unsaved-changes prompt and the command line. Every dialog goes through <see cref="IDialogs"/>.
+/// The main window shell, ported from WinForms MainForm (stage 1): File / Edit / View / Tools menus, the main toolbar, one tab per visible
+/// map, the counter palette, open/save of native games, the unsaved-changes prompt and the command line. Every dialog goes through <see cref="IDialogs"/>.
 /// The public methods (<see cref="OpenModule"/>, <see cref="StartSetup"/>, <see cref="SaveGame"/>, <see cref="OpenGame"/>) act at once,
 /// without questions; the menu commands ask first, as WinForms.
 /// </summary>
@@ -34,10 +34,12 @@ public partial class MainWindow : Window
     readonly CommandRouter _router = new();
     readonly List<MenuItem> _needsModule = new();
     readonly List<MenuItem> _needsGame = new();
-    readonly List<(string Id, MenuItem Item)> _gated = new();   // menu items whose state comes from CommandAvailability
+    readonly List<(string Id, Control Item)> _gated = new();   // menu items and toolbar buttons whose state comes from CommandAvailability
     static readonly FileFilter RulesFilter = new("Rules packs (*.qrules)", "*.qrules");
     readonly MenuItem _showGrid;
     MenuItem? _editUndo, _editRedo;
+    Button? _tbUndo, _tbRedo;
+    readonly DiceTools _dice;
 
     ModuleSession? _session;
     PhaseController? _phases;
@@ -65,9 +67,10 @@ public partial class MainWindow : Window
         InitializeComponent();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _router.Guard = Guard;
+        _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
         BuildMenu();
-        _router.Attach(this);
+        BuildToolbar();
 
         Maps.StatusChanged += (view, loc, zoom) =>
         {
@@ -103,6 +106,13 @@ public partial class MainWindow : Window
 
     /// <summary>The counter palette.</summary>
     public PaletteDock Palette => PaletteHost;
+
+    /// <summary>The main toolbar under the menu bar.</summary>
+    public MainToolbar Toolbar => ToolbarHost;
+
+    /// <summary>The status bar's turn label ("Turn 3 · Movement") and whether it shows (only with a game).</summary>
+    public string TurnText => SbTurn.Text ?? "";
+    public bool TurnLabelVisible => SbTurnBox.IsVisible;
 
     /// <summary>True when closing would ask (WinForms ConfirmDiscard): a savable game changed since it was started, opened or saved.</summary>
     public bool HasUnsavedChanges => _dirty && _session is { Game: not null, CanSave: true };
@@ -255,6 +265,22 @@ public partial class MainWindow : Window
         _router.SetHandler("file.openGame", () => Available(Avail("file.openGame"), () => RunAsync(OpenGameDialogAsync)));
         _router.SetHandler("file.saveGame", () => Available(Avail("file.saveGame"), () => RunAsync(() => SaveGameAsync(false))));
         _router.SetHandler("file.saveGameAs", () => Available(Avail("file.saveGameAs"), () => RunAsync(() => SaveGameAsync(true))));
+        // WinForms MainForm.BuildToolbar: F5 / F6 roll (false without a game lets the key through); Ctrl+Right is Next turn.
+        _router.SetHandler("dice.1d6", () => _dice.Roll(DiceTurnActions.OneD6));
+        _router.SetHandler("dice.2d6", () => _dice.Roll(DiceTurnActions.TwoD6));
+        _router.SetHandler("turn.next", NextTurnCommand);
+    }
+
+    /// <summary>
+    /// WinForms NextTurnCommand: Next Phase when the rules pack has phases, otherwise the plain turn counter. The phase flow (with its open
+    /// decisions dialog) comes with the phase panel in stage 2b; until then the key is let through when the pack has phases.
+    /// </summary>
+    bool NextTurnCommand()
+    {
+        if (_session?.Game == null) return false;
+        if (_session.Rules is { Phases.Count: > 0 }) return false;
+        _dice.Core.StepTurn(1);
+        return true;
     }
 
     /// <summary>Whether a gated command is available now (<see cref="CommandAvailability"/>, the WinForms rules).</summary>
@@ -267,6 +293,9 @@ public partial class MainWindow : Window
         act();
         return true;
     }
+
+    /// <summary>Registers a gated control (menu item or toolbar button) with <see cref="ApplyGates"/>.</summary>
+    void Gate(string id, Control c) => _gated.Add((id, c));
 
     MenuItem Item(MenuItem into, string label, Action act, string? cmd = null, bool needsModule = false, bool needsGame = false, string? gate = null)
     {
@@ -328,10 +357,46 @@ public partial class MainWindow : Window
         }
         Item(zoom, "Fit", () => Maps.ActiveView?.ZoomToFit());
 
+        // Tools (WinForms: Rules Workbench, Inventory, Notes, -, Dice, Turn, -, Settings...): only Dice and Turn are in the Avalonia app so far.
+        var tools = Top("&Tools");
+        tools.Items.Add(_dice.DiceMenu);
+        Gate("tools.dice", _dice.DiceMenu);
+        tools.Items.Add(_dice.TurnMenu);
+        Gate("tools.turn", _dice.TurnMenu);
+
         MainMenu.Items.Add(file);
         MainMenu.Items.Add(edit);
         MainMenu.Items.Add(view);
+        MainMenu.Items.Add(tools);
         RefreshHistoryUi();
+    }
+
+    /// <summary>
+    /// The main toolbar in WinForms MainForm.BuildToolbar order. Buttons whose features are not in the Avalonia app yet (Diagnostics, Notes,
+    /// Overview, Inventory, Palette, Step Back) are left out until their stage.
+    /// </summary>
+    void BuildToolbar()
+    {
+        var bar = ToolbarHost;
+        void Tool(string id, string text, Action act) => Gate(id, bar.Add(id, text, () => Guard(act)));
+        Tool("tool.openModule", "Open Module", () => RunAsync(OpenModuleDialogAsync));
+        Tool("tool.newGame", "New Game", () => RunAsync(NewGameAsync));
+        Tool("tool.loadSetup", "Load Setup", () => RunAsync(LoadSetupAsync));
+        Tool("tool.openGame", "Open Game", () => RunAsync(OpenGameDialogAsync));
+        Tool("tool.saveGame", "Save Game", () => RunAsync(() => SaveGameAsync(false)));
+        bar.AddSeparator();
+        Tool("tool.los", "LOS", () => _router.Execute("tool.los"));
+        // Undo / Redo are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
+        _tbUndo = bar.Add("edit.undo", "Undo", () => _router.Execute("edit.undo"));
+        _tbRedo = bar.Add("edit.redo", "Redo", () => _router.Execute("edit.redo"));
+        // DiceTools' buttons (WinForms adds a separator first).
+        bar.AddSeparator();
+        void Dice(string id, Button b) { Gate(id, b); _dice.Track(b); }
+        Dice("dice.1d6", bar.Add("dice.1d6", "1d6", () => Guard(() => _dice.Roll(DiceTurnActions.OneD6))));
+        Dice("dice.2d6", bar.Add("dice.2d6", "2d6", () => Guard(() => _dice.Roll(DiceTurnActions.TwoD6))));
+        Dice("dice.menu", bar.AddDropDown("dice.menu", "Dice ▾", _dice.BuildDiceItems));
+        Dice("turn.next", bar.Add("turn.next", "Next turn", () => Guard(() => _dice.Core.StepTurn(1))));
+        UpdateUi();
     }
 
     void UpdateUi()
@@ -339,6 +404,7 @@ public partial class MainWindow : Window
         foreach (var i in _needsModule) i.IsEnabled = _session != null;
         foreach (var i in _needsGame) i.IsEnabled = _session?.Game != null;
         ApplyGates();
+        RefreshDice();
         var palette = _session?.Game != null;
         PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
         Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
@@ -356,9 +422,21 @@ public partial class MainWindow : Window
             mi.IsEnabled = enabled;
             if (!CommandAvailability.OwnsTooltip(id)) continue;
             if (reason != null) ToolTip.SetTip(mi, reason);
-            else if (CommandAvailability.IsOwnText(ToolTip.GetTip(mi) as string)) ToolTip.SetTip(mi, null);
+            else if (CommandAvailability.IsOwnText(ToolTip.GetTip(mi) as string)) ToolTip.SetTip(mi, BaseTip(mi));
             ToolTip.SetShowOnDisabled(mi, true);
         }
+    }
+
+    /// <summary>A control's own tooltip once a reason is gone: a toolbar button's text, nothing for a menu item.</summary>
+    object? BaseTip(Control c) => ToolbarHost.BaseTip(c);
+
+    /// <summary>WinForms DiceTools.Refresh (after the gates): dice and turn items off while the game may not change; the turn label.</summary>
+    void RefreshDice()
+    {
+        _dice.Refresh(BaseTip);
+        var game = _session?.Game;
+        SbTurnBox.IsVisible = game != null;
+        if (game != null) SbTurn.Text = DiceTurnActions.TurnText(game.State.Turn);
     }
 
     void UpdateTitle()
@@ -395,6 +473,8 @@ public partial class MainWindow : Window
                 : h?.UndoBlockedBySentTurn == true ? HistoryController.AlreadySentText : h?.AtFloorFromOldSave == true ? FloorTip : null;
             Set(_editUndo, h?.UndoText ?? "Undo", undo, !undo ? why : null);
             Set(_editRedo, h?.RedoText ?? "Redo", redo, guest || replaying ? why : null);
+            SetButton(_tbUndo, undo, Tip(h?.UndoText ?? "Undo", "edit.undo"), !undo ? why : null);
+            SetButton(_tbRedo, redo, Tip(h?.RedoText ?? "Redo", "edit.redo"), guest || replaying ? why : null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -410,7 +490,17 @@ public partial class MainWindow : Window
             mi.Header = MenuText.FromWinForms("&" + text.Replace("&", "&&", StringComparison.Ordinal));
             mi.IsEnabled = enabled;
         }
+
+        static void SetButton(Button? b, bool enabled, string tip, string? why)
+        {
+            if (b == null) return;
+            b.IsEnabled = enabled;
+            ToolTip.SetTip(b, why ?? tip);
+        }
     }
+
+    /// <summary>A toolbar tooltip with the command's shortcut: "Undo move (Ctrl+Z)" (WinForms MainForm.History Tip).</summary>
+    string Tip(string text, string cmd) => _router.ShortcutText(cmd) is { Length: > 0 } k ? $"{text} ({k})" : text;
 
     /// <summary>Coalesces refreshes asked for by game changes (many commands can arrive in one burst).</summary>
     void RequestHistoryRefresh()
@@ -570,9 +660,20 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(Close);
     }
 
+    /// <summary>
+    /// Shortcuts that bubble up to the window (not handled by the focused control) run here, in the window's class handler: an instance
+    /// handler (<see cref="CommandRouter.Attach"/>) would run after the window's own keyboard navigation, which takes the arrow keys, so
+    /// Ctrl+Right (Next turn) would never arrive.
+    /// </summary>
+    protected override void OnKeyDown(Avalonia.Input.KeyEventArgs e)
+    {
+        if (!e.Handled && _router.TryDispatch(e)) e.Handled = true;
+        base.OnKeyDown(e);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
-        _router.Detach(this);
+        _dice.Stop();
         CloseSession();
         base.OnClosed(e);
     }
@@ -638,6 +739,7 @@ public partial class MainWindow : Window
     {
         _dirty = true;
         UpdateTitle();
+        RefreshDice();
         RequestHistoryRefresh();
     }
 

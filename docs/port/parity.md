@@ -75,8 +75,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
 | Tools > Rules Workbench | 4 |  |  |  |  |
 | Tools > Inventory, Notes | 3 |  |  |  |  |
-| Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2 |  |  |  | F5, F6 |
-| Tools > Turn (Next, Previous, Set) | 2 |  |  |  |  |
+| Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2 | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice wait for Settings (stage 4) |
+| Tools > Turn (Next, Previous, Set) | 2 | ✔ |  |  | Ctrl+Right steps the turn; with a phased rules pack it is Next Phase in WinForms, which comes with the phase panel (stage 2b), so until then the key does nothing there. Turn label in the status bar |
 | Tools > Settings... | 4 |  |  |  |  |
 | Window > Cascade, Tile, Close All, Pop Out, floating list | - |  |  |  | Desktop uses tabs, not MDI; to be decided |
 | Help > Interface Tour, Check for updates, About | 5 |  |  |  |  |
@@ -85,7 +85,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| MainForm: toolbar | 2 |  |  |  |  |
+| MainForm: toolbar | 2 | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability. Diagnostics, Notes, Overview, Inventory, Palette and Step Back are left out until their stage; hiding buttons (Settings) comes in stage 4 |
 | MainForm: status bar (module, message, tiling progress, location, zoom) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ | ✔ | ✔ |  |
@@ -148,7 +148,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
 | FormulaDialog, FormulaFormView, CheatSheetWindow, BatchGridWindow, MissingInputDialog | 2 |  |  |  |  |
-| DiceTools, DiceDialog, TurnDialog | 2 |  |  |  |  |
+| DiceTools, DiceDialog, TurnDialog | 2 | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
 | LogPanel, LogDock, LogFloatForm, ChatBox | 2 |  |  |  |  |
 | OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 |  |  |  |  |
 | PhaseWatcher | 2 |  |  |  |  |

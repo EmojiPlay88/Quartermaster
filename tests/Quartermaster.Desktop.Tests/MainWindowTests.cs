@@ -92,6 +92,26 @@ sealed class FakeDialogs : IDialogs
         LastPreselectNew = preselectNew;
         return Task.FromResult(Setup);
     }
+
+    /// <summary>Dice prompts shown ("title|multi") and what the next one answers (null = Cancel).</summary>
+    public readonly List<string> DicePrompts = new();
+    public DiceChoice? Dice;
+
+    public Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi)
+    {
+        DicePrompts.Add($"{title}|{multi}");
+        return Task.FromResult(Dice);
+    }
+
+    /// <summary>Set Turn dialogs shown (the turn they opened with) and what the next one answers (null = Cancel).</summary>
+    public readonly List<TurnState> TurnPrompts = new();
+    public TurnChoice? Turn;
+
+    public Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current)
+    {
+        TurnPrompts.Add(current);
+        return Task.FromResult(Turn);
+    }
 }
 
 /// <summary>Task 7: the main window shell, headless, with fake dialogs (menus, map tabs, palette, open/save, unsaved prompt, command line).</summary>
@@ -161,7 +181,7 @@ public sealed class MainWindowTests : IDisposable
     {
         var w = NewWindow();
         var menus = w.MenuLabels();
-        Assert.Equal(new[] { "&File", "&Edit", "&View" }, menus.Keys);
+        Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools" }, menus.Keys);
         Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo" }, menus["&Edit"]);
         Assert.Equal(new[] { "Show &Grid", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
