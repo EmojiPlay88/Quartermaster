@@ -44,6 +44,7 @@ sealed partial class MapCanvas : SKControl
         Map = map;
         _pieces = new PieceRenderer(s.Images);
         _renderer = new MapRenderer(s.Images, _pieces);
+        MapDragController.DiagnosticLog ??= Program.AppLog;
         _drag = new MapDragController(s, map, _pieces, Guard);
         _drag.Aborted += CancelDrag;
         AllowDrop = true;

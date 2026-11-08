@@ -1,12 +1,12 @@
 using Quartermaster.Core;
-using Quartermaster.Render;
+using System.Drawing;
 using Quartermaster.Vassal;
 using SkiaSharp;
 
-namespace Quartermaster.App;
+namespace Quartermaster.Render;
 
 /// <summary>What a drag carries. Pieces are identified by id; the grab offset is the map-space vector from the grab point to the primary piece.</summary>
-sealed record DragInfo(ModuleSession Session, string[] Ids, string PrimaryId, PointD GrabOffset);
+public sealed record DragInfo(ModuleSession Session, string[] Ids, string PrimaryId, PointD GrabOffset);
 
 /// <summary>
 /// Piece dragging for one map window, in two flavours that share the formation logic of <see cref="DropResolver.ResolveFormation"/>:
@@ -17,9 +17,12 @@ sealed record DragInfo(ModuleSession Session, string[] Ids, string PrimaryId, Po
 /// </list>
 /// Zoom/pan/resize while a captured drag is active is not supported: the owner cancels the drag instead (<see cref="IsStale"/>).
 /// </summary>
-sealed class MapDragController : IDisposable
+public sealed class MapDragController : IDisposable
 {
     public const string Format = "Quartermaster.PieceIds";
+
+    /// <summary>Optional sink for failure details beyond the session log (the WinForms app points it at app.log).</summary>
+    public static Action<string>? DiagnosticLog { get; set; }
 
     /// <summary>The OLE drag in flight in this process (cross-window hand-off), if any.</summary>
     public static DragInfo? Current { get; set; }
@@ -70,7 +73,7 @@ sealed class MapDragController : IDisposable
     void Fail(Exception ex, bool wasActive)
     {
         _s.Log.AddOnce("drag:" + ex.GetType().Name, DiagnosticSeverity.Error, "render", "Dragging failed and was cancelled: " + ex.Message, _map.Name);
-        Program.AppLog("drag failed: " + ex);
+        DiagnosticLog?.Invoke("drag failed: " + ex);
         End();
         ClearIncoming();
         if (wasActive) Aborted?.Invoke();
