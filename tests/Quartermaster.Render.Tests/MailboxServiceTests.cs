@@ -51,6 +51,7 @@ public sealed class MailboxServiceTests : IAsyncLifetime
             b.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Relay:Port"] = _port.ToString(),
+                ["Relay:BindAddress"] = "loopback",
                 ["Relay:DataDir"] = Path.Combine(_dir, "relay"),
             });
         });

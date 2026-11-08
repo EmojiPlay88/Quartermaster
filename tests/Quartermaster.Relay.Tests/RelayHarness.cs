@@ -53,7 +53,7 @@ public sealed class RelayHarness : IAsyncDisposable
         h._app = RelayApp.Build([], b =>
         {
             b.WebHost.UseTestServer();
-            var config = new Dictionary<string, string?> { ["Relay:DataDir"] = h.DataDir };
+            var config = new Dictionary<string, string?> { ["Relay:DataDir"] = h.DataDir, ["Relay:BindAddress"] = "loopback" };
             foreach (var (k, v) in settings ?? new Dictionary<string, string?>()) config[k] = v;
             b.Configuration.AddInMemoryCollection(config);
             b.Services.AddSingleton<TimeProvider>(h.Time);

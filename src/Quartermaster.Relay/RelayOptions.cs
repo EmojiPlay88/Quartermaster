@@ -8,6 +8,9 @@ public sealed class RelayOptions
 {
     public int Port { get; set; } = Quartermaster.Net.Protocol.DefaultPort;
 
+    /// <summary>Interface to listen on: <c>any</c> (default, all interfaces), <c>loopback</c> (127.0.0.1 only) or an IP address.</summary>
+    public string BindAddress { get; set; } = "any";
+
     /// <summary>A .pfx/.p12 file, or a PEM certificate (e.g. Let's Encrypt <c>fullchain.pem</c>). Empty = self-signed.</summary>
     public string? CertificatePath { get; set; }
 

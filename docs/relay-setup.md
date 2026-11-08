@@ -156,6 +156,7 @@ Settings are read from `appsettings.json` next to the program, or from environme
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `Port` | `47820` | TCP port to listen on (TLS) |
+| `BindAddress` | `any` | Interface to listen on: `any` (all interfaces), `loopback` (127.0.0.1 only) or an IP address; env var `Relay__BindAddress` |
 | `DataDir` | `/data` | Folder for the generated certificate and the turn mailbox (must be writable) |
 | `CertificatePath` | empty | Own certificate (`.pem` or `.pfx`); empty = self-signed |
 | `CertificateKeyPath` | empty | Key file for a `.pem` certificate |

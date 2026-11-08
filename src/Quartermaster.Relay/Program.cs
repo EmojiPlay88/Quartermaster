@@ -25,12 +25,14 @@ namespace Quartermaster.Relay
             builder.Services.AddSingleton<Mailbox>();
             builder.Services.AddSingleton<Rooms>();
 
+            var bind = ParseBind(options.BindAddress);
             var cert = Certificates.LoadOrCreate(options);
             builder.WebHost.ConfigureKestrel(k =>
             {
                 k.Limits.MaxConcurrentConnections = options.MaxConnections;
                 k.Limits.MaxConcurrentUpgradedConnections = options.MaxConnections;
-                k.ListenAnyIP(options.Port, l => l.UseHttps(cert.Certificate));
+                if (bind is null) k.ListenAnyIP(options.Port, l => l.UseHttps(cert.Certificate));
+                else k.Listen(bind, options.Port, l => l.UseHttps(cert.Certificate));
             });
 
             var app = builder.Build();
@@ -48,6 +50,16 @@ namespace Quartermaster.Relay
             });
             app.Map(EndpointPath, (HttpContext ctx, Rooms rooms, TimeProvider time) => Serve(ctx, rooms, time, log, options));
             return app;
+        }
+
+        /// <summary>null = all interfaces.</summary>
+        private static System.Net.IPAddress? ParseBind(string? value)
+        {
+            var v = (value ?? "any").Trim();
+            if (v.Length == 0 || v.Equals("any", StringComparison.OrdinalIgnoreCase)) return null;
+            if (v.Equals("loopback", StringComparison.OrdinalIgnoreCase)) return System.Net.IPAddress.Loopback;
+            if (System.Net.IPAddress.TryParse(v, out var ip)) return ip;
+            throw new InvalidOperationException($"Relay:BindAddress '{value}' is invalid: use 'any', 'loopback' or an IP address.");
         }
 
         private static bool IsNetworkError(Exception e) =>

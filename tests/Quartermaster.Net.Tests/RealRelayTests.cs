@@ -25,6 +25,7 @@ public sealed class RealRelayTests : IAsyncLifetime
         _app = RelayApp.Build([], b => b.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Relay:Port"] = port.ToString(),
+            ["Relay:BindAddress"] = "loopback",
             ["Relay:DataDir"] = Path.Combine(_dir, "relay"),
         }));
         await _app.StartAsync();
