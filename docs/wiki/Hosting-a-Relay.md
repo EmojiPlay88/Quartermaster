@@ -285,7 +285,7 @@ The fingerprint is printed in the relay log (`Relay certificate fingerprint: C08
 
 **Security advice, please read:**
 
-- **Use lobby passwords.** Games with a password are end to end encrypted and the relay cannot read them. **Open lobbies (no password) can be read by the relay**, and anyone who knows the lobby code can join. Tell your players to set a password on every lobby.
+- **Use lobby passwords.** Games with a password are end to end encrypted and the relay cannot read them. **Open lobbies (no password) can be read by the relay**, and an open lobby has no password to stop anyone: lobby listings are public, so anyone who can reach your relay can see it in the list and join it. A lobby with a password needs that password to join. Tell your players to set a password on every lobby.
 - **Open only the relay port** (47820 or the one you chose). Do not forward or open anything else on that machine, and do not run services you do not need on it.
 - **Keep it updated.** Install new relay versions when they are released (section 11) and keep the operating system updated.
 - **Keep the data folder** and back it up if you use the mailbox: it holds the certificate your players trust and the waiting turns.
@@ -375,4 +375,4 @@ player's Quartermaster picks it up, instead of sending it by e-mail or chat.
 
 **Docker:** `docker compose pull && docker compose up -d` if you use a published image, otherwise `docker compose build && docker compose up -d` after pulling the new source (section 6.7).
 
-Update the relay when you update the app, so both sides speak the same version.
+The app and the relay check that they speak the same network version, and the relay refuses an app with a different one (the message says "update both copies"). That number does not change with every release, so a newer app does not always need a newer relay, but updating both together is the simplest way to stay safe.

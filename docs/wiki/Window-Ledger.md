@@ -10,7 +10,7 @@ The Ledger lists every tracked value of the game, one row per unit or depot and 
 |---|---|
 | **Filter:** | Shows only rows whose name or kind contains the text |
 | **Side:** | "All sides", or one side's units, for example "Northern League" |
-| **Group by:** | None, Map or Side. Groups get bold header rows |
+| **Group by:** | Map (the default), Side or None. Groups get bold header rows |
 | **Show counters** | Shows each unit's counter beside its name |
 | **Edit tabs…** | Adds, removes or changes your own tabs (below) |
 | **Export CSV…** | Saves the current tab's rows and columns as a CSV file |

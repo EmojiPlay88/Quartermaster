@@ -14,8 +14,8 @@ The module already contains a short invented rulebook, which opens as a tab in t
 ## Open the module
 
 1. Start Quartermaster. The launcher opens.
-2. Choose **Add module...** and pick `Riverland-Demo.vmod`.
-3. Select it in the list. The line under the list reads "Rules pack: (none)". Choose **change...** and pick `Riverland-Demo.qrules`.
+2. Choose **Add module…** and pick `Riverland-Demo.vmod`.
+3. Select it in the list. The line under the list reads "Rules pack: (none)". Choose **change…** and pick `Riverland-Demo.qrules`.
 
 ![The launcher with Riverland listed](images/launcher.png)
 
@@ -23,11 +23,11 @@ The module already contains a short invented rulebook, which opens as a tab in t
 
 ![The Play offline window](images/offline.png)
 
-This window lists your recent games. **Continue** reopens the newest autosave, **Open saved game...** browses for a `.qsave` file, **Open turn file...** opens a turn file (see [Playing With Others](Playing-With-Others)), and **New game...** starts a fresh game.
+This window lists your recent games. **Continue** reopens the newest autosave, **Open saved game…** browses for a `.qsave` file, **Open turn file…** opens a turn file (see [Playing With Others](Playing-With-Others)), and **New game…** starts a fresh game.
 
 ## Start a new game
 
-Choose **New game...**. The first page asks for a start and a difficulty.
+Choose **New game…**. The first page asks for a start and a difficulty.
 
 ![The new game chooser with the three difficulty modes](images/setup.png)
 
@@ -55,7 +55,7 @@ Choose **Start game** to begin turn 1.
 
 Drag a counter with the mouse. Drag a selection or a stack and it moves together, keeping its shape. Every move goes into the log under the map. The toolbar's **1d6**, **2d6** and **Dice** buttons roll dice, and each roll is logged too.
 
-In Riverland, the rules pack has a "Fuel for movement" formula that is meant to run when a unit moves during a Movement phase. If it needs a value that the program cannot work out itself, a formula dialog asks for it.
+In Riverland, moving a unit during North Movement or South Movement (and only then) uses up fuel. The rules pack's "Fuel for movement" formula takes away half the number of hexes moved, multiplied by the weather, rounded up. It only applies to units that have Fuel. What you see depends on the difficulty. On Hardcore and Semi-automatic, a formula dialog opens as soon as you drop the counter, with an empty box for the hexes moved: type the number (or choose Calculate to fill it in from your drag) and choose Apply. On Fully automatic, no dialog appears: the fuel is taken off straight away and the calculation goes into the log. If the weather has not been set yet (the demo rolls it in North Supply), the dialog asks for it.
 
 ## Undo and step back
 

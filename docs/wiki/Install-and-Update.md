@@ -25,8 +25,8 @@ When you start Quartermaster, the launcher opens with your list of modules.
 
 ![The launcher with its module list](images/launcher.png)
 
-- **Add module...** lists a `.vmod` file. The file is not copied or changed, and **Remove** only takes it off the list.
-- The line under the list shows the module's rules pack. **change...** points the module at another one.
+- **Add module…** lists a `.vmod` file. The file is not copied or changed, and **Remove** only takes it off the list.
+- The line under the list shows the module's rules pack. **change…** points the module at another one.
 - **Play offline** and **Online lobby** start a game. See [Your First Game](Your-First-Game) and [Playing With Others](Playing-With-Others).
 
 ## Updating

@@ -84,8 +84,7 @@ public class WikiLintTests
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
     }
 
-    // The screenshots land in Task 4, the pages that use them in Tasks 5-10; Task 10 removes this skip.
-    [Fact(Skip = "pages land in Tasks 5–10")]
+    [Fact]
     public void Images_are_referenced()
     {
         var imagesDir = Path.Combine(WikiDir, "images");

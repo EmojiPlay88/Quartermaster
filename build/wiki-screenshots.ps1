@@ -60,7 +60,6 @@ $shots = @(
     @{ Name = 'setup';           Flag = '--screenshot-setup';       Smoke = 8 }
     @{ Name = 'ledger';          Flag = '--screenshot-ledger';      Smoke = 8 }
     @{ Name = 'ledger-tabs';     Flag = '--screenshot-ledger-tabs'; Smoke = 12 }
-    @{ Name = 'workbench';       Flag = '--screenshot-workbench';   Smoke = 8 }
     @{ Name = 'workbench-tables';     Flag = '--screenshot-workbench'; Smoke = 8; Extra = @('--workbench-tab', 'tables') }
     @{ Name = 'workbench-formulas';   Flag = '--screenshot-workbench'; Smoke = 8; Extra = @('--workbench-tab', 'formulas') }
     @{ Name = 'workbench-properties'; Flag = '--screenshot-workbench'; Smoke = 8; Extra = @('--workbench-tab', 'properties') }
@@ -68,7 +67,6 @@ $shots = @(
     @{ Name = 'search';          Flag = '--screenshot-search';      Smoke = 20 }
     @{ Name = 'ocr';             Flag = '--screenshot-ocr';         Smoke = 30 }
     @{ Name = 'turns';           Flag = '--screenshot-turns';       Smoke = 30 }
-    @{ Name = 'settings';        Flag = '--screenshot-settings';    Smoke = 8 }
     @{ Name = 'alerts';          Flag = '--screenshot-alerts';      Smoke = 8 }
     @{ Name = 'phases';          Flag = '--screenshot-phases';      Smoke = 20; Extra = @('--smoke-phases') }
     @{ Name = 'palette';         Flag = '--screenshot-palette';     Smoke = 8; Extra = @('--gm') }

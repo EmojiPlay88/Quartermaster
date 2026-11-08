@@ -9,7 +9,7 @@ The examples use the invented Riverland demo game: units have the properties Fue
 - **Three kinds of value.** A **number** (`3`, `0.5`), **text** in double quotes (`"Unit"`), and **true/false**. Numbers show with at most two decimals.
 - **Literals.** Write numbers with digits and an optional decimal point (`2`, `.5`, `1.25`). There is no minus sign inside a number: `-3` is the minus operator applied to 3. Write text between double quotes. To put a quote inside text, write `\"`, and for a backslash write `\\`. Nothing else may follow a backslash. `true` and `false` are the two true/false values.
 - **Names.** Anything else you type is a variable name: letters, digits and underscores, starting with a letter or underscore (`Fuel`, `Hexes`, `Supply_Left`). A name cannot contain a space. Where the name gets its value depends on where the formula is used; see [Where names get their values](#where-names-get-their-values).
-- **Capital letters.** Function names, `and`, `or`, `not`, `true` and `false` may be written in any case: `MIN(1, 2)` and `min(1, 2)` are the same. Variable names must match the name you gave them exactly. Comparing text with `==` and `!=` ignores capitals (`"Unit" == "unit"` is true).
+- **Capital letters.** Function names, `and`, `or`, `not`, `true` and `false` may be written in any case: `MIN(1, 2)` and `min(1, 2)` are the same. Variable names (the names of bindings) must match the name you gave them exactly, capitals included. In a filter, a bare name is a property name instead, and property names ignore capitals. Marker keys ignore capitals too (`marker("kind")` finds the marker `Kind`). Comparing text with `==` and `!=` ignores capitals (`"Unit" == "unit"` is true).
 - **Spaces and signs.** Spaces are free. For comfort when pasting from a rulebook, the signs `−` (minus), `×` (times) and `÷` (divide) are accepted in place of `-`, `*` and `/`.
 - **True/false and numbers.** Where a formula needs a true/false answer (`if`, `and`, `or`, `not`), a number counts as true if it is anything but 0. Text is never accepted there.
 - **No percent or power.** There is no `%` (remainder) and no `^` (power). Use `floor`, `round` and multiplication instead.
@@ -64,7 +64,7 @@ True for units whose Readiness is below 3. Because `not` binds looser than a com
 -Fuel + 10 * 2
 ```
 
-If Fuel is 3, this gives 17: `10 * 2` first, then the minus sign on Fuel, then the sum.
+If Fuel is 3, this gives 17. The minus sign in front of a value binds tightest, so it is applied first (Fuel becomes -3); `10 * 2` is 20; then the two are added: -3 + 20.
 
 ## Functions
 
@@ -172,7 +172,7 @@ Gives a number from 2 to 12. For a roll the player sees as a named variable, bin
 
 ### has(Property)
 
-True when the unit has a value for that property. Use it to keep a formula or filter to the units it makes sense for. Give the property's name bare, or in quotes if you prefer.
+True when the unit has a value for that property. Use it to keep a formula or filter to the units it makes sense for. Give the property's name bare, or in quotes if you prefer. The name is compared ignoring capitals, so `has("fuel")` finds Fuel.
 
 ```formula
 has(Fuel) and Fuel < 2
@@ -202,7 +202,7 @@ True for "NL 4 Armour" and "SC 3 Armour".
 
 ### name()
 
-The name of the counter the formula is about, as text. Takes no arguments. It needs a unit; used with no unit it is an error.
+The name of the counter the formula is about, as text. Takes 0 arguments: write `name()` with nothing between the brackets. It needs a unit; used with no unit it is an error.
 
 ```formula
 name() == "NL 6 Recon"
@@ -286,7 +286,7 @@ Most of these end with "at position N", where N counts characters from the start
 | 'clamp' low limit is above the high limit | The second argument of `clamp` is bigger than the third. | Swap them. |
 | Division by zero | The right side of `/` was 0. | Guard it: `if(Hexes == 0, 0, Fuel / Hexes)`. |
 | Result is not a finite number | A sum overflowed. | Check for huge values. |
-| No table named 'x' | A `lookup` names a table that does not exist. | Check the spelling against the Tables tab. Table names must match exactly; use one word. |
+| No table named 'x' | A `lookup` names a table that does not exist. | Check the spelling against the Tables tab. Write the name as it appears on the Tables tab (capitals don't matter); use one word. |
 | No row for 5 in SupplyByDistance | No row key in the table matches the value (the message shows the value and the table). | Add a row, or an open-ended row such as `5+`. |
 | No column for x in Table | The same, for the column of a two-dimension table. | Add a column that matches. |
 | Table T needs a column | `lookup` was given only a row, but the table has two dimensions. | Give a column as the third argument. |

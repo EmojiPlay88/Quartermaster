@@ -20,9 +20,9 @@ Online games go through a **relay**, a small server program that passes messages
 
 In the launcher, select the module and choose **Online lobby**. The lobby window has a **Relay:** box for the relay's address, and these buttons:
 
-- **Join...** joins a game from the list shown for this module. The list refreshes every ten seconds, and **Refresh** reloads it now. You give your name, and a password if the lobby has one, then choose a side.
-- **Create lobby...** starts a new game for others to join. You choose the start, the difficulty, your own name and sides, the lobby's name, and an optional password.
-- **Host a saved game...** picks a `.qsave` file and continues that game online, with a lobby name, a password and the seats you want to keep open.
+- **Join…** joins a game from the list shown for this module. The list refreshes every ten seconds, and **Refresh** reloads it now. You give your name, and a password if the lobby has one, then choose a side.
+- **Create lobby…** starts a new game for others to join. You choose the start, the difficulty, your own name and sides, the lobby's name, and an optional password.
+- **Host a saved game…** picks a `.qsave` file and continues that game online, with a lobby name, a password and the seats you want to keep open.
 
 The lobby list only shows games for the module you selected, so everyone needs the same module.
 
@@ -34,13 +34,13 @@ Give the lobby a password and the game is end-to-end encrypted, so the relay can
 
 A seat is a player's place in the game, tied to one or more sides. The host's copy runs the game. Guests send what they want to do and receive only what their own sides may see, never another side's private values.
 
-As the host you can manage seats from **Game > Players...**. It lists every seat with its sides and whether the player is connected, and lets you assign free sides or free the seat of a player who left. Free sides show up in the lobby list as open seats.
+As the host you can manage seats from **Game > Players…**. It lists every seat with its sides and whether the player is connected, and lets you assign free sides or free the seat of a player who left. Free sides show up in the lobby list as open seats.
 
 If a guest drops, their seat is kept and they rejoin where they left off. Chat appears in the log.
 
 ### What only the host can do
 
-Only the host can undo, step back and save. A guest can use **File > Export Viewer Copy...** to keep a copy of their own view. To leave an online game, use **Game > Leave Online Game**.
+Only the host can undo, step back and save. A guest can use **File > Export Viewer Copy…** to keep a copy of their own view. To leave an online game, use **Game > Leave Online Game**.
 
 ## Turn files
 
@@ -48,11 +48,11 @@ Turn files let you play with someone who is not online at the same time.
 
 ### Sending a turn
 
-When you have finished your turn, choose **Game > Send Turn...**. A short dialog asks who you are sending to, and then you choose where to save the file. It is saved as a `.qturn` file, which you give to the other player by e-mail, chat or any other way.
+When you have finished your turn, choose **Game > Send Turn…**. A short dialog asks who you are sending to, and then you choose where to save the file. It is saved as a `.qturn` file, which you give to the other player by e-mail, chat or any other way.
 
 ### Receiving a turn
 
-The other player opens the file with **File > Open Turn File...**, or **Open turn file...** in the launcher's Play offline window. A replay bar appears above the log with three buttons:
+The other player opens the file with **File > Open Turn File…**, or **Open turn file…** in the launcher's Play offline window. A replay bar appears above the log with three buttons:
 
 ![The replay bar showing a turn from another player](images/turns.png)
 

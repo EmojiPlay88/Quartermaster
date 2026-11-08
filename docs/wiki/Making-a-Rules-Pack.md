@@ -15,8 +15,8 @@ Riverland in one paragraph: two sides, the Northern League and the Southern Comp
 
 ## Step 1: Create the pack
 
-1. Start Quartermaster. In the launcher, select `Riverland-Demo.vmod` (use **Add module...** if it is not listed yet).
-2. Choose **Play offline**, then **New game...**, then **OK**. The main window opens with the map.
+1. Start Quartermaster. In the launcher, select `Riverland-Demo.vmod` (use **Add module…** if it is not listed yet).
+2. Choose **Play offline**, then **New game…**, then **OK**. The main window opens with the map.
 3. Choose **File > New Rules Pack...**. Type a name, for example `My Riverland rules`, and choose OK.
 4. Choose **Tools > Rules Workbench** (Ctrl+Shift+W). The Workbench opens on the new, empty pack.
 
@@ -66,7 +66,7 @@ A **holder** is a place that keeps values without being a counter. The built-in 
 
 Riverland's supply chart: a unit 0 hexes from its depot gets 3 points, 1-2 hexes gets 2, 3-4 hexes gets 1, 5 or more gets nothing.
 
-Open the **Tables** tab and choose **New...**. Name the table `SupplyByDistance` (one word: formulas refer to tables by name). Leave **Kind:** on **OneD** (one row key and one value). Choose **Add row** until there are four rows, and type:
+Open the **Tables** tab and choose **New…**. Name the table `SupplyByDistance` (one word: formulas refer to tables by name). Leave **Kind:** on **OneD** (one row key and one value). Choose **Add row** until there are four rows, and type:
 
 | Row key | Value |
 |---|---|
@@ -77,11 +77,11 @@ Open the **Tables** tab and choose **New...**. Name the table `SupplyByDistance`
 
 ![The Tables tab with SupplyByDistance](images/workbench-tables.png)
 
-Row keys can be single numbers, ranges like `1-2`, or open ranges like `5+`. A chart from a spreadsheet can be pasted in with **Paste from clipboard...**, and a scan of a printed chart can be read with **Open scan...** (see [Rulebook search and OCR](Window-Rulebook-Search-and-OCR)).
+Row keys can be single numbers, ranges like `1-2`, or open ranges like `5+`. A chart from a spreadsheet can be pasted in with **Paste from clipboard…**, and a scan of a printed chart can be read with **Open scan…** (see [Rulebook search and OCR](Window-Rulebook-Search-and-OCR)).
 
 ## Step 4: Formulas
 
-Open the **Formulas** tab. For each formula below, choose **New...**, type the name, then type the formula in the big box. Every name you use in the formula (Fuel, Hexes and so on) appears as a row under **Bindings**. Fill in each row's **Kind**, **Target** and **Details** as shown, so Quartermaster knows where each value comes from. Then set the **Outputs**: what the result changes in the ledger.
+Open the **Formulas** tab. For each formula below, choose **New…**, type the name, then type the formula in the big box. Every name you use in the formula (Fuel, Hexes and so on) appears as a row under **Bindings**. Fill in each row's **Kind**, **Target** and **Details** as shown, so Quartermaster knows where each value comes from. Then set the **Outputs**: what the result changes in the ledger.
 
 ![The Formulas tab with Ammo supply](images/workbench-formulas.png)
 
@@ -207,7 +207,7 @@ Open the **Phases** tab.
 
 ### Sides
 
-Under **Sides**, choose **Add...** and type `Northern League`. In **Units of this side:** type the filter that picks its units:
+Under **Sides**, choose **Add…** and type `Northern League`. In **Units of this side:** type the filter that picks its units:
 
 ```formula
 marker("Side") == "Northern League"
@@ -250,7 +250,7 @@ and the **Message** `{unit} has no fuel and cannot move`. `{unit}` is replaced b
 
 ### North Combat
 
-Add a phase `North Combat`, side Northern League. Under **Checklist**, choose **Add...** for each item: "Choose attackers", "Run Attack roll for each attacker", "Run Ammo for firing for each attacker". Add a warning:
+Add a phase `North Combat`, side Northern League. Under **Checklist**, choose **Add…** for each item: "Choose attackers", "Run Attack roll for each attacker", "Run Ammo for firing for each attacker". Add a warning:
 
 ```formula
 Ammo <= 0
@@ -305,7 +305,7 @@ Quartermaster remembers the pack for this module, so the next time you open the 
 
 ## Step 10: Share it
 
-The `.qrules` file is all another player needs, together with the same module file. They choose **change...** in the launcher and pick it ([Launcher](Window-Launcher)). A rules pack is made for one exact module file: if the module is a different version, Quartermaster warns "Rules pack was made for a different module". In an online game, guests get the host's pack automatically and cannot change it.
+The `.qrules` file is all another player needs, together with the same module file. They choose **change…** in the launcher and pick it ([Launcher](Window-Launcher)). A rules pack is made for one exact module file: if the module is a different version, Quartermaster warns "Rules pack was made for a different module". In an online game, guests get the host's pack automatically and cannot change it.
 
 A rules pack holds only what you typed in. It never contains the module's rulebooks, pictures or counters, so you can share your own work without sharing anyone else's.
 
