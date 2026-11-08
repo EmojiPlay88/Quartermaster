@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
+using Quartermaster.Desktop.Input;
 using Quartermaster.Core;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
@@ -18,8 +20,10 @@ public sealed partial class MapView : Control
 {
     /// <summary>Workspace grey behind "no game" messages (WinForms SystemColors.AppWorkspace).</summary>
     static readonly SKColor Workspace = new(0xAB, 0xAB, 0xAB);
-    /// <summary>DIPs a horizontal wheel/trackpad unit scrolls (Avalonia's ScrollViewer uses the same 50).</summary>
-    const double HorizontalWheelStep = 50;
+    /// <summary>DIPs one wheel/trackpad scroll unit pans (Avalonia's ScrollViewer uses the same 50).</summary>
+    const double ScrollStep = 50;
+    /// <summary>Largest wheel delta one event may zoom by (precise trackpads send big deltas; keeps Cmd+scroll zoom smooth).</summary>
+    const double MaxZoomNotches = 3;
 
     readonly MapRenderer _renderer;
     readonly PieceRenderer _pieces;
@@ -31,6 +35,8 @@ public sealed partial class MapView : Control
     bool _space;
     bool _panning;
     Point _panLast;
+    TopLevel? _topLevel;
+    int _playbackReported;
 
     public MapView(ModuleSession session, MapDef map)
     {
@@ -62,6 +68,9 @@ public sealed partial class MapView : Control
 
     /// <summary>What this player may see (the game state itself in solo).</summary>
     GameState? State => Session.View;
+
+    /// <summary>Device pixels per DIP of the window this view is in (1 until attached).</summary>
+    float DeviceScale => (float)(_topLevel?.RenderScaling ?? 1);
 
     SKSize ClientSize => new((float)Math.Max(Bounds.Width, 1), (float)Math.Max(Bounds.Height, 1));
 
@@ -144,7 +153,15 @@ public sealed partial class MapView : Control
         {
             Session.Log.AddOnce("paint:" + ex.GetType().Name, DiagnosticSeverity.Error, "render", "Map drawing failed: " + ex.Message, Map.Name);
         }
-        context.Custom(new SkiaDrawOperation(recorder.EndRecording(), new Rect(Bounds.Size)));
+        context.Custom(new SkiaDrawOperation(recorder.EndRecording(), new Rect(Bounds.Size), PlaybackFailed));
+    }
+
+    /// <summary>Called on the render thread when replaying the picture fails: logged once, on the UI thread.</summary>
+    internal void PlaybackFailed(Exception ex)
+    {
+        if (Interlocked.Exchange(ref _playbackReported, 1) != 0) return;
+        Dispatcher.UIThread.Post(() => Session.Log.AddOnce("playback:" + ex.GetType().Name, DiagnosticSeverity.Error, "render",
+            "Map drawing failed: " + ex.Message, Map.Name));
     }
 
     void Scene(SKCanvas c, SKSize size)
@@ -163,7 +180,7 @@ public sealed partial class MapView : Control
             return;
         }
         if (_drag.Active) _drag.Draw(c, View, st);
-        else _renderer.Draw(c, Map, _tiles, st, Session.Model, View, size, new MapDrawOptions(ShowGrid, _selected, null));
+        else _renderer.Draw(c, Map, _tiles, st, Session.Model, View, size, new MapDrawOptions(ShowGrid, _selected, null, DeviceScale: DeviceScale));
         if (Preparing is { } p) Message(c, size, $"Preparing map… {(int)Math.Round(p * 100)}%");
     }
 
@@ -186,10 +203,28 @@ public sealed partial class MapView : Control
     {
         base.OnPointerWheelChanged(e);
         e.Handled = true;
-        if (_drag.Active) return; // zoom is ignored mid-drag: the snapshot is only valid for the view the drag started in
-        var at = e.GetPosition(this);
-        if (e.Delta.Y != 0) View.ZoomAt(new SKPoint((float)at.X, (float)at.Y), (float)Math.Pow(_zoomStep, e.Delta.Y));
-        if (e.Delta.X != 0) View.Pan = new SKPoint((float)(View.Pan.X - e.Delta.X * HorizontalWheelStep / View.Zoom), View.Pan.Y);
+        if (_drag.Active) return; // zoom/pan is ignored mid-drag: the snapshot is only valid for the view the drag started in
+        var d = e.Delta;
+        if (ShortcutGestures.IsMac && (e.KeyModifiers & KeyModifiers.Meta) == 0)
+        {
+            // macOS: two-finger scroll pans both axes (natural direction as the OS delivers it); pinch and Cmd+scroll zoom.
+            Scroll(d.X, d.Y);
+            return;
+        }
+        // Windows/Linux as MapCanvas (and Cmd+scroll on macOS): vertical wheel zooms at the cursor, horizontal wheel pans.
+        if (d.Y != 0)
+        {
+            var at = e.GetPosition(this);
+            View.ZoomAt(new SKPoint((float)at.X, (float)at.Y), (float)Math.Pow(_zoomStep, Math.Clamp(d.Y, -MaxZoomNotches, MaxZoomNotches)));
+        }
+        Scroll(d.X, 0);
+    }
+
+    /// <summary>Pans by scroll units the way a ScrollViewer does (offset -= delta * 50 DIPs).</summary>
+    void Scroll(double dx, double dy)
+    {
+        if (dx == 0 && dy == 0) { ViewChanged(); return; }
+        View.Pan = new SKPoint((float)(View.Pan.X - dx * ScrollStep / View.Zoom), (float)(View.Pan.Y - dy * ScrollStep / View.Zoom));
         ViewChanged();
     }
 
@@ -207,14 +242,21 @@ public sealed partial class MapView : Control
     {
         base.OnAttachedToVisualTree(e);
         AddHandler(PointerTouchPadGestureMagnifyEvent, OnMagnify);
+        _topLevel = TopLevel.GetTopLevel(this);
+        if (_topLevel != null) _topLevel.ScalingChanged += OnScalingChanged;
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         RemoveHandler(PointerTouchPadGestureMagnifyEvent, OnMagnify);
+        if (_topLevel != null) _topLevel.ScalingChanged -= OnScalingChanged;
+        _topLevel = null;
         _drag.End();
         base.OnDetachedFromVisualTree(e);
     }
+
+    /// <summary>Moved to a monitor with another scaling: redraw with tiles and SVG rasters for the new device resolution.</summary>
+    void OnScalingChanged(object? sender, EventArgs e) => InvalidateVisual();
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {

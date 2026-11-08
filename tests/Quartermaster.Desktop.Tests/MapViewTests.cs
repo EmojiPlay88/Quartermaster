@@ -4,6 +4,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Quartermaster.Core;
+using Quartermaster.Desktop.Input;
 using Quartermaster.Desktop.Map;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
@@ -11,15 +12,19 @@ using SkiaSharp;
 
 namespace Quartermaster.Desktop.Tests;
 
-/// <summary>MapView: draws through the shared MapRenderer, pans and zooms like the WinForms MapCanvas. Headless only.</summary>
+/// <summary>MapView: draws through the shared MapRenderer, pans and zooms like the WinForms MapCanvas. Headless only.
+/// Wheel handling depends on ShortcutGestures.IsMac, so the class sets it explicitly and lives in the MacFlag collection.</summary>
+[Collection("MacFlag")]
 public sealed class MapViewTests : IDisposable
 {
+    readonly bool _wasMac = ShortcutGestures.IsMac;
     const int W = 800, H = 600;
     readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-mapview-" + Guid.NewGuid().ToString("N"));
     ModuleSession? _s;
 
     public void Dispose()
     {
+        ShortcutGestures.IsMac = _wasMac;
         _s?.Dispose();
         try { Directory.Delete(_tmp, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
@@ -27,8 +32,9 @@ public sealed class MapViewTests : IDisposable
     static string DemoVmod([System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "..", "..", "docs", "wiki", "demo", "Riverland-Demo.vmod"));
 
-    (MapView View, Window Window, Dictionary<string, TileSet> Tiles) Open(double scaling = 1)
+    (MapView View, Window Window, Dictionary<string, TileSet> Tiles) Open(double scaling = 1, bool mac = false)
     {
+        ShortcutGestures.IsMac = mac;
         _s = ModuleSession.Open(DemoVmod(), Path.Combine(_tmp, "cache"), null);
         _s.StartNewGame(Difficulty.FullyAuto);
         var map = _s.Model.Maps[0];
@@ -46,13 +52,14 @@ public sealed class MapViewTests : IDisposable
         return (view, window, tiles);
     }
 
-    SKBitmap Expected(MapView view, Dictionary<string, TileSet> tiles, int scale)
+    /// <summary>The renderer drawing natively at <paramref name="scale"/> device pixels per DIP (tile levels and SVG rasters chosen for it).</summary>
+    SKBitmap Expected(MapView view, Dictionary<string, TileSet> tiles, float scale)
     {
-        var bmp = new SKBitmap(new SKImageInfo(W * scale, H * scale, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var bmp = new SKBitmap(new SKImageInfo((int)(W * scale), (int)(H * scale), SKColorType.Bgra8888, SKAlphaType.Premul));
         using var c = new SKCanvas(bmp);
         c.Scale(scale);
         new MapRenderer(_s!.Images, new PieceRenderer(_s.Images))
-            .Draw(c, view.Map, tiles, _s.View!, _s.Model, view.View, new SKSize(W, H), new MapDrawOptions(false, new HashSet<string>(), null));
+            .Draw(c, view.Map, tiles, _s.View!, _s.Model, view.View, new SKSize(W, H), new MapDrawOptions(false, new HashSet<string>(), null, DeviceScale: scale));
         return bmp;
     }
 
@@ -128,9 +135,54 @@ public sealed class MapViewTests : IDisposable
         window.MouseWheel(new Point(400, 300), new Vector(-1, 0));
         window.Close();
 
-        Assert.NotEqual(pan0.X, view.View.Pan.X);
+        // Avalonia's convention (ScrollViewer): offset -= Delta.X * 50 DIPs.
+        Assert.Equal(pan0.X + 50 / z0, view.View.Pan.X, 3);
         Assert.Equal(pan0.Y, view.View.Pan.Y);
         Assert.Equal(z0, view.View.Zoom);
+    }
+
+    [AvaloniaFact]
+    public void Windows_large_precise_wheel_delta_is_clamped()
+    {
+        var (view, window, _) = Open();
+        view.ZoomCentered(0.5f);
+        window.MouseWheel(new Point(400, 300), new Vector(0, 10));
+        window.Close();
+        Assert.Equal(0.5f * (float)Math.Pow(1.2, 3), view.View.Zoom, 4);
+    }
+
+    [AvaloniaFact]
+    public void Mac_scroll_pans_both_axes()
+    {
+        var (view, window, _) = Open(mac: true);
+        view.ZoomToFit();
+        var z = view.View.Zoom;
+        var pan0 = view.View.Pan;
+
+        window.MouseWheel(new Point(400, 300), new Vector(-1, 0.5));
+        window.Close();
+
+        Assert.Equal(z, view.View.Zoom);
+        // Natural direction as delivered: the view offset moves against the delta, like a ScrollViewer.
+        Assert.Equal(pan0.X + 50 / z, view.View.Pan.X, 3);
+        Assert.Equal(pan0.Y - 25 / z, view.View.Pan.Y, 3);
+    }
+
+    [AvaloniaFact]
+    public void Mac_cmd_wheel_zooms_at_cursor()
+    {
+        var (view, window, _) = Open(mac: true);
+        view.ZoomToFit();
+        var z0 = view.View.Zoom;
+        var m0 = view.View.ToMap(P(250, 350));
+
+        window.MouseWheel(new Point(250, 350), new Vector(0, 1), RawInputModifiers.Meta);
+        window.Close();
+
+        Assert.Equal(z0 * 1.2f, view.View.Zoom, 4);
+        var m1 = view.View.ToMap(P(250, 350));
+        Assert.InRange(m1.X - m0.X, -0.5, 0.5);
+        Assert.InRange(m1.Y - m0.Y, -0.5, 0.5);
     }
 
     [AvaloniaFact]
@@ -218,7 +270,7 @@ public sealed class MapViewTests : IDisposable
         var a = actual.Px[cy * actual.Width + cx];
         var e = expected.GetPixel(cx, cy);
         Assert.True(Math.Abs(a.Red - e.Red) <= 2 && Math.Abs(a.Green - e.Green) <= 2 && Math.Abs(a.Blue - e.Blue) <= 2, $"centre {a} vs {e}");
-        // The whole frame matches a 2x renderer draw: nothing was upscaled from a 1x bitmap.
+        // The whole frame matches the renderer drawing natively at 2x (tile level and SVG rasters for 2x): nothing was upscaled.
         Assert.Equal(0, CountDiffs(actual, expected, 2));
 
         // The wheel uses DIP coordinates at scale 2: the map point under the cursor stays put.
@@ -228,6 +280,87 @@ public sealed class MapViewTests : IDisposable
         var m1 = view.View.ToMap(P(400, 300));
         Assert.InRange(m1.X - m0.X, -0.5, 0.5);
         Assert.InRange(m1.Y - m0.Y, -0.5, 0.5);
+    }
+
+    [AvaloniaFact]
+    public void Fractional_scale_1_5_matches_native_renderer()
+    {
+        var (view, window, tiles) = Open(scaling: 1.5);
+        view.ZoomCentered(0.4f); // 1x would pick tile level 1; 0.4 * 1.5 = 0.6 needs level 0
+        using var frame = window.CaptureRenderedFrame();
+        window.Close();
+        var actual = TestHelpers.Pixels(frame!);
+        Assert.Equal((1200, 900), (actual.Width, actual.Height));
+        using var expected = Expected(view, tiles, 1.5f);
+        Assert.Equal(0, CountDiffs(actual, expected, 2));
+    }
+
+    [AvaloniaFact]
+    public void Counters_rasterised_for_device_pixels_at_scale_2()
+    {
+        var (view, window, tiles) = Open(scaling: 2);
+        view.ZoomCentered(1f); // SVG bucket 1 at 1x; the 2x device needs bucket 2
+        var st = _s!.View!;
+        view.CentreOn(st.StacksOn(view.Map.Id).First(k => k.PieceIds.Count == 1).Pos);
+        using var frame = window.CaptureRenderedFrame();
+        window.Close();
+        using var expected = Expected(view, tiles, 2);
+        Assert.Equal(0, CountDiffs(TestHelpers.Pixels(frame!), expected, 2));
+    }
+
+    [Fact]
+    public void PieceRenderer_rasterises_svg_counters_for_the_device_scale()
+    {
+        _s = ModuleSession.Open(DemoVmod(), Path.Combine(_tmp, "cache"), null);
+        _s.StartNewGame(Difficulty.FullyAuto);
+        var pieces = new PieceRenderer(_s.Images);
+        var p = _s.View!.Pieces.Values.First(x => x.MapId == _s.Model.Maps[0].Id);
+        var type = pieces.Types.Get(p.TypeString);
+        // Zoom 1 on a 2x canvas (device scale 2) must equal zoom 2 drawn directly: both need the 2x SVG raster.
+        using var hidpi = new SKBitmap(200, 200);
+        using (var c = new SKCanvas(hidpi)) { c.Clear(SKColors.White); c.Scale(2); pieces.Draw(c, p, type, new PointD(50, 50), 1f, PieceDrawFlags.None, 2f); }
+        using var direct = new SKBitmap(200, 200);
+        using (var c = new SKCanvas(direct)) { c.Clear(SKColors.White); pieces.Draw(c, p, type, new PointD(100, 100), 2f, PieceDrawFlags.None); }
+        var diff = 0;
+        for (var y = 0; y < 200; y++)
+            for (var x = 0; x < 200; x++)
+            {
+                SKColor a = hidpi.GetPixel(x, y), e = direct.GetPixel(x, y);
+                if (Math.Abs(a.Red - e.Red) > 2 || Math.Abs(a.Green - e.Green) > 2 || Math.Abs(a.Blue - e.Blue) > 2) diff++;
+            }
+        Assert.Equal(0, diff);
+    }
+
+    [AvaloniaFact]
+    public void Scaling_change_redraws_at_the_new_resolution()
+    {
+        var (view, window, tiles) = Open();
+        view.ZoomCentered(0.4f);
+        using (window.CaptureRenderedFrame()) { }
+        window.SetRenderScaling(2);
+        using var frame = window.CaptureRenderedFrame();
+        window.Close();
+        var actual = TestHelpers.Pixels(frame!);
+        using var expected = Expected(view, tiles, 2);
+        Assert.Equal(0, CountDiffs(actual, expected, 2));
+    }
+
+    [AvaloniaFact]
+    public void Playback_failure_is_logged_once_on_the_UI_thread()
+    {
+        var (view, window, _) = Open();
+        var before = _s!.Log.Items.Count;
+        int? loggedOn = null;
+        _s.Log.Added += _ => loggedOn = Environment.CurrentManagedThreadId;
+        Task.Run(() => { view.PlaybackFailed(new InvalidOperationException("boom")); view.PlaybackFailed(new InvalidOperationException("boom")); }).Wait();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        window.Close();
+
+        var added = _s.Log.Items.Skip(before).ToList();
+        var d = Assert.Single(added);
+        Assert.Equal(DiagnosticSeverity.Error, d.Severity);
+        Assert.Equal("Map drawing failed: boom", d.Message);
+        Assert.Equal(Environment.CurrentManagedThreadId, loggedOn);
     }
 
     [AvaloniaFact]

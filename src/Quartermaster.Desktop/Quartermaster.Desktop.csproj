@@ -11,6 +11,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Quartermaster.Desktop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Quartermaster.Core\Quartermaster.Core.csproj" />
     <ProjectReference Include="..\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
     <ProjectReference Include="..\Quartermaster.Render\Quartermaster.Render.csproj" />

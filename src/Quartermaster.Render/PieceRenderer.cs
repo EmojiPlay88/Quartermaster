@@ -22,8 +22,10 @@ public sealed class PieceRenderer(ImageSource images)
     /// <summary>Multiplies every label's font size (Settings label size / 8); 1 keeps the sizes the module asks for.</summary>
     public float LabelScale { get; set; } = 1f;
 
-    public void Draw(SKCanvas c, PieceInstance p, PieceType x, PointD center, float zoom, PieceDrawFlags flags)
+    /// <param name="deviceScale">Device pixels per canvas unit (HiDPI); SVG images are rasterised for <c>zoom * deviceScale</c>. 1 = as before.</param>
+    public void Draw(SKCanvas c, PieceInstance p, PieceType x, PointD center, float zoom, PieceDrawFlags flags, float deviceScale = 1f)
     {
+        var raster = zoom * (float.IsFinite(deviceScale) && deviceScale > 0 ? deviceScale : 1f);
         var traits = x.Traits;
         var alpha = 1.0;
         var obscured = false;
@@ -46,8 +48,8 @@ public sealed class PieceRenderer(ImageSource images)
                 using var layer = new SKPaint { Color = new SKColor(255, 255, 255, (byte)Math.Round(Math.Clamp(alpha, 0, 1) * 255)) };
                 c.SaveLayer(layer);
             }
-            if (obscured) DrawMask(c, p, x, zoom);
-            else DrawBody(c, p, x, zoom, flags);
+            if (obscured) DrawMask(c, p, x, raster);
+            else DrawBody(c, p, x, raster, flags);
         }
         finally
         {

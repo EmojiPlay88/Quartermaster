@@ -4,6 +4,7 @@ using Quartermaster.Render;
 
 namespace Quartermaster.Desktop.Tests;
 
+[Collection("MacFlag")]
 public class ShortcutGestureTests
 {
     [Fact]

@@ -7,6 +7,11 @@ using SkiaSharp;
 
 namespace Quartermaster.Desktop.Tests;
 
+/// <summary>Tests that set the process-wide ShortcutGestures.IsMac (or read it through input handling) run here, one at a time, never
+/// alongside other tests.</summary>
+[CollectionDefinition("MacFlag", DisableParallelization = true)]
+public sealed class MacFlagCollection;
+
 public static class TestHelpers
 {
     /// <summary>Renders the (headless) window and saves the frame as a PNG. No real window is ever shown.</summary>
