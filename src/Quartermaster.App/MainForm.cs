@@ -880,13 +880,42 @@ sealed partial class MainForm : Form
     }
 
 
-    /// <summary>Opens (or activates) the ledger window; needs a loaded rules pack.</summary>
+    /// <summary>
+    /// View &gt; Ledger (Ctrl+L): opens (or activates) the ledger window; needs a loaded rules pack. When counters are selected on the active map
+    /// their rows are selected too (Show in Ledger); with no selection it only opens the window.
+    /// </summary>
     void ShowLedger()
     {
         if (_session?.Rules == null) return;
+        // The active map: a floating map window, or the docked map tab while the main window (or nothing, off-screen) is active.
+        var map = ActiveForm as MapWindow ?? (ActiveForm == null || ActiveForm == this ? ActiveMdiChild as MapWindow : null);
+        var picked = map?.Canvas.Selected.ToList() ?? new List<string>();
+        if (picked.Count > 0) { ShowInLedger(picked); return; }
+        OpenLedger();
+    }
+
+    LedgerWindow? OpenLedger()
+    {
+        if (_session?.Rules == null) return null;
         var s = _session;
         OpenChild(_ledgers, "ledger", () => new LedgerWindow(s, () => Actions, CentreOnPiece));
+        return _ledgers.TryGetValue("ledger", out var f) && !f.IsDisposed ? f as LedgerWindow : null;
     }
+
+    /// <summary>Show in Ledger (map right-click, or Ctrl+L with counters selected): opens the Ledger and selects the counters' rows; the status bar says when some have none.</summary>
+    public void ShowInLedger(IReadOnlyCollection<string> pieceIds)
+    {
+        Guard(() =>
+        {
+            if (OpenLedger() is not { } lw) return;
+            var plan = lw.ShowPieces(pieceIds);
+            lw.Activate();
+            SetStatus(plan.Message ?? (plan.RowKeys.Count == 1 ? "Shown in the Ledger." : $"{plan.RowKeys.Count} counters shown in the Ledger."));
+        });
+    }
+
+    /// <summary>True when the Ledger can be opened (a rules pack is loaded), as for View &gt; Ledger.</summary>
+    public bool LedgerAvailable => _session?.Rules != null;
 
     /// <summary>Opens (or activates) the single rules workbench of this session.</summary>
     void ShowWorkbench()

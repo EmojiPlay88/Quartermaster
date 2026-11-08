@@ -302,7 +302,24 @@ sealed class MapWindow : Form
             if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Delete counter", null, (_, _) => Run(() => DeleteCounters(piece, game))));
         }
+        AddShowInLedger(menu, piece, game);
         if (menu.Items.Count == 0) menu.Items.Add(new ToolStripMenuItem("(no commands)") { Enabled = false });
+    }
+
+    /// <summary>The counters a piece command acts on: the selection when the clicked counter is part of it, otherwise just the clicked counter.</summary>
+    List<string> TargetIds(PieceInstance clicked, GameSession game) => Canvas.Selected.Contains(clicked.Id)
+        ? game.State.Pieces.Keys.Where(Canvas.Selected.Contains).ToList()
+        : new List<string> { clicked.Id };
+
+    /// <summary>"Show in Ledger": selects the counters' rows in the Ledger window (same path as Ctrl+L with a selection). Disabled without a rules pack.</summary>
+    void AddShowInLedger(ContextMenuStrip menu, PieceInstance piece, GameSession game)
+    {
+        if (Host is not { } host) return;
+        if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
+        var item = new ToolStripMenuItem("Show in &Ledger") { ShortcutKeyDisplayString = host.ShortcutText("view.ledger") };
+        if (!host.LedgerAvailable) { item.Enabled = false; item.ToolTipText = "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)."; }
+        item.Click += (_, _) => Run(() => host.ShowInLedger(TargetIds(piece, game)));
+        menu.Items.Add(item);
     }
 
     /// <summary>"Calculate" submenu: one entry per formula that applies to the piece. Hidden without a rules pack.</summary>
@@ -399,9 +416,7 @@ sealed class MapWindow : Form
     void DeleteCounters(PieceInstance clicked, GameSession game)
     {
         // The selection is the target only when the clicked counter is part of it; otherwise just the clicked counter.
-        var ids = Canvas.Selected.Contains(clicked.Id)
-            ? game.State.Pieces.Keys.Where(Canvas.Selected.Contains).ToList()
-            : new List<string> { clicked.Id };
+        var ids = TargetIds(clicked, game);
         if (!ConfirmDeletes(game.State, ids, clicked)) return;
         Execute(ids.Select(id => new RemovePiece(id)));
     }
