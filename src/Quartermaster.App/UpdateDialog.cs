@@ -74,7 +74,7 @@ sealed class UpdateDialog : Form
             _bar.Value = (int)Math.Clamp(f * 1000, 0, 1000);
             if (f >= 1 && !_cts.IsCancellationRequested) _status.Text = "Checking and unpacking…";
         });
-        DialogResult result;
+        var result = DialogResult.Abort;
         try
         {
             Staged = await Task.Run(() => UpdateInstaller.Download(_feed, _info, _updatesRoot, progress, _cts.Token));
@@ -84,16 +84,30 @@ sealed class UpdateDialog : Form
         {
             result = DialogResult.Cancel;
         }
-        catch (Exception ex) when (ex is UpdateRefused or IOException or UnauthorizedAccessException or HttpRequestException
-                                       or OperationCanceledException or InvalidDataException)
+        catch (OperationCanceledException ex)
         {
-            // An OperationCanceledException without our Cancel is the HTTP timeout.
-            Error = ex is OperationCanceledException ? "The download timed out." : ex.Message;
-            Program.AppLog("update: download failed: " + ex.Message);
-            result = DialogResult.Abort;
+            // Without our Cancel this is the HTTP timeout.
+            Fail("The download timed out.", ex);
         }
-        _running = false;
-        if (!IsDisposed) DialogResult = result;
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Expected: UpdateRefused, IOException, HttpRequestException…; anything else gets the same plain path (the full exception is logged).
+            Fail(ex.Message, ex);
+        }
+        finally
+        {
+            // Always: otherwise FormClosing would keep cancelling and the dialog could never close.
+            _running = false;
+            if (!IsDisposed) DialogResult = result;
+        }
+    }
+
+    void Fail(string message, Exception ex)
+    {
+        Error = message;
+        Program.AppLog(ex is UpdateRefused or IOException or UnauthorizedAccessException or HttpRequestException
+            ? "update: download failed: " + ex.Message
+            : "update: download failed unexpectedly: " + ex);
     }
 
     protected override void Dispose(bool disposing)
