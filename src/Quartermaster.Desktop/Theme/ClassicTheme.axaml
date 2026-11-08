@@ -27,8 +27,9 @@
           <Color x:Key="Classic.Page">#F9F9F9</Color>
           <Color x:Key="Classic.PopupBorder">#808080</Color>
           <Color x:Key="Classic.PopupFace">#FCFCFC</Color>
-          <Color x:Key="Classic.ScrollThumb">#CDCDCD</Color>
-          <Color x:Key="Classic.ScrollGlyph">#606060</Color>
+          <Color x:Key="Classic.TabEdge">#E5E5E5</Color>
+          <Color x:Key="Classic.ScrollThumb">#858585</Color>
+          <Color x:Key="Classic.ScrollGlyph">#A4A4A4</Color>
           <Color x:Key="Classic.TreeBox">#919191</Color>
           <Color x:Key="Classic.TreeGlyph">#4B63A7</Color>
           <Color x:Key="Classic.TreeLine">#6D6D6D</Color>
@@ -82,6 +83,7 @@
           <SolidColorBrush x:Key="Classic.PageBrush" Color="{StaticResource Classic.Page}" />
           <SolidColorBrush x:Key="Classic.PopupBorderBrush" Color="{StaticResource Classic.PopupBorder}" />
           <SolidColorBrush x:Key="Classic.PopupFaceBrush" Color="{StaticResource Classic.PopupFace}" />
+          <SolidColorBrush x:Key="Classic.TabEdgeBrush" Color="{StaticResource Classic.TabEdge}" />
           <SolidColorBrush x:Key="Classic.ScrollThumbBrush" Color="{StaticResource Classic.ScrollThumb}" />
           <SolidColorBrush x:Key="Classic.ScrollGlyphBrush" Color="{StaticResource Classic.ScrollGlyph}" />
           <SolidColorBrush x:Key="Classic.TreeBoxBrush" Color="{StaticResource Classic.TreeBox}" />
@@ -172,7 +174,7 @@
     <Setter Property="Background" Value="{DynamicResource Classic.CheckedBrush}" />
   </Style>
 
-  <!-- Tabs: raised tabs over a bordered page (WinForms TabControl) -->
+  <!-- Tabs: raised tabs over a bordered page (WinForms TabControl). Tabs are top-only: the app never uses other TabStripPlacement values. -->
   <Style Selector="TabControl">
     <Setter Property="Background" Value="{DynamicResource Classic.PageBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Classic.BorderBrush}" />
@@ -221,6 +223,7 @@
   </Style>
   <Style Selector="TabItem:selected /template/ Border#PART_LayoutRoot">
     <Setter Property="BorderThickness" Value="1,1,1,0" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Classic.TabEdgeBrush}" />
   </Style>
   <Style Selector="TabItem:disabled">
     <Setter Property="Foreground" Value="{DynamicResource Classic.GrayTextBrush}" />
@@ -260,18 +263,18 @@
     <Setter Property="Background" Value="{DynamicResource Classic.FaceBrush}" />
   </Style>
 
-  <!-- Scrollbars: classic 17px bar with arrow buttons -->
+  <!-- Scrollbars: Windows 11 look: 16px track, thin thumb when idle, arrows and a wider thumb while hovered -->
   <Style Selector="ScrollBar">
     <Setter Property="Background" Value="{DynamicResource Classic.FaceBrush}" />
     <Setter Property="AllowAutoHide" Value="False" />
   </Style>
   <Style Selector="ScrollBar:vertical">
-    <Setter Property="Width" Value="17" />
+    <Setter Property="Width" Value="16" />
     <Setter Property="Template">
       <ControlTemplate>
-        <Grid RowDefinitions="17,*,17" Background="{TemplateBinding Background}">
+        <Grid RowDefinitions="16,*,16" Background="{TemplateBinding Background}">
           <RepeatButton Name="PART_LineUpButton" Grid.Row="0" Classes="classicScroll" Focusable="False">
-            <Path Data="M0,4 L4,0 L8,4 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Path Data="M0,5 L4,0 L8,5 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
           </RepeatButton>
           <Track Grid.Row="1" Orientation="Vertical" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
                  Value="{TemplateBinding Value, Mode=TwoWay}" ViewportSize="{TemplateBinding ViewportSize}"
@@ -281,19 +284,19 @@
             <Track.IncreaseButton><RepeatButton Name="PART_PageDownButton" Classes="classicTrack" Focusable="False" /></Track.IncreaseButton>
           </Track>
           <RepeatButton Name="PART_LineDownButton" Grid.Row="2" Classes="classicScroll" Focusable="False">
-            <Path Data="M0,0 L4,4 L8,0 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Path Data="M0,0 L4,5 L8,0 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
           </RepeatButton>
         </Grid>
       </ControlTemplate>
     </Setter>
   </Style>
   <Style Selector="ScrollBar:horizontal">
-    <Setter Property="Height" Value="17" />
+    <Setter Property="Height" Value="16" />
     <Setter Property="Template">
       <ControlTemplate>
-        <Grid ColumnDefinitions="17,*,17" Background="{TemplateBinding Background}">
+        <Grid ColumnDefinitions="16,*,16" Background="{TemplateBinding Background}">
           <RepeatButton Name="PART_LineUpButton" Grid.Column="0" Classes="classicScroll" Focusable="False">
-            <Path Data="M4,0 L0,4 L4,8 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Path Data="M5,0 L0,4 L5,8 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
           </RepeatButton>
           <Track Grid.Column="1" Orientation="Horizontal" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
                  Value="{TemplateBinding Value, Mode=TwoWay}" ViewportSize="{TemplateBinding ViewportSize}">
@@ -302,7 +305,7 @@
             <Track.IncreaseButton><RepeatButton Name="PART_PageDownButton" Classes="classicTrack" Focusable="False" /></Track.IncreaseButton>
           </Track>
           <RepeatButton Name="PART_LineDownButton" Grid.Column="2" Classes="classicScroll" Focusable="False">
-            <Path Data="M0,0 L4,4 L0,8 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Path Data="M0,0 L5,4 L0,8 Z" Fill="{DynamicResource Classic.ScrollGlyphBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
           </RepeatButton>
         </Grid>
       </ControlTemplate>
@@ -310,17 +313,15 @@
   </Style>
   <Style Selector="RepeatButton.classicScroll">
     <Setter Property="Background" Value="{DynamicResource Classic.FaceBrush}" />
+    <Setter Property="Opacity" Value="0" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}"><ContentPresenter Content="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
       </ControlTemplate>
     </Setter>
   </Style>
-  <Style Selector="RepeatButton.classicScroll:pointerover">
-    <Setter Property="Background" Value="{DynamicResource Classic.ScrollThumbBrush}" />
-  </Style>
-  <Style Selector="RepeatButton.classicScroll:pressed">
-    <Setter Property="Background" Value="{DynamicResource Classic.ScrollGlyphBrush}" />
+  <Style Selector="ScrollBar:pointerover /template/ RepeatButton.classicScroll">
+    <Setter Property="Opacity" Value="1" />
   </Style>
   <Style Selector="RepeatButton.classicTrack">
     <Setter Property="Background" Value="Transparent" />
@@ -329,13 +330,23 @@
     </Setter>
   </Style>
   <Style Selector="Thumb.classicThumb">
-    <Setter Property="Background" Value="{DynamicResource Classic.ScrollThumbBrush}" />
     <Setter Property="Template">
-      <ControlTemplate><Border Background="{TemplateBinding Background}" Margin="1" /></ControlTemplate>
+      <ControlTemplate><Border Name="bar" Background="{DynamicResource Classic.ScrollThumbBrush}" /></ControlTemplate>
     </Setter>
   </Style>
-  <Style Selector="Thumb.classicThumb:pointerover">
-    <Setter Property="Background" Value="{DynamicResource Classic.SeparatorBrush}" />
+  <Style Selector="ScrollBar:vertical /template/ Thumb.classicThumb /template/ Border#bar">
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="Width" Value="2" />
+  </Style>
+  <Style Selector="ScrollBar:vertical:pointerover /template/ Thumb.classicThumb /template/ Border#bar">
+    <Setter Property="Width" Value="6" />
+  </Style>
+  <Style Selector="ScrollBar:horizontal /template/ Thumb.classicThumb /template/ Border#bar">
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Height" Value="2" />
+  </Style>
+  <Style Selector="ScrollBar:horizontal:pointerover /template/ Thumb.classicThumb /template/ Border#bar">
+    <Setter Property="Height" Value="6" />
   </Style>
 
   <!-- Checkbox: own template (13px box like WinForms); part names differ from Simple so its states do not apply -->

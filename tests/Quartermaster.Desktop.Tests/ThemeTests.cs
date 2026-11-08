@@ -1,3 +1,4 @@
+using Avalonia.Headless;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -58,7 +59,7 @@ public class ThemeTests
     [InlineData("HighlightText")] [InlineData("Border")] [InlineData("ButtonFace")] [InlineData("ButtonBorder")] [InlineData("ButtonHover")]
     [InlineData("Checked")] [InlineData("Separator")] [InlineData("Page")] [InlineData("PopupBorder")] [InlineData("PopupFace")]
     [InlineData("ScrollThumb")] [InlineData("ScrollGlyph")] [InlineData("TreeBox")] [InlineData("TreeGlyph")] [InlineData("TreeLine")]
-    [InlineData("CheckOn")] [InlineData("CheckBorder")]
+    [InlineData("TabEdge")] [InlineData("CheckOn")] [InlineData("CheckBorder")]
     public void Brushes_match_their_colour_keys(string name)
     {
         var app = Application.Current!;
@@ -140,6 +141,25 @@ public class ThemeTests
         list[Grid.ColumnProperty] = 2;
         grid.Children.Add(list);
         Shoot(grid, "theme-tree-scroll-splitter.png", 420, 150);
+    }
+
+    [AvaloniaFact]
+    public void Theme_scrollbar_hover_screenshot()
+    {
+        var list = new ListBox { ItemsSource = Enumerable.Range(1, 40).Select(i => "Row " + i).ToArray(), Height = 120, Width = 200, Margin = new Thickness(8) };
+        var window = new MainWindow { Width = 240, Height = 150, Content = list };
+        window.Show();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        // Pointer over the vertical scrollbar (right edge of the list), as a hovering user would be.
+        foreach (var pt in new[] { new Point(100, 70), new Point(190, 70), new Point(211, 72) })
+        {
+            window.MouseMove(pt, Avalonia.Input.RawInputModifiers.None);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        }
+        var bar = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(list).OfType<Avalonia.Controls.Primitives.ScrollBar>().First(b => b.Orientation == Avalonia.Layout.Orientation.Vertical);
+        Assert.True(bar.IsPointerOver, "vertical scrollbar not hovered: " + bar.Bounds + " " + bar.TranslatePoint(new Point(0, 0), window));
+        TestHelpers.CaptureToPng(window, Path.Combine(ShotDir(), "theme-scrollbar-hover.png"));
+        window.Close();
     }
 
     static string Src([System.Runtime.CompilerServices.CallerFilePath] string p = "") => p;
