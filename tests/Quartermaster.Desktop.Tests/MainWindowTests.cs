@@ -36,11 +36,13 @@ sealed class FakeDialogs : IDialogs
     }
 
     public readonly List<string?> SuggestedNames = new();
+    public readonly List<string> DefaultExtensions = new();
     public TaskCompletionSource<string?>? SaveGate;   // when set, the next save picker waits for it (a slow dialog)
 
     public Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null)
     {
         SuggestedNames.Add(suggestedFileName);
+        DefaultExtensions.Add(defaultExtension);
         if (SaveGate is { } g) { SaveGate = null; PickerTitles.Add(title); return g.Task; }
         PickerTitles.Add(title);
         return Task.FromResult(SaveFiles.Count > 0 ? SaveFiles.Dequeue() : null);

@@ -237,4 +237,61 @@ public sealed class LogPanelTests : IDisposable
         Assert.True(sw.ElapsedMilliseconds < 5000, "filter took " + sw.ElapsedMilliseconds + " ms");
         Assert.All(p.Rows, r => Assert.Contains("entry 99", r.Text));
     }
+
+    [AvaloniaFact]
+    public async Task Export_failure_is_logged_not_thrown()
+    {
+        var w = Game();
+        var p = Panel(w);
+        var unobserved = new List<Exception>();
+        void OnUnobserved(object? _, UnobservedTaskExceptionEventArgs e) => unobserved.Add(e.Exception);
+        TaskScheduler.UnobservedTaskException += OnUnobserved;
+        try
+        {
+            _dialogs.SaveFiles.Enqueue(_tmp);   // a folder: the write fails
+            var before = w.Session!.Log.Items.Count;
+            await p.ExportAsync();
+            Assert.Contains(w.Session.Log.Items, e => e.Category == "log" && e.Message.StartsWith("The log panel could not complete an action: "));
+            Assert.True(w.Session.Log.Items.Count > before);
+
+            _dialogs.SaveFiles.Enqueue(_tmp);   // through the button too
+            p.ExportButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Task.Delay(200);
+            Pump();
+            GC.Collect(); GC.WaitForPendingFinalizers();
+            Assert.Empty(unobserved);
+            Assert.Equal(new[] { "txt", "txt" }, _dialogs.DefaultExtensions.TakeLast(2));
+        }
+        finally { TaskScheduler.UnobservedTaskException -= OnUnobserved; }
+    }
+
+    [AvaloniaFact]
+    public void Resized_dock_height_is_kept_across_hide_and_show()
+    {
+        var w = Game();
+        var grid = w.FindControl<Grid>("BodyAndLog")!;
+        Assert.Equal(170, grid.RowDefinitions[2].Height.Value);
+        grid.RowDefinitions[2].Height = new GridLength(260);   // the splitter dragged it
+        w.ClickMenu("&Log");
+        Pump();
+        Assert.Equal(0, grid.RowDefinitions[2].Height.Value);
+        w.ClickMenu("&Log");
+        Pump();
+        Assert.Equal(260, grid.RowDefinitions[2].Height.Value);
+    }
+
+    [AvaloniaFact]
+    public void Panel_screenshot()
+    {
+        var w = Game();
+        w.KeyPress(Key.F5, RawInputModifiers.None, PhysicalKey.F5, null);
+        Pump();
+        Panel(w);
+        w.UpdateLayout();
+        Pump();
+        TestHelpers.CaptureToPng(w, Path.Combine(Root(), "artifacts", "port", "log-panel.png"));
+    }
+
+    static string Root([System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "..", ".."));
 }

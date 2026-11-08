@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     readonly MenuItem _showGrid;
     readonly MenuItem _viewLog;
     LogPanel? _log;
+    double _logHeight = 170;   // WinForms default; follows the splitter
     bool _logWanted = true;   // View > Log: whether the user wants the bottom dock shown
     MenuItem? _editUndo, _editRedo;
     Button? _tbUndo, _tbRedo;
@@ -763,8 +764,9 @@ public partial class MainWindow : Window
         var shown = LogShown;
         LogHost.IsVisible = LogSplitter.IsVisible = shown;
         BodyAndLog.RowDefinitions[1].Height = new GridLength(shown ? 4 : 0);
-        if (shown) { if (BodyAndLog.RowDefinitions[2].Height.Value < 1) BodyAndLog.RowDefinitions[2].Height = new GridLength(170); }
-        else BodyAndLog.RowDefinitions[2].Height = new GridLength(0);
+        var row = BodyAndLog.RowDefinitions[2];
+        if (!shown && row.Height.Value >= 1) _logHeight = row.Height.Value;   // keep what the user dragged it to
+        row.Height = new GridLength(shown ? _logHeight : 0);
         _viewLog.IsChecked = shown;
     }
 

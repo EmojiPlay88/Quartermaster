@@ -61,14 +61,14 @@ public sealed class LogPanel : UserControl
         _search.TextChanged += (_, _) => Schedule();
         bar.Children.Add(_search);
         _copy.Margin = new Thickness(8, 0, 2, 0);
-        _copy.Click += (_, _) => Guard(() => _ = CopyAsync());
-        _export.Click += (_, _) => Guard(() => _ = ExportAsync());
+        _copy.Click += (_, _) => _ = CopyAsync();
+        _export.Click += (_, _) => _ = ExportAsync();
         bar.Children.Add(_copy);
         bar.Children.Add(_export);
         DockPanel.SetDock(bar, Dock.Top);
 
         // Column header, as the WinForms details view.
-        var header = Row("Time", "Kind", "Turn · Phase", "Text", bold: true);
+        var header = Row("Time", "Kind", "Turn · Phase", "Text", bold: false);
         header.Margin = new Thickness(4, 0);
         DockPanel.SetDock(header, Dock.Top);
 
@@ -84,7 +84,7 @@ public sealed class LogPanel : UserControl
             if (e.Key == Key.C && e.KeyModifiers.HasFlag(ShortcutGestures.IsMac ? KeyModifiers.Meta : KeyModifiers.Control))
             {
                 e.Handled = true;
-                Guard(() => _ = CopyAsync());
+                _ = CopyAsync();
             }
         };
 
@@ -200,10 +200,15 @@ public sealed class LogPanel : UserControl
     /// <summary>The text Copy puts on the clipboard: the selected rows (all when none) as the text export.</summary>
     public string CopyText() => LogFilter.ToText(SelectedOrAll());
 
-    async Task CopyAsync()
+    /// <summary>Copy: never throws (a clipboard failure is logged as a warning, as WinForms Guard).</summary>
+    public async Task CopyAsync()
     {
-        var text = CopyText();
-        if (text.Length > 0 && TopLevel.GetTopLevel(this)?.Clipboard is { } cb) await cb.SetDataAsync(DataTransferFactory(text));
+        try
+        {
+            var text = CopyText();
+            if (text.Length > 0 && TopLevel.GetTopLevel(this)?.Clipboard is { } cb) await cb.SetDataAsync(DataTransferFactory(text));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Warn(ex); }
     }
 
     static DataTransfer DataTransferFactory(string text)
@@ -216,10 +221,14 @@ public sealed class LogPanel : UserControl
     /// <summary>Export log…: asks for a file (text or HTML by extension, "game-log" suggested) and writes the listed rows.</summary>
     public async Task ExportAsync()
     {
-        if (_owner() is not { } owner) return;
-        var path = await _dialogs.SaveFileAsync(owner, LogPanelRules.ExportTitle, ExportFilter, "txt", LogPanelRules.ExportFileName);
-        if (path == null) return;
-        LogPanelRules.Export(path, _rows);
+        try
+        {
+            if (_owner() is not { } owner) return;
+            var path = await _dialogs.SaveFileAsync(owner, LogPanelRules.ExportTitle, ExportFilter, "txt", LogPanelRules.ExportFileName);
+            if (path == null) return;
+            LogPanelRules.Export(path, _rows);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Warn(ex); }   // a locked or read-only path: warned in the diagnostics log, as WinForms
     }
 
     void CentreSelected()
@@ -230,11 +239,10 @@ public sealed class LogPanel : UserControl
     void Guard(Action a)
     {
         try { a(); }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _s.Log.Add(DiagnosticSeverity.Warning, "log", "The log panel could not complete an action: " + ex.Message);
-        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Warn(ex); }
     }
+
+    void Warn(Exception ex) => _s.Log.Add(DiagnosticSeverity.Warning, "log", "The log panel could not complete an action: " + ex.Message);
 
     /// <summary>Detaches from the session (the panel is going away).</summary>
     public void Detach()
