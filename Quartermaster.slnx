@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Quartermaster.App/Quartermaster.App.csproj" />
     <Project Path="src/Quartermaster.Core/Quartermaster.Core.csproj" />
+    <Project Path="src/Quartermaster.Desktop/Quartermaster.Desktop.csproj" />
     <Project Path="src/Quartermaster.Net/Quartermaster.Net.csproj" />
     <Project Path="src/Quartermaster.Ocr/Quartermaster.Ocr.csproj" />
     <Project Path="src/Quartermaster.Relay/Quartermaster.Relay.csproj" />
@@ -12,6 +13,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Quartermaster.Core.Tests/Quartermaster.Core.Tests.csproj" />
+    <Project Path="tests/Quartermaster.Desktop.Tests/Quartermaster.Desktop.Tests.csproj" />
     <Project Path="tests/Quartermaster.Docs.Tests/Quartermaster.Docs.Tests.csproj" />
     <Project Path="tests/Quartermaster.Net.Tests/Quartermaster.Net.Tests.csproj" />
     <Project Path="tests/Quartermaster.Ocr.Tests/Quartermaster.Ocr.Tests.csproj" />

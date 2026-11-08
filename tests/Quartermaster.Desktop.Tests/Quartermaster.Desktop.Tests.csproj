@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Avalonia.Headless.XUnit 12 runs on xunit v3 (it depends on xunit.v3.extensibility.core 3.2.2), so this project uses xunit.v3, not xunit 2. -->
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="12.1.5" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Quartermaster.Desktop\Quartermaster.Desktop.csproj" />
+    <ProjectReference Include="..\..\src\Quartermaster.Render\Quartermaster.Render.csproj" />
+    <ProjectReference Include="..\..\src\Quartermaster.Core\Quartermaster.Core.csproj" />
+    <ProjectReference Include="..\..\src\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
+    <ProjectReference Include="..\Quartermaster.TestFixtures\Quartermaster.TestFixtures.csproj" />
+  </ItemGroup>
+
+</Project>

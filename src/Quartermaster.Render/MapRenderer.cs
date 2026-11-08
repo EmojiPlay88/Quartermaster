@@ -11,8 +11,10 @@ namespace Quartermaster.Render;
 /// <param name="HighlightPieceIds">Pieces outlined (2 px, <paramref name="HighlightColor"/>) as "last moved"; null or empty draws nothing extra.</param>
 /// <param name="HideAllPieces">True draws the board, grid and trails but no counters.</param>
 /// <param name="HighlightColor">Colour of the last-moved outline; null uses the selection colour.</param>
+/// <param name="DeviceScale">Device pixels per canvas unit (HiDPI render scaling, applied by the caller's canvas). Board tile levels and
+/// SVG rasters are chosen for <c>zoom * DeviceScale</c> so they stay sharp; 1 (WinForms) changes nothing.</param>
 public sealed record MapDrawOptions(bool ShowGrid, IReadOnlySet<string> SelectedPieceIds, string? HoverStackId, IReadOnlySet<string>? HiddenPieceIds = null, SKColor? Highlight = null, bool ModuleGrids = true,
-    IReadOnlySet<string>? HighlightPieceIds = null, bool HideAllPieces = false, SKColor? HighlightColor = null);
+    IReadOnlySet<string>? HighlightPieceIds = null, bool HideAllPieces = false, SKColor? HighlightColor = null, float DeviceScale = 1f);
 
 /// <summary>
 /// Draws a map into a screen-space canvas: board tiles, grid overlay, movement trails, stacks (insertion order),
@@ -31,7 +33,7 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
         foreach (var board in map.Boards)
         {
             tiles.TryGetValue(BoardTiler.TileKey(board), out var ts);
-            DrawBoard(c, board, ts, vp, visible);
+            DrawBoard(c, board, ts, vp, visible, opt.DeviceScale);
             if (board.Grid != null && (opt.ShowGrid || (opt.ModuleGrids && board.Grid.Visible)))
             {
                 var save = c.Save();
@@ -51,7 +53,11 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
         return new SKRect((float)Math.Round(a.X), (float)Math.Round(a.Y), (float)Math.Round(b.X), (float)Math.Round(b.Y));
     }
 
-    private void DrawBoard(SKCanvas c, BoardDef board, TileSet? ts, Viewport vp, RectD visible)
+    /// <summary>The pyramid level drawn at <paramref name="zoom"/> on a canvas with <paramref name="deviceScale"/> device pixels per unit.</summary>
+    public static int TileLevel(TileSet ts, float zoom, float deviceScale = 1f) =>
+        ts.ChooseLevel(zoom * (float.IsFinite(deviceScale) && deviceScale > 0 ? deviceScale : 1f));
+
+    private void DrawBoard(SKCanvas c, BoardDef board, TileSet? ts, Viewport vp, RectD visible, float deviceScale)
     {
         var ox = board.Offset.X;
         var oy = board.Offset.Y;
@@ -62,7 +68,7 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
             return;
         }
 
-        var level = ts.ChooseLevel(vp.Zoom);
+        var level = TileLevel(ts, vp.Zoom, deviceScale);
         var lw = ts.LevelWidth(level);
         var lh = ts.LevelHeight(level);
         var sx = ts.Width / (double)lw;
@@ -144,7 +150,7 @@ public sealed class MapRenderer(ImageSource images, PieceRenderer pieces)
                 var type = pieces.Types.Get(p.TypeString);
                 var sel = opt.SelectedPieceIds.Contains(p.Id);
                 var sp = vp.ToScreen(center);
-                pieces.Draw(c, p, type, new PointD(sp.X, sp.Y), vp.Zoom, sel ? PieceDrawFlags.Selected : PieceDrawFlags.None);
+                pieces.Draw(c, p, type, new PointD(sp.X, sp.Y), vp.Zoom, sel ? PieceDrawFlags.Selected : PieceDrawFlags.None, opt.DeviceScale);
                 var moved = opt.HighlightPieceIds != null && opt.HighlightPieceIds.Contains(p.Id);
                 if (sel || moved || st.Id == opt.HoverStackId)
                 {

@@ -1,0 +1,9 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Quartermaster.Desktop.App"
+             RequestedThemeVariant="Light">
+  <Application.Styles>
+    <SimpleTheme />
+    <StyleInclude Source="avares://Quartermaster/Theme/ClassicTheme.axaml" />
+  </Application.Styles>
+</Application>

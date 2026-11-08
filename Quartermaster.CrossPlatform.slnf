@@ -1,0 +1,24 @@
+{
+  "solution": {
+    "path": "Quartermaster.slnx",
+    "projects": [
+      "src/Quartermaster.Core/Quartermaster.Core.csproj",
+      "src/Quartermaster.Desktop/Quartermaster.Desktop.csproj",
+      "src/Quartermaster.Net/Quartermaster.Net.csproj",
+      "src/Quartermaster.Relay/Quartermaster.Relay.csproj",
+      "src/Quartermaster.Render/Quartermaster.Render.csproj",
+      "src/Quartermaster.Rules/Quartermaster.Rules.csproj",
+      "src/Quartermaster.Vassal/Quartermaster.Vassal.csproj",
+      "tests/Quartermaster.Core.Tests/Quartermaster.Core.Tests.csproj",
+      "tests/Quartermaster.Desktop.Tests/Quartermaster.Desktop.Tests.csproj",
+      "tests/Quartermaster.Docs.Tests/Quartermaster.Docs.Tests.csproj",
+      "tests/Quartermaster.Net.Tests/Quartermaster.Net.Tests.csproj",
+      "tests/Quartermaster.Relay.Tests/Quartermaster.Relay.Tests.csproj",
+      "tests/Quartermaster.Render.Tests/Quartermaster.Render.Tests.csproj",
+      "tests/Quartermaster.Rules.Tests/Quartermaster.Rules.Tests.csproj",
+      "tests/Quartermaster.TestFixtures/Quartermaster.TestFixtures.csproj",
+      "tests/Quartermaster.Vassal.Tests/Quartermaster.Vassal.Tests.csproj",
+      "tools/Quartermaster.DemoModule/Quartermaster.DemoModule.csproj"
+    ]
+  }
+}

@@ -344,12 +344,12 @@ sealed partial class MainForm
         var b = map.Boards[0];
         var places = game.State.Log.Count(e => e.Kind == LogKind.Place);
         var pieces = game.State.Pieces.Count;
-        var (placed, msg) = PaletteDrop.Place(_session, map, slot, new PointD(b.Offset.X + b.Width / 2.0, b.Offset.Y + b.Height / 2.0), _settings.Current.SnapOnDrop, _actions);
+        var (placed, msg) = PaletteModel.Place(_session, map, slot, new PointD(b.Offset.X + b.Width / 2.0, b.Offset.Y + b.Height / 2.0), _settings.Current.SnapOnDrop, _actions);
         var newPlaces = game.State.Log.Count(e => e.Kind == LogKind.Place) - places;
         var ok = placed && newPlaces == 1 && game.State.Pieces.Count == pieces + 1 && game.State.Log[^1].Text.Contains(" placed", StringComparison.Ordinal);
         Program.AppLog($"smoke: palette drop {(ok ? "ok" : "FAILED")} ('{msg}'; {newPlaces} place entr(y/ies); last log '{game.State.Log[^1].Text}')");
         if (!ok) Program.ExitCode = 1;
-        var outside = PaletteDrop.Place(_session, map, slot, new PointD(-100000, -100000), true);
+        var outside = PaletteModel.Place(_session, map, slot, new PointD(-100000, -100000), true);
         if (outside.Placed || outside.Message != "Drop onto a board" || game.State.Pieces.Count != pieces + 1) { SmokePaletteFail("drop outside boards was not rejected"); }
         if (placed && game.State.Pieces.Keys.FirstOrDefault(k => k.StartsWith("p:", StringComparison.Ordinal)) is { } id)
         {

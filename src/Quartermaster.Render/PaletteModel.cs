@@ -75,6 +75,31 @@ public static class PaletteModel
         return (map.Id, t.Pos, t.StackOnto);
     }
 
+    /// <summary>The module's slot with this <see cref="Key"/>, or null.</summary>
+    public static PieceSlotDef? Find(ModuleModel m, string? key) =>
+        key == null ? null : m.Slots.FirstOrDefault(x => Key(x) == key);
+
+    /// <summary>
+    /// Places a palette counter on a map (the drop path of every UI): resolve the drop, build the piece from its slot, execute a logged
+    /// AddPiece and seed its ledgers. Returns whether it was placed and the status-bar message.
+    /// </summary>
+    /// <param name="actions">The main window's action port (it executes the AddPiece and seeds); null = execute directly.</param>
+    public static (bool Placed, string Message) Place(ModuleSession s, MapDef map, PieceSlotDef slot, PointD mapPoint, bool snap, IActionPort? actions = null)
+    {
+        if (s.Game is not { } game) return (false, "No game is running");
+        if (ResolveDrop(game.State, map, mapPoint, s.Images, snap) is not { } t) return (false, "Drop onto a board");
+        var (type, state) = PieceFactory.FromSlot(s.Model, slot, t.MapId, t.Pos);
+        var id = "p:" + Guid.NewGuid().ToString("N");
+        var add = new AddPiece(id, type, state, t.MapId, t.Pos, t.StackOnto);
+        if (actions != null) actions.PieceCommand(add);
+        else
+        {
+            game.Execute(CommandLog.Prepare(add, game.State, s));
+            s.SeedLedgers();
+        }
+        return (true, $"Placed {PieceName(slot)}");
+    }
+
     private static bool OnBoard(MapDef map, PointD p) =>
         map.Boards.Any(b => p.X >= b.Offset.X && p.Y >= b.Offset.Y && p.X < b.Offset.X + b.Width && p.Y < b.Offset.Y + b.Height);
 }

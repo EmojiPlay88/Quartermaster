@@ -1,0 +1,69 @@
+name: cross-platform
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is Apple silicon (arm64) on GitHub, so the osx-arm64 build below runs natively there.
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          # The repo targets net10.0 (released SDK, no global.json, no preview quality needed).
+          dotnet-version: '10.0.x'
+
+      # Skia needs fontconfig and a GL library at load time; the classic theme falls back to DejaVu Sans when Tahoma is missing.
+      - name: Install Linux libraries and fonts
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1 libfreetype6 libharfbuzz0b libgl1 fonts-dejavu-core
+
+      # Headless UI tests only: Avalonia.Headless never opens a window on any OS.
+      - name: Test
+        run: dotnet test Quartermaster.CrossPlatform.slnf -c Release --nologo
+
+      - name: Publish macOS (Apple silicon)
+        if: runner.os == 'macOS'
+        run: |
+          dotnet publish src/Quartermaster.Desktop -c Release -r osx-arm64 --self-contained -o publish/osx-arm64
+          # A tar keeps the executable bit, which the artifact zip would drop.
+          tar -czf Quartermaster-Desktop-osx-arm64.tar.gz -C publish osx-arm64
+
+      - name: Publish Linux (x64)
+        if: runner.os == 'Linux'
+        run: |
+          dotnet publish src/Quartermaster.Desktop -c Release -r linux-x64 --self-contained -o publish/linux-x64
+          tar -czf Quartermaster-Desktop-linux-x64.tar.gz -C publish linux-x64
+
+      - name: Upload macOS build
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quartermaster-Desktop-osx-arm64
+          path: Quartermaster-Desktop-osx-arm64.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Linux build
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quartermaster-Desktop-linux-x64
+          path: Quartermaster-Desktop-linux-x64.tar.gz
+          if-no-files-found: error

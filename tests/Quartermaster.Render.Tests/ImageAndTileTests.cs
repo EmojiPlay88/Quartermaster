@@ -173,4 +173,18 @@ public class ImageAndTileTests
     [Fact]
     public void TileSet_ChooseLevel_ClampsToLevels()
         => Assert.Equal(0, new TileSet("x", 800, 600, 0).ChooseLevel(0.25f));
+
+    [Fact]
+    public void TileLevel_uses_device_pixels()
+    {
+        var ts = new TileSet("x", 3000, 2000, 2);
+        // HiDPI: zoom 0.5 on a 2x canvas needs the same pixels as zoom 1 at 1x.
+        Assert.Equal(MapRenderer.TileLevel(ts, 1f, 1f), MapRenderer.TileLevel(ts, 0.5f, 2f));
+        Assert.Equal(0, MapRenderer.TileLevel(ts, 0.5f, 2f));
+        Assert.Equal(MapRenderer.TileLevel(ts, 0.375f), MapRenderer.TileLevel(ts, 0.25f, 1.5f));
+        // Default scale 1 (WinForms) is exactly ChooseLevel; nonsense scales fall back to 1.
+        Assert.Equal(ts.ChooseLevel(0.5f), MapRenderer.TileLevel(ts, 0.5f));
+        Assert.Equal(1, MapRenderer.TileLevel(ts, 0.5f, 0f));
+        Assert.Equal(1, MapRenderer.TileLevel(ts, 0.5f, float.NaN));
+    }
 }
