@@ -424,6 +424,7 @@ public class RelayTests
             {
                 b.Configuration["Relay:DataDir"] = dir;
                 b.Configuration["Relay:Port"] = "0";
+                b.Configuration["Relay:BindAddress"] = "loopback";
                 b.Logging.AddProvider(logs);
             });
             await app.StartAsync();

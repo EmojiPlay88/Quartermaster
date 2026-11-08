@@ -48,6 +48,7 @@ public sealed class Piece6cEndToEndTests : IAsyncLifetime
             b.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Relay:Port"] = _port.ToString(),
+                ["Relay:BindAddress"] = "loopback",
                 ["Relay:DataDir"] = Path.Combine(_tmp, "relay"),
             });
         });

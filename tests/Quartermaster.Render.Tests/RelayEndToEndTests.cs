@@ -47,6 +47,7 @@ public sealed class RelayEndToEndTests : IAsyncLifetime
             b.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Relay:Port"] = port.ToString(),
+                ["Relay:BindAddress"] = "loopback",
                 ["Relay:DataDir"] = Path.Combine(_dir, "relay"),
             });
             b.Services.AddSingleton<IStartupFilter>(new CaptureFilter(_capture));
