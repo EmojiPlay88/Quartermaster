@@ -284,13 +284,13 @@ public sealed class MapToolsTests : IDisposable
         var w = new MainWindow(dialogs, Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
-        var bar = w.MapBar;
-        Assert.False(bar.IsVisible);   // no maps yet
         Assert.True(w.OpenModule(Demo("Riverland-Demo.vmod")));
         w.StartSetup(null);
         Dispatcher.UIThread.RunJobs();
-        Assert.True(bar.IsVisible);
         var view = w.MapTabs.ActiveView!;
+        var bar = w.MapTabs.ToolbarOf(view)!;   // the toolbar sits at the top of the map's own tab
+        Assert.True(bar.IsVisible);
+        Assert.Same(((Control)view.Parent!), bar.Parent);
         _s = w.Session;
 
         // Labels and order as WinForms (Save map as picture… waits for stage 3).
@@ -333,8 +333,38 @@ public sealed class MapToolsTests : IDisposable
         {
             w.MapTabs.SelectedIndex = 1;
             Dispatcher.UIThread.RunJobs();
-            Assert.False(bar.HideButton.IsChecked);
+            Assert.NotSame(view, w.MapTabs.ActiveView);
+            Assert.False(w.MapTabs.ToolbarOf(w.MapTabs.ActiveView!)!.HideButton.IsChecked);
         }
+    }
+
+    /// <summary>Headless screenshot of a map tab with the toolbar (Line of sight on) when QM_SHOT_DIR names a folder; otherwise just renders.</summary>
+    [AvaloniaFact]
+    public void Map_tab_with_toolbar_renders()
+    {
+        ShortcutGestures.IsMac = false;
+        var w = new MainWindow(new FakeDialogs(), Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
+        _windows.Add(w);
+        w.Show();
+        w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.StartSetup(null);
+        PumpTiles(w);
+        var view = w.MapTabs.ActiveView!;
+        view.LosEnabled = true;
+        var a = new Point(300, 250);
+        view.ZoomToFit();
+        w.MouseDown(w.MapTabs.TranslatePoint(new Point(200, 200), w) ?? default, MouseButton.Left);
+        w.MouseUp(w.MapTabs.TranslatePoint(new Point(200, 200), w) ?? default, MouseButton.Left);
+        if (Environment.GetEnvironmentVariable("QM_SHOT_DIR") is { Length: > 0 } dir)
+            TestHelpers.CaptureToPng(w, Path.Combine(dir, "map-toolbar.png"));
+        else using (w.CaptureRenderedFrame()) { }
+    }
+
+    static void PumpTiles(MainWindow w)
+    {
+        var until = DateTime.UtcNow.AddSeconds(60);
+        while (w.MapTabs.ActiveView?.Preparing != null && DateTime.UtcNow < until) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
+        Dispatcher.UIThread.RunJobs();
     }
 
     static void Click(ToggleButton b)

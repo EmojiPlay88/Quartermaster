@@ -68,7 +68,6 @@ public partial class MainWindow : Window
         RegisterCommands();
         BuildMenu();
         _router.Attach(this);
-        MapBar.Bind(Maps);
 
         Maps.StatusChanged += (view, loc, zoom) =>
         {

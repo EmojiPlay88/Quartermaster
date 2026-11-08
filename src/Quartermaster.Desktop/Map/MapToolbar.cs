@@ -8,8 +8,8 @@ namespace Quartermaster.Desktop.Map;
 
 /// <summary>
 /// The map toolbar of the WinForms MapWindow (BuildToolbar): Line of sight, Last moved, Hide counters (toggle buttons that follow the
-/// view, so the L and H shortcuts and Esc keep them in step), Centre on selected, and the Zoom presets drop-down. It acts on the active
-/// tab's view and is hidden while no map is shown. Buttons never take the keyboard focus, so Esc and the letter shortcuts stay with the map.
+/// view, so the L and H shortcuts and Esc keep them in step), Centre on selected, and the Zoom presets drop-down. One sits at the top of
+/// each map tab, as in a WinForms map window, and acts on that tab's view. Buttons never take the keyboard focus, so Esc and the letter shortcuts stay with the map.
 /// </summary>
 public sealed class MapToolbar : Border
 {
@@ -26,36 +26,36 @@ public sealed class MapToolbar : Border
     readonly Button _centre = Plain("Centre on selected", CentreTip);
     readonly Button _zoom;
     readonly List<MenuItem> _zoomItems = new();
-    MapTabs? _tabs;
-    MapView? _view;
+    readonly MapView _view;
     bool _syncing;
 
-    public MapToolbar()
+    public MapToolbar(MapView view)
     {
+        _view = view;
         _zoom = Plain("Zoom ▾", ZoomTip);
         var menu = new MenuFlyout();
         foreach (var pct in new[] { 25, 50, 100, 200 })
         {
             var f = pct / 100f;
-            Add(menu, pct + "%", () => _view?.ZoomCentered(f));
+            Add(menu, pct + "%", () => _view.ZoomCentered(f));
         }
-        Add(menu, "Fit", () => _view?.ZoomToFit());
+        Add(menu, "Fit", () => _view.ZoomToFit());
         _zoom.Flyout = menu;
-        _zoom.Content = "Zoom ▾";
 
-        _los.IsCheckedChanged += (_, _) => { if (!_syncing && _view != null) _view.LosEnabled = _los.IsChecked == true; };
-        _last.IsCheckedChanged += (_, _) => { if (!_syncing && _view != null) _view.HighlightLastMoved = _last.IsChecked == true; };
-        _hide.IsCheckedChanged += (_, _) => { if (!_syncing && _view != null) _view.HideCounters = _hide.IsChecked == true; };
-        _centre.Click += (_, _) => _view?.CentreOnSelection();
+        _los.IsCheckedChanged += (_, _) => { if (!_syncing) _view.LosEnabled = _los.IsChecked == true; };
+        _last.IsCheckedChanged += (_, _) => { if (!_syncing) _view.HighlightLastMoved = _last.IsChecked == true; };
+        _hide.IsCheckedChanged += (_, _) => { if (!_syncing) _view.HideCounters = _hide.IsChecked == true; };
+        _centre.Click += (_, _) => _view.CentreOnSelection();
 
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0 };
         foreach (var c in new Control[] { _los, _last, _hide, _centre, _zoom }) bar.Children.Add(c);
+        _view.LosChanged += Sync;
+        _view.HideCountersChanged += SyncHide;
         Child = bar;
-        Padding = new Thickness(2);
+        Padding = new Thickness(0, 1);
         BorderThickness = new Thickness(0, 0, 0, 1);
-        IsVisible = false;
-        Classes.Add("toolbar");
-        this.Bind(BackgroundProperty, this.GetResourceObservable("Classic.FaceBrush"));
+        Classes.Add("mapToolbar");
+        this.Bind(BackgroundProperty, this.GetResourceObservable("Classic.WindowBrush"));
         this.Bind(BorderBrushProperty, this.GetResourceObservable("Classic.BorderBrush"));
     }
 
@@ -67,27 +67,6 @@ public sealed class MapToolbar : Border
     internal Button ZoomButton => _zoom;
     internal IReadOnlyList<MenuItem> ZoomItems => _zoomItems;
 
-    /// <summary>Follows the tabs' active view.</summary>
-    public void Bind(MapTabs tabs)
-    {
-        _tabs = tabs;
-        tabs.ActiveViewChanged += Follow;
-        Follow();
-    }
-
-    void Follow()
-    {
-        var next = _tabs?.ActiveView;
-        if (!ReferenceEquals(next, _view))
-        {
-            if (_view != null) { _view.LosChanged -= Sync; _view.HideCountersChanged -= SyncHide; }
-            _view = next;
-            if (_view != null) { _view.LosChanged += Sync; _view.HideCountersChanged += SyncHide; }
-        }
-        IsVisible = _view != null;
-        Sync();
-    }
-
     void SyncHide(bool _) => Sync();
 
     void Sync()
@@ -95,9 +74,9 @@ public sealed class MapToolbar : Border
         _syncing = true;
         try
         {
-            _los.IsChecked = _view?.LosEnabled == true;
-            _last.IsChecked = _view?.HighlightLastMoved == true;
-            _hide.IsChecked = _view?.HideCounters == true;
+            _los.IsChecked = _view.LosEnabled;
+            _last.IsChecked = _view.HighlightLastMoved;
+            _hide.IsChecked = _view.HideCounters;
         }
         finally { _syncing = false; }
     }
