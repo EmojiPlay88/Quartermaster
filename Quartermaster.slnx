@@ -7,6 +7,7 @@
     <Project Path="src/Quartermaster.Relay/Quartermaster.Relay.csproj" />
     <Project Path="src/Quartermaster.Render/Quartermaster.Render.csproj" />
     <Project Path="src/Quartermaster.Rules/Quartermaster.Rules.csproj" />
+    <Project Path="src/Quartermaster.Updater/Quartermaster.Updater.csproj" />
     <Project Path="src/Quartermaster.Vassal/Quartermaster.Vassal.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -17,6 +18,7 @@
     <Project Path="tests/Quartermaster.Render.Tests/Quartermaster.Render.Tests.csproj" />
     <Project Path="tests/Quartermaster.Rules.Tests/Quartermaster.Rules.Tests.csproj" />
     <Project Path="tests/Quartermaster.TestFixtures/Quartermaster.TestFixtures.csproj" />
+    <Project Path="tests/Quartermaster.Updater.Tests/Quartermaster.Updater.Tests.csproj" />
     <Project Path="tests/Quartermaster.Vassal.Tests/Quartermaster.Vassal.Tests.csproj" />
   </Folder>
 </Solution>
