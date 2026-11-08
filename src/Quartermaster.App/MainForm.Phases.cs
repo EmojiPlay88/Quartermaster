@@ -379,6 +379,7 @@ sealed partial class MainForm
     {
         if (_session?.Game is not { } game || _phases == null) return;
         Application.DoEvents();
+        PaintOpenWindowsForSmoke();
         foreach (var run in game.State.Pending.ToList())
         {
             if (_docs.TryGetValue("batch:" + run.Id, out var form) && form is BatchGridWindow { IsDisposed: false } win)
@@ -515,6 +516,17 @@ sealed partial class MainForm
         CloseFormulaDialogs();
     }
 
+    /// <summary>Smoke: draws every open window once into a scratch bitmap. Windows kept off-screen are never painted by the system, so their lazy parts (grid cells) would otherwise never be built.</summary>
+    void PaintOpenWindowsForSmoke()
+    {
+        foreach (var f in OwnedForms.Concat(MdiChildren).Where(f => !f.IsDisposed).ToList())
+        {
+            using var scratch = new Bitmap(Math.Max(f.Width, 1), Math.Max(f.Height, 1));
+            f.DrawToBitmap(scratch, new Rectangle(0, 0, scratch.Width, scratch.Height));
+        }
+        Application.DoEvents();
+    }
+
     /// <summary>Screenshot runs: closes the calculation windows the phase flow opened (they would cover the picture), brings the map forward and redraws the phase views.</summary>
     void ClearWindowsForShot()
     {
@@ -522,6 +534,7 @@ sealed partial class MainForm
         foreach (var b in _docs.Where(kv => kv.Key.StartsWith("batch:", StringComparison.Ordinal) && !kv.Value.IsDisposed).Select(kv => kv.Value).ToList()) b.Close();
         Application.DoEvents();
         FirstMap()?.Activate();
+        SyncTabs(null); // drop the tabs of the windows just closed
         RefreshPhaseViews();
         Application.DoEvents();
     }

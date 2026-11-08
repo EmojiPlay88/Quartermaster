@@ -444,6 +444,14 @@ sealed partial class LedgerWindow : Form
 
     public int RowCountForSmoke => _rows.Count;
 
+    /// <summary>Smoke: pumps messages and draws the window once into a scratch bitmap. A window kept off-screen is never painted by the system, so this is what makes its lazy parts (counter pictures) get requested and drawn.</summary>
+    public void PaintForSmoke()
+    {
+        Application.DoEvents();
+        using var scratch = new Bitmap(Math.Max(Width, 1), Math.Max(Height, 1));
+        DrawToBitmap(scratch, new Rectangle(0, 0, scratch.Width, scratch.Height));
+    }
+
     public void SaveScreenshot(string path)
     {
         Update();

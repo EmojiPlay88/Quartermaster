@@ -964,6 +964,25 @@ sealed class WorkbenchWindow : Form, WindowManager.IReparentAware
         return null;
     }
 
+    /// <summary>
+    /// Screenshot runs: waits for the rulebook index, restates its status (a smoke step may have left another one), and removes the PDF viewer,
+    /// which only shows a placeholder in smoke mode: the whole left pane goes, or with <paramref name="keepResults"/> the results list fills it.
+    /// </summary>
+    public void SettleForShot(bool keepResults)
+    {
+        var until = DateTime.UtcNow.AddSeconds(30);
+        while (_indexTask is { IsCompleted: false } && DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(20); }
+        Application.DoEvents();
+        if (_index is { } ix && ix.Documents.Count > 0)
+        {
+            var bad = ix.Documents.Count(d => !d.Searchable);
+            _statusText.Text = $"Rulebooks indexed: {ix.Documents.Count - bad} searchable" + (bad > 0 ? $", {bad} {SearchPanelModel.NotSearchableText}" : "") + ".";
+        }
+        if (keepResults) { _viewer.Visible = false; _searchSplit.Visible = false; _search.Dock = DockStyle.Fill; }
+        else _split.Panel1Collapsed = true;
+        Update();
+    }
+
     public void SaveScreenshot(string path)
     {
         SetSplit();

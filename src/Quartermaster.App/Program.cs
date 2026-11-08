@@ -294,6 +294,7 @@ static class Program
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.SetDefaultFont(new Font("Tahoma", 8.25f));
             ApplicationConfiguration.Initialize();
+            OffscreenShots.InstallIfRequested(); // screenshot runs only: no window ever shows on the desktop
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (_, e) => Crash(e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>

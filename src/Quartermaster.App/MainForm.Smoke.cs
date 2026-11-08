@@ -68,6 +68,7 @@ sealed partial class MainForm
             wb.SelectTabForSmoke(_opts.WorkbenchTab);
             wb.WindowState = FormWindowState.Normal;
             wb.Size = new Size(1100, 720); // room for the editors (the default size crops them)
+            wb.SettleForShot(keepResults: false);
             Program.AppLog($"smoke: workbench opened; selected table {wb.SelectedTableForSmoke ?? "(none)"}; {wb.IssueCountForSmoke} issue(s)");
             wb.SaveScreenshot(_opts.ScreenshotWorkbench);
         }
@@ -100,6 +101,7 @@ sealed partial class MainForm
         wb.WindowState = FormWindowState.Normal;
         wb.Size = new Size(1100, 720); // room for the PDF pane, results and editor
         Program.AppLog($"smoke: search workbench resized to {wb.Size}");
+        wb.SettleForShot(keepResults: true);
         wb.SaveScreenshot(_opts.ScreenshotSearch);
     }
 
@@ -160,7 +162,15 @@ sealed partial class MainForm
         if (_ledgers.TryGetValue("ledger", out var w) && !w.IsDisposed && w is LedgerWindow lw)
         {
             Program.AppLog($"smoke: ledger window opened with {lw.RowCountForSmoke} row(s)");
-            if (_opts.ScreenshotLedger != null) lw.SaveScreenshot(_opts.ScreenshotLedger);
+            if (_opts.ScreenshotLedger != null)
+            {
+                // the counter pictures are drawn by a worker: wait for them so the picture is not blank
+                var until = DateTime.UtcNow.AddSeconds(10);
+                while (DateTime.UtcNow < until && (lw.VisibleUnitRowsForSmoke() == 0 || lw.ReadyCounterRowsForSmoke() < lw.VisibleUnitRowsForSmoke()))
+                { lw.PaintForSmoke(); System.Threading.Thread.Sleep(50); }
+                for (var i = 0; i < 5; i++) { lw.PaintForSmoke(); System.Threading.Thread.Sleep(40); }
+                lw.SaveScreenshot(_opts.ScreenshotLedger);
+            }
         }
         else Program.ExitCode = 1;
     }
