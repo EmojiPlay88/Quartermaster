@@ -59,7 +59,8 @@ In the lobby window, the line at the bottom shows what happened. Work down this 
 Quartermaster only updates when you click **Update now**, and only when no game is open. See [Install and Update](Install-and-Update#updating). If something goes wrong you will see one of these:
 
 - **"The update to … was not installed; nothing was changed. Close every other Quartermaster window and try again, or download it from the release page."** The updater refused before it touched anything, because another copy of Quartermaster was running from the same folder, or the copy has no file list. Close every other window and try again.
-- **"This copy of Quartermaster can't update itself; download the new version from the release page."** The copy was built from source, or sits in a folder that is not writable (for example under `Program Files`). Download the zip and unzip it by hand. Your saves and settings are kept.
+- **"This copy of Quartermaster can't update itself; download the new version from the release page. Open the download page?"** The copy has no file list (`quartermaster-files.txt`), which means it was built from source or is not an unzipped release. Download the release zip and unzip it by hand; your saves and settings are kept.
+- **"Quartermaster can't update itself in this folder. Open the download page?"** The program's folder is not writable (for example under `Program Files`). Download the zip and unzip it into a folder you can write to, such as one in your user folder, then run it from there.
 - **The download did not pass its checks.** The messages say the download's SHA-256 or size does not match the release, or the zip is not valid. Nothing was installed. Try again; if it keeps happening, download the zip from the release page yourself.
 - **"The update to … didn't start, so Quartermaster went back to …".** The new version did not confirm that it had started, so the updater put the old files back. You are on your previous version and can keep playing. If the message adds "Some files may need a fresh download from the release page", download the zip and unzip it over the folder.
 
@@ -67,7 +68,7 @@ The previous version is kept in a `Quartermaster.backup-<version>` folder beside
 
 ## Where does Quartermaster keep my files?
 
-Your own files stay where you put them. **Add module…** only lists a `.vmod` file where it already is, and **Save Game As…** and **Save Rules Pack As…** save where you choose.
+Your own files stay where you put them. **Add module…** only lists a `.vmod` file where it already is, and **Save Game As...** and **Save Rules Pack As...** save where you choose.
 
 Everything else Quartermaster keeps for itself is in one folder, `%LOCALAPPDATA%\Quartermaster` (paste that into the Explorer address bar). In it:
 
@@ -90,7 +91,7 @@ Deleting `settings.json` puts everything back to the defaults (and empties your 
 
 Yes, that is what it is for, with some honest limits.
 
-- **What it does.** It opens standard `.vmod` files directly: boards, grids (hex, square and zoned), counters and their traits, setups, the turn track and rulebook PDFs. It can import saved games (`.vsav`). It does not change your module file.
+- **What it does.** It opens standard `.vmod` files directly: maps and boards, grids (hex, square and zoned), counters (piece slots) with their traits and prototypes, the module's setups, dice, sides, charts and rulebook documents. It can import saved games (`.vsav`). It does not change your module file.
 - **What it may not support.** VASSAL is large and modules can do many things. Anything Quartermaster does not know about is skipped rather than guessed at. The skipped parts are listed in **View > Diagnostics** with messages such as "Unsupported trait … ignored", "Unsupported grid type … ignored" and "unmodelled element(s) … ignored". A module that relies on those parts, for example automated behaviours coded as unusual traits, may not play the same way as it does in VASSAL. The best test is to open your module and look at the Diagnostics list.
 - **Rules packs are made per module.** Quartermaster ships no game content. A rules pack holds the tables, formulas and phases for one specific module file, and you (or someone sharing theirs) write it in the Rules Workbench. A pack made for one module will not carry over to another. See [Making a Rules Pack](Making-a-Rules-Pack).
 
