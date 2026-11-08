@@ -94,7 +94,7 @@ public static class MapContextMenu
         }
     }
 
-    /// <summary>WinForms MapWindow.BuildMapMenu. "Hide counters" arrives with the map tools, "Save map as picture…" with stage 3.</summary>
+    /// <summary>WinForms MapWindow.BuildMapMenu. "Save map as picture…" comes with stage 3.</summary>
     static void AddMapItems(ItemCollection items, MapView view, GameSession game)
     {
         MenuItem Item(string label, Action click)
@@ -118,6 +118,9 @@ public static class MapContextMenu
         Item("Zoom to Fit", view.ZoomToFit);
         Item("Zoom 100%", () => view.ZoomCentered(1f));
         items.Add(new Separator());
+        var hide = Item("Hide counters", () => view.HideCounters = !view.HideCounters);   // before Centre on selected, as WinForms
+        hide.ToggleType = MenuItemToggleType.CheckBox;
+        hide.IsChecked = view.HideCounters;
         Item("Centre on selected", view.CentreOnSelection);
     }
 

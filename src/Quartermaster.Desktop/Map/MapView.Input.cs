@@ -182,7 +182,9 @@ public sealed partial class MapView
 
     void PruneIfAttached()
     {
-        if (_topLevel != null) PruneSelection();
+        if (_topLevel == null) return;
+        PruneSelection();
+        RefreshLastMoved();   // also after an undo or a new game
     }
 
     /// <summary>
@@ -222,7 +224,8 @@ public sealed partial class MapView
         InvalidateVisual();
     }
 
-    MapDrawOptions Options(IReadOnlySet<string>? hidden, string? hover = null) => new(ShowGrid, _selected, hover, hidden, DeviceScale: DeviceScale);
+    MapDrawOptions Options(IReadOnlySet<string>? hidden, string? hover = null) =>
+        new(ShowGrid, _selected, hover, hidden, HighlightPieceIds: _highlightLast ? _lastMoved : null, HideAllPieces: _hideCounters, DeviceScale: DeviceScale);
 
     void DrawBand(SKCanvas c)
     {
@@ -278,6 +281,7 @@ public sealed partial class MapView
             e.Handled = true;
             return;
         }
+        if (LosPressed(e, pt)) return;
         // Right press, or Ctrl+click on macOS (never add-to-selection there): select the counter now, open the menu on release (MapCanvas).
         if (props.IsRightButtonPressed
             || (ShortcutGestures.IsMac && props.IsLeftButtonPressed && (e.KeyModifiers & KeyModifiers.Control) != 0))
@@ -325,6 +329,7 @@ public sealed partial class MapView
             e.Handled = true;
             return;
         }
+        if (LosMoved(p)) { e.Handled = true; return; }
         if (_panning)
         {
             View.Pan = new SKPoint((float)(View.Pan.X - (p.X - _panLast.X) / View.Zoom), (float)(View.Pan.Y - (p.Y - _panLast.Y) / View.Zoom));
@@ -356,6 +361,7 @@ public sealed partial class MapView
         base.OnPointerReleased(e);
         var p = e.GetPosition(this);
         var left = e.InitialPressMouseButton == MouseButton.Left;
+        if (LosReleased(e)) return;
         if (_drag.Active)
         {
             // A drop outside the view lands nowhere (the WinForms app hands such drags to other windows; stage 1 has one map).
@@ -407,12 +413,13 @@ public sealed partial class MapView
         if (_panning) EndPan();
         if (_drag.Active) EndDrag(commit: false, default); // capture taken away (window switch, dialog): cancel
         if (_bandActive) { _bandActive = false; InvalidateVisual(); }
+        if (_los is { Dragging: true } los) { los.End(); InvalidateVisual(); }   // capture taken away mid-line: keep what was drawn
     }
 
     void EndPan()
     {
         _panning = false;
-        Cursor = _space ? new Cursor(StandardCursorType.Hand) : null;
+        Cursor = _space ? new Cursor(StandardCursorType.Hand) : RestingCursor;
     }
 
     // ---------- keys ----------
@@ -420,6 +427,7 @@ public sealed partial class MapView
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (e.Key == Key.Escape && LosEscape()) { e.Handled = true; return; }
         if (e.Key == Key.Escape && _drag.Active)
         {
             EndDrag(commit: false, default);
@@ -440,7 +448,7 @@ public sealed partial class MapView
         if (e.Key == Key.Space)
         {
             _space = false;
-            if (!_panning) Cursor = null;
+            if (!_panning) Cursor = RestingCursor;
             e.Handled = true;
         }
     }

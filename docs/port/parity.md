@@ -108,6 +108,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
+| MapWindow: map toolbar (Line of sight, Last moved, Hide counters, Centre on selected, Zoom) | 2 | ✔ |  |  | one toolbar above the tabs acting on the selected map; Save map as picture… waits for stage 3 |
 | MapWindow: one map per tab, board tiles prepared in the background, placeholder on failure | 1 | ✔ | ✔ | ✔ |  |
 | MapCanvas: pan (drag, wheel, trackpad) | 1 | ✔ | ✔ | ✔ | mac wheel = pan, Cmd+wheel = zoom |
 | MapCanvas: zoom (wheel, pinch, menus) | 1 | ✔ | ✔ | ✔ |  |
@@ -122,10 +123,10 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MapCanvas: hover stack popup (CounterDetailPopup) | 2 | ✔ |  |  | same layout and pixels as WinForms (shared `CounterPopupLayout`); shown in the window overlay, so it stays inside the map window rather than the screen; hover delay fixed at 600 ms until Settings |
 | MapCanvas: hover-stack highlight | 2 | ✔ |  |  |  |
 | MapCanvas: double-click stack expand | 2 | ✔ |  |  | online guests send it through their action port, as WinForms |
-| MapCanvas: right-click and Ctrl+click context menu | 2 | ✔ |  |  | counter menu from the shared PieceMenuModel; empty-map menu without Hide counters (map tools) and Save map as picture (stage 3); macOS Ctrl+click opens it; Show in Ledger and Calculate wait for the Ledger and formula dialogs (2b) |
-| MapCanvas: Line of sight tool (LosTool), Esc cancels LOS | 2 |  |  |  |  |
-| MapCanvas: Hide counters (H) | 2 |  |  |  |  |
-| MapCanvas: Last moved highlight | 2 |  |  |  |  |
+| MapCanvas: right-click and Ctrl+click context menu | 2 | ✔ |  |  | counter menu from the shared PieceMenuModel; empty-map menu without Save map as picture (stage 3); macOS Ctrl+click opens it; Show in Ledger and Calculate wait for the Ledger and formula dialogs (2b) |
+| MapCanvas: Line of sight tool (LosTool), Esc cancels LOS | 2 | ✔ |  |  | L key or toolbar; left-drag measures, Esc or right-click cancels; drawn in the view's picture so it stays sharp on HiDPI; on macOS Ctrl+click counts as right-click |
+| MapCanvas: Hide counters (H) | 2 | ✔ |  |  | H key, toolbar and the empty-map menu; draws the board only (all counters) and clears the selection, as WinForms |
+| MapCanvas: Last moved highlight | 2 | ✔ |  |  | toolbar toggle; follows moves, undo and new games |
 | Cross-window drag preview and drops (OLE) | - |  |  |  | Windows-specific |
 | PropertySheetDialog | 2 | ✔ |  |  |  |
 | BreakdownTip | 3 | ✔ |  |  | on the popup's ledger lines; the ledger and inventory grid tips come with those windows (stage 3) |

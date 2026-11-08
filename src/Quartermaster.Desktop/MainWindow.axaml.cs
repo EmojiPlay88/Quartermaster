@@ -68,6 +68,7 @@ public partial class MainWindow : Window
         RegisterCommands();
         BuildMenu();
         _router.Attach(this);
+        MapBar.Bind(Maps);
 
         Maps.StatusChanged += (view, loc, zoom) =>
         {
@@ -247,6 +248,9 @@ public partial class MainWindow : Window
 
     void RegisterCommands()
     {
+        // The map tools act on the selected tab (WinForms: the active map window). Letter shortcuts only fire with the map focused.
+        _router.SetHandler("tool.los", () => Available(Maps.ActiveView != null && Avail("tool.los"), () => Maps.ActiveView!.ToggleLos()));
+        _router.SetHandler("view.hideCounters", () => Available(Maps.ActiveView != null, () => Maps.ActiveView!.ToggleHideCounters()));
         _router.SetHandler("file.openModule", () => RunAsync(OpenModuleDialogAsync));
         _router.SetHandler("file.newGame", () => Available(Avail("file.newGame"), () => RunAsync(NewGameAsync)));
         _router.SetHandler("file.openGame", () => Available(Avail("file.openGame"), () => RunAsync(OpenGameDialogAsync)));

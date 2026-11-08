@@ -190,6 +190,7 @@ public sealed partial class MapView : Control
         if (_drag.Active) _drag.Draw(c, View, st);
         else _renderer.Draw(c, Map, _tiles, st, Session.Model, View, size, Options(null, _hoverStack));
         DrawBand(c);
+        DrawLos(c);
         if (Preparing is { } p) Message(c, size, $"Preparing map… {(int)Math.Round(p * 100)}%");
     }
 

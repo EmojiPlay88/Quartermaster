@@ -1,11 +1,14 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="using:Quartermaster.Desktop.Shell"
+        xmlns:map="using:Quartermaster.Desktop.Map"
         x:Class="Quartermaster.Desktop.MainWindow"
         Title="Quartermaster"
         Width="1024" Height="768">
   <DockPanel>
     <Menu x:Name="MainMenu" DockPanel.Dock="Top" />
+    <!-- The map toolbar (WinForms MapWindow.BuildToolbar), acting on the selected tab -->
+    <map:MapToolbar x:Name="MapBar" DockPanel.Dock="Top" />
     <!-- Status bar as WinForms MainForm: module | message (springs) | tiling progress | location (170) | zoom (50) -->
     <Border Classes="status" DockPanel.Dock="Bottom" BorderThickness="0,1,0,0">
       <Grid ColumnDefinitions="Auto,*,Auto,170,50" Height="22">
