@@ -42,6 +42,7 @@ public sealed class MapDragController : IDisposable
     float _baseZoom;
     SKPoint _basePan;
     float _spriteZoom;
+    float _scale = 1;
     List<Item> _items = new();
     IReadOnlyList<FormationGroup> _groups = Array.Empty<FormationGroup>();
     PointD _delta;
@@ -86,10 +87,14 @@ public sealed class MapDragController : IDisposable
     /// Enters captured drag mode: snapshots the scene minus the dragged pieces and pre-renders them.
     /// <paramref name="renderBase"/> draws the scene with the given pieces hidden. Returns false when there is nothing to drag
     /// or something failed (logged); fields are only assigned once everything succeeded.
+    /// <paramref name="scale"/> is device pixels per view unit (HiDPI): <paramref name="renderBase"/> then returns an image of
+    /// <paramref name="size"/> × scale pixels and the sprites are rendered at zoom × scale, so a canvas drawing at that scale stays
+    /// pixel-sharp. 1 (WinForms) draws exactly as before.
     /// </summary>
     public bool Begin(GameState st, string grabbed, IEnumerable<string> selected, PointD grabPoint, Viewport vp, SKSize size,
-        Func<IReadOnlySet<string>, SKImage?> renderBase)
+        Func<IReadOnlySet<string>, SKImage?> renderBase, float scale = 1)
     {
+        if (!(scale > 0)) scale = 1;
         End();
         SKImage? snap = null;
         List<Item>? items = null;
@@ -102,7 +107,7 @@ public sealed class MapDragController : IDisposable
             var info = new DragInfo(_s, ids, primary, new PointD(pp.Pos.X - grabPoint.X, pp.Pos.Y - grabPoint.Y));
             snap = renderBase(new HashSet<string>(ids));
             if (snap == null) return false;
-            items = MakeSprites(st, info, vp.Zoom);
+            items = MakeSprites(st, info, vp.Zoom * scale);
             var delta = DropResolver.GhostDelta(st, info.PrimaryId, grabPoint, info.GrabOffset);
             var groups = DropResolver.ResolveFormation(st, _map, grabPoint, info.GrabOffset, info.PrimaryId, info.Ids, _s.Images, Snap);
             // Everything succeeded: only now touch the fields.
@@ -113,6 +118,7 @@ public sealed class MapDragController : IDisposable
             _basePan = vp.Pan;
             _items = items;
             _spriteZoom = vp.Zoom;
+            _scale = scale;
             _delta = delta;
             _groups = groups;
             snap = null;
@@ -136,12 +142,13 @@ public sealed class MapDragController : IDisposable
     {
         try
         {
-            if (_info != d || !Incoming || _spriteZoom != zoom)
+            if (_info != d || !Incoming || _spriteZoom != zoom || _scale != 1)
             {
                 var items = MakeSprites(st, d, zoom);
                 DisposeSprites();
                 _items = items;
                 _spriteZoom = zoom;
+                _scale = 1;
                 _info = d;
                 Incoming = true;
             }
@@ -162,9 +169,9 @@ public sealed class MapDragController : IDisposable
         _groups = Array.Empty<FormationGroup>();
     }
 
-    /// <summary>True when the view changed since the snapshot (zoom, pan or size), so the snapshot no longer matches the screen.</summary>
-    public bool IsStale(Viewport vp, SKSize size) =>
-        Active && (vp.Zoom != _baseZoom || vp.Pan != _basePan || size != _baseSize);
+    /// <summary>True when the view changed since the snapshot (zoom, pan, size or device scale), so the snapshot no longer matches the screen.</summary>
+    public bool IsStale(Viewport vp, SKSize size, float scale = 1) =>
+        Active && (vp.Zoom != _baseZoom || vp.Pan != _basePan || size != _baseSize || scale != _scale);
 
     /// <summary>Recomputes the unsnapped ghost offset and the landing groups for a cursor position (map space).</summary>
     public void Update(GameState st, PointD cursor)
@@ -218,18 +225,28 @@ public sealed class MapDragController : IDisposable
         if (!Incoming) _info = null;
         DisposeSprites();
         _groups = Array.Empty<FormationGroup>();
+        if (!Incoming) _scale = 1;
     }
 
     /// <summary>Draws the snapshot (captured drag only), the cursor-following sprites and the landing outlines.</summary>
     public void Draw(SKCanvas c, Viewport vp, GameState st)
     {
-        if (_base != null) c.DrawImage(_base, 0, 0, Sampling);
+        var k = _scale;
+        if (_base != null)
+        {
+            // At device scale k the image holds k pixels per view unit: drawn into its view-unit rectangle it lands 1:1 on device pixels.
+            if (k == 1) c.DrawImage(_base, 0, 0, Sampling);
+            else c.DrawImage(_base, SKRect.Create(0, 0, _base.Width / k, _base.Height / k), Sampling);
+        }
         if (_info == null) return;
 
         foreach (var it in _items)
         {
             var sp = vp.ToScreen(new PointD(it.Center.X + _delta.X, it.Center.Y + _delta.Y));
-            c.DrawImage(it.Sprite.Image, sp.X - it.Sprite.Half, sp.Y - it.Sprite.Half, Sampling);
+            var img = it.Sprite.Image;
+            var h = it.Sprite.Half / k;
+            if (k == 1) c.DrawImage(img, sp.X - h, sp.Y - h, Sampling);
+            else c.DrawImage(img, SKRect.Create(sp.X - h, sp.Y - h, img.Width / k, img.Height / k), Sampling);
         }
 
         var hl = SystemColors.Highlight;

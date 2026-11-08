@@ -14,7 +14,7 @@ namespace Quartermaster.Desktop.Map;
 /// <summary>
 /// One map: board tiles, grids and pieces drawn by the shared <see cref="MapRenderer"/>, with pan and zoom copied from the WinForms
 /// MapCanvas. <see cref="View"/> works in Avalonia DIPs (control-relative); Avalonia's canvas applies the render scaling, so the map is
-/// rasterised at device resolution. Selection and piece drags (the selected set and drag controller below) are wired up by the input part.
+/// rasterised at device resolution. Selection, rubber band and piece drags live in the input part (MapView.Input.cs).
 /// </summary>
 public sealed partial class MapView : Control
 {
@@ -32,9 +32,6 @@ public sealed partial class MapView : Control
     Dictionary<string, TileSet> _tiles = new();
     double _zoomStep = 1.2;
     bool _initialView;
-    bool _space;
-    bool _panning;
-    Point _panLast;
     TopLevel? _topLevel;
     int _playbackReported;
 
@@ -44,7 +41,8 @@ public sealed partial class MapView : Control
         Map = map;
         _pieces = new PieceRenderer(session.Images);
         _renderer = new MapRenderer(session.Images, _pieces);
-        _drag = new MapDragController(session, map, _pieces, a => a());
+        _drag = new MapDragController(session, map, _pieces, Guard);
+        _drag.Aborted += CancelDrag;
         Focusable = true;
         ClipToBounds = true;
     }
@@ -179,8 +177,14 @@ public sealed partial class MapView : Control
             Message(c, size, "This map belongs to another side");
             return;
         }
+        if (_drag.IsStale(View, ClientSize, DeviceScale))
+        {
+            _drag.End();
+            Dispatcher.UIThread.Post(CancelDrag); // release the pointer outside the render pass
+        }
         if (_drag.Active) _drag.Draw(c, View, st);
-        else _renderer.Draw(c, Map, _tiles, st, Session.Model, View, size, new MapDrawOptions(ShowGrid, _selected, null, DeviceScale: DeviceScale));
+        else _renderer.Draw(c, Map, _tiles, st, Session.Model, View, size, Options(null));
+        DrawBand(c);
         if (Preparing is { } p) Message(c, size, $"Preparing map… {(int)Math.Round(p * 100)}%");
     }
 
@@ -244,6 +248,7 @@ public sealed partial class MapView : Control
         AddHandler(PointerTouchPadGestureMagnifyEvent, OnMagnify);
         _topLevel = TopLevel.GetTopLevel(this);
         if (_topLevel != null) _topLevel.ScalingChanged += OnScalingChanged;
+        Session.ViewChanged += OnSessionViewChanged;
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -251,87 +256,11 @@ public sealed partial class MapView : Control
         RemoveHandler(PointerTouchPadGestureMagnifyEvent, OnMagnify);
         if (_topLevel != null) _topLevel.ScalingChanged -= OnScalingChanged;
         _topLevel = null;
-        _drag.End();
+        Session.ViewChanged -= OnSessionViewChanged;
+        CancelDrag();
         base.OnDetachedFromVisualTree(e);
     }
 
     /// <summary>Moved to a monitor with another scaling: redraw with tiles and SVG rasters for the new device resolution.</summary>
     void OnScalingChanged(object? sender, EventArgs e) => InvalidateVisual();
-
-    protected override void OnPointerPressed(PointerPressedEventArgs e)
-    {
-        base.OnPointerPressed(e);
-        if (_drag.Active) return; // a drag owns the pointer until it ends
-        Focus();
-        var pt = e.GetCurrentPoint(this);
-        // Same pan gestures as MapCanvas: middle button, or left button while Space is held.
-        if (pt.Properties.IsMiddleButtonPressed || (pt.Properties.IsLeftButtonPressed && _space))
-        {
-            _panning = true;
-            _panLast = pt.Position;
-            e.Pointer.Capture(this);
-            Cursor = new Cursor(StandardCursorType.SizeAll);
-            e.Handled = true;
-        }
-    }
-
-    protected override void OnPointerMoved(PointerEventArgs e)
-    {
-        base.OnPointerMoved(e);
-        if (!_panning) return;
-        var p = e.GetPosition(this);
-        View.Pan = new SKPoint((float)(View.Pan.X - (p.X - _panLast.X) / View.Zoom), (float)(View.Pan.Y - (p.Y - _panLast.Y) / View.Zoom));
-        _panLast = p;
-        e.Handled = true;
-        ViewChanged();
-    }
-
-    protected override void OnPointerReleased(PointerReleasedEventArgs e)
-    {
-        base.OnPointerReleased(e);
-        if (!_panning || (e.InitialPressMouseButton != MouseButton.Middle && e.InitialPressMouseButton != MouseButton.Left)) return;
-        EndPan();
-        e.Pointer.Capture(null);
-        e.Handled = true;
-    }
-
-    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
-    {
-        base.OnPointerCaptureLost(e);
-        if (_panning) EndPan();
-    }
-
-    void EndPan()
-    {
-        _panning = false;
-        Cursor = _space ? new Cursor(StandardCursorType.Hand) : null;
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        base.OnKeyDown(e);
-        if (e.Key == Key.Space)
-        {
-            _space = true;
-            if (!_panning) Cursor = new Cursor(StandardCursorType.Hand);
-            e.Handled = true;
-        }
-    }
-
-    protected override void OnKeyUp(KeyEventArgs e)
-    {
-        base.OnKeyUp(e);
-        if (e.Key == Key.Space)
-        {
-            _space = false;
-            if (!_panning) Cursor = null;
-            e.Handled = true;
-        }
-    }
-
-    protected override void OnLostFocus(FocusChangedEventArgs e)
-    {
-        base.OnLostFocus(e);
-        _space = false;
-    }
 }
