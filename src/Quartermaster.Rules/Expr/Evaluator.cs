@@ -143,6 +143,19 @@ public static class Evaluator
         return v.Text;
     }
 
+    /// <summary>Every function name <see cref="EvalCall"/> dispatches (lower-case; the parser matches names case-insensitively).</summary>
+    public static IReadOnlyList<string> FunctionNames { get; } = new[]
+    {
+        "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup",
+        "dice", "has", "startswith", "contains", "name", "marker",
+    };
+
+    /// <summary>Every binary and unary operator the formula language accepts ('-' is both binary and unary).</summary>
+    public static IReadOnlyList<string> OperatorNames { get; } = new[]
+    {
+        "+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!=", "and", "or", "not",
+    };
+
     private static Value EvalCall(Call c, IEvalContext ctx)
     {
         var a = c.Args;
