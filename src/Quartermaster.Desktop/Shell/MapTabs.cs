@@ -53,13 +53,24 @@ public sealed class MapTabs : TabControl
     /// location unknown, as MapCanvas.ReportStatus(null)) and null when only the zoom changed (keep the shown location).</summary>
     public event Action<MapView, string?, string>? StatusChanged;
 
-    /// <summary>A short message for the status bar (palette drops), as MapCanvas.DropMessage.</summary>
+    /// <summary>A short message for the status bar (palette drops, "Select a counter first"), as MapCanvas.DropMessage.</summary>
     public event Action<string>? DropMessage;
 
     /// <summary>A view's tile preparation progress 0..1; null when done.</summary>
     public event Action<MapView, double?>? TilingProgress;
 
     public event Action? ActiveViewChanged;
+
+    /// <summary>Dialogs and shortcut texts for the views' right-click menus (the main window's).</summary>
+    public MapMenuServices? MenuServices
+    {
+        get;
+        set
+        {
+            field = value;
+            foreach (var v in _views) v.MenuServices = value;
+        }
+    }
 
     /// <summary>Forces grids on every view (View → Show Grid).</summary>
     public bool ShowGrid
@@ -132,7 +143,8 @@ public sealed class MapTabs : TabControl
 
     MapView Create(ModuleSession s, MapDef map)
     {
-        var v = new MapView(s, map) { ShowGrid = _showGrid, Preparing = map.Boards.Count > 0 ? 0 : null };
+        var v = new MapView(s, map) { ShowGrid = _showGrid, Preparing = map.Boards.Count > 0 ? 0 : null, MenuServices = MenuServices };
+        v.StatusMessage += m => DropMessage?.Invoke(m);
         v.Guarded = a => Run(s, map, a);
         v.Actions = () => _actions?.Invoke();
         // As MapCanvas: pan, resize and tiles arriving update only the zoom; fit/centre/menu zoom clear the location; the pointer and the

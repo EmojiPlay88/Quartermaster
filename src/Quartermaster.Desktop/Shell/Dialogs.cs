@@ -37,6 +37,11 @@ public interface IDialogs
     /// <summary>A one-line text prompt with OK / Cancel (WinForms InputDialog); the entered text, or null when cancelled.</summary>
     Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial);
 
+    /// <summary>A piece's property sheet (WinForms PropertySheetDialog): one text box per row; the edited values in row order, or null when
+    /// cancelled. <paramref name="managedValue"/> gives the Ledger value of a row a rules-pack property manages (that box is read-only).</summary>
+    Task<IReadOnlyList<string>?> EditPropertySheetAsync(Window owner, string title, IReadOnlyList<(string Name, string Value)> rows,
+        Func<string, string?>? managedValue);
+
     /// <summary>A warning with an OK button.</summary>
     Task ShowWarningAsync(Window owner, string message, string caption);
 
@@ -95,7 +100,11 @@ public sealed class Dialogs : IDialogs
         MessageBox.ShowYesNoCancelAsync(owner, message, caption);
 
     public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial) =>
-        new TextPrompt(title, prompt, initial).ShowDialog<string?>(owner);
+        new InputDialog(title, prompt, initial).ShowDialog<string?>(owner);
+
+    public Task<IReadOnlyList<string>?> EditPropertySheetAsync(Window owner, string title, IReadOnlyList<(string Name, string Value)> rows,
+        Func<string, string?>? managedValue) =>
+        new PropertySheetDialog(title, rows, managedValue).ShowDialog<IReadOnlyList<string>?>(owner);
 
     public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty) =>
         new SetupChooser(model, difficulty, preselectNew).ShowDialog<SetupChoice?>(owner);
@@ -150,32 +159,4 @@ sealed class MessageBox : Window
     /// <summary>Yes / No / Cancel; closing the window counts as Cancel.</summary>
     public static Task<bool?> ShowYesNoCancelAsync(Window owner, string message, string caption) =>
         new MessageBox(message, caption, yesNo: true, cancel: true).ShowDialog<bool?>(owner);
-}
-
-/// <summary>A small classic text prompt (WinForms InputDialog): prompt, one text box, OK / Cancel. Closes with the text, or null.</summary>
-sealed class TextPrompt : Window
-{
-    public TextPrompt(string title, string prompt, string initial)
-    {
-        Title = title;
-        SizeToContent = SizeToContent.Height;
-        Width = 320;
-        CanResize = false;
-        ShowInTaskbar = false;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        var box = new TextBox { Text = initial };
-        var ok = new Button { Content = "OK", MinWidth = 75, IsDefault = true, HorizontalContentAlignment = HorizontalAlignment.Center };
-        var cancel = new Button { Content = "Cancel", MinWidth = 75, IsCancel = true, HorizontalContentAlignment = HorizontalAlignment.Center };
-        ok.Click += (_, _) => Close(box.Text ?? "");
-        cancel.Click += (_, _) => Close(null);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
-        buttons.Children.Add(ok);
-        buttons.Children.Add(cancel);
-        var panel = new StackPanel { Margin = new Thickness(8) };
-        panel.Children.Add(new TextBlock { Text = prompt, TextWrapping = Avalonia.Media.TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
-        panel.Children.Add(box);
-        panel.Children.Add(buttons);
-        Content = panel;
-        Opened += (_, _) => ok.Focus();   // as WinForms InputDialog: OK has TabIndex 0 and so the focus
-    }
 }

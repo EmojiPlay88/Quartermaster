@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Quartermaster.Core;
@@ -27,6 +28,7 @@ public sealed partial class MapView
     bool _bandActive;
     PointD _bandStart, _bandNow;
     IPointer? _dragPointer;
+    bool _contextPress;
 
     /// <summary>The selected pieces (click, add-modifier click, rubber band).</summary>
     public IReadOnlySet<string> SelectedPieceIds => _selected;
@@ -48,6 +50,65 @@ public sealed partial class MapView
 
     /// <summary>Supplies the action port that executes drops (one undoable move gesture, OnMove formulas); null result = plain commands.</summary>
     public Func<IActionPort?>? Actions { get => _drag.Actions; set => _drag.Actions = value; }
+
+    /// <summary>The window's dialogs, game-master switch and shortcut texts for the right-click menu; null: no dialogs (prompts count as
+    /// cancelled, nothing is deleted, no property sheet).</summary>
+    public MapMenuServices? MenuServices { get; set; }
+
+    /// <summary>The right-click menu while it is open (tests).</summary>
+    internal ContextMenu? OpenMenu { get; private set; }
+
+    /// <summary>The last menu command, which may still wait for a dialog (tests).</summary>
+    internal Task? MenuCommand { get; private set; }
+
+    /// <summary>A short message for the status bar ("Select a counter first"), as MapCanvas.DropMessage.</summary>
+    public event Action<string>? StatusMessage;
+
+    /// <summary>Scrolls to the selected counters (WinForms MapCanvas.CentreOnSelection); says so when nothing is selected.</summary>
+    public void CentreOnSelection()
+    {
+        if (State is { } st && MapViewTools.SelectionCentre(st, Map.Id, _selected) is { } c) CentreOn(c);
+        else StatusMessage?.Invoke("Select a counter first");
+    }
+
+    /// <summary>Runs a menu command as WinForms MapWindow.Run: failures (also those after an asynchronous dialog) are logged, not thrown.</summary>
+    internal void RunMenuCommand(Func<Task> command)
+    {
+        Task? t = null;
+        GuardCommand(() => t = command());
+        if (t != null) MenuCommand = Observe(t);
+    }
+
+    async Task Observe(Task t)
+    {
+        try { await t; }
+        catch (Exception) when (t.IsFaulted) { GuardCommand(() => t.GetAwaiter().GetResult()); }   // rethrown inside the guard: logged
+    }
+
+    void GuardCommand(Action a)
+    {
+        if (Guarded != null) { Guarded(a); return; }
+        try { a(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Session.Log.Add(DiagnosticSeverity.Error, "command", "A command failed: " + ex.Message, Map.Name);
+        }
+    }
+
+    /// <summary>Opens the right-click menu for what is under <paramref name="p"/> (WinForms MapCanvas.ContextRequested → MapWindow.OnContext).</summary>
+    void OpenContextMenu(Point p) => OpenContextMenu(PieceAt(p));
+
+    /// <summary>Opens the right-click menu of a counter (null: the map menu) at the pointer.</summary>
+    internal void OpenContextMenu(string? pieceId)
+    {
+        OpenMenu?.Close();
+        ContextMenu? menu = null;
+        GuardCommand(() => menu = MapContextMenu.Build(this, pieceId));
+        if (menu == null) return;
+        menu.Closed += (_, _) => { if (ReferenceEquals(OpenMenu, menu)) OpenMenu = null; };
+        OpenMenu = menu;
+        menu.Open(this);
+    }
 
     void Guard(Action a)
     {
@@ -199,6 +260,7 @@ public sealed partial class MapView
     {
         base.OnPointerPressed(e);
         if (_drag.Active) return; // a drag owns the pointer until it ends
+        _contextPress = false;    // a menu press released outside the view is forgotten
         Focus();
         var pt = e.GetCurrentPoint(this);
         var props = pt.Properties;
@@ -213,10 +275,13 @@ public sealed partial class MapView
             e.Handled = true;
             return;
         }
-        if (props.IsRightButtonPressed)
+        // Right press, or Ctrl+click on macOS (never add-to-selection there): select the counter now, open the menu on release (MapCanvas).
+        if (props.IsRightButtonPressed
+            || (ShortcutGestures.IsMac && props.IsLeftButtonPressed && (e.KeyModifiers & KeyModifiers.Control) != 0))
         {
             var hit = PieceAt(pt.Position);
             if (hit != null && !_selected.Contains(hit)) SelectOnly(hit);
+            _contextPress = true;
             e.Handled = true;
             return;
         }
@@ -297,6 +362,13 @@ public sealed partial class MapView
             EndPan();
             e.Pointer.Capture(null);
             e.Handled = true;
+            return;
+        }
+        if (_contextPress && (left || e.InitialPressMouseButton == MouseButton.Right))
+        {
+            _contextPress = false;
+            e.Handled = true;
+            OpenContextMenu(p);
             return;
         }
         if (!left) return;

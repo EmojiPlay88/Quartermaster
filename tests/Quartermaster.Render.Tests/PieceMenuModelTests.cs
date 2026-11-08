@@ -162,4 +162,36 @@ public class PieceMenuModelTests : IDisposable
         Assert.Equal("40", PieceMenuModel.ManagedSheetValue(s, s.Game.State.Pieces[PhaseFixture.RedOne], "Fuel"));
         Assert.Null(PieceMenuModel.ManagedSheetValue(s, s.Game.State.Pieces[PhaseFixture.RedOne], "Other"));
     }
+
+    [Fact]
+    public async Task Async_hooks_ask_then_run_and_sync_run_refuses_a_pending_dialog()
+    {
+        var s = Open(rules: false);
+        // A gamemaster delete through the async question: nothing happens until the question is answered.
+        var answer = new TaskCompletionSource<bool>();
+        string? asked = null;
+        var hooks = new PieceMenuHooks { GameMaster = true, ConfirmDeleteAsync = q => { asked = q; return answer.Task; } };
+        var delete = PieceMenuModel.Build(s, MapOf(s, PhaseFixture.RedOne), new[] { PhaseFixture.RedOne }, null, hooks)
+            .Single(e => e.Label == "Delete counter");
+        Assert.NotNull(delete.RunAsync);
+        var running = delete.RunAsync!();
+        Assert.Equal("Delete Red 1?", asked);
+        Assert.False(running.IsCompleted);
+        Assert.True(s.Game!.State.Pieces.ContainsKey(PhaseFixture.RedOne));
+        answer.SetResult(true);
+        await running;
+        Assert.False(s.Game.State.Pieces.ContainsKey(PhaseFixture.RedOne));
+
+        // The sync Run cannot wait for an asynchronous dialog: it says so instead of returning early.
+        var pending = new PieceMenuHooks { GameMaster = true, ConfirmDeleteAsync = _ => new TaskCompletionSource<bool>().Task };
+        var again = PieceMenuModel.Build(s, MapOf(s, PhaseFixture.RedTwo), new[] { PhaseFixture.RedTwo }, null, pending)
+            .Single(e => e.Label == "Delete counter");
+        Assert.Throws<InvalidOperationException>(() => again.Run!());
+
+        // Sync hooks still run synchronously through Run (the WinForms path).
+        var sync = new PieceMenuHooks { GameMaster = true, ConfirmDelete = _ => true };
+        PieceMenuModel.Build(s, MapOf(s, PhaseFixture.BlueOne), new[] { PhaseFixture.BlueOne }, null, sync)
+            .Single(e => e.Label == "Delete counter").Run!();
+        Assert.False(s.Game.State.Pieces.ContainsKey(PhaseFixture.BlueOne));
+    }
 }

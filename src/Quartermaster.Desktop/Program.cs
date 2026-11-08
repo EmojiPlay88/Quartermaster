@@ -85,6 +85,8 @@ static class Program
         public Task<bool> AskYesNoAsync(Avalonia.Controls.Window owner, string message, string caption) => Task.FromResult(false);
         public Task<bool?> AskYesNoCancelAsync(Avalonia.Controls.Window owner, string message, string caption) => Task.FromResult<bool?>(null);
         public Task<string?> AskTextAsync(Avalonia.Controls.Window owner, string title, string prompt, string initial) => Task.FromResult<string?>(null);
+        public Task<IReadOnlyList<string>?> EditPropertySheetAsync(Avalonia.Controls.Window owner, string title,
+            IReadOnlyList<(string Name, string Value)> rows, Func<string, string?>? managedValue) => Task.FromResult<IReadOnlyList<string>?>(null);
         public Task ShowWarningAsync(Avalonia.Controls.Window owner, string message, string caption)
         {
             Console.Error.WriteLine(message);

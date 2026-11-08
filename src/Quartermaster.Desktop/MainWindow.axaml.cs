@@ -76,6 +76,8 @@ public partial class MainWindow : Window
             SbZoom.Text = zoom;
         };
         Maps.DropMessage += SetStatus;
+        // No settings or game master mode in the Avalonia app yet: no "Delete counter", and deletions are always asked (the WinForms default).
+        Maps.MenuServices = new MapMenuServices { Dialogs = _dialogs, Gesture = _router.Gesture };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
         Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
         UpdateUi();

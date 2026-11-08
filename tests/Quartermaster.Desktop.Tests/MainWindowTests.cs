@@ -68,6 +68,18 @@ sealed class FakeDialogs : IDialogs
         return Task.FromResult(Texts.Count > 0 ? Texts.Dequeue() : null);
     }
 
+    /// <summary>Property sheets shown: title, rows, and each row's managed-by-ledger value.</summary>
+    public readonly List<(string Title, IReadOnlyList<(string Name, string Value)> Rows, IReadOnlyList<string?> Managed)> Sheets = new();
+    /// <summary>What the next property sheet answers (null = Cancel).</summary>
+    public IReadOnlyList<string>? SheetValues;
+
+    public Task<IReadOnlyList<string>?> EditPropertySheetAsync(Window owner, string title, IReadOnlyList<(string Name, string Value)> rows,
+        Func<string, string?>? managedValue)
+    {
+        Sheets.Add((title, rows, rows.Select(r => managedValue?.Invoke(r.Name)).ToList()));
+        return Task.FromResult(SheetValues);
+    }
+
     public Task ShowWarningAsync(Window owner, string message, string caption)
     {
         Warnings.Add((message, caption));

@@ -12,6 +12,13 @@ namespace Quartermaster.Render;
 /// </summary>
 public sealed record MenuEntry(string Label, string? CommandId, bool Enabled, string? DisabledReason, IReadOnlyList<MenuEntry> Children, Action? Run, bool IsSeparator)
 {
+    /// <summary>
+    /// The same command for UIs whose dialogs are asynchronous (set on entries that may ask something: actions, "Delete counter"). It
+    /// waits for <see cref="PieceMenuHooks.AskInputAsync"/> / <see cref="PieceMenuHooks.ConfirmDeleteAsync"/>; <see cref="Run"/> on such an
+    /// entry throws <see cref="InvalidOperationException"/> while a dialog is still open. Null: <see cref="Run"/> is all there is.
+    /// </summary>
+    public Func<Task>? RunAsync { get; init; }
+
     public static MenuEntry Separator { get; } = new("-", null, false, null, Array.Empty<MenuEntry>(), null, true);
 
     public static MenuEntry Item(string label, Action? run, bool enabled = true, string? reason = null, string? commandId = null) =>
@@ -41,6 +48,12 @@ public sealed class PieceMenuHooks
 
     /// <summary>Yes/No for a deletion, given the question ("Delete Red 1?"); only asked when something would be deleted.</summary>
     public Func<string, bool>? ConfirmDelete { get; init; }
+
+    /// <summary>Asynchronous <see cref="AskInput"/>, used instead of it when set; run the entry with <see cref="MenuEntry.RunAsync"/>.</summary>
+    public Func<string, string, Task<string?>>? AskInputAsync { get; init; }
+
+    /// <summary>Asynchronous <see cref="ConfirmDelete"/>, used instead of it when set; run the entry with <see cref="MenuEntry.RunAsync"/>.</summary>
+    public Func<string, Task<bool>>? ConfirmDeleteAsync { get; init; }
 
     /// <summary>Opens the property sheet editor: (the "sheet" action, piece id). See <see cref="PieceMenuModel.SheetIndex"/> and
     /// <see cref="PieceMenuModel.ManagedSheetValue"/>.</summary>
@@ -88,14 +101,14 @@ public static class PieceMenuModel
             foreach (var a in group)
             {
                 var action = a;
-                menu.Add(MenuEntry.Item(a.Label, () => RunAction(s, actions, hooks, action, piece, selected), a.Enabled, a.DisabledReason));
+                menu.Add(Asking(a.Label, () => RunActionAsync(s, actions, hooks, action, piece, selected), a.Enabled, a.DisabledReason));
             }
         }
         AddCalculate(menu, s, game, piece, hooks);
         if (hooks.GameMaster)
         {
             if (menu.Count > 0) menu.Add(MenuEntry.Separator);
-            menu.Add(MenuEntry.Item("Delete counter", () => DeleteCounters(s, actions, hooks, piece, game, selected)));
+            menu.Add(Asking("Delete counter", () => DeleteCountersAsync(s, actions, hooks, piece, game, selected)));
         }
         if (hooks.ShowInLedger is { } show)
         {
@@ -107,6 +120,17 @@ public static class PieceMenuModel
         if (menu.Count == 0) menu.Add(MenuEntry.Item(NoCommands, null, enabled: false));
         return menu;
     }
+
+    /// <summary>An entry that may wait for a dialog: <see cref="MenuEntry.RunAsync"/> is the command; <see cref="MenuEntry.Run"/> runs it
+    /// when every dialog answers at once (the sync hooks) and otherwise refuses, rather than return before the command ran.</summary>
+    private static MenuEntry Asking(string label, Func<Task> run, bool enabled = true, string? reason = null) =>
+        MenuEntry.Item(label, () =>
+        {
+            var t = run();
+            if (!t.IsCompleted)
+                throw new InvalidOperationException("This menu entry is waiting for an asynchronous dialog; run it with MenuEntry.RunAsync.");
+            t.GetAwaiter().GetResult();
+        }, enabled, reason) with { RunAsync = run };
 
     /// <summary>"Calculate" submenu: one entry per formula that applies to the piece. Left out without a rules pack or when the viewer may not act.</summary>
     private static void AddCalculate(List<MenuEntry> menu, ModuleSession s, GameSession game, PieceInstance piece, PieceMenuHooks hooks)
@@ -143,8 +167,16 @@ public static class PieceMenuModel
         return $"Delete {what}?";
     }
 
-    private static bool Confirm(PieceMenuHooks hooks, GameState st, List<string> ids, string clickedId) =>
-        ids.Count == 0 || hooks.ConfirmDelete == null || hooks.ConfirmDelete(DeleteQuestion(st, ids, clickedId));
+    private static async Task<bool> ConfirmAsync(PieceMenuHooks hooks, GameState st, List<string> ids, string clickedId)
+    {
+        if (ids.Count == 0) return true;
+        var question = DeleteQuestion(st, ids, clickedId);
+        if (hooks.ConfirmDeleteAsync != null) return await hooks.ConfirmDeleteAsync(question);
+        return hooks.ConfirmDelete == null || hooks.ConfirmDelete(question);
+    }
+
+    private static Task<string?> AskInputAsync(PieceMenuHooks hooks, string title, string prompt) =>
+        hooks.AskInputAsync?.Invoke(title, prompt) ?? Task.FromResult(hooks.AskInput?.Invoke(title, prompt));
 
     /// <summary>
     /// Runs commands as one undoable action: through the action port when there is one (consecutive moves are one move gesture), else as
@@ -158,20 +190,23 @@ public static class PieceMenuModel
         foreach (var c in commands) game.Execute(CommandLog.Prepare(c, game.State, s));
     }
 
-    private static void RunAction(ModuleSession s, IActionPort? actions, PieceMenuHooks hooks, PieceAction action, PieceInstance clicked,
+    // With sync hooks every await below completes at once, so the command runs inside the caller's Run (and its error guard), as before.
+    // With async hooks a dialog may stay open while the game moves on: a game replaced meanwhile drops the command, and the targets are
+    // read once the input is in.
+    private static async Task RunActionAsync(ModuleSession s, IActionPort? actions, PieceMenuHooks hooks, PieceAction action, PieceInstance clicked,
         IReadOnlySet<string> selected)
     {
         if (s.Game is not { } game) return;
         if (action.Group == "sheet") { hooks.EditSheet?.Invoke(action, clicked.Id); return; }
 
-        // The action applies to every selected piece that offers the same command (the clicked piece always does).
-        var targets = game.State.Pieces.Values.Where(p => p.Id == clicked.Id || selected.Contains(p.Id)).ToList();
         string? input = null;
         if (action.BuildWithInput != null)
         {
-            input = hooks.AskInput?.Invoke(action.Label, action.PromptText is { Length: > 0 } t ? t : action.Label);
-            if (input == null) return;
+            input = await AskInputAsync(hooks, action.Label, action.PromptText is { Length: > 0 } t ? t : action.Label);
+            if (input == null || !ReferenceEquals(s.Game, game) || !game.State.Pieces.ContainsKey(clicked.Id)) return;
         }
+        // The action applies to every selected piece that offers the same command (the clicked piece always does).
+        var targets = game.State.Pieces.Values.Where(p => p.Id == clicked.Id || selected.Contains(p.Id)).ToList();
         var batches = new List<GameCommand[]>();
         var deleting = new List<string>();
         foreach (var p in targets)
@@ -183,17 +218,18 @@ public static class PieceMenuModel
             if (mine.IsDelete) deleting.Add(p.Id);
             batches.Add((input != null && mine.BuildWithInput != null ? mine.BuildWithInput(game.State, input) : mine.Build(game.State)).ToArray());
         }
-        if (!Confirm(hooks, game.State, deleting, clicked.Id)) return;
+        if (!await ConfirmAsync(hooks, game.State, deleting, clicked.Id) || !ReferenceEquals(s.Game, game)) return;
         foreach (var b in batches) Execute(s, actions, b);
     }
 
     /// <summary>Game master: removes the clicked counter, or the whole selection when the clicked counter is selected (after the delete question).</summary>
-    private static void DeleteCounters(ModuleSession s, IActionPort? actions, PieceMenuHooks hooks, PieceInstance clicked, GameSession game,
-        IReadOnlySet<string> selected)
+    private static async Task DeleteCountersAsync(ModuleSession s, IActionPort? actions, PieceMenuHooks hooks, PieceInstance clicked,
+        GameSession game, IReadOnlySet<string> selected)
     {
         var ids = TargetIds(clicked.Id, game.State, selected);
-        if (!Confirm(hooks, game.State, ids, clicked.Id)) return;
-        Execute(s, actions, ids.Select(id => new RemovePiece(id)));
+        if (!await ConfirmAsync(hooks, game.State, ids, clicked.Id) || !ReferenceEquals(s.Game, game)) return;
+        // Counters removed while an asynchronous question was open are skipped (with sync hooks nothing can change in between).
+        Execute(s, actions, ids.Where(game.State.Pieces.ContainsKey).Select(id => new RemovePiece(id)));
     }
 
     /// <summary>Trait index of the piece's property sheet whose menu name is <paramref name="label"/>; -1 when there is none.</summary>

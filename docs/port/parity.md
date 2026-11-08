@@ -25,7 +25,6 @@ How to read the columns:
 
 - Hover popup of a stack (CounterDetailPopup) and the hover-stack highlight.
 - Double-click on a stack to expand or collapse it.
-- Right-click context menu, including the macOS Ctrl+click convention (a right press only selects for now).
 - Line of sight tool and Esc cancelling the line-of-sight line; the Hide counters key.
 - Dragging between windows: the OLE drag preview in the target window and drops across windows (a drop released outside the view is cancelled).
 - Last moved highlight (RefreshLastMoved).
@@ -125,15 +124,15 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MapCanvas: hover stack popup (CounterDetailPopup) | 2 |  |  |  |  |
 | MapCanvas: hover-stack highlight | 2 |  |  |  |  |
 | MapCanvas: double-click stack expand | 2 |  |  |  |  |
-| MapCanvas: right-click and Ctrl+click context menu | 2 |  |  |  |  |
+| MapCanvas: right-click and Ctrl+click context menu | 2 | ✔ |  |  | counter menu from the shared PieceMenuModel; empty-map menu without Hide counters (map tools) and Save map as picture (stage 3); macOS Ctrl+click opens it; Show in Ledger and Calculate wait for the Ledger and formula dialogs (2b) |
 | MapCanvas: Line of sight tool (LosTool), Esc cancels LOS | 2 |  |  |  |  |
 | MapCanvas: Hide counters (H) | 2 |  |  |  |  |
 | MapCanvas: Last moved highlight | 2 |  |  |  |  |
 | Cross-window drag preview and drops (OLE) | - |  |  |  | Windows-specific |
-| PropertySheetDialog | 2 |  |  |  |  |
+| PropertySheetDialog | 2 | ✔ |  |  |  |
 | BreakdownTip | 3 |  |  |  |  |
 | CounterDetailPopup interactive ledger lines | 3 |  |  |  |  |
-| InputDialog | 2 |  |  |  |  |
+| InputDialog | 2 | ✔ |  |  | also the rules-pack name prompt |
 | ExportChoiceDialog, ExportProgressDialog, MapExport (save the map as a picture) | 3 |  |  |  |  |
 | OverviewWindow | 3 |  |  |  |  |
 
