@@ -33,7 +33,7 @@ static class Program
         foreach (var w in warnings) Console.Error.WriteLine(w);
         if (startup.ScreenshotPath is not { } png || startup.ModulePath is not { } module)
         {
-            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new]");
+            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules]");
             return 1;
         }
         if (Application.Current == null)
@@ -47,6 +47,8 @@ static class Program
             window.Show();
             if (!window.OpenModule(module)) return 1;
             // No chooser without a window to answer it: the default is a new game from the module.
+            if (startup.RulesPath != null) window.Session?.OpenRules(startup.RulesPath);
+            else if (startup.NewRulesName != null) window.Session?.NewRules(startup.NewRulesName);
             if (startup.SetupIndex is { } idx) window.StartSetup(idx); else window.StartSetup(null);
             var until = DateTime.UtcNow.AddSeconds(120);
             while (!window.MapTabs.WhenTiled().IsCompleted)
@@ -58,6 +60,7 @@ static class Program
             Dispatcher.UIThread.RunJobs();
             using (window.CaptureRenderedFrame()) { } // first frame lays out the final size
             Dispatcher.UIThread.RunJobs();
+            if (startup.ScreenshotState is { } state && ScreenshotStates.Apply(state, window) is { } problem) { Console.Error.WriteLine(problem); return 1; }
             using var frame = window.CaptureRenderedFrame();
             if (frame == null) { Console.Error.WriteLine("No frame was rendered."); return 1; }
             if (Path.GetDirectoryName(Path.GetFullPath(png)) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
