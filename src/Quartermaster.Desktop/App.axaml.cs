@@ -17,7 +17,21 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            desktop.MainWindow = new MainWindow();
+        {
+            var window = new MainWindow();
+            desktop.MainWindow = window;
+            // Command line [<vmod>] [--setup <index>|--new]; applied once the window is up, so its dialogs have an owner.
+            var args = Shell.StartupArgs.Parse(desktop.Args ?? Array.Empty<string>(), m => System.Diagnostics.Trace.WriteLine(m));
+            if (args.ModulePath != null)
+            {
+                void Once(object? sender, EventArgs e)
+                {
+                    window.Opened -= Once;
+                    window.ApplyStartup(args);
+                }
+                window.Opened += Once;
+            }
+        }
         base.OnFrameworkInitializationCompleted();
     }
 }

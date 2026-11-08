@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\Quartermaster.Render\Quartermaster.Render.csproj" />
     <ProjectReference Include="..\..\src\Quartermaster.Core\Quartermaster.Core.csproj" />
     <ProjectReference Include="..\..\src\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
+    <ProjectReference Include="..\Quartermaster.TestFixtures\Quartermaster.TestFixtures.csproj" />
   </ItemGroup>
 
 </Project>
