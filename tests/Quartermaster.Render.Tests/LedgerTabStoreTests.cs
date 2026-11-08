@@ -69,6 +69,44 @@ public sealed class LedgerTabStoreTests : IDisposable
         Assert.Equal(LedgerGrouping.Map, p.Grouping);
     }
 
+    [Theory]
+    [InlineData("{\"A\": {\"tabs\": [{\"name\": \"One TEST\"}]}, oops")]
+    [InlineData("[1,2]")]
+    public void UnparseableFile_CopiedToBadOnce_BeforeSaveOverwritesIt(string json)
+    {
+        Directory.CreateDirectory(_root);
+        var path = Path.Combine(_root, "ledger-tabs.json");
+        File.WriteAllText(path, json);
+        LedgerTabStore.Load(_root, "A");
+        LedgerTabStore.Save(_root, "B", LedgerPrefs.Default with { Tabs = new[] { Tab("Two") } });
+        LedgerTabStore.Save(_root, "B", LedgerPrefs.Default with { Tabs = new[] { Tab("Three") } });
+        var bad = Assert.Single(Directory.GetFiles(_root, "ledger-tabs.json.bad-*"));
+        Assert.Matches(@"ledger-tabs\.json\.bad-\d{14}$", bad);
+        Assert.Equal(json, File.ReadAllText(bad)); // the original bytes survive
+        Assert.Equal("Three", Assert.Single(LedgerTabStore.Load(_root, "B").Tabs).Name);
+    }
+
+    [Fact]
+    public void ParseableFile_NoBadCopy()
+    {
+        LedgerTabStore.Save(_root, "A", LedgerPrefs.Default with { Tabs = new[] { Tab("One") } });
+        LedgerTabStore.Save(_root, "B", LedgerPrefs.Default with { Tabs = new[] { Tab("Two") } });
+        Assert.Empty(Directory.GetFiles(_root, "ledger-tabs.json.bad-*"));
+    }
+
+    [Fact]
+    public void Save_FileLocked_LeavesItAlone()
+    {
+        LedgerTabStore.Save(_root, "A", LedgerPrefs.Default with { Tabs = new[] { Tab("One") } });
+        var path = Path.Combine(_root, "ledger-tabs.json");
+        var before = File.ReadAllText(path);
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+            LedgerTabStore.Save(_root, "B", LedgerPrefs.Default with { Tabs = new[] { Tab("Two") } });
+        Assert.Equal(before, File.ReadAllText(path));
+        Assert.Empty(Directory.GetFiles(_root, "ledger-tabs.json.bad-*"));
+        Assert.Equal("One", Assert.Single(LedgerTabStore.Load(_root, "A").Tabs).Name);
+    }
+
     [Fact]
     public void Load_DuplicateNames_FirstWins()
     {

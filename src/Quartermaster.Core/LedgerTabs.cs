@@ -66,7 +66,7 @@ public static class LedgerTabs
         var map = cols.Select(c => allCols.ToList().FindIndex(a => a.Id == c.Id)).ToArray();
 
         string? error = null;
-        if (tab.Kind == LedgerTabKind.User) error = FilterError(tab.User?.Filter);
+        if (tab.Kind == LedgerTabKind.User) error = FilterError(tab.User?.Filter, p);
         if (error != null) return new LedgerTabResult(cols, Array.Empty<LedgerRowEx>(), 0, error);
 
         var baseRows = LedgerTable.Rows(view, p, m, "", includeEmpty);
@@ -146,6 +146,41 @@ public static class LedgerTabs
         if (string.IsNullOrWhiteSpace(expr)) return null;
         try { Parser.Parse(expr); return null; }
         catch (Exception e) { return string.IsNullOrWhiteSpace(e.Message) ? "Invalid filter" : e.Message; }
+    }
+
+    /// <summary>
+    /// <see cref="FilterError(string?)"/>, then "Unknown property: &lt;name&gt;" for the first property the filter names (a bare name or a
+    /// <c>has(...)</c> argument) that is neither a property name nor a property id in <paramref name="pack"/>. Those are the only names
+    /// <see cref="PieceFilter"/> resolves; table names in <c>lookup</c> and text arguments such as <c>marker("Type")</c> are not properties
+    /// and are not flagged.
+    /// </summary>
+    public static string? FilterError(string? expr, RulesPack pack)
+    {
+        if (FilterError(expr) is { } parse) return parse;
+        if (string.IsNullOrWhiteSpace(expr)) return null;
+        var unknown = UnknownProperty(Parser.Parse(expr), pack);
+        return unknown == null ? null : "Unknown property: " + unknown;
+    }
+
+    private static string? UnknownProperty(Quartermaster.Rules.Expr.Expr e, RulesPack pack)
+    {
+        bool Known(string name) => pack.PropertyByName(name) != null || pack.Properties.Any(p => p.Id == name);
+        switch (e)
+        {
+            case VarRef v: return Known(v.Name) ? null : v.Name;
+            case Unary u: return UnknownProperty(u.Operand, pack);
+            case Binary b: return UnknownProperty(b.Left, pack) ?? UnknownProperty(b.Right, pack);
+            case Call { Function: "has" } c when c.Args.Count > 0 && c.Args[0] is VarRef or TextLit:
+            {
+                var name = c.Args[0] is VarRef hv ? hv.Name : ((TextLit)c.Args[0]).Value;
+                return Known(name) ? null : name;
+            }
+            case Call { Function: "lookup" } c:
+                return c.Args.Skip(1).Select(a => UnknownProperty(a, pack)).FirstOrDefault(x => x != null);
+            case Call c:
+                return c.Args.Select(a => UnknownProperty(a, pack)).FirstOrDefault(x => x != null);
+            default: return null;
+        }
     }
 
     /// <summary>CSV of the tab's columns and rows; group headers are skipped.</summary>

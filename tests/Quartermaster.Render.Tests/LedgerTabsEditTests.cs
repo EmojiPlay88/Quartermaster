@@ -39,4 +39,20 @@ public class LedgerTabsEditTests
         Assert.Contains(err!, p[0]);
         Assert.Contains("Broken TEST", p[0]);
     }
+
+    [Fact]
+    public void FilterNamingDeletedProperty_ReportedWithPack_NotWithout()
+    {
+        var pack = new Quartermaster.Rules.RulesPack
+        {
+            Format = 4,
+            Properties = new() { new Quartermaster.Rules.PropertyDef { Id = "fuel", Name = "Fuel", Scope = Quartermaster.Rules.PropertyScope.Pieces } },
+        };
+        var tabs = new[] { Tab("Stale TEST", "Gone < 5"), Tab("Fine TEST", "Fuel < 5") };
+        var p = LedgerTabsEdit.Problems(tabs, pack);
+        var line = Assert.Single(p);
+        Assert.Contains("Stale TEST", line);
+        Assert.Contains("Unknown property: Gone", line);
+        Assert.Empty(LedgerTabsEdit.Problems(tabs)); // without a pack only parsing is checked
+    }
 }

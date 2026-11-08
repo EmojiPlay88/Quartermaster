@@ -224,6 +224,36 @@ public class LedgerTabsTests
     }
 
     [Fact]
+    public void UserTab_FilterNamesDeletedProperty_BannerNoRowsNoCrash()
+    {
+        var r = Run(User("Gone < 5 and Fuel < 5"));
+        Assert.Equal("Unknown property: Gone", r.FilterError); // the Ledger window shows FilterError as its banner
+        Assert.Empty(r.Rows);
+        Assert.Equal(0, r.Count);
+        Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("has(Gone)", Pack()));
+        Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("has(\"Gone\")", Pack()));
+        Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("not (abs(Gone) > 1)", Pack()));
+    }
+
+    [Fact]
+    public void FilterError_WithPack_KnownNamesAndPieceIdentifiersNotFlagged()
+    {
+        var pack = Pack();
+        Assert.Null(LedgerTabs.FilterError("Fuel < 5", pack));
+        Assert.Null(LedgerTabs.FilterError("fuel < 5", pack)); // property id
+        Assert.Null(LedgerTabs.FilterError("has(Fuel) and Divisor > 0", pack));
+        Assert.Null(LedgerTabs.FilterError("marker(\"Type\") == \"Infantry TEST\" and name() != \"x\"", pack)); // piece identifiers
+        Assert.Null(LedgerTabs.FilterError("lookup(SomeTable, Fuel) > 1", pack)); // a table name is not a property
+        Assert.Null(LedgerTabs.FilterError(null, pack));
+        Assert.Null(LedgerTabs.FilterError("  ", pack));
+        Assert.NotNull(LedgerTabs.FilterError("Fuel <", pack)); // parse errors still come first
+        // A bare name is only ever a rules-pack property to PieceFilter: with no property "Type" it matches nothing, so it is reported.
+        Assert.Equal("Unknown property: Type", LedgerTabs.FilterError("Type == \"Infantry TEST\"", pack));
+        var withType = pack with { Properties = pack.Properties.Append(new PropertyDef { Id = "type", Name = "Type", Scope = PropertyScope.Pieces }).ToList() };
+        Assert.Null(LedgerTabs.FilterError("Type == 1", withType));
+    }
+
+    [Fact]
     public void UserTab_PrivateProperty_ViewHidesIt()
     {
         var pack = Pack();

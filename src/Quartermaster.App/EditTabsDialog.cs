@@ -13,6 +13,7 @@ sealed class EditTabsDialog : Form
 {
     readonly List<UserLedgerTab> _tabs;
     readonly IReadOnlyList<PropertyDef> _props;
+    readonly RulesPack? _pack;
     readonly ListBox _list = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     readonly Button _add = new() { Text = "Add", AutoSize = true };
     readonly Button _remove = new() { Text = "Remove", AutoSize = true };
@@ -39,6 +40,7 @@ sealed class EditTabsDialog : Form
     public EditTabsDialog(IReadOnlyList<UserLedgerTab> tabs, RulesPack? pack, int select, bool addNew)
     {
         _tabs = tabs.ToList();
+        _pack = pack;
         _props = pack == null ? Array.Empty<PropertyDef>() : LedgerTable.Columns(pack);
         Text = "Edit Ledger tabs";
         FormBorderStyle = FormBorderStyle.Sizable;
@@ -191,14 +193,17 @@ sealed class EditTabsDialog : Form
 
     void ShowFilterError()
     {
-        var err = Current >= 0 && Current < _tabs.Count ? LedgerTabs.FilterError(_tabs[Current].Filter) : null;
-        _filterError.Text = err == null ? "" : "Does not parse: " + err;
-        _filterError.Visible = err != null;
+        var f = Current >= 0 && Current < _tabs.Count ? _tabs[Current].Filter : null;
+        var err = LedgerTabs.FilterError(f);
+        var text = err == null ? null : "Does not parse: " + err;
+        if (text == null && _pack != null && LedgerTabs.FilterError(f, _pack) is { } perr) text = perr;
+        _filterError.Text = text ?? "";
+        _filterError.Visible = text != null;
     }
 
     void UpdateProblems()
     {
-        var p = LedgerTabsEdit.Problems(_tabs);
+        var p = LedgerTabsEdit.Problems(_tabs, _pack);
         _problems.Text = string.Join(Environment.NewLine, p);
         _ok.Enabled = p.Count == 0;
     }
@@ -254,7 +259,7 @@ sealed class EditTabsDialog : Form
 
     void TryAccept()
     {
-        var p = LedgerTabsEdit.Problems(_tabs);
+        var p = LedgerTabsEdit.Problems(_tabs, _pack);
         if (p.Count > 0) { UpdateProblems(); return; }
         var clean = LedgerTabStore.Normalize(_tabs.ToList());
         _tabs.Clear();

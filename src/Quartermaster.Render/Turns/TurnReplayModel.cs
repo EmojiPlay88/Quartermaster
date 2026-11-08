@@ -17,10 +17,10 @@ public sealed class TurnReplayModel
     public const string EndMismatchText = "The replayed turn does not match the sender's game.";
 
     /// <summary>Shown when the local player is not in the game's player list: only public information is shown.</summary>
+    public const string NotAPlayerText = "You are not a player in this game; only public information is shown.";
+
     /// <summary>Set when the turn file was made with another app version (a gentle warning); null otherwise.</summary>
     public string? VersionNotice => VersionCheck.TurnFileVersionWarning(AppVersion.Text, _t.AppVersion);
-
-    public const string NotAPlayerText = "You are not a player in this game; only public information is shown.";
 
     private readonly ModuleSession _s;
     private readonly TurnFile _t;

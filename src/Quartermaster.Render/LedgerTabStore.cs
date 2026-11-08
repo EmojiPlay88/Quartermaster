@@ -23,17 +23,50 @@ public static class LedgerTabStore
 
     private static string FilePath(string root) => Path.Combine(root, "ledger-tabs.json");
 
-    private static JsonObject ReadAll(string root)
+    /// <summary>
+    /// The whole file: empty when it does not exist; null when it exists but cannot be read right now (locked, no access), so Save leaves it
+    /// alone. A file that reads but does not parse as a JSON object is first copied to <c>ledger-tabs.json.bad-&lt;yyyyMMddHHmmss&gt;</c> (UTC),
+    /// once, so the next Save cannot destroy the other modules' tabs without a copy.
+    /// </summary>
+    private static JsonObject? ReadAll(string root)
     {
-        try { return JsonNode.Parse(File.ReadAllText(FilePath(root))) as JsonObject ?? new JsonObject(); }
-        catch (Exception) { return new JsonObject(); }
+        var path = FilePath(root);
+        string text;
+        try
+        {
+            if (!File.Exists(path)) return new JsonObject();
+            text = File.ReadAllText(path);
+        }
+        catch (Exception) { return null; }
+        try
+        {
+            if (JsonNode.Parse(text) is JsonObject o) return o;
+        }
+        catch (Exception) { /* not JSON: kept below */ }
+        KeepBadCopy(path, text);
+        return new JsonObject();
+    }
+
+    private static void KeepBadCopy(string path, string text)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(path)!;
+            var name = Path.GetFileName(path) + ".bad-";
+            // Once: an identical copy already kept is enough (Load and Save both get here until the file is rewritten).
+            foreach (var old in Directory.GetFiles(dir, name + "*"))
+                if (File.ReadAllText(old) == text) return;
+            var bad = path + ".bad-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+            if (!File.Exists(bad)) File.Copy(path, bad);
+        }
+        catch (Exception) { /* best effort */ }
     }
 
     public static LedgerPrefs Load(string root, string moduleSha)
     {
         try
         {
-            if (ReadAll(root)[moduleSha] is not JsonObject o) return LedgerPrefs.Default;
+            if (ReadAll(root)?[moduleSha] is not JsonObject o) return LedgerPrefs.Default;
             var tabs = new List<UserLedgerTab>();
             if (o["tabs"] is JsonArray arr)
                 foreach (var n in arr)
@@ -64,7 +97,7 @@ public static class LedgerTabStore
     {
         try
         {
-            var all = ReadAll(root);
+            var all = ReadAll(root) ?? throw new IOException("ledger-tabs.json cannot be read right now; not overwriting it");
             var tabs = new JsonArray();
             foreach (var t in Normalize(prefs.Tabs))
             {
