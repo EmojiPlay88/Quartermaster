@@ -6,6 +6,7 @@ How to read the columns:
 
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
 - **Linux**: ticked only for features verified by tests actually run on Linux. None so far: this machine has no usable WSL distribution, so Linux is checked by the CI workflow `.github/workflows/cross-platform.yml` (CI after push). Fill in from the first green run.
+- **Docs.Tests on Linux**: the documentation tests build paths from the repository layout; whether those paths work on Linux (separators, case-sensitive names) is unverified until the first CI run on ubuntu.
 - **macOS**: ticked only after the user has worked through `docs/port/stage1-mac-checklist.md` on the M1 Mac.
 - **Stage**: 1 = shell, map, pieces (this branch); 2 to 5 = planned later stages (2 rules, formulas, log, dice, turns; 3 ledger, notes, inventory, documents, search; 4 workbench and settings; 5 multiplayer, launcher, updates); `-` = no plan yet or not applicable off Windows. The stage numbers after 1 are provisional.
 
@@ -30,6 +31,13 @@ How to read the columns:
 - Last moved highlight (RefreshLastMoved).
 - Zoom percentage and cursor location are shown in the status bar, but only as text.
 - Applying Settings to the map (wheel step, drag threshold, hover delay, highlight colour, label size, snap, grid default).
+
+## Before the stage release
+
+Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the real rendering paths. Before stage 1 is released:
+
+- Add a software-rendering fallback option (for example a command-line switch or environment variable that makes Avalonia render with its software/CPU renderer) for machines whose GPU driver fails.
+- Linux manual smoke: on a real Linux desktop (X11 and Wayland if possible), open the Riverland demo, start a game, pan and zoom the map, drag a counter, drop one from the palette, save and reopen. This covers the GPU rendering, fonts and input paths no headless test reaches.
 
 ## Menu bar: File
 
