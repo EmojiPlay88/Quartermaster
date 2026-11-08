@@ -38,6 +38,8 @@ sealed class OutlinerPanel : UserControl
         ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing, EnableHeadersVisualStyles = true,
         CellBorderStyle = DataGridViewCellBorderStyle.None, ShowCellToolTips = false, VirtualMode = true,
     };
+    readonly CounterCellImages _counters;
+    static readonly Size ImageSize = new(24, 18);
     readonly BreakdownTip _tip = new();
     readonly ToolTip _headerTip = new() { ShowAlways = true };
     readonly HashSet<string> _open = new(StringComparer.Ordinal);
@@ -60,6 +62,8 @@ sealed class OutlinerPanel : UserControl
     {
         _s = s; _phases = phases; _alerts = alerts; _mode = grouping; _saveGrouping = saveGrouping; _centre = centreOnPiece; _openMap = openMap; _jump = jump;
         Name = "OutlinerPanel";
+        _counters = new CounterCellImages(s.Counters, ImageSize, _grid, () => _grid.Invalidate());
+        _grid.RowTemplate.Height = ImageSize.Height + 2;
         Font = _font;
         _nowLabel.Font = _nowFont;
 
@@ -216,6 +220,7 @@ sealed class OutlinerPanel : UserControl
             _now.Visible = _nowLabel.Visible = !_noPhases;
             _nowLabel.Text = _decisions.Count == 0 ? "Now" : $"Now — {_decisions.Count}";
 
+            _counters.Reset();   // new state: pictures may differ
             _rows.Clear();
             void Add(OutlinerNode n, int depth)
             {
@@ -341,7 +346,21 @@ sealed class OutlinerPanel : UserControl
                     TextRenderer.DrawText(e.Graphics, _open.Contains(n.Key) ? "−" : "+", Font, new Rectangle(x, e.CellBounds.Top, 12, e.CellBounds.Height), fore,
                         TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPrefix);
                 var f = e.CellStyle?.Font ?? Font;
-                TextRenderer.DrawText(e.Graphics, n.Name, f, new Rectangle(x + 14, e.CellBounds.Top, Math.Max(0, e.CellBounds.Right - x - 14), e.CellBounds.Height), fore,
+                var textX = x + 14;
+                if (n.Kind == OutlinerNodeKind.Piece && n.PieceId != null && _s.View?.Pieces.TryGetValue(n.PieceId, out var piece) == true && piece != null)
+                {
+                    var first = Math.Max(0, _grid.FirstDisplayedScrollingRowIndex);
+                    _counters.SetVisible(first, first + Math.Max(1, _grid.DisplayedRowCount(true)) - 1);
+                    var top = e.CellBounds.Top + (e.CellBounds.Height - ImageSize.Height) / 2;
+                    if (_counters.Get(piece, e.RowIndex) is { } bmp) e.Graphics.DrawImage(bmp, textX, top, bmp.Width, bmp.Height);
+                    else
+                    {
+                        using var pen = new Pen(Color.Silver) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
+                        e.Graphics.DrawRectangle(pen, textX, top, ImageSize.Width - 1, ImageSize.Height - 1);
+                    }
+                    textX += ImageSize.Width + 4;
+                }
+                TextRenderer.DrawText(e.Graphics, n.Name, f, new Rectangle(textX, e.CellBounds.Top, Math.Max(0, e.CellBounds.Right - textX), e.CellBounds.Height), fore,
                     TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.Left);
                 e.Handled = true;
             }
@@ -396,6 +415,7 @@ sealed class OutlinerPanel : UserControl
         if (disposing)
         {
             _closing = true;
+            _counters.Dispose();
             _tip.Dispose();
             _headerTip.Dispose();
         }

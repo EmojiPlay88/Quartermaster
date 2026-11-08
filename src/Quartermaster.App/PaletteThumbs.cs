@@ -16,7 +16,7 @@ sealed class PaletteThumbs
     public PaletteThumbs(ModuleSession s)
     {
         _s = s;
-        _counters = new CounterImages(s.Images);
+        _counters = s.Counters;
     }
 
     /// <summary>A bitmap for the slot, or null when it cannot be drawn. The caller owns it.</summary>
