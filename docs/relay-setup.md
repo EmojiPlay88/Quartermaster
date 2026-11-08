@@ -154,6 +154,7 @@ The builds are self-contained: no .NET needs to be installed on the server. Linu
 
 ```sh
 sudo mkdir -p /opt/quartermaster-relay /var/lib/quartermaster-relay
+sudo chown "$USER": /var/lib/quartermaster-relay
 sudo tar -xzf QuartermasterRelay-0.1.0-linux-x64.tar.gz -C /opt/quartermaster-relay
 sudo chmod +x /opt/quartermaster-relay/Quartermaster.Relay
 Relay__DataDir=/var/lib/quartermaster-relay /opt/quartermaster-relay/Quartermaster.Relay
@@ -165,7 +166,7 @@ System Settings, Privacy & Security, Open Anyway because the file is unsigned).
 
 The relay listens on all interfaces by default; set `Relay__BindAddress=loopback` to accept only local
 connections (for example behind a reverse proxy), see the settings table in 2.2. For a service, use the
-systemd unit in 2.3 with `ExecStart` pointing at the extracted `Quartermaster.Relay`.
+systemd unit in 2.3 with `ExecStart` pointing at the extracted `Quartermaster.Relay` (keep the `chmod +x` above, or the service fails with "permission denied"). The data folder must belong to the user that runs the relay: in the example above that is you, and 2.3 gives it to `qmrelay` instead.
 
 **Updating a downloaded relay:** stop it, download the new archive, extract it over the same folder
 (keep the data folder, it holds the certificate and the fingerprint players already trust), start it again.
