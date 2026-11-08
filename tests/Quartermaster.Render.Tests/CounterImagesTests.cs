@@ -100,6 +100,17 @@ public class CounterImagesTests
     }
 
     [Fact]
+    public void NativeBounds_MatchesImageSize()
+    {
+        using var e = Env();
+        var ci = new CounterImages(e.Images);
+        var b = ci.NativeBounds(Red());
+        Assert.Equal(32, b.Width, 1);
+        Assert.Equal(32, b.Height, 1);
+        Assert.Equal(new SKSizeI(200, 200), CounterImages.PreviewSize(b, new SKSizeI(1920, 1080)));
+    }
+
+    [Fact]
     public void Render_UndrawablePiece_Null()
     {
         using var e = Env();

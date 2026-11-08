@@ -7,15 +7,20 @@ using Quartermaster.Vassal;
 
 namespace Quartermaster.App;
 
-/// <summary>MDI child listing every holder and every unit that has ledger values, one column per property. Cells are editable (with a required note).</summary>
-sealed class LedgerWindow : Form
+/// <summary>
+/// MDI child listing holders and units with ledger values, one column per property, split into tabs (Units, Depots &amp; Global, Everything and
+/// the player's own tabs, see LedgerWindow.Tabs.cs). Unit rows can show their counter (LedgerWindow.Counters.cs). Cells are editable (with a required note).
+/// Rows and pictures come only from the player's view.
+/// </summary>
+sealed partial class LedgerWindow : Form
 {
     const int FixedCols = 2; // Name, Kind
     readonly ModuleSession _s;
     readonly Func<IActionPort?>? _actions;
-    readonly ToolStrip _bar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
+    readonly Action<string>? _centre;
+    readonly ToolStrip _bar = new() { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System, LayoutStyle = ToolStripLayoutStyle.Flow };   // wraps onto a second line when narrow
     readonly ToolStripTextBox _filter = new() { AutoSize = false, Width = 160, ToolTipText = "Filter by name or kind" };
-    readonly ToolStripButton _export = new("Export CSV…") { DisplayStyle = ToolStripItemDisplayStyle.Text };
+    readonly ToolStripButton _export = new("Export CSV…") { DisplayStyle = ToolStripItemDisplayStyle.Text, ToolTipText = "Save the current tab's rows and columns as a CSV file" };
     readonly ToolStripButton _showEmpty = new("Show units without values") { DisplayStyle = ToolStripItemDisplayStyle.Text, CheckOnClick = true };
     readonly ToolStripButton _refresh = new("Refresh") { DisplayStyle = ToolStripItemDisplayStyle.Text };
     readonly DataGridView _grid = new();
@@ -23,22 +28,27 @@ sealed class LedgerWindow : Form
     readonly ToolTip _headerTip = new() { ShowAlways = true, UseAnimation = false, UseFading = false, AutoPopDelay = 30000 };
     (int Col, bool Shown) _headerAt = (-1, false);
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 200 };
+    Font? _boldFont;
     IReadOnlyList<PropertyDef> _cols = Array.Empty<PropertyDef>();
-    List<LedgerRow> _rows = new();
+    List<LedgerRowEx> _rows = new();
+    LedgerTabResult _result = new(Array.Empty<PropertyDef>(), Array.Empty<LedgerRowEx>(), 0, null);
     string _colSignature = "";
     int _sortCol = -1;
     bool _sortAsc = true;
     GameSession? _game;
     bool _closing;
 
-    public LedgerWindow(ModuleSession s, Func<IActionPort?>? actions = null)
+    public LedgerWindow(ModuleSession s, Func<IActionPort?>? actions = null, Action<string>? centreOnPiece = null)
     {
         _s = s;
         _actions = actions;
+        _centre = centreOnPiece;
         Text = "Ledger";
-        Size = new Size(720, 520);
+        Size = new Size(820, 560);
         _bar.Items.Add(new ToolStripLabel("Filter:"));
         _bar.Items.Add(_filter);
+        _bar.Items.Add(new ToolStripSeparator());
+        AddTabToolbar();
         _bar.Items.Add(new ToolStripSeparator());
         _bar.Items.Add(_export);
         _bar.Items.Add(_showEmpty);
@@ -57,6 +67,7 @@ sealed class LedgerWindow : Form
         _grid.CellValueNeeded += OnCellValueNeeded;
         _grid.CellValuePushed += OnCellValuePushed;
         _grid.CellFormatting += OnCellFormatting;
+        _grid.CellBeginEdit += (_, e) => { if (e.RowIndex < 0 || e.RowIndex >= _rows.Count || _rows[e.RowIndex].IsGroupHeader) e.Cancel = true; };
         _tip.Track(_grid, BreakdownFor);
         // The breakdown tip turns the grid's own tooltips off, so property notes on the column headers get their own tooltip.
         _grid.CellMouseMove += (_, e) => Run(() => HeaderTip(e.RowIndex, e.ColumnIndex));
@@ -64,8 +75,11 @@ sealed class LedgerWindow : Form
         _grid.Scroll += (_, _) => HideHeaderTip();
         _grid.ColumnHeaderMouseClick += (_, e) => Run(() => SortBy(e.ColumnIndex));
         _grid.DataError += (_, e) => e.ThrowException = false;
+        InitCounters();
 
         Controls.Add(_grid);
+        Controls.Add(_banner);
+        Controls.Add(_tabStrip);
         Controls.Add(_bar);
 
         _filter.TextChanged += (_, _) => Kick();
@@ -77,7 +91,9 @@ sealed class LedgerWindow : Form
         s.RulesChanged += OnRulesChanged;
         s.GameReplaced += OnGameReplaced;
         s.ViewChanged += OnViewChanged;
+        LedgerTabStore.Changed += OnStoreChanged;
         HookGame();
+        Run(InitTabs);
         Run(Reload);
     }
 
@@ -111,12 +127,13 @@ sealed class LedgerWindow : Form
     void OnGameChanged(GameCommand _) => OnUi(Kick);
     void OnRewound() => OnUi(Kick);
     void OnGameReplaced() => OnUi(() => { HookGame(); Kick(); });
-    void OnRulesChanged() => OnUi(Kick);
+    void OnRulesChanged() => OnUi(() => { Run(RefreshSides); Kick(); });
     void OnViewChanged() => OnUi(Kick);   // debounced: a burst of changes reloads once
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         base.OnFormClosed(e);
+        Run(FlushPrefs);
         Unhook();
     }
 
@@ -127,6 +144,7 @@ sealed class LedgerWindow : Form
         _s.RulesChanged -= OnRulesChanged;
         _s.GameReplaced -= OnGameReplaced;
         _s.ViewChanged -= OnViewChanged;
+        LedgerTabStore.Changed -= OnStoreChanged;
         if (_game != null) _game.Changed -= OnGameChanged;
         if (_game != null) _game.Rewound -= OnRewound;
         _game = null;
@@ -134,7 +152,16 @@ sealed class LedgerWindow : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { Unhook(); _debounce.Dispose(); _tip.Dispose(); _headerTip.Dispose(); }
+        if (disposing)
+        {
+            Unhook();
+            _debounce.Dispose();
+            _saveTimer.Dispose();
+            _tip.Dispose();
+            _headerTip.Dispose();
+            DisposeCounters();
+            _boldFont?.Dispose();
+        }
         base.Dispose(disposing);
     }
 
@@ -146,14 +173,25 @@ sealed class LedgerWindow : Form
         if (_grid.IsCurrentCellInEditMode) { Kick(); return; } // never pull the cell out from under the user
         var pack = _s.Rules;
         var game = _s.Game;
-        _cols = pack == null ? Array.Empty<PropertyDef>() : LedgerTable.Columns(pack);
         var keepKeys = SelectedKeys();
         var firstKey = FirstVisibleKey();
-        var sig = string.Join("|", _cols.Select(c => c.Id + "\u0001" + c.Name));
+
+        var side = SideFilter;
+        var group = Grouping;
+        _result = pack == null || game == null || _s.View is not { } view
+            ? new LedgerTabResult(pack == null ? Array.Empty<PropertyDef>() : LedgerTabs.ColumnsFor(_tab, pack), Array.Empty<LedgerRowEx>(), 0, null)
+            : LedgerTabs.Rows(_tab, view, pack, _s.Model, _filter.Text, side, group, _showEmpty.Checked);
+        _cols = _result.Columns;
+        UpdateTabCounts(pack, game);
+        ShowBanner(_result.FilterError);
+
+        var sig = _tab.Key + "\u0002" + _showCounters.Checked + "\u0002" + string.Join("|", _cols.Select(c => c.Id + "\u0001" + c.Name));
         if (sig != _colSignature) { _colSignature = sig; RebuildColumns(); }
 
-        _rows = pack == null || game == null || _s.View is not { } view ? new() : LedgerTable.Rows(view, pack, _s.Model, _filter.Text, _showEmpty.Checked).ToList();
+        _rows = _result.Rows.ToList();
         ApplySort();
+        ResetCounterImages();
+        _grid.RowTemplate.Height = RowHeight;
         _grid.RowCount = 0;
         _grid.RowCount = _rows.Count;
         Restore(keepKeys, firstKey);
@@ -176,25 +214,38 @@ sealed class LedgerWindow : Form
         try { _headerTip.Hide(_grid); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
     }
 
+    bool _rebuildingColumns;
+
     void RebuildColumns()
     {
-        _grid.Columns.Clear();
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Name", ReadOnly = true, Width = 180, SortMode = DataGridViewColumnSortMode.Programmatic });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Kind", ReadOnly = true, Width = 140, SortMode = DataGridViewColumnSortMode.Programmatic });
-        foreach (var c in _cols)
+        _rebuildingColumns = true;
+        try
+        {
+            _grid.Columns.Clear();
+            var pad = NameImagePad;
             _grid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                HeaderText = c.Name, ToolTipText = c.Notes ?? "", Width = 90, SortMode = DataGridViewColumnSortMode.Programmatic,
-                DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight },
+                HeaderText = "Name", ReadOnly = true, Width = 180 + pad, SortMode = DataGridViewColumnSortMode.Programmatic,
+                DefaultCellStyle = new DataGridViewCellStyle { Padding = new Padding(pad, 0, 0, 0) },   // the counter picture is painted in the padding
             });
-        if (_sortCol >= _grid.Columns.Count) _sortCol = -1;
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Kind", ReadOnly = true, Width = 140, SortMode = DataGridViewColumnSortMode.Programmatic });
+            foreach (var c in _cols)
+                _grid.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    HeaderText = c.Name, ToolTipText = c.Notes ?? "", Width = 90, SortMode = DataGridViewColumnSortMode.Programmatic,
+                    DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight },
+                });
+            ApplyColumnWidths();
+            if (_sortCol >= _grid.Columns.Count) _sortCol = -1;
+        }
+        finally { _rebuildingColumns = false; }
     }
 
     HashSet<string> SelectedKeys()
     {
         var set = new HashSet<string>(StringComparer.Ordinal);
         foreach (DataGridViewRow r in _grid.SelectedRows)
-            if (r.Index >= 0 && r.Index < _rows.Count) set.Add(_rows[r.Index].Key);
+            if (r.Index >= 0 && r.Index < _rows.Count) set.Add(_rows[r.Index].Row.Key);
         return set;
     }
 
@@ -203,18 +254,23 @@ sealed class LedgerWindow : Form
         try
         {
             var i = _grid.FirstDisplayedScrollingRowIndex;
-            return i >= 0 && i < _rows.Count ? _rows[i].Key : null;
+            return i >= 0 && i < _rows.Count ? _rows[i].Row.Key : null;
         }
         catch (InvalidOperationException) { return null; }
     }
 
-    /// <summary>Selects and scrolls to the row of a holder (used by the alert bar). Clears the filter first so the row is visible.</summary>
+    /// <summary>Selects and scrolls to the row of a holder (used by the alert bar). Moves to the Depots &amp; Global tab and clears the filter when the row is not shown.</summary>
     public void SelectHolder(string holderId)
     {
         try
         {
             var key = LedgerKey.Holder(holderId);
-            if (_rows.FindIndex(r => r.Key == key) < 0 && _filter.Text.Length > 0) { _filter.Text = ""; Reload(); }
+            if (_rows.FindIndex(r => r.Row.Key == key) < 0)
+            {
+                if (_tab.Kind is not (LedgerTabKind.Holders or LedgerTabKind.Everything)) SelectTab("holders");
+                if (_filter.Text.Length > 0) _filter.Text = "";
+                Reload();
+            }
             Restore(new HashSet<string> { key }, key);
         }
         catch (InvalidOperationException) { }
@@ -227,10 +283,10 @@ sealed class LedgerWindow : Form
         {
             _grid.ClearSelection();
             for (var i = 0; i < _rows.Count; i++)
-                if (keys.Contains(_rows[i].Key)) _grid.Rows[i].Selected = true;
+                if (keys.Contains(_rows[i].Row.Key)) _grid.Rows[i].Selected = true;
             if (firstKey != null)
             {
-                var at = _rows.FindIndex(r => r.Key == firstKey);
+                var at = _rows.FindIndex(r => r.Row.Key == firstKey);
                 if (at >= 0 && at < _grid.RowCount) _grid.FirstDisplayedScrollingRowIndex = at;
             }
         }
@@ -249,25 +305,37 @@ sealed class LedgerWindow : Form
         Restore(keys, first);
     }
 
+    /// <summary>Sorts by the chosen column within each group: group header rows stay where they are and keep their rows under them.</summary>
     void ApplySort()
     {
         foreach (DataGridViewColumn c in _grid.Columns) c.HeaderCell.SortGlyphDirection = SortOrder.None;
         if (_sortCol < 0 || _sortCol >= _grid.Columns.Count) return;
         _grid.Columns[_sortCol].HeaderCell.SortGlyphDirection = _sortAsc ? SortOrder.Ascending : SortOrder.Descending;
+        var output = new List<LedgerRowEx>(_rows.Count);
+        var segment = new List<LedgerRowEx>();
+        void Flush() { output.AddRange(SortSegment(segment)); segment.Clear(); }
+        foreach (var r in _rows)
+        {
+            if (r.IsGroupHeader) { Flush(); output.Add(r); }
+            else segment.Add(r);
+        }
+        Flush();
+        _rows = output;
+    }
+
+    List<LedgerRowEx> SortSegment(List<LedgerRowEx> rows)
+    {
         var sign = _sortAsc ? 1 : -1;
         if (_sortCol >= FixedCols)
         {
             var vi = _sortCol - FixedCols;
+            double? V(LedgerRowEx r) => vi < r.Row.Values.Count ? r.Row.Values[vi] : null;
             // Blank values always sort last; a stable order keeps ties in their natural order.
-            _rows = _rows.Select((r, i) => (r, i)).OrderBy(x => x.r.Values[vi] == null ? 1 : 0)
-                .ThenBy(x => (x.r.Values[vi] ?? 0) * sign).ThenBy(x => x.i).Select(x => x.r).ToList();
+            return rows.Select((r, i) => (r, i)).OrderBy(x => V(x.r) == null ? 1 : 0)
+                .ThenBy(x => (V(x.r) ?? 0) * sign).ThenBy(x => x.i).Select(x => x.r).ToList();
         }
-        else
-        {
-            Func<LedgerRow, string> sel = _sortCol == 0 ? r => r.Name : r => r.Kind;
-            var ordered = _sortAsc ? _rows.OrderBy(sel, StringComparer.CurrentCultureIgnoreCase) : _rows.OrderByDescending(sel, StringComparer.CurrentCultureIgnoreCase);
-            _rows = ordered.ToList();
-        }
+        Func<LedgerRowEx, string> sel = _sortCol == 0 ? r => r.Row.Name : r => r.Row.Kind;
+        return (_sortAsc ? rows.OrderBy(sel, StringComparer.CurrentCultureIgnoreCase) : rows.OrderByDescending(sel, StringComparer.CurrentCultureIgnoreCase)).ToList();
     }
 
     static string Fmt(double v) => LedgerTable.FormatNumber(v);
@@ -275,7 +343,7 @@ sealed class LedgerWindow : Form
     void OnCellValueNeeded(object? sender, DataGridViewCellValueEventArgs e)
     {
         if (e.RowIndex < 0 || e.RowIndex >= _rows.Count) return;
-        var r = _rows[e.RowIndex];
+        var r = _rows[e.RowIndex].Row;
         e.Value = e.ColumnIndex switch
         {
             0 => r.Name,
@@ -287,9 +355,19 @@ sealed class LedgerWindow : Form
 
     void OnCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
     {
-        if (e.RowIndex < 0 || e.RowIndex >= _rows.Count || e.ColumnIndex < FixedCols || e.CellStyle == null) return;
+        if (e.RowIndex < 0 || e.RowIndex >= _rows.Count || e.CellStyle == null) return;
+        var row = _rows[e.RowIndex];
+        if (row.IsGroupHeader)
+        {
+            e.CellStyle.Font = _boldFont ??= new Font(_grid.Font, FontStyle.Bold);
+            e.CellStyle.BackColor = SystemColors.ControlLight;
+            e.CellStyle.SelectionBackColor = SystemColors.ControlDark;
+            if (e.ColumnIndex == 0) e.CellStyle.Padding = Padding.Empty;
+            return;
+        }
+        if (e.ColumnIndex < FixedCols) return;
         var i = e.ColumnIndex - FixedCols;
-        if (i < _rows[e.RowIndex].Values.Count && _rows[e.RowIndex].Values[i] is < 0)
+        if (i < row.Row.Values.Count && row.Row.Values[i] is < 0)
         {
             e.CellStyle.ForeColor = Color.Red;
             e.CellStyle.SelectionForeColor = Color.Red;
@@ -298,9 +376,9 @@ sealed class LedgerWindow : Form
 
     Breakdown? BreakdownFor(int rowIndex, int colIndex)
     {
-        if (rowIndex >= _rows.Count || colIndex < FixedCols || colIndex - FixedCols >= _cols.Count) return null;
+        if (rowIndex >= _rows.Count || colIndex < FixedCols || colIndex - FixedCols >= _cols.Count || _rows[rowIndex].IsGroupHeader) return null;
         if (_s.Game is not { } game) return null;
-        return LedgerBreakdown.For(_s.View ?? game.State, _s.Rules, _s.Model, _rows[rowIndex].Key, _cols[colIndex - FixedCols].Id);
+        return LedgerBreakdown.For(_s.View ?? game.State, _s.Rules, _s.Model, _rows[rowIndex].Row.Key, _cols[colIndex - FixedCols].Id);
     }
 
     // ---------- manual edit ----------
@@ -308,7 +386,8 @@ sealed class LedgerWindow : Form
     void OnCellValuePushed(object? sender, DataGridViewCellValueEventArgs e)
     {
         if (e.RowIndex < 0 || e.RowIndex >= _rows.Count || e.ColumnIndex < FixedCols || e.ColumnIndex - FixedCols >= _cols.Count) return;
-        var key = _rows[e.RowIndex].Key;
+        if (_rows[e.RowIndex].IsGroupHeader) return;
+        var key = _rows[e.RowIndex].Row.Key;
         var prop = _cols[e.ColumnIndex - FixedCols];
         var text = (e.Value as string ?? "").Trim();
         if (text.Length == 0) return; // empty input cancels
@@ -352,9 +431,12 @@ sealed class LedgerWindow : Form
     void ExportCsv()
     {
         if (Program.Smoke) return;
-        using var dlg = new SaveFileDialog { Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*", DefaultExt = "csv", FileName = "ledger.csv" };
+        var safe = new string(_tab.Title.Select(c => Path.GetInvalidFileNameChars().Contains(c) || char.IsWhiteSpace(c) ? '-' : c).ToArray()).ToLowerInvariant();
+        using var dlg = new SaveFileDialog { Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*", DefaultExt = "csv", FileName = "ledger-" + safe + ".csv" };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        try { File.WriteAllText(dlg.FileName, LedgerTable.ToCsv(_cols, _rows), new UTF8Encoding(true)); }
+        // The rows as shown (sorted), group headers left out.
+        var shown = _result with { Rows = _rows };
+        try { File.WriteAllText(dlg.FileName, LedgerTabs.ToCsv(shown), new UTF8Encoding(true)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Warn("Could not save the file: " + ex.Message); }
     }
 

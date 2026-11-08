@@ -885,7 +885,7 @@ sealed partial class MainForm : Form
     {
         if (_session?.Rules == null) return;
         var s = _session;
-        OpenChild(_ledgers, "ledger", () => new LedgerWindow(s, () => Actions));
+        OpenChild(_ledgers, "ledger", () => new LedgerWindow(s, () => Actions, CentreOnPiece));
     }
 
     /// <summary>Opens (or activates) the single rules workbench of this session.</summary>

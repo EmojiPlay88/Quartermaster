@@ -164,6 +164,10 @@ sealed record StartupOptions(string? ModulePath, int? SetupIndex, bool NewGame, 
                     if (i + 1 < args.Length) shotLedger = args[++i];
                     else warn("--screenshot-ledger needs a file path; ignored.");
                     break;
+                case "--screenshot-ledger-tabs":
+                    if (i + 1 < args.Length) MainForm.LedgerTabsShot = args[++i];
+                    else warn("--screenshot-ledger-tabs needs a file path; ignored.");
+                    break;
                 case "--screenshot-workbench":
                     if (i + 1 < args.Length) shotBench = args[++i];
                     else warn("--screenshot-workbench needs a file path; ignored.");

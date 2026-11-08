@@ -36,6 +36,20 @@ public sealed class CounterImages(ImageSource images, long maxBytes = 64L << 20)
 
     public SKImage? TryGetCached(PieceInstance p, SKSizeI size) => _cache.TryGet(Key(p, size));
 
+    /// <summary>The piece's drawn bounds at module scale (what <see cref="PreviewSize"/> needs); a 32 px box when it cannot be measured.</summary>
+    public SKRect NativeBounds(PieceInstance p)
+    {
+        try
+        {
+            lock (_gate)
+            {
+                var b = PieceGeometry.LocalBounds(_pieces.Types.Get(p.TypeString), p, images);
+                return b.Width < 1 || b.Height < 1 ? SKRect.Create(-16, -16, 32, 32) : b;
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return SKRect.Create(-16, -16, 32, 32); }
+    }
+
     /// <summary>The counter fitted into <paramref name="size"/> (transparent background), cached; null when it cannot be drawn.</summary>
     public SKImage? Render(PieceInstance p, SKSizeI size)
     {
