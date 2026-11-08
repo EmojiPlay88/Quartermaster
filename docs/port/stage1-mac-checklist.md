@@ -20,6 +20,9 @@ The app is not signed, so macOS blocks it the first time.
    `xattr -dr com.apple.quarantine ~/Desktop/osx-arm64`
    `chmod +x ~/Desktop/osx-arm64/Quartermaster`
    Then try step 5 again.
+   - A Terminal window opening next to the app is normal for this test build: it is a bare program, not a `.app` bundle yet (that comes with the installers). Leave Terminal open while testing.
+   - If the "cannot verify / malware" warning still appears (macOS 15 Sequoia and newer no longer accept right-click > Open): start it from Terminal with `~/Desktop/osx-arm64/Quartermaster`. If it is still blocked, click **Done** on the warning, open **System Settings > Privacy & Security**, scroll down, click **Open Anyway** next to Quartermaster and confirm with your password.
+   - The Riverland demo can also be downloaded directly: https://github.com/EmojiPlay88/Quartermaster/raw/master/docs/wiki/demo/Riverland-Demo.vmod
 7. A window should open with a grey menu bar (File, Edit, View). Note: did it open at all? Did a Dock icon appear? The Dock icon may be a plain default one at this stage.
 
 ## C. Look

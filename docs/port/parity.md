@@ -5,9 +5,9 @@ Every window, menu command and feature of the WinForms app (`src/Quartermaster.A
 How to read the columns:
 
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
-- **Linux**: ticked only for features verified by tests actually run on Linux. None so far: this machine has no usable WSL distribution, so Linux is checked by the CI workflow `.github/workflows/cross-platform.yml` (CI after push). Fill in from the first green run.
-- **Docs.Tests on Linux**: the documentation tests build paths from the repository layout; whether those paths work on Linux (separators, case-sensitive names) is unverified until the first CI run on ubuntu.
-- **macOS**: ticked only after the user has worked through `docs/port/stage1-mac-checklist.md` on the M1 Mac.
+- **Linux**: ticked only for features verified by tests actually run on Linux. Stage 1 rows: verified by the headless tests in the CI workflow `.github/workflows/cross-platform.yml` on ubuntu-latest (green run 42510235329, 2026-11-08). Not yet opened on a real Linux desktop.
+- **Docs.Tests on Linux**: pass on ubuntu-latest in CI (run 42510235329).
+- **macOS**: ticked only after the user has worked through `docs/port/stage1-mac-checklist.md` on the M1 Mac. Stage 1: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
 - **Stage**: 1 = shell, map, pieces (this branch); 2 to 5 = planned later stages (2 rules, formulas, log, dice, turns; 3 ledger, notes, inventory, documents, search; 4 workbench and settings; 5 multiplayer, launcher, updates); `-` = no plan yet or not applicable off Windows. The stage numbers after 1 are provisional.
 
 ## Stage-1 deviations from the WinForms app (deliberate or known)
@@ -43,29 +43,29 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| Open Module... | 1 | ✔ |  |  | Ctrl/Cmd+O |
-| New Game | 1 | ✔ |  |  | Ctrl/Cmd+N |
-| Load Setup... | 1 | ✔ |  |  |  |
-| Open Game... | 1 | ✔ |  |  | Ctrl/Cmd+G |
+| Open Module... | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+O |
+| New Game | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+N |
+| Load Setup... | 1 | ✔ | ✔ | ✔ |  |
+| Open Game... | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+G |
 | Open Autosave... | 4 |  |  |  |  |
 | Open Turn File... | 5 |  |  |  |  |
-| Save Game | 1 | ✔ |  |  | Ctrl/Cmd+S |
-| Save Game As... | 1 | ✔ |  |  | Ctrl/Cmd+Shift+S |
+| Save Game | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+S |
+| Save Game As... | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+Shift+S |
 | Export Viewer Copy... | 5 |  |  |  |  |
 | New Rules Pack... | 2 |  |  |  |  |
 | Open Rules Pack... | 2 |  |  |  |  |
 | Save Rules Pack / Save Rules Pack As... | 2 |  |  |  |  |
 | Back to launcher | 5 |  |  |  |  |
-| Exit | 1 | ✔ |  |  | asks about unsaved changes, as WinForms |
+| Exit | 1 | ✔ | ✔ | ✔ | asks about unsaved changes, as WinForms |
 
 ## Menu bar: Edit, View, Game, Tools, Window, Help
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| Edit > Undo / Redo (caption follows the history) | 1 | ✔ |  |  | Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z |
+| Edit > Undo / Redo (caption follows the history) | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z |
 | Edit > Step Back to Start of Phase / Step Back To... | 2 |  |  |  |  |
-| View > Show Grid | 1 | ✔ |  |  |  |
-| View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ |  |  | labels from the map context menu and toolbar |
+| View > Show Grid | 1 | ✔ | ✔ | ✔ |  |
+| View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
 | View > Module Tree | 2 |  |  |  |  |
 | View > Diagnostics | 3 |  |  |  |  |
 | View > Log | 2 |  |  |  |  |
@@ -73,7 +73,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Outliner | 3 |  |  |  |  |
 | View > Ledger | 3 |  |  |  |  |
 | View > Overview | 3 |  |  |  |  |
-| View > Counter palette (GM only) | 1 | ✔ |  |  | always visible in Desktop |
+| View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | always visible in Desktop |
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
 | Tools > Rules Workbench | 4 |  |  |  |  |
 | Tools > Inventory, Notes | 3 |  |  |  |  |
@@ -88,15 +88,15 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
 | MainForm: toolbar | 2 |  |  |  |  |
-| MainForm: status bar (module, message, tiling progress, location, zoom) | 1 | ✔ |  |  |  |
-| MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ |  |  |  |
-| MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ |  |  |  |
-| MainForm: error guard (warning box on a bad file) | 1 | ✔ |  |  |  |
-| MainForm: command line <vmod> --setup N / --new | 1 | ✔ |  |  | --rules and the other options come later |
-| MainForm: shortcut router (Cmd on macOS) | 1 | ✔ |  |  | user-editable keys come with Settings |
+| MainForm: status bar (module, message, tiling progress, location, zoom) | 1 | ✔ | ✔ | ✔ |  |
+| MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ | ✔ | ✔ |  |
+| MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ | ✔ | ✔ |  |
+| MainForm: error guard (warning box on a bad file) | 1 | ✔ | ✔ | ✔ |  |
+| MainForm: command line <vmod> --setup N / --new | 1 | ✔ | ✔ | ✔ | --rules and the other options come later |
+| MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | user-editable keys come with Settings |
 | ModuleTreePanel | 2 |  |  |  |  |
 | TablesTreePanel | 2 |  |  |  |  |
-| DocumentTabStrip (map tabs) | 1 | ✔ |  |  | one tab per visible map |
+| DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2 |  |  |  |  |
 | TourOverlay | 5 |  |  |  |  |
@@ -110,17 +110,17 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| MapWindow: one map per tab, board tiles prepared in the background, placeholder on failure | 1 | ✔ |  |  |  |
-| MapCanvas: pan (drag, wheel, trackpad) | 1 | ✔ |  |  | mac wheel = pan, Cmd+wheel = zoom |
-| MapCanvas: zoom (wheel, pinch, menus) | 1 | ✔ |  |  |  |
-| MapCanvas: click select, Ctrl/Cmd+click multi-select, rubber band | 1 | ✔ |  |  |  |
-| MapCanvas + MapDragController: drag, snap, drop, stacking | 1 | ✔ |  |  |  |
-| MapCanvas: Esc cancels a drag | 1 | ✔ |  |  |  |
-| MapCanvas: view refresh, selection prune and drag cancel on game change or rewind | 1 | ✔ |  |  |  |
-| MapCanvas: cursor location and zoom text in the status bar | 1 | ✔ |  |  |  |
-| Grid overlay and grid location names | 1 | ✔ |  |  |  |
-| PaletteDock / PalettePanel: search, folder tree, counter thumbnails | 1 | ✔ |  |  |  |
-| PaletteDrop: drag a counter onto a map | 1 | ✔ |  |  |  |
+| MapWindow: one map per tab, board tiles prepared in the background, placeholder on failure | 1 | ✔ | ✔ | ✔ |  |
+| MapCanvas: pan (drag, wheel, trackpad) | 1 | ✔ | ✔ | ✔ | mac wheel = pan, Cmd+wheel = zoom |
+| MapCanvas: zoom (wheel, pinch, menus) | 1 | ✔ | ✔ | ✔ |  |
+| MapCanvas: click select, Ctrl/Cmd+click multi-select, rubber band | 1 | ✔ | ✔ | ✔ |  |
+| MapCanvas + MapDragController: drag, snap, drop, stacking | 1 | ✔ | ✔ | ✔ |  |
+| MapCanvas: Esc cancels a drag | 1 | ✔ | ✔ | ✔ |  |
+| MapCanvas: view refresh, selection prune and drag cancel on game change or rewind | 1 | ✔ | ✔ | ✔ |  |
+| MapCanvas: cursor location and zoom text in the status bar | 1 | ✔ | ✔ | ✔ |  |
+| Grid overlay and grid location names | 1 | ✔ | ✔ | ✔ |  |
+| PaletteDock / PalettePanel: search, folder tree, counter thumbnails | 1 | ✔ | ✔ | ✔ |  |
+| PaletteDrop: drag a counter onto a map | 1 | ✔ | ✔ | ✔ |  |
 | MapCanvas: hover stack popup (CounterDetailPopup) | 2 |  |  |  |  |
 | MapCanvas: hover-stack highlight | 2 |  |  |  |  |
 | MapCanvas: double-click stack expand | 2 |  |  |  |  |
@@ -140,7 +140,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| SetupChooserDialog: New game from module + setups, difficulty, double-click = OK | 1 | ✔ |  |  | no Players page, difficulty not saved |
+| SetupChooserDialog: New game from module + setups, difficulty, double-click = OK | 1 | ✔ | ✔ | ✔ | no Players page, difficulty not saved |
 | PlayersEditor | 5 |  |  |  |  |
 | Remembered rules pack per module (RulesMemory) | 2 |  |  |  | stage 1 passes no rules folder |
 
@@ -187,7 +187,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| Saves open in both apps (ModuleSession.SaveNative / LoadNative) | 1 | ✔ |  |  | same calls; cross-app open is on the Mac checklist |
-| Same classic grey look, one theme on all systems | 1 | ✔ |  |  | side-by-side shots: build/port-screenshots.ps1 |
-| Desktop references no WinForms, WebView2, WinRT, App or Ocr project | 1 | ✔ |  |  | project file |
+| Saves open in both apps (ModuleSession.SaveNative / LoadNative) | 1 | ✔ | ✔ | ✔ | same calls; cross-app open is on the Mac checklist |
+| Same classic grey look, one theme on all systems | 1 | ✔ | ✔ | ✔ | side-by-side shots: build/port-screenshots.ps1 |
+| Desktop references no WinForms, WebView2, WinRT, App or Ocr project | 1 | ✔ | ✔ | ✔ | project file |
 
