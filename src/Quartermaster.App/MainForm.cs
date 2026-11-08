@@ -812,50 +812,63 @@ sealed partial class MainForm : Form
         else if (_opts.NewRulesName != null) s.NewRules(_opts.NewRulesName);
     }
 
+    RulesPackFlow? RulesFlow() => _session == null ? null : new RulesPackFlow(_session, new RulesUi(this), null);
+
+    /// <summary>The WinForms dialogs behind <see cref="RulesPackFlow"/>.</summary>
+    sealed class RulesUi : IRulesPackUi
+    {
+        readonly MainForm _f;
+        public RulesUi(MainForm f) => _f = f;
+
+        public bool? AskSaveChanges(string packName)
+        {
+            var r = MessageBox.Show(_f, $"Save changes to the rules pack '{packName}'?", "Quartermaster",
+                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            return r == DialogResult.Cancel ? null : r == DialogResult.Yes;
+        }
+
+        public string? PickOpen()
+        {
+            using var dlg = new OpenFileDialog { Filter = "Rules packs (*.qrules)|*.qrules|All files (*.*)|*.*", Title = "Open Rules Pack" };
+            return dlg.ShowDialog(_f) == DialogResult.OK ? dlg.FileName : null;
+        }
+
+        public string? PickSave(string suggestedName)
+        {
+            using var dlg = new SaveFileDialog { Filter = "Rules packs (*.qrules)|*.qrules", DefaultExt = "qrules", Title = "Save Rules Pack", FileName = suggestedName };
+            return dlg.ShowDialog(_f) == DialogResult.OK ? dlg.FileName : null;
+        }
+
+        public string? AskName(string title, string prompt, string def) => InputDialog.Ask(_f, title, prompt, def);
+
+        public void Warn(string text) => _f.ShowError(text);
+    }
+
     /// <summary>Offers to save an edited rules pack. Returns false when the user cancels (or cancels the save).</summary>
     bool ConfirmRulesSaved()
     {
         if (_session is not { RulesDirty: true } || Program.Smoke) return true;
-        var r = MessageBox.Show(this, $"Save changes to the rules pack '{_session.Rules?.Name}'?", "Quartermaster",
-            MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-        if (r == DialogResult.Cancel) return false;
-        if (r == DialogResult.No) return true;
-        try { return SaveRulesPack(false); }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            ShowError(ex.Message);
-            return false;
-        }
+        return RulesFlow()!.ConfirmSaved();
     }
 
     void NewRulesPack()
     {
-        if (_session == null || Program.Smoke || !ConfirmRulesSaved()) return;
-        var name = InputDialog.Ask(this, "New Rules Pack", "Name of the new rules pack:", "Rules");
-        if (!string.IsNullOrWhiteSpace(name)) _session.NewRules(name.Trim());
+        if (_session == null || Program.Smoke) return;
+        RulesFlow()!.New();
     }
 
     void OpenRulesDialog()
     {
-        if (_session == null || Program.Smoke || !ConfirmRulesSaved()) return;
-        using var dlg = new OpenFileDialog { Filter = "Rules packs (*.qrules)|*.qrules|All files (*.*)|*.*", Title = "Open Rules Pack" };
-        if (dlg.ShowDialog(this) == DialogResult.OK) _session.OpenRules(dlg.FileName);
+        if (_session == null || Program.Smoke) return;
+        RulesFlow()!.Open();
     }
 
     /// <summary>Saves the pack; returns false when the user cancelled the file dialog.</summary>
     bool SaveRulesPack(bool saveAs)
     {
         if (_session?.Rules == null) return true;
-        string? path = null;
-        if (saveAs || _session.RulesPath == null)
-        {
-            if (Program.Smoke) return true;
-            using var dlg = new SaveFileDialog { Filter = "Rules packs (*.qrules)|*.qrules", DefaultExt = "qrules", Title = "Save Rules Pack", FileName = _session.Rules.Name };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return false;
-            path = dlg.FileName;
-        }
-        _session.SaveRules(path);
-        return true;
+        if ((saveAs || _session.RulesPath == null) && Program.Smoke) return true;
+        return RulesFlow()!.Save(saveAs);
     }
 
     /// <summary>Opens (or activates) a module document and jumps to a 1-based page.</summary>
