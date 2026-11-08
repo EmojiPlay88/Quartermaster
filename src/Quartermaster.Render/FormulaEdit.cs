@@ -52,18 +52,37 @@ public static class FormulaEdit
     public static IReadOnlyList<VariableBinding> Stale(FormulaDef f, IReadOnlyList<string> variables) =>
         f.Bindings.Where(b => !variables.Contains(b.Variable, StringComparer.Ordinal)).ToList();
 
-    /// <summary>Bindings whose variable is not in the formula's current text.</summary>
-    public static IReadOnlyList<VariableBinding> Unused(FormulaDef f)
+    /// <summary>
+    /// The variables of the text, then any used only inside a Table binding's row or column expression (in text order, nested tables
+    /// included), the same set the formula runner resolves and the validator counts as used. Empty when the text does not parse.
+    /// </summary>
+    public static IReadOnlyList<string> UsedVariables(FormulaDef f)
     {
         var a = Analyze(f.Text);
-        return a.Error != null ? Array.Empty<VariableBinding>() : Stale(f, a.Variables);
+        if (a.Error != null) return Array.Empty<string>();
+        var names = new List<string>(a.Variables);
+        for (var i = 0; i < names.Count; i++)
+        {
+            var b = f.Bindings.FirstOrDefault(x => x.Variable == names[i]);
+            if (b is not { Kind: BindingKind.Table }) continue;
+            foreach (var src in new[] { b.RowExpr, b.ColExpr })
+            {
+                if (string.IsNullOrWhiteSpace(src)) continue;
+                var sub = Analyze(src);
+                foreach (var v in sub.Variables)
+                    if (!names.Contains(v)) names.Add(v);
+            }
+        }
+        return names;
     }
 
-    public static FormulaDef RemoveUnused(FormulaDef f)
-    {
-        var a = Analyze(f.Text);
-        return a.Error != null ? f : Sync(f, a.Variables).Formula;
-    }
+    /// <summary>Bindings whose variable is neither in the formula's current text nor in a table binding's row/column expression.</summary>
+    public static IReadOnlyList<VariableBinding> Unused(FormulaDef f) =>
+        Analyze(f.Text).Error != null ? Array.Empty<VariableBinding>() : Stale(f, UsedVariables(f));
+
+    /// <summary>Drops unused bindings and adds an Input binding for any used variable that has none (e.g. a new row-expression variable).</summary>
+    public static FormulaDef RemoveUnused(FormulaDef f) =>
+        Analyze(f.Text).Error != null ? f : Sync(f, UsedVariables(f)).Formula;
 
     /// <summary>Bindings follow the variables in text order; new ones are Input. Removed ones are reported (configured ones are kept on request).</summary>
     public static SyncResult Sync(FormulaDef f, IReadOnlyList<string> variables, bool keepConfigured = false)

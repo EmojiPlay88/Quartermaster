@@ -326,7 +326,7 @@ sealed partial class FormulasTab : UserControl, IRuleRefEditor
             Commit(x =>
             {
                 var y = FormulaEdit.SetAppliesTo(FormulaEdit.SetText(x, text), apply);
-                return analysis.Error != null || !textChanged ? y : FormulaEdit.Sync(y, analysis.Variables, keepConfigured: true).Formula;
+                return analysis.Error != null || !textChanged ? y : FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula;
             });
             if (analysis.Error == null && textChanged) RebuildBindings();
         }
@@ -348,8 +348,7 @@ sealed partial class FormulasTab : UserControl, IRuleRefEditor
                 var asked = FormulaEdit.Unused(f).Where(FormulaEdit.IsConfigured).Where(b => !_declined.Contains(id + "|" + b.Variable)).ToList();
                 if (asked.Count == 0) return;
                 var names = string.Join(", ", asked.Select(b => b.Variable));
-                if (Program.Smoke) Program.AppLog($"smoke: skipped the box asking to remove unused bindings of {f.Name}: {names}");
-                if (!Program.Smoke && MessageBox.Show(this, $"In \"{f.Name}\", the variable(s) {names} are no longer in the formula. Remove their settings (kind, target, details)?", "Remove unused bindings",
+                if (MessageBox.Show(this, $"In \"{f.Name}\", the variable(s) {names} are no longer in the formula. Remove their settings (kind, target, details)?", "Remove unused bindings",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
                 {
                     CommitFor(id, FormulaEdit.RemoveUnused);
