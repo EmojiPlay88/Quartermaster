@@ -29,6 +29,7 @@ sealed class BatchGridWindow : Form
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 120 };
     readonly CheatSheetWindow? _cheat;
     readonly CounterCellImages _counters;
+    readonly CounterPreviewTip _preview;
     GameSession? _attached;
     int _varCount;
     int _shownRows = -1;
@@ -45,6 +46,7 @@ sealed class BatchGridWindow : Form
 
         _grid.RowTemplate.Height = RowHeight;
         _counters = new CounterCellImages(s.Counters, ImageSize, _grid, () => _grid.Invalidate());
+        _preview = new CounterPreviewTip(s.Counters);
         BuildColumns();
         var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 38, Padding = new Padding(6, 4, 6, 4), WrapContents = false };
         bar.Controls.AddRange(new Control[] { _calcAll, _applyAll, _applyRow, _status });
@@ -63,6 +65,12 @@ sealed class BatchGridWindow : Form
         _grid.CellValuePushed += (_, e) => Safe(() => OnValuePushed(e));
         _grid.CellFormatting += (_, e) => Safe(() => OnFormatting(e));
         _grid.CellPainting += (_, e) => Safe(() => OnPaintImage(e));
+        _grid.CellMouseMove += (_, e) => Safe(() => OnHoverImage(e));
+        _grid.CellMouseLeave += (_, _) => _preview.Hide();
+        _grid.MouseLeave += (_, _) => _preview.Hide();
+        _grid.Scroll += (_, _) => _preview.Hide();
+        _grid.MouseDown += (_, _) => _preview.Hide();
+        Deactivate += (_, _) => _preview.Hide();
         _grid.CellToolTipTextNeeded += (_, e) => Safe(() => OnToolTip(e));
         _tip.Track(_grid, LedgerTip);
         _grid.ShowCellToolTips = true; // native tips stay on for the "doesn't match" hint; OnToolTip returns nothing for the Ledger column, so they never overlap the breakdown
@@ -138,6 +146,21 @@ sealed class BatchGridWindow : Form
             using var pen = new Pen(Color.Silver) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot };
             e.Graphics.DrawRectangle(pen, box.Left, box.Top, box.Width - 1, box.Height - 1);
         }
+    }
+
+    /// <summary>Hovering the unit's picture shows the big counter preview; anywhere else hides it.</summary>
+    void OnHoverImage(DataGridViewCellMouseEventArgs e)
+    {
+        if (e.ColumnIndex != 0 || e.RowIndex < 0 || e.RowIndex >= _model.RowCount) { _preview.Hide(); return; }
+        var cell = _grid.GetCellDisplayRectangle(0, e.RowIndex, false);
+        var box = new Rectangle(2, (cell.Height - ImageSize.Height) / 2, ImageSize.Width, ImageSize.Height);
+        var row = _model.Row(e.RowIndex);
+        if (!box.Contains(e.Location) || row.PieceId == null || _s.View?.Pieces.TryGetValue(row.PieceId, out var piece) != true || piece == null)
+        {
+            _preview.Hide();
+            return;
+        }
+        _preview.Show(piece, row.Label, Cursor.Position);
     }
 
     /// <summary>The cheat sheet takes a share of the width that suits a narrow document area as well as a wide one.</summary>
@@ -314,6 +337,7 @@ sealed class BatchGridWindow : Form
         if (!RunExists) { Close(); return; }       // finished, or the game was replaced
         _model.Invalidate();
         _counters.Reset();   // the viewed state changed: pictures may differ
+        _preview.Hide();
         var n = _model.RowCount;
         if (n != _shownRows) { _shownRows = n; _grid.RowCount = n; }
         Text = _model.Title;
@@ -350,6 +374,7 @@ sealed class BatchGridWindow : Form
             if (_attached != null) _attached.Changed -= OnGameChanged;
             _debounce.Dispose();
             _counters.Dispose();
+            _preview.Dispose();
             _tip.Dispose();
         }
         base.Dispose(disposing);

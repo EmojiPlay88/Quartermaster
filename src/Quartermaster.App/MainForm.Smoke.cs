@@ -218,6 +218,7 @@ sealed partial class MainForm
         if (_opts.SmokePhases || _opts.ScreenshotPhases != null) Guard(SmokePhases);
         if (_opts.SmokeUndo || _opts.ScreenshotStepBack != null) Guard(SmokeUndo);
         if (_opts.ScreenshotBreakdown != null) Guard(SmokeBreakdown);
+        if (LedgerTabsShot != null) Guard(SmokeLedgerTabs);
         if (_opts.ScreenshotOutliner != null) Guard(SmokeOutliner);
         if (_opts.ScreenshotAlerts != null) Guard(SmokeAlerts);
         if (_opts.ScreenshotTour != null) Guard(SmokeTour);
