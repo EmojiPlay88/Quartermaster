@@ -49,8 +49,9 @@ public sealed class MapTabs : TabControl
     /// <summary>The selected tab's view.</summary>
     public MapView? ActiveView => (SelectedItem as TabItem)?.Content as MapView;
 
-    /// <summary>A view's status: (view, location text, zoom text). Location is "-" when the cursor is not over the map.</summary>
-    public event Action<MapView, string, string>? StatusChanged;
+    /// <summary>A view's status: (view, location text, zoom text). Location is "-" after a fit/centre/menu zoom or a tab switch (cursor
+    /// location unknown, as MapCanvas.ReportStatus(null)) and null when only the zoom changed (keep the shown location).</summary>
+    public event Action<MapView, string?, string>? StatusChanged;
 
     /// <summary>A short message for the status bar (palette drops), as MapCanvas.DropMessage.</summary>
     public event Action<string>? DropMessage;
@@ -134,9 +135,13 @@ public sealed class MapTabs : TabControl
         var v = new MapView(s, map) { ShowGrid = _showGrid, Preparing = map.Boards.Count > 0 ? 0 : null };
         v.Guarded = a => Run(s, map, a);
         v.Actions = () => _actions?.Invoke();
-        v.ViewportChanged += (_, _) => StatusChanged?.Invoke(v, "-", MapStatus.Zoom(v.View));
-        v.AddHandler(PointerMovedEvent, (_, e) =>
-            StatusChanged?.Invoke(v, MapStatus.Location(map, v.ScreenToMap(e.GetPosition(v))), MapStatus.Zoom(v.View)), RoutingStrategies.Bubble, handledEventsToo: true);
+        // As MapCanvas: pan, resize and tiles arriving update only the zoom; fit/centre/menu zoom clear the location; the pointer and the
+        // wheel (after MapView's class handler zoomed) report the cursor's map location.
+        v.ViewportChanged += (_, _) => StatusChanged?.Invoke(v, null, MapStatus.Zoom(v.View));
+        v.ViewReset += (_, _) => StatusChanged?.Invoke(v, "-", MapStatus.Zoom(v.View));
+        void ReportAt(PointerEventArgs e) => StatusChanged?.Invoke(v, MapStatus.Location(map, v.ScreenToMap(e.GetPosition(v))), MapStatus.Zoom(v.View));
+        v.AddHandler(PointerMovedEvent, (_, e) => ReportAt(e), RoutingStrategies.Bubble, handledEventsToo: true);
+        v.AddHandler(PointerWheelChangedEvent, (_, e) => ReportAt(e), RoutingStrategies.Bubble, handledEventsToo: true);
         DragDrop.SetAllowDrop(v, true);
         v.AddHandler(DragDrop.DragEnterEvent, (_, e) => OnDragOver(v, e));
         v.AddHandler(DragDrop.DragOverEvent, (_, e) => OnDragOver(v, e));

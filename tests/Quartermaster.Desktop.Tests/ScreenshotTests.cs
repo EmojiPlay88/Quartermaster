@@ -22,7 +22,9 @@ public sealed class ScreenshotTests
             Assert.True(bytes.Length > 1000);
             Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, bytes[..4]); // PNG signature
             // The run is headless: the platform is Avalonia.Headless, so no OS window can have been created.
-            Assert.Equal("HeadlessWindowImpl", new Window().PlatformImpl?.GetType().Name);
+            var probe = new Window();
+            try { Assert.Equal("HeadlessWindowImpl", probe.PlatformImpl?.GetType().Name); }
+            finally { probe.Close(); }
         }
         finally { try { File.Delete(png); } catch (IOException) { } }
     }

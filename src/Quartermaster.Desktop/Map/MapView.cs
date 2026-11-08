@@ -64,6 +64,10 @@ public sealed partial class MapView : Control
     /// <summary>Raised whenever pan or zoom changes (and when tiles arrive), like MapCanvas.ViewportChanged.</summary>
     public event EventHandler? ViewportChanged;
 
+    /// <summary>Raised after a programmatic view change (fit, centre, menu zoom, the first fit) after which the cursor location is unknown,
+    /// as MapCanvas.ReportStatus(null). Pan, wheel and tiles arriving do not raise it.</summary>
+    public event EventHandler? ViewReset;
+
     /// <summary>What this player may see (the game state itself in solo).</summary>
     GameState? State => Session.View;
 
@@ -89,14 +93,14 @@ public sealed partial class MapView : Control
         if (Bounds.Width < 1 || Bounds.Height < 1) return;
         _initialView = true;
         FitView.ZoomToFit(View, Map, ClientSize);
-        ViewChanged();
+        ViewChanged(reset: true);
     }
 
     /// <summary>Scrolls so the map point is in the middle of the view (zoom unchanged).</summary>
     public void CentreOn(PointD p)
     {
         FitView.Center(View, p, ClientSize);
-        ViewChanged();
+        ViewChanged(reset: true);
     }
 
     /// <summary>Sets the zoom (clamped) around the middle of the view.</summary>
@@ -106,13 +110,14 @@ public sealed partial class MapView : Control
         var centre = View.ToMap(new SKPoint(size.Width / 2, size.Height / 2));
         View.Zoom = zoom;
         FitView.Center(View, centre, size);
-        ViewChanged();
+        ViewChanged(reset: true);
     }
 
-    void ViewChanged()
+    void ViewChanged(bool reset = false)
     {
         InvalidateVisual();
         NotifyViewport();
+        if (reset) ViewReset?.Invoke(this, EventArgs.Empty);
     }
 
     void NotifyViewport() => ViewportChanged?.Invoke(this, EventArgs.Empty);
@@ -133,7 +138,7 @@ public sealed partial class MapView : Control
             var x = FitView.Extent(Map);
             FitView.Center(View, new PointD(x.X + x.W / 2, x.Y + x.H / 2), size);
         }
-        ViewChanged();
+        ViewChanged(reset: true);
     }
 
     public override void Render(DrawingContext context)

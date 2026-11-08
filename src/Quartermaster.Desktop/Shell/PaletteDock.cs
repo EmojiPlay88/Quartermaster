@@ -47,7 +47,8 @@ public sealed class PaletteDock : DockPanel
 {
     /// <summary>Thumbnail size (WinForms PaletteThumbs.Size).</summary>
     public static readonly PixelSize ThumbSize = new(64, 48);
-    const int CacheCap = 3000;
+    /// <summary>Most thumbnails kept (settable for tests).</summary>
+    internal int CacheCap { get; set; } = 3000;
 
     readonly TextBox _search = new() { Width = 150 };
     readonly TreeView _tree = new();
@@ -55,6 +56,7 @@ public sealed class PaletteDock : DockPanel
     readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
     readonly Dictionary<string, Bitmap> _cache = new();
     readonly Queue<string> _cacheOrder = new();
+    List<Image> _images = new();
     ModuleSession? _s;
     IReadOnlyList<PieceSlotDef> _listed = Array.Empty<PieceSlotDef>();
     CancellationTokenSource? _cts;
@@ -104,11 +106,11 @@ public sealed class PaletteDock : DockPanel
     public void Bind(ModuleSession? s)
     {
         StopWorker();
-        ClearCache();
         _s = s;
         _search.Text = "";
         _tree.ItemsSource = null;
-        Show(Array.Empty<PieceSlotDef>());
+        Show(Array.Empty<PieceSlotDef>());   // nothing shown any more, so the old module's thumbnails can all be released
+        ClearCache();
         if (s == null) return;
         var root = PaletteModel.Build(s.Model);
         var top = Node(root);
@@ -147,10 +149,12 @@ public sealed class PaletteDock : DockPanel
         StopWorker();
         _listed = slots;
         var items = new List<ListBoxItem>(slots.Count);
+        var images = new List<Image>(slots.Count);
         var missing = new List<(Image Img, PieceSlotDef Slot)>();
         foreach (var slot in slots)
         {
             var img = new Image { Width = ThumbSize.Width, Height = ThumbSize.Height, Stretch = Stretch.None };
+            images.Add(img);
             if (_cache.TryGetValue(PaletteModel.Key(slot), out var bmp)) img.Source = bmp;
             else missing.Add((img, slot));
             var text = new TextBlock { Text = slot.EntryName, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 80 };
@@ -160,6 +164,7 @@ public sealed class PaletteDock : DockPanel
             items.Add(item);
         }
         _list.ItemsSource = items;
+        _images = images;
         if (missing.Count == 0 || _s is not { } s) return;
         var cts = _cts = new CancellationTokenSource();
         _worker = Task.Run(() => Work(s, missing, cts.Token), cts.Token);
@@ -202,18 +207,31 @@ public sealed class PaletteDock : DockPanel
         }
     }
 
-    void Remember(string key, Bitmap bmp)
+    /// <summary>The thumbnail images of the listed counters (for tests).</summary>
+    internal IReadOnlyList<Image> ThumbImages => _images;
+
+    /// <summary>Caches a thumbnail, evicting the oldest past <see cref="CacheCap"/>. A bitmap an Image still shows is never disposed here:
+    /// it is only dropped from the cache and left to the GC (its native image has a finalizer).</summary>
+    internal void Remember(string key, Bitmap bmp)
     {
-        if (_cache.Remove(key, out var old)) old.Dispose();
+        HashSet<Bitmap>? shown = null;
+        if (_cache.Remove(key, out var old) && !ReferenceEquals(old, bmp)) Release(old, ref shown);
         _cache[key] = bmp;
         _cacheOrder.Enqueue(key);
         while (_cache.Count > CacheCap && _cacheOrder.TryDequeue(out var k))
-            if (_cache.Remove(k, out var gone) && !ReferenceEquals(gone, bmp)) gone.Dispose();
+            if (_cache.TryGetValue(k, out var gone) && !ReferenceEquals(gone, bmp)) { _cache.Remove(k); Release(gone, ref shown); }
+    }
+
+    void Release(Bitmap b, ref HashSet<Bitmap>? shown)
+    {
+        shown ??= _images.Select(i => i.Source).OfType<Bitmap>().ToHashSet();
+        if (!shown.Contains(b)) b.Dispose();
     }
 
     void ClearCache()
     {
-        foreach (var b in _cache.Values) b.Dispose();
+        HashSet<Bitmap>? shown = null;
+        foreach (var b in _cache.Values) Release(b, ref shown);
         _cache.Clear();
         _cacheOrder.Clear();
     }

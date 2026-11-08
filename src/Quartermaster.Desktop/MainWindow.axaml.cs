@@ -70,7 +70,7 @@ public partial class MainWindow : Window
         Maps.StatusChanged += (view, loc, zoom) =>
         {
             if (!ReferenceEquals(view, Maps.ActiveView)) return;
-            SbLocation.Text = loc;
+            if (loc != null) SbLocation.Text = loc;
             SbZoom.Text = zoom;
         };
         Maps.DropMessage += SetStatus;

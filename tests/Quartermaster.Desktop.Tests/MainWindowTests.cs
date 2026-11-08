@@ -8,6 +8,7 @@ using Avalonia.Input.Raw;
 using Avalonia.Threading;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Input;
+using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.TestFixtures;
@@ -447,6 +448,35 @@ public sealed class MainWindowTests : IDisposable
         Assert.True(w.HasUnsavedChanges);
     }
 
+    static bool Alive(Avalonia.Media.Imaging.Bitmap b)
+    {
+        try { _ = b.PixelSize; return true; }
+        catch (ObjectDisposedException) { return false; }
+    }
+
+    [AvaloniaFact]
+    public void Palette_cache_eviction_never_disposes_a_shown_thumbnail()
+    {
+        var w = NewWindow();
+        w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.StartSetup(null);
+        var palette = w.Palette;
+        PumpUntil(() => palette.ThumbImages.Count > 0 && palette.ThumbImages.All(i => i.Source != null));
+        var shown = palette.ThumbImages.Select(i => i.Source).OfType<Avalonia.Media.Imaging.Bitmap>().ToList();
+        Assert.NotEmpty(shown);
+
+        var slot = palette.ListedSlots[0];
+        var unshown = PaletteDock.Render(w.Session!, slot)!;
+        var newest = PaletteDock.Render(w.Session!, slot)!;
+        palette.CacheCap = 1;
+        palette.Remember("test:unshown", unshown);
+        palette.Remember("test:newest", newest);   // evicts every shown thumbnail and the unshown one
+
+        Assert.All(shown, b => Assert.True(Alive(b), "a thumbnail still on screen was disposed"));
+        Assert.False(Alive(unshown), "an evicted thumbnail nobody shows should be disposed");
+        Assert.True(Alive(newest));
+    }
+
     [AvaloniaFact]
     public void Palette_drop_off_the_boards_says_so()
     {
@@ -478,6 +508,7 @@ public sealed class MainWindowTests : IDisposable
         var view = w.MapTabs.Views[0];
         var board = view.Map.Boards[0];
         var centre = new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0);
+        PumpUntil(() => w.MapTabs.WhenTiled().IsCompleted);
         view.CentreOn(centre);
         Pump();
         var sp = view.View.ToScreen(centre);
@@ -492,6 +523,52 @@ public sealed class MainWindowTests : IDisposable
         w.ClickMenu("Zoom 100%");
         Pump();
         Assert.Equal("100%", w.ZoomText);
+        Assert.Equal("-", w.LocationText);   // a menu zoom resets the location, as WinForms
+    }
+
+    /// <summary>Opens the demo, waits for its tiles, and moves the mouse to the middle of the first board; returns the view and that screen point.</summary>
+    (MainWindow W, MapView View, Point At) DemoWithMouseOverBoard()
+    {
+        var w = NewWindow();
+        w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.StartSetup(null);
+        PumpUntil(() => w.MapTabs.WhenTiled().IsCompleted);
+        var view = w.MapTabs.Views[0];
+        var board = view.Map.Boards[0];
+        var centre = new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0);
+        view.CentreOn(centre);
+        Pump();
+        var sp = view.View.ToScreen(centre);
+        var at = view.TranslatePoint(new Point(sp.X, sp.Y), w)!.Value;
+        w.MouseMove(at);
+        Pump();
+        return (w, view, new Point(sp.X, sp.Y));
+    }
+
+    [AvaloniaFact]
+    public void Tiles_arriving_after_a_mouse_move_keep_the_location()
+    {
+        var (w, view, at) = DemoWithMouseOverBoard();
+        var expected = MapStatus.Location(view.Map, view.ScreenToMap(at));
+        Assert.Equal(expected, w.LocationText);
+        // Tile preparation finishing (MapTabs.PrepareTilesAsync → SetTiles) must not wipe the location (WinForms never does).
+        var board = view.Map.Boards[0];
+        view.SetTiles(BoardTiler.TileKey(board), new TileSet("", Math.Max(board.Width, 1), Math.Max(board.Height, 1), 0, isPlaceholder: true));
+        Pump();
+        Assert.Equal(expected, w.LocationText);
+    }
+
+    [AvaloniaFact]
+    public void Wheel_zoom_reports_the_cursor_location()
+    {
+        var (w, view, at) = DemoWithMouseOverBoard();
+        var zoom = view.View.Zoom;
+        w.MouseWheel(view.TranslatePoint(at, w)!.Value, new Vector(0, 1));
+        Pump();
+        Assert.NotEqual(zoom, view.View.Zoom);
+        Assert.Equal(MapStatus.Location(view.Map, view.ScreenToMap(at)), w.LocationText);
+        Assert.NotEqual("-", w.LocationText);
+        Assert.Equal($"{Math.Round(view.View.Zoom * 100)}%", w.ZoomText);
     }
 
     [AvaloniaFact]
