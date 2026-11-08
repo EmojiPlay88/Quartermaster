@@ -1,5 +1,6 @@
 using System.Globalization;
 using Quartermaster.Render;
+using Quartermaster.Render.Update;
 
 namespace Quartermaster.App;
 
@@ -31,6 +32,12 @@ sealed class LauncherForm : Form
     readonly Panel _playHost = new() { AutoSize = true, Margin = new Padding(3), Padding = Padding.Empty };
     readonly CancellationTokenSource _cts = new();
     readonly string? _justPlayed;
+    readonly UpdateBar _noticeBar = new() { Name = "UpdateNotice" };
+    readonly UpdateBar _updateBar = new() { Name = "UpdateBar" };
+    readonly Label _version = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 3, 6, 3), Text = "Quartermaster " + AppVersion.Text };
+    readonly LinkLabel _checkLink = new() { AutoSize = true, Text = "Check for updates", Margin = new Padding(3, 3, 3, 3) };
+    readonly bool _checkUpdates;
+    Task _updateCheck = Task.CompletedTask;
     Task _refresh = Task.CompletedTask;
     bool _closing;
     bool _addedDuringRefresh; // set when a module is added while a refresh runs: one more refresh hashes it
@@ -45,10 +52,20 @@ sealed class LauncherForm : Form
 
     public bool OnlineEnabled => _online.Enabled;
 
+    /// <summary>The update check started when the window opened (screenshots wait on it).</summary>
+    public Task UpdateCheckTask => _updateCheck;
+
+    /// <summary>The update bar's text, or null while it is hidden (smoke checks).</summary>
+    public string? UpdateBarText => _updateBar.Visible ? _updateBar.Message : null;
+
+    public IReadOnlyList<string> UpdateBarActions => _updateBar.Actions;
+
     /// <param name="justPlayed">After Back to launcher: the module just played, selected regardless of "Select the last module in the launcher".</param>
-    public LauncherForm(SettingsStore store, string layoutRoot, string? justPlayed = null)
+    /// <param name="checkForUpdates">False for smokes and screenshots that must never reach the network: no update check and no update bar.</param>
+    public LauncherForm(SettingsStore store, string layoutRoot, string? justPlayed = null, bool checkForUpdates = true)
     {
         _store = store;
+        _checkUpdates = checkForUpdates;
         try { _justPlayed = justPlayed == null ? null : Path.GetFullPath(justPlayed); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { _justPlayed = justPlayed; }
         _library = new ModuleLibrary(store);
@@ -85,16 +102,26 @@ sealed class LauncherForm : Form
         buttons.Controls.Add(right);
         buttons.Controls.Add(left);
 
+        var footer = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Padding = new Padding(8, 0, 8, 4) };
+        footer.Controls.Add(_version);
+        footer.Controls.Add(_checkLink);
+
         var bottom = new Panel { Dock = DockStyle.Bottom, AutoSize = true };
         bottom.Controls.Add(buttons);
         bottom.Controls.Add(rulesRow);
+        bottom.Controls.Add(footer);
         buttons.BringToFront();
+        footer.BringToFront();
         rulesRow.SendToBack();
         var listHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8, 8, 8, 0) };
         listHost.Controls.Add(_list);
         Controls.Add(listHost);
         Controls.Add(bottom);
+        Controls.Add(_updateBar);
+        Controls.Add(_noticeBar); // docked first: the topmost strip
         AcceptButton = _play;
+        _checkLink.Visible = checkForUpdates;
+        _checkLink.LinkClicked += (_, _) => Guarded(() => StartUpdateCheck(manual: true));
 
         _add.Click += (_, _) => Guarded(AddModules);
         _remove.Click += (_, _) => Guarded(RemoveSelected);
@@ -136,6 +163,105 @@ sealed class LauncherForm : Form
     {
         Fill(preselectLast: true);
         StartRefresh();
+        StartUpdateUi();
+    }
+
+    // ---------- updates ----------
+
+    /// <summary>On show: the one-off notice after an update, then the update already found this run, or the background check when due.</summary>
+    void StartUpdateUi()
+    {
+        if (AppUpdates.Notice is { } n)
+        {
+            AppUpdates.Notice = null;
+            var actions = new List<(string, Action)>();
+            if (n.Link is { } link) actions.Add((n.LinkText ?? "Release page", () => Guarded(() => AppUpdates.OpenPage(this, link))));
+            actions.Add(("Close", () => _noticeBar.Clear()));
+            _noticeBar.Show(n.Text, actions.ToArray());
+        }
+        if (!_checkUpdates) return;
+        if (AppUpdates.CheckOnNextLauncher)
+        {
+            AppUpdates.CheckOnNextLauncher = false;
+            StartUpdateCheck(manual: true);
+            return;
+        }
+        if (AppUpdates.Offered is { } offered)
+        {
+            if (!AppUpdates.Later && _store.Current.SkippedVersion != AppVersion.Format(offered.Version)) ShowOffer(offered);
+            return;
+        }
+        if (AppUpdates.CheckedThisRun || !_store.Current.CheckUpdatesOnStart || !UpdateChecker.Due(_store.Current.LastUpdateCheckUtc, DateTime.UtcNow)) return;
+        StartUpdateCheck(manual: false);
+    }
+
+    /// <summary>Checks on a worker; the automatic check is silent unless an update is found (a failure goes to the app log only).</summary>
+    void StartUpdateCheck(bool manual)
+    {
+        if (_closing || !_updateCheck.IsCompleted) return;
+        _checkLink.Enabled = false;
+        _updateCheck = CheckAsync(manual, _store.Current.SkippedVersion);
+    }
+
+    async Task CheckAsync(bool manual, string? skipped)
+    {
+        CheckResult r;
+        try { r = await Task.Run(() => UpdateChecker.Check(AppUpdates.Feed, AppVersion.Current, skipped, _cts.Token)); }
+        catch (OperationCanceledException) { return; }
+        AppUpdates.CheckedThisRun = true;
+        if (r.Outcome != CheckOutcome.Failed)
+        {
+            try { _store.Update(s => s with { LastUpdateCheckUtc = DateTime.UtcNow }); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Program.AppLog("update: could not save the check time: " + ex.Message); }
+        }
+        if (r.Outcome == CheckOutcome.Available) AppUpdates.Offered = r.Info;
+        if (r.Outcome == CheckOutcome.Failed) Program.AppLog($"update: {(manual ? "" : "automatic ")}check failed: {r.Error}");
+        if (_closing || IsDisposed) return;
+        Guarded(() =>
+        {
+            _checkLink.Enabled = true;
+            switch (r.Outcome)
+            {
+                case CheckOutcome.Available:
+                    if (manual) AppUpdates.Later = false;
+                    if (manual || !AppUpdates.Later) ShowOffer(r.Info!);
+                    break;
+                case CheckOutcome.Skipped when manual:
+                    var v = AppVersion.Format(r.Info!.Version);
+                    if (MessageBox.Show(this, $"Quartermaster {v} is available, but you chose to skip it. Offer it again?", "Quartermaster",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) break;
+                    _store.Update(s => s with { SkippedVersion = null });
+                    AppUpdates.Offered = r.Info;
+                    AppUpdates.Later = false;
+                    ShowOffer(r.Info!);
+                    break;
+                case CheckOutcome.UpToDate when manual:
+                    _updateBar.Clear();
+                    MessageBox.Show(this, $"Quartermaster {AppVersion.Text} is up to date.", "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    break;
+                case CheckOutcome.Failed when manual:
+                    MessageBox.Show(this, "Could not check for updates.\n\n" + r.Error, "Quartermaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    break;
+            }
+        });
+    }
+
+    /// <summary>The yellow bar: "Quartermaster 0.2.0 is available." What's new · Update now · Later · Skip this version.</summary>
+    void ShowOffer(UpdateInfo info)
+    {
+        var v = AppVersion.Format(info.Version);
+        _updateBar.Show($"Quartermaster {v} is available.",
+            ("What's new", () => Guarded(() => { using var dlg = new WhatsNewDialog(info); dlg.ShowDialog(this); })),
+            ("Update now", () => Guarded(() => AppUpdates.UpdateNow(this, info))),
+            ("Later", () => { AppUpdates.Later = true; _updateBar.Clear(); }),
+            ("Skip this version", () => Guarded(() =>
+            {
+                _store.Update(s => s with { SkippedVersion = v });
+                AppUpdates.Offered = null;
+                _updateBar.Clear();
+            })));
+        // The launcher only exists while no game is open, but never offer to update over one.
+        _updateBar.SetActionEnabled("Update now", !AppUpdates.GameOpen);
     }
 
     void StartRefresh()

@@ -16,6 +16,7 @@ static class LauncherShots
             if (opts.ModulePath != null) Seed(store, root, opts.ModulePath, opts.ScreenshotOffline != null);
             if (opts.ScreenshotLauncher is { } l) ShotLauncher(store, root, l);
             if (opts.ScreenshotOffline is { } o) ShotOffline(store, root, o);
+            if (AppUpdates.ScreenshotBarPath is { } u) ShotUpdateBar(store, root, u);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -67,7 +68,7 @@ static class LauncherShots
                 return new LaunchRequest(Path.GetFullPath(modulePath), null, LaunchKind.NewGame,
                     new NewGameRequest(GameMode.Offline, null, store.Current.LastDifficulty, null, null, null), null);
             }
-            using var form = new LauncherForm(store, root);
+            using var form = new LauncherForm(store, root, checkForUpdates: false);
             form.StartPosition = FormStartPosition.Manual;
             form.Location = new Point(-20000, -20000);
             form.Show();
@@ -111,13 +112,65 @@ static class LauncherShots
 
     static void ShotLauncher(SettingsStore store, string root, string path)
     {
-        using var form = new LauncherForm(store, root);
+        using var form = new LauncherForm(store, root, checkForUpdates: false);
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.Show();
         Pump(() => form.RefreshTask.IsCompleted);
         Shot(form, path);
         form.Hide();
+    }
+
+    /// <summary>
+    /// --screenshot-update-bar: a TEST folder feed offering 9.9.9 (dummy assets, never installable) under the scratch root, pointed to by
+    /// QUARTERMASTER_UPDATE_FEED for this process; the launcher runs its normal check against it and is drawn with the bar.
+    /// </summary>
+    static void ShotUpdateBar(SettingsStore store, string root, string path)
+    {
+        var feed = Path.Combine(root, "test-update-feed");
+        WriteTestFeed(feed, "9.9.9");
+        Environment.SetEnvironmentVariable(Quartermaster.Render.Update.UpdateFeeds.EnvVar, feed);
+        store.Update(s => s with { CheckUpdatesOnStart = true, LastUpdateCheckUtc = null, SkippedVersion = null });
+        using var form = new LauncherForm(store, root);
+        form.StartPosition = FormStartPosition.Manual;
+        form.Location = new Point(-20000, -20000);
+        form.Show();
+        Pump(() => form.RefreshTask.IsCompleted && form.UpdateCheckTask.IsCompleted);
+        var text = form.UpdateBarText;
+        var actions = string.Join(" | ", form.UpdateBarActions);
+        var ok = text == "Quartermaster 9.9.9 is available." && actions == "What's new | Update now | Later | Skip this version"
+                 && store.Current.LastUpdateCheckUtc != null;
+        Program.AppLog($"smoke: update bar {(ok ? "ok" : "FAILED")} ('{text}' [{actions}])");
+        if (!ok) Program.ExitCode = 1;
+        Shot(form, path);
+        form.Hide();
+    }
+
+    /// <summary>A release.json in the GitHub API shape plus a dummy zip and its .sha256 (TEST content, not a real build).</summary>
+    static void WriteTestFeed(string dir, string version)
+    {
+        Directory.CreateDirectory(dir);
+        var zipName = $"Quartermaster-{version}-win-x64.zip";
+        var zip = System.Text.Encoding.UTF8.GetBytes("TEST dummy update asset - not a Quartermaster build");
+        File.WriteAllBytes(Path.Combine(dir, zipName), zip);
+        File.WriteAllText(Path.Combine(dir, zipName + ".sha256"), Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(zip)) + "  " + zipName + "\n");
+        var tag = "quartermaster-v" + version;
+        var download = $"https://github.com/EmojiPlay88/Quartermaster/releases/download/{tag}/";
+        var release = new Dictionary<string, object>
+        {
+            ["tag_name"] = tag,
+            ["name"] = "TEST " + version,
+            ["draft"] = false,
+            ["prerelease"] = false,
+            ["html_url"] = "https://github.com/EmojiPlay88/Quartermaster/releases/tag/" + tag,
+            ["body"] = "TEST release notes for the update bar screenshot.\n\n- TEST: an invented change\n- TEST: another invented change",
+            ["assets"] = new object[]
+            {
+                new Dictionary<string, object> { ["name"] = zipName, ["size"] = zip.Length, ["browser_download_url"] = download + zipName },
+                new Dictionary<string, object> { ["name"] = zipName + ".sha256", ["size"] = 64 + 2 + zipName.Length + 1, ["browser_download_url"] = download + zipName + ".sha256" },
+            },
+        };
+        File.WriteAllText(Path.Combine(dir, "release.json"), System.Text.Json.JsonSerializer.Serialize(release));
     }
 
     static void ShotOffline(SettingsStore store, string root, string path)
