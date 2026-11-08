@@ -47,6 +47,11 @@ public class TurnUiModelTests
         Assert.Equal("Game game turn 0.qturn", TurnUiModel.DefaultFileName(" ", null, -3));
     }
 
+    /// <summary>Turn files move between OSes: every character Windows forbids is replaced on every OS, not only this OS's own set.</summary>
+    [Fact]
+    public void DefaultFileName_ReplacesWindowsForbiddenCharactersOnEveryOs() =>
+        Assert.Equal("a_b_c_d_e_f_g_h_i_j abc turn 1.qturn", TurnUiModel.DefaultFileName("a\\b<c>d\"e|f*g:h?i\tj", "abc", 1));
+
     [Fact]
     public void DefaultLocalPlayer_KnownThenRecipientThenFirst()
     {

@@ -61,15 +61,15 @@ public static class TurnUiModel
 
     /// <summary>
     /// The Save As name: <c>{module} {GameId[..8]} turn {n}.qturn</c> (n = the game's turn number), with characters a file name cannot
-    /// hold replaced.
+    /// hold replaced. Turn files travel between Windows, Linux and macOS, so the same characters are replaced on every OS
+    /// (<see cref="PortableFileName"/>).
     /// </summary>
     public static string DefaultFileName(string? moduleName, string? gameId, int turn)
     {
         var module = string.IsNullOrWhiteSpace(moduleName) ? "Game" : moduleName.Trim();
         var id = string.IsNullOrEmpty(gameId) ? "game" : gameId.Length > 8 ? gameId[..8] : gameId;
         var name = $"{module} {id} turn {Math.Max(0, turn)}";
-        var bad = Path.GetInvalidFileNameChars();
-        name = new string(name.Select(c => bad.Contains(c) || char.IsControl(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
+        name = new string(name.Select(c => PortableFileName.IsInvalidChar(c) || char.IsControl(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
         if (name.Length > 120) name = name[..120].TrimEnd();
         return name + ".qturn";
     }

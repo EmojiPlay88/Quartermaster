@@ -310,6 +310,21 @@ public class UpdateCheckerTests : IDisposable
         await Assert.ThrowsAsync<UpdateRefused>(() => f.Open(new Uri("..\\secret.txt", UriKind.Relative), default));
     }
 
+    /// <summary>Refused the same on every OS: either separator, and the characters Windows forbids, even where this OS would allow them.</summary>
+    [Theory]
+    [InlineData("../secret.txt")]
+    [InlineData("sub\\secret.txt")]
+    [InlineData("sub/secret.txt")]
+    [InlineData("a*b.zip")]
+    [InlineData("a<b.zip")]
+    [InlineData("a?.zip")]
+    [InlineData("..")]
+    public async Task FolderFeed_RefusesNamesThatAreNotPortableFileNames(string name)
+    {
+        var f = new FolderFeed(_tmp);
+        await Assert.ThrowsAsync<UpdateRefused>(() => f.Open(new Uri(name, UriKind.Relative), default));
+    }
+
     [Fact]
     public void UpdateFeeds_Default_EnvVarWins()
     {

@@ -72,7 +72,7 @@ public static class DemoContent
             foreach (var c in Counters) fx.AddFile("images/" + c.Image, Utf8(CounterSvg(c)));
             fx.AddFile("riverland-rules.txt", new UTF8Encoding(false).GetBytes(RulesText.Replace("\r\n", "\n").Replace("\n", "\r\n"))); // CRLF: the text window shows LF-only files on one line
             fx.AddFile("riverland-rulebook.pdf", RulebookPdf());
-            File.Copy(fx.Build(), vmodPath, overwrite: true);
+            File.WriteAllBytes(vmodPath, NormalizeZipHost(File.ReadAllBytes(fx.Build())));
         }
 
         var pack = Pack(VmodArchive.ComputeSha256(vmodPath));
@@ -532,6 +532,30 @@ public static class DemoContent
     }
 
     // ---- helpers ----
+
+    /// <summary>
+    /// Clears the two central-directory fields .NET fills from the OS that writes the zip: "version made by" host (0 = MS-DOS on Windows,
+    /// 3 = Unix elsewhere) and the external attributes (0 on Windows, regular-file mode 0644 elsewhere). Both are left as Windows writes them,
+    /// so the module, and the module SHA-256 the rules pack records, are byte-identical whichever OS builds the demo.
+    /// </summary>
+    public static byte[] NormalizeZipHost(byte[] zip)
+    {
+        var z = (byte[])zip.Clone();
+        var eocd = -1;
+        for (var i = z.Length - 22; i >= Math.Max(0, z.Length - 22 - 0xFFFF); i--)
+            if (BitConverter.ToUInt32(z, i) == 0x06054b50) { eocd = i; break; }
+        if (eocd < 0) throw new InvalidDataException("Not a zip: no end-of-central-directory record.");
+        int count = BitConverter.ToUInt16(z, eocd + 10);
+        var at = (int)BitConverter.ToUInt32(z, eocd + 16);
+        for (var n = 0; n < count; n++)
+        {
+            if (BitConverter.ToUInt32(z, at) != 0x02014b50) throw new InvalidDataException("Bad central-directory entry.");
+            z[at + 5] = 0;                       // version made by: host byte
+            Array.Clear(z, at + 38, 4);          // external file attributes
+            at += 46 + BitConverter.ToUInt16(z, at + 28) + BitConverter.ToUInt16(z, at + 30) + BitConverter.ToUInt16(z, at + 32);
+        }
+        return z;
+    }
 
     private static byte[] Utf8(string s) => new UTF8Encoding(false).GetBytes(s.Replace("\r\n", "\n"));
     private static string X(string s) => SecurityElement.Escape(s) ?? "";

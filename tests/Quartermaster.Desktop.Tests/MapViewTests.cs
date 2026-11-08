@@ -55,26 +55,12 @@ public sealed class MapViewTests : IDisposable
     /// <summary>The renderer drawing natively at <paramref name="scale"/> device pixels per DIP (tile levels and SVG rasters chosen for it).</summary>
     SKBitmap Expected(MapView view, Dictionary<string, TileSet> tiles, float scale)
     {
-        var bmp = new SKBitmap(new SKImageInfo((int)(W * scale), (int)(H * scale), SKColorType.Bgra8888, SKAlphaType.Premul));
+        var bmp = TestHelpers.ReferenceBitmap((int)(W * scale), (int)(H * scale));
         using var c = new SKCanvas(bmp);
         c.Scale(scale);
         new MapRenderer(_s!.Images, new PieceRenderer(_s.Images))
             .Draw(c, view.Map, tiles, _s.View!, _s.Model, view.View, new SKSize(W, H), new MapDrawOptions(false, new HashSet<string>(), null, DeviceScale: scale));
         return bmp;
-    }
-
-    static int CountDiffs((int Width, int Height, SKColor[] Px) actual, SKBitmap expected, int tolerance)
-    {
-        var diff = 0;
-        for (var y = 0; y < actual.Height; y++)
-            for (var x = 0; x < actual.Width; x++)
-            {
-                var a = actual.Px[y * actual.Width + x];
-                var e = expected.GetPixel(x, y);
-                if (Math.Abs(a.Red - e.Red) > tolerance || Math.Abs(a.Green - e.Green) > tolerance ||
-                    Math.Abs(a.Blue - e.Blue) > tolerance || Math.Abs(a.Alpha - e.Alpha) > tolerance) diff++;
-            }
-        return diff;
     }
 
     static SKPoint P(double x, double y) => new((float)x, (float)y);
@@ -91,7 +77,7 @@ public sealed class MapViewTests : IDisposable
         Assert.Equal((W, H), (actual.Width, actual.Height));
         Assert.True(actual.Px.Distinct().Count() > 50, "the map did not draw");
         using var expected = Expected(view, tiles, 1);
-        Assert.Equal(0, CountDiffs(actual, expected, 2));
+        TestHelpers.AssertSamePixels(actual, expected, 2);
     }
 
     [AvaloniaFact]
@@ -271,7 +257,7 @@ public sealed class MapViewTests : IDisposable
         var e = expected.GetPixel(cx, cy);
         Assert.True(Math.Abs(a.Red - e.Red) <= 2 && Math.Abs(a.Green - e.Green) <= 2 && Math.Abs(a.Blue - e.Blue) <= 2, $"centre {a} vs {e}");
         // The whole frame matches the renderer drawing natively at 2x (tile level and SVG rasters for 2x): nothing was upscaled.
-        Assert.Equal(0, CountDiffs(actual, expected, 2));
+        TestHelpers.AssertSamePixels(actual, expected, 2);
 
         // The wheel uses DIP coordinates at scale 2: the map point under the cursor stays put.
         var m0 = view.View.ToMap(P(400, 300));
@@ -292,7 +278,7 @@ public sealed class MapViewTests : IDisposable
         var actual = TestHelpers.Pixels(frame!);
         Assert.Equal((1200, 900), (actual.Width, actual.Height));
         using var expected = Expected(view, tiles, 1.5f);
-        Assert.Equal(0, CountDiffs(actual, expected, 2));
+        TestHelpers.AssertSamePixels(actual, expected, 2);
     }
 
     [AvaloniaFact]
@@ -305,7 +291,7 @@ public sealed class MapViewTests : IDisposable
         using var frame = window.CaptureRenderedFrame();
         window.Close();
         using var expected = Expected(view, tiles, 2);
-        Assert.Equal(0, CountDiffs(TestHelpers.Pixels(frame!), expected, 2));
+        TestHelpers.AssertSamePixels(TestHelpers.Pixels(frame!), expected, 2);
     }
 
     [Fact]
@@ -342,7 +328,7 @@ public sealed class MapViewTests : IDisposable
         window.Close();
         var actual = TestHelpers.Pixels(frame!);
         using var expected = Expected(view, tiles, 2);
-        Assert.Equal(0, CountDiffs(actual, expected, 2));
+        TestHelpers.AssertSamePixels(actual, expected, 2);
     }
 
     [AvaloniaFact]
