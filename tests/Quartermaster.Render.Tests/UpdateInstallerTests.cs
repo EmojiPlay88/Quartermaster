@@ -262,6 +262,68 @@ public class UpdateInstallerTests : IDisposable
         }
     }
 
+    [Fact]
+    public void AppFolderWritable_ParentNotWritable_StillTrue()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var parent = Directory.CreateDirectory(Path.Combine(_tmp, "locked-parent"));
+        var app = Directory.CreateDirectory(Path.Combine(parent.FullName, "app")).FullName;
+        var me = WindowsIdentity.GetCurrent().User!;
+        // Deny creating anything directly in the parent; the inherited-only flags keep the app folder itself writable.
+        var deny = new FileSystemAccessRule(me, FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories, InheritanceFlags.None, PropagationFlags.None, AccessControlType.Deny);
+        var acl = parent.GetAccessControl();
+        acl.AddAccessRule(deny);
+        parent.SetAccessControl(acl);
+        try
+        {
+            Assert.Throws<UnauthorizedAccessException>(() => Directory.CreateDirectory(Path.Combine(parent.FullName, "probe")));
+            Assert.True(UpdateInstaller.AppFolderWritable(app));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(app)); // probe (and its renamed copy) left nothing behind
+        }
+        finally
+        {
+            acl = parent.GetAccessControl();
+            acl.RemoveAccessRule(deny);
+            parent.SetAccessControl(acl);
+        }
+    }
+
+    [Fact]
+    public void AppFolderWritable_CannotDelete_False_AndNoProbeLeftBehindWhereRemovable()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var app = Path.Combine(_tmp, "nodelete");
+        var di = Directory.CreateDirectory(app);
+        var me = WindowsIdentity.GetCurrent().User!;
+        // Files created in the folder inherit "deny delete": create works, rename/delete does not.
+        var deny = new FileSystemAccessRule(me, FileSystemRights.Delete, InheritanceFlags.ObjectInherit, PropagationFlags.InheritOnly, AccessControlType.Deny);
+        var denyChild = new FileSystemAccessRule(me, FileSystemRights.DeleteSubdirectoriesAndFiles, AccessControlType.Deny);
+        var acl = di.GetAccessControl();
+        acl.AddAccessRule(deny);
+        acl.AddAccessRule(denyChild);
+        di.SetAccessControl(acl);
+        try
+        {
+            Assert.False(UpdateInstaller.AppFolderWritable(app));
+        }
+        finally
+        {
+            acl = di.GetAccessControl();
+            acl.RemoveAccessRule(deny);
+            acl.RemoveAccessRule(denyChild);
+            di.SetAccessControl(acl);
+            foreach (var f in Directory.GetFiles(app))
+            {
+                var fi = new FileInfo(f);
+                var fa = fi.GetAccessControl();
+                foreach (FileSystemAccessRule r in fa.GetAccessRules(true, false, typeof(SecurityIdentifier)))
+                    if (r.AccessControlType == AccessControlType.Deny) fa.RemoveAccessRule(r);
+                fa.SetAccessRuleProtection(false, false);
+                fi.SetAccessControl(fa);
+            }
+        }
+    }
+
     // ---------- LaunchHelper ----------
 
     StagedUpdate FakeStaged()

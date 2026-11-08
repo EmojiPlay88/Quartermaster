@@ -171,25 +171,32 @@ public static class UpdateInstaller
     }
 
     /// <summary>
-    /// True when the app folder can take the swap: a file can be created (and removed) in it, and a folder can be created beside it
-    /// (where the helper keeps the backup, <c>&lt;app&gt;\..\Quartermaster.backup-&lt;old&gt;</c>). False for Program Files, missing or locked folders.
+    /// True when the app folder can take the swap: a file can be created, renamed and deleted in the folder itself. The parent folder is not
+    /// checked (the helper keeps the backup under the updates folder when it cannot write beside the app). False for Program Files, missing or locked folders.
     /// </summary>
     public static bool AppFolderWritable(string appDir)
     {
+        string? probe = null, renamed = null;
         try
         {
             var full = Path.GetFullPath(appDir);
-            var probe = Path.Combine(full, ".qm-write-probe-" + Guid.NewGuid().ToString("N"));
-            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose)) { }
-            if (Path.GetDirectoryName(full) is { } parent)
-            {
-                var dirProbe = Path.Combine(parent, ".qm-write-probe-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(dirProbe);
-                Directory.Delete(dirProbe);
-            }
+            var id = Guid.NewGuid().ToString("N");
+            probe = Path.Combine(full, ".qm-write-probe-" + id);
+            renamed = probe + ".renamed";
+            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+            File.Move(probe, renamed);
+            probe = null;
+            File.Delete(renamed);
+            renamed = null;
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
+        finally
+        {
+            foreach (var left in new[] { probe, renamed })
+                if (left != null)
+                    try { File.Delete(left); } catch (Exception) { /* best effort */ }
+        }
     }
 
     /// <summary>The file the new app writes once it started after an update; the helper waits for it (and rolls back without it).</summary>
