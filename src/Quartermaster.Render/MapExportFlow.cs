@@ -37,9 +37,9 @@ public static class MapExportFlow
         IReadOnlyDictionary<string, TileSet>? tiles = null, Action<string>? log = null)
     {
         if (s.Game == null) return new ExportResult(false, false, NoGameText, NoGameText);
-        var snapshot = (s.View ?? s.Game.State).DeepClone();   // what this player may see
         try
         {
+            var snapshot = (s.View ?? s.Game.State).DeepClone();   // what this player may see; taken before any await, on the caller's thread
             var map = s.Model.Maps.FirstOrDefault(m => m.Id == mapId) ?? throw new InvalidOperationException("Unknown map: " + mapId);
             if (tiles == null)
             {
@@ -51,7 +51,8 @@ public static class MapExportFlow
             return await Task.Run(() => Run(s, map, tiles, snapshot, zoom, path, p, ct, log), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { return new ExportResult(false, true, CancelledText); }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (OutOfMemoryException) { return Failed(OutOfMemoryText); }
+        catch (Exception ex)
         {
             log?.Invoke("map export failed: " + ex);
             return Failed(ex.Message);
