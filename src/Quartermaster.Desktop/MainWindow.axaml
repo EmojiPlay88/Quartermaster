@@ -1,12 +1,14 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="using:Quartermaster.Desktop.Shell"
+        xmlns:phases="using:Quartermaster.Desktop.Phases"
         x:Class="Quartermaster.Desktop.MainWindow"
         Title="Quartermaster"
         Width="1024" Height="768">
   <DockPanel>
     <Menu x:Name="MainMenu" DockPanel.Dock="Top" />
     <shell:MainToolbar x:Name="ToolbarHost" DockPanel.Dock="Top" />
+    <phases:PhaseStrip x:Name="StripHost" DockPanel.Dock="Top" />
     <!-- Status bar as WinForms MainForm: module | message (springs) | tiling progress | turn | location (170) | zoom (50) -->
     <Border Classes="status" DockPanel.Dock="Bottom" BorderThickness="0,1,0,0">
       <Grid ColumnDefinitions="Auto,*,Auto,Auto,170,50" Height="22">
@@ -36,13 +38,22 @@
           <shell:TablesTree x:Name="TablesTreeHost" Grid.Row="2" />
         </Grid>
         <GridSplitter x:Name="LeftColumnSplitter" Grid.Column="1" ResizeDirection="Columns" />
-      <Grid x:Name="Body" Grid.Column="2" ColumnDefinitions="*,0,0">
+      <Grid x:Name="Body" Grid.Column="2">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="0" />
+          <ColumnDefinition Width="0" />
+          <ColumnDefinition Width="0" />
+          <ColumnDefinition Width="0" />
+        </Grid.ColumnDefinitions>
         <!-- Classic control colour behind the tab strip (WinForms DocumentTabStrip); the AppWorkspace grey is the MapView's own "no game" backdrop -->
         <Border Background="{DynamicResource Classic.FaceBrush}">
           <shell:MapTabs x:Name="Maps" />
         </Border>
         <GridSplitter x:Name="PaletteSplitter" Grid.Column="1" ResizeDirection="Columns" IsVisible="False" />
         <shell:PaletteDock x:Name="PaletteHost" Grid.Column="2" IsVisible="False" />
+        <GridSplitter x:Name="PhaseSplitter" Grid.Column="3" ResizeDirection="Columns" IsVisible="False" />
+        <Border x:Name="PhaseHost" Grid.Column="4" IsVisible="False" />
       </Grid>
       </Grid>
       <GridSplitter x:Name="LogSplitter" Grid.Row="1" ResizeDirection="Rows" HorizontalAlignment="Stretch" IsVisible="False" />
