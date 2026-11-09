@@ -72,6 +72,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         InitPhaseUi(layoutRoot);
         InitAlertUi();
+        InitTools();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         InitTrees(layoutRoot);
@@ -175,6 +176,7 @@ public partial class MainWindow : Window
         SbLocation.Text = "-";
         SbZoom.Text = "-";
         SetStatus("");
+        CreateTools(next);
         HookGame();
         UpdateUi();
         UpdateTitle();
@@ -188,6 +190,7 @@ public partial class MainWindow : Window
     public void StartSetup(int? index, Difficulty? difficulty = null)
     {
         var s = _session ?? throw new InvalidOperationException("Open a module first.");
+        FlushNotes();   // pending note text goes into the game that is about to be replaced
         if (index is not { } idx) s.StartNewGame(difficulty);
         else if (idx >= 0 && idx < s.Model.Setups.Count) s.LoadSetup(s.Model.Setups[idx], difficulty);
         else
@@ -212,6 +215,7 @@ public partial class MainWindow : Window
     public void OpenGame(string path)
     {
         var s = _session ?? throw new InvalidOperationException("Open a module first.");
+        FlushNotes();
         s.LoadNative(path);
         _recoveredAutosave = Autosaver.IsAutosavePath(path, AppDataRoot.Path);
         _savePath = _recoveredAutosave ? null : path;
@@ -365,6 +369,7 @@ public partial class MainWindow : Window
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _showGrid.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) Maps.ShowGrid = _showGrid.IsChecked; };
         view.Items.Add(_viewTree);
+        Item(view, "&Diagnostics", ShowDiagnostics, "view.diagnostics");
         view.Items.Add(_showGrid);
         // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.
         _viewLog.InputGesture = _router.Gesture("view.log");
@@ -385,6 +390,9 @@ public partial class MainWindow : Window
 
         // Tools (WinForms: Rules Workbench, Inventory, Notes, -, Dice, Turn, -, Settings...): only Dice and Turn are in the Avalonia app so far.
         var tools = Top("&Tools");
+        Item(tools, "&Inventory", ShowInventory, gate: "tools.inventory");
+        Item(tools, "&Notes", ShowNotes, gate: "tools.notes");
+        tools.Items.Add(new Separator());
         tools.Items.Add(_dice.DiceMenu);
         Gate("tools.dice", _dice.DiceMenu);
         tools.Items.Add(_dice.TurnMenu);
@@ -411,6 +419,10 @@ public partial class MainWindow : Window
         Tool("tool.openGame", "Open Game", () => RunAsync(OpenGameDialogAsync));
         Tool("tool.saveGame", "Save Game", () => RunAsync(() => SaveGameAsync(false)));
         bar.AddSeparator();
+        Tool("tool.diagnostics", "Diagnostics", ShowDiagnostics);
+        Tool("tool.notes", "Notes", ShowNotes);
+        // Overview (WinForms order: Diagnostics, Notes, Overview, Inventory) is added here by the Overview task.
+        Tool("tool.inventory", "Inventory", ShowInventory);
         Tool("tool.los", "LOS", () => _router.Execute("tool.los"));
         // Undo / Redo / Step Back are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
         _tbUndo = bar.Add("edit.undo", "Undo", () => _router.Execute("edit.undo"));
@@ -668,6 +680,7 @@ public partial class MainWindow : Window
     /// <summary>The question to ask before the game goes away, or null when nothing would be lost (WinForms ConfirmDiscard).</summary>
     string? DiscardQuestion()
     {
+        FlushNotes();   // pending note text becomes a command first, so the dirty check below counts it
         if (_session?.IsGuest == true) return null;   // a guest's game is the host's
         if (_session?.IsReplaying == true) return AbandonReplayText;   // a half-replayed turn is never saved
         if (_session is { Game: not null, CanSave: false }) return null;   // a viewer copy: never saved
@@ -748,6 +761,7 @@ public partial class MainWindow : Window
 
     void CloseSession()
     {
+        DestroyTools();
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
         DestroyAlerts();

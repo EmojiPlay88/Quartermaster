@@ -33,7 +33,7 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 - The hover delay is fixed at 600 ms until Settings (stage 4).
 - The log export picker has a single filter, "Log files (*.txt;*.html)" (default .txt); the format follows the extension. WinForms has two filters.
 - There is no chat line offline (WinForms shows it only online); the box comes with multiplayer (stage 5).
-- The main toolbar shows only the buttons whose features exist in Desktop (no Diagnostics, Notes, Overview, Inventory, Palette yet). Hiding buttons via Settings is stage 4.
+- The main toolbar shows only the buttons whose features exist in Desktop (no Overview, Palette yet; Diagnostics, Notes and Inventory are in, in the WinForms order). Hiding buttons via Settings is stage 4.
 - The map toolbar sits inside each map tab (WinForms: one per map window); "Save map as picture" waits for stage 3.
 - The counter menu has no Show in Ledger until the Ledger (stage 3); no Delete counter until the game master setting exists.
 - Physical dice wait for Settings (stage 4); rolls and log lines are the shared WinForms ones.
@@ -101,7 +101,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Show Grid | 1 | ✔ | ✔ | ✔ |  |
 | View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
 | View > Module Tree | 2b | ✔ |  |  | checked by default; hides the left column (tree over tables tree) |
-| View > Diagnostics | 3 |  |  |  |  |
+| View > Diagnostics | 3 | ✔ |  |  | Ctrl/Cmd+D; needs a module; opens the one Diagnostics window (also from the toolbar button and the status-bar link) |
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
 | View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown or floating; while floating it docks the panel back |
 | View > Outliner | 3 |  |  |  |  |
@@ -111,7 +111,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | always visible in Desktop |
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
 | Tools > Rules Workbench | 4 |  |  |  |  |
-| Tools > Inventory, Notes | 3 |  |  |  |  |
+| Tools > Inventory, Notes | 3 | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
 | Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2a | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice wait for Settings (stage 4) |
 | Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right (Cmd+Right on macOS) steps the turn; with a phased rules pack it is Next Phase, as WinForms (2b). Turn label in the status bar |
 | Tools > Settings... | 4 |  |  |  |  |
@@ -122,7 +122,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes, Overview, Inventory and Palette are left out until their stage; hiding buttons (Settings) comes in stage 4 |
+| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes and Inventory follow Save Game; Overview and Palette are left out until their stage; hiding buttons (Settings) comes in stage 4 |
 | MainForm: status bar (module, message, tiling progress, location, zoom) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ | ✔ | ✔ |  |
@@ -196,9 +196,9 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
 | LedgerWindow (+ Tabs, Counters), EditTabsDialog, CounterPreviewTip | 3 |  |  |  |  |
-| NotesWindow, InventoryWindow | 3 |  |  |  |  |
+| NotesWindow, InventoryWindow | 3 | ✔ |  |  | Notes: monospace box, commits after 1 s, on leaving the box and on close; the main window flushes it before the game closes or is replaced. Inventory: group by name / map / marker / ledger property, filter (300 ms), Total hover tip, double-click steps through the group's pieces; counts only what the viewer may see |
 | PdfWindow, PdfViewerControl, ChartWindow | 3 |  |  |  | needs a cross-platform PDF renderer |
-| DiagnosticsWindow | 3 |  |  |  |  |
+| DiagnosticsWindow | 3 | ✔ |  |  | Severity / Category / Message / Context, Show filter, Copy all (clipboard), live updates from any thread; the status-bar link ("n warning(s)/error(s) - click here to view diagnostics") opens it |
 | SearchPanel, ScanPane, ImagePane, OcrPanel | 3 |  |  |  | OCR is Windows-only today; decision pending |
 
 ## Rules Workbench and Settings
