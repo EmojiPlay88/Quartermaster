@@ -130,7 +130,11 @@ public sealed class PdfPagesTests : IDisposable
             var pdf = PdfPages.Open(ThreePages());
             var tasks = Enumerable.Range(0, 6).Select(_ => pdf.RenderAsync(1, 300, CancellationToken.None)).ToArray();
             await Task.Delay(30);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             pdf.Dispose();
+            sw.Stop();
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2.5), $"Dispose took {sw.Elapsed}");
+            Assert.All(tasks, t => Assert.True(t.IsCompleted, "every task is finished once Dispose returns"));
             foreach (var t in tasks)
             {
                 try { (await t).Dispose(); } catch (OperationCanceledException) { } catch (ObjectDisposedException) { }
@@ -140,6 +144,30 @@ public sealed class PdfPagesTests : IDisposable
             Assert.Empty(seen);
         }
         finally { TaskScheduler.UnobservedTaskException -= OnUnobserved; }
+    }
+
+    [Fact]
+    public async Task Dispose_of_one_document_does_not_wait_behind_another_documents_queue()
+    {
+        using var a = PdfPages.Open(ThreePages());
+        using var b = PdfPages.Open(ThreePages());
+        // A long queue of big renders for B keeps the shared worker busy.
+        var slow = Enumerable.Range(0, 12).Select(_ => b.RenderAsync(1, 600, CancellationToken.None)).ToArray();
+        var queuedForA = a.RenderAsync(1, 72, CancellationToken.None);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        a.Dispose();
+        sw.Stop();
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1), $"Dispose(A) waited {sw.Elapsed}");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queuedForA);
+        foreach (var t in slow) (await t).Dispose();
+    }
+
+    [Fact]
+    public void ClampDpi_treats_non_finite_or_non_positive_dpi_safely()
+    {
+        var page = new SizeD(612, 792);
+        foreach (var bad in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity, 0, -5 })
+            Assert.Equal(72.0, PdfPages.ClampDpi(page, bad));
     }
 
     [Fact]

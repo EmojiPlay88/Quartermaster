@@ -189,6 +189,50 @@ public sealed class ScanImageLoadTests : IDisposable
     }
 
     [Fact]
+    public void Transparent_png_loads_on_white()
+    {
+        string path = Path.Combine(_dir, "alpha.png");
+        using (var bmp = new SKBitmap(new SKImageInfo(20, 20, SKColorType.Bgra8888, SKAlphaType.Premul)))
+        {
+            using (var canvas = new SKCanvas(bmp))
+            {
+                canvas.Clear(SKColors.Transparent);
+                using var red = new SKPaint { Color = SKColors.Red };
+                canvas.DrawRect(0, 0, 10, 10, red);
+            }
+            using var data = bmp.Encode(SKEncodedImageFormat.Png, 100);
+            File.WriteAllBytes(path, data.ToArray());
+        }
+        using var loaded = ScanImageLoad.Load(path);
+        Assert.True(IsWhite(loaded.GetPixel(15, 15)), "transparent area must be white, not black");
+        Assert.True(IsRed(loaded.GetPixel(5, 5)));
+        Assert.Equal(255, loaded.GetPixel(15, 15).Alpha);
+    }
+
+    [Fact]
+    public void Tiff_with_alpha_loads_on_white()
+    {
+        string path = Path.Combine(_dir, "alpha.tif");
+        using (var tiff = Tiff.Open(path, "w")!)
+        {
+            tiff.SetField(TiffTag.IMAGEWIDTH, 4);
+            tiff.SetField(TiffTag.IMAGELENGTH, 4);
+            tiff.SetField(TiffTag.SAMPLESPERPIXEL, 4);
+            tiff.SetField(TiffTag.BITSPERSAMPLE, 8);
+            tiff.SetField(TiffTag.PHOTOMETRIC, Photometric.RGB);
+            tiff.SetField(TiffTag.PLANARCONFIG, PlanarConfig.CONTIG);
+            tiff.SetField(TiffTag.EXTRASAMPLES, 1, new short[] { (short)ExtraSample.UNASSALPHA });
+            tiff.SetField(TiffTag.ROWSPERSTRIP, 4);
+            var row = new byte[16]; // left half opaque red, right half fully transparent black
+            for (int x = 0; x < 2; x++) { row[x * 4] = 255; row[x * 4 + 3] = 255; }
+            for (int y = 0; y < 4; y++) tiff.WriteScanline(row, y);
+        }
+        using var loaded = ScanImageLoad.Load(path);
+        Assert.True(IsRed(loaded.GetPixel(0, 0)));
+        Assert.True(IsWhite(loaded.GetPixel(3, 3)), "transparent area must be white");
+    }
+
+    [Fact]
     public void Small_generated_png_loads()
     {
         string path = Path.Combine(_dir, "small.png");

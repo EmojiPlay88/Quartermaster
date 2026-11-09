@@ -34,6 +34,7 @@ public sealed class PdfPages : IDisposable
 
     public int PageCount => _sizes.Length;
 
+    /// <remarks>Blocks on the shared PDF worker thread; call off the UI thread.</remarks>
     /// <exception cref="InvalidDataException">Corrupt, encrypted or empty PDF.</exception>
     public static PdfPages Open(string path)
     {
@@ -43,7 +44,9 @@ public sealed class PdfPages : IDisposable
         {
             sizes = Worker.Run(() =>
             {
+#pragma warning disable CA1416 // see RenderCore
                 var raw = Conversion.GetPageSizes(bytes);
+#pragma warning restore CA1416
                 var list = new SizeD[raw.Count];
                 for (int i = 0; i < list.Length; i++) list[i] = new SizeD(raw[i].Width, raw[i].Height);
                 return list;
@@ -66,11 +69,7 @@ public sealed class PdfPages : IDisposable
     /// </summary>
     public Task<SKBitmap> RenderAsync(int page, double dpi, CancellationToken ct)
     {
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
-            _active++;
-        }
+        lock (_gate) ObjectDisposedException.ThrowIf(_isDisposed, this);
         int index = Clamp(page) - 1;
         var size = _sizes[index];
         double useDpi = ClampDpi(size, dpi);
@@ -78,39 +77,41 @@ public sealed class PdfPages : IDisposable
         var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _disposed.Token);
         var task = Worker.Run(() =>
         {
-            var options = new RenderOptions(Dpi: (int)Math.Max(1, Math.Round(useDpi)), Width: w, Height: h, WithAnnotations: true,
-                BackgroundColor: SKColors.White);
-            return Conversion.ToImage(_bytes, index, options: options);
+            lock (_gate) _active++;
+            try
+            {
+                return RenderCore(index, useDpi, w, h);
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _active--;
+                    Monitor.PulseAll(_gate);
+                }
+            }
         }, linked.Token);
-        _ = Finish(task, linked);
+        // Observe our own outcome so a render nobody awaits never becomes an unobserved task exception; awaiters still see it.
+        _ = task.ContinueWith(static (t, state) => { _ = t.Exception; ((CancellationTokenSource)state!).Dispose(); }, linked,
+            CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         return task;
     }
 
-    private async Task Finish(Task<SKBitmap> task, CancellationTokenSource linked)
+    private SKBitmap RenderCore(int index, double useDpi, int w, int h)
     {
-        try
         {
-            // Observe our own outcome so a render nobody awaits never becomes an unobserved task exception.
-            await task.ConfigureAwait(false);
-        }
-        catch
-        {
-        }
-        finally
-        {
-            linked.Dispose();
-            lock (_gate)
-            {
-                _active--;
-                Monitor.PulseAll(_gate);
-            }
+            var options = new RenderOptions(Dpi: (int)Math.Max(1, Math.Round(useDpi)), Width: w, Height: h, WithAnnotations: true,
+                BackgroundColor: SKColors.White);
+#pragma warning disable CA1416 // PDFtoImage is annotated for platforms (mobile, browser) this project never runs on.
+            return Conversion.ToImage(_bytes, index, options: options);
+#pragma warning restore CA1416
         }
     }
 
     /// <summary>The DPI to render at: <paramref name="dpi"/>, lowered when the page would exceed <see cref="MaxPixels"/>.</summary>
     public static double ClampDpi(SizeD pagePoints, double dpi)
     {
-        if (!(dpi > 0)) dpi = 72;
+        if (!double.IsFinite(dpi) || dpi <= 0) dpi = 72;
         if (PixelCount(pagePoints, dpi) <= MaxPixels) return dpi;
         double lowered = dpi * Math.Sqrt((double)MaxPixels / ((pagePoints.W * dpi / 72.0) * (pagePoints.H * dpi / 72.0)));
         // Rounding the sides up can overshoot by a few pixels; nudge down until it fits.
@@ -169,20 +170,19 @@ public sealed class PdfPages : IDisposable
         public static Task<T> Run<T>(Func<T> func, CancellationToken ct)
         {
             var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            // Cancelling completes the task at once, even while the item still waits behind other documents' work.
+            var reg = ct.CanBeCanceled ? ct.Register(static state => ((TaskCompletionSource<T>)state!).TrySetCanceled(), tcs) : default;
             Queue.Add(() =>
             {
-                if (ct.IsCancellationRequested) { tcs.TrySetCanceled(ct); return; }
                 try
                 {
-                    var result = func();
-                    if (ct.IsCancellationRequested && result is IDisposable d)
-                    {
-                        d.Dispose();
-                        tcs.TrySetCanceled(ct);
-                    }
-                    else tcs.TrySetResult(result);
+                    if (tcs.Task.IsCompleted) return; // cancelled while queued
+                    T result;
+                    try { result = func(); }
+                    catch (Exception ex) { tcs.TrySetException(ex); return; }
+                    if (!tcs.TrySetResult(result) && result is IDisposable d) d.Dispose();
                 }
-                catch (Exception ex) { tcs.TrySetException(ex); }
+                finally { reg.Dispose(); }
             });
             return tcs.Task;
         }

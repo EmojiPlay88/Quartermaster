@@ -31,10 +31,10 @@ public static class ScanImageLoad
             var result = codec.GetPixels(decoded.Info, decoded.GetPixels());
             if (result is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
                 throw new InvalidDataException("This image could not be decoded (" + result + ").");
-            if (origin is SKEncodedOrigin.TopLeft or SKEncodedOrigin.Default) return decoded;
-            var upright = Orient(decoded, origin);
-            decoded.Dispose();
-            return upright;
+            var upright = origin is SKEncodedOrigin.TopLeft or SKEncodedOrigin.Default ? decoded : Orient(decoded, origin);
+            if (!ReferenceEquals(upright, decoded)) decoded.Dispose();
+            // Transparent pixels become white (the WinForms loader cleared to white), not black.
+            return info.AlphaType == SKAlphaType.Opaque ? upright : OntoWhite(upright);
         }
         catch
         {
@@ -70,8 +70,11 @@ public static class ScanImageLoad
             {
                 uint v = (uint)raster[i];
                 uint r = v & 0xFF, g = (v >> 8) & 0xFF, b = (v >> 16) & 0xFF, a = (v >> 24) & 0xFF;
-                if (a != 255) { r = r * a / 255; g = g * a / 255; b = b * a / 255; } // premultiply
-                px[i] = unchecked((int)(b | (g << 8) | (r << 16) | (a << 24)));
+                if (a != 255) // composite onto white
+                {
+                    r = (r * a + 255 * (255 - a)) / 255; g = (g * a + 255 * (255 - a)) / 255; b = (b * a + 255 * (255 - a)) / 255;
+                }
+                px[i] = unchecked((int)(b | (g << 8) | (r << 16) | 0xFF000000u));
             }
             System.Runtime.InteropServices.Marshal.Copy(px, 0, dst, px.Length);
             return bmp;
@@ -79,6 +82,28 @@ public static class ScanImageLoad
         catch
         {
             bmp.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Draws <paramref name="src"/> over an opaque white bitmap; disposes the source.</summary>
+    private static SKBitmap OntoWhite(SKBitmap src)
+    {
+        var dst = new SKBitmap(new SKImageInfo(src.Width, src.Height, SKColorType.Bgra8888, SKAlphaType.Opaque));
+        try
+        {
+            using (var canvas = new SKCanvas(dst))
+            {
+                canvas.Clear(SKColors.White);
+                canvas.DrawBitmap(src, 0, 0, new SKSamplingOptions(SKFilterMode.Nearest), null);
+            }
+            src.Dispose();
+            return dst;
+        }
+        catch
+        {
+            dst.Dispose();
+            src.Dispose();
             throw;
         }
     }

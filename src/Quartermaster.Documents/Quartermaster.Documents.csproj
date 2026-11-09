@@ -9,7 +9,7 @@
     <PackageReference Include="SkiaSharp" Version="4.154.0" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
     <!-- PDFtoImage pulls the NoDependencies Linux native at 4.150.1; pin it to 4.154.0 so only one SkiaSharp version ships. -->
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" ExcludeAssets="native" />
     <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.649" />
   </ItemGroup>
 
@@ -21,8 +21,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- PDFtoImage is annotated for its native platforms (incl. mobile and browser); this project only runs on the three desktops. -->
-    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
 </Project>
