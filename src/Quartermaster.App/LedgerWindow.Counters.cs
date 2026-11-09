@@ -11,14 +11,14 @@ namespace Quartermaster.App;
 sealed partial class LedgerWindow
 {
     static readonly Size ImageSize = new(CounterImages.RowSize.Width, CounterImages.RowSize.Height);
-    const int CounterRowHeight = 52;
+    const int CounterRowHeight = LedgerViewRules.CounterRowHeight;
     const int ImageLeft = 2;
     int _compactRowHeight;
     CounterCellImages? _counterCells;
     CounterPreviewTip? _preview;
 
     bool CountersOn => _showCounters.Checked;
-    int RowHeight => CountersOn ? CounterRowHeight : _compactRowHeight;
+    int RowHeight => LedgerViewRules.RowHeight(CountersOn, _compactRowHeight);
     int NameImagePad => CountersOn ? ImageSize.Width + ImageLeft + 6 : 0;
 
     void InitCounters()
