@@ -68,10 +68,10 @@ public sealed partial class LedgerWindow
         _preview.Show(r.PictureBox, at, r.Data.PieceId!, r.Data.Row.Name);
     }
 
-    /// <summary>Double-click a unit row (its picture, Name or Kind): centres its piece on the map.</summary>
+    /// <summary>Double-click a unit row's counter picture (Show counters on): centres its piece on the map (WinForms DoubleClickCounter / OverImage).</summary>
     void DoubleClickUnit(int row)
     {
-        if (_centre == null || row < 0 || row >= _rows.Count || _rows[row].PieceId is not { } id || RowPiece(_rows[row]) == null) return;
+        if (_centre == null || !CountersOn || row < 0 || row >= _rows.Count || _rows[row].PieceId is not { } id || RowPiece(_rows[row]) == null) return;
         HidePreview();
         _centre(id);
     }
@@ -113,6 +113,7 @@ public sealed partial class LedgerWindow
             _pictureBox.PointerEntered += (_, e) => _w.Run(() => _w.ShowPreview(this, e.GetPosition(_pictureBox)));
             _pictureBox.PointerMoved += (_, e) => _w.Run(() => _w.ShowPreview(this, e.GetPosition(_pictureBox)));
             _pictureBox.PointerExited += (_, _) => _w.HidePreview();
+            _pictureBox.DoubleTapped += (_, e) => { e.Handled = true; _w.Run(() => _w.DoubleClickUnit(Index)); };
             text.Margin = new Thickness(_w.NameImagePad - 4, 0, 0, 0);   // the cell's own 4 px padding is part of the picture's room
             return new Panel { Children = { _pictureBox, text } };
         }

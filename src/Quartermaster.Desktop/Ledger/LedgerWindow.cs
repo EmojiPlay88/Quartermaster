@@ -96,6 +96,7 @@ public sealed partial class LedgerWindow : Window
 
         _list.ItemTemplate = new FuncDataTemplate<RowItem>((r, _) => r == null ? new Panel() : new LedgerRowView(this, r), supportsRecycling: false);
         _list.KeyDown += (_, e) => Run(() => OnListKey(e));
+        _list.AddHandler(TextInputEvent, (_, e) => Run(() => OnListText(e)), RoutingStrategies.Bubble);
         _list.AddHandler(ScrollViewer.ScrollChangedEvent, (_, _) => { _tip.Hide(); HidePreview(); }, RoutingStrategies.Bubble, handledEventsToo: true);
         _list.AddHandler(PointerPressedEvent, (_, _) => HidePreview(), RoutingStrategies.Tunnel, handledEventsToo: true);
         _list.PointerExited += (_, _) => { _tip.Hide(); HidePreview(); };
@@ -499,24 +500,36 @@ public sealed partial class LedgerWindow : Window
 
     // ---------- manual edit ----------
 
-    void OnListKey(KeyEventArgs e)
+    /// <summary>The value cell F2 or a keystroke edits: the last clicked cell (a value column), else the selected row's first value.</summary>
+    (int Row, int Col)? EditTarget()
     {
-        if (e.Key != Key.F2 || _editing != null) return;
         var row = _currentCell.Row >= 0 && _currentCell.Row < _rows.Count ? _currentCell.Row : _list.SelectedIndex;
         var col = _currentCell.Col >= FixedCols ? _currentCell.Col : FixedCols;
-        if (row < 0) return;
-        BeginEdit(row, col);
+        return row < 0 ? null : (row, col);
+    }
+
+    void OnListKey(KeyEventArgs e)
+    {
+        if (e.Key != Key.F2 || _editing != null || EditTarget() is not { } at) return;
+        BeginEdit(at.Row, at.Col);
         e.Handled = true;
     }
 
+    /// <summary>Typing on the grid starts editing the current value cell with the typed text (WinForms EditOnKeystrokeOrF2).</summary>
+    void OnListText(TextInputEventArgs e)
+    {
+        if (_editing != null || string.IsNullOrEmpty(e.Text) || e.Text.Any(char.IsControl) || EditTarget() is not { } at) return;
+        if (BeginEdit(at.Row, at.Col, e.Text)) e.Handled = true;
+    }
+
     /// <summary>Starts editing a value cell (double-click or F2, as the WinForms grid); holder, group and fixed cells are not editable.</summary>
-    internal bool BeginEdit(int row, int col)
+    internal bool BeginEdit(int row, int col, string? typed = null)
     {
         if (_closing || _editing != null || row < 0 || row >= _rows.Count || col < FixedCols || col - FixedCols >= _cols.Count) return false;
         if (_rows[row].IsGroupHeader) return false;
         ScrollToRow(row);
         if (Live(row) is not { } view) return false;
-        var box = view.BeginEdit(col, CellText(row, col));
+        var box = view.BeginEdit(col, typed ?? CellText(row, col));
         if (box == null) return false;
         _editing = new Editing(view, col, box);
         box.KeyDown += (_, e) =>
@@ -526,7 +539,8 @@ public sealed partial class LedgerWindow : Window
         };
         box.LostFocus += (_, _) => EndEdit(true);
         box.Focus();
-        box.SelectAll();
+        if (typed == null) box.SelectAll();
+        else box.CaretIndex = typed.Length;   // the keystroke replaces the value, caret after it
         return true;
     }
 
@@ -603,7 +617,7 @@ public sealed partial class LedgerWindow : Window
     /// <summary>
     /// Show in Ledger: moves to the tab that shows the counters' rows (<see cref="LedgerJump"/>), clearing the text filter when it hides them,
     /// then selects those rows and scrolls to the first one shown. Only rows of the player's view. Returns null when every counter was shown,
-    /// else the message that tells what was not (or why nothing could be shown); <see cref="LastJump"/> has the whole plan.
+    /// else the message that tells what was not (or why nothing could be shown; LedgerJump.Plan's Message is null exactly when none is missing); <see cref="LastJump"/> has the whole plan.
     /// </summary>
     public string? ShowPieces(IReadOnlyList<string> pieceIds)
     {
@@ -626,7 +640,10 @@ public sealed partial class LedgerWindow : Window
         _debounce.Stop();   // the cleared filter's pending reload is done
         var keys = plan.RowKeys.ToHashSet(StringComparer.Ordinal);
         var first = _rows.FindIndex(r => keys.Contains(r.Row.Key));
-        if (first >= 0) Restore(keys, _rows[first].Row.Key);
+        if (first < 0) return plan.Message;
+        _currentCell = (first, 0);   // WinForms: keyboard focus on the first row (CurrentCell), which also scrolls it into view
+        _list.Focus();
+        Restore(keys, _rows[first].Row.Key);
         return plan.Message;
     }
 
@@ -677,7 +694,6 @@ public sealed partial class LedgerWindow : Window
                     cell.PointerExited += (_, _) => _w._tip.Hide();
                     cell.DoubleTapped += (_, e) => { e.Handled = true; _w.Run(() => _w.BeginEdit(Index, col)); };
                 }
-                else cell.DoubleTapped += (_, e) => { e.Handled = true; _w.Run(() => _w.DoubleClickUnit(Index)); };
             }
             AttachedToVisualTree += (_, _) => { if (!_w._live.Contains(this)) _w._live.Add(this); UpdatePicture(); _w.PrioritiseShown(); };
             DetachedFromVisualTree += (_, _) => { _w._live.Remove(this); _w.PrioritiseShown(); };

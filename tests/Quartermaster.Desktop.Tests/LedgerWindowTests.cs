@@ -598,16 +598,76 @@ public sealed class LedgerWindowTests : IDisposable
         var lw = Open(w);
         var row = UnitRow(lw);
         var id = lw.Rows[row].PieceId!;
-        foreach (var v in w.Maps.Views) v.SelectOnly(null);
-        DoubleClick(lw, lw.CellBounds(row, 1).Center);
+        void Clear() { foreach (var v in w.Maps.Views) v.SelectOnly(null); }
+        bool NoneSelected() => w.Maps.Views.All(v => v.SelectedPieceIds.Count == 0);
+
+        // As WinForms (DoubleClickCounter / OverImage): only a double-click on the counter picture centres.
+        Clear();
+        DoubleClick(lw, lw.PictureBounds(row).Center);
         Assert.Contains(id, w.Maps.ActiveView!.SelectedPieceIds);
-        Assert.Null(lw.Editor);   // Name and Kind do not edit
+        Assert.Null(lw.Editor);
+
+        // Name text and Kind are read-only cells: a double-click there does nothing.
+        Clear();
+        var name = lw.CellBounds(row, 0);
+        DoubleClick(lw, new Point(name.Right - 10, name.Center.Y));
+        Assert.True(NoneSelected());
+        DoubleClick(lw, lw.CellBounds(row, 1).Center);
+        Assert.True(NoneSelected());
+        Assert.Null(lw.Editor);
+
         // A group header row centres nothing.
-        foreach (var v in w.Maps.Views) v.SelectOnly(null);
         lw.ScrollToRow(0);
         Assert.True(lw.Rows[0].IsGroupHeader);
         DoubleClick(lw, lw.CellBounds(0, 0).Center);
-        Assert.All(w.Maps.Views, v => Assert.Empty(v.SelectedPieceIds));
+        Assert.True(NoneSelected());
+
+        // Show counters off: no picture, so nothing centres anywhere in the row.
+        lw.CountersButton.IsChecked = false;
+        Pump();
+        lw.UpdateLayout();
+        row = UnitRow(lw, r => r.PieceId == id);
+        DoubleClick(lw, new Point(lw.CellBounds(row, 0).X + 34, lw.CellBounds(row, 0).Center.Y));
+        DoubleClick(lw, lw.CellBounds(row, 1).Center);
+        Assert.True(NoneSelected());
+    }
+
+    [AvaloniaFact]
+    public void Typing_on_value_cell_starts_edit()
+    {
+        var w = Game();
+        var s = w.Session!;
+        var lw = Open(w);
+        var row = UnitRow(lw);
+        var key = lw.Rows[row].Row.Key;
+        var col = Col(lw, "Fuel");
+        var at = lw.CellBounds(row, col).Center;
+        lw.MouseDown(at, MouseButton.Left);
+        lw.MouseUp(at, MouseButton.Left);
+        Pump();
+        lw.KeyTextInput("7");   // WinForms EditOnKeystrokeOrF2: the keystroke opens the cell with what was typed
+        Pump();
+        var box = Assert.IsType<TextBox>(lw.Editor);
+        Assert.Equal("7", box.Text);
+        Assert.Equal(1, box.CaretIndex);
+        _dialogs.Texts.Enqueue("typed");
+        PressEnter(box);
+        Pump();
+        Assert.Equal("Manual change|Why is Fuel being set to 7? (required)|", _dialogs.TextPrompts.Last());
+        Assert.Equal(7, Ledger.Get(s.Game!.State, key, "fuel"));
+
+        // On the Kind cell the keystroke edits the row's first value column, as F2 does.
+        lw.Flush();
+        row = UnitRow(lw, r => r.Row.Key == key);
+        at = lw.CellBounds(row, 1).Center;
+        lw.MouseDown(at, MouseButton.Left);
+        lw.MouseUp(at, MouseButton.Left);
+        Pump();
+        lw.KeyTextInput("3");
+        Pump();
+        Assert.Equal("3", lw.Editor?.Text);
+        lw.EndEdit(false);
+        Assert.Null(lw.Editor);
     }
 
     // ---------- large games ----------
