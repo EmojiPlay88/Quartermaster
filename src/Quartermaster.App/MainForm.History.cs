@@ -135,48 +135,27 @@ sealed partial class MainForm
         try { _actions!.Redo(); } finally { _rewindStatus = null; }
     }
 
-    void DoStepBackToStart()
-    {
-        if (GuestCannotUndo() || _history is not { } h || h.StartOfPhase() is not { } row) return;
-        using var dlg = new StepBackDialog(new[] { row }, r => HistoryController.Describe(h.Preview(r)), confirmOnly: true);
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        StepBackTo(row);
-    }
+    void DoStepBackToStart() => RunNow(_dispatch?.StepBackToStart());
 
-    void DoStepBackTo()
-    {
-        if (GuestCannotUndo() || _history is not { } h) return;
-        var rows = h.Checkpoints();
-        if (rows.Count == 0) return;
-        using var dlg = new StepBackDialog(rows, r => HistoryController.Describe(h.Preview(r)), confirmOnly: false);
-        if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Selected is not { } row) return;
-        StepBackTo(row);
-    }
+    void DoStepBackTo() => RunNow(_dispatch?.StepBackTo());
 
     /// <summary>Autosaves first (a failure is logged and does not block), then steps back and closes the dialogs that belonged to the old state.</summary>
-    void StepBackTo(CheckpointRow row)
-    {
-        if (GuestCannotUndo() || _history == null) return;
-        try
-        {
-            if (_autosaver?.SaveForced(DateTimeOffset.UtcNow) != null) _autosavedSeq = _changeSeq;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            Program.AppLog("step back autosave: " + ex.Message);
-        }
-        _rewindStatus = "Stepped back — reopen from the phase panel";
-        try { _actions!.StepBack(row); } finally { _rewindStatus = null; }
-    }
+    void StepBackTo(CheckpointRow row) => _dispatch?.StepBack(row);
 
     /// <summary>Open formula dialogs, batch grids and cheat sheets belong to the state before a rewind or a difficulty change, so they close.
     /// Pending runs stay pending. (The missing-input dialog is modal, so none can be open while a menu command runs.)</summary>
     void CloseFormulaWindows(string status)
     {
         if (IsDisposed || _session == null) return;
+        CloseFormulaWindowsOnly();
+        SetStatus(status);
+    }
+
+    void CloseFormulaWindowsOnly()
+    {
+        if (IsDisposed || _session == null) return;
         FormulaDialog.CloseAllFor(_session);
         foreach (var kv in _docs.Where(kv => kv.Key.StartsWith("batch:", StringComparison.Ordinal)).ToList())
             if (kv.Value is { IsDisposed: false } f) { try { f.Close(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Program.AppLog("closing batch grid: " + ex.Message); } }
-        SetStatus(status);
     }
 }
