@@ -4,6 +4,7 @@
     "projects": [
       "src/Quartermaster.Core/Quartermaster.Core.csproj",
       "src/Quartermaster.Desktop/Quartermaster.Desktop.csproj",
+      "src/Quartermaster.Documents/Quartermaster.Documents.csproj",
       "src/Quartermaster.Net/Quartermaster.Net.csproj",
       "src/Quartermaster.Relay/Quartermaster.Relay.csproj",
       "src/Quartermaster.Render/Quartermaster.Render.csproj",
@@ -12,6 +13,7 @@
       "tests/Quartermaster.Core.Tests/Quartermaster.Core.Tests.csproj",
       "tests/Quartermaster.Desktop.Tests/Quartermaster.Desktop.Tests.csproj",
       "tests/Quartermaster.Docs.Tests/Quartermaster.Docs.Tests.csproj",
+      "tests/Quartermaster.Documents.Tests/Quartermaster.Documents.Tests.csproj",
       "tests/Quartermaster.Net.Tests/Quartermaster.Net.Tests.csproj",
       "tests/Quartermaster.Relay.Tests/Quartermaster.Relay.Tests.csproj",
       "tests/Quartermaster.Render.Tests/Quartermaster.Render.Tests.csproj",
