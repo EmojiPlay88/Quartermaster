@@ -15,7 +15,18 @@ public sealed class BoardTiler(VmodArchive archive, string cacheDir, DiagnosticL
 
     private sealed record Marker(int Width, int Height, int Levels, string? Image);
 
-    public async Task<TileSet> EnsureTilesAsync(BoardDef board, IProgress<double>? progress, CancellationToken ct)
+    /// <summary>Builds or loads the board's tiles. A failure is still thrown to anyone who awaits the task, but it is also observed
+    /// here, so a UI caller whose continuation never runs (its window closed, the app quitting) does not leave an unobserved
+    /// faulted task for the finalizer.</summary>
+    public Task<TileSet> EnsureTilesAsync(BoardDef board, IProgress<double>? progress, CancellationToken ct)
+    {
+        var task = EnsureCoreAsync(board, progress, ct);
+        task.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return task;
+    }
+
+    private async Task<TileSet> EnsureCoreAsync(BoardDef board, IProgress<double>? progress, CancellationToken ct)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try

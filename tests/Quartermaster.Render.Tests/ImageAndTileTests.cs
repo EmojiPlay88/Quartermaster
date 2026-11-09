@@ -60,6 +60,43 @@ public class ImageAndTileTests
     private static BoardDef Board(string name, string image, int w, int h) => new(name, image, w, h, null, new PointD(0, 0));
 
     [Fact]
+    public async Task Tiler_failure_nobody_awaits_is_not_an_unobserved_task_exception()
+    {
+        // A UI caller whose continuation never runs (window gone, app closing) must not leave a faulted task for the finalizer.
+        using var fx = new FixtureModule().AddImage("big.png", 600, 400); using var tc = new TempCache();
+        using var arch = Open(fx);
+        var blocked = Path.Combine(tc.Dir, "blocked");
+        File.WriteAllText(blocked, "a file where the cache folder should be");
+        var tiler = new BoardTiler(arch, blocked, new DiagnosticLog());
+        var seen = new List<Exception>();
+        void OnUnobserved(object? _, UnobservedTaskExceptionEventArgs e)
+        {
+            if (e.Exception.ToString().Contains(nameof(BoardTiler))) lock (seen) seen.Add(e.Exception);
+        }
+        TaskScheduler.UnobservedTaskException += OnUnobserved;
+        try
+        {
+            StartAndForget(tiler);
+            for (var i = 0; i < 50 && seen.Count == 0; i++)
+            {
+                await Task.Delay(20);
+                GC.Collect(); GC.WaitForPendingFinalizers();
+            }
+            Assert.Empty(seen);
+            // Awaiting callers still get the failure.
+            await Assert.ThrowsAnyAsync<Exception>(() => tiler.EnsureTilesAsync(Board("Big", "big.png", 600, 400), null, CancellationToken.None));
+        }
+        finally { TaskScheduler.UnobservedTaskException -= OnUnobserved; }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void StartAndForget(BoardTiler tiler)
+    {
+        var t = tiler.EnsureTilesAsync(Board("Big", "big.png", 600, 400), null, CancellationToken.None);
+        ((IAsyncResult)t).AsyncWaitHandle.WaitOne(5000);
+    }
+
+    [Fact]
     public async Task Tiler_ProducesExpectedGridAndLevels()
     {
         using var fx = new FixtureModule().AddImage("big.png", 3000, 2000); using var tc = new TempCache();
