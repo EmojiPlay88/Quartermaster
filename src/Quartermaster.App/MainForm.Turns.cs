@@ -15,7 +15,6 @@ sealed partial class MainForm
 {
     readonly ReplayBar _replayBar = new();
     /// <summary>Menu items and tools that change the game or its rules: disabled while a turn replays.</summary>
-    readonly List<ToolStripItem> _replayBlocked = new();
     /// <summary>Mailbox passwords typed this session (used when the protected copy cannot be stored or read back).</summary>
     readonly Dictionary<string, string> _mailboxPasswords = new(StringComparer.OrdinalIgnoreCase);
     ToolStripMenuItem? _sendTurn, _openTurn;
@@ -124,13 +123,7 @@ sealed partial class MainForm
             _sendTurn.ToolTipText = s?.Game == null ? "" : !local ? TurnUiModel.OnlineText : s.IsViewerCopy ? ModuleSession.ViewerCopyText
                 : replaying ? ModuleSession.ReplayingText : "";
         }
-        if (_openTurn != null && !local) _openTurn.Enabled = false;
-        if (_openTurn != null && replaying) _openTurn.Enabled = false;
-        foreach (var i in _replayBlocked)
-        {
-            if (replaying) { i.Enabled = false; i.ToolTipText = ModuleSession.ReplayingText; }
-            else if (i.ToolTipText == ModuleSession.ReplayingText) i.ToolTipText = null;
-        }
+        ApplyGates(full: false);
         if (_gameMenu != null) _gameMenu.Visible = IsOnline || _onlineStarting || s?.Game != null;
     }
 
@@ -703,7 +696,7 @@ sealed partial class MainForm
         var opened = OpenTurnFile(toBlue);
         var m = _replay;
         Check(opened && m != null && s.IsReplaying && _replayBar.Visible && _hotSeat == null && s.ViewSides is { Count: 0 } && !s.CanSave
-            && _sendTurn?.Enabled == false && _editUndo?.Enabled == false && _replayBlocked.All(i => !i.Enabled),
+            && _sendTurn?.Enabled == false && _editUndo?.Enabled == false && ReplayBlockedItems().All(i => !i.Enabled),
             "replay started (public view, no hot-seat, sending, undo and rules edits off)");
         if (m == null) return;
         var logCount = s.Game!.State.Log.Count;

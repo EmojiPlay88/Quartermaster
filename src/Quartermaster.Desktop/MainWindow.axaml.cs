@@ -12,8 +12,8 @@ using Quartermaster.Vassal;
 namespace Quartermaster.Desktop;
 
 /// <summary>
-/// The main window shell, ported from WinForms MainForm (stage 1): File / Edit / View menus, one tab per visible map, the counter
-/// palette, open/save of native games, the unsaved-changes prompt and the command line. Every dialog goes through <see cref="IDialogs"/>.
+/// The main window shell, ported from WinForms MainForm (stage 1): File / Edit / View / Tools menus, the main toolbar, one tab per visible
+/// map, the counter palette, open/save of native games, the unsaved-changes prompt and the command line. Every dialog goes through <see cref="IDialogs"/>.
 /// The public methods (<see cref="OpenModule"/>, <see cref="StartSetup"/>, <see cref="SaveGame"/>, <see cref="OpenGame"/>) act at once,
 /// without questions; the menu commands ask first, as WinForms.
 /// </summary>
@@ -34,8 +34,16 @@ public partial class MainWindow : Window
     readonly CommandRouter _router = new();
     readonly List<MenuItem> _needsModule = new();
     readonly List<MenuItem> _needsGame = new();
+    readonly List<(string Id, Control Item)> _gated = new();   // menu items and toolbar buttons whose state comes from CommandAvailability
+    static readonly FileFilter RulesFilter = new("Rules packs (*.qrules)", "*.qrules");
     readonly MenuItem _showGrid;
+    readonly MenuItem _viewLog;
+    LogPanel? _log;
+    double _logHeight = 170;   // WinForms default; follows the splitter
+    bool _logWanted = true;   // View > Log: whether the user wants the bottom dock shown
     MenuItem? _editUndo, _editRedo;
+    Button? _tbUndo, _tbRedo;
+    readonly DiceTools _dice;
 
     ModuleSession? _session;
     PhaseController? _phases;
@@ -62,10 +70,12 @@ public partial class MainWindow : Window
         _rulesRoot = rulesRoot;
         InitializeComponent();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
+        _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         _router.Guard = Guard;
+        _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
         BuildMenu();
-        _router.Attach(this);
+        BuildToolbar();
 
         Maps.StatusChanged += (view, loc, zoom) =>
         {
@@ -74,6 +84,8 @@ public partial class MainWindow : Window
             SbZoom.Text = zoom;
         };
         Maps.DropMessage += SetStatus;
+        // No settings or game master mode in the Avalonia app yet: no "Delete counter", and deletions are always asked (the WinForms default).
+        Maps.MenuServices = new MapMenuServices { Dialogs = _dialogs, Gesture = _router.Gesture };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
         Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
         UpdateUi();
@@ -99,6 +111,13 @@ public partial class MainWindow : Window
 
     /// <summary>The counter palette.</summary>
     public PaletteDock Palette => PaletteHost;
+
+    /// <summary>The main toolbar under the menu bar.</summary>
+    public MainToolbar Toolbar => ToolbarHost;
+
+    /// <summary>The status bar's turn label ("Turn 3 · Movement") and whether it shows (only with a game).</summary>
+    public string TurnText => SbTurn.Text ?? "";
+    public bool TurnLabelVisible => SbTurnBox.IsVisible;
 
     /// <summary>True when closing would ask (WinForms ConfirmDiscard): a savable game changed since it was started, opened or saved.</summary>
     public bool HasUnsavedChanges => _dirty && _session is { Game: not null, CanSave: true };
@@ -139,6 +158,7 @@ public partial class MainWindow : Window
         CreatePhases(next);
         Maps.Bind(next, () => _actions);
         PaletteHost.Bind(next);
+        CreateLog(next);
         SbModule.Text = $"{next.Model.Name} {next.Model.Version}".Trim();
         SbLocation.Text = "-";
         SbZoom.Text = "-";
@@ -193,6 +213,7 @@ public partial class MainWindow : Window
     public void ApplyStartup(StartupArgs args)
     {
         if (args.ModulePath is not { } path || !OpenModule(path)) return;
+        Guard(() => LoadRulesFromArgs(args));   // as WinForms: the pack is in place before the first game starts
         if (args.SetupIndex is { } idx) Guard(() => StartSetup(idx));
         else if (args.NewGame) Guard(() => StartSetup(null));
         else RunAsync(() => ChooseAndStartAsync(preselectNew: false));
@@ -231,16 +252,46 @@ public partial class MainWindow : Window
         Close();
     }
 
+    void LoadRulesFromArgs(StartupArgs args)
+    {
+        if (_session is not { } s) return;
+        if (args.RulesPath != null) s.OpenRules(args.RulesPath);
+        else if (args.NewRulesName != null) s.NewRules(args.NewRulesName);
+    }
+
     // ---------- menus and commands ----------
 
     void RegisterCommands()
     {
+        // The map tools act on the selected tab (WinForms: the active map window). Letter shortcuts only fire with the map focused.
+        _router.SetHandler("tool.los", () => Available(Maps.ActiveView != null && Avail("tool.los"), () => Maps.ActiveView!.ToggleLos()));
+        _router.SetHandler("view.hideCounters", () => Available(Maps.ActiveView != null, () => Maps.ActiveView!.ToggleHideCounters()));
+        _router.SetHandler("view.log", () => Available(Avail("view.log"), ToggleLog));
         _router.SetHandler("file.openModule", () => RunAsync(OpenModuleDialogAsync));
-        _router.SetHandler("file.newGame", () => Available(_session != null, () => RunAsync(NewGameAsync)));
-        _router.SetHandler("file.openGame", () => Available(_session != null, () => RunAsync(OpenGameDialogAsync)));
-        _router.SetHandler("file.saveGame", () => Available(_session?.Game != null, () => RunAsync(() => SaveGameAsync(false))));
-        _router.SetHandler("file.saveGameAs", () => Available(_session?.Game != null, () => RunAsync(() => SaveGameAsync(true))));
+        _router.SetHandler("file.newGame", () => Available(Avail("file.newGame"), () => RunAsync(NewGameAsync)));
+        _router.SetHandler("file.openGame", () => Available(Avail("file.openGame"), () => RunAsync(OpenGameDialogAsync)));
+        _router.SetHandler("file.saveGame", () => Available(Avail("file.saveGame"), () => RunAsync(() => SaveGameAsync(false))));
+        _router.SetHandler("file.saveGameAs", () => Available(Avail("file.saveGameAs"), () => RunAsync(() => SaveGameAsync(true))));
+        // WinForms MainForm.BuildToolbar: F5 / F6 roll (false without a game lets the key through); Ctrl+Right is Next turn.
+        _router.SetHandler("dice.1d6", () => _dice.Roll(DiceTurnActions.OneD6));
+        _router.SetHandler("dice.2d6", () => _dice.Roll(DiceTurnActions.TwoD6));
+        _router.SetHandler("turn.next", NextTurnCommand);
     }
+
+    /// <summary>
+    /// WinForms NextTurnCommand: Next Phase when the rules pack has phases, otherwise the plain turn counter. The phase flow (with its open
+    /// decisions dialog) comes with the phase panel in stage 2b; until then the key is let through when the pack has phases.
+    /// </summary>
+    bool NextTurnCommand()
+    {
+        if (_session?.Game == null) return false;
+        if (_session.Rules is { Phases.Count: > 0 }) return false;
+        _dice.Core.StepTurn(1);
+        return true;
+    }
+
+    /// <summary>Whether a gated command is available now (<see cref="CommandAvailability"/>, the WinForms rules).</summary>
+    bool Avail(string id) => CommandAvailability.For(_session).TryGetValue(id, out var a) && a.Enabled;
 
     /// <summary>Runs <paramref name="act"/> when the command is available (its menu item enabled); otherwise lets the key press through.</summary>
     static bool Available(bool enabled, Action act)
@@ -250,7 +301,10 @@ public partial class MainWindow : Window
         return true;
     }
 
-    MenuItem Item(MenuItem into, string label, Action act, string? cmd = null, bool needsModule = false, bool needsGame = false)
+    /// <summary>Registers a gated control (menu item or toolbar button) with <see cref="ApplyGates"/>.</summary>
+    void Gate(string id, Control c) => _gated.Add((id, c));
+
+    MenuItem Item(MenuItem into, string label, Action act, string? cmd = null, bool needsModule = false, bool needsGame = false, string? gate = null)
     {
         var mi = new MenuItem { Header = MenuText.FromWinForms(label) };
         if (cmd != null)
@@ -262,6 +316,8 @@ public partial class MainWindow : Window
         into.Items.Add(mi);
         if (needsModule) _needsModule.Add(mi);
         if (needsGame) _needsGame.Add(mi);
+        gate ??= cmd;
+        if (gate != null && CommandAvailability.Ids.Contains(gate)) _gated.Add((gate, mi));
         return mi;
     }
 
@@ -272,12 +328,17 @@ public partial class MainWindow : Window
         var file = Top("&File");
         Item(file, "&Open Module...", () => { }, "file.openModule");
         file.Items.Add(new Separator());
-        Item(file, "&New Game", () => { }, "file.newGame", needsModule: true);
-        Item(file, "Load &Setup...", () => RunAsync(LoadSetupAsync), needsModule: true);
-        Item(file, "Open &Game...", () => { }, "file.openGame", needsModule: true);
+        Item(file, "&New Game", () => { }, "file.newGame");
+        Item(file, "Load &Setup...", () => RunAsync(LoadSetupAsync), gate: "file.loadSetup");
+        Item(file, "Open &Game...", () => { }, "file.openGame");
         file.Items.Add(new Separator());
-        Item(file, "&Save Game", () => { }, "file.saveGame", needsGame: true);
-        Item(file, "Save Game &As...", () => { }, "file.saveGameAs", needsGame: true);
+        Item(file, "&Save Game", () => { }, "file.saveGame");
+        Item(file, "Save Game &As...", () => { }, "file.saveGameAs");
+        file.Items.Add(new Separator());
+        Item(file, "New &Rules Pack...", NewRulesPack, gate: "file.newRules");
+        Item(file, "Open Rules &Pack...", OpenRulesPack, gate: "file.openRules");
+        Item(file, "Save Rules Pac&k", () => SaveRulesPack(false), gate: "file.saveRules");
+        Item(file, "Save Rules Pack A&s...", () => SaveRulesPack(true), gate: "file.saveRulesAs");
         file.Items.Add(new Separator());
         Item(file, "E&xit", Close);
 
@@ -292,6 +353,11 @@ public partial class MainWindow : Window
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _showGrid.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) Maps.ShowGrid = _showGrid.IsChecked; };
         view.Items.Add(_showGrid);
+        // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.
+        _viewLog.InputGesture = _router.Gesture("view.log");
+        _viewLog.Click += (_, _) => _router.Execute("view.log");
+        Gate("view.log", _viewLog);
+        view.Items.Add(_viewLog);
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
         Item(view, "Zoom 100%", () => Maps.ActiveView?.ZoomCentered(1f), needsModule: true);
@@ -303,21 +369,86 @@ public partial class MainWindow : Window
         }
         Item(zoom, "Fit", () => Maps.ActiveView?.ZoomToFit());
 
+        // Tools (WinForms: Rules Workbench, Inventory, Notes, -, Dice, Turn, -, Settings...): only Dice and Turn are in the Avalonia app so far.
+        var tools = Top("&Tools");
+        tools.Items.Add(_dice.DiceMenu);
+        Gate("tools.dice", _dice.DiceMenu);
+        tools.Items.Add(_dice.TurnMenu);
+        Gate("tools.turn", _dice.TurnMenu);
+
         MainMenu.Items.Add(file);
         MainMenu.Items.Add(edit);
         MainMenu.Items.Add(view);
+        MainMenu.Items.Add(tools);
         RefreshHistoryUi();
+    }
+
+    /// <summary>
+    /// The main toolbar in WinForms MainForm.BuildToolbar order. Buttons whose features are not in the Avalonia app yet (Diagnostics, Notes,
+    /// Overview, Inventory, Palette, Step Back) are left out until their stage.
+    /// </summary>
+    void BuildToolbar()
+    {
+        var bar = ToolbarHost;
+        void Tool(string id, string text, Action act) => Gate(id, bar.Add(id, text, () => Guard(act)));
+        Tool("tool.openModule", "Open Module", () => RunAsync(OpenModuleDialogAsync));
+        Tool("tool.newGame", "New Game", () => RunAsync(NewGameAsync));
+        Tool("tool.loadSetup", "Load Setup", () => RunAsync(LoadSetupAsync));
+        Tool("tool.openGame", "Open Game", () => RunAsync(OpenGameDialogAsync));
+        Tool("tool.saveGame", "Save Game", () => RunAsync(() => SaveGameAsync(false)));
+        bar.AddSeparator();
+        Tool("tool.los", "LOS", () => _router.Execute("tool.los"));
+        // Undo / Redo are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
+        _tbUndo = bar.Add("edit.undo", "Undo", () => _router.Execute("edit.undo"));
+        _tbRedo = bar.Add("edit.redo", "Redo", () => _router.Execute("edit.redo"));
+        // DiceTools' buttons (WinForms adds a separator first).
+        bar.AddSeparator();
+        void Dice(string id, Button b) { Gate(id, b); _dice.Track(b); }
+        Dice("dice.1d6", bar.Add("dice.1d6", "1d6", () => Guard(() => _dice.Roll(DiceTurnActions.OneD6))));
+        Dice("dice.2d6", bar.Add("dice.2d6", "2d6", () => Guard(() => _dice.Roll(DiceTurnActions.TwoD6))));
+        Dice("dice.menu", bar.AddDropDown("dice.menu", "Dice ▾", _dice.BuildDiceItems));
+        Dice("turn.next", bar.Add("turn.next", "Next turn", () => Guard(() => _dice.Core.StepTurn(1))));
+        UpdateUi();
     }
 
     void UpdateUi()
     {
         foreach (var i in _needsModule) i.IsEnabled = _session != null;
         foreach (var i in _needsGame) i.IsEnabled = _session?.Game != null;
+        ApplyGates();
+        RefreshDice();
         var palette = _session?.Game != null;
         PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
         Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
         Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
         RefreshHistoryUi();
+    }
+
+    /// <summary>Enabled state and the reason tooltip of every gated menu item (WinForms ApplyGates); other tooltips are left alone.</summary>
+    void ApplyGates()
+    {
+        var av = CommandAvailability.For(_session);
+        foreach (var (id, mi) in _gated)
+        {
+            var (enabled, reason) = av[id];
+            mi.IsEnabled = enabled;
+            if (!CommandAvailability.OwnsTooltip(id)) continue;
+            if (reason != null) ToolTip.SetTip(mi, reason);
+            else if (CommandAvailability.IsOwnText(ToolTip.GetTip(mi) as string)) ToolTip.SetTip(mi, BaseTip(mi));
+            ToolTip.SetShowOnDisabled(mi, true);
+        }
+    }
+
+    /// <summary>A control's own tooltip once a reason is gone: a toolbar button's text, nothing for a menu item.</summary>
+    object? BaseTip(Control c) => ToolbarHost.BaseTip(c);
+
+    /// <summary>WinForms DiceTools.Refresh (after the gates): dice and turn items off while the game may not change; the turn label.</summary>
+    void RefreshDice()
+    {
+        _dice.Refresh(BaseTip);
+        var game = _session?.Game;
+        SbTurnBox.IsVisible = game != null;
+        if (game != null) SbTurn.Text = DiceTurnActions.TurnText(game.State.Turn);
     }
 
     void UpdateTitle()
@@ -354,6 +485,8 @@ public partial class MainWindow : Window
                 : h?.UndoBlockedBySentTurn == true ? HistoryController.AlreadySentText : h?.AtFloorFromOldSave == true ? FloorTip : null;
             Set(_editUndo, h?.UndoText ?? "Undo", undo, !undo ? why : null);
             Set(_editRedo, h?.RedoText ?? "Redo", redo, guest || replaying ? why : null);
+            SetButton(_tbUndo, undo, Tip(h?.UndoText ?? "Undo", "edit.undo"), !undo ? why : null);
+            SetButton(_tbRedo, redo, Tip(h?.RedoText ?? "Redo", "edit.redo"), guest || replaying ? why : null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -369,7 +502,17 @@ public partial class MainWindow : Window
             mi.Header = MenuText.FromWinForms("&" + text.Replace("&", "&&", StringComparison.Ordinal));
             mi.IsEnabled = enabled;
         }
+
+        static void SetButton(Button? b, bool enabled, string tip, string? why)
+        {
+            if (b == null) return;
+            b.IsEnabled = enabled;
+            ToolTip.SetTip(b, why ?? tip);
+        }
     }
+
+    /// <summary>A toolbar tooltip with the command's shortcut: "Undo move (Ctrl+Z)" (WinForms MainForm.History Tip).</summary>
+    string Tip(string text, string cmd) => _router.ShortcutText(cmd) is { Length: > 0 } k ? $"{text} ({k})" : text;
 
     /// <summary>Coalesces refreshes asked for by game changes (many commands can arrive in one burst).</summary>
     void RequestHistoryRefresh()
@@ -384,7 +527,7 @@ public partial class MainWindow : Window
     async Task OpenModuleDialogAsync()
     {
         var path = await _dialogs.OpenFileAsync(this, "Open Module", new[] { ModuleFilter, AllFiles });
-        if (path == null || !await ConfirmDiscardAsync()) return;
+        if (path == null || !await ConfirmDiscardAsync() || !await ConfirmRulesSavedAsync()) return;
         if (OpenModule(path)) await ChooseAndStartAsync(preselectNew: false);
     }
 
@@ -440,6 +583,59 @@ public partial class MainWindow : Window
         SaveGame(path);
     }
 
+    // ---------- rules packs ----------
+
+    RulesPackFlow? RulesFlow() => _session == null ? null : new RulesPackFlow(_session, new RulesUi(this));
+
+    bool _rulesFlowBusy;
+
+    /// <summary>
+    /// Runs one rules-pack flow (New / Open / Save) at a time: while a dialog of one is open, a second request is ignored.
+    /// Errors become a warning box, as the other menu flows.
+    /// </summary>
+    async Task RulesFlowAsync(Func<RulesPackFlow, Task> run)
+    {
+        if (_rulesFlowBusy || RulesFlow() is not { } flow) return;
+        _rulesFlowBusy = true;
+        try { await run(flow); }
+        catch (Exception ex) when (IsUserError(ex)) { ShowError(ex.Message); }
+        finally { _rulesFlowBusy = false; }
+    }
+
+    void NewRulesPack() => RunAsync(() => RulesFlowAsync(f => f.NewAsync()));
+    void OpenRulesPack() => RunAsync(() => RulesFlowAsync(f => f.OpenAsync()));
+
+    void SaveRulesPack(bool saveAs)
+    {
+        if (_session?.Rules == null) return;
+        RunAsync(() => RulesFlowAsync(f => f.SaveAsync(saveAs)));
+    }
+
+    /// <summary>Offers to save an edited rules pack; false when the user cancels (WinForms ConfirmRulesSaved).</summary>
+    async Task<bool> ConfirmRulesSavedAsync()
+    {
+        if (_session is not { RulesDirty: true } || RulesFlow() is not { } flow) return true;
+        if (_rulesFlowBusy) return false;   // another rules dialog is open: not now
+        _rulesFlowBusy = true;
+        try { return await flow.ConfirmSavedAsync(); }
+        finally { _rulesFlowBusy = false; }
+    }
+
+    /// <summary><see cref="IRulesPackUiAsync"/> over <see cref="IDialogs"/>.</summary>
+    sealed class RulesUi : IRulesPackUiAsync
+    {
+        readonly MainWindow _w;
+        public RulesUi(MainWindow w) => _w = w;
+
+        public Task<bool?> AskSaveChangesAsync(string packName) =>
+            _w._dialogs.AskYesNoCancelAsync(_w, $"Save changes to the rules pack '{packName}'?", Caption);
+        public Task<string?> PickOpenAsync() => _w._dialogs.OpenFileAsync(_w, "Open Rules Pack", new[] { RulesFilter, AllFiles });
+        public Task<string?> PickSaveAsync(string suggestedName) =>
+            _w._dialogs.SaveFileAsync(_w, "Save Rules Pack", RulesFilter, "qrules", suggestedName);
+        public Task<string?> AskNameAsync(string title, string prompt, string def) => _w._dialogs.AskTextAsync(_w, title, prompt, def);
+        public Task WarnAsync(string text) => _w._dialogs.ShowWarningAsync(_w, text, Caption);
+    }
+
     /// <summary>The question to ask before the game goes away, or null when nothing would be lost (WinForms ConfirmDiscard).</summary>
     string? DiscardQuestion()
     {
@@ -454,20 +650,21 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        if (!e.Cancel && !_closeConfirmed && DiscardQuestion() is { } q)
+        if (!e.Cancel && !_closeConfirmed && (DiscardQuestion() is not null || _session is { RulesDirty: true }))
         {
-            // Dialogs are asynchronous: keep the window, ask, and close again on Yes.
+            // Dialogs are asynchronous: keep the window, ask, and close again when everything is answered.
             e.Cancel = true;
-            if (!_closeAsking) AskThenClose(q);
+            if (!_closeAsking) AskThenClose(DiscardQuestion());
         }
         base.OnClosing(e);
     }
 
-    async void AskThenClose(string question)
+    async void AskThenClose(string? question)
     {
         _closeAsking = true;
         bool yes;
-        try { yes = await _dialogs.AskYesNoAsync(this, question, Caption); }
+        // WinForms: ConfirmDiscard, then ConfirmRulesSaved.
+        try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption)) && await ConfirmRulesSavedAsync(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("close question: " + ex); yes = false; }
         finally { _closeAsking = false; }
         if (!yes) return;
@@ -475,9 +672,20 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(Close);
     }
 
+    /// <summary>
+    /// Shortcuts that bubble up to the window (not handled by the focused control) run here, in the window's class handler: an instance
+    /// handler (<see cref="CommandRouter.Attach"/>) would run after the window's own keyboard navigation, which takes the arrow keys, so
+    /// Ctrl+Right (Next turn) would never arrive.
+    /// </summary>
+    protected override void OnKeyDown(Avalonia.Input.KeyEventArgs e)
+    {
+        if (!e.Handled && _router.TryDispatch(e)) e.Handled = true;
+        base.OnKeyDown(e);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
-        _router.Detach(this);
+        _dice.Stop();
         CloseSession();
         base.OnClosed(e);
     }
@@ -500,6 +708,7 @@ public partial class MainWindow : Window
     {
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
+        DestroyLog();
         UnhookGame();
         if (_history != null) _history.Rewound -= RequestHistoryRefresh;
         _history = null;
@@ -517,6 +726,59 @@ public partial class MainWindow : Window
         SbLocation.Text = "-";
         SbZoom.Text = "-";
         SetTilingProgress(null);
+    }
+
+    // ---------- log panel (see LogPanel) ----------
+
+    /// <summary>The log panel of the open module; null without one.</summary>
+    public LogPanel? Log => _log;
+
+    /// <summary>True while the log dock is shown (View > Log checked).</summary>
+    public bool LogShown => _log != null && _logWanted;
+
+    void CreateLog(ModuleSession s)
+    {
+        _log = new LogPanel(s, CentreOnPiece, _dialogs, () => this);
+        LogHost.Child = _log;
+        ApplyLog();
+    }
+
+    void DestroyLog()
+    {
+        _log?.Detach();
+        _log = null;
+        LogHost.Child = null;
+        ApplyLog();
+    }
+
+    /// <summary>View > Log: show or collapse the bottom panel.</summary>
+    void ToggleLog()
+    {
+        if (_log == null) return;
+        _logWanted = !_logWanted;
+        ApplyLog();
+    }
+
+    void ApplyLog()
+    {
+        var shown = LogShown;
+        LogHost.IsVisible = LogSplitter.IsVisible = shown;
+        BodyAndLog.RowDefinitions[1].Height = new GridLength(shown ? 4 : 0);
+        var row = BodyAndLog.RowDefinitions[2];
+        if (!shown && row.Height.Value >= 1) _logHeight = row.Height.Value;   // keep what the user dragged it to
+        row.Height = new GridLength(shown ? _logHeight : 0);
+        _viewLog.IsChecked = shown;
+    }
+
+    /// <summary>Scrolls the map holding the piece to it and selects it (WinForms MainForm.CentreOnPiece); only pieces this player may see.</summary>
+    public void CentreOnPiece(string pieceId)
+    {
+        if (_session?.View is not { } seen || !seen.Pieces.TryGetValue(pieceId, out var piece)) return;
+        var view = Maps.Views.FirstOrDefault(v => v.Map.Id == piece.MapId) ?? Maps.Views.FirstOrDefault(v => v.Map.Name == piece.MapId);
+        if (view == null) return;
+        Maps.Activate(view);
+        view.CentreOn(piece.Pos);
+        view.SelectOnly(pieceId);
     }
 
     void HookGame()
@@ -543,6 +805,7 @@ public partial class MainWindow : Window
     {
         _dirty = true;
         UpdateTitle();
+        RefreshDice();
         RequestHistoryRefresh();
     }
 
@@ -560,7 +823,7 @@ public partial class MainWindow : Window
     /// <summary>The player's view changed: maps another side owns lose their tab.</summary>
     void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(Maps.Rebuild));
 
-    void OnRulesChangedAnyThread() => OnUi(UpdateTitle);
+    void OnRulesChangedAnyThread() => OnUi(() => { UpdateUi(); UpdateTitle(); });
 
     static void OnUi(Action a)
     {

@@ -17,11 +17,14 @@ sealed class DiceTools : IDisposable
     readonly ToolStripMenuItem _prev = new("&Previous turn");
     string? _shown;
 
+    /// <summary>The shared roll / turn logic (Render); this class only adds the WinForms menus, buttons, dialogs and status text.</summary>
+    readonly DiceTurnActions _core;
+
     /// <summary>Prompt for each die value instead of rolling (Settings: physical dice).</summary>
-    public bool PhysicalDice { get; set; }
+    public bool PhysicalDice { get => _core.PhysicalDice; set => _core.PhysicalDice = value; }
 
     /// <summary>Whether a roll's result text is shown in the status bar (Settings).</summary>
-    public bool ShowLastRoll { get; set; } = true;
+    public bool ShowLastRoll { get => _core.ShowLastRoll; set => _core.ShowLastRoll = value; }
 
     /// <summary>Effective shortcut text of a command id, shown on menu items.</summary>
     public Func<string, string> ShortcutText { get; set; } = _ => "";
@@ -33,9 +36,10 @@ sealed class DiceTools : IDisposable
     };
 
     public DiceTools(Form owner, Func<ModuleSession?> session, Action<Action> guard, ToolStrip toolbar,
-        ToolStripMenuItem toolsMenu, ToolStripStatusLabel message, List<ToolStripItem> needsGame)
+        ToolStripMenuItem toolsMenu, ToolStripStatusLabel message, Func<string, ToolStripItem, ToolStripItem> gate)
     {
         _owner = owner; _session = session; _guard = guard; _message = message;
+        _core = new DiceTurnActions(session, ShowResult) { AskPhysical = AskPhysical };
         _clear.Tick += (_, _) =>
         {
             _clear.Stop();
@@ -44,22 +48,22 @@ sealed class DiceTools : IDisposable
         };
 
         toolbar.Items.Add(new ToolStripSeparator());
-        AddButton(toolbar, "dice.1d6", "1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll"), needsGame);
-        AddButton(toolbar, "dice.2d6", "2d6", () => RollSpec(new DiceSpec(2, 6, 0), "Roll"), needsGame);
+        AddButton(toolbar, "dice.1d6", "1d6", () => RollSpec(DiceTurnActions.OneD6, DiceTurnActions.RollPurpose), gate);
+        AddButton(toolbar, "dice.2d6", "2d6", () => RollSpec(DiceTurnActions.TwoD6, DiceTurnActions.RollPurpose), gate);
         var dd = new ToolStripDropDownButton("Dice") { Name = "dice.menu", DisplayStyle = ToolStripItemDisplayStyle.Text };
         dd.DropDownOpening += (_, _) => _guard(() => BuildDiceItems(dd.DropDownItems));
         dd.DropDownItems.Add("(no game)").Enabled = false;
         toolbar.Items.Add(dd);
-        needsGame.Add(dd);
+        gate("dice.menu", dd);
         _items.Add(dd);
-        AddButton(toolbar, "turn.next", "Next turn", () => StepTurn(1), needsGame);
+        AddButton(toolbar, "turn.next", "Next turn", () => StepTurn(1), gate);
 
         toolsMenu.DropDownItems.Add(new ToolStripSeparator());
         var dice = new ToolStripMenuItem("&Dice");
         dice.DropDownOpening += (_, _) => _guard(() => BuildDiceItems(dice.DropDownItems));
         dice.DropDownItems.Add("(no game)").Enabled = false;
         toolsMenu.DropDownItems.Add(dice);
-        needsGame.Add(dice);
+        gate("tools.dice", dice);
         _items.Add(dice);
 
         var turn = new ToolStripMenuItem("&Turn");
@@ -70,37 +74,23 @@ sealed class DiceTools : IDisposable
         var set = new ToolStripMenuItem("&Set...");
         set.Click += (_, _) => _guard(SetTurnDialog);
         turn.DropDownItems.AddRange(new ToolStripItem[] { next, _prev, set });
-        turn.DropDownOpening += (_, _) => _guard(() => _prev.Enabled = CurrentTurn.Turn > 1);
+        turn.DropDownOpening += (_, _) => _guard(() => _prev.Enabled = _core.CanStepBack);
         toolsMenu.DropDownItems.Add(turn);
-        needsGame.Add(turn);
+        gate("tools.turn", turn);
         _items.Add(turn);
     }
 
     /// <summary>Every dice and turn item (toolbar and Tools menu): off while the game may not change.</summary>
     readonly List<ToolStripItem> _items = new();
 
-    /// <summary>Why nothing may be rolled or stepped now (a received turn is replaying; a viewer copy is read-only), else null.</summary>
-    static string? BlockedText(ModuleSession? s) =>
-        s == null ? null : s.IsReplaying ? ModuleSession.ReplayingText : s.IsViewerCopy ? ModuleSession.ViewerCopyText : null;
-
-    /// <summary>True (and says why in the status bar) when the game may not change; no roll is made or shown then.</summary>
-    bool Refused()
-    {
-        if (BlockedText(_session()) is not { } why) return false;
-        ShowResult(why);
-        return true;
-    }
-
-    void AddButton(ToolStrip bar, string id, string text, Action act, List<ToolStripItem> needsGame)
+    void AddButton(ToolStrip bar, string id, string text, Action act, Func<string, ToolStripItem, ToolStripItem> gate)
     {
         var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text, Name = id };
         b.Click += (_, _) => _guard(act);
         bar.Items.Add(b);
-        needsGame.Add(b);
+        gate(id, b);
         _items.Add(b);
     }
-
-    TurnState CurrentTurn => _session()?.Game?.State.Turn ?? new TurnState(1, null);
 
     /// <summary>Updates the turn label from the current game.</summary>
     public void Dispose()
@@ -116,7 +106,7 @@ sealed class DiceTools : IDisposable
     {
         if (_disposed) return;
         var game = _session()?.Game;
-        var blocked = BlockedText(_session());
+        var blocked = DiceTurnActions.BlockedText(_session());
         foreach (var i in _items)
         {
             if (blocked != null) { i.Enabled = false; i.ToolTipText = blocked; }
@@ -127,8 +117,7 @@ sealed class DiceTools : IDisposable
         TurnLabel.Text = TurnText(game.State.Turn);
     }
 
-    public static string TurnText(TurnState t) =>
-        "Turn " + t.Turn.ToString(CultureInfo.InvariantCulture) + (string.IsNullOrEmpty(t.Phase) ? "" : " · " + t.Phase);
+    public static string TurnText(TurnState t) => DiceTurnActions.TurnText(t);
 
     // ---------- dice ----------
 
@@ -137,8 +126,8 @@ sealed class DiceTools : IDisposable
         into.Clear();
         var s = _session();
         if (s == null) return;
-        Add(into, "&1d6", () => RollSpec(new DiceSpec(1, 6, 0), "Roll")).ShortcutKeyDisplayString = ShortcutText("dice.1d6");
-        Add(into, "&2d6", () => RollSpec(new DiceSpec(2, 6, 0), "Roll")).ShortcutKeyDisplayString = ShortcutText("dice.2d6");
+        Add(into, "&1d6", () => RollSpec(DiceTurnActions.OneD6, DiceTurnActions.RollPurpose)).ShortcutKeyDisplayString = ShortcutText("dice.1d6");
+        Add(into, "&2d6", () => RollSpec(DiceTurnActions.TwoD6, DiceTurnActions.RollPurpose)).ShortcutKeyDisplayString = ShortcutText("dice.2d6");
         if (s.Model.Dice.Count > 0)
         {
             into.Add(new ToolStripSeparator());
@@ -146,7 +135,7 @@ sealed class DiceTools : IDisposable
             {
                 var d = die;
                 var mi = Add(into, d.Name.Replace("&", "&&"), () => RollSpecial(d));
-                if (d.Faces.Count < 2) { mi.Enabled = false; mi.ToolTipText = "This die needs at least 2 faces"; }
+                if (d.Faces.Count < 2) { mi.Enabled = false; mi.ToolTipText = DiceTurnActions.NeedsFacesText; }
             }
         }
         into.Add(new ToolStripSeparator());
@@ -164,64 +153,21 @@ sealed class DiceTools : IDisposable
 
     void CustomRoll()
     {
-        if (DiceDialog.Ask(_owner, "Custom Roll", false) is { } r) RollSpec(r.Spec, "Roll");
+        if (DiceDialog.Ask(_owner, "Custom Roll", false) is { } r) RollSpec(r.Spec, DiceTurnActions.RollPurpose);
     }
 
     void MultiRoll()
     {
-        if (DiceDialog.Ask(_owner, "Multi-roll", true) is not { } r) return;
-        for (var k = 1; k <= r.Times; k++)
-            if (!RollSpec(r.Spec, $"Multi-roll {k}/{r.Times}", quiet: k < r.Times)) break;
+        if (DiceDialog.Ask(_owner, "Multi-roll", true) is { } r) _core.MultiRoll(r.Spec, r.Times);
     }
 
     /// <summary>Rolls (or asks for physical results) and records one RollDice command. Returns false when cancelled or impossible.</summary>
-    public bool RollSpec(DiceSpec spec, string purpose, bool quiet = false)
-    {
-        if (_session() is not { Game: { } game } s || Refused()) return false;
-        var results = Results(s, spec.Count, spec.Sides);
-        if (results == null) return false;
-        Record(game, new RollDice(purpose, spec.Count, spec.Sides, results, DiceExpr.Format(spec), null, spec.Modifier));
-        if (!quiet && ShowLastRoll) ShowResult(game.State.Log.LastOrDefault()?.Text);
-        return true;
-    }
+    public bool RollSpec(DiceSpec spec, string purpose, bool quiet = false) => _core.RollSpec(spec, purpose, quiet);
 
-    public bool RollSpecial(DieDef die)
-    {
-        if (_session() is not { Game: { } game } s || die.Faces.Count < 2 || Refused()) return false;
-        var results = Results(s, 1, die.Faces.Count);
-        if (results == null) return false;
-        var face = die.Faces[results[0] - 1];
-        Record(game, new RollDice(die.Name, 1, die.Faces.Count, results, null, new[] { face }));
-        if (ShowLastRoll) ShowResult(game.State.Log.LastOrDefault()?.Text);
-        return true;
-    }
+    public bool RollSpecial(DieDef die) => _core.RollSpecial(die);
 
     /// <summary>The main window's action port; null = execute directly.</summary>
-    public Func<IActionPort?>? Actions { get; set; }
-
-    void Record(GameSession game, RollDice roll)
-    {
-        if (Actions?.Invoke() is { } port) port.RecordRoll(roll);
-        else game.Execute(CommandLog.Stamp(roll));
-    }
-
-    void ChangeTurn(GameSession game, int turn, string? phase)
-    {
-        if (Actions?.Invoke() is { } port) port.SetTurn(turn, phase);
-        else game.Execute(CommandLog.Stamp(new SetTurn(turn, phase)));
-    }
-
-    IReadOnlyList<int>? Results(ModuleSession s, int n, int sides)
-    {
-        if (PhysicalDice) return AskPhysical(n, sides);
-        var r = s.Roll(n, sides);
-        if (r.Count != n || r.Any(v => v < 1 || v > sides))
-        {
-            ShowResult("The dice roller returned invalid results; nothing was recorded.");
-            return null;
-        }
-        return r;
-    }
+    public Func<IActionPort?>? Actions { get => _core.Actions; set => _core.Actions = value; }
 
     IReadOnlyList<int>? AskPhysical(int n, int sides)
     {
@@ -251,20 +197,13 @@ sealed class DiceTools : IDisposable
 
     // ---------- turn ----------
 
-    public void StepTurn(int delta)
-    {
-        if (_session()?.Game is not { } game || Refused()) return;
-        var cur = game.State.Turn;
-        var n = Math.Max(1, cur.Turn + delta);
-        if (n == cur.Turn) return;
-        ChangeTurn(game, n, null);
-    }
+    public void StepTurn(int delta) => _core.StepTurn(delta);
 
     void SetTurnDialog()
     {
-        if (_session()?.Game is not { } game || Refused()) return;
-        if (TurnDialog.Ask(_owner, game.State.Turn) is not { } r) return;
-        ChangeTurn(game, r.Turn, string.IsNullOrWhiteSpace(r.Phase) ? null : r.Phase.Trim());
+        if (!_core.CanSetTurn()) return;
+        if (TurnDialog.Ask(_owner, _core.CurrentTurn) is not { } r) return;
+        _core.SetTurn(r.Turn, r.Phase);
     }
 }
 

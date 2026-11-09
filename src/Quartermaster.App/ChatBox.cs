@@ -8,7 +8,7 @@ namespace Quartermaster.App;
 /// </summary>
 sealed class ChatBox : UserControl
 {
-    readonly TextBox _text = new() { Dock = DockStyle.Fill, MaxLength = ChatText.MaxLength, PlaceholderText = "Chat — press Enter to send" };
+    readonly TextBox _text = new() { Dock = DockStyle.Fill, MaxLength = ChatText.MaxLength, PlaceholderText = LogPanelRules.ChatPlaceholder };
     readonly Button _send = new() { Text = "Send", Dock = DockStyle.Right, Width = 60, FlatStyle = FlatStyle.System };
     readonly Action<string> _sendText;
 

@@ -135,9 +135,6 @@ sealed class LogPanel : UserControl
         catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { /* shutting down */ }
     }
 
-    LogFilterSpec Spec() =>
-        new(_kindButtons.Where(k => k.Value.Checked).Select(k => k.Key).ToHashSet(), _search.Text ?? "");
-
     /// <summary>Recomputes the visible rows now (also used by smoke so the screenshot does not wait for the debounce).</summary>
     public void Reload()
     {
@@ -145,8 +142,7 @@ sealed class LogPanel : UserControl
         var follow = IsAtBottom();
         // Selection is by row index, which changes when the rows do: re-select by Seq so Copy / double-click act on what is highlighted.
         var selected = _list.SelectedIndices.Cast<int>().Where(i => i < _rows.Count).Select(i => _rows[i].Seq).ToHashSet();
-        _rows = LogFilter.Apply(log, Spec());
-        if (!_showMoves) _rows = _rows.Where(r => LogFilter.DisplayKind(r.Kind) is not (LogKind.Move or LogKind.Place or LogKind.Delete)).ToList();
+        _rows = LogPanelRules.Visible(log, _kindButtons.Where(k => k.Value.Checked).Select(k => k.Key).ToHashSet(), _search.Text, _showMoves);
         _list.SelectedIndices.Clear();
         _list.VirtualListSize = _rows.Count;
         if (selected.Count > 0)
@@ -173,7 +169,8 @@ sealed class LogPanel : UserControl
     {
         if (e.ItemIndex < 0 || e.ItemIndex >= _rows.Count) { e.Item = new ListViewItem(new[] { "", "", "", "" }); return; }
         var r = _rows[e.ItemIndex];
-        e.Item = new ListViewItem(new[] { LogFilter.Time(r, _timeFormat), LogFilter.DisplayKind(r.Kind), LogFilter.TurnPhase(r), r.Text ?? "" });
+        var c = LogPanelRules.Cells(r, _timeFormat);
+        e.Item = new ListViewItem(new[] { c.Time, c.Kind, c.TurnPhase, c.Text });
     }
 
     // ---------- actions ----------
@@ -192,10 +189,10 @@ sealed class LogPanel : UserControl
 
     void Export()
     {
-        using var dlg = new SaveFileDialog { Title = "Export log", Filter = "Text file (*.txt)|*.txt|HTML file (*.html)|*.html", FileName = "game-log" };
+        using var dlg = new SaveFileDialog { Title = LogPanelRules.ExportTitle, Filter = "Text file (*.txt)|*.txt|HTML file (*.html)|*.html", FileName = LogPanelRules.ExportFileName };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         var rows = _rows;
-        File.WriteAllText(dlg.FileName, dlg.FileName.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ? LogFilter.ToHtml(rows) : LogFilter.ToText(rows), System.Text.Encoding.UTF8);
+        LogPanelRules.Export(dlg.FileName, rows);
     }
 
     void CentreSelected()

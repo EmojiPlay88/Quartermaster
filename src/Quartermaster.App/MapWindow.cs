@@ -262,86 +262,53 @@ sealed class MapWindow : Form
 
     // ---------- menus ----------
 
-    static string NewId() => "c" + Guid.NewGuid().ToString("N");
-
     void OnContext(string? pieceId, Point at)
     {
         var game = _s.Game;
         if (game == null) return;
         var menu = new ContextMenuStrip();
         menu.Closed += (_, _) => BeginInvoke(new Action(menu.Dispose));
-        if (pieceId != null && game.State.Pieces.TryGetValue(pieceId, out var piece))
+        if (pieceId != null && game.State.Pieces.ContainsKey(pieceId))
         {
-            // Hot-seat: a piece drawn as its mask (or not shown at all) must not reveal its real commands.
-            if (_s.ViewSides != null && (_s.View?.Pieces.TryGetValue(pieceId, out var seen) != true || seen!.TypeString != piece.TypeString))
-                menu.Items.Add(new ToolStripMenuItem("(no commands)") { Enabled = false });
-            else BuildPieceMenu(menu, piece, game);
+            // The clicked counter first, then the selection (which repeats it when it is selected).
+            var ids = new List<string> { pieceId };
+            ids.AddRange(Canvas.Selected);
+            AddEntries(menu.Items, PieceMenuModel.Build(_s, Map.Id, ids, Host?.Actions, PieceHooks()));
         }
         else
             BuildMapMenu(menu, game);
         if (menu.Items.Count > 0) menu.Show(Canvas, at);
     }
 
-    void BuildPieceMenu(ContextMenuStrip menu, PieceInstance piece, GameSession game)
+    /// <summary>The dialogs and windows the shared counter menu opens from this window.</summary>
+    PieceMenuHooks PieceHooks()
     {
-        var actions = PieceActions.For(piece, _s.Model, game.State, NewId);
-        foreach (var group in ActionMenu.Group(actions.Where(a => a.Group != "error")))
+        var host = Host;
+        return new PieceMenuHooks
         {
-            if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
-            foreach (var a in group)
-            {
-                var action = a;
-                var item = new ToolStripMenuItem(a.Label) { Enabled = a.Enabled, ToolTipText = a.DisabledReason };
-                item.Click += (_, _) => Run(() => RunAction(action, piece));
-                menu.Items.Add(item);
-            }
-        }
-        AddCalculateMenu(menu, piece, game);
-        if (Host?.GameMaster == true)
-        {
-            if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("Delete counter", null, (_, _) => Run(() => DeleteCounters(piece, game))));
-        }
-        AddShowInLedger(menu, piece, game);
-        if (menu.Items.Count == 0) menu.Items.Add(new ToolStripMenuItem("(no commands)") { Enabled = false });
+            GameMaster = host?.GameMaster == true,
+            ShowInLedger = host == null ? null : ids => host.ShowInLedger(ids),
+            ShowFormula = ShowFormula,
+            AskInput = (title, prompt) => InputDialog.Ask(this, title, prompt),
+            // Settings "ask before deleting": always yes when the setting is off or in smoke mode.
+            ConfirmDelete = question => Program.Smoke || Host?.CurrentSettings.ConfirmDelete == false
+                || MessageBox.Show(this, question, "Quartermaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes,
+            EditSheet = EditSheet,
+        };
     }
 
-    /// <summary>The counters a piece command acts on: the selection when the clicked counter is part of it, otherwise just the clicked counter.</summary>
-    List<string> TargetIds(PieceInstance clicked, GameSession game) => Canvas.Selected.Contains(clicked.Id)
-        ? game.State.Pieces.Keys.Where(Canvas.Selected.Contains).ToList()
-        : new List<string> { clicked.Id };
-
-    /// <summary>"Show in Ledger": selects the counters' rows in the Ledger window (same path as Ctrl+L with a selection). Disabled without a rules pack.</summary>
-    void AddShowInLedger(ContextMenuStrip menu, PieceInstance piece, GameSession game)
+    /// <summary>Turns shared menu entries into WinForms items: same texts, tooltips, separators, submenus and shortcut texts.</summary>
+    void AddEntries(ToolStripItemCollection items, IReadOnlyList<MenuEntry> entries)
     {
-        if (Host is not { } host) return;
-        if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
-        var item = new ToolStripMenuItem("Show in &Ledger") { ShortcutKeyDisplayString = host.ShortcutText("view.ledger") };
-        if (!host.LedgerAvailable) { item.Enabled = false; item.ToolTipText = "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)."; }
-        item.Click += (_, _) => Run(() => host.ShowInLedger(TargetIds(piece, game)));
-        menu.Items.Add(item);
-    }
-
-    /// <summary>"Calculate" submenu: one entry per formula that applies to the piece. Hidden without a rules pack.</summary>
-    void AddCalculateMenu(ContextMenuStrip menu, PieceInstance piece, GameSession game)
-    {
-        if (_s.Rules is not { } rules || _s.Runner == null || !_s.CanAct(piece.Id)) return;
-        IReadOnlyList<Quartermaster.Rules.FormulaDef> formulas;
-        try { formulas = PieceFilter.FormulasFor(rules, piece, game.State, _s.Model); }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        foreach (var e in entries)
         {
-            _s.Log.Add(DiagnosticSeverity.Warning, "rules", "Could not list formulas for a piece: " + ex.Message);
-            return;
+            if (e.IsSeparator) { items.Add(new ToolStripSeparator()); continue; }
+            var item = new ToolStripMenuItem(e.Label) { Enabled = e.Enabled, ToolTipText = e.DisabledReason };
+            if (e.CommandId != null && Host is { } host) item.ShortcutKeyDisplayString = host.ShortcutText(e.CommandId);
+            if (e.Children.Count > 0) AddEntries(item.DropDownItems, e.Children);
+            if (e.Run is { } run) item.Click += (_, _) => Run(run);
+            items.Add(item);
         }
-        if (formulas.Count == 0) return;
-        if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator());
-        var calc = new ToolStripMenuItem("Calculate");
-        foreach (var f in formulas)
-        {
-            var id = f.Id;
-            calc.DropDownItems.Add(new ToolStripMenuItem(f.Name, null, (_, _) => Run(() => ShowFormula(id, piece.Id))));
-        }
-        menu.Items.Add(calc);
     }
 
     void ShowFormula(string formulaId, string pieceId)
@@ -375,84 +342,15 @@ sealed class MapWindow : Form
         }
     }
 
-    void Execute(IEnumerable<GameCommand> commands)
-    {
-        if (_s.Game is not { } game) return;
-        // One undoable action per call; consecutive moves (Send to, keyboard moves) are one move gesture with its OnMove formulas.
-        if (Host?.Actions is { } port) { port.PieceCommands(commands.ToList()); return; }
-        using var scope = game.BeginAction();   // no main window: plain logged commands; label comes from the first command
-        foreach (var c in commands) game.Execute(CommandLog.Prepare(c, game.State, _s));
-    }
+    void Execute(IEnumerable<GameCommand> commands) => PieceMenuModel.Execute(_s, Host?.Actions, commands);
 
-    void RunAction(PieceAction action, PieceInstance clicked)
+    void EditSheet(PieceAction action, string pieceId)
     {
-        if (_s.Game is not { } game) return;
-        if (action.Group == "sheet") { EditSheet(action, clicked, game); return; }
-
-        // The action applies to every selected piece that offers the same command (the clicked piece always does).
-        var targets = game.State.Pieces.Values.Where(p => p.Id == clicked.Id || Canvas.Selected.Contains(p.Id)).ToList();
-        string? input = null;
-        if (action.BuildWithInput != null)
-        {
-            input = InputDialog.Ask(this, action.Label, action.PromptText is { Length: > 0 } t ? t : action.Label);
-            if (input == null) return;
-        }
-        var batches = new List<GameCommand[]>();
-        var deleting = new List<string>();
-        foreach (var p in targets)
-        {
-            var mine = p.Id == clicked.Id
-                ? action
-                : PieceActions.For(p, _s.Model, game.State, NewId).FirstOrDefault(a => a.Label == action.Label && a.Group == action.Group && a.Enabled);
-            if (mine == null) continue;
-            if (mine.IsDelete) deleting.Add(p.Id);
-            batches.Add((input != null && mine.BuildWithInput != null ? mine.BuildWithInput(game.State, input) : mine.Build(game.State)).ToArray());
-        }
-        if (!ConfirmDeletes(game.State, deleting, clicked)) return;
-        foreach (var b in batches) Execute(b);
-    }
-
-    /// <summary>Game master: removes the clicked counter, or the whole selection when the clicked counter is selected (after the usual confirmation).</summary>
-    void DeleteCounters(PieceInstance clicked, GameSession game)
-    {
-        // The selection is the target only when the clicked counter is part of it; otherwise just the clicked counter.
-        var ids = TargetIds(clicked, game);
-        if (!ConfirmDeletes(game.State, ids, clicked)) return;
-        Execute(ids.Select(id => new RemovePiece(id)));
-    }
-
-    /// <summary>Settings "ask before deleting": one Yes/No for the pieces a trait Delete action would remove. Always true when the setting is off or in smoke mode.</summary>
-    bool ConfirmDeletes(GameState st, List<string> ids, PieceInstance clicked)
-    {
-        if (ids.Count == 0 || Program.Smoke || Host?.CurrentSettings.ConfirmDelete == false) return true;
-        var what = ids.Count == 1
-            ? (st.Pieces.TryGetValue(ids[0], out var p) ? PieceInfo.Name(p) : clicked.Id) is { Length: > 0 } n ? n : "this piece"
-            : ids.Count + " pieces";
-        return MessageBox.Show(this, $"Delete {what}?", "Quartermaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
-    }
-
-    /// <summary>Ledger value text for a sheet row that a rules-pack property manages; null when no pack is loaded or no property is bound to the row.</summary>
-    string? ManagedSheetValue(PieceInstance piece, GameSession game, string rowName)
-    {
-        if (_s.Rules is not { } rules) return null;
-        var prop = rules.Properties.FirstOrDefault(p => p.Scope != Quartermaster.Rules.PropertyScope.Holders
-            && string.Equals(p.SheetField, rowName, StringComparison.OrdinalIgnoreCase)
-            && PieceFilter.Matches(p.AppliesTo, piece, game.State, _s.Model, rules));
-        if (prop == null) return null;
-        if (_s.View is not { } view || (_s.ViewSides != null && Ledger.Get(view, LedgerKey.Piece(piece.Id), prop.Id) == null
-            && Ledger.Get(game.State, LedgerKey.Piece(piece.Id), prop.Id) != null)) return ModuleSession.HiddenText;
-        return Ledger.GetOrDefault(view,LedgerKey.Piece(piece.Id), prop).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    void EditSheet(PieceAction action, PieceInstance piece, GameSession game)
-    {
-        var traits = PieceTypeCache.For(_s.Images).Get(piece.TypeString).Traits;
-        var index = -1;
-        for (var i = 0; i < traits.Count; i++)
-            if (traits[i] is PropertySheetDef d && d.MenuName == action.Label) { index = i; break; }
+        if (_s.Game is not { } game || !game.State.Pieces.TryGetValue(pieceId, out var piece)) return;
+        var index = PieceMenuModel.SheetIndex(_s, piece, action.Label);
         if (index < 0) return;
         var rows = PieceActions.ReadSheet(piece, index);
-        using var dlg = new PropertySheetDialog(action.Label, rows, name => ManagedSheetValue(piece, game, name));
+        using var dlg = new PropertySheetDialog(action.Label, rows, name => PieceMenuModel.ManagedSheetValue(_s, piece, name));
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         var write = PieceActions.WriteSheet(piece, index, dlg.Values);
         if (Host?.Actions is { } port) port.PieceCommand(write);

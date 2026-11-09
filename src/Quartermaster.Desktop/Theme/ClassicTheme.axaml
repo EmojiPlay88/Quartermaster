@@ -144,6 +144,27 @@
     <Setter Property="BorderBrush" Value="{DynamicResource Classic.HighlightBrush}" />
   </Style>
 
+  <!-- Map and main toolbars (WinForms ToolStripButton): flat text until hover; hover and checked as the other buttons -->
+  <Style Selector=".mapToolbar Button, .mapToolbar ToggleButton, .mainToolbar Button">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Padding" Value="6,3" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+  <Style Selector=".mapToolbar Button /template/ ContentPresenter#PART_ContentPresenter, .mapToolbar ToggleButton /template/ ContentPresenter#PART_ContentPresenter, .mainToolbar Button /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector=".mapToolbar Button:pointerover /template/ ContentPresenter#PART_ContentPresenter, .mapToolbar ToggleButton:pointerover /template/ ContentPresenter#PART_ContentPresenter, .mainToolbar Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Classic.ButtonHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Classic.HighlightBrush}" />
+  </Style>
+  <Style Selector=".mapToolbar ToggleButton:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Classic.CheckedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Classic.HighlightBrush}" />
+  </Style>
+
   <!-- Inputs and lists: white with the classic thin border -->
   <Style Selector="TextBox, ComboBox, ListBox, TreeView, NumericUpDown">
     <Setter Property="Background" Value="{DynamicResource Classic.WindowBrush}" />

@@ -16,8 +16,6 @@ sealed partial class MainForm
     readonly ToolStripStatusLabel _sbOnline = new() { Visible = false, Name = "status.online", BorderSides = ToolStripStatusLabelBorderSides.Left, BorderStyle = Border3DStyle.Etched };
     readonly Panel _onlineBanner = new() { Dock = DockStyle.Top, Height = 26, Visible = false, BackColor = Color.FromArgb(255, 240, 200) };
     readonly Label _onlineBannerText = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 8, 0), Font = new Font("Tahoma", 8.25f, FontStyle.Bold) };
-    readonly List<ToolStripItem> _guestBlocked = new();
-    readonly List<ToolStripItem> _needsSave = new();
     ToolStripMenuItem? _gameMenu, _gamePlayers, _gameLeave, _exportViewer;
     LocalActions? _localActions;
     RelayClient? _relayClient;
@@ -502,23 +500,7 @@ sealed partial class MainForm
     void ApplyGuestLimits()
     {
         var guest = _session?.IsGuest == true;
-        foreach (var i in _guestBlocked)
-        {
-            if (guest) i.Enabled = false;
-            Tip(i, guest ? ModuleSession.GuestBusyText : null);
-        }
-        foreach (var i in _needsSave)
-        {
-            if (_session?.Game != null && _session.CanSave != true) i.Enabled = false;
-            Tip(i, guest ? ModuleSession.GuestSaveText : _session?.IsViewerCopy == true ? ModuleSession.ViewerCopyText : null);
-        }
-
-        // Only our own tooltips are set or cleared; others (shortcut hints) stay.
-        static void Tip(ToolStripItem i, string? tip)
-        {
-            if (tip != null) i.ToolTipText = tip;
-            else if (i.ToolTipText is ModuleSession.GuestBusyText or ModuleSession.GuestSaveText or ModuleSession.ViewerCopyText) i.ToolTipText = null;
-        }
+        ApplyGates(full: false);
         if (_exportViewer != null)
         {
             _exportViewer.Visible = guest;

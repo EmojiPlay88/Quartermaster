@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Quartermaster.Core;
+using Quartermaster.Render;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.Desktop.Shell;
@@ -16,6 +17,12 @@ public sealed record FileFilter(string Name, IReadOnlyList<string> Patterns)
 /// <summary>The setup chooser's answer: a predefined setup (null = "New game from module") and the difficulty.</summary>
 public sealed record SetupChoice(SetupDef? Setup, Difficulty Difficulty);
 
+/// <summary>The dice dialog's answer: the dice and how many times to roll them (1 except for Multi-roll).</summary>
+public sealed record DiceChoice(DiceSpec Spec, int Times);
+
+/// <summary>The Set Turn dialog's answer: the turn number and the phase as typed.</summary>
+public sealed record TurnChoice(int Turn, string Phase);
+
 /// <summary>
 /// Every dialog the main window shows: file pickers, Yes/No questions, warnings and the setup chooser. The window only talks to dialogs
 /// through this, so tests swap in a fake and never open a real window.
@@ -26,16 +33,33 @@ public interface IDialogs
     Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters);
 
     /// <summary>A path to save to (with <paramref name="defaultExtension"/> added when the name has none), or null when cancelled.</summary>
-    Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension);
+    Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null);
 
     /// <summary>A Yes/No question with No as the default (WinForms MessageBoxDefaultButton.Button2). True = Yes.</summary>
     Task<bool> AskYesNoAsync(Window owner, string message, string caption);
+
+    /// <summary>A Yes / No / Cancel question (WinForms MessageBoxButtons.YesNoCancel, Yes focused). Yes = true, No = false, Cancel = null.</summary>
+    Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption);
+
+    /// <summary>A one-line text prompt with OK / Cancel (WinForms InputDialog); the entered text, or null when cancelled.</summary>
+    Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial);
+
+    /// <summary>A piece's property sheet (WinForms PropertySheetDialog): one text box per row; the edited values in row order, or null when
+    /// cancelled. <paramref name="managedValue"/> gives the Ledger value of a row a rules-pack property manages (that box is read-only).</summary>
+    Task<IReadOnlyList<string>?> EditPropertySheetAsync(Window owner, string title, IReadOnlyList<(string Name, string Value)> rows,
+        Func<string, string?>? managedValue);
 
     /// <summary>A warning with an OK button.</summary>
     Task ShowWarningAsync(Window owner, string message, string caption);
 
     /// <summary>The setup chooser (WinForms SetupChooserDialog); null when cancelled.</summary>
     Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty);
+
+    /// <summary>The dice expression prompt (WinForms DiceDialog), with Times when <paramref name="multi"/>; null when cancelled.</summary>
+    Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi);
+
+    /// <summary>The Set Turn dialog (WinForms TurnDialog) opened at <paramref name="current"/>; null when cancelled.</summary>
+    Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -58,12 +82,13 @@ public sealed class Dialogs : IDialogs
         return null;
     }
 
-    public async Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension)
+    public async Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null)
     {
         var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = title,
             DefaultExtension = defaultExtension,
+            SuggestedFileName = suggestedFileName,
             FileTypeChoices = new[] { Type(filter) },
             ShowOverwritePrompt = true,
         });
@@ -84,14 +109,30 @@ public sealed class Dialogs : IDialogs
     public Task ShowWarningAsync(Window owner, string message, string caption) =>
         MessageBox.ShowAsync(owner, message, caption, yesNo: false);
 
+    public Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption) =>
+        MessageBox.ShowYesNoCancelAsync(owner, message, caption);
+
+    public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial) =>
+        new InputDialog(title, prompt, initial).ShowDialog<string?>(owner);
+
+    public Task<IReadOnlyList<string>?> EditPropertySheetAsync(Window owner, string title, IReadOnlyList<(string Name, string Value)> rows,
+        Func<string, string?>? managedValue) =>
+        new PropertySheetDialog(title, rows, managedValue).ShowDialog<IReadOnlyList<string>?>(owner);
+
     public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty) =>
         new SetupChooser(model, difficulty, preselectNew).ShowDialog<SetupChoice?>(owner);
+
+    public Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi) =>
+        new DiceDialog(title, multi).ShowDialog<DiceChoice?>(owner);
+
+    public Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current) =>
+        new TurnDialog(current).ShowDialog<TurnChoice?>(owner);
 }
 
 /// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>
 sealed class MessageBox : Window
 {
-    MessageBox(string message, string caption, bool yesNo)
+    MessageBox(string message, string caption, bool yesNo, bool cancel = false)
     {
         Title = caption;
         SizeToContent = SizeToContent.WidthAndHeight;
@@ -102,7 +143,7 @@ sealed class MessageBox : Window
         MaxWidth = 520;
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 6, Margin = new Thickness(10) };
-        Button Add(string text, bool result, bool isDefault = false, bool isCancel = false)
+        Button Add(string text, bool? result, bool isDefault = false, bool isCancel = false)
         {
             var b = new Button { Content = text, MinWidth = 75, IsDefault = isDefault, IsCancel = isCancel, HorizontalContentAlignment = HorizontalAlignment.Center };
             b.Click += (_, _) => Close(result);
@@ -110,7 +151,13 @@ sealed class MessageBox : Window
             return b;
         }
         Button focus;
-        if (yesNo)
+        if (cancel)
+        {
+            focus = Add("Yes", true, isDefault: true);
+            Add("No", false);
+            Add("Cancel", null, isCancel: true);
+        }
+        else if (yesNo)
         {
             Add("Yes", true);
             focus = Add("No", false, isDefault: true, isCancel: true);
@@ -127,4 +174,8 @@ sealed class MessageBox : Window
 
     public static async Task<bool> ShowAsync(Window owner, string message, string caption, bool yesNo) =>
         await new MessageBox(message, caption, yesNo).ShowDialog<bool?>(owner) == true;
+
+    /// <summary>Yes / No / Cancel; closing the window counts as Cancel.</summary>
+    public static Task<bool?> ShowYesNoCancelAsync(Window owner, string message, string caption) =>
+        new MessageBox(message, caption, yesNo: true, cancel: true).ShowDialog<bool?>(owner);
 }

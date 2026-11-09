@@ -6,29 +6,38 @@
         Width="1024" Height="768">
   <DockPanel>
     <Menu x:Name="MainMenu" DockPanel.Dock="Top" />
-    <!-- Status bar as WinForms MainForm: module | message (springs) | tiling progress | location (170) | zoom (50) -->
+    <shell:MainToolbar x:Name="ToolbarHost" DockPanel.Dock="Top" />
+    <!-- Status bar as WinForms MainForm: module | message (springs) | tiling progress | turn | location (170) | zoom (50) -->
     <Border Classes="status" DockPanel.Dock="Bottom" BorderThickness="0,1,0,0">
-      <Grid ColumnDefinitions="Auto,*,Auto,170,50" Height="22">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto,170,50" Height="22">
         <Border Grid.Column="0" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="0,0,1,0" Padding="4,0">
           <TextBlock x:Name="SbModule" Text="No module" VerticalAlignment="Center" />
         </Border>
         <TextBlock x:Name="SbMessage" Grid.Column="1" VerticalAlignment="Center" Margin="4,0" TextTrimming="CharacterEllipsis" />
         <ProgressBar x:Name="SbTiling" Grid.Column="2" Width="100" Height="14" Minimum="0" Maximum="100" IsVisible="False" Margin="4,0" />
-        <Border Grid.Column="3" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0">
-          <TextBlock x:Name="SbLocation" Text="-" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        <Border x:Name="SbTurnBox" Grid.Column="3" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0" IsVisible="False">
+          <TextBlock x:Name="SbTurn" Text="Turn 1" VerticalAlignment="Center" />
         </Border>
         <Border Grid.Column="4" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0">
+          <TextBlock x:Name="SbLocation" Text="-" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </Border>
+        <Border Grid.Column="5" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0">
           <TextBlock x:Name="SbZoom" Text="-" VerticalAlignment="Center" />
         </Border>
       </Grid>
     </Border>
-    <Grid x:Name="Body" ColumnDefinitions="*,0,0">
-      <!-- Classic control colour behind the tab strip (WinForms DocumentTabStrip); the AppWorkspace grey is the MapView's own "no game" backdrop -->
-      <Border Background="{DynamicResource Classic.FaceBrush}">
-        <shell:MapTabs x:Name="Maps" />
-      </Border>
-      <GridSplitter x:Name="PaletteSplitter" Grid.Column="1" ResizeDirection="Columns" IsVisible="False" />
-      <shell:PaletteDock x:Name="PaletteHost" Grid.Column="2" IsVisible="False" />
+    <!-- The log docks under the maps and palette, like the WinForms default layout (170 high, 4 splitter) -->
+    <Grid x:Name="BodyAndLog" RowDefinitions="*,0,0">
+      <Grid x:Name="Body" ColumnDefinitions="*,0,0">
+        <!-- Classic control colour behind the tab strip (WinForms DocumentTabStrip); the AppWorkspace grey is the MapView's own "no game" backdrop -->
+        <Border Background="{DynamicResource Classic.FaceBrush}">
+          <shell:MapTabs x:Name="Maps" />
+        </Border>
+        <GridSplitter x:Name="PaletteSplitter" Grid.Column="1" ResizeDirection="Columns" IsVisible="False" />
+        <shell:PaletteDock x:Name="PaletteHost" Grid.Column="2" IsVisible="False" />
+      </Grid>
+      <GridSplitter x:Name="LogSplitter" Grid.Row="1" ResizeDirection="Rows" HorizontalAlignment="Stretch" IsVisible="False" />
+      <Border x:Name="LogHost" Grid.Row="2" IsVisible="False" />
     </Grid>
   </DockPanel>
 </Window>

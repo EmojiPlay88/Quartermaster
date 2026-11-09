@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Quartermaster.Core;
@@ -27,6 +28,7 @@ public sealed partial class MapView
     bool _bandActive;
     PointD _bandStart, _bandNow;
     IPointer? _dragPointer;
+    bool _contextPress;
 
     /// <summary>The selected pieces (click, add-modifier click, rubber band).</summary>
     public IReadOnlySet<string> SelectedPieceIds => _selected;
@@ -48,6 +50,65 @@ public sealed partial class MapView
 
     /// <summary>Supplies the action port that executes drops (one undoable move gesture, OnMove formulas); null result = plain commands.</summary>
     public Func<IActionPort?>? Actions { get => _drag.Actions; set => _drag.Actions = value; }
+
+    /// <summary>The window's dialogs, game-master switch and shortcut texts for the right-click menu; null: no dialogs (prompts count as
+    /// cancelled, nothing is deleted, no property sheet).</summary>
+    public MapMenuServices? MenuServices { get; set; }
+
+    /// <summary>The right-click menu while it is open (tests).</summary>
+    internal ContextMenu? OpenMenu { get; private set; }
+
+    /// <summary>The last menu command, which may still wait for a dialog (tests).</summary>
+    internal Task? MenuCommand { get; private set; }
+
+    /// <summary>A short message for the status bar ("Select a counter first"), as MapCanvas.DropMessage.</summary>
+    public event Action<string>? StatusMessage;
+
+    /// <summary>Scrolls to the selected counters (WinForms MapCanvas.CentreOnSelection); says so when nothing is selected.</summary>
+    public void CentreOnSelection()
+    {
+        if (State is { } st && MapViewTools.SelectionCentre(st, Map.Id, _selected) is { } c) CentreOn(c);
+        else StatusMessage?.Invoke("Select a counter first");
+    }
+
+    /// <summary>Runs a menu command as WinForms MapWindow.Run: failures (also those after an asynchronous dialog) are logged, not thrown.</summary>
+    internal void RunMenuCommand(Func<Task> command)
+    {
+        Task? t = null;
+        GuardCommand(() => t = command());
+        if (t != null) MenuCommand = Observe(t);
+    }
+
+    async Task Observe(Task t)
+    {
+        try { await t; }
+        catch (Exception) when (t.IsFaulted) { GuardCommand(() => t.GetAwaiter().GetResult()); }   // rethrown inside the guard: logged
+    }
+
+    void GuardCommand(Action a)
+    {
+        if (Guarded != null) { Guarded(a); return; }
+        try { a(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Session.Log.Add(DiagnosticSeverity.Error, "command", "A command failed: " + ex.Message, Map.Name);
+        }
+    }
+
+    /// <summary>Opens the right-click menu for what is under <paramref name="p"/> (WinForms MapCanvas.ContextRequested → MapWindow.OnContext).</summary>
+    void OpenContextMenu(Point p) => OpenContextMenu(PieceAt(p));
+
+    /// <summary>Opens the right-click menu of a counter (null: the map menu) at the pointer.</summary>
+    internal void OpenContextMenu(string? pieceId)
+    {
+        OpenMenu?.Close();
+        ContextMenu? menu = null;
+        GuardCommand(() => menu = MapContextMenu.Build(this, pieceId));
+        if (menu == null) return;
+        menu.Closed += (_, _) => { if (ReferenceEquals(OpenMenu, menu)) OpenMenu = null; };
+        OpenMenu = menu;
+        menu.Open(this);
+    }
 
     void Guard(Action a)
     {
@@ -75,6 +136,7 @@ public sealed partial class MapView
         var st = State;
         var removed = _selected.RemoveWhere(id => st == null || !st.Pieces.ContainsKey(id));
         if (_drag.Active) CancelDrag(); else _drag.ClearIncoming();
+        HidePopup();
         if (removed > 0) SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
@@ -120,7 +182,9 @@ public sealed partial class MapView
 
     void PruneIfAttached()
     {
-        if (_topLevel != null) PruneSelection();
+        if (_topLevel == null) return;
+        PruneSelection();
+        RefreshLastMoved();   // also after an undo or a new game
     }
 
     /// <summary>
@@ -154,12 +218,14 @@ public sealed partial class MapView
         ViewRefreshRuns++;
         if (_topLevel == null) return;   // detached meanwhile
         if (sidesChanged) { PruneSelection(); return; }
+        HidePopup();   // WinForms prunes on every view change, which closes the popup
         var st = State;
         if (_selected.RemoveWhere(id => st == null || !st.Pieces.ContainsKey(id)) > 0) SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
 
-    MapDrawOptions Options(IReadOnlySet<string>? hidden) => new(ShowGrid, _selected, null, hidden, DeviceScale: DeviceScale);
+    MapDrawOptions Options(IReadOnlySet<string>? hidden, string? hover = null) =>
+        new(ShowGrid, _selected, hover, hidden, HighlightPieceIds: _highlightLast ? _lastMoved : null, HideAllPieces: _hideCounters, DeviceScale: DeviceScale);
 
     void DrawBand(SKCanvas c)
     {
@@ -180,9 +246,11 @@ public sealed partial class MapView
     /// <summary>The add-to-selection modifier: Ctrl on Windows/Linux, Cmd on macOS.</summary>
     static bool AddModifier(KeyModifiers m) => (m & (ShortcutGestures.IsMac ? KeyModifiers.Meta : KeyModifiers.Control)) != 0;
 
+    /// <summary>The counter under <paramref name="p"/>; none while counters are hidden (WinForms MapCanvas.PieceAt): no hover, selection,
+    /// drag or counter menu then.</summary>
     string? PieceAt(Point p)
     {
-        if (State is not { } st) return null;
+        if (State is not { } st || _hideCounters) return null;
         try
         {
             return HitTester.PieceAt(st, Map, Session.Model, Session.Images, MapPoint(p), _pieces.Types);
@@ -199,7 +267,9 @@ public sealed partial class MapView
     {
         base.OnPointerPressed(e);
         if (_drag.Active) return; // a drag owns the pointer until it ends
+        _contextPress = false;    // a menu press released outside the view is forgotten
         Focus();
+        HidePopup();
         var pt = e.GetCurrentPoint(this);
         var props = pt.Properties;
         _downPos = pt.Position;
@@ -213,10 +283,14 @@ public sealed partial class MapView
             e.Handled = true;
             return;
         }
-        if (props.IsRightButtonPressed)
+        if (LosPressed(e, pt)) return;
+        // Right press, or Ctrl+click on macOS (never add-to-selection there): select the counter now, open the menu on release (MapCanvas).
+        if (props.IsRightButtonPressed
+            || (ShortcutGestures.IsMac && props.IsLeftButtonPressed && (e.KeyModifiers & KeyModifiers.Control) != 0))
         {
             var hit = PieceAt(pt.Position);
             if (hit != null && !_selected.Contains(hit)) SelectOnly(hit);
+            _contextPress = true;
             e.Handled = true;
             return;
         }
@@ -242,6 +316,7 @@ public sealed partial class MapView
             _bandStart = _bandNow = MapPoint(pt.Position);
             e.Pointer.Capture(this);
         }
+        if (e.ClickCount == 2) ToggleStack(pt.Position);
         InvalidateVisual();
     }
 
@@ -256,6 +331,7 @@ public sealed partial class MapView
             e.Handled = true;
             return;
         }
+        if (LosMoved(p)) { e.Handled = true; return; }
         if (_panning)
         {
             View.Pan = new SKPoint((float)(View.Pan.X - (p.X - _panLast.X) / View.Zoom), (float)(View.Pan.Y - (p.Y - _panLast.Y) / View.Zoom));
@@ -276,7 +352,10 @@ public sealed partial class MapView
         {
             BeginDrag(p, e.Pointer);
             e.Handled = true;
+            return;
         }
+        var props = e.GetCurrentPoint(this).Properties;
+        if (!props.IsLeftButtonPressed && !props.IsRightButtonPressed && !props.IsMiddleButtonPressed) UpdateHover(p);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -284,6 +363,7 @@ public sealed partial class MapView
         base.OnPointerReleased(e);
         var p = e.GetPosition(this);
         var left = e.InitialPressMouseButton == MouseButton.Left;
+        if (LosReleased(e)) return;
         if (_drag.Active)
         {
             // A drop outside the view lands nowhere (the WinForms app hands such drags to other windows; stage 1 has one map).
@@ -299,6 +379,13 @@ public sealed partial class MapView
             e.Handled = true;
             return;
         }
+        if (_contextPress && (left || e.InitialPressMouseButton == MouseButton.Right))
+        {
+            _contextPress = false;
+            e.Handled = true;
+            OpenContextMenu(p);
+            return;
+        }
         if (!left) return;
         _leftDown = false;
         e.Handled = true;
@@ -306,7 +393,7 @@ public sealed partial class MapView
         {
             _bandActive = false;
             e.Pointer.Capture(null);
-            if (State is { } st && Math.Abs(p.X - _downPos.X) + Math.Abs(p.Y - _downPos.Y) >= 3)
+            if (State is { } st && !_hideCounters && Math.Abs(p.X - _downPos.X) + Math.Abs(p.Y - _downPos.Y) >= 3)
             {
                 var r = SelectionRect.FromCorners(_bandStart, _bandNow);
                 var added = false;
@@ -328,12 +415,13 @@ public sealed partial class MapView
         if (_panning) EndPan();
         if (_drag.Active) EndDrag(commit: false, default); // capture taken away (window switch, dialog): cancel
         if (_bandActive) { _bandActive = false; InvalidateVisual(); }
+        if (_los is { Dragging: true } los) { los.End(); InvalidateVisual(); }   // capture taken away mid-line: keep what was drawn
     }
 
     void EndPan()
     {
         _panning = false;
-        Cursor = _space ? new Cursor(StandardCursorType.Hand) : null;
+        Cursor = _space ? new Cursor(StandardCursorType.Hand) : RestingCursor;
     }
 
     // ---------- keys ----------
@@ -341,6 +429,7 @@ public sealed partial class MapView
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (e.Key == Key.Escape && LosEscape()) { e.Handled = true; return; }
         if (e.Key == Key.Escape && _drag.Active)
         {
             EndDrag(commit: false, default);
@@ -361,7 +450,7 @@ public sealed partial class MapView
         if (e.Key == Key.Space)
         {
             _space = false;
-            if (!_panning) Cursor = null;
+            if (!_panning) Cursor = RestingCursor;
             e.Handled = true;
         }
     }
@@ -379,6 +468,8 @@ public sealed partial class MapView
         if (State is not { } st || _downPiece == null) return;
         var grabbed = _downPiece;
         _downPiece = null;
+        HidePopup();
+        _hoverStack = null;
         if (!_drag.Begin(st, grabbed, _selected, MapPoint(_downPos), View, ClientSize, RenderWithout, DeviceScale)) { InvalidateVisual(); return; }
         _dragPointer = pointer;
         pointer.Capture(this);

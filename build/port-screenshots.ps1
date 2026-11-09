@@ -2,6 +2,8 @@
 .SYNOPSIS
   Side-by-side screenshots of the cross-platform Desktop app and the WinForms app on the invented Riverland demo.
 .DESCRIPTION
+  Stage 2a adds Desktop state shots (--screenshot-state: menu, hover, los, log; all with the Riverland rules pack) as
+  artifacts/port/stage2a-desktop-<state>.png, and the WinForms equivalents where a flag exists (--screenshot-log, --screenshot-breakdown).
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -55,6 +57,12 @@ function Invoke-Shot([string]$Exe, [string[]]$ArgList, [hashtable]$Env, [string]
 # Desktop: headless, no window. The Riverland demo has no predefined setups, so --new.
 Invoke-Shot $deskExe @($vmod, '--new', '--screenshot-main', (Join-Path $out 'stage1-desktop.png')) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } (Join-Path $out 'stage1-desktop.png') 'desktop'
 
+# Stage 2a states, Desktop, headless, with the demo's rules pack.
+foreach ($state in 'menu', 'hover', 'los', 'log') {
+    $png = Join-Path $out "stage2a-desktop-$state.png"
+    Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png "desktop-$state"
+}
+
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'
 $marker = Join-Path $demoRoot '.quartermaster-demo-root'
@@ -76,5 +84,11 @@ try {
         QUARTERMASTER_SHOT_OFFSCREEN = '1'
     }
     Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot', $wfPng, '--smoke', '8', '--no-smoke-documents') $env2 $wfPng 'winforms'
+    # Stage 2a equivalents. WinForms has no flag for the context menu, LOS line or Tools menu (those are native/transient); the log and the
+    # breakdown popup have one (the menu bar's popups are not drawn by the headless platform, so there is no Tools menu shot). Both stay off-screen because the main form is created off-screen.
+    $logPng = Join-Path $out 'stage2a-winforms-log.png'
+    Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot-log', $logPng, '--smoke', '8', '--no-smoke-documents') $env2 $logPng 'winforms-log'
+    $bdPng = Join-Path $out 'stage2a-winforms-breakdown.png'
+    Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot-breakdown', $bdPng, '--smoke', '8', '--no-smoke-documents') $env2 $bdPng 'winforms-breakdown'
 }
 finally { Reset-DemoRoot }

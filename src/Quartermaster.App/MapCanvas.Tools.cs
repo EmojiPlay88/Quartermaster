@@ -48,7 +48,7 @@ sealed partial class MapCanvas
     /// <summary>Recomputes the last-moved set from the command list (call after the game changed).</summary>
     public void RefreshLastMoved()
     {
-        _lastMoved = _highlightLast && _s.Game is { } g ? MapViewTools.LastMovedIds(g.Log, Map.Id) : new HashSet<string>();
+        _lastMoved = _highlightLast ? LastMoved.For(_s.Game, Map.Id) : new HashSet<string>();
         Invalidate();
     }
 

@@ -29,6 +29,30 @@ public sealed class ScreenshotTests
         finally { try { File.Delete(png); } catch (IOException) { } }
     }
 
+    [AvaloniaTheory]
+    [InlineData("menu")]
+    [InlineData("hover")]
+    [InlineData("los")]
+    [InlineData("log")]
+    public void Screenshot_state_flag_writes_png(string state)
+    {
+        var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");
+        try
+        {
+            var code = Program.RunScreenshot(new[] { Demo("Riverland-Demo.vmod"), "--new", "--rules", Demo("Riverland-Demo.qrules"), "--screenshot-state", state, "--screenshot-main", png });
+            Assert.Equal(0, code);
+            Assert.True(new FileInfo(png).Length > 1000);
+        }
+        finally { try { File.Delete(png); } catch (IOException) { } }
+    }
+
+    [AvaloniaFact]
+    public void Unknown_screenshot_state_fails()
+    {
+        var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");
+        Assert.Equal(1, Program.RunScreenshot(new[] { Demo("Riverland-Demo.vmod"), "--new", "--screenshot-state", "nope", "--screenshot-main", png }));
+    }
+
     [Fact]
     public void Missing_arguments_fail_with_usage_code()
     {

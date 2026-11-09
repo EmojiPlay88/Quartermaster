@@ -46,20 +46,43 @@ public sealed class MapTabs : TabControl
     /// <summary>The views in tab order.</summary>
     public IReadOnlyList<MapView> Views => _views;
 
+    /// <summary>Selects the tab of a view.</summary>
+    public void Activate(MapView v)
+    {
+        if (Items.OfType<TabItem>().FirstOrDefault(t => ViewOf(t) == v) is { } tab) SelectedItem = tab;
+    }
+
     /// <summary>The selected tab's view.</summary>
-    public MapView? ActiveView => (SelectedItem as TabItem)?.Content as MapView;
+    public MapView? ActiveView => ViewOf(SelectedItem as TabItem);
+
+    /// <summary>The map view inside a tab (each tab holds the map toolbar above its view, as a WinForms map window).</summary>
+    static MapView? ViewOf(TabItem? t) => (t?.Content as DockPanel)?.Children.OfType<MapView>().FirstOrDefault();
+
+    /// <summary>The toolbar of a view's tab (tests).</summary>
+    internal MapToolbar? ToolbarOf(MapView v) => Items.OfType<TabItem>().Select(t => t.Content as DockPanel).FirstOrDefault(p => p?.Children.Contains(v) == true)?.Children.OfType<MapToolbar>().FirstOrDefault();
 
     /// <summary>A view's status: (view, location text, zoom text). Location is "-" after a fit/centre/menu zoom or a tab switch (cursor
     /// location unknown, as MapCanvas.ReportStatus(null)) and null when only the zoom changed (keep the shown location).</summary>
     public event Action<MapView, string?, string>? StatusChanged;
 
-    /// <summary>A short message for the status bar (palette drops), as MapCanvas.DropMessage.</summary>
+    /// <summary>A short message for the status bar (palette drops, "Select a counter first"), as MapCanvas.DropMessage.</summary>
     public event Action<string>? DropMessage;
 
     /// <summary>A view's tile preparation progress 0..1; null when done.</summary>
     public event Action<MapView, double?>? TilingProgress;
 
     public event Action? ActiveViewChanged;
+
+    /// <summary>Dialogs and shortcut texts for the views' right-click menus (the main window's).</summary>
+    public MapMenuServices? MenuServices
+    {
+        get;
+        set
+        {
+            field = value;
+            foreach (var v in _views) v.MenuServices = value;
+        }
+    }
 
     /// <summary>Forces grids on every view (View → Show Grid).</summary>
     public bool ShowGrid
@@ -81,7 +104,7 @@ public sealed class MapTabs : TabControl
         if (s == null) return;
         Rebuild();
         var main = s.Model.Maps.FirstOrDefault(m => !m.IsOrgDisplay) ?? s.Model.Maps.FirstOrDefault();
-        var tab = Items.OfType<TabItem>().FirstOrDefault(t => (t.Content as MapView)?.Map == main) ?? Items.OfType<TabItem>().FirstOrDefault();
+        var tab = Items.OfType<TabItem>().FirstOrDefault(t => ViewOf(t)?.Map == main) ?? Items.OfType<TabItem>().FirstOrDefault();
         if (tab != null) SelectedItem = tab;
     }
 
@@ -99,7 +122,7 @@ public sealed class MapTabs : TabControl
         {
             var v = have.TryGetValue(m, out var kept) ? kept : Create(s, m);
             views.Add(v);
-            tabs.Add(Items.OfType<TabItem>().FirstOrDefault(t => t.Content == v) ?? new TabItem { Header = m.Name, Content = v });
+            tabs.Add(Items.OfType<TabItem>().FirstOrDefault(t => ViewOf(t) == v) ?? new TabItem { Header = m.Name, Content = Host(v) });
         }
         foreach (var gone in _views.Except(views).ToList())
             if (_tiling.Remove(gone, out var t)) t.Cts.Cancel();   // a map the player may no longer see stops preparing its tiles
@@ -107,7 +130,7 @@ public sealed class MapTabs : TabControl
         _views.AddRange(views);
         Items.Clear();
         foreach (var t in tabs) Items.Add(t);
-        SelectedItem = tabs.FirstOrDefault(t => (t.Content as MapView)?.Map == selected) ?? tabs.FirstOrDefault();
+        SelectedItem = tabs.FirstOrDefault(t => ViewOf(t)?.Map == selected) ?? tabs.FirstOrDefault();
     }
 
     /// <summary>Removes every tab and stops tile preparation.</summary>
@@ -130,9 +153,18 @@ public sealed class MapTabs : TabControl
     /// <summary>True while the view's tile preparation may still run (false once cancelled, e.g. its tab was removed).</summary>
     internal bool IsPreparingTiles(MapView v) => _tiling.TryGetValue(v, out var t) && !t.Cts.IsCancellationRequested && !t.Task.IsCompleted;
 
+    /// <summary>Tab content: the toolbar on top, the map filling the rest.</summary>
+    static DockPanel Host(MapView v)
+    {
+        var bar = new MapToolbar(v);
+        DockPanel.SetDock(bar, Dock.Top);
+        return new DockPanel { Children = { bar, v } };
+    }
+
     MapView Create(ModuleSession s, MapDef map)
     {
-        var v = new MapView(s, map) { ShowGrid = _showGrid, Preparing = map.Boards.Count > 0 ? 0 : null };
+        var v = new MapView(s, map) { ShowGrid = _showGrid, Preparing = map.Boards.Count > 0 ? 0 : null, MenuServices = MenuServices };
+        v.StatusMessage += m => DropMessage?.Invoke(m);
         v.Guarded = a => Run(s, map, a);
         v.Actions = () => _actions?.Invoke();
         // As MapCanvas: pan, resize and tiles arriving update only the zoom; fit/centre/menu zoom clear the location; the pointer and the

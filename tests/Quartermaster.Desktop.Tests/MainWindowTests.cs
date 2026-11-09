@@ -35,8 +35,15 @@ sealed class FakeDialogs : IDialogs
         return Task.FromResult(OpenFiles.Count > 0 ? OpenFiles.Dequeue() : null);
     }
 
-    public Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension)
+    public readonly List<string?> SuggestedNames = new();
+    public readonly List<string> DefaultExtensions = new();
+    public TaskCompletionSource<string?>? SaveGate;   // when set, the next save picker waits for it (a slow dialog)
+
+    public Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null)
     {
+        SuggestedNames.Add(suggestedFileName);
+        DefaultExtensions.Add(defaultExtension);
+        if (SaveGate is { } g) { SaveGate = null; PickerTitles.Add(title); return g.Task; }
         PickerTitles.Add(title);
         return Task.FromResult(SaveFiles.Count > 0 ? SaveFiles.Dequeue() : null);
     }
@@ -45,6 +52,34 @@ sealed class FakeDialogs : IDialogs
     {
         Questions.Add((message, caption));
         return Task.FromResult(Answer);
+    }
+
+    public readonly Queue<bool?> YesNoCancel = new();
+    public readonly Queue<string?> Texts = new();
+    public readonly List<string> TextPrompts = new();
+
+    public Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption)
+    {
+        Questions.Add((message, caption));
+        return Task.FromResult(YesNoCancel.Count > 0 ? YesNoCancel.Dequeue() : null);
+    }
+
+    public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial)
+    {
+        TextPrompts.Add($"{title}|{prompt}|{initial}");
+        return Task.FromResult(Texts.Count > 0 ? Texts.Dequeue() : null);
+    }
+
+    /// <summary>Property sheets shown: title, rows, and each row's managed-by-ledger value.</summary>
+    public readonly List<(string Title, IReadOnlyList<(string Name, string Value)> Rows, IReadOnlyList<string?> Managed)> Sheets = new();
+    /// <summary>What the next property sheet answers (null = Cancel).</summary>
+    public IReadOnlyList<string>? SheetValues;
+
+    public Task<IReadOnlyList<string>?> EditPropertySheetAsync(Window owner, string title, IReadOnlyList<(string Name, string Value)> rows,
+        Func<string, string?>? managedValue)
+    {
+        Sheets.Add((title, rows, rows.Select(r => managedValue?.Invoke(r.Name)).ToList()));
+        return Task.FromResult(SheetValues);
     }
 
     public Task ShowWarningAsync(Window owner, string message, string caption)
@@ -58,6 +93,26 @@ sealed class FakeDialogs : IDialogs
         SetupChooserShown++;
         LastPreselectNew = preselectNew;
         return Task.FromResult(Setup);
+    }
+
+    /// <summary>Dice prompts shown ("title|multi") and what the next one answers (null = Cancel).</summary>
+    public readonly List<string> DicePrompts = new();
+    public DiceChoice? Dice;
+
+    public Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi)
+    {
+        DicePrompts.Add($"{title}|{multi}");
+        return Task.FromResult(Dice);
+    }
+
+    /// <summary>Set Turn dialogs shown (the turn they opened with) and what the next one answers (null = Cancel).</summary>
+    public readonly List<TurnState> TurnPrompts = new();
+    public TurnChoice? Turn;
+
+    public Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current)
+    {
+        TurnPrompts.Add(current);
+        return Task.FromResult(Turn);
     }
 }
 
@@ -128,10 +183,10 @@ public sealed class MainWindowTests : IDisposable
     {
         var w = NewWindow();
         var menus = w.MenuLabels();
-        Assert.Equal(new[] { "&File", "&Edit", "&View" }, menus.Keys);
-        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "E&xit" }, menus["&File"]);
+        Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools" }, menus.Keys);
+        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo" }, menus["&Edit"]);
-        Assert.Equal(new[] { "Show &Grid", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
+        Assert.Equal(new[] { "Show &Grid", "&Log", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
         Assert.Equal(new[] { "25%", "50%", "100%", "200%", "Fit" },
             w.FindMenuItem("Zoom")!.Items.OfType<MenuItem>().Select(i => MenuText.ToWinForms((string)i.Header!)));
 
