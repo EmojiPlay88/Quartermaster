@@ -291,6 +291,41 @@ public class Stage3aRulesTests : IDisposable
         Assert.StartsWith("The picture could not be saved: ", r2.Message);
     }
 
+    [Fact]
+    public async Task Export_out_of_memory_during_render_returns_oom_text()
+    {
+        using var fx = PhaseFixture.Module();
+        using var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "c7"));
+        s.LoadSetup(s.Model.Setups[0]);
+        var path = Path.Combine(_tmp, "oom.png");
+        var r = await MapExportFlow.RunWholeAsync(s, s.Model.Maps[0].Id, 0.5, path, new ThrowingProgress(() => throw new OutOfMemoryException()), CancellationToken.None);
+        Assert.False(r.Ok);
+        Assert.False(r.Cancelled);
+        Assert.Equal(MapExportFlow.OutOfMemoryText, r.Detail);
+        Assert.Equal(MapExportFlow.FailurePrefix + MapExportFlow.OutOfMemoryText, r.Message);
+        Assert.Empty(Directory.GetFiles(_tmp, "oom.png*"));
+    }
+
+    [Fact]
+    public async Task Export_cancel_mid_render_leaves_no_file()
+    {
+        using var fx = PhaseFixture.Module();
+        using var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "c8"));
+        s.LoadSetup(s.Model.Setups[0]);
+        var path = Path.Combine(_tmp, "mid.png");
+        using var cts = new CancellationTokenSource();
+        var r = await MapExportFlow.RunWholeAsync(s, s.Model.Maps[0].Id, 0.5, path, new ThrowingProgress(() => cts.Cancel()), cts.Token);
+        Assert.False(r.Ok);
+        Assert.True(r.Cancelled);
+        Assert.Equal(MapExportFlow.CancelledText, r.Message);
+        Assert.Empty(Directory.GetFiles(_tmp, "mid.png*"));
+    }
+
+    private sealed class ThrowingProgress(Action act) : IProgress<double>
+    {
+        public void Report(double value) => act();
+    }
+
     private sealed class SyncProgress(List<double> sink) : IProgress<double>
     {
         public void Report(double value) { lock (sink) sink.Add(value); }
