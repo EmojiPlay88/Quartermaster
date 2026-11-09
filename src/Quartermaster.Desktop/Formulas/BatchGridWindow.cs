@@ -426,6 +426,14 @@ public sealed class BatchGridWindow : Window
         _preview.Show(r.PictureBox, at, row.PieceId, row.Label);
     }
 
+    /// <summary>Stops the counter preview and thumbnail workers and waits briefly for renders in flight, so the session can be disposed.
+    /// Called on close, and again by <see cref="FormulaWindows.CloseAllFor"/> before the session goes away. Safe to call twice.</summary>
+    internal void StopRendering()
+    {
+        _preview.Dispose();
+        _thumbs.Dispose();
+    }
+
     // ---- actions ----
 
     void CalculateAll()
@@ -558,8 +566,7 @@ public sealed class BatchGridWindow : Window
         _game = null;
         _debounce.Stop();
         _tip.Hide();
-        _preview.Hide();
-        _thumbs.Dispose();
+        StopRendering();
         FormulaWindows.ClosedBatch(this);
         base.OnClosed(e);
     }

@@ -53,6 +53,9 @@ public sealed class CounterThumbnails : IDisposable
     /// <summary>The bitmaps on screen now; eviction never disposes these.</summary>
     public Func<IEnumerable<object?>>? Shown { get; set; }
 
+    /// <summary>True once disposed (tests).</summary>
+    internal bool IsDisposed => _disposed;
+
     /// <summary>Bitmaps cached (tests).</summary>
     internal int Count => _cache.Count;
 
@@ -154,7 +157,9 @@ public sealed class CounterThumbnails : IDisposable
             Dispatcher.UIThread.Post(() =>
             {
                 if (_disposed || gen != _generation) { bmp?.Dispose(); return; }
-                if (bmp == null) { _failed.Add(key); return; }   // cannot be drawn: not asked again until cleared
+                // A piece that cannot be drawn is not asked again until cleared (WinForms CounterCellImages). Keyed entries (the palette) and
+                // renders cut short by a closing session are tried again on the next request, as the old palette worker did on every Show.
+                if (bmp == null) { if (!key.StartsWith(KeyedPrefix, StringComparison.Ordinal) && !_s.Disposed) _failed.Add(key); return; }
                 Store(key, bmp);
                 foreach (var (id, ready) in p.Waiting)
                 {

@@ -181,4 +181,28 @@ public sealed class CounterThumbnailTests : IDisposable
         Assert.Equal(3000, thumbs.Cap);   // the palette keeps its own cap
         Assert.Equal(PaletteDock.ThumbSize, ((Bitmap)palette.ThumbImages[0].Source!).PixelSize);
     }
+
+    [AvaloniaFact]
+    public void Keyed_null_render_is_retried_on_next_request()
+    {
+        // The palette's old worker drew every missing thumbnail again on each Show: a null render (e.g. the session closing) is not final.
+        var s = Session();
+        var t = Thumbs(s);
+        var piece = s.View!.Pieces[PhaseFixture.RedOne];
+        var calls = 0;
+        Bitmap? Render() => Interlocked.Increment(ref calls) == 1 ? null
+            : CounterThumbnails.ToBitmap(s.Counters.Render(piece, new SkiaSharp.SKSizeI(64, 48)));
+        var ready = new List<string>();
+        Assert.Null(t.GetKeyed("slot", Render, ready.Add));
+        PumpUntil(() => Volatile.Read(ref calls) == 1 && t.PendingCount == 0);
+        for (var i = 0; i < 10; i++) { Pump(); Thread.Sleep(5); }
+        Assert.Empty(ready);
+        Assert.Null(t.Peek("slot"));
+
+        Assert.Null(t.GetKeyed("slot", Render, ready.Add));   // the next Show asks again
+        PumpUntil(() => ready.Count == 1);
+        Assert.Equal("slot", ready[0]);
+        Assert.NotNull(t.Peek("slot"));
+        Assert.Equal(2, calls);
+    }
 }

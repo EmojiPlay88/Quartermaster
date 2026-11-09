@@ -19,7 +19,7 @@ namespace Quartermaster.Desktop.Shell;
 /// pointer. Only pieces in <see cref="ModuleSession.View"/> are shown. <see cref="Show"/> on hover, <see cref="Hide"/> on leave, scroll or
 /// click. UI thread only; never throws.
 /// </summary>
-public sealed class CounterPreview
+public sealed class CounterPreview : IDisposable
 {
     const double Pad = 6;
     static readonly IBrush Info = new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xE1));   // SystemColors.Info
@@ -36,7 +36,10 @@ public sealed class CounterPreview
     readonly Border _box;
     Bitmap? _bmp;
     string? _key;     // what is shown or being rendered; null when hidden
-    int _generation;
+    int _generation;  // written on the UI thread, read by the render task
+    volatile bool _stopped;
+    Task? _render;    // the render in flight, waited for by Dispose so the module archive can be closed safely
+    int _renders;
 
     public CounterPreview(ModuleSession s)
     {
@@ -65,6 +68,12 @@ public sealed class CounterPreview
     public PixelSize PictureSize => _bmp?.PixelSize ?? default;
     /// <summary>Where the preview's top-left was put, in screen pixels (tests).</summary>
     public PixelPoint ScreenPosition { get; private set; }
+    /// <summary>Tests: when set, a render task waits for it before it starts drawing.</summary>
+    internal ManualResetEventSlim? RenderGate { get; set; }
+    /// <summary>True once <see cref="Dispose"/> ran (tests).</summary>
+    internal bool Stopped => _stopped;
+    /// <summary>Renders actually started (tests).</summary>
+    internal int Renders => Volatile.Read(ref _renders);
 
     /// <summary>Shows the piece's preview near <paramref name="pointer"/> (coordinates of <paramref name="anchor"/>). The same piece, state and
     /// name as already shown: nothing happens (it does not follow the cursor, as WinForms).</summary>
@@ -72,13 +81,14 @@ public sealed class CounterPreview
     {
         try
         {
+            if (_stopped || _s.Disposed) return;
             if (_s.View?.Pieces.TryGetValue(pieceId, out var piece) != true || piece == null) { Hide(); return; }   // hidden or gone
             var key = CounterImages.Key(piece, default) + "\u001f" + label;
             if (key == _key) return;
             Hide();
             if (TopLevel.GetTopLevel(anchor) is not { } top) return;
             _key = key;
-            var gen = ++_generation;
+            var gen = Interlocked.Increment(ref _generation);
             var copy = new PieceInstance { Id = piece.Id, TypeString = piece.TypeString, TraitStates = new List<string>(piece.TraitStates), Moved = piece.Moved };
             var cursor = anchor.PointToScreen(pointer);
             var screen = top.Screens?.ScreenFromPoint(cursor) ?? top.Screens?.ScreenFromVisual(anchor) ?? top.Screens?.Primary;
@@ -87,15 +97,24 @@ public sealed class CounterPreview
             var counters = _s.Counters;
             var size = CounterImages.PreviewSize(counters.NativeBounds(copy), new SKSizeI(area.Width, area.Height));
             if (counters.TryGetCached(copy, size) is { } hit) { Place(CounterThumbnails.ToBitmap(hit), anchor, cursor, area, scaling, pieceId, label); return; }
-            Task.Run(() =>
+            var gate = RenderGate;
+            _render = Task.Run(() =>
             {
-                var bmp = CounterThumbnails.ToBitmap(counters.Render(copy, size));   // the SKImage is the shared cache's: never disposed here
-                if (bmp == null) return;
-                Dispatcher.UIThread.Post(() =>
+                try
                 {
-                    if (gen == _generation && _key == key) Place(bmp, anchor, cursor, area, scaling, pieceId, label);
-                    else bmp.Dispose();
-                });
+                    gate?.Wait(10000);
+                    // Hidden, superseded or closed meanwhile: never touch a disposed session's archive.
+                    if (_stopped || gen != Volatile.Read(ref _generation) || _s.Disposed) return;
+                    Interlocked.Increment(ref _renders);
+                    var bmp = CounterThumbnails.ToBitmap(counters.Render(copy, size));   // the SKImage is the shared cache's: never disposed here
+                    if (bmp == null) return;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (!_stopped && gen == _generation && _key == key) Place(bmp, anchor, cursor, area, scaling, pieceId, label);
+                        else bmp.Dispose();
+                    });
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("counter preview: " + ex); }
             });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Hide(); }
@@ -134,7 +153,7 @@ public sealed class CounterPreview
     public void Hide()
     {
         _key = null;
-        _generation++;
+        Interlocked.Increment(ref _generation);
         Label = null;
         PieceId = null;
         try
@@ -145,5 +164,17 @@ public sealed class CounterPreview
             _bmp = null;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { }
+    }
+
+    /// <summary>Hides the preview for good and waits briefly for a render in flight (as <see cref="CounterThumbnails.StopWorker"/>), so the
+    /// session can be disposed afterwards. Later <see cref="Show"/> calls do nothing. Safe to call twice.</summary>
+    public void Dispose()
+    {
+        _stopped = true;
+        Hide();
+        var r = _render;
+        _render = null;
+        try { r?.Wait(2000); }
+        catch (Exception ex) when (ex is AggregateException or OperationCanceledException) { }
     }
 }

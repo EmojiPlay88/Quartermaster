@@ -495,4 +495,34 @@ public sealed class BatchGridTests : IDisposable
         Assert.Null(win.PictureOf(0));
         Assert.Equal(0, win.Thumbnails.PendingCount);
     }
+
+    [AvaloniaFact]
+    public void Batch_preview_render_held_then_closed_never_renders()
+    {
+        var (w, run) = Make(Difficulty.Hardcore);
+        var s = w.Session!;
+        var win = Batch(w, run);
+        PumpUntil(() => PicturesReady(win));
+        using var gate = new ManualResetEventSlim(false);
+        win.Preview.RenderGate = gate;   // the preview's render task waits here
+        win.MouseMove(win.PictureBounds(0).Center);
+        Pump();
+        Assert.False(win.Preview.IsOpen);
+        Assert.Equal(0, win.Preview.Renders);
+
+        // Closing the module: the batch grid closes synchronously and its workers stop before the session is disposed.
+        _windows.Remove(w);
+        w.ForceClose();
+        Assert.True(s.Disposed);
+        Assert.Empty(FormulaWindows.OpenBatchFor(s));
+        Assert.True(win.Preview.Stopped);
+        Assert.True(win.Thumbnails.IsDisposed);
+
+        gate.Set();   // the held render wakes up after the session is gone
+        for (var i = 0; i < 20; i++) { Pump(); Thread.Sleep(10); }
+        Assert.Equal(0, win.Preview.Renders);
+        Assert.False(win.Preview.IsOpen);
+        win.Preview.Show(win, default, PhaseFixture.RedOne, "Red 1");   // after dispose: nothing, no throw
+        Assert.False(win.Preview.IsOpen);
+    }
 }
