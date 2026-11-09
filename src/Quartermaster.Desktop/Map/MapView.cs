@@ -76,6 +76,9 @@ public sealed partial class MapView : Control
 
     SKSize ClientSize => new((float)Math.Max(Bounds.Width, 1), (float)Math.Max(Bounds.Height, 1));
 
+    /// <summary>The board tiles this view draws, under <see cref="BoardTiler.TileKey"/> (map export and the overview reuse them).</summary>
+    public IReadOnlyDictionary<string, TileSet> Tiles => _tiles;
+
     /// <summary>Stores tiles under <see cref="BoardTiler.TileKey"/>.</summary>
     public void SetTiles(string tileKey, TileSet ts)
     {
@@ -143,9 +146,15 @@ public sealed partial class MapView : Control
 
     public override void Render(DrawingContext context)
     {
-        var size = new SKSize((float)Bounds.Width, (float)Bounds.Height);
-        if (size.Width <= 0 || size.Height <= 0) return;
         // Recorded here on the UI thread (the game state is only touched here), replayed on Avalonia's render thread.
+        if (Record() is { } picture) context.Custom(new SkiaDrawOperation(picture, new Rect(Bounds.Size), PlaybackFailed));
+    }
+
+    /// <summary>The scene as on screen, recorded in DIPs; null when the view has no size. UI thread only.</summary>
+    SKPicture? Record()
+    {
+        var size = new SKSize((float)Bounds.Width, (float)Bounds.Height);
+        if (size.Width <= 0 || size.Height <= 0) return null;
         using var recorder = new SKPictureRecorder();
         var c = recorder.BeginRecording(new SKRect(0, 0, size.Width, size.Height));
         try
@@ -156,7 +165,37 @@ public sealed partial class MapView : Control
         {
             Session.Log.AddOnce("paint:" + ex.GetType().Name, DiagnosticSeverity.Error, "render", "Map drawing failed: " + ex.Message, Map.Name);
         }
-        context.Custom(new SkiaDrawOperation(recorder.EndRecording(), new Rect(Bounds.Size), PlaybackFailed));
+        return recorder.EndRecording();
+    }
+
+    /// <summary>The current view as a bitmap with the same pixels as on screen (device resolution, the platform's 8888 colour type, as
+    /// Avalonia's Skia surface); null when the view has no size. UI thread only. The caller owns the bitmap.</summary>
+    public SKBitmap? Snapshot()
+    {
+        using var picture = Record();
+        return picture == null ? null : Rasterise(picture, Bounds.Size, DeviceScale);
+    }
+
+    /// <summary>As <see cref="Snapshot"/>, but only the recording happens now on the UI thread; the pixels are drawn on a worker.</summary>
+    public Task<SKBitmap?> SnapshotAsync()
+    {
+        var picture = Record();
+        if (picture == null) return Task.FromResult<SKBitmap?>(null);
+        var size = Bounds.Size;
+        var k = DeviceScale;
+        return Task.Run(() => { using (picture) return Rasterise(picture, size, k); });
+    }
+
+    static SKBitmap? Rasterise(SKPicture picture, Size size, float k)
+    {
+        var bmp = new SKBitmap(new SKImageInfo(Math.Max(1, (int)Math.Ceiling(size.Width * k)), Math.Max(1, (int)Math.Ceiling(size.Height * k)),
+            SKImageInfo.PlatformColorType, SKAlphaType.Premul));
+        using var c = new SKCanvas(bmp);
+        c.Clear(SKColors.Transparent);
+        c.Scale(k);
+        c.ClipRect(new SKRect(0, 0, (float)size.Width, (float)size.Height));
+        c.DrawPicture(picture);
+        return bmp;
     }
 
     /// <summary>Called on the render thread when replaying the picture fails: logged once, on the UI thread.</summary>
