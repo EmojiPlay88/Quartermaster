@@ -33,7 +33,6 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 - The hover delay is fixed at 600 ms until Settings (stage 4).
 - The log export picker has a single filter, "Log files (*.txt;*.html)" (default .txt); the format follows the extension. WinForms has two filters.
 - There is no chat line offline (WinForms shows it only online); the box comes with multiplayer (stage 5).
-- The log is docked at the bottom only; popping it out is stage 2b.
 - Ctrl+Right (Next turn) steps the plain turn counter. With a phased rules pack WinForms runs Next Phase there; that comes with the phase panel (stage 2b), so the key does nothing then.
 - The main toolbar shows only the buttons whose features exist in Desktop (no Diagnostics, Notes, Overview, Inventory, Palette, Step Back yet). Hiding buttons via Settings is stage 4.
 - The map toolbar sits inside each map tab (WinForms: one per map window); "Save map as picture" waits for stage 3.
@@ -82,9 +81,9 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Edit > Step Back to Start of Phase / Step Back To... | 2b |  |  |  |  |
 | View > Show Grid | 1 | ✔ | ✔ | ✔ |  |
 | View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
-| View > Module Tree | 2b |  |  |  |  |
+| View > Module Tree | 2b | ✔ |  |  | checked by default; hides the left column (tree over tables tree) |
 | View > Diagnostics | 3 |  |  |  |  |
-| View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable); floating is 2b |
+| View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
 | View > Phase panel | 2b |  |  |  |  |
 | View > Outliner | 3 |  |  |  |  |
 | View > Ledger | 3 |  |  |  |  |
@@ -111,8 +110,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MainForm: error guard (warning box on a bad file) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: command line <vmod> --setup N / --new | 1 | ✔ | ✔ | ✔ | --rules and --new-rules too (stage 2a); the other options come later |
 | MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | user-editable keys come with Settings |
-| ModuleTreePanel | 2b |  |  |  |  |
-| TablesTreePanel | 2b |  |  |  |  |
+| ModuleTreePanel | 2b | ✔ |  |  | map nodes activate the tab; setup nodes open the setup chooser (no preselect yet); chart and PDF nodes say "Opens in a later version" (stage 3); rebuilds when the viewer changes |
+| TablesTreePanel | 2b | ✔ |  |  | Tables and Formulas folders, refreshed 200 ms after rules changes; activation ignored until stage 4; split with the module tree remembered (ui.json) |
 | DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b |  |  |  |  |
@@ -168,7 +167,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 |---|---|---|---|---|---|
 | FormulaDialog, FormulaFormView, CheatSheetWindow, BatchGridWindow, MissingInputDialog | 2b |  |  |  |  |
 | DiceTools, DiceDialog, TurnDialog | 2a | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
-| LogPanel, LogDock, LogFloatForm, ChatBox | 2a | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / LogFloatForm wait for 2b; the chat line shows only online (stage 5) |
+| LogPanel, LogDock, LogFloatForm, ChatBox | 2a | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / Dock moves it to a floating window (bounds remembered per module); the chat line shows only online (stage 5) |
 | OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 |  |  |  |  |
 | PhaseWatcher | 2b |  |  |  |  |
 
