@@ -98,6 +98,9 @@ public sealed class PhasePanel : UserControl
     /// <summary>Raised by the Pop out / Dock button; the host moves the panel.</summary>
     public event Action? PopToggleRequested;
 
+    /// <summary>The Pop out / Dock button.</summary>
+    public Button PopButton => _pop;
+
     public void SetFloating(bool floating) => _pop.Content = floating ? "Dock" : "Pop out";
 
     /// <summary>Refreshes at once and cancels the pending debounced refresh.</summary>

@@ -127,14 +127,23 @@ public sealed class PanelFloat
         else { _state.Reveal(); _state.PopOut(); }
     }
 
-    /// <summary>Screens now: working area and DPI (scaling x 96) in pixels; one 1920x1080 stand-in when the platform reports none.</summary>
+    /// <summary>Screens now: working area and DPI (scaling x 96) in pixels, the primary screen first (<see cref="Placement"/> falls back to it;
+    /// Screens.All is not ordered); one 1920x1080 stand-in when the platform reports none.</summary>
     public static IReadOnlyList<ScreenInfo> ScreensOf(Window? w)
     {
         var all = w?.Screens?.All;
         if (all == null || all.Count == 0) return [new ScreenInfo(new Rectangle(0, 0, 1920, 1080), 96)];
-        return all.Select(s => new ScreenInfo(new Rectangle(s.WorkingArea.X, s.WorkingArea.Y, s.WorkingArea.Width, s.WorkingArea.Height),
+        var primary = w!.Screens.Primary;
+        var list = all.Select(s => new ScreenInfo(new Rectangle(s.WorkingArea.X, s.WorkingArea.Y, s.WorkingArea.Width, s.WorkingArea.Height),
             (int)Math.Round(s.Scaling * 96))).ToList();
+        var index = -1;
+        for (var i = 0; i < all.Count; i++) if (ReferenceEquals(all[i], primary) || all[i].IsPrimary) { index = i; break; }
+        return PrimaryFirst(list, index);
     }
+
+    /// <summary>The screens with the primary one (index <paramref name="primary"/>; negative = none reported) first, the others in order.</summary>
+    internal static IReadOnlyList<ScreenInfo> PrimaryFirst(IReadOnlyList<ScreenInfo> all, int primary) =>
+        primary <= 0 || primary >= all.Count ? all : new[] { all[primary] }.Concat(all.Where((_, i) => i != primary)).ToList();
 
     /// <summary>The bounds to open the window at: the saved ones moved onto a screen that exists now.</summary>
     internal RectangleI Placement()
