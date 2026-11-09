@@ -7,6 +7,8 @@
   Stage 2b adds the Desktop shots artifacts/port/stage2b-desktop-<state>.png (phases, nextphase, stepback, formula, cheatsheet, batch, alerts, tree,
   floatlog, floatphases; dialogs and floating windows are drawn as their own picture, without a title bar) and the WinForms equivalents
   stage2b-winforms-<flag>.png (--screenshot-phases / nextphase / stepback / alerts).
+  Stage 3a adds stage3a-desktop-<state>.png (ledger, ledger-counters, edittabs, outliner, inventory, notes, diagnostics, overview, export-choice) and
+  stage3a-winforms-ledger.png.
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -72,6 +74,13 @@ foreach ($state in 'phases', 'nextphase', 'stepback', 'formula', 'cheatsheet', '
     Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png "desktop-$state"
 }
 
+# Stage 3a states, Desktop, headless: the Ledger (plain and with counter pictures), the tab editor, the docked outliner (main window picture),
+# Inventory, Notes, Diagnostics, Overview and the "Save map as picture" choice. Each window is captured as its own picture.
+foreach ($state in 'ledger', 'ledger-counters', 'edittabs', 'outliner', 'inventory', 'notes', 'diagnostics', 'overview', 'export-choice') {
+    $png = Join-Path $out "stage3a-desktop-$state.png"
+    Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png "desktop-$state"
+}
+
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'
 $marker = Join-Path $demoRoot '.quartermaster-demo-root'
@@ -108,5 +117,10 @@ try {
         try { Invoke-Shot $appExe (@($vmod, '--rules', $rules, "--screenshot-$flag", $png, '--smoke', '8', '--no-smoke-documents')) $env2 $png "winforms-$flag" }
         catch { Write-Warning "winforms-${flag}: $($_.Exception.Message)" }
     }
+    # Stage 3a equivalent: the Ledger (--screenshot-ledger). --screenshot-outliner is NOT run: it exits 1 on Riverland (the baseline needs phases),
+    # and WinForms has no flag for the tab editor, Inventory, Notes, Diagnostics, Overview or the export choice.
+    $ledPng = Join-Path $out 'stage3a-winforms-ledger.png'
+    try { Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot-ledger', $ledPng, '--smoke', '8', '--no-smoke-documents') $env2 $ledPng 'winforms-ledger' }
+    catch { Write-Warning "winforms-ledger: $($_.Exception.Message)" }
 }
 finally { Reset-DemoRoot }
