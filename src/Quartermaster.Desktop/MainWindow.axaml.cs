@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Quartermaster.Core;
+using Quartermaster.Desktop.Formulas;
 using Quartermaster.Desktop.Input;
 using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Shell;
@@ -85,7 +86,11 @@ public partial class MainWindow : Window
         };
         Maps.DropMessage += SetStatus;
         // No settings or game master mode in the Avalonia app yet: no "Delete counter", and deletions are always asked (the WinForms default).
-        Maps.MenuServices = new MapMenuServices { Dialogs = _dialogs, Gesture = _router.Gesture };
+        Maps.MenuServices = new MapMenuServices
+        {
+            Dialogs = _dialogs, Gesture = _router.Gesture,
+            ShowFormula = (formulaId, pieceId) => { if (_session is { } s) FormulaWindows.Show(this, s, formulaId, pieceId, null); },
+        };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
         Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
         UpdateUi();
@@ -102,6 +107,9 @@ public partial class MainWindow : Window
 
     /// <summary>Undo / redo history of the open module's game.</summary>
     public HistoryController? History => _history;
+
+    /// <summary>The phase controller of the open module (WinForms MainForm.Phases); null without one.</summary>
+    public PhaseController? Phases => _phases;
 
     /// <summary>Command ids (CommandDefaults) with their shortcuts and handlers; the window's KeyDown goes through it.</summary>
     public CommandRouter Commands => _router;
@@ -715,6 +723,7 @@ public partial class MainWindow : Window
         _phases = null;
         _actions = null;
         if (_session == null) return;
+        FormulaWindows.CloseAllFor(_session);
         _session.GameReplaced -= OnGameReplacedAnyThread;
         _session.ViewChanged -= OnViewChangedAnyThread;
         _session.RulesChanged -= OnRulesChangedAnyThread;
