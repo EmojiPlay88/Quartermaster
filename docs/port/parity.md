@@ -104,7 +104,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Diagnostics | 3 | ✔ |  |  | Ctrl/Cmd+D; needs a module; opens the one Diagnostics window (also from the toolbar button and the status-bar link) |
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
 | View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown or floating; while floating it docks the panel back |
-| View > Outliner | 3 |  |  |  |  |
+| View > Outliner | 3 | ✔ |  |  | hidden by default (WinForms OutlinerVisible); docked at the right of the maps after the phase panel (440 wide, resizable) or floating; checked while shown or floating; while floating it docks back |
 | View > Ledger | 3 |  |  |  |  |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3 |  |  |  |  | comes with the Desktop Ledger; decision logic already shared (`LedgerJump` in Quartermaster.Render) |
 | View > Overview | 3 |  |  |  |  |
@@ -189,7 +189,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | CounterPreviewTip, CounterCellImages (counter preview and list thumbnails) | 3a | ✔ |  |  | shared `CounterThumbnails` cache (worker-drawn, visible rows first, 600 cap, shown bitmaps never disposed; the palette uses it with its own 3000 cap) and `CounterPreview` popup (no activation; size from `CounterImages.PreviewSize`, placed by the shared `PreviewPlacement`: cursor + 16, flipped at the screen edges); only pieces in the viewed state; MapView exposes `Tiles` and `Snapshot()` (same pixels as on screen) for map export |
 | DiceTools, DiceDialog, TurnDialog | 2a | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
 | LogPanel, LogDock, LogFloatForm, ChatBox | 2a | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / Dock moves it to a floating window (bounds remembered per module); the chat line shows only online (stage 5) |
-| OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 |  |  |  |  |
+| OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 | ✔ |  |  | Now list (double-click jumps to the decision), Group: By map / org display or By side, folders / groups / pieces with 24x18 counter pictures (visible pieces only), units and aggregated property columns with breakdown tips and header notes, alert dots from the shared alert hub, column widths kept per column, expanded state kept across reloads, refresh put off while hidden. Pop out / Dock moves it to a floating "Outliner" window (bounds remembered per module under "outliner"). Grouping and visibility are not kept between runs until the Settings dialog (stage 4) |
 | PhaseWatcher | 2b | ✔ |  |  | `PhaseWatch` + `Debouncer` (DispatcherTimer, 150 ms) |
 
 ## Ledger, notes, inventory, documents, search
