@@ -12,6 +12,7 @@ sealed class MissingInputDialog : Form
     readonly ModuleSession _s;
     readonly IActionPort _actions;
     readonly PendingRun _run;
+    readonly IReadOnlyList<MissingInput> _missing;
     readonly Dictionary<string, Control> _inputs = new(StringComparer.Ordinal);
     readonly Button _ok = new() { Text = "OK", Width = 75, Height = 25, Enabled = false };
     readonly Button _perUnit = new() { Text = "Per unit…", Width = 85, Height = 25, DialogResult = DialogResult.Retry };
@@ -35,13 +36,12 @@ sealed class MissingInputDialog : Form
 
         var open = run.Units.Count(u => !u.Applied);
         var missing = MissingInputs.For(s, run);
+        _missing = missing;
         var root = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, Padding = new Padding(10) };
         root.Controls.Add(new Label
         {
             AutoSize = true, MaximumSize = new Size(380, 0), Margin = new Padding(0, 0, 0, 8),
-            Text = missing.Count == 0
-                ? $"{run.FormulaName} could not be calculated automatically. Use Per unit… to work through the {open} unit(s)."
-                : $"{run.FormulaName} needs {(missing.Count == 1 ? "a value" : "values")} for {open} unit(s). The answer is used for every unit of this run.",
+            Text = FormulaWindowRules.MissingHead(run.FormulaName, open, missing.Count),
         });
         var grid = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2 };
         foreach (var m in missing)
@@ -76,14 +76,15 @@ sealed class MissingInputDialog : Form
         Sync();
     }
 
-    void Sync() => _ok.Enabled = _inputs.Count > 0 && _inputs.Values.All(c => c.Text.Trim().Length > 0);
+    // WinForms has always enabled OK on non-blank answers only; the engine reports out-of-range values when applying.
+    void Sync() => _ok.Enabled = FormulaWindowRules.MissingOkEnabled(_inputs.ToDictionary(kv => kv.Key, kv => (string?)kv.Value.Text, StringComparer.Ordinal), _missing, checkRange: false);
 
     void Accept()
     {
         var values = _inputs.ToDictionary(kv => kv.Key, kv => kv.Value.Text.Trim(), StringComparer.Ordinal);
         var (applied, failed) = _actions.ApplyMissingInputs(_run, values);
         if (failed.Count == 0) { DialogResult = DialogResult.OK; return; }
-        _message.Text = $"{applied} applied; {failed.Count} failed. " + string.Join("; ", failed.Take(3)) + (failed.Count > 3 ? "…" : "");
+        _message.Text = FormulaWindowRules.MissingFailureLine(applied, failed);
     }
 
     void Guarded(Action a)

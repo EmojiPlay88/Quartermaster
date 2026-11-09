@@ -81,14 +81,13 @@ sealed class AlertBar : Panel
         Invalidate();
     }
 
-    static Color Accent(AlertSeverity s) => s switch
+    static Color Accent(AlertSeverity s)
     {
-        AlertSeverity.Critical => Color.FromArgb(200, 40, 40),
-        AlertSeverity.Warning => Color.FromArgb(214, 140, 0),
-        _ => Color.FromArgb(40, 100, 200),
-    };
+        var (r, g, b) = AlertBarModel.Accent(s);
+        return Color.FromArgb(r, g, b);
+    }
 
-    static string Label(AlertHit h) => h.Matches.Count > 1 ? $"{h.Name} ({h.Matches.Count})" : h.Name;
+    static string Label(AlertHit h) => AlertBarModel.Label(h);
 
     int Measure(string text) => TextRenderer.MeasureText(text, _bold, new Size(int.MaxValue, Height), TextFormatFlags.NoPadding).Width + PadX * 2 + 6;
 
@@ -107,7 +106,7 @@ sealed class AlertBar : Panel
         var placed = new List<Chip>();
         for (var i = 0; i < r.Xs.Count; i++) placed.Add(new Chip(_hits[i], Label(_hits[i]), new Rectangle(r.Xs[i], 3, widths[i], h)));
         _overflow = r.Overflow;
-        if (r.Overflow > 0) placed.Add(new Chip(null, "+" + r.Overflow.ToString(CultureInfo.InvariantCulture), new Rectangle(r.OverflowX, 3, wMore, h)));
+        if (r.Overflow > 0) placed.Add(new Chip(null, AlertBarModel.OverflowText(r.Overflow), new Rectangle(r.OverflowX, 3, wMore, h)));
         _chips = placed;
         _bannerRect = new Rectangle(left, 0, Math.Max(0, r.BannerRight - left), Height);
     }
@@ -161,11 +160,10 @@ sealed class AlertBar : Panel
 
     string? TipFor(object? o) => o switch
     {
-        Chip { Hit: { } h } => AlertEngine.Tooltip(h) + (VisibleOnly ? "\n(" + ModuleSession.VisibleOnlyText + ")" : "")
-            + (string.IsNullOrWhiteSpace(h.Notes) ? "" : "\n\n" + h.Notes),
+        Chip { Hit: { } h } => AlertBarModel.Tooltip(h, VisibleOnly),
         Chip => string.Join(", ", _hits.Skip(_hits.Count - _overflow).Select(Label)),
         AlertBar => _bannerTip,
-        _ when ReferenceEquals(o, NoticeKey) => "Click to open the turn and replay it.",
+        _ when ReferenceEquals(o, NoticeKey) => AlertBarModel.NoticeTip,
         _ => null,
     };
 

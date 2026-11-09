@@ -42,14 +42,14 @@ sealed class FormulaDialog : Form
     public static FormulaDialog? Show(ModuleSession s, string formulaId, string? pieceId, Form owner, MainForm? host, RunLink? link = null)
     {
         Open.RemoveAll(d => d.IsDisposed);
-        if (!s.CanAct(pieceId))
+        if (FormulaWindowRules.Refusal(s, pieceId) is { } msg)
         {
-            var msg = "That unit " + ModuleSession.OtherSideText + ".";
             if (host != null) host.SetStatus(msg);
             else Program.AppLog("formula dialog refused: " + msg);
             return null;
         }
-        var existing = Open.FirstOrDefault(d => d._s == s && d._formulaId == formulaId && d._pieceId == pieceId && d._link?.RunId == link?.RunId);
+        var key = FormulaWindowRules.Key(formulaId, pieceId, link?.RunId);
+        var existing = Open.FirstOrDefault(d => d._s == s && FormulaWindowRules.Key(d._formulaId, d._pieceId, d._link?.RunId) == key);
         if (existing != null)
         {
             if (existing.WindowState == FormWindowState.Minimized) existing.WindowState = FormWindowState.Normal;
@@ -88,13 +88,16 @@ sealed class FormulaDialog : Form
         var formula = rules.ById<FormulaDef>(formulaId) ?? new FormulaDef { Id = formulaId, Name = "(missing formula)" };
         _model = new FormulaDialogModel(runner, formula, pieceId) { Moved = link?.Moved };
         // Hardcore and semi-automatic: the user types the values and the dialog only checks them. Fully automatic keeps the prefilled dialog.
-        var mode = s.Game?.State.Difficulty;
-        if (!previewOnly && mode is Difficulty.Hardcore or Difficulty.SemiAuto) _model.Checked = true;
-        if (!previewOnly && mode == Difficulty.SemiAuto) _cheat = new CheatSheetWindow();
+        if (!previewOnly && s.Game?.State.Difficulty is { } mode)
+        {
+            var m = FormulaWindowRules.Mode(mode);
+            if (m.Checked) _model.Checked = true;
+            if (m.ShowCheatSheet) _cheat = new CheatSheetWindow();
+        }
 
         string? piece = null;
         if (pieceId != null && s.Game?.State.Pieces.TryGetValue(pieceId, out var pi) == true) piece = PieceInfo.Name(pi);
-        Text = piece == null ? formula.Name : $"{formula.Name}: {piece}";
+        Text = FormulaWindowRules.Title(formula, piece);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
         ShowInTaskbar = false;
@@ -176,15 +179,11 @@ sealed class FormulaDialog : Form
 
     void CheckPieceThenRefresh()
     {
-        if (_link != null && HostForm?.Phases is { } ph && !ph.IsPending(_link.RunId, _pieceId))
+        if (FormulaWindowRules.ShouldClose(_s, HostForm?.Phases, _pieceId, _link?.RunId))
         {
-            Close();   // its run was cleared (phase change) or the game was replaced: applying now would write into the wrong place
-            return;
-        }
-        if (_pieceId != null && _s.Game?.State.Pieces.ContainsKey(_pieceId) != true)
-        {
-            if (_embedded) { SetPiece(null); return; }
-            Close();
+            // A cleared run (phase change) or a replaced game closes the window: applying now would write into the wrong place.
+            if (_embedded && !FormulaWindowRules.RunGone(HostForm?.Phases, _pieceId, _link?.RunId)) SetPiece(null);
+            else Close();
             return;
         }
         _debounce.Stop();
@@ -388,9 +387,9 @@ sealed class FormulaDialog : Form
     void SyncMode()
     {
         if (_previewOnly || _s.Game is not { } g) return;
-        var manual = g.State.Difficulty != Difficulty.FullyAuto;
-        _model.Checked = manual;
-        _calc.Visible = manual;
+        var m = FormulaWindowRules.Mode(g.State.Difficulty);
+        _model.Checked = m.Checked;
+        _calc.Visible = m.ShowCalculate;
     }
 
     void RebuildInline(DialogView v)
