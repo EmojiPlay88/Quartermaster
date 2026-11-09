@@ -9,6 +9,7 @@ using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
+using Quartermaster.TestFixtures;
 using SkiaSharp;
 
 namespace Quartermaster.Desktop.Tests;
@@ -83,14 +84,6 @@ public sealed class OverviewAndExportTests : IDisposable
         w.ClickMenu("&Overview");
         Assert.Same(ov, w.OverviewTool);
 
-        var other = w.MapTabs.Views.FirstOrDefault(v => !ReferenceEquals(v, active));
-        if (other != null)
-        {
-            w.MapTabs.Activate(other);
-            Assert.Same(other, ov.Target);
-            Assert.Equal("Overview - " + other.Map.Name, ov.Title);
-        }
-
         // Toolbar button sits between Notes and Inventory and opens it too.
         var ids = w.Toolbar.Buttons.Select(b => b.Id).ToList();
         Assert.True(ids.IndexOf("tool.overview") > ids.IndexOf("tool.notes"));
@@ -100,6 +93,31 @@ public sealed class OverviewAndExportTests : IDisposable
         Assert.Null(w.OverviewTool);
         w.Toolbar.Find("tool.overview")!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert.NotNull(w.OverviewTool);
+    }
+
+    [AvaloniaFact]
+    public void Overview_follows_second_map_tab()
+    {
+        var xml = FixtureModule.MinimalBuildFile().Replace("</VASSAL.build.GameModule>",
+            "<VASSAL.build.module.Map mapName=\"Second Map\"><VASSAL.build.module.map.BoardPicker>" +
+            "<VASSAL.build.module.map.boardPicker.Board image=\"board.png\" name=\"Board Two\" reversible=\"false\"/>" +
+            "</VASSAL.build.module.map.BoardPicker></VASSAL.build.module.Map></VASSAL.build.GameModule>");
+        using var fx = new FixtureModule().WithBuildFile(xml);
+        var w = NewWindow();
+        Assert.True(w.OpenModule(fx.Build()));
+        w.StartSetup(null);
+        Assert.True(WaitFor(() => w.MapTabs.WhenTiled().IsCompleted));
+        Assert.Equal(2, w.MapTabs.Views.Count);
+        w.ClickMenu("&Overview");
+        var ov = w.OverviewTool!;
+        var first = w.MapTabs.ActiveView!;
+        Assert.Same(first, ov.Target);
+        var other = w.MapTabs.Views.Single(v => !ReferenceEquals(v, first));
+        w.MapTabs.Activate(other);
+        Assert.Same(other, ov.Target);
+        Assert.Equal("Overview - " + other.Map.Name, ov.Title);
+        w.MapTabs.Activate(first);
+        Assert.Equal("Overview - " + first.Map.Name, ov.Title);
     }
 
     [AvaloniaFact]
@@ -279,6 +297,50 @@ public sealed class OverviewAndExportTests : IDisposable
         Assert.False(File.Exists(path));
         Assert.Empty(Directory.GetFiles(_tmp, "cancel.png*"));
         Assert.Empty(_dialogs.Warnings);
+        Assert.False(w.ExportRunning);
+    }
+
+    [AvaloniaFact]
+    public void Export_cancelled_when_main_window_closes()
+    {
+        var w = Game();
+        var view = w.MapTabs.ActiveView!;
+        var path = Path.Combine(_tmp, "closing.png");
+        _dialogs.ExportChoices.Enqueue(new ExportChoice(true, 1));
+        _dialogs.SaveFiles.Enqueue(path);
+        var release = new ManualResetEventSlim();
+        var inRender = new ManualResetEventSlim();
+        w.ExportProgressTap = _ => { inRender.Set(); release.Wait(10000); };   // holds the render on its worker
+        var t = w.SaveMapAsPictureAsync(view);
+        Assert.True(WaitFor(() => inRender.IsSet));
+        var dlg = w.LastExportDialog!;
+        Assert.True(dlg.IsVisible);
+
+        w.ForceClose();   // no unsaved-game question; OnClosed -> CloseSession -> DestroyExport
+        release.Set();
+        Assert.True(WaitFor(() => t.IsCompleted));
+        t.GetAwaiter().GetResult();
+        Assert.False(w.IsVisible);
+        Assert.False(dlg.IsVisible);
+        Assert.False(w.ExportRunning);
+        Assert.False(File.Exists(path));
+        Assert.Empty(Directory.GetFiles(_tmp, "closing.png*"));
+    }
+
+    [AvaloniaFact]
+    public void Export_current_view_out_of_memory_shows_warning()
+    {
+        var w = Game();
+        var view = w.MapTabs.ActiveView!;
+        var path = Path.Combine(_tmp, "oom.png");
+        _dialogs.ExportChoices.Enqueue(new ExportChoice(false, 0));
+        _dialogs.SaveFiles.Enqueue(path);
+        w.SnapshotSource = _ => throw new OutOfMemoryException();
+        var t = w.SaveMapAsPictureAsync(view);
+        Assert.True(WaitFor(() => t.IsCompleted));
+        t.GetAwaiter().GetResult();
+        Assert.Equal((MapExportFlow.FailurePrefix + MapExportFlow.OutOfMemoryText, "Save map as picture"), Assert.Single(_dialogs.Warnings));
+        Assert.False(File.Exists(path));
         Assert.False(w.ExportRunning);
     }
 

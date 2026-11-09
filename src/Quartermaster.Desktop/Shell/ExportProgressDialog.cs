@@ -27,7 +27,15 @@ sealed class ExportProgressDialog : Window
         panel.Children.Add(_bar);
         panel.Children.Add(_cancel);
         Content = panel;
-        Closing += (_, e) => { if (!_done) { e.Cancel = true; Cancel(); } };   // WinForms has no control box: the title bar's close is a cancel
+        // WinForms has no control box: the title bar's close is a cancel. When the owner closes (or the export was cancelled) it just closes,
+        // and the owner's close cancels the export; a veto here would block the main window's own close.
+        Closing += (_, e) =>
+        {
+            if (_done || _cts.IsCancellationRequested) return;
+            if (e.CloseReason == WindowCloseReason.OwnerWindowClosing) { Cancel(); return; }
+            e.Cancel = true;
+            Cancel();
+        };
     }
 
     /// <summary>The progress shown, 0..100, and how many updates arrived (tests).</summary>

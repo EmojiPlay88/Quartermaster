@@ -5,6 +5,7 @@ using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
+using SkiaSharp;
 
 namespace Quartermaster.Desktop;
 
@@ -32,6 +33,11 @@ public partial class MainWindow
     internal Action<double>? ExportProgressTap { get; set; }
 
     internal bool ExportRunning => _exporting;
+
+    /// <summary>Takes the current view's picture (tests swap it to simulate running out of memory).</summary>
+    internal Func<MapView, SKBitmap?> SnapshotSource { get; set; } = v => v.Snapshot();
+
+    ExportProgressDialog? _exportDlg;
 
     // ---------- Overview ----------
 
@@ -100,11 +106,15 @@ public partial class MainWindow
         {
             try
             {
-                using var bmp = view.Snapshot() ?? throw new InvalidOperationException("The view has no size.");
+                using var bmp = SnapshotSource(view) ?? throw new InvalidOperationException("The view has no size.");
                 MapImageExporter.SavePng(bmp, path);
                 SetStatus(MapExportFlow.SavedText(path));
             }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
+            catch (OutOfMemoryException)
+            {
+                await _dialogs.ShowWarningAsync(this, MapExportFlow.FailurePrefix + MapExportFlow.OutOfMemoryText, ExportCaption);
+            }
+            catch (Exception ex)
             {
                 System.Diagnostics.Trace.WriteLine("map export failed: " + ex);
                 await _dialogs.ShowWarningAsync(this, MapExportFlow.FailurePrefix + ex.Message, ExportCaption);
@@ -118,6 +128,7 @@ public partial class MainWindow
         _exportCts = cts;
         var dlg = new ExportProgressDialog(cts);
         LastExportDialog = dlg;
+        _exportDlg = dlg;
         var progress = new TapProgress(p => ExportProgressTap?.Invoke(p), p => Dispatcher.UIThread.Post(() => dlg.SetProgress(p)));
         dlg.Show(this);
         ExportResult r;
@@ -126,7 +137,7 @@ public partial class MainWindow
             // The snapshot of what this player may see is taken inside, before the first await, on this (UI) thread.
             r = await MapExportFlow.RunWholeAsync(s, view.Map.Id, choice.Zoom, path, progress, cts.Token, tiles, m => System.Diagnostics.Trace.WriteLine(m));
         }
-        finally { dlg.Finish(); }
+        finally { _exportDlg = null; dlg.Finish(); }
         if (!ReferenceEquals(_session, s)) return;   // the window or the game went meanwhile
         if (r.Ok) SetStatus(r.Message);
         else if (r.Cancelled) SetStatus(MapExportFlow.CancelledText);
@@ -143,6 +154,8 @@ public partial class MainWindow
     void DestroyExport()
     {
         CancelExport();
+        try { _exportDlg?.Finish(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("closing the progress dialog: " + ex.Message); }
         var w = _overviewWin;
         _overviewWin = null;
         try { w?.Close(); }
