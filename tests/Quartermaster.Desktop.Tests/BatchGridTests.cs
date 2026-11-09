@@ -525,4 +525,37 @@ public sealed class BatchGridTests : IDisposable
         win.Preview.Show(win, default, PhaseFixture.RedOne, "Red 1");   // after dispose: nothing, no throw
         Assert.False(win.Preview.IsOpen);
     }
+    [AvaloniaFact]
+    public void Preview_dispose_waits_for_every_render_in_flight()
+    {
+        var (w, _) = Make(Difficulty.Hardcore);
+        var s = w.Session!;
+        var preview = new CounterPreview(s);
+        using var first = new ManualResetEventSlim(false);
+        using var second = new ManualResetEventSlim(false);
+        preview.RenderGate = first;
+        preview.Show(w, default, PhaseFixture.RedOne, "Red 1");    // held on its worker
+        preview.RenderGate = second;
+        preview.Show(w, default, PhaseFixture.RedTwo, "Red 2");    // supersedes the first; held too
+        preview.RenderGate = null;
+        Assert.Equal(2, preview.InFlight);
+
+        // The newer render is let go soon, the older one later: Dispose must wait for both (the older one may already be drawing).
+        var firstReleased = new ManualResetEventSlim(false);
+        var releaser = new Thread(() =>
+        {
+            Thread.Sleep(100);
+            second.Set();
+            Thread.Sleep(300);
+            firstReleased.Set();
+            first.Set();
+        }) { IsBackground = true };
+        releaser.Start();
+        preview.Dispose();
+        Assert.True(firstReleased.IsSet, "Dispose returned while the first render was still running");
+        Assert.Equal(0, preview.InFlight);
+        releaser.Join();
+        Assert.Equal(0, preview.Renders);   // both were superseded or stopped before drawing
+        Assert.False(preview.IsOpen);
+    }
 }

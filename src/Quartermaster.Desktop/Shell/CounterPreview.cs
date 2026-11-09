@@ -38,8 +38,8 @@ public sealed class CounterPreview : IDisposable
     string? _key;     // what is shown or being rendered; null when hidden
     int _generation;  // written on the UI thread, read by the render task
     volatile bool _stopped;
-    Task? _render;    // the render in flight, waited for by Dispose so the module archive can be closed safely
-    int _renders;
+    readonly HashSet<Task> _renders = new();   // every render not finished yet (a superseded one may still be drawing); waited for by Dispose
+    int _renderCount;
 
     public CounterPreview(ModuleSession s)
     {
@@ -72,8 +72,10 @@ public sealed class CounterPreview : IDisposable
     internal ManualResetEventSlim? RenderGate { get; set; }
     /// <summary>True once <see cref="Dispose"/> ran (tests).</summary>
     internal bool Stopped => _stopped;
+    /// <summary>Render tasks not finished yet (tests).</summary>
+    internal int InFlight { get { lock (_renders) return _renders.Count(t => !t.IsCompleted); } }
     /// <summary>Renders actually started (tests).</summary>
-    internal int Renders => Volatile.Read(ref _renders);
+    internal int Renders => Volatile.Read(ref _renderCount);
 
     /// <summary>Shows the piece's preview near <paramref name="pointer"/> (coordinates of <paramref name="anchor"/>). The same piece, state and
     /// name as already shown: nothing happens (it does not follow the cursor, as WinForms).</summary>
@@ -98,14 +100,14 @@ public sealed class CounterPreview : IDisposable
             var size = CounterImages.PreviewSize(counters.NativeBounds(copy), new SKSizeI(area.Width, area.Height));
             if (counters.TryGetCached(copy, size) is { } hit) { Place(CounterThumbnails.ToBitmap(hit), anchor, cursor, area, scaling, pieceId, label); return; }
             var gate = RenderGate;
-            _render = Task.Run(() =>
+            var render = Task.Run(() =>
             {
                 try
                 {
                     gate?.Wait(10000);
                     // Hidden, superseded or closed meanwhile: never touch a disposed session's archive.
                     if (_stopped || gen != Volatile.Read(ref _generation) || _s.Disposed) return;
-                    Interlocked.Increment(ref _renders);
+                    Interlocked.Increment(ref _renderCount);
                     var bmp = CounterThumbnails.ToBitmap(counters.Render(copy, size));   // the SKImage is the shared cache's: never disposed here
                     if (bmp == null) return;
                     Dispatcher.UIThread.Post(() =>
@@ -116,6 +118,11 @@ public sealed class CounterPreview : IDisposable
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("counter preview: " + ex); }
             });
+            lock (_renders)
+            {
+                _renders.RemoveWhere(t => t.IsCompleted);
+                _renders.Add(render);
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Hide(); }
     }
@@ -166,15 +173,20 @@ public sealed class CounterPreview : IDisposable
         catch (Exception ex) when (ex is not OutOfMemoryException) { }
     }
 
-    /// <summary>Hides the preview for good and waits briefly for a render in flight (as <see cref="CounterThumbnails.StopWorker"/>), so the
-    /// session can be disposed afterwards. Later <see cref="Show"/> calls do nothing. Safe to call twice.</summary>
+    /// <summary>Hides the preview for good and waits briefly (2 s in all) for every render in flight, superseded ones too (as
+    /// <see cref="CounterThumbnails.StopWorker"/>), so the session can be disposed afterwards. Later <see cref="Show"/> calls do nothing. Safe to
+    /// call twice.</summary>
     public void Dispose()
     {
         _stopped = true;
         Hide();
-        var r = _render;
-        _render = null;
-        try { r?.Wait(2000); }
+        Task[] all;
+        lock (_renders)
+        {
+            all = _renders.ToArray();
+            _renders.Clear();
+        }
+        try { Task.WaitAll(all, 2000); }
         catch (Exception ex) when (ex is AggregateException or OperationCanceledException) { }
     }
 }
