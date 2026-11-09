@@ -70,7 +70,7 @@ public partial class MainWindow : Window
         _cacheRoot = cacheRoot;
         _rulesRoot = rulesRoot;
         InitializeComponent();
-        InitPhaseUi();
+        InitPhaseUi(layoutRoot);
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         InitTrees(layoutRoot);
@@ -289,16 +289,13 @@ public partial class MainWindow : Window
         _router.SetHandler("turn.next", NextTurnCommand);
     }
 
-    /// <summary>
-    /// WinForms NextTurnCommand: Next Phase when the rules pack has phases, otherwise the plain turn counter. The phase flow (with its open
-    /// decisions dialog) comes with the phase panel in stage 2b; until then the key is let through when the pack has phases.
-    /// </summary>
+    /// <summary>WinForms NextTurnCommand (Ctrl+Right): Next Phase when the rules pack has phases, otherwise the plain turn counter.</summary>
     bool NextTurnCommand()
     {
-        if (_session?.Game == null) return false;
-        if (_session.Rules is { Phases.Count: > 0 }) return false;
-        _dice.Core.StepTurn(1);
-        return true;
+        if (_session?.Game == null || _dispatch == null) return false;
+        var t = _dispatch.NextTurnCommand(() => { _dice.Core.StepTurn(1); return true; });
+        RunAsync(() => t);
+        return !t.IsCompletedSuccessfully || t.Result;
     }
 
     /// <summary>Whether a gated command is available now (<see cref="CommandAvailability"/>, the WinForms rules).</summary>

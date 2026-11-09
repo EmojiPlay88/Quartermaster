@@ -1,8 +1,10 @@
 using Avalonia.Controls;
+using Avalonia.Threading;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Phases;
 using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Desktop;
 
@@ -13,6 +15,9 @@ public partial class MainWindow
     readonly PanelDockState _phaseDock = new("phases", () => PanelDockState.PhasesDefault(new RectangleI(0, 0, 1024, 768)));
     PhasePanel? _phasePanel;
     PhaseWatch? _stripWatch;
+    PhaseRunDispatch? _dispatch;
+    Autosaver? _autosaver;
+    string _dataRoot = "";   // app data root (layout memory, autosaves)
     double _phaseWidth = 320;   // WinForms default; follows the splitter
 
     // Looked up by the controls' columns, so other docks may add columns around these.
@@ -28,8 +33,9 @@ public partial class MainWindow
     /// <summary>True while the panel is docked and showing (View > Phase panel checked).</summary>
     public bool PhasePanelShown => PhaseHost.IsVisible;
 
-    void InitPhaseUi()
+    void InitPhaseUi(string? layoutRoot)
     {
+        _dataRoot = layoutRoot ?? AppDataRoot.Path;
         _viewPhases.Click += (_, _) => Guard(_phaseDock.Toggle);
         _phaseDock.Changed += UpdatePhaseUi;
         StripHost.StartRequested += () => Guard(NextPhaseFromUi);
@@ -38,14 +44,15 @@ public partial class MainWindow
     /// <summary>Builds the strip watcher and the phase panel for a freshly opened session.</summary>
     void CreatePhaseUi(ModuleSession s, PhaseController c)
     {
-        c.PhaseBoundary += RequestPhaseRefresh;
+        c.PhaseBoundary += OnPhaseBoundaryAnyThread;
         c.RunsQueued += OnPhaseRunsQueued;
-        c.DifficultyChanged += RequestPhaseRefresh;
+        c.DifficultyChanged += OnDifficultyChangedAnyThread;
+        CreateDispatch(s, c);
         _stripWatch = new PhaseWatch(s, RefreshStrip);
         StripHost.FlushHook = _stripWatch.Flush;
         _phasePanel = new PhasePanel(s, c, () => _actions!, CentreOnPiece);
         _phasePanel.NextRequested += () => Guard(NextPhaseFromUi);
-        _phasePanel.DecisionActivated += d => Guard(() => { if (d.PieceIds.FirstOrDefault() is { } id) CentreOnPiece(id); });
+        _phasePanel.DecisionActivated += d => Guard(() => _dispatch?.JumpToDecision(d));
         PhaseHost.Child = _phasePanel;
         UpdatePhaseUi();
     }
@@ -54,10 +61,12 @@ public partial class MainWindow
     {
         if (_phases is { } c)
         {
-            c.PhaseBoundary -= RequestPhaseRefresh;
+            c.PhaseBoundary -= OnPhaseBoundaryAnyThread;
             c.RunsQueued -= OnPhaseRunsQueued;
-            c.DifficultyChanged -= RequestPhaseRefresh;
+            c.DifficultyChanged -= OnDifficultyChangedAnyThread;
         }
+        _dispatch = null;
+        _autosaver = null;
         _stripWatch?.Dispose();
         _stripWatch = null;
         StripHost.FlushHook = null;
@@ -73,7 +82,82 @@ public partial class MainWindow
         _phasePanel?.RequestRefresh();
     }
 
-    void OnPhaseRunsQueued(IReadOnlyList<PendingRun> _) => RequestPhaseRefresh();
+    /// <summary>Triggers queued runs: each opens its calculation UI. Always posted, never inside Advance / ExecuteMove (as WinForms BeginInvoke).</summary>
+    void OnPhaseRunsQueued(IReadOnlyList<PendingRun> runs)
+    {
+        RequestPhaseRefresh();
+        var d = _dispatch;
+        Dispatcher.UIThread.Post(() => { if (d != null && ReferenceEquals(d, _dispatch)) Guard(() => d.OnRunsQueued(runs)); });
+    }
+
+    /// <summary>The phase just changed: write an autosave now (AutosaveMinutes = 0 is off).</summary>
+    void OnPhaseBoundaryAnyThread()
+    {
+        RequestPhaseRefresh();
+        OnUiThread(d => d.OnPhaseBoundary());
+    }
+
+    /// <summary>The difficulty changed: the formula windows of the old mode close; pending runs stay pending.</summary>
+    void OnDifficultyChangedAnyThread()
+    {
+        RequestPhaseRefresh();
+        OnUiThread(d => d.OnDifficultyChanged());
+    }
+
+    /// <summary>Runs <paramref name="act"/> on the dispatch now when on the UI thread, else posts it there (if the session is still open).</summary>
+    void OnUiThread(Action<PhaseRunDispatch> act)
+    {
+        var d = _dispatch;
+        if (d == null) return;
+        if (Dispatcher.UIThread.CheckAccess()) { Guard(() => act(d)); return; }
+        Dispatcher.UIThread.Post(() => { if (ReferenceEquals(d, _dispatch)) Guard(() => act(d)); });
+    }
+
+    /// <summary>The shared Next Phase / run dispatch (WinForms MainForm.CreatePhases) with a phase-boundary autosaver under the app data root.</summary>
+    void CreateDispatch(ModuleSession s, PhaseController c)
+    {
+        // A guest's game and a viewer copy are never written (CanSave): no module hash means no autosave.
+        _autosaver = new Autosaver(() => _session is { CanSave: true } cur ? cur.Archive.Sha256 : null, p => s.SaveNative(p), _dataRoot,
+            OnAutosaveError, () => _session?.Game?.State.Turn.Turn);
+        _dispatch = new PhaseRunDispatch(s, c, _history!, () => _actions!, new DesktopPhaseUi(this, s, () => _dispatch), _autosaver, () => DateTimeOffset.UtcNow)
+        {
+            AutosaveMinutes = () => AutosaveMinutes,
+            Failed = OnDispatchFailed,
+            Log = m => System.Diagnostics.Trace.WriteLine(m),
+        };
+        _dispatch.Advanced += FlushPhaseViews;
+    }
+
+    /// <summary>No Settings dialog in the Avalonia app yet: the WinForms default interval (<see cref="Settings.AutosaveMinutes"/>).</summary>
+    static int AutosaveMinutes => new Settings().AutosaveMinutes;
+
+    void OnAutosaveError(string message)
+    {
+        System.Diagnostics.Trace.WriteLine(message);
+        _session?.Log.AddOnce("autosave:failed", DiagnosticSeverity.Warning, "autosave", message);
+    }
+
+    /// <summary>Opening a queued run threw: logged and shown as a warning; the other runs still open.</summary>
+    void OnDispatchFailed(Exception ex)
+    {
+        System.Diagnostics.Trace.WriteLine("phase run: " + ex);
+        _session?.Log.Add(DiagnosticSeverity.Warning, "phases", "Opening a calculation failed: " + ex.Message);
+        ShowError(ex.Message);
+    }
+
+    void FlushPhaseViews()
+    {
+        _stripWatch?.Flush();
+        _phasePanel?.Flush();
+    }
+
+    /// <summary>Shows the phase panel (docked or floating) so a checklist item can be selected.</summary>
+    internal void RevealPhasePanel() => _phaseDock.Reveal();
+
+    internal IDialogs Dialogs => _dialogs;
+
+    /// <summary><see cref="Guard"/> for the phase UI adapter.</summary>
+    internal void GuardUi(Action a) => Guard(a);
 
     void RefreshStrip()
     {
@@ -97,17 +181,10 @@ public partial class MainWindow
         if (shown) _phasePanel!.Reload();
     }
 
-    /// <summary>Start game / Next Phase. The phase flow with its open-decisions question replaces this in the run dispatch.</summary>
+    /// <summary>Start game, or advance one phase. Open decisions only warn: the dialog lists them and the user may continue anyway.</summary>
     void NextPhaseFromUi()
     {
-        if (_session?.Game == null || _phases == null) return;
-        if (_session.IsReplaying) { SetStatus(ModuleSession.ReplayingText); return; }   // the sender's turn replays as sent
-        var v = _phases.View();
-        if (v.NoPhases) return;
-        if (v.PlayingText is { } playing) { SetStatus(playing); return; }   // hot-seat: another side's phase
-        if (v.BeforeStart) _phases.Start();
-        else if (_actions!.NextPhase() is { } pass) SetStatus(pass);
-        _stripWatch?.Flush();
-        _phasePanel?.Flush();
+        if (_session?.Game == null || _phases == null || _dispatch is not { } d) return;
+        RunAsync(d.NextPhase);
     }
 }

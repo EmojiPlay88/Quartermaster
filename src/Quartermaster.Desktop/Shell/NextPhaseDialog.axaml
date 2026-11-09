@@ -1,0 +1,17 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Quartermaster.Desktop.Shell.NextPhaseDialog"
+        Title="Next Phase"
+        Width="420" Height="260"
+        CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+  <!-- As WinForms NextPhaseDialog: the open decisions, Continue anyway / Go back (Enter and Esc go back); double-click jumps to one. -->
+  <DockPanel>
+    <TextBlock x:Name="Head" DockPanel.Dock="Top" Margin="8,8,8,0" TextWrapping="Wrap" />
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6" Margin="8,6,8,8">
+      <Button x:Name="Continue" Content="Continue anyway" MinWidth="120" HorizontalContentAlignment="Center" />
+      <Button x:Name="Back" Content="Go back" MinWidth="90" IsDefault="True" IsCancel="True" HorizontalContentAlignment="Center" />
+    </StackPanel>
+    <ListBox x:Name="List" Margin="8,4,8,4" />
+  </DockPanel>
+</Window>
