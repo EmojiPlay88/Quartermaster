@@ -93,6 +93,27 @@ public sealed class AlertBarTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Banner_click_raises_floating_phase_panel()
+    {
+        var w = Game();
+        w.Phases.PopButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));   // float it
+        Pump();
+        var f = w.PhaseFloat!;
+        Assert.NotNull(f);
+        w.Activate();   // the main window in front
+        Pump();
+        var raised = 0;
+        f.Activated += (_, _) => raised++;
+        w.Alerts.ClickBanner();
+        Pump();
+        Assert.Same(f, w.PhaseFloat);   // still floating, not docked back
+        Assert.True(f.IsVisible);
+        Assert.Equal(1, raised);   // brought to the front (headless keeps IsActive on every shown window, so count activations)
+        Assert.Same(w.Phases, f.Content);
+        Assert.True(w.Phases.IsVisible);
+    }
+
+    [AvaloniaFact]
     public void Negative_value_alert_chip_appears()
     {
         var w = Game();

@@ -167,7 +167,7 @@ public sealed class FormulaWindowTests : IDisposable
         Pump();
 
         var win = Assert.Single(FormulaWindows.OpenFor(w.Session!));
-        Assert.Equal(1, FormulaWindows.OpenCount);
+        Assert.Single(FormulaWindows.OpenFor(w.Session!));
         Assert.Equal("Daily water: Red 1", win.Title);
         Assert.Same(w, win.Owner);
         Assert.True(win.IsVisible);
@@ -187,7 +187,7 @@ public sealed class FormulaWindowTests : IDisposable
         Click(ButtonOf(win, "Cancel"));
         Pump();
         Assert.False(win.IsVisible);
-        Assert.Equal(0, FormulaWindows.OpenCount);
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));
     }
 
     [AvaloniaFact]
@@ -197,13 +197,13 @@ public sealed class FormulaWindowTests : IDisposable
         var a = Open(w, "f-water", PhaseFixture.RedOne);
         var again = Open(w, "f-water", PhaseFixture.RedOne);
         Assert.Same(a, again);
-        Assert.Equal(1, FormulaWindows.OpenCount);
+        Assert.Single(FormulaWindows.OpenFor(w.Session!));
         var other = Open(w, "f-water", PhaseFixture.RedTwo);
         Assert.NotSame(a, other);
-        Assert.Equal(2, FormulaWindows.OpenCount);
+        Assert.Equal(2, FormulaWindows.OpenFor(w.Session!).Count);
         FormulaWindows.CloseAllFor(w.Session!);
         Pump();
-        Assert.Equal(0, FormulaWindows.OpenCount);
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));
     }
 
     [AvaloniaFact]
@@ -228,7 +228,7 @@ public sealed class FormulaWindowTests : IDisposable
         Click(ButtonOf(win, "&Apply to ledger"));
         Pump();
         Assert.False(win.IsVisible);
-        Assert.Equal(0, FormulaWindows.OpenCount);
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));
         Assert.Equal(9, Water(w, PhaseFixture.RedOne));
     }
 
@@ -322,7 +322,7 @@ public sealed class FormulaWindowTests : IDisposable
         Pump();
         Assert.Null(FormulaWindows.Show(w, w.Session!, "f-water", PhaseFixture.RedOne, null));
         Assert.Equal("That unit belongs to a side you don't hold.", w.StatusText);
-        Assert.Equal(0, FormulaWindows.OpenCount);
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));
     }
 
     /// <summary>Hardcore: Start (Weather) then Supply, which queues Daily water for Red 1 and Red 2.</summary>
@@ -349,7 +349,7 @@ public sealed class FormulaWindowTests : IDisposable
         Pump();
         Assert.False(win.IsVisible);   // its unit of the run is done
         Assert.True(other.IsVisible);  // Red 2 is still waiting
-        Assert.Equal(1, FormulaWindows.OpenCount);
+        Assert.Single(FormulaWindows.OpenFor(w.Session!));
     }
 
     [AvaloniaFact]
@@ -364,7 +364,7 @@ public sealed class FormulaWindowTests : IDisposable
         Pump();
         Assert.DoesNotContain(w.Session!.Game!.State.Pending, r => r.Id == run.Id);
         Assert.False(win.IsVisible);
-        Assert.Equal(0, FormulaWindows.OpenCount);
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));
     }
 
     [AvaloniaFact]
@@ -376,7 +376,57 @@ public sealed class FormulaWindowTests : IDisposable
         w.Actions!.StepBack(w.History!.Checkpoints().Last());
         Pump();
         Assert.False(win.IsVisible);
-        Assert.Equal(0, FormulaWindows.OpenCount);
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));
+    }
+
+    /// <summary>Hardcore at Supply with an unrelated ledger edit to take back: a Calculate-menu window (no run link) and the run's batch grid
+    /// stay open on their own through it, so only the rewind handler can close them.</summary>
+    (FormulaWindow Win, BatchGridWindow Batch) OpenAfterSupply(MainWindow w, PendingRun run)
+    {
+        var view = Assert.IsType<MapView>(w.MapTabs.ActiveView);
+        var menu = MapContextMenu.Build(view, PhaseFixture.RedOne)!;
+        var calc = menu.Items.OfType<MenuItem>().Single(m => MenuText.ToWinForms((string)m.Header!) == "Calculate");
+        calc.Items.OfType<MenuItem>().Single(m => MenuText.ToWinForms((string)m.Header!) == "Daily water").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Pump();
+        var win = Assert.Single(FormulaWindows.OpenFor(w.Session!));
+        var batch = FormulaWindows.ShowBatch(w, w.Session!, w.Actions!, run.Id, null)!;
+        Pump();
+        Assert.True(win.IsVisible);
+        Assert.True(batch.IsVisible);
+        Assert.Single(FormulaWindows.OpenBatchFor(w.Session!));
+        return (win, batch);
+    }
+
+    [AvaloniaFact]
+    public void Undo_closes_formula_windows()
+    {
+        var w = Game(Difficulty.Hardcore);
+        var run = ToSupply(w);
+        w.Actions!.EditLedger(LedgerKey.Piece(PhaseFixture.BlueOne), "water", 4, "test");
+        Pump();
+        var (win, batch) = OpenAfterSupply(w, run);
+        w.Actions!.Undo();
+        PumpUntil(() => !win.IsVisible && !batch.IsVisible);
+        Assert.Contains(w.Session!.Game!.State.Pending, r => r.Id == run.Id);   // the run itself is still waiting
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));
+        Assert.Empty(FormulaWindows.OpenBatchFor(w.Session!));
+        Assert.Null(win.CheatSheet);   // hardcore: no cheat sheet to leave behind
+    }
+
+    [AvaloniaFact]
+    public void Redo_closes_formula_windows()
+    {
+        var w = Game(Difficulty.Hardcore);
+        var run = ToSupply(w);
+        w.Actions!.EditLedger(LedgerKey.Piece(PhaseFixture.BlueOne), "water", 4, "test");
+        w.Actions!.Undo();
+        Pump();
+        var (win, batch) = OpenAfterSupply(w, run);
+        w.Actions!.Redo();
+        PumpUntil(() => !win.IsVisible && !batch.IsVisible);
+        Assert.Equal(4, Water(w, PhaseFixture.BlueOne));
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));
+        Assert.Empty(FormulaWindows.OpenBatchFor(w.Session!));
     }
 
     /// <summary>A remote port whose formula intents wait for the test to answer.</summary>

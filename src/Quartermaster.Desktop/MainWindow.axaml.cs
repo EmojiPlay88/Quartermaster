@@ -729,11 +729,21 @@ public partial class MainWindow : Window
         _phases = c;
         _history = new HistoryController(s, c, (cmd, st) => CommandLog.Prepare(cmd, st, s));
         _history.Rewound += RequestHistoryRefresh;
+        _history.Rewound += OnHistoryRewoundAnyThread;
         _actions = new ActionPortSwitch(new LocalActions(s, c, _history));
         HistoryCommands.Register(_router, s, _history, () => _actions, SetStatus);
         CreatePhaseUi(s, c);
         HistoryCommands.RegisterStepBack(_router, s, _history, () => _dispatch, RunAsync);
         CreateAlerts(s);
+    }
+
+    /// <summary>WinForms OnHistoryRewound: any rewind (undo, redo, step back, a remote rewind) closes every formula window, batch grid and
+    /// cheat sheet of the session.</summary>
+    void OnHistoryRewoundAnyThread()
+    {
+        var s = _session;
+        if (s == null) return;
+        OnUi(() => { if (ReferenceEquals(_session, s)) FormulaWindows.CloseAllFor(s); });
     }
 
     void CloseSession()
@@ -745,7 +755,7 @@ public partial class MainWindow : Window
         DestroyLog();
         ClearTrees();
         UnhookGame();
-        if (_history != null) _history.Rewound -= RequestHistoryRefresh;
+        if (_history != null) { _history.Rewound -= RequestHistoryRefresh; _history.Rewound -= OnHistoryRewoundAnyThread; }
         _history = null;
         _phases = null;
         _actions = null;

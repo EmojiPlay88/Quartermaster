@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Input;
 using Quartermaster.Desktop.Phases;
@@ -185,6 +186,36 @@ public sealed class PhasePanelTests : IDisposable
         Assert.Equal("0 decisions left", w.Phases.CountText);
         Assert.False(w.Phases.CountRed);
         Assert.True(w.Phases.IsChecked(0));
+    }
+
+    static IReadOnlyList<CheckBox> ChecklistBoxes(MainWindow w) =>
+        w.Phases.GetVisualDescendants().OfType<ScrollViewer>().Single(v => v.Name == "ChecklistScroll")
+            .GetVisualDescendants().OfType<CheckBox>().ToList();
+
+    [AvaloniaFact]
+    public void Checklist_keeps_focus_after_tick()
+    {
+        var w = PhaseGame();
+        ToCombat(w);
+        w.UpdateLayout();
+        var box = Assert.Single(ChecklistBoxes(w));
+        Assert.True(box.Focus());
+        w.Phases.SetChecked(0, true);   // as Space on the focused box
+        Pump();
+        Flush(w);
+        w.UpdateLayout();
+        Assert.Equal(new[] { 0 }, w.Session!.Game!.State.Ticked);
+        Assert.Same(box, Assert.Single(ChecklistBoxes(w)));   // the same box, not a rebuilt one (WinForms CheckedListBox)
+        Assert.True(box.IsFocused);   // so Tab moves on from it
+        Assert.True(box.IsChecked);
+        // A change from elsewhere (an undo) still shows in the kept box.
+        w.Actions!.Undo();
+        Pump();
+        Flush(w);
+        Assert.Empty(w.Session!.Game!.State.Ticked);
+        Assert.Same(box, Assert.Single(ChecklistBoxes(w)));
+        Assert.False(box.IsChecked);
+        Assert.Empty(w.Session!.Game!.State.Ticked);   // updating the box in place ticks nothing
     }
 
     [AvaloniaFact]

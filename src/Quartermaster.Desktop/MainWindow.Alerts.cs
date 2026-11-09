@@ -30,7 +30,7 @@ public partial class MainWindow
 
     void InitAlertUi()
     {
-        AlertBarHost.BannerClicked += () => Guard(_phaseDock.Reveal);
+        AlertBarHost.BannerClicked += () => Guard(RevealPhasePanel);
         AlertBarHost.ChipClicked += c => Guard(() => GoToAlert(c.Id));
         AlertBarHost.ChipContext += (c, at) => Guard(() => AlertMenuFor(c.Id).Open(at));
         AlertBarHost.OverflowClicked += (chips, at) => Guard(() => OverflowMenuFor(chips).Open(at));

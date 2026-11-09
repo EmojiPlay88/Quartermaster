@@ -214,6 +214,25 @@ public sealed class PhasePanel : UserControl
         // Hot-seat: another side's phase shows none of its decisions (its checklist included).
         var items = checklistHidden ? new List<string>() : v.Current?.Checklist ?? new List<string>();
         var ticked = _s.View?.Ticked;
+        var boxes = _checklist.Children.OfType<CheckBox>().ToList();
+        if (boxes.Count == items.Count && boxes.Count == _checklist.Children.Count && boxes.Select(b => b.Content as string).SequenceEqual(items.Select(t => t ?? "")))
+        {
+            // The same items: update the boxes in place (Reload holds _updating, so this ticks nothing) and keep the keyboard focus on the one
+            // just ticked, as the WinForms CheckedListBox does.
+            for (var i = 0; i < boxes.Count; i++) boxes[i].IsChecked = ticked?.Contains(i) == true;
+        }
+        else
+        {
+            ShowChecklist(items, ticked);
+        }
+        _openRows = v.Decisions.Where(d => d.Kind != DecisionKind.Checklist).ToList();
+        var sel = _open.SelectedIndex;
+        _open.ItemsSource = _openRows.Select(d => d.Text).ToList();
+        if (sel >= 0 && sel < _openRows.Count) _open.SelectedIndex = sel;
+    }
+
+    void ShowChecklist(List<string> items, IReadOnlyCollection<int>? ticked)
+    {
         _checklist.Children.Clear();
         for (var i = 0; i < items.Count; i++)
         {
@@ -222,10 +241,6 @@ public sealed class PhasePanel : UserControl
             box.IsCheckedChanged += (_, _) => OnItemCheck(index, box.IsChecked == true);
             _checklist.Children.Add(box);
         }
-        _openRows = v.Decisions.Where(d => d.Kind != DecisionKind.Checklist).ToList();
-        var sel = _open.SelectedIndex;
-        _open.ItemsSource = _openRows.Select(d => d.Text).ToList();
-        if (sel >= 0 && sel < _openRows.Count) _open.SelectedIndex = sel;
     }
 
     // ---------- actions ----------

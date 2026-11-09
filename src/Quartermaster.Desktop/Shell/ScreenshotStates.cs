@@ -59,6 +59,7 @@ static class ScreenshotStates
     /// <returns>An error text, or null when the state is in place.</returns>
     public static string? Apply(string name, MainWindow window)
     {
+        Target = null;   // never the window an earlier state left behind
         var view = window.MapTabs.ActiveView;
         var s = window.Session;
         if (view == null || s?.Game == null) return "No map to put into the state.";

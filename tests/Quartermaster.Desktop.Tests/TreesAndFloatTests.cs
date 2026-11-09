@@ -302,6 +302,26 @@ public sealed class TreesAndFloatTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Pack_without_phases_docks_floating_panel_and_hides_column()
+    {
+        var w = PhaseGame(PhaseModule());
+        ClickPop(w);
+        Assert.NotNull(w.PhaseFloat);
+        var s = w.Session!;
+        s.UpdateRules(p => p with { Phases = new(), Blocks = new() });   // swap to a pack without phases
+        Pump();
+        w.UpdateLayout();
+        Assert.Null(w.PhaseFloat);   // docked back (WinForms leaves the float open with the no-phases text: see parity.md)
+        Assert.False(w.PhasePanelShown);
+        Assert.False(w.PhaseSplitter.IsVisible);
+        Assert.Equal(0, w.Body.ColumnDefinitions[Grid.GetColumn(w.PhaseHost)].Width.Value);
+        Assert.Equal("Pop out", w.Phases.PopButton.Content);
+        var item = w.FindMenuItem("&Phase panel")!;
+        Assert.False(item.IsEnabled);
+        Assert.False(item.IsChecked);
+    }
+
+    [AvaloniaFact]
     public void Phase_panel_pops_out_and_docks_back()
     {
         var w = PhaseGame(PhaseModule());

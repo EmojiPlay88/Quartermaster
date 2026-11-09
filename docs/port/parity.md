@@ -61,6 +61,9 @@ Stage 2b = phase strip and panel, Next Phase, Step Back, formula window and chea
 - Tables-tree activation is ignored until the Rules Workbench (stage 4); the PDF and chart nodes of the module tree say "Opens in a later version".
 - Floating log and phase windows are clamped onto a screen that exists (primary screen as fallback). Real second-display behaviour is only checked by the Mac checklist (`docs/port/stage2b-mac-checklist.md`).
 - Open Autosave, Game > Send Turn and the other WinForms menus around phases wait for their own stages (4 and 5).
+- When a rules pack without phases replaces one with phases while the phase panel floats, Desktop docks the panel back (the column stays hidden); WinForms leaves the floating window open showing the no-phases text.
+- Known: while a Desktop modal dialog (Step Back, Next Phase, missing input) is open, the floating Phases window and the formula and batch-grid windows still accept input (Avalonia ShowDialog disables only the owner); WinForms disables every window of the app.
+- Floating log and phase panels always reopen docked: the layout memory never stores Floating=true, the same as WinForms.
 - Fixed in the 2b screenshot pass: the alert bar's hidden measuring chip ("+00") was visible at the left of the banner text.
 
 ## Before the stage release
