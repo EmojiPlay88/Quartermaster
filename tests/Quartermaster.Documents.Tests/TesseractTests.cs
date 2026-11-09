@@ -93,7 +93,7 @@ public class TesseractTests
     [Fact]
     public async Task Non_ascii_tessdata_path_works()
     {
-        string dir = Path.Combine(Path.GetTempPath(), "qm-tessdé-" + Guid.NewGuid().ToString("N"));
+        string dir = Path.Combine(Path.GetTempPath(), "qm-tessdÃ©-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try
         {
