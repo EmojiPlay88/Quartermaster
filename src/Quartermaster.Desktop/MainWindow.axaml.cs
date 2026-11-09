@@ -69,6 +69,7 @@ public partial class MainWindow : Window
         _cacheRoot = cacheRoot;
         _rulesRoot = rulesRoot;
         InitializeComponent();
+        InitPhaseUi();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         _router.Guard = Guard;
@@ -358,6 +359,7 @@ public partial class MainWindow : Window
         _viewLog.Click += (_, _) => _router.Execute("view.log");
         Gate("view.log", _viewLog);
         view.Items.Add(_viewLog);
+        view.Items.Add(_viewPhases);
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
         Item(view, "Zoom 100%", () => Maps.ActiveView?.ZoomCentered(1f), needsModule: true);
@@ -421,6 +423,7 @@ public partial class MainWindow : Window
         PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
         Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
         Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
+        UpdatePhaseUi();
         RefreshHistoryUi();
     }
 
@@ -702,12 +705,14 @@ public partial class MainWindow : Window
         _history.Rewound += RequestHistoryRefresh;
         _actions = new ActionPortSwitch(new LocalActions(s, c, _history));
         HistoryCommands.Register(_router, s, _history, () => _actions, SetStatus);
+        CreatePhaseUi(s, c);
     }
 
     void CloseSession()
     {
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
+        DestroyPhaseUi();
         DestroyLog();
         UnhookGame();
         if (_history != null) _history.Rewound -= RequestHistoryRefresh;

@@ -85,7 +85,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Module Tree | 2b |  |  |  |  |
 | View > Diagnostics | 3 |  |  |  |  |
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable); floating is 2b |
-| View > Phase panel | 2b |  |  |  |  |
+| View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown; floating comes later in 2b |
 | View > Outliner | 3 |  |  |  |  |
 | View > Ledger | 3 |  |  |  |  |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3 |  |  |  |  | comes with the Desktop Ledger; decision logic already shared (`LedgerJump` in Quartermaster.Render) |
@@ -117,7 +117,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b |  |  |  |  |
 | TourOverlay | 5 |  |  |  |  |
-| PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b |  |  |  |  |
+| PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the plain step; the open-decisions question and floating panel come later in 2b); rule reference shown disabled until the rulebook viewer |
 | NextPhaseDialog | 2b |  |  |  |  |
 | StepBackDialog | 2b |  |  |  |  |
 | ReplayBar | 5 |  |  |  |  |
@@ -170,7 +170,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | DiceTools, DiceDialog, TurnDialog | 2a | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
 | LogPanel, LogDock, LogFloatForm, ChatBox | 2a | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / LogFloatForm wait for 2b; the chat line shows only online (stage 5) |
 | OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 |  |  |  |  |
-| PhaseWatcher | 2b |  |  |  |  |
+| PhaseWatcher | 2b | ✔ |  |  | `PhaseWatch` + `Debouncer` (DispatcherTimer, 150 ms) |
 
 ## Ledger, notes, inventory, documents, search
 
