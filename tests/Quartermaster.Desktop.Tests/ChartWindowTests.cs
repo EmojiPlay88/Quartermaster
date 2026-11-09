@@ -1,6 +1,7 @@
 using System.Drawing;
 using Point = Avalonia.Point;
 using Avalonia;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Quartermaster.Desktop.Documents;
@@ -215,5 +216,69 @@ public sealed class ChartWindowTests : IDisposable
         Assert.Equal(500, again.Width);
         Assert.Equal(350, again.Height);
         Assert.Equal(new PixelPoint(210, 130), again.Position);
+    }
+
+    [AvaloniaFact]
+    public void Real_input_wheel_and_buttons()
+    {
+        var w = Game();
+        var c = Open(w);
+        Pump();
+        c.ActualSize();
+        var origin = c.Canvas.TranslatePoint(new Point(), c)!.Value;
+        var at = origin + new Point(80, 60);
+
+        // Wheel up zooms in at the cursor, down zooms out.
+        var before = c.View.ToMap(new SKPoint(80, 60));
+        c.MouseWheel(at, new Vector(0, 1));
+        Assert.Equal(1.25f, c.View.Zoom, 3);
+        var after = c.View.ToMap(new SKPoint(80, 60));
+        Assert.Equal(before.X, after.X, 2);
+        Assert.Equal(before.Y, after.Y, 2);
+        c.MouseWheel(at, new Vector(0, -1));
+        Assert.Equal(1f, c.View.Zoom, 3);
+
+        // Left and middle drags pan; the cursor is back to default afterwards.
+        foreach (var button in new[] { Avalonia.Input.MouseButton.Left, Avalonia.Input.MouseButton.Middle })
+        {
+            c.ActualSize();
+            var pan = c.View.Pan;
+            c.MouseDown(at, button);
+            Assert.True(c.Panning);
+            Assert.NotNull(c.Canvas.Cursor);
+            c.MouseMove(at + new Point(20, -10));
+            Assert.Equal(pan.X - 20, c.View.Pan.X, 2);
+            Assert.Equal(pan.Y + 10, c.View.Pan.Y, 2);
+            c.MouseUp(at + new Point(20, -10), button);
+            Assert.False(c.Panning);
+            Assert.Null(c.Canvas.Cursor);
+        }
+
+        // A right-button press and drag does not pan.
+        c.ActualSize();
+        var start = c.View.Pan;
+        c.MouseDown(at, Avalonia.Input.MouseButton.Right);
+        Assert.False(c.Panning);
+        c.MouseMove(at + new Point(40, 40));
+        c.MouseUp(at + new Point(40, 40), Avalonia.Input.MouseButton.Right);
+        Assert.Equal(start, c.View.Pan);
+        Assert.Null(c.Canvas.Cursor);
+    }
+
+    [AvaloniaFact]
+    public void Device_zoom_follows_render_scaling()
+    {
+        Assert.Equal(2f, ChartWindow.DeviceZoom(1f, 2));
+        Assert.Equal(0.5f, ChartWindow.DeviceZoom(0.25f, 2));
+        Assert.Equal(1.5f, ChartWindow.DeviceZoom(1.5f, 1));
+        var w = Game();
+        var c = Open(w);
+        c.SetRenderScaling(2);
+        Pump();
+        Assert.Equal(2, c.RenderScaling);
+        c.ActualSize();   // still 1 image pixel per DIP
+        Assert.Equal(1f, c.View.Zoom);
+        c.Canvas.InvalidateVisual();
+        Pump();
     }
 }

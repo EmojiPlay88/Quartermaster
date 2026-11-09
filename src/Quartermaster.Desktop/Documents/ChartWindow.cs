@@ -56,6 +56,7 @@ public sealed class ChartWindow : Window
     internal void DragMove(Point at) => _canvas.DragMove(at);
     internal void DragEnd() => _canvas.DragEnd();
     internal bool Panning => _canvas.Panning;
+    internal static float DeviceZoom(float zoom, double renderScaling) => ChartCanvas.DeviceZoom(zoom, renderScaling);
 
     sealed class ChartCanvas : Control
     {
@@ -128,16 +129,20 @@ public sealed class ChartWindow : Window
         void Draw(SKCanvas c)
         {
             c.Clear(Workspace);
-            var img = _s.Images.Get(_chart.FileName, View.Zoom);
+            var device = DeviceZoom(View.Zoom, TopLevel.GetTopLevel(this)?.RenderScaling ?? 1);
+            var img = _s.Images.Get(_chart.FileName, device);
             var n = Natural;
             c.Save();
             c.Scale(View.Zoom);
             c.Translate(-View.Pan.X, -View.Pan.Y);
             using var paint = new SKPaint { IsAntialias = true };
-            var sampling = View.Zoom < 1f ? new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear) : new SKSamplingOptions(SKFilterMode.Linear);
+            var sampling = device < 1f ? new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear) : new SKSamplingOptions(SKFilterMode.Linear);
             c.DrawImage(img, SKRect.Create(0, 0, n.Width, n.Height), sampling, paint);
             c.Restore();
         }
+
+        /// <summary>Image pixels per device pixel: the view zoom (per DIP) times the screen scaling.</summary>
+        internal static float DeviceZoom(float zoom, double renderScaling) => zoom * (float)renderScaling;
 
         public void Wheel(Point at, double delta)
         {
@@ -156,7 +161,7 @@ public sealed class ChartWindow : Window
             InvalidateVisual();
         }
 
-        public void DragEnd() { Panning = false; Cursor = null; }
+        public void DragEnd() { if (!Panning) return; Panning = false; Cursor = null; }
 
         protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
         {
