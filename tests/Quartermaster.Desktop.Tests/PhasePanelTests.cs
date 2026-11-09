@@ -305,4 +305,73 @@ public sealed class PhasePanelTests : IDisposable
         PumpUntil(() => runs == 2);
         Assert.Single(errors);
     }
+
+    MainWindow RefGame(string entry = "rules.pdf")
+    {
+        var fx = PhaseFixture.Module().EditBuildFile(x => x.Replace("</VASSAL.build.GameModule>",
+            "<VASSAL.build.module.Documentation><VASSAL.build.module.documentation.HelpFile title=\"Rules\" fileName=\"rules.pdf\" fileType=\"archive\"/>" +
+            "</VASSAL.build.module.Documentation></VASSAL.build.GameModule>")).AddFile("rules.pdf", DocumentWindowTests.Pdf("Rules"));
+        _fixtures.Add(fx);
+        var w = NewWindow();
+        Assert.True(w.OpenModule(fx.Build()));
+        var s = w.Session!;
+        s.SetRoller((n, _) => Enumerable.Repeat(3, n).ToList());
+        w.StartSetup(0, Difficulty.FullyAuto);
+        s.NewRules("t");
+        s.UpdateRules(_ =>
+        {
+            var p = PhaseFixture.Pack(s.Archive.Sha256);
+            return p with
+            {
+                RuleRefs = new() { new RuleRef { Id = "rr-supply", Label = "Supply rules", DocumentEntry = entry, Page = 2 } },
+                Phases = p.Phases.Select(ph => ph.Id == "ph-supply" ? ph with { RuleRefId = "rr-supply" } : ph).ToList(),
+            };
+        });
+        Pump();
+        Flush(w);
+        return w;
+    }
+
+    [AvaloniaFact]
+    public void Phase_rule_link_text_and_click_opens_page()
+    {
+        var w = RefGame();
+        w.Actions!.NextPhase();
+        w.Actions.NextPhase();   // Supply
+        Pump();
+        Flush(w);
+        Assert.Equal("Rule: Supply rules (p. 2)", w.Phases.RuleText);
+        w.Phases.ClickRule();
+        Pump();
+        var doc = Assert.Single(w.DocumentWindows).Value;
+        Assert.Equal(2, doc.Viewer.Page);
+        Assert.Equal("Rules", doc.Title);
+    }
+
+    [AvaloniaFact]
+    public void Phase_rule_link_to_missing_document_shows_error()
+    {
+        var w = RefGame("gone.pdf");
+        w.Actions!.NextPhase();
+        w.Actions.NextPhase();
+        Pump();
+        Flush(w);
+        w.Phases.ClickRule();
+        Pump();
+        Assert.Empty(w.DocumentWindows);
+        Assert.Equal("The rule reference points to 'gone.pdf', which is not in this module.", Assert.Single(_dialogs.Warnings).Message);
+    }
+
+    [AvaloniaFact]
+    public void Phase_without_ref_hides_link()
+    {
+        var w = RefGame();
+        w.Actions!.NextPhase();   // Weather: no reference
+        Pump();
+        Flush(w);
+        Assert.Null(w.Phases.RuleText);
+        w.Phases.ClickRule();
+        Pump();
+        Assert.Empty(w.DocumentWindows);
+    }
 }

@@ -12,9 +12,6 @@ namespace Quartermaster.Desktop;
 /// </summary>
 public partial class MainWindow
 {
-    /// <summary>"Opens in a later version": document windows come in stage 3b.</summary>
-    internal const string LaterVersionText = "Opens in a later version";
-
     WindowLayoutStore _layout = null!;
     MenuItem _viewTree = null!;
     PanelDockState _logState = null!;
@@ -152,7 +149,7 @@ public partial class MainWindow
             OpenChart(chart);
             return;
         }
-        if (n.Kind is WindowNodeKind.Chart or WindowNodeKind.Document) SetStatus(LaterVersionText);
+        if (n.Kind == WindowNodeKind.Document && n.Ref is DocumentDef doc) OpenDocument(doc);
     }
 
     // ---------- the log's place (docked at the bottom or floating) ----------

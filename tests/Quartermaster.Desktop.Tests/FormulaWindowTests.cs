@@ -180,8 +180,8 @@ public sealed class FormulaWindowTests : IDisposable
         Assert.False(ButtonOf(win, "&Calculate").IsVisible);   // fully automatic: no Calculate
         Assert.True(ButtonOf(win, "Cancel").IsVisible);
         var ruleRef = ButtonOf(win, "&Rule ref…");
-        Assert.False(ruleRef.IsEnabled);
-        Assert.Equal("Rulebook viewer comes in a later version", ToolTip.GetTip(ruleRef));
+        Assert.False(ruleRef.IsEnabled);   // this formula has no rule reference
+        Assert.Null(ToolTip.GetTip(ruleRef));
         Assert.Contains(win.GetVisualDescendants().OfType<CheckBox>(), c => (string?)c.Content == "Physical dice");
 
         Click(ButtonOf(win, "Cancel"));
@@ -503,5 +503,73 @@ public sealed class FormulaWindowTests : IDisposable
         Assert.True(win.IsVisible);
         Assert.DoesNotContain("61616", string.Join("|", win.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text))
             + string.Join("|", win.GetVisualDescendants().OfType<TextBox>().Select(t => t.Text)));
+    }
+
+    static RulesPack RefPack(string sha, string entry = "rules.pdf") => Pack(sha) with
+    {
+        RuleRefs = new() { new RuleRef { Id = "rr1", Label = "Water", DocumentEntry = entry, Page = 3 } },
+        Formulas = Pack(sha).Formulas.Select(f => f.Id switch
+        {
+            "f-water" => f with { RuleRefId = "rr1" },
+            "f-add" => f with { RuleRefId = "dangling" },
+            _ => f,
+        }).ToList(),
+    };
+
+    MainWindow DocGame(string entry = "rules.pdf")
+    {
+        var fx = PhaseFixture.Module().EditBuildFile(x => x.Replace("</VASSAL.build.GameModule>",
+            "<VASSAL.build.module.Documentation><VASSAL.build.module.documentation.HelpFile title=\"Rules\" fileName=\"rules.pdf\" fileType=\"archive\"/>" +
+            "</VASSAL.build.module.Documentation></VASSAL.build.GameModule>")).AddFile("rules.pdf", DocumentWindowTests.Pdf("Rules"));
+        _fixtures.Add(fx);
+        var w = NewWindow();
+        Assert.True(w.OpenModule(fx.Build()));
+        var s = w.Session!;
+        w.StartSetup(0, Difficulty.FullyAuto);
+        s.NewRules("t");
+        s.UpdateRules(_ => RefPack(s.Archive.Sha256, entry));
+        Pump();
+        return w;
+    }
+
+    [AvaloniaFact]
+    public void Formula_rule_ref_enabled_only_when_ref_resolves()
+    {
+        var w = DocGame();
+        var water = Open(w, "f-water", PhaseFixture.RedOne);
+        Assert.True(ButtonOf(water, "&Rule ref…").IsEnabled);
+        Assert.Null(ToolTip.GetTip(water.RuleRefButton));
+        Assert.False(ButtonOf(Open(w, "f-add", PhaseFixture.RedOne), "&Rule ref…").IsEnabled);   // dangling id
+        Assert.False(ButtonOf(Open(w, "f-fuel", PhaseFixture.RedOne), "&Rule ref…").IsEnabled);   // no id
+
+        // Re-checked when the pack changes while open.
+        var s = w.Session!;
+        s.UpdateRules(p => p with { RuleRefs = new() });
+        PumpUntil(() => !water.RuleRefButton.IsEnabled);
+        s.UpdateRules(_ => RefPack(s.Archive.Sha256));
+        PumpUntil(() => water.RuleRefButton.IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Formula_rule_ref_opens_document_at_page()
+    {
+        var w = DocGame();
+        var win = Open(w, "f-water", PhaseFixture.RedOne);
+        Click(win.RuleRefButton);
+        Pump();
+        var doc = Assert.Single(w.DocumentWindows).Value;
+        Assert.Equal("Rules", doc.Title);
+        Assert.Equal(3, doc.Viewer.Page);
+        Assert.Empty(_dialogs.Warnings);
+    }
+
+    [AvaloniaFact]
+    public void Formula_rule_ref_to_missing_document_shows_error()
+    {
+        var w = DocGame("gone.pdf");
+        Click(Open(w, "f-water", PhaseFixture.RedOne).RuleRefButton);
+        Pump();
+        Assert.Empty(w.DocumentWindows);
+        Assert.Equal("The rule reference points to 'gone.pdf', which is not in this module.", Assert.Single(_dialogs.Warnings).Message);
     }
 }
