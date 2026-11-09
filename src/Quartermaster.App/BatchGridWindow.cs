@@ -182,11 +182,11 @@ sealed class BatchGridWindow : Form
         if (c >= 1 && c <= _varCount && _grid.Columns[c] is DataGridViewComboBoxColumn combo && c - 1 < row.Cells.Count
             && row.Cells[c - 1] is { Length: > 0 } typed && !combo.Items.Contains(typed))
             combo.Items.Add(typed);   // a typed or calculated value that is not one of the listed keys must still display
-        e.Value = c == 0 ? row.Label
-            : c <= _varCount ? (c - 1 < row.Cells.Count ? row.Cells[c - 1] : "")
-            : c == ResultCol ? (row.Applied && row.Result.Length == 0 ? "Applied" : row.Result)
-            : c == ResultCol + 1 ? row.LedgerText
-            : row.Exceptions;
+        e.Value = c == 0 ? FormulaWindowRules.CellOf(row, FormulaWindowRules.BatchUnit).Text
+            : c <= _varCount ? FormulaWindowRules.VariableCell(row, c - 1).Text
+            : c == ResultCol ? FormulaWindowRules.CellOf(row, FormulaWindowRules.BatchResult).Text
+            : c == ResultCol + 1 ? FormulaWindowRules.CellOf(row, FormulaWindowRules.BatchLedger).Text
+            : FormulaWindowRules.CellOf(row, FormulaWindowRules.BatchExceptions).Text;
     }
 
     void OnValuePushed(DataGridViewCellValueEventArgs e)
@@ -202,11 +202,11 @@ sealed class BatchGridWindow : Form
         if (e.RowIndex < 0 || e.RowIndex >= _model.RowCount) return;
         var c = e.ColumnIndex;
         var row = _model.Row(e.RowIndex);
-        if (c >= 1 && c <= _varCount && c - 1 < row.Wrong.Count && row.Wrong[c - 1])
-            e.CellStyle!.BackColor = Color.MistyRose;
-        else if (row.Applied)
-            e.CellStyle!.ForeColor = SystemColors.GrayText;
-        if (c == ResultCol + 2 && row.Exceptions.Length > 0 && !row.Applied) e.CellStyle!.ForeColor = Color.Firebrick;
+        var tone = c >= 1 && c <= _varCount ? FormulaWindowRules.VariableCell(row, c - 1).Tone
+            : FormulaWindowRules.CellOf(row, c == 0 ? FormulaWindowRules.BatchUnit : c == ResultCol ? FormulaWindowRules.BatchResult : c == ResultCol + 1 ? FormulaWindowRules.BatchLedger : FormulaWindowRules.BatchExceptions).Tone;
+        if (tone == CellTone.Wrong) e.CellStyle!.BackColor = Color.MistyRose;
+        else if (tone == CellTone.Applied) e.CellStyle!.ForeColor = SystemColors.GrayText;
+        if (tone == CellTone.Exception) e.CellStyle!.ForeColor = Color.Firebrick;
     }
 
     /// <summary>History of the first ledger value this row would change (what happened before, never the pending result).</summary>
@@ -223,7 +223,7 @@ sealed class BatchGridWindow : Form
         if (e.RowIndex < 0 || e.RowIndex >= _model.RowCount || c < 1 || c > _varCount) return;
         if (!_model.Row(e.RowIndex).Wrong[c - 1] || _s.Game == null) return;
         var v = _model.Variables[c - 1];
-        e.ToolTipText = _model.ModelFor(e.RowIndex).Evaluate(_s.Game.State).Boxes.FirstOrDefault(b => b.Variable == v)?.Tooltip ?? "Doesn't match";
+        e.ToolTipText = _model.ModelFor(e.RowIndex).Evaluate(_s.Game.State).Boxes.FirstOrDefault(b => b.Variable == v)?.Tooltip ?? FormulaWindowRules.DoesntMatchTip;
     }
 
     // ---- actions ----
@@ -237,7 +237,7 @@ sealed class BatchGridWindow : Form
             _model.CalculateAll();
             _grid.Invalidate();
         }
-        _status.Text = "Calculated " + _model.RowCount + " row(s).";
+        _status.Text = FormulaWindowRules.CalculatedText(_model.RowCount);
         UpdateCheat();
     }
 
@@ -249,20 +249,20 @@ sealed class BatchGridWindow : Form
         int n;
         using (WaitCursor()) n = _model.ApplyAll();
         // The run may be gone now (all applied): the debounced refresh closes the window.
-        _status.Text = $"Applied {n} row(s); rows with a red cell were skipped.";
+        _status.Text = FormulaWindowRules.AppliedRowsText(n);
         _debounce.Stop();
         Refresh_();
-        if (!IsDisposed && before > 0 && n == 0) _status.Text = "Nothing applied: check the red cells, or press Calculate all.";
+        if (!IsDisposed && before > 0 && n == 0) _status.Text = FormulaWindowRules.NothingAppliedText;
     }
 
     void ApplyRow()
     {
         if (!_grid.EndEdit()) return;
         var r = _grid.CurrentCell?.RowIndex ?? -1;
-        if (r < 0 || r >= _model.RowCount) { _status.Text = "Select a row first."; return; }
+        if (r < 0 || r >= _model.RowCount) { _status.Text = FormulaWindowRules.SelectRowText; return; }
         if (_model.HostCalculates) { SendToHost(new[] { r }, calculate: false); return; }
         var ok = _model.ApplyRow(r);
-        _status.Text = ok ? "Row applied." : "That row does not match yet: fix the red cells or press Calculate all.";
+        _status.Text = ok ? FormulaWindowRules.RowAppliedText : FormulaWindowRules.RowNotMatchingText;
         _debounce.Stop();
         Refresh_();
     }
@@ -275,12 +275,12 @@ sealed class BatchGridWindow : Form
         if (_sending || IsDisposed) return;
         _sending = true;
         _calcAll.Enabled = _applyAll.Enabled = _applyRow.Enabled = false;
-        _status.Text = "Asking the host…";
+        _status.Text = FormulaWindowRules.AskingHostText;
         try
         {
             var (applied, message) = await _model.SendRowsAsync(rows, calculate, preview);
             if (IsDisposed) return;
-            _status.Text = (preview ? $"The host calculated {rows.Count} row(s)." : $"The host applied {applied} of {rows.Count} row(s).")
+            _status.Text = (preview ? FormulaWindowRules.HostCalculatedText(rows.Count) : FormulaWindowRules.HostAppliedText(applied, rows.Count))
                 + (message != null ? " " + message : "");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -361,7 +361,7 @@ sealed class BatchGridWindow : Form
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Program.AppLog("batch grid: " + ex.Message);
-            if (!IsDisposed) _status.Text = "Something went wrong: " + ex.Message;
+            if (!IsDisposed) _status.Text = FormulaWindowRules.WentWrongText(ex.Message);
         }
     }
 
