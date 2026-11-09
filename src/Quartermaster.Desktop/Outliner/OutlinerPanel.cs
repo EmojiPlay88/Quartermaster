@@ -43,6 +43,7 @@ public sealed class OutlinerPanel : UserControl
     readonly Action<Decision> _jump;
     readonly CounterThumbnails _thumbs;
     readonly BreakdownTip _tip = new();
+    readonly Action<string> _pictureReady;
 
     readonly ComboBox _grouping = new() { Width = 170, ItemsSource = new[] { "By map / org display", "By side" }, SelectedIndex = 0 };
     readonly Button _pop = new() { Content = "Pop out", Margin = new Thickness(4, 0, 0, 0) };
@@ -50,7 +51,10 @@ public sealed class OutlinerPanel : UserControl
     readonly ListBox _now = new() { Height = 70 };
     readonly Grid _header = new() { Height = RowHeight + 2 };
     readonly Border _headerClip = new() { ClipToBounds = true };
-    readonly ListBox _list = new() { SelectionMode = SelectionMode.Single, Padding = new Thickness(0) };
+    // No auto-scroll to the selection: a refresh restores the selection and must leave the list where the user scrolled it (WinForms keeps
+    // FirstDisplayedScrollingRowIndex). The selection deferred-scroll would otherwise run after the offset was restored. Keyboard moves still
+    // scroll (the items panel brings the next row into view itself; OutlinerTests.Outliner_keyboard_moves_still_scroll).
+    readonly ListBox _list = new() { SelectionMode = SelectionMode.Single, Padding = new Thickness(0), AutoScrollToSelectedItem = false };
 
     readonly HashSet<string> _open = new(StringComparer.Ordinal);
     readonly HashSet<string> _seen = new(StringComparer.Ordinal);
@@ -73,6 +77,7 @@ public sealed class OutlinerPanel : UserControl
         Name = "OutlinerPanel";
         MinWidth = 180;
         _thumbs = new CounterThumbnails(s) { Shown = () => _liveImages.Keys.Select(i => (object?)i.Source) };
+        _pictureReady = OnPictureReady;
 
         var bar = new DockPanel { Margin = new Thickness(2) };
         DockPanel.SetDock(_pop, Dock.Right);
@@ -201,6 +206,12 @@ public sealed class OutlinerPanel : UserControl
     /// <summary>True when the row shows a picture placeholder (a piece this player may see).</summary>
     public bool HasPicture(int row) => row >= 0 && row < _rows.Count && _rows[row].Node.PieceId is { } id && _s.View?.Pieces.ContainsKey(id) == true;
 
+    /// <summary>The picture frame of a row on screen (tests; null when the row is not built or has no picture).</summary>
+    internal Border? PictureFrameAt(int row) =>
+        row >= 0 && row < _rows.Count && _rows[row].Node.PieceId is { } id
+            ? _liveImages.Where(kv => kv.Value == id).Select(kv => kv.Key.Parent as Border).FirstOrDefault(b => b != null)
+            : null;
+
     public double ColumnWidth(int col) => ColumnId(col) is { } id ? WidthOf(id, DefaultWidth(col)) : -1;
 
     public void SetColumnWidth(int col, double width)
@@ -291,6 +302,8 @@ public sealed class OutlinerPanel : UserControl
             _nowLabel.Text = OutlinerViewRules.NowLabel(_decisions.Count);
 
             var cur = _list.SelectedItem is Row sel ? sel.Node.Key : null;
+            var scroller = _list.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+            var offset = scroller?.Offset;   // WinForms keeps FirstDisplayedScrollingRowIndex across a refresh
             var flat = OutlinerViewRules.Flatten(_tree, _open);
             _rows = flat.Select((r, i) => new Row(r.Node, r.Depth, i)).ToList();
             BuildHeader();
@@ -298,7 +311,12 @@ public sealed class OutlinerPanel : UserControl
             if (cur != null)
             {
                 var at = _rows.FindIndex(r => r.Node.Key == cur);
-                if (at >= 0) _list.SelectedIndex = at;
+                if (at >= 0) _list.SelectedIndex = at;   // no auto-scroll to it (see _list): the rows stay where the user scrolled them
+            }
+            if (scroller != null && offset is { } o)
+            {
+                _list.UpdateLayout();   // the new rows' extent first, so the offset is not clamped
+                scroller.Offset = o;
             }
         }
         finally { _loading = false; }
@@ -441,10 +459,7 @@ public sealed class OutlinerPanel : UserControl
         void Load()
         {
             if (_closing) return;
-            var bmp = _thumbs.Get(pieceId, ImageSize, id => Dispatcher.UIThread.Post(() =>
-            {
-                if (!_closing && _liveImages.ContainsKey(img)) img.Source = _thumbs.Get(id, ImageSize, null);
-            }));
+            var bmp = _thumbs.Get(pieceId, ImageSize, _pictureReady);   // one handler per panel: the cache keeps one waiter per piece
             img.Source = bmp;
             frame.BorderThickness = new Thickness(bmp == null ? 1 : 0);
         }
@@ -460,6 +475,18 @@ public sealed class OutlinerPanel : UserControl
             _thumbs.Prioritise(_liveImages.Values);
         };
         return frame;
+    }
+
+    /// <summary>A piece's picture was drawn (UI thread): every row on screen showing that piece gets it and loses the placeholder border.</summary>
+    void OnPictureReady(string id)
+    {
+        if (_closing) return;
+        foreach (var (img, pid) in _liveImages.ToList())
+        {
+            if (pid != id || _thumbs.Get(id, ImageSize, null) is not { } bmp) continue;
+            img.Source = bmp;
+            if (img.Parent is Border frame) frame.BorderThickness = new Thickness(0);
+        }
     }
 
     // ---------- tree behaviour ----------

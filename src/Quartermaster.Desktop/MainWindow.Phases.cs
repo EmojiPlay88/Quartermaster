@@ -218,7 +218,7 @@ public partial class MainWindow
         var shown = has && _phaseDock.Wanted && !_phaseDock.Floating;
         _viewPhases.IsEnabled = has;
         _viewPhases.IsChecked = has && (_phaseDock.Floating || _phaseDock.Wanted);
-        if (!shown && PhaseHost.IsVisible && PhaseCol.Width.Value >= 1) _phaseWidth = PhaseCol.Width.Value;   // keep what the user dragged it to
+        if (PhaseHost.IsVisible && PhaseCol.Width.Value >= 1) _phaseWidth = PhaseCol.Width.Value;   // keep what the user dragged it to (shown or hiding)
         PhaseHost.IsVisible = PhaseSplitter.IsVisible = shown;
         PhaseSplitCol.Width = new Avalonia.Controls.GridLength(shown ? 4 : 0);
         PhaseCol.Width = new Avalonia.Controls.GridLength(shown ? _phaseWidth : 0);

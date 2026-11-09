@@ -93,7 +93,7 @@ public partial class MainWindow
         var has = _outlinerPanel != null && _session?.Game != null;
         var shown = has && _outlinerState.Wanted && !_outlinerState.Floating;
         _viewOutliner.IsChecked = has && (_outlinerState.Floating || _outlinerState.Wanted);
-        if (!shown && OutlinerHost.IsVisible && OutlinerCol.Width.Value >= 1) _outlinerWidth = OutlinerCol.Width.Value;   // keep what the user dragged it to
+        if (OutlinerHost.IsVisible && OutlinerCol.Width.Value >= 1) _outlinerWidth = OutlinerCol.Width.Value;   // keep what the user dragged it to (shown or hiding)
         OutlinerHost.IsVisible = OutlinerSplitter.IsVisible = shown;
         OutlinerSplitCol.Width = new GridLength(shown ? 4 : 0);
         OutlinerCol.Width = new GridLength(shown ? _outlinerWidth : 0);

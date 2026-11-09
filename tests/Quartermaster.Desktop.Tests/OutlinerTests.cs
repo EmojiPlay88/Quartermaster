@@ -390,4 +390,132 @@ public sealed class OutlinerTests : IDisposable
         o.Toggle(0);
         Assert.Equal(1, o.VisibleRowCount);
     }
+    // ---------- final review fixes ----------
+
+    static ScrollViewer Scroller(OutlinerPanel o) =>
+        Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(o.RowList).OfType<ScrollViewer>().First();
+
+    /// <summary>80 more copies of Red 1, so the outliner list scrolls.</summary>
+    static void AddManyPieces(MainWindow w)
+    {
+        var s = w.Session!;
+        var g = s.Game!;
+        var src = g.State.Pieces[PhaseFixture.RedOne];
+        var state = src.TraitStates.All(x => x.Length == 0) ? "" : Quartermaster.Vassal.PieceTypeParser.EncodeState(src.TraitStates);
+        for (var i = 0; i < 80; i++)
+            g.State.Apply(new AddPiece("many" + i, src.TypeString, state, src.MapId, new Quartermaster.Vassal.PointD(src.Pos.X + i, src.Pos.Y), null));
+        s.SetViewSides(null);   // the view is read again
+        Pump();
+    }
+
+    [AvaloniaFact]
+    public void Outliner_keeps_scroll_position_across_reload()
+    {
+        var w = PhaseGame();
+        var g = w.Session!.Game!;
+        var src = g.State.Pieces[PhaseFixture.RedOne];
+        AddManyPieces(w);
+        ShowOutliner(w);
+        var o = w.Outliner!;
+        o.ExpandAll();
+        w.UpdateLayout();
+        Assert.True(o.VisibleRowCount > 60);
+        o.RowList.SelectedIndex = 1;   // a row near the top is selected (the selection is kept across the reload, too)
+        w.UpdateLayout();
+        var sv = Scroller(o);
+        Assert.True(sv.Extent.Height > sv.Viewport.Height + 300, "the list does not scroll");
+        sv.Offset = new Avalonia.Vector(0, 300);
+        w.UpdateLayout();
+        Assert.Equal(300, sv.Offset.Y);
+
+        // Moving a counter reloads the outliner through the alert hub: the list stays where the user scrolled it (WinForms keeps
+        // FirstDisplayedScrollingRowIndex).
+        g.Execute(new MovePieces(new[] { PhaseFixture.RedTwo }, src.MapId, new Quartermaster.Vassal.PointD(src.Pos.X + 5, src.Pos.Y + 5), null));
+        var reloads = o.ReloadCount;
+        w.FlushAlerts();
+        Pump();   // the alert hub's reload, and the list's deferred work after it
+        Assert.True(o.ReloadCount > reloads);
+        Assert.Equal(300, Scroller(o).Offset.Y);
+        o.Flush();
+        Pump();
+        w.UpdateLayout();
+        Assert.Equal(300, Scroller(o).Offset.Y);
+        Assert.Equal(1, o.RowList.SelectedIndex);
+    }
+
+    [AvaloniaFact]
+    public void Outliner_keyboard_moves_still_scroll()
+    {
+        var w = PhaseGame();
+        AddManyPieces(w);
+        ShowOutliner(w);
+        var o = w.Outliner!;
+        o.ExpandAll();
+        w.UpdateLayout();
+        o.RowList.SelectedIndex = 0;
+        w.UpdateLayout();
+        Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(o.RowList).OfType<ListBoxItem>().First().Focus();
+        for (var i = 0; i < 60; i++)
+        {
+            var f = (w.FocusManager?.GetFocusedElement() as Avalonia.Interactivity.Interactive) ?? o.RowList;
+            f.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Down, Source = f });
+            Pump();
+        }
+        w.UpdateLayout();
+        Assert.Equal(60, o.RowList.SelectedIndex);
+        Assert.True(Scroller(o).Offset.Y > 500, "the list did not follow the keyboard");   // no auto-scroll on selection, but arrows still bring rows into view
+    }
+
+    static ColumnDefinition ColOf(MainWindow w, Control host) => w.Body.ColumnDefinitions[Grid.GetColumn(host)];
+
+    [AvaloniaFact]
+    public void Dock_widths_kept_when_ui_updates()
+    {
+        var w = PhaseGame();
+        ShowOutliner(w);
+        Assert.True(w.OutlinerShown);
+        Assert.True(w.PhasePanelShown);
+        // The splitters were dragged: the columns have new widths.
+        ColOf(w, w.OutlinerHost).Width = new GridLength(333);
+        ColOf(w, w.PhaseHost).Width = new GridLength(277);
+        w.UpdateLayout();
+        // A rules change re-runs UpdateUi for both docks.
+        w.Session!.UpdateRules(p => p with { Name = p.Name + " 2" });
+        Pump();
+        w.UpdateLayout();
+        Assert.True(w.OutlinerShown);
+        Assert.True(w.PhasePanelShown);
+        Assert.Equal(333, ColOf(w, w.OutlinerHost).Width.Value);
+        Assert.Equal(277, ColOf(w, w.PhaseHost).Width.Value);
+        // Hidden and shown again: still the dragged widths.
+        ClickOutlinerMenu(w);
+        ClickOutlinerMenu(w);
+        Assert.Equal(333, ColOf(w, w.OutlinerHost).Width.Value);
+    }
+
+    [AvaloniaFact]
+    public void Picture_placeholder_border_goes_when_picture_arrives()
+    {
+        var w = PhaseGame();
+        ShowOutliner(w);
+        var o = w.Outliner!;
+        o.Thumbnails.Hold = true;   // nothing is drawn yet: the rows show the dotted placeholder
+        o.ExpandAll();
+        w.UpdateLayout();
+        var row = RowOf(o, "Red 1");
+        var frame = o.PictureFrameAt(row);
+        Assert.NotNull(frame);
+        Assert.Equal(new Avalonia.Thickness(1), frame!.BorderThickness);
+        o.Thumbnails.Hold = false;
+        var until = DateTime.UtcNow.AddSeconds(20);
+        while ((frame.Child as Image)?.Source == null && DateTime.UtcNow < until)
+        {
+            Pump();
+            using var slice = new CancellationTokenSource(10);
+            Dispatcher.UIThread.MainLoop(slice.Token);
+        }
+        Assert.NotNull((frame.Child as Image)?.Source);
+        Assert.Same(frame, o.PictureFrameAt(row));   // the same row control: the picture arrived through the ready callback
+        Assert.Equal(new Avalonia.Thickness(0), frame.BorderThickness);
+    }
 }
