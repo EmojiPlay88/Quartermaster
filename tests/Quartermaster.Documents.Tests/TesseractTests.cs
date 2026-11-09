@@ -78,4 +78,49 @@ public class TesseractTests
         var all = await Task.WhenAll(tasks);
         Assert.All(all, w => Assert.Contains(w, x => x.Text.Contains("Bravo")));
     }
+
+    [Theory]
+    [InlineData("1/2")]
+    [InlineData("(2)")]
+    public async Task Cells_with_real_symbols_keep_them(string text)
+    {
+        using var t = new TesseractRecognizer();
+        using var img = InventedTables.Line(text, 60f);
+        var cells = await new OcrReader(t).ReadCellsAsync(img, [new SKRect(0, 0, img.Width, img.Height)], 4, "eng", CancellationToken.None);
+        Assert.Equal(text, cells[0]?.Text.Trim());
+    }
+
+    [Fact]
+    public async Task Non_ascii_tessdata_path_works()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "qm-tessdé-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "tessdata", "eng.traineddata"), Path.Combine(dir, "eng.traineddata"));
+            using var t = new TesseractRecognizer(dir);
+            using var img = InventedTables.Line("Alpha Bravo Charlie");
+            var words = await new OcrReader(t).ReadAsync(img, null, "eng", CancellationToken.None);
+            Assert.Contains(words, w => w.Text.Contains("Bravo"));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task Language_matches_case_insensitively()
+    {
+        using var t = new TesseractRecognizer();
+        using var img = InventedTables.Line("Alpha Bravo Charlie");
+        var words = await t.RecognizeAsync(img, OcrLayout.Block, "ENG", CancellationToken.None);
+        Assert.Contains(words, w => w.Text.Contains("Bravo"));
+    }
+
+    [Fact]
+    public async Task Native_load_failure_becomes_unavailable()
+    {
+        using var t = new TesseractRecognizer(null, () => throw new DllNotFoundException("libtesseract missing"));
+        using var img = InventedTables.Line("Hello");
+        var ex = await Assert.ThrowsAsync<OcrUnavailableException>(() => t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None));
+        Assert.Equal("OCR could not be started on this computer: libtesseract missing", ex.Message);
+    }
 }

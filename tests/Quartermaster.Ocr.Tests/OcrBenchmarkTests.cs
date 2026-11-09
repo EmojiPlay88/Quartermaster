@@ -72,8 +72,6 @@ public class OcrBenchmarkTests(ITestOutputHelper output)
         var win = new OcrService();
         using var tess = new TesseractRecognizer();
         var reader = new OcrReader(tess);
-        // Warm up both engines so the first load is not counted.
-        using (var warm = new Bitmap(120, 60)) { using var g = Graphics.FromImage(warm); g.Clear(Color.White); }
         foreach (var (name, bordered, factor) in new[] { ("bordered, 200 DPI", true, 1.0), ("unbordered, 200 DPI", false, 1.0), ("bordered, half size", true, 0.5), ("unbordered, half size", false, 0.5) })
         {
             var (full, expected) = OcrServiceTests.InventedTable(bordered);

@@ -60,6 +60,10 @@ internal static unsafe partial class TessApi
     internal static partial int TessBaseAPIInit3(IntPtr api, string datapath, string language);
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int TessBaseAPISetVariable(IntPtr api, string name, string value);
+    // Init5 loads the language data from memory, so the data folder path never reaches Tesseract's narrow fopen.
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int TessBaseAPIInit5(IntPtr api, byte* data, int dataSize, string language, int oem, IntPtr configs, int configsSize,
+        IntPtr varsVec, IntPtr varsValues, nuint varsVecSize, int setOnlyNonDebugParams);
     [LibraryImport(Lib)] internal static partial void TessBaseAPISetPageSegMode(IntPtr api, int mode);
     [LibraryImport(Lib)] internal static partial void TessBaseAPISetImage(IntPtr api, byte* data, int width, int height, int bytesPerPixel, int bytesPerLine);
     [LibraryImport(Lib)] internal static partial void TessBaseAPIClear(IntPtr api);

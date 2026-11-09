@@ -5,16 +5,27 @@ using SkiaSharp;
 
 namespace Quartermaster.Documents;
 
-/// <summary>Tesseract OCR over the bundled tessdata folder. One engine per language, calls serialized; never downloads.</summary>
+/// <summary>
+/// Tesseract OCR over the bundled tessdata folder. One engine per language, calls serialized; never downloads.
+/// Table-cell reads (single line) that end or start in a dangling slash or bar after a digit, such as "6/" for 67 (Tesseract
+/// misreads a 7 that way), are read once more restricted to number characters, and that reading is used if it is not shorter.
+/// Readings with a symbol that has a meaning ("1/2", "(2)", "5*") are never re-read. An interior slash that is a misread 7
+/// ("3/7" for 37) cannot be told from a fraction, so it is left alone.
+/// </summary>
 public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
 {
     private readonly string _path;
     private readonly object _gate = new();
     private readonly Dictionary<string, TessApiHandle> _engines = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<TessApiHandle> _create;
     private bool _disposed;
 
-    public TesseractRecognizer(string? tessdataPath = null)
+    public TesseractRecognizer(string? tessdataPath = null) : this(tessdataPath, TessApiHandle.Create) { }
+
+    /// <summary>Test seam: <paramref name="create"/> makes the native engine (a failing one simulates a missing library).</summary>
+    internal TesseractRecognizer(string? tessdataPath, Func<TessApiHandle> create)
     {
+        _create = create;
         _path = tessdataPath ?? Path.Combine(AppContext.BaseDirectory, "tessdata");
         Languages = Directory.Exists(_path)
             ? Directory.GetFiles(_path, "*.traineddata").Select(f => Path.GetFileNameWithoutExtension(f)).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray()
@@ -33,8 +44,9 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
         ArgumentNullException.ThrowIfNull(gray);
         ct.ThrowIfCancellationRequested();
         if (Languages.Count == 0) throw new OcrUnavailableException(UnavailableMessage);
-        if (!Languages.Contains(language, StringComparer.OrdinalIgnoreCase))
-            throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
+        var canonical = Languages.FirstOrDefault(l => string.Equals(l, language, StringComparison.OrdinalIgnoreCase))
+            ?? throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
+        language = canonical;
         int w = gray.Width, h = gray.Height;
         var pixels = ToGray8(gray); // copied now; the caller's bitmap is not kept
         int psm = layout == OcrLayout.SingleLine ? TessApi.PsmSingleLine : TessApi.PsmSingleBlock;
@@ -50,19 +62,34 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
         }, ct);
     }
 
-    private TessApiHandle Engine(string language)
+    private unsafe TessApiHandle Engine(string language)
     {
         if (_engines.TryGetValue(language, out var e)) return e;
-        var api = TessApiHandle.Create();
+        TessApiHandle api;
+        try { api = _create(); }
+        catch (Exception ex) when (IsLoadFailure(ex)) { throw NotStarted(ex); }
         try
         {
             if (api.IsInvalid) throw new OcrUnavailableException(UnavailableMessage);
-            if (TessApi.TessBaseAPIInit3(api.DangerousGetHandle(), _path, language) != 0)
-                throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
+            var data = File.ReadAllBytes(Path.Combine(_path, language + ".traineddata"));
+            int rc;
+            try
+            {
+                fixed (byte* d = data)
+                    rc = TessApi.TessBaseAPIInit5(api.DangerousGetHandle(), d, data.Length, language, 3, IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero, 0, 0);
+            }
+            catch (Exception ex) when (IsLoadFailure(ex)) { throw NotStarted(ex); }
+            if (rc != 0) throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
         }
         catch { api.Dispose(); throw; }
         return _engines[language] = api;
     }
+
+    private static bool IsLoadFailure(Exception ex) =>
+        ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or TypeInitializationException;
+
+    private static OcrUnavailableException NotStarted(Exception ex) =>
+        new($"OCR could not be started on this computer: {(ex.InnerException ?? ex).Message}");
 
     private static unsafe IReadOnlyList<OcrWord> Run(TessApiHandle api, byte[] pixels, int w, int h, int psm)
     {
@@ -73,16 +100,16 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
         {
             if (TessApi.TessBaseAPIRecognize(a, IntPtr.Zero) != 0) return [];
             var words = Words(a);
-            if (psm == TessApi.PsmSingleLine && LooksNumeric(words))
+            if (psm == TessApi.PsmSingleLine && HasDanglingSlash(words))
             {
-                // A short numeric cell: re-read restricted to number characters (Tesseract reads a 7 as "/" otherwise).
+                // A dangling slash ("6/" for 67): re-read restricted to number characters.
                 TessApi.TessBaseAPISetVariable(a, "tessedit_char_whitelist", NumberChars);
                 try
                 {
                     if (TessApi.TessBaseAPIRecognize(a, IntPtr.Zero) == 0)
                     {
                         var again = Words(a);
-                        if (again.Count > 0) return again;
+                        if (again.Count > 0 && Length(again) >= Length(words)) return again;
                     }
                 }
                 finally { TessApi.TessBaseAPISetVariable(a, "tessedit_char_whitelist", ""); }
@@ -93,19 +120,11 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
     }
 
     private const string NumberChars = "0123456789.,-+%:";
+    private static int Length(IReadOnlyList<OcrWord> words) => words.Sum(w => w.Text.Length);
 
-    /// <summary>True when the reading has a digit and no letters other than the usual digit look-alikes (I, l, O, o).</summary>
-    private static bool LooksNumeric(IReadOnlyList<OcrWord> words)
-    {
-        bool digit = false;
-        foreach (var w in words)
-            foreach (char c in w.Text)
-            {
-                if (char.IsAsciiDigit(c)) digit = true;
-                else if (char.IsAsciiLetter(c) && "IlOo".IndexOf(c) < 0) return false;
-            }
-        return digit;
-    }
+    /// <summary>True when a word has a digit and starts or ends with a slash or bar.</summary>
+    private static bool HasDanglingSlash(IReadOnlyList<OcrWord> words) =>
+        words.Any(w => w.Text.Length > 1 && w.Text.Any(char.IsAsciiDigit) && ("/|\\".Contains(w.Text[^1]) || "/|\\".Contains(w.Text[0])));
 
     private static IReadOnlyList<OcrWord> Words(IntPtr a)
     {
