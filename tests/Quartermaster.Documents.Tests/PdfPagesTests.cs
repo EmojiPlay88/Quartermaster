@@ -151,15 +151,19 @@ public sealed class PdfPagesTests : IDisposable
     {
         using var a = PdfPages.Open(ThreePages());
         using var b = PdfPages.Open(ThreePages());
-        // A long queue of big renders for B keeps the shared worker busy.
-        var slow = Enumerable.Range(0, 12).Select(_ => b.RenderAsync(1, 600, CancellationToken.None)).ToArray();
+        // A queue of renders for B keeps the shared worker busy. Each bitmap is disposed as soon as it completes,
+        // so only a few are alive at once (300 dpi, not 600: the queue length, not the size, is what matters).
+        var slow = Enumerable.Range(0, 8).Select(async _ =>
+        {
+            (await b.RenderAsync(1, 300, CancellationToken.None)).Dispose();
+        }).ToArray();
         var queuedForA = a.RenderAsync(1, 72, CancellationToken.None);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         a.Dispose();
         sw.Stop();
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1), $"Dispose(A) waited {sw.Elapsed}");
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queuedForA);
-        foreach (var t in slow) (await t).Dispose();
+        await Task.WhenAll(slow);
     }
 
     [Fact]

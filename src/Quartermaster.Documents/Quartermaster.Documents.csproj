@@ -10,7 +10,15 @@
     <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
     <!-- PDFtoImage pulls the NoDependencies Linux native at 4.150.1; pin it to 4.154.0 so only one SkiaSharp version ships. -->
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" ExcludeAssets="native" />
+    <!-- Tesseract + Leptonica natives only (jbtule/tesseract-nuget-platforms); our own P/Invoke layer is Tesseract/TessApi.cs. -->
+    <PackageReference Include="Tesseract.Native.runtime.win-x64" Version="5.5.2.200" />
+    <PackageReference Include="Tesseract.Native.runtime.linux-x64" Version="5.5.2.200" />
+    <PackageReference Include="Tesseract.Native.runtime.osx-arm64" Version="5.5.2.200" />
     <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.649" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="tessdata\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" LinkBase="tessdata" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,6 +29,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
 </Project>

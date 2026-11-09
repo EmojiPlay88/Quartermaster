@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quartermaster.Ocr\Quartermaster.Ocr.csproj" />
+    <ProjectReference Include="..\..\src\Quartermaster.Documents\Quartermaster.Documents.csproj" />
   </ItemGroup>
 
 </Project>
