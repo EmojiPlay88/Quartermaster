@@ -67,13 +67,11 @@ Stage 2b = phase strip and panel, Next Phase, Step Back, formula window and chea
 
 ## Stage-3a deviations from the WinForms app (deliberate or known)
 
-Stage 3a = Ledger window (tabs, counter pictures, editing, CSV), Edit Ledger tabs, Show in Ledger, holder alerts opening the Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures in the batch grid. The row logic is shared in Quartermaster.Render (`LedgerViewRules`, `LedgerJump`, `OutlinerRules`, `InventoryRules`, `DiagnosticsView`, `MapExportFlow`, `PreviewPlacement`). Not done in 3a and left for 3b: PDF rulebook viewer, charts, rulebook search, scans and OCR, Rule ref buttons (still disabled).
+Stage 3a = Ledger window (tabs, counter pictures, editing, CSV), Edit Ledger tabs, Show in Ledger, holder alerts opening the Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures in the batch grid. The row logic is shared in Quartermaster.Render (`LedgerViewRules`, `LedgerJump`, `OutlinerViewRules`, `InventoryRules`, `DiagnosticsView`, `MapExportFlow`, `PreviewPlacement`). Not done in 3a and left for 3b: PDF rulebook viewer, charts, rulebook search, scans and OCR, Rule ref buttons (still disabled).
 
 - The Overview is always a floating owned window (WinForms can dock it as an MDI document under "doc:overview"); document-tab docking is not ported (see 2b: Desktop uses tabs).
 - The Ledger's CSV save dialog has a single filter ("CSV files (*.csv)") and the title "Save As" (WinForms: the SaveFileDialog default title; `IDialogs.SaveFileAsync` takes one filter, as the log export).
 - Grouping and visibility of the Outliner are not kept between runs until the Settings dialog (stage 4), as the dock state of the other panels; its floating bounds are kept per module under "outliner".
-- Known: F2, typing, or double-click on a Name or Kind cell of the Ledger starts editing the first value column (WinForms does nothing there); on a value cell the behaviour is the WinForms one.
-- Double-clicking a unit row's Name or Kind cell centres the piece on its map as well as the counter picture (WinForms: the picture only).
 - The Ledger's Export CSV picker and the Save map as picture file picker are the Avalonia storage dialogs (async), not the Windows common dialogs.
 - The Ledger, Inventory, Notes, Diagnostics and Overview windows are Avalonia windows owned by the main window, one of each per module; their placement is the platform's (centred on the owner) unless bounds were remembered under "doc:ledger", "doc:inventory", "doc:notes", "diag", "doc:overview". They are not MDI children. While a Desktop modal dialog is open they still accept input (as in 2b).
 - The counter preview text uses a fixed 12-px font instead of the WinForms status font, so its width can differ by a few pixels.

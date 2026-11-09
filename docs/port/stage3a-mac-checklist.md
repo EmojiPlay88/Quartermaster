@@ -85,15 +85,15 @@ The app is not signed, so macOS blocks it the first time (again, because this is
 
 30. **Tools > Inventory** (or the toolbar button). A window with **Group by**, a second drop-down, **Filter**, and a list with Group, Count, Total. Choose different groupings, type in the Filter. Hover a Total: a tip. Double-click a line: it steps the map through the pieces of that group.
 31. **Tools > Notes**. A plain text box. Type a few lines, wait a second, close the window, and open it again: the text is still there. Save the game (Cmd+S), quit, reopen the save and open Notes: the text comes back.
-32. **View > Diagnostics** (shortcut shown as "⌘D") or press **Cmd+D**. A window with Severity, Category, Message, Context, a **Show** drop-down and **Copy all**. It may be empty after a clean start. If the status bar at the bottom shows "n warning(s) - click here to view diagnostics", click it and the window opens; paste the text of **Copy all** into your notes.
+32. **View > Diagnostics** (shortcut shown as "⌘D") or press **Cmd+D**. A window with Severity, Category, Message, Context, a **Show** drop-down and **Copy all**. It may be empty after a clean start. If the status bar at the bottom shows "n warning(s)/error(s) - click here to view diagnostics", click it and the window opens; paste the text of **Copy all** into your notes.
 33. Press Cmd+D with the window open: it comes to the front, no second window.
 
 ## J. Overview and Save map as picture
 
 34. **View > Overview** (or the toolbar button). A small window (about 260 by 240) opens near the right edge of the main window. It shows the whole map small with a red rectangle where the main view is. **Click** somewhere on it: the main map centres there and the red rectangle follows. **Drag** inside the overview: the map follows continuously. Zoom or pan the main map: the rectangle follows. (In this build the Overview is always a separate window; it cannot dock into the tabs.)
 35. Move the Overview to the second display, close it, open it again: it reopens in the same place.
-36. On the map toolbar click **Save map as picture...** (or right-click an empty part of the map and pick it). A box titled with the map name offers **Current view** and **Whole map at 25% / 50% / 100%**. Choose **Whole map at 50%**, click **OK**, and in the save box pick the **Desktop**, keep the name, save.
-37. A progress box appears (it may be too quick to notice at 50%). Try again with **100%** and click **Cancel** on the progress box while it works: no error appears and no half-written picture is left.
+36. On the map toolbar click **Save map as picture...** (or right-click an empty part of the map and pick it). A box titled "Save map as picture" shows the map name on a line inside and offers **Current view** and **Whole map at** with a zoom drop-down beside it (25% / 50% / 100%). Choose **Whole map at** with **50%** in the drop-down, click **OK**, and in the save box pick the **Desktop**, keep the name, save.
+37. A progress box appears (it may be too quick to notice at 50%). Try again with **100%** and click **Cancel** on the progress box while it works: no error appears and no half-written picture is left. If it finishes before you can click Cancel, skip this check.
 38. On the Desktop double-click the saved PNG: it opens in **Preview**. Is the whole map there, sharp, with the counters on it? Do the same for **Current view**: it should look like what is on screen.
 
 ## K. Counter pictures in the batch grid
@@ -102,7 +102,7 @@ The app is not signed, so macOS blocks it the first time (again, because this is
 
 ## L. Things from earlier stages that must still work
 
-40. Phase strip and Next Phase (Cmd+Right), Step Back (Cmd+Left), formula window (right-click a counter > Calculate), hover popup with breakdown tip, alert chips (click **Low fuel**: it selects a counter; any alert that names a depot or Global opens the Ledger on that row), Save Game As (Cmd+Shift+S), dice (F5 / F6), pop-out log and phase panel. Keep the Ledger and the Outliner open while doing these and check nothing looks stale.
+40. Phase strip and Next Phase (Cmd+Right), Step Back (Cmd+Left), formula window (right-click a counter > Calculate), hover popup with breakdown tip, alert chips (click **Low fuel**: it selects a counter; any alert that names a depot or Global opens the Ledger on that row; Riverland may have no depot or Global alert, so this path may not be testable there: note it and move on), Save Game As (Cmd+Shift+S), dice (F5 / F6), pop-out log and phase panel. Keep the Ledger and the Outliner open while doing these and check nothing looks stale.
 
 ## M. Graphics
 
