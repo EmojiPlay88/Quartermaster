@@ -78,6 +78,10 @@ public interface IDialogs
     /// <summary>The Ledger tab editor (WinForms EditTabsDialog) opened at user tab <paramref name="select"/>, or with a fresh tab added and
     /// selected when <paramref name="addNew"/> (the "+" tab); the edited list, or null when cancelled.</summary>
     Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false);
+
+    /// <summary>Opens a local file (an extracted HTML document) in the system browser through <paramref name="owner"/>'s launcher (the
+    /// main window's when null). Returns at once; a failed launch is only traced.</summary>
+    void OpenInBrowser(TopLevel? owner, string path);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -171,6 +175,26 @@ public sealed class Dialogs : IDialogs
 
     public Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false) =>
         new Ledgers.EditTabsDialog(tabs, pack, select, addNew).ShowDialog<IReadOnlyList<UserLedgerTab>?>(owner);
+
+    public void OpenInBrowser(TopLevel? owner, string path)
+    {
+        var top = owner ?? (Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (top == null) return;
+        _ = LaunchAsync(top, path);
+    }
+
+    /// <summary>Never faults: nobody awaits it.</summary>
+    static async Task LaunchAsync(TopLevel top, string path)
+    {
+        try
+        {
+            if (!await top.Launcher.LaunchFileInfoAsync(new FileInfo(path))) System.Diagnostics.Trace.WriteLine("browser did not open " + path);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            System.Diagnostics.Trace.WriteLine("browser launch failed: " + ex.Message);
+        }
+    }
 }
 
 /// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>

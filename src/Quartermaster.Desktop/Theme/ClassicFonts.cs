@@ -7,6 +7,11 @@ public static class ClassicFonts
 {
     public const double SizePx = 11.0;
 
+    /// <summary>The monospace face (WinForms Consolas 9pt = 12px) with look-alikes on other OSes.</summary>
+    public const string Mono = "Consolas, Lucida Console, Menlo, DejaVu Sans Mono, monospace";
+
+    public const double MonoSizePx = 12.0;
+
     public static string FamilyFor(OSPlatform os) =>
         os == OSPlatform.Windows ? "Tahoma"
         : os == OSPlatform.OSX ? "Tahoma, Verdana, sans-serif"

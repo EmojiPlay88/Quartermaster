@@ -19,6 +19,11 @@ namespace Quartermaster.Desktop.Tests;
 /// <summary>Records every dialog the window asks for and answers from queues; no real window, picker or message box is ever shown.</summary>
 sealed class FakeDialogs : IDialogs
 {
+    /// <summary>Files handed to the browser (HTML documents).</summary>
+    public readonly List<string> Browsed = new();
+
+    public void OpenInBrowser(TopLevel? owner, string path) => Browsed.Add(path);
+
     public readonly Queue<string?> OpenFiles = new();
     public readonly Queue<string?> SaveFiles = new();
     public readonly List<(string Message, string Caption)> Questions = new();

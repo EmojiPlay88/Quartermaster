@@ -107,5 +107,6 @@ static class Program
         public Task<ExportChoice?> AskExportChoiceAsync(Avalonia.Controls.Window owner, string mapName) => Task.FromResult<ExportChoice?>(null);
         public Task<IReadOnlyList<Quartermaster.Core.UserLedgerTab>?> EditLedgerTabsAsync(Avalonia.Controls.Window owner, IReadOnlyList<Quartermaster.Core.UserLedgerTab> tabs,
             Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false) => Task.FromResult<IReadOnlyList<Quartermaster.Core.UserLedgerTab>?>(null);
+        public void OpenInBrowser(Avalonia.Controls.TopLevel? owner, string path) { }
     }
 }
