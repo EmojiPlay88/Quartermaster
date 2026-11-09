@@ -114,6 +114,16 @@ sealed class FakeDialogs : IDialogs
         TurnPrompts.Add(current);
         return Task.FromResult(Turn);
     }
+
+    /// <summary>Missing-input dialogs asked (formula names) and what the next one answers (default Cancel).</summary>
+    public readonly List<string> MissingAsked = new();
+    public readonly Queue<MissingInputResult> Missing = new();
+
+    public Task<MissingInputResult> AskMissingAsync(Window owner, ModuleSession s, IActionPort port, PendingRun run)
+    {
+        MissingAsked.Add(run.FormulaName);
+        return Task.FromResult(Missing.Count > 0 ? Missing.Dequeue() : MissingInputResult.Cancel);
+    }
 }
 
 /// <summary>Task 7: the main window shell, headless, with fake dialogs (menus, map tabs, palette, open/save, unsaved prompt, command line).</summary>

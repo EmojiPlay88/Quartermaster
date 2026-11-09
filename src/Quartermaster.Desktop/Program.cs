@@ -98,5 +98,6 @@ static class Program
         public Task<SetupChoice?> ChooseSetupAsync(Avalonia.Controls.Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty) => Task.FromResult<SetupChoice?>(null);
         public Task<DiceChoice?> AskDiceAsync(Avalonia.Controls.Window owner, string title, bool multi) => Task.FromResult<DiceChoice?>(null);
         public Task<TurnChoice?> AskTurnAsync(Avalonia.Controls.Window owner, TurnState current) => Task.FromResult<TurnChoice?>(null);
+        public Task<Quartermaster.Render.MissingInputResult> AskMissingAsync(Avalonia.Controls.Window owner, Quartermaster.Render.ModuleSession s, Quartermaster.Render.IActionPort port, Quartermaster.Core.PendingRun run) => Task.FromResult(Quartermaster.Render.MissingInputResult.Cancel);
     }
 }

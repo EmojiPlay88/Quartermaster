@@ -166,7 +166,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
 | FormulaDialog, FormulaFormView, CheatSheetWindow | 2b | ✔ |  |  | non-modal window owned by the main window, one per formula, unit and run; Calculate in Hardcore and Semi-auto, cheat sheet beside it in Semi-auto; online guests ask the host; closes when its run or unit is gone; Rule ref shown disabled (rulebook viewer, stage 3); the window rules are shared in Render FormulaWindowRules |
-| BatchGridWindow, MissingInputDialog | 2b |  |  |  |  |
+| BatchGridWindow, MissingInputDialog | 2b | ✔ |  |  | batch grid is a non-modal window per run (virtualised rows, choice columns are editable dropdowns, Calculate all / Apply all / Apply row, cheat sheet docked in Semi-auto, Ledger breakdown tip); no counter pictures in the Unit cell yet; opened by the phase wiring (task 6); OK in the missing-input dialog also checks Min/Max |
 | DiceTools, DiceDialog, TurnDialog | 2a | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
 | LogPanel, LogDock, LogFloatForm, ChatBox | 2a | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / Dock moves it to a floating window (bounds remembered per module); the chat line shows only online (stage 5) |
 | OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 |  |  |  |  |
