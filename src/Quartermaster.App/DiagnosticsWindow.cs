@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
+using Quartermaster.Render;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.App;
@@ -28,7 +29,7 @@ sealed class DiagnosticsWindow : Form
         _list.Columns.Add("Message", 520);
         _list.Columns.Add("Context", 160);
 
-        _filter.Items.AddRange(new object[] { "All", "Warnings and errors", "Errors only" });
+        _filter.Items.AddRange(DiagnosticsView.FilterNames.Cast<object>().ToArray());
         _filter.SelectedIndex = 0;
         var copy = new ToolStripButton("Copy all") { DisplayStyle = ToolStripItemDisplayStyle.Text };
         var bar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System };
@@ -48,7 +49,7 @@ sealed class DiagnosticsWindow : Form
         Repopulate();
     }
 
-    int MinSeverity => _filter.SelectedIndex switch { 1 => (int)DiagnosticSeverity.Warning, 2 => (int)DiagnosticSeverity.Error, _ => 0 };
+    DiagnosticsFilter Filter => DiagnosticsView.FilterFor(_filter.SelectedIndex);
 
     // Runs on whichever thread logged; must never throw back into the logger.
     void OnAdded(Diagnostic d)
@@ -83,7 +84,7 @@ sealed class DiagnosticsWindow : Form
 
     void AddRow(Diagnostic d)
     {
-        if ((int)d.Severity < MinSeverity) return;
+        if (!DiagnosticsView.Passes(d, Filter)) return;
         _list.Items.Add(new ListViewItem(new[] { d.Severity.ToString(), d.Category, d.Message, d.Context ?? "" }));
     }
 
@@ -101,10 +102,9 @@ sealed class DiagnosticsWindow : Form
 
     void CopyAll()
     {
-        var sb = new StringBuilder();
-        foreach (ListViewItem it in _list.Items)
-            sb.AppendLine(string.Join('\t', it.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(s => s.Text)));
-        try { Clipboard.SetText(sb.Length == 0 ? " " : sb.ToString()); }
+        var shown = new List<Diagnostic>();
+        foreach (var d in _log.Items) if (DiagnosticsView.Passes(d, Filter)) shown.Add(d);
+        try { Clipboard.SetText(DiagnosticsView.CopyText(shown)); }
         catch (ExternalException) { /* clipboard busy */ }
     }
 

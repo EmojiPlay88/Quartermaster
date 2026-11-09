@@ -87,8 +87,8 @@ sealed class OverviewWindow : Form
     (double Scale, double X, double Y, RectD Extent) Fit(int w, int h)
     {
         var e = _target != null ? FitView.Extent(_target.Map) : new RectD(0, 0, 1, 1);
-        var s = Math.Min(Math.Max(w - 8, 1) / e.W, Math.Max(h - 8, 1) / e.H);
-        return (s, (w - e.W * s) / 2, (h - e.H * s) / 2, e);
+        var f = OverviewGeometry.Fit(e, new SizeD(w, h));
+        return (f.Scale, f.OffsetX, f.OffsetY, e);
     }
 
     // ---------- painting ----------
@@ -125,7 +125,7 @@ sealed class OverviewWindow : Form
                 c.DrawRect(ToScreen(ox, oy, ox + b.Width, oy + b.Height), blank);
                 continue;
             }
-            var level = ts.Levels; // coarsest level: at most 1024 px on its long side
+            var level = OverviewGeometry.TileLevel(ts); // coarsest level: at most 1024 px on its long side
             var sx = ts.Width / (double)ts.LevelWidth(level);
             var sy = ts.Height / (double)ts.LevelHeight(level);
             for (var ty = 0; ty < ts.TilesY(level); ty++)
@@ -185,8 +185,8 @@ sealed class OverviewWindow : Form
             if (_target == null) return;
             var (s, fx, fy, ext) = Fit(_view.Width, _view.Height);
             if (s <= 0) return;
-            var p = new PointD(ext.X + (at.X - fx) / s, ext.Y + (at.Y - fy) / s);
-            _target.Canvas.CentreOn(new PointD(Math.Clamp(p.X, ext.X, ext.X + ext.W), Math.Clamp(p.Y, ext.Y, ext.Y + ext.H)));
+            var fit = new OverviewFit(s, fx, fy, ext.X, ext.Y);
+            _target.Canvas.CentreOn(OverviewGeometry.ToMap(new PointD(at.X, at.Y), fit, new SizeD(ext.W, ext.H)));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
