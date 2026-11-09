@@ -111,7 +111,7 @@ public partial class MainWindow : Window
     public HistoryController? History => _history;
 
     /// <summary>The phase controller of the open module (WinForms MainForm.Phases); null without one.</summary>
-    public PhaseController? Phases => _phases;
+    public PhaseController? PhaseControl => _phases;
 
     /// <summary>Command ids (CommandDefaults) with their shortcuts and handlers; the window's KeyDown goes through it.</summary>
     public CommandRouter Commands => _router;

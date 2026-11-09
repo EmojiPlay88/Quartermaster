@@ -201,13 +201,13 @@ public sealed class FormulaWindow : Window
     void OnViewChanged() => OnUi(() =>
     {
         if (_s.ViewSides != null && !_s.CanAct(_pieceId)) { Close(); return; }
-        if (FormulaWindowRules.ShouldClose(_s, _host.Phases, _pieceId, _link?.RunId)) Close();
+        if (FormulaWindowRules.ShouldClose(_s, _host.PhaseControl, _pieceId, _link?.RunId)) Close();
     });
 
     void CheckPieceThenRefresh()
     {
         // A cleared run (phase change, step back) or a replaced game closes the window: applying now would write into the wrong place.
-        if (FormulaWindowRules.ShouldClose(_s, _host.Phases, _pieceId, _link?.RunId)) { Close(); return; }
+        if (FormulaWindowRules.ShouldClose(_s, _host.PhaseControl, _pieceId, _link?.RunId)) { Close(); return; }
         _debounce.Stop();
         _debounce.Start();
     }
