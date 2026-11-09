@@ -23,6 +23,13 @@ public sealed class MapMenuServices
 
     /// <summary>Opens the formula window for (formula id, piece id): the counter menu's Calculate entries. Null = they open nothing.</summary>
     public Action<string, string>? ShowFormula { get; init; }
+
+    /// <summary>Show in Ledger for the counters (WinForms MainForm.ShowInLedger through MapWindow.Host). Null = the counter menu leaves the
+    /// entry out (as a WinForms map window without a main window).</summary>
+    public Action<IReadOnlyList<string>>? ShowInLedger { get; init; }
+
+    /// <summary>"Save map as picture…" for a view (WinForms MapWindow.SaveAsPictureAsync, run inside the view's error guard). Null = the entry and the toolbar button do nothing.</summary>
+    public Func<MapView, Task>? SaveAsPicture { get; init; }
 }
 
 /// <summary>
@@ -52,8 +59,8 @@ public static class MapContextMenu
         return menu.Items.Count > 0 ? menu : null;
     }
 
-    /// <summary>The dialogs the shared counter menu opens from this view. No Ledger in the Avalonia app yet: "Show in Ledger" is left out (as
-    /// a WinForms map window without a main window). Calculate entries open the formula window through the services.</summary>
+    /// <summary>The dialogs the shared counter menu opens from this view. Calculate entries open the formula window and "Show in Ledger" the
+    /// Ledger through the services (left out without them, as a WinForms map window without a main window).</summary>
     static PieceMenuHooks Hooks(MapView view)
     {
         var services = view.MenuServices;
@@ -69,6 +76,7 @@ public static class MapContextMenu
                 : Task.FromResult(false),
             EditSheet = (action, pieceId) => view.RunMenuCommand(() => EditSheetAsync(view, action, pieceId)),
             ShowFormula = services?.ShowFormula,
+            ShowInLedger = services?.ShowInLedger,
         };
     }
 
@@ -98,7 +106,7 @@ public static class MapContextMenu
         }
     }
 
-    /// <summary>WinForms MapWindow.BuildMapMenu. "Save map as picture…" comes with stage 3.</summary>
+    /// <summary>WinForms MapWindow.BuildMapMenu.</summary>
     static void AddMapItems(ItemCollection items, MapView view, GameSession game)
     {
         MenuItem Item(string label, Action click)
@@ -126,6 +134,13 @@ public static class MapContextMenu
         hide.ToggleType = MenuItemToggleType.CheckBox;
         hide.IsChecked = view.HideCounters;
         Item("Centre on selected", view.CentreOnSelection);
+        Item("Save map as picture…", () => SaveAsPicture(view));
+    }
+
+    /// <summary>The map toolbar button and the empty-map entry.</summary>
+    internal static void SaveAsPicture(MapView view)
+    {
+        if (view.MenuServices?.SaveAsPicture is { } save) view.RunMenuCommand(() => save(view));
     }
 
     /// <summary>WinForms MapWindow.EditSheet: the property sheet dialog, then one SetTraitState through the action port.</summary>

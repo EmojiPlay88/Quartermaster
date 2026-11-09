@@ -19,12 +19,14 @@ public sealed class MapToolbar : Border
     public const string HideTip = "Show only the board (H)";
     public const string CentreTip = "Scroll to the selected counters";
     public const string ZoomTip = "Zoom presets";
+    public const string SaveTip = "Save the view or the whole map as a PNG";
 
     readonly ToggleButton _los = Toggle("Line of sight", LosTip);
     readonly ToggleButton _last = Toggle("Last moved", LastMovedTip);
     readonly ToggleButton _hide = Toggle("Hide counters", HideTip);
     readonly Button _centre = Plain("Centre on selected", CentreTip);
     readonly Button _zoom;
+    readonly Button _save = Plain("Save map as picture…", SaveTip);
     readonly List<MenuItem> _zoomItems = new();
     readonly MapView _view;
     bool _syncing;
@@ -46,9 +48,10 @@ public sealed class MapToolbar : Border
         _last.IsCheckedChanged += (_, _) => { if (!_syncing) _view.HighlightLastMoved = _last.IsChecked == true; };
         _hide.IsCheckedChanged += (_, _) => { if (!_syncing) _view.HideCounters = _hide.IsChecked == true; };
         _centre.Click += (_, _) => _view.CentreOnSelection();
+        _save.Click += (_, _) => MapContextMenu.SaveAsPicture(_view);
 
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0 };
-        foreach (var c in new Control[] { _los, _last, _hide, _centre, _zoom }) bar.Children.Add(c);
+        foreach (var c in new Control[] { _los, _last, _hide, _centre, _zoom, _save }) bar.Children.Add(c);
         _view.LosChanged += Sync;
         _view.HideCountersChanged += SyncHide;
         Child = bar;
@@ -65,6 +68,7 @@ public sealed class MapToolbar : Border
     internal ToggleButton HideButton => _hide;
     internal Button CentreButton => _centre;
     internal Button ZoomButton => _zoom;
+    internal Button SaveButton => _save;
     internal IReadOnlyList<MenuItem> ZoomItems => _zoomItems;
 
     void SyncHide(bool _) => Sync();

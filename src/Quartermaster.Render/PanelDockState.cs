@@ -53,5 +53,6 @@ public sealed class PanelDockState(string key, Func<RectangleI> defaultFloat)
         => _bounds is not { } b ? null : new SavedWindow(_floating, new System.Drawing.Rectangle(b.X, b.Y, b.W, b.H), _maximized, _dpi);
 
     public static RectangleI PhasesDefault(RectangleI main) => new(main.X + main.W - 340, main.Y + 120, 320, 520);
+    public static RectangleI OutlinerDefault(RectangleI main) => new(main.X + main.W - 460, main.Y + 100, 440, 520);
     public static RectangleI LogDefault(RectangleI main) => new(main.X + 40, main.Y + main.H - 320, Math.Max(480, main.W - 80), 260);
 }

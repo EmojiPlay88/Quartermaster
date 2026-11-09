@@ -339,31 +339,7 @@ sealed partial class LedgerWindow : Form
         foreach (DataGridViewColumn c in _grid.Columns) c.HeaderCell.SortGlyphDirection = SortOrder.None;
         if (_sortCol < 0 || _sortCol >= _grid.Columns.Count) return;
         _grid.Columns[_sortCol].HeaderCell.SortGlyphDirection = _sortAsc ? SortOrder.Ascending : SortOrder.Descending;
-        var output = new List<LedgerRowEx>(_rows.Count);
-        var segment = new List<LedgerRowEx>();
-        void Flush() { output.AddRange(SortSegment(segment)); segment.Clear(); }
-        foreach (var r in _rows)
-        {
-            if (r.IsGroupHeader) { Flush(); output.Add(r); }
-            else segment.Add(r);
-        }
-        Flush();
-        _rows = output;
-    }
-
-    List<LedgerRowEx> SortSegment(List<LedgerRowEx> rows)
-    {
-        var sign = _sortAsc ? 1 : -1;
-        if (_sortCol >= FixedCols)
-        {
-            var vi = _sortCol - FixedCols;
-            double? V(LedgerRowEx r) => vi < r.Row.Values.Count ? r.Row.Values[vi] : null;
-            // Blank values always sort last; a stable order keeps ties in their natural order.
-            return rows.Select((r, i) => (r, i)).OrderBy(x => V(x.r) == null ? 1 : 0)
-                .ThenBy(x => (V(x.r) ?? 0) * sign).ThenBy(x => x.i).Select(x => x.r).ToList();
-        }
-        Func<LedgerRowEx, string> sel = _sortCol == 0 ? r => r.Row.Name : r => r.Row.Kind;
-        return (_sortAsc ? rows.OrderBy(sel, StringComparer.CurrentCultureIgnoreCase) : rows.OrderByDescending(sel, StringComparer.CurrentCultureIgnoreCase)).ToList();
+        _rows = LedgerViewRules.Sort(_rows, _sortCol, _sortAsc).ToList();
     }
 
     static string Fmt(double v) => LedgerTable.FormatNumber(v);
@@ -423,25 +399,15 @@ sealed partial class LedgerWindow : Form
         BeginInvoke(() => { if (!IsDisposed && !_closing) Run(() => CommitManual(key, prop, text)); });
     }
 
-    /// <summary>Invariant first (no thousands separators), then the current culture; null when not a finite number.</summary>
-    internal static double? ParseNumber(string text)
-    {
-        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v)) return v;
-        if (double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out v) && double.IsFinite(v)) return v;
-        return null;
-    }
-
     void CommitManual(string key, PropertyDef prop, string text)
     {
-        if (ParseNumber(text) is not { } after)
-        {
-            Warn($"'{text}' is not a number.");
-            return;
-        }
-        if (_s.Game is not { } game) return;
-        if (!_s.CanEditLedger(key)) { Warn("That value " + ModuleSession.OtherSideText + "."); Reload(); return; }
-        if (Ledger.Get(game.State, key, prop.Id) is { } cur && cur == after) { Reload(); return; } // unchanged: no history entry
-        var note = InputDialog.Ask(this, "Manual change", $"Why is {prop.Name} being set to {Fmt(after)}? (required)");
+        var game = _s.Game;
+        var check = LedgerViewRules.CheckManualEdit(_s, key, prop.Id, game == null ? null : Ledger.Get(game.State, key, prop.Id), text, prop.Name);
+        if (check.Error != null) Warn(check.Error);
+        if (check.Reload) Reload();
+        if (!check.Ok || check.Unchanged || game == null) return;   // unchanged: no history entry
+        var after = check.Value;
+        var note = InputDialog.Ask(this, "Manual change", check.NotePrompt!);
         if (string.IsNullOrWhiteSpace(note)) { Reload(); return; }
         if (_actions?.Invoke() is { } port) { port.EditLedger(key, prop.Id, after, note); return; }
         var before = Ledger.GetOrDefault(game.State, key, prop);
@@ -459,8 +425,7 @@ sealed partial class LedgerWindow : Form
     void ExportCsv()
     {
         if (Program.Smoke) return;
-        var safe = new string(_tab.Title.Select(c => Path.GetInvalidFileNameChars().Contains(c) || char.IsWhiteSpace(c) ? '-' : c).ToArray()).ToLowerInvariant();
-        using var dlg = new SaveFileDialog { Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*", DefaultExt = "csv", FileName = "ledger-" + safe + ".csv" };
+        using var dlg = new SaveFileDialog { Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*", DefaultExt = "csv", FileName = LedgerViewRules.CsvFileName(_tab.Title) };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         // The rows as shown (sorted), group headers left out.
         var shown = _result with { Rows = _rows };

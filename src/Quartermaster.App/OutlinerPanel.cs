@@ -193,18 +193,9 @@ sealed class OutlinerPanel : UserControl
         _decisions = view?.Decisions ?? Array.Empty<Decision>();
         _noPhases = view == null || view.NoPhases;
         // New folders start open, groups start closed; what the user opened or closed is remembered by key.
-        foreach (var n in Flatten(_tree.Roots))
-            if (_seen.Add(n.Key) && n.Kind == OutlinerNodeKind.Folder) _open.Add(n.Key);
+        foreach (var n in OutlinerViewRules.AllNodes(_tree.Roots))
+            if (_seen.Add(n.Key) && OutlinerViewRules.StartsExpanded(n)) _open.Add(n.Key);
         Rebuild();
-    }
-
-    static IEnumerable<OutlinerNode> Flatten(IEnumerable<OutlinerNode> ns)
-    {
-        foreach (var n in ns)
-        {
-            yield return n;
-            foreach (var c in Flatten(n.Children)) yield return c;
-        }
     }
 
     void Rebuild()
@@ -215,19 +206,14 @@ sealed class OutlinerPanel : UserControl
             _now.BeginUpdate();
             _now.Items.Clear();
             foreach (var d in _decisions) _now.Items.Add(d.Text);
-            if (_decisions.Count == 0) _now.Items.Add("(nothing waiting)");
+            if (_decisions.Count == 0) _now.Items.Add(OutlinerViewRules.NothingWaitingText);
             _now.EndUpdate();
             _now.Visible = _nowLabel.Visible = !_noPhases;
-            _nowLabel.Text = _decisions.Count == 0 ? "Now" : $"Now — {_decisions.Count}";
+            _nowLabel.Text = OutlinerViewRules.NowLabel(_decisions.Count);
 
             _counters.Reset();   // new state: pictures may differ
             _rows.Clear();
-            void Add(OutlinerNode n, int depth)
-            {
-                _rows.Add((n, depth));
-                if (n.Children.Count > 0 && _open.Contains(n.Key)) foreach (var c in n.Children) Add(c, depth + 1);
-            }
-            foreach (var r in _tree.Roots) Add(r, 0);
+            _rows.AddRange(OutlinerViewRules.Flatten(_tree, _open));
 
             var first = _grid.FirstDisplayedScrollingRowIndex;
             var cur = _grid.CurrentCell is { RowIndex: var ci } && ci >= 0 && ci < _shownKeys.Count ? _shownKeys[ci] : null;
@@ -301,22 +287,19 @@ sealed class OutlinerPanel : UserControl
     {
         if (row < 0 || row >= _rows.Count) return;
         var n = _rows[row].Node;
-        if (n.Kind == OutlinerNodeKind.Piece && n.PieceId != null) { _centre(n.PieceId); return; }
-        if (n.Kind == OutlinerNodeKind.Group && n.Key.StartsWith("map:", StringComparison.Ordinal))
+        switch (OutlinerViewRules.Activate(n, _s.Model))
         {
-            var id = n.Key["map:".Length..];
-            var map = _s.Model.Maps.FirstOrDefault(m => m.Id == id) ?? _s.Model.Maps.FirstOrDefault(m => m.Name == id);
-            if (map != null && map.IsOrgDisplay) { _openMap(map); return; }
+            case OutlinerActivation.CentrePiece: _centre(n.PieceId!); break;
+            case OutlinerActivation.OpenMap: _openMap(OutlinerViewRules.OrgDisplayFor(n, _s.Model)!); break;
+            default: if (n.Children.Count > 0) Toggle(row); break;
         }
-        if (n.Children.Count > 0) Toggle(row);
     }
 
-    static Color SeverityColor(AlertSeverity s) => s switch
+    static Color SeverityColor(AlertSeverity s)
     {
-        AlertSeverity.Critical => Color.Firebrick,
-        AlertSeverity.Warning => Color.DarkOrange,
-        _ => Color.SteelBlue,
-    };
+        var (r, g, b) = OutlinerViewRules.SeverityColour(s);
+        return Color.FromArgb(r, g, b);
+    }
 
     void OnPaint(object? sender, DataGridViewCellPaintingEventArgs e)
     {
@@ -380,11 +363,7 @@ sealed class OutlinerPanel : UserControl
         if (ci >= node.Values.Count || node.Values[ci] == null) return null;
         if (node.Kind == OutlinerNodeKind.Piece && node.PieceId != null)
             return LedgerBreakdown.For(_s.View ?? game.State, _s.Rules, _s.Model, LedgerKey.Piece(node.PieceId), column.PropertyId);
-        var parts = new List<(string, double)>();
-        foreach (var leaf in Flatten(new[] { node }).Where(x => x.Kind == OutlinerNodeKind.Piece))
-            if (ci < leaf.Values.Count && leaf.Values[ci] is { } v) parts.Add((leaf.Name, v));
-        var how = column.Aggregate switch { OutlinerAggregate.Min => "lowest", OutlinerAggregate.Average => "average", _ => "total" };
-        return LedgerBreakdown.ForTotal(_s.VisibleOnly($"{column.Name} {how} {node.Values[ci]!.Value.ToString("0.##", CultureInfo.InvariantCulture)}  ({node.Name})"), parts);
+        return OutlinerViewRules.AggregateBreakdown(column, node, ci, _s.ViewFiltered);
     }
 
     void OnHeaderHover(object? sender, DataGridViewCellMouseEventArgs e)

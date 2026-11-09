@@ -174,7 +174,7 @@ public sealed class DiceTurnTests : IDisposable
         _fixtures.Add(fx);
         var w = Game(fx.Build(), face: 2);
 
-        Assert.Equal(new[] { "&Dice", "&Turn" }, w.MenuLabels()["&Tools"]);
+        Assert.Equal(new[] { "&Inventory", "&Notes", "&Dice", "&Turn" }, w.MenuLabels()["&Tools"]);
         var dice = w.FindMenuItem("&Dice")!;
         Assert.Equal(new[] { "&1d6", "&2d6", "R&&D", "Blank", "&Custom...", "&Multi-roll..." }, Labels(dice));
         Assert.Equal(2, dice.Items.OfType<Separator>().Count());   // around the module dice, as WinForms
@@ -328,11 +328,11 @@ public sealed class DiceTurnTests : IDisposable
         var w = NewWindow();
         var bar = w.Toolbar;
         // WinForms MainForm.BuildToolbar order, without the buttons whose features are not in the Avalonia app yet
-        // (Diagnostics, Notes, Overview, Inventory, Palette).
+        // (Palette).
         var expected = new[]
         {
             ("tool.openModule", "Open Module"), ("tool.newGame", "New Game"), ("tool.loadSetup", "Load Setup"), ("tool.openGame", "Open Game"),
-            ("tool.saveGame", "Save Game"), ("tool.los", "LOS"), ("edit.undo", "Undo"), ("edit.redo", "Redo"), ("phase.stepBack", "◀ Step Back"),
+            ("tool.saveGame", "Save Game"), ("tool.diagnostics", "Diagnostics"), ("tool.notes", "Notes"), ("tool.overview", "Overview"), ("tool.inventory", "Inventory"), ("tool.los", "LOS"), ("edit.undo", "Undo"), ("edit.redo", "Redo"), ("phase.stepBack", "◀ Step Back"),
             ("dice.1d6", "1d6"), ("dice.2d6", "2d6"), ("dice.menu", "Dice ▾"), ("turn.next", "Next turn"),
         };
         Assert.Equal(expected, bar.Buttons.Select(b => (b.Id, b.Text)));
@@ -342,12 +342,12 @@ public sealed class DiceTurnTests : IDisposable
         // Gated by CommandAvailability: without a module only Open Module is on.
         Assert.Equal(new[] { "tool.openModule" }, bar.Buttons.Where(b => b.Button.IsEnabled).Select(b => b.Id));
         Assert.True(w.OpenModule(Demo()));
-        Assert.Equal(new[] { "tool.openModule", "tool.newGame", "tool.loadSetup", "tool.openGame" },
+        Assert.Equal(new[] { "tool.openModule", "tool.newGame", "tool.loadSetup", "tool.openGame", "tool.diagnostics" },
             bar.Buttons.Where(b => b.Button.IsEnabled).Select(b => b.Id));
         w.Session!.SetRoller((n, _) => Enumerable.Repeat(6, n).ToList());
         w.StartSetup(null);
         Pump();
-        foreach (var id in new[] { "tool.saveGame", "tool.los", "dice.1d6", "dice.2d6", "dice.menu", "turn.next" })
+        foreach (var id in new[] { "tool.saveGame", "tool.notes", "tool.inventory", "tool.los", "dice.1d6", "dice.2d6", "dice.menu", "turn.next" })
             Assert.True(bar.Find(id)!.IsEnabled, id);
         Assert.False(bar.Find("edit.undo")!.IsEnabled);
 

@@ -285,8 +285,8 @@ public sealed class ContextMenuTests : IDisposable
         var empty = EmptySpot(view);
         RightClick(window, empty);
         var menu = Assert.IsType<ContextMenu>(view.OpenMenu);
-        // WinForms MapWindow.BuildMapMenu; "Save map as picture…" comes with stage 3.
-        Assert.Equal(new[] { "Mark All Unmoved", "-", "Show Grid", "Zoom to Fit", "Zoom 100%", "-", "Hide counters", "Centre on selected" }, Shape(menu.Items));
+        // WinForms MapWindow.BuildMapMenu.
+        Assert.Equal(new[] { "Mark All Unmoved", "-", "Show Grid", "Zoom to Fit", "Zoom 100%", "-", "Hide counters", "Centre on selected", "Save map as picture…" }, Shape(menu.Items));
         Assert.False(Item(menu, "Hide counters").IsChecked);
 
         var grid = Item(menu, "Show Grid");

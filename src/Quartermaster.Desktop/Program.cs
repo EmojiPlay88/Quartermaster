@@ -104,5 +104,8 @@ static class Program
         public Task<Quartermaster.Render.MissingInputResult> AskMissingAsync(Avalonia.Controls.Window owner, Quartermaster.Render.ModuleSession s, Quartermaster.Render.IActionPort port, Quartermaster.Core.PendingRun run) => Task.FromResult(Quartermaster.Render.MissingInputResult.Cancel);
         public Task<Quartermaster.Render.CheckpointRow?> PickCheckpointAsync(Avalonia.Controls.Window owner, IReadOnlyList<Quartermaster.Render.CheckpointRow> rows, bool confirmOnly) =>
             Task.FromResult<Quartermaster.Render.CheckpointRow?>(null);   // Cancel
+        public Task<ExportChoice?> AskExportChoiceAsync(Avalonia.Controls.Window owner, string mapName) => Task.FromResult<ExportChoice?>(null);
+        public Task<IReadOnlyList<Quartermaster.Core.UserLedgerTab>?> EditLedgerTabsAsync(Avalonia.Controls.Window owner, IReadOnlyList<Quartermaster.Core.UserLedgerTab> tabs,
+            Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false) => Task.FromResult<IReadOnlyList<Quartermaster.Core.UserLedgerTab>?>(null);
     }
 }

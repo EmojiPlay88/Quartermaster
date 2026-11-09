@@ -84,6 +84,9 @@ public static class FormulaWindows
                 s.Log.Add(Quartermaster.Vassal.DiagnosticSeverity.Warning, "formula", "Closing a batch grid failed: " + ex.Message);
                 Batches.Remove(w);
             }
+            // Close runs OnClosed synchronously, which already stopped them; this makes the order explicit even if closing failed or was
+            // cancelled, because the caller may dispose the session right after.
+            w.StopRendering();
         }
     }
 

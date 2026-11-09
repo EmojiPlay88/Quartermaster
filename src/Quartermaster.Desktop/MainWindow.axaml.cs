@@ -72,9 +72,12 @@ public partial class MainWindow : Window
         InitializeComponent();
         InitPhaseUi(layoutRoot);
         InitAlertUi();
+        InitTools();
+        InitLedger();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         InitTrees(layoutRoot);
+        InitOutliner();
         _router.Guard = Guard;
         _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
@@ -91,8 +94,9 @@ public partial class MainWindow : Window
         // No settings or game master mode in the Avalonia app yet: no "Delete counter", and deletions are always asked (the WinForms default).
         Maps.MenuServices = new MapMenuServices
         {
-            Dialogs = _dialogs, Gesture = _router.Gesture,
+            Dialogs = _dialogs, Gesture = _router.Gesture, SaveAsPicture = SaveMapAsPictureAsync,
             ShowFormula = (formulaId, pieceId) => { if (_session is { } s) FormulaWindows.Show(this, s, formulaId, pieceId, null); },
+            ShowInLedger = ShowInLedger,
         };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
         Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
@@ -175,6 +179,7 @@ public partial class MainWindow : Window
         SbLocation.Text = "-";
         SbZoom.Text = "-";
         SetStatus("");
+        CreateTools(next);
         HookGame();
         UpdateUi();
         UpdateTitle();
@@ -188,6 +193,7 @@ public partial class MainWindow : Window
     public void StartSetup(int? index, Difficulty? difficulty = null)
     {
         var s = _session ?? throw new InvalidOperationException("Open a module first.");
+        FlushNotes();   // pending note text goes into the game that is about to be replaced
         if (index is not { } idx) s.StartNewGame(difficulty);
         else if (idx >= 0 && idx < s.Model.Setups.Count) s.LoadSetup(s.Model.Setups[idx], difficulty);
         else
@@ -212,6 +218,7 @@ public partial class MainWindow : Window
     public void OpenGame(string path)
     {
         var s = _session ?? throw new InvalidOperationException("Open a module first.");
+        FlushNotes();
         s.LoadNative(path);
         _recoveredAutosave = Autosaver.IsAutosavePath(path, AppDataRoot.Path);
         _savePath = _recoveredAutosave ? null : path;
@@ -365,6 +372,7 @@ public partial class MainWindow : Window
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _showGrid.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) Maps.ShowGrid = _showGrid.IsChecked; };
         view.Items.Add(_viewTree);
+        Item(view, "&Diagnostics", ShowDiagnostics, "view.diagnostics");
         view.Items.Add(_showGrid);
         // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.
         _viewLog.InputGesture = _router.Gesture("view.log");
@@ -372,6 +380,9 @@ public partial class MainWindow : Window
         Gate("view.log", _viewLog);
         view.Items.Add(_viewLog);
         view.Items.Add(_viewPhases);
+        view.Items.Add(_viewOutliner);
+        Item(view, "&Ledger", ShowLedger, "view.ledger");
+        Item(view, "&Overview", ShowOverview, gate: "view.overview");
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
         Item(view, "Zoom 100%", () => Maps.ActiveView?.ZoomCentered(1f), needsModule: true);
@@ -385,6 +396,9 @@ public partial class MainWindow : Window
 
         // Tools (WinForms: Rules Workbench, Inventory, Notes, -, Dice, Turn, -, Settings...): only Dice and Turn are in the Avalonia app so far.
         var tools = Top("&Tools");
+        Item(tools, "&Inventory", ShowInventory, gate: "tools.inventory");
+        Item(tools, "&Notes", ShowNotes, gate: "tools.notes");
+        tools.Items.Add(new Separator());
         tools.Items.Add(_dice.DiceMenu);
         Gate("tools.dice", _dice.DiceMenu);
         tools.Items.Add(_dice.TurnMenu);
@@ -411,6 +425,10 @@ public partial class MainWindow : Window
         Tool("tool.openGame", "Open Game", () => RunAsync(OpenGameDialogAsync));
         Tool("tool.saveGame", "Save Game", () => RunAsync(() => SaveGameAsync(false)));
         bar.AddSeparator();
+        Tool("tool.diagnostics", "Diagnostics", ShowDiagnostics);
+        Tool("tool.notes", "Notes", ShowNotes);
+        Tool("tool.overview", "Overview", ShowOverview);
+        Tool("tool.inventory", "Inventory", ShowInventory);
         Tool("tool.los", "LOS", () => _router.Execute("tool.los"));
         // Undo / Redo / Step Back are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
         _tbUndo = bar.Add("edit.undo", "Undo", () => _router.Execute("edit.undo"));
@@ -437,6 +455,7 @@ public partial class MainWindow : Window
         Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
         Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
         UpdatePhaseUi();
+        UpdateOutlinerUi();
         RefreshHistoryUi();
     }
 
@@ -668,6 +687,7 @@ public partial class MainWindow : Window
     /// <summary>The question to ask before the game goes away, or null when nothing would be lost (WinForms ConfirmDiscard).</summary>
     string? DiscardQuestion()
     {
+        FlushNotes();   // pending note text becomes a command first, so the dirty check below counts it
         if (_session?.IsGuest == true) return null;   // a guest's game is the host's
         if (_session?.IsReplaying == true) return AbandonReplayText;   // a half-replayed turn is never saved
         if (_session is { Game: not null, CanSave: false }) return null;   // a viewer copy: never saved
@@ -735,6 +755,7 @@ public partial class MainWindow : Window
         CreatePhaseUi(s, c);
         HistoryCommands.RegisterStepBack(_router, s, _history, () => _dispatch, RunAsync);
         CreateAlerts(s);
+        CreateOutliner(s);
     }
 
     /// <summary>WinForms OnHistoryRewound: any rewind (undo, redo, step back, a remote rewind) closes every formula window, batch grid and
@@ -748,8 +769,12 @@ public partial class MainWindow : Window
 
     void CloseSession()
     {
+        DestroyExport();
+        DestroyLedger();
+        DestroyTools();
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
+        DestroyOutliner();
         DestroyAlerts();
         DestroyPhaseUi();
         DestroyLog();

@@ -67,8 +67,12 @@ sealed class FakeDialogs : IDialogs
     public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial)
     {
         TextPrompts.Add($"{title}|{prompt}|{initial}");
+        if (TextGate is { } g) { TextGate = null; return g.Task; }
         return Task.FromResult(Texts.Count > 0 ? Texts.Dequeue() : null);
     }
+
+    /// <summary>When set, the next text prompt waits for it (a dialog left open while the main window is used).</summary>
+    public TaskCompletionSource<string?>? TextGate;
 
     /// <summary>Property sheets shown: title, rows, and each row's managed-by-ledger value.</summary>
     public readonly List<(string Title, IReadOnlyList<(string Name, string Value)> Rows, IReadOnlyList<string?> Managed)> Sheets = new();
@@ -155,6 +159,26 @@ sealed class FakeDialogs : IDialogs
         if (CheckpointPick is not { } i || rows.Count == 0) return Task.FromResult<CheckpointRow?>(null);
         return Task.FromResult<CheckpointRow?>(rows[i < 0 ? rows.Count + i : i]);
     }
+
+    /// <summary>What the next "Save map as picture" choice answers (null = Cancel); the map names asked about.</summary>
+    public readonly Queue<ExportChoice?> ExportChoices = new();
+    public readonly List<string> ExportAsked = new();
+
+    public Task<ExportChoice?> AskExportChoiceAsync(Window owner, string mapName)
+    {
+        ExportAsked.Add(mapName);
+        return Task.FromResult(ExportChoices.Count > 0 ? ExportChoices.Dequeue() : null);
+    }
+
+    /// <summary>Ledger tab editors shown (tabs, selected index, opened by "+") and what the next one answers: (tabs, addNew) => list, null = Cancel.</summary>
+    public readonly List<(IReadOnlyList<UserLedgerTab> Tabs, int Select, bool AddNew)> TabEdits = new();
+    public Func<IReadOnlyList<UserLedgerTab>, bool, IReadOnlyList<UserLedgerTab>?>? TabEditAnswer;
+
+    public Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false)
+    {
+        TabEdits.Add((tabs, select, addNew));
+        return Task.FromResult(TabEditAnswer?.Invoke(tabs, addNew));
+    }
 }
 
 /// <summary>Task 7: the main window shell, headless, with fake dialogs (menus, map tabs, palette, open/save, unsaved prompt, command line).</summary>
@@ -227,7 +251,7 @@ public sealed class MainWindowTests : IDisposable
         Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools" }, menus.Keys);
         Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo", "Step &Back to Start of Phase", "Step Back &To..." }, menus["&Edit"]);
-        Assert.Equal(new[] { "Module &Tree", "Show &Grid", "&Log", "&Phase panel", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
+        Assert.Equal(new[] { "Module &Tree", "&Diagnostics", "Show &Grid", "&Log", "&Phase panel", "&Outliner", "&Ledger", "&Overview", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
         Assert.Equal(new[] { "25%", "50%", "100%", "200%", "Fit" },
             w.FindMenuItem("Zoom")!.Items.OfType<MenuItem>().Select(i => MenuText.ToWinForms((string)i.Header!)));
 

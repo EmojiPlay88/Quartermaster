@@ -71,6 +71,13 @@ public interface IDialogs
     /// <summary>The Step Back dialog (WinForms StepBackDialog): the list of checkpoints, or with <paramref name="confirmOnly"/> the one row to
     /// confirm. The chosen row, or null when cancelled.</summary>
     Task<CheckpointRow?> PickCheckpointAsync(Window owner, IReadOnlyList<CheckpointRow> rows, bool confirmOnly);
+
+    /// <summary>The "Save map as picture" choice (WinForms ExportChoiceDialog): the current view or the whole map at 25 / 50 / 100 %; null when cancelled.</summary>
+    Task<ExportChoice?> AskExportChoiceAsync(Window owner, string mapName);
+
+    /// <summary>The Ledger tab editor (WinForms EditTabsDialog) opened at user tab <paramref name="select"/>, or with a fresh tab added and
+    /// selected when <paramref name="addNew"/> (the "+" tab); the edited list, or null when cancelled.</summary>
+    Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -158,6 +165,12 @@ public sealed class Dialogs : IDialogs
         Func<CheckpointRow, string> summary = h != null ? r => HistoryController.Describe(h.Preview(r)) : _ => "";
         return new StepBackDialog(rows, summary, confirmOnly).ShowDialog<CheckpointRow?>(owner);
     }
+
+    public Task<ExportChoice?> AskExportChoiceAsync(Window owner, string mapName) =>
+        new ExportChoiceDialog(mapName).ShowDialog<ExportChoice?>(owner);
+
+    public Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false) =>
+        new Ledgers.EditTabsDialog(tabs, pack, select, addNew).ShowDialog<IReadOnlyList<UserLedgerTab>?>(owner);
 }
 
 /// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>

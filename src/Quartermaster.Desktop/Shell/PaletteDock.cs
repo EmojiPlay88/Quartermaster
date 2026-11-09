@@ -47,20 +47,20 @@ public sealed class PaletteDock : DockPanel
 {
     /// <summary>Thumbnail size (WinForms PaletteThumbs.Size).</summary>
     public static readonly PixelSize ThumbSize = new(64, 48);
+    /// <summary>Most thumbnails the palette keeps (its own cap, larger than the lists' 600).</summary>
+    public const int DefaultCacheCap = 3000;
+    int _cacheCap = DefaultCacheCap;
     /// <summary>Most thumbnails kept (settable for tests).</summary>
-    internal int CacheCap { get; set; } = 3000;
+    internal int CacheCap { get => _cacheCap; set { _cacheCap = value; if (_thumbs != null) _thumbs.Cap = value; } }
 
     readonly TextBox _search = new() { Width = 150 };
     readonly TreeView _tree = new();
     readonly ListBox _list = new();
     readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
-    readonly Dictionary<string, Bitmap> _cache = new();
-    readonly Queue<string> _cacheOrder = new();
     List<Image> _images = new();
     ModuleSession? _s;
+    CounterThumbnails? _thumbs;
     IReadOnlyList<PieceSlotDef> _listed = Array.Empty<PieceSlotDef>();
-    CancellationTokenSource? _cts;
-    Task? _worker;
     PointerPressedEventArgs? _press;
     PieceSlotDef? _pressSlot;
     Point _pressAt;
@@ -110,8 +110,10 @@ public sealed class PaletteDock : DockPanel
         _search.Text = "";
         _tree.ItemsSource = null;
         Show(Array.Empty<PieceSlotDef>());   // nothing shown any more, so the old module's thumbnails can all be released
-        ClearCache();
+        _thumbs?.Dispose();
+        _thumbs = null;
         if (s == null) return;
+        _thumbs = new CounterThumbnails(s, CacheCap) { Shown = () => _images.Select(i => i.Source) };
         var root = PaletteModel.Build(s.Model);
         var top = Node(root);
         top.IsExpanded = true;
@@ -150,13 +152,15 @@ public sealed class PaletteDock : DockPanel
         _listed = slots;
         var items = new List<ListBoxItem>(slots.Count);
         var images = new List<Image>(slots.Count);
-        var missing = new List<(Image Img, PieceSlotDef Slot)>();
+        var thumbs = _thumbs;
+        var s = _s;
         foreach (var slot in slots)
         {
             var img = new Image { Width = ThumbSize.Width, Height = ThumbSize.Height, Stretch = Stretch.None };
             images.Add(img);
-            if (_cache.TryGetValue(PaletteModel.Key(slot), out var bmp)) img.Source = bmp;
-            else missing.Add((img, slot));
+            // Missing ones are drawn on the shared cache's worker in list order; each lands in its image when done.
+            if (thumbs != null && s != null)
+                img.Source = thumbs.GetKeyed(PaletteModel.Key(slot), () => s.Disposed ? null : Render(s, slot), k => img.Source = thumbs.Peek(k));
             var text = new TextBlock { Text = slot.EntryName, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 80 };
             var panel = new StackPanel { Width = 84, Children = { img, text } };
             var item = new ListBoxItem { Content = panel, Tag = slot, Padding = new Thickness(2) };
@@ -165,26 +169,6 @@ public sealed class PaletteDock : DockPanel
         }
         _list.ItemsSource = items;
         _images = images;
-        if (missing.Count == 0 || _s is not { } s) return;
-        var cts = _cts = new CancellationTokenSource();
-        _worker = Task.Run(() => Work(s, missing, cts.Token), cts.Token);
-    }
-
-    /// <summary>Renders the thumbnails in list order on a worker thread and hands them to the UI thread.</summary>
-    void Work(ModuleSession s, List<(Image Img, PieceSlotDef Slot)> missing, CancellationToken ct)
-    {
-        foreach (var (img, slot) in missing)
-        {
-            if (ct.IsCancellationRequested || s.Disposed) return;
-            var bmp = Render(s, slot);
-            if (bmp == null) continue;
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (ct.IsCancellationRequested) { bmp.Dispose(); return; }
-                Remember(PaletteModel.Key(slot), bmp);
-                img.Source = bmp;
-            });
-        }
     }
 
     /// <summary>The slot's counter fitted into <see cref="ThumbSize"/> (WinForms PaletteThumbs.Render), or null when it cannot be drawn.</summary>
@@ -195,11 +179,8 @@ public sealed class PaletteDock : DockPanel
             var (type, state) = PieceFactory.FromSlot(s.Model, slot, "", new PointD(0, 0));
             var count = PieceTypeParser.Parse(type, new DiagnosticLog(), null).Traits.Count;
             var piece = new PieceInstance { Id = "thumb", TypeString = type, TraitStates = PieceTypeParser.SplitState(state, count).ToList() };
-            var img = s.Counters.Render(piece, new SKSizeI(ThumbSize.Width, ThumbSize.Height));   // cached by CounterImages: not ours to dispose
-            if (img == null) return null;
-            using var data = img.Encode(SKEncodedImageFormat.Png, 100);
-            using var stream = new MemoryStream(data.ToArray());
-            return new Bitmap(stream);
+            // Cached by CounterImages: not ours to dispose.
+            return CounterThumbnails.ToBitmap(s.Counters.Render(piece, new SKSizeI(ThumbSize.Width, ThumbSize.Height)));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -210,42 +191,15 @@ public sealed class PaletteDock : DockPanel
     /// <summary>The thumbnail images of the listed counters (for tests).</summary>
     internal IReadOnlyList<Image> ThumbImages => _images;
 
+    /// <summary>The shared thumbnail cache of the bound module (null when none is bound).</summary>
+    internal CounterThumbnails? Thumbnails => _thumbs;
+
     /// <summary>Caches a thumbnail, evicting the oldest past <see cref="CacheCap"/>. A bitmap an Image still shows is never disposed here:
     /// it is only dropped from the cache and left to the GC (its native image has a finalizer).</summary>
-    internal void Remember(string key, Bitmap bmp)
-    {
-        HashSet<Bitmap>? shown = null;
-        if (_cache.Remove(key, out var old) && !ReferenceEquals(old, bmp)) Release(old, ref shown);
-        _cache[key] = bmp;
-        _cacheOrder.Enqueue(key);
-        while (_cache.Count > CacheCap && _cacheOrder.TryDequeue(out var k))
-            if (_cache.TryGetValue(k, out var gone) && !ReferenceEquals(gone, bmp)) { _cache.Remove(k); Release(gone, ref shown); }
-    }
-
-    void Release(Bitmap b, ref HashSet<Bitmap>? shown)
-    {
-        shown ??= _images.Select(i => i.Source).OfType<Bitmap>().ToHashSet();
-        if (!shown.Contains(b)) b.Dispose();
-    }
-
-    void ClearCache()
-    {
-        HashSet<Bitmap>? shown = null;
-        foreach (var b in _cache.Values) Release(b, ref shown);
-        _cache.Clear();
-        _cacheOrder.Clear();
-    }
+    internal void Remember(string key, Bitmap bmp) => _thumbs?.Remember(key, bmp);
 
     /// <summary>Stops the thumbnail worker and waits briefly for an in-flight render, so the module archive can be closed safely.</summary>
-    public void StopWorker()
-    {
-        _cts?.Cancel();
-        try { _worker?.Wait(2000); }
-        catch (Exception ex) when (ex is AggregateException or OperationCanceledException) { }
-        _cts?.Dispose();
-        _cts = null;
-        _worker = null;
-    }
+    public void StopWorker() => _thumbs?.StopWorker();
 
     void OnListPressed(object? sender, PointerPressedEventArgs e)
     {

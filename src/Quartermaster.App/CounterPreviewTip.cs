@@ -63,11 +63,9 @@ sealed class CounterPreviewTip : IDisposable
             _popup.SetContent(img.ToBitmap(), name);
             var size = _popup.PreferredClientSize(Pad);
             var area = Screen.FromPoint(screenAt).WorkingArea;
-            var x = screenAt.X + 16;
-            var y = screenAt.Y + 16;
-            if (x + size.Width > area.Right) x = Math.Max(area.Left, screenAt.X - 16 - size.Width);
-            if (y + size.Height > area.Bottom) y = Math.Max(area.Top, area.Bottom - size.Height);
-            _popup.Bounds = new Rectangle(x, y, size.Width, size.Height);
+            var at = PreviewPlacement.Place(new SKPointI(screenAt.X, screenAt.Y), new SKSizeI(size.Width, size.Height),
+                new SKRectI(area.Left, area.Top, area.Right, area.Bottom));
+            _popup.Bounds = new Rectangle(at.X, at.Y, size.Width, size.Height);
             if (!_popup.Visible) _popup.ShowNoActivate();
             _popup.Invalidate();
         }

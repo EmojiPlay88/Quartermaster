@@ -409,4 +409,153 @@ public sealed class BatchGridTests : IDisposable
         Assert.False(dlg.OkEnabled);
         dlg.Close();
     }
+
+    // ---- stage 3a task 3: counter pictures and the hover preview ----
+
+    static bool PicturesReady(BatchGridWindow win) => Enumerable.Range(0, win.RowCount).All(r => win.PictureOf(r) != null);
+
+    [AvaloniaFact]
+    public void Batch_unit_cell_shows_counter_picture()
+    {
+        var (w, run) = Make(Difficulty.Hardcore);
+        var win = Batch(w, run);
+        Assert.Equal(150 + 64 + 8, win.UnitColumnWidth);   // WinForms: 150 + picture + 8
+        Assert.Equal(52, win.RowHeightOf(0));
+        PumpUntil(() => PicturesReady(win));
+        Assert.Equal(new Avalonia.PixelSize(64, 48), win.PictureOf(0)!.PixelSize);
+        Assert.False(win.PlaceholderShown(0));
+        Assert.Equal("Red 1", win.CellText(0, 0));
+        // The picture sits in the cell's left padding, the unit's name to its right.
+        var pic = win.PictureBounds(0);
+        var cell = win.UnitCellBounds(0);
+        Assert.Equal(64, pic.Width);
+        Assert.Equal(48, pic.Height);
+        Assert.Equal(cell.X + 2, pic.X, 0);
+        Assert.Equal(cell.Y + (cell.Height - 48) / 2, pic.Y, 0);
+        Assert.True(win.UnitTextLeft(0) >= pic.Right + 6, "the unit name overlaps the picture");
+        // It is really drawn: the fixture counter (a #C04040 square) shows in the picture box.
+        using var frame = win.CaptureRenderedFrame();
+        var px = TestHelpers.Pixels(frame!);
+        var red = 0;
+        for (var y = (int)pic.Y; y < (int)pic.Bottom; y++)
+            for (var x = (int)pic.X; x < (int)pic.Right; x++)
+                if (px.Px[y * px.Width + x] is var c && Math.Abs(c.Red - 0xC0) < 8 && Math.Abs(c.Green - 0x40) < 8 && Math.Abs(c.Blue - 0x40) < 8) red++;
+        Assert.True(red > 500, $"the counter picture did not draw ({red} counter pixels)");
+    }
+
+    [AvaloniaFact]
+    public void Batch_unit_hover_shows_preview_with_label()
+    {
+        var (w, run) = Make(Difficulty.Hardcore);
+        var win = Batch(w, run);
+        PumpUntil(() => PicturesReady(win));
+        Assert.False(win.Preview.IsOpen);
+        var pic = win.PictureBounds(1);
+        win.MouseMove(pic.Center);
+        PumpUntil(() => win.Preview.IsOpen);
+        Assert.Equal("Red 2", win.Preview.Label);
+        Assert.Equal(PhaseFixture.RedTwo, win.Preview.PieceId);
+        var size = win.Preview.PictureSize;
+        Assert.True(Math.Max(size.Width, size.Height) >= 200, $"preview {size} is smaller than 200 px on its long side");
+        // Cursor + 16, as WinForms (the window is far from the screen edges).
+        var cursor = Avalonia.VisualExtensions.PointToScreen(win, pic.Center);
+        Assert.Equal(new Avalonia.PixelPoint(cursor.X + 16, cursor.Y + 16), win.Preview.ScreenPosition);
+        // Off the picture (over the unit's name): hidden.
+        win.MouseMove(new Avalonia.Point(win.UnitTextLeft(1) + 20, pic.Center.Y));
+        Pump();
+        Assert.False(win.Preview.IsOpen);
+        // Back on it, then a click: hidden (WinForms MouseDown).
+        win.MouseMove(pic.Center);
+        PumpUntil(() => win.Preview.IsOpen);
+        win.MouseDown(pic.Center, MouseButton.Left);
+        win.MouseUp(pic.Center, MouseButton.Left);
+        Pump();
+        Assert.False(win.Preview.IsOpen);
+    }
+
+    [AvaloniaFact]
+    public void Batch_no_picture_for_other_side_hidden_piece()
+    {
+        var (w, run) = Make(Difficulty.Hardcore);
+        var s = w.Session!;
+        var win = Batch(w, run);
+        PumpUntil(() => PicturesReady(win));
+        // Main Map becomes Red's and Blue takes the screen: both red units leave the view.
+        s.UpdateRules(r => r with { MapOwners = new List<MapOwner> { new() { MapId = s.Model.Maps[0].Id, SideId = "red" } } });
+        s.SetViewSides(new HashSet<string> { "blue" });
+        PumpUntil(() => win.PictureOf(0) == null && win.PictureOf(1) == null);
+        Assert.False(s.View!.Pieces.ContainsKey(PhaseFixture.RedOne));
+        Assert.Equal(ModuleSession.HiddenText, win.CellText(0, 0));
+        for (var r = 0; r < win.RowCount; r++) Assert.False(win.PlaceholderShown(r));   // no placeholder either: nothing to draw
+        win.MouseMove(win.PictureBounds(0).Center);
+        Pump();
+        Assert.False(win.Preview.IsOpen);
+        // Nothing queued for them either, now or later.
+        for (var i = 0; i < 20; i++) { Pump(); Thread.Sleep(5); }
+        Assert.Null(win.PictureOf(0));
+        Assert.Equal(0, win.Thumbnails.PendingCount);
+    }
+
+    [AvaloniaFact]
+    public void Batch_preview_render_held_then_closed_never_renders()
+    {
+        var (w, run) = Make(Difficulty.Hardcore);
+        var s = w.Session!;
+        var win = Batch(w, run);
+        PumpUntil(() => PicturesReady(win));
+        using var gate = new ManualResetEventSlim(false);
+        win.Preview.RenderGate = gate;   // the preview's render task waits here
+        win.MouseMove(win.PictureBounds(0).Center);
+        Pump();
+        Assert.False(win.Preview.IsOpen);
+        Assert.Equal(0, win.Preview.Renders);
+
+        // Closing the module: the batch grid closes synchronously and its workers stop before the session is disposed.
+        _windows.Remove(w);
+        w.ForceClose();
+        Assert.True(s.Disposed);
+        Assert.Empty(FormulaWindows.OpenBatchFor(s));
+        Assert.True(win.Preview.Stopped);
+        Assert.True(win.Thumbnails.IsDisposed);
+
+        gate.Set();   // the held render wakes up after the session is gone
+        for (var i = 0; i < 20; i++) { Pump(); Thread.Sleep(10); }
+        Assert.Equal(0, win.Preview.Renders);
+        Assert.False(win.Preview.IsOpen);
+        win.Preview.Show(win, default, PhaseFixture.RedOne, "Red 1");   // after dispose: nothing, no throw
+        Assert.False(win.Preview.IsOpen);
+    }
+    [AvaloniaFact]
+    public void Preview_dispose_waits_for_every_render_in_flight()
+    {
+        var (w, _) = Make(Difficulty.Hardcore);
+        var s = w.Session!;
+        var preview = new CounterPreview(s);
+        using var first = new ManualResetEventSlim(false);
+        using var second = new ManualResetEventSlim(false);
+        preview.RenderGate = first;
+        preview.Show(w, default, PhaseFixture.RedOne, "Red 1");    // held on its worker
+        preview.RenderGate = second;
+        preview.Show(w, default, PhaseFixture.RedTwo, "Red 2");    // supersedes the first; held too
+        preview.RenderGate = null;
+        Assert.Equal(2, preview.InFlight);
+
+        // The newer render is let go soon, the older one later: Dispose must wait for both (the older one may already be drawing).
+        var firstReleased = new ManualResetEventSlim(false);
+        var releaser = new Thread(() =>
+        {
+            Thread.Sleep(100);
+            second.Set();
+            Thread.Sleep(300);
+            firstReleased.Set();
+            first.Set();
+        }) { IsBackground = true };
+        releaser.Start();
+        preview.Dispose();
+        Assert.True(firstReleased.IsSet, "Dispose returned while the first render was still running");
+        Assert.Equal(0, preview.InFlight);
+        releaser.Join();
+        Assert.Equal(0, preview.Renders);   // both were superseded or stopped before drawing
+        Assert.False(preview.IsOpen);
+    }
 }
