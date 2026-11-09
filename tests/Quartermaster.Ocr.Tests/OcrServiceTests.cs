@@ -41,7 +41,7 @@ public class OcrServiceTests(ITestOutputHelper output)
     }
 
     /// <summary>Invented 6-column × 4-row table of two-digit numbers (fixed seed), Segoe UI 11 pt at 200 DPI.</summary>
-    private static (Bitmap Image, string[][] Expected) InventedTable(bool bordered)
+    internal static (Bitmap Image, string[][] Expected) InventedTable(bool bordered)
     {
         const int cols = 6, rows = 4, cw = 200, ch = 70, margin = 60;
         var rng = new Random(7341);
