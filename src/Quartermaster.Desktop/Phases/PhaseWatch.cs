@@ -17,7 +17,7 @@ public sealed class PhaseWatch : IDisposable
     public PhaseWatch(ModuleSession s, Action changed)
     {
         _s = s;
-        _debounce = new Debouncer(TimeSpan.FromMilliseconds(150), changed);
+        _debounce = new Debouncer(TimeSpan.FromMilliseconds(150), changed, ex => System.Diagnostics.Trace.WriteLine("phase view: " + ex.Message));   // as WinForms PhaseWatcher
         s.GameReplaced += OnReplaced;
         s.RulesChanged += Request;
         s.ViewChanged += Request;   // also a new viewer (hot-seat handover)

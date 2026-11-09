@@ -260,4 +260,18 @@ public sealed class PhasePanelTests : IDisposable
         PumpFor(300);
         Assert.Equal(2, runs);
     }
+
+    [AvaloniaFact]
+    public void Debouncer_reports_errors_and_keeps_working()
+    {
+        var runs = 0;
+        var errors = new List<Exception>();
+        using var d = new Debouncer(TimeSpan.FromMilliseconds(150), () => { if (++runs == 1) throw new InvalidOperationException("boom"); }, errors.Add);
+        d.Flush();
+        Assert.Equal(1, runs);
+        Assert.Equal("boom", Assert.Single(errors).Message);
+        d.Request();
+        PumpUntil(() => runs == 2);
+        Assert.Single(errors);
+    }
 }

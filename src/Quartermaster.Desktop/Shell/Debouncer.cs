@@ -4,9 +4,9 @@ namespace Quartermaster.Desktop.Shell;
 
 /// <summary>
 /// Runs <paramref name="run"/> on the UI thread once, <paramref name="delay"/> after the last <see cref="Request"/> (WinForms PhaseWatcher's timer).
-/// <see cref="Request"/> may be called from any thread. Never throws into the caller; a failing <paramref name="run"/> is swallowed.
+/// <see cref="Request"/> may be called from any thread. Never throws into the caller; a failing <paramref name="run"/> is reported to <paramref name="onError"/> (if any) and later requests still run.
 /// </summary>
-public sealed class Debouncer(TimeSpan delay, Action run) : IDisposable
+public sealed class Debouncer(TimeSpan delay, Action run, Action<Exception>? onError = null) : IDisposable
 {
     DispatcherTimer? _timer;
     bool _disposed;
@@ -42,7 +42,11 @@ public sealed class Debouncer(TimeSpan delay, Action run) : IDisposable
     {
         if (_disposed) return;
         try { run(); }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { /* a refresh must never take the game down */ }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // A refresh must never take the game down; the owner decides where the failure is recorded.
+            try { onError?.Invoke(ex); } catch (Exception e2) when (e2 is not OutOfMemoryException) { }
+        }
     }
 
     public void Dispose()
