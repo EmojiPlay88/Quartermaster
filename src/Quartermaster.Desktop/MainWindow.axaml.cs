@@ -772,6 +772,7 @@ public partial class MainWindow : Window
         DestroyExport();
         DestroyLedger();
         DestroyTools();
+        DestroyCharts();
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
         DestroyOutliner();
