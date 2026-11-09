@@ -114,7 +114,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | TablesTreePanel | 2b | ✔ |  |  | Tables and Formulas folders, refreshed 200 ms after rules changes; activation ignored until stage 4; split with the module tree remembered (ui.json) |
 | DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
 | WindowManager (floating windows) | - |  |  |  |  |
-| AlertBar | 2b |  |  |  |  |
+| AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches say "Open the Ledger to see ..." until the Ledger window; shown whenever a game is open (Settings toggle in stage 4) |
 | TourOverlay | 5 |  |  |  |  |
 | PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the plain step; the open-decisions question and floating panel come later in 2b); rule reference shown disabled until the rulebook viewer |
 | NextPhaseDialog | 2b |  |  |  |  |
