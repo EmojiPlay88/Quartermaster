@@ -1,4 +1,5 @@
 using Quartermaster.Core;
+using Quartermaster.Render;
 
 namespace Quartermaster.App;
 
@@ -24,7 +25,7 @@ sealed class NextPhaseDialog : Form
         var head = new Label
         {
             Dock = DockStyle.Top, Height = 36, Padding = new Padding(8, 8, 8, 0),
-            Text = n == 1 ? "1 decision is still open in this phase:" : $"{n} decisions are still open in this phase:",
+            Text = PhaseTexts.NextPhaseHead(n),
         };
         foreach (var d in decisions) _list.Items.Add(d.Text);
         var listHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8, 4, 8, 4) };

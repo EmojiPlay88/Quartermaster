@@ -22,6 +22,7 @@ sealed partial class MainForm
     readonly ToolStripMenuItem _viewPhases = new("&Phase panel");
     PhaseDock? _phaseDock;
     PhaseController? _phases;
+    PhaseRunDispatch? _dispatch;
     ActionPortSwitch? _actions;
     PhaseWatcher? _stripWatch;
 
@@ -74,6 +75,21 @@ sealed partial class MainForm
         _history.IsTurnGame = () => _turnIdentity is { LocalPlayerId.Length: > 0 };   // a sent turn cannot be undone
         _localActions = new LocalActions(session, c, _history);
         _actions = new ActionPortSwitch(_localActions);   // an online guest swaps in RemoteActions behind it
+        _dispatch = new PhaseRunDispatch(session, c, _history, () => _actions!, new PhaseUi(this), _autosaver, () => DateTimeOffset.UtcNow)
+        {
+            AutosaveMinutes = () => _settings.Current.AutosaveMinutes,
+            // Hot-seat: the phase belongs to the next player; their calculations open once they are at the screen.
+            HoldRuns = runs =>
+            {
+                if (_handoverFor == null && _hotSeat?.Pending == null) return false;
+                _runsAfterHandover.AddRange(runs);
+                return true;
+            },
+            Failed = ex => Guard(() => System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw()),
+            Log = Program.AppLog,
+        };
+        _dispatch.Advanced += RefreshPhaseViews;
+        _dispatch.Autosaved += () => _autosavedSeq = _changeSeq;
         CreateHotSeat(session, c, _history);
         _stripWatch = new PhaseWatcher(_strip, session, RefreshStrip);
         _phaseDock!.Create(new PhasePanel(session, c, _actions, () => Guard(NextPhase), CentreOnPiece, OpenPendingRun, OpenDocumentAtPage));
@@ -90,6 +106,7 @@ sealed partial class MainForm
         _phaseDock?.Destroy();
         if (_phases != null) { _phases.PhaseBoundary -= OnPhaseBoundary; _phases.RunsQueued -= OnRunsQueued; _phases.DifficultyChanged -= OnDifficultyChanged; }
         _phases = null;
+        _dispatch = null;
         if (_history != null) _history.Rewound -= OnHistoryRewound;
         _history = null;
         _actions = null;
@@ -142,26 +159,13 @@ sealed partial class MainForm
     }
 
     /// <summary>The phase just changed: write an autosave now (AutosaveMinutes = 0 is off).</summary>
-    void OnPhaseBoundary()
-    {
-        try
-        {
-            if (_autosaver?.SaveNow(DateTimeOffset.UtcNow, _settings.Current.AutosaveMinutes) != null) _autosavedSeq = _changeSeq;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            Program.AppLog("phase autosave: " + ex.Message);
-        }
-    }
-
-    bool HasPhases => _session?.Game != null && _session.Rules is { Phases.Count: > 0 };
+    void OnPhaseBoundary() => _dispatch?.OnPhaseBoundary();
 
     /// <summary>Ctrl+Right: Next Phase when the pack has phases, otherwise the plain turn counter.</summary>
     bool NextTurnCommand()
     {
-        if (_session?.Game == null) return false;
-        if (HasPhases) NextPhase();
-        else _dice!.StepTurn(1);
+        if (_session?.Game == null || _dispatch == null) return false;
+        RunNow(_dispatch.NextTurnCommand(() => { _dice!.StepTurn(1); return true; }));
         return true;
     }
 
@@ -169,31 +173,14 @@ sealed partial class MainForm
     void NextPhase()
     {
         if (_phases == null || _session?.Game == null) return;
-        if (_session.IsReplaying) { SetStatus(ModuleSession.ReplayingText); return; }   // the sender's turn replays as sent
-        var v = _phases.View();
-        if (v.NoPhases) return;
-        if (v.PlayingText is { } playing) { SetStatus(playing); return; }   // hot-seat: another side's phase
-        if (v.BeforeStart)
-        {
-            _actions?.NextPhase();
-            RefreshPhaseViews();
-            return;
-        }
-        if (v.Decisions.Count > 0)
-        {
-            if (Program.Smoke) Program.AppLog($"smoke: Next Phase with {v.Decisions.Count} open decision(s): continuing without the dialog");
-            else
-            {
-                using var dlg = new NextPhaseDialog(v.Decisions);
-                if (dlg.ShowDialog(this) != DialogResult.OK)
-                {
-                    if (dlg.JumpTo is { } d) JumpToDecision(d);
-                    return;
-                }
-            }
-        }
-        if (_actions?.NextPhase() is { } pass) SetStatus(pass);
-        RefreshPhaseViews();
+        RunNow(_dispatch?.NextPhase());
+    }
+
+    /// <summary>The WinForms dialogs are modal, so a <see cref="PhaseRunDispatch"/> task has finished when the call returns;
+    /// this rethrows its exception here, where the caller's Guard sees it.</summary>
+    static void RunNow(Task? t)
+    {
+        if (t is { IsCompleted: true }) t.GetAwaiter().GetResult();
     }
 
     void RefreshPhaseViews()
@@ -202,16 +189,7 @@ sealed partial class MainForm
         _phaseDock?.Panel?.Flush();
     }
 
-    void JumpToDecision(Decision d)
-    {
-        if (d.Kind == DecisionKind.Pending && d.RunId != null) OpenPendingRun(d.RunId);
-        else if (d.Kind == DecisionKind.Checklist)
-        {
-            _phaseDock?.Reveal();
-            _phaseDock?.Panel?.SelectChecklist(d.Index);
-        }
-        else if (d.PieceIds.FirstOrDefault() is { } id) CentreOnPiece(id);
-    }
+    void JumpToDecision(Decision d) => _dispatch?.JumpToDecision(d);
 
     /// <summary>The session's phase controller (null without a game); map windows route move gestures through it.</summary>
     public PhaseController? Phases => _phases;
@@ -225,87 +203,83 @@ sealed partial class MainForm
         void Open()
         {
             if (IsDisposed) return;
-            SetStatus($"{runs.Count} calculation(s) waiting in the phase panel");
-            // Hot-seat: the phase belongs to the next player; their calculations open once they are at the screen.
-            if (_handoverFor != null || _hotSeat?.Pending != null) { _runsAfterHandover.AddRange(runs); return; }
-            foreach (var r in runs) Guard(() => OpenPendingRun(r.Id));
+            _dispatch?.OnRunsQueued(runs);
         }
         if (IsHandleCreated) BeginInvoke(Open);   // never inside Advance / ExecuteMove: the autosave and drag end finish first
     }
 
-    /// <summary>
-    /// Opens the calculation UI of a pending run in the CURRENT difficulty, whatever mode it was queued in (spec 7.3).
-    /// Fully automatic: the run is finished from the auto values, asking once (missing-input dialog) only for what has no auto value.
-    /// Hardcore / semi-auto: the checked dialog for one unit or the checked batch grid for several (semi-auto adds the cheat sheet).
-    /// </summary>
+    /// <summary>Opens the calculation UI of a pending run in the current difficulty (see <see cref="PhaseRunDispatch.OpenPendingRun"/>).</summary>
     public void OpenPendingRun(string runId)
     {
-        if (_session?.Game is not { } game || _phases == null) return;
-        var run = game.State.Pending.FirstOrDefault(r => r.Id == runId);
-        if (run == null) { SetStatus("That calculation is no longer waiting."); return; }
-        var open = run.Units.Where(u => !u.Applied).ToList();
-        if (open.Count == 0) return;
-        // Hot-seat: a run with no unit of a held side (or of no side) is not this player's to calculate.
-        if (!open.Any(u => _session.CanAct(u.PieceId))) { SetStatus("That calculation " + ModuleSession.OtherSideText + "."); return; }
-        if (game.State.Difficulty == Difficulty.FullyAuto)
-        {
-            OpenPendingRunAutomatic(run);
-            return;
-        }
-        OpenPendingRunAsUnits(run, open);
-    }
-
-    void OpenPendingRunAutomatic(PendingRun run)
-    {
-        if (_session == null || _phases == null) return;
-        if (MissingInputs.For(_session, run).Count == 0)
-        {
-            // Nothing to ask (for example a run left over from a manual mode): finish it from the auto values, no window.
-            var (applied, failed) = _actions!.ApplyMissingInputs(run, new Dictionary<string, string>());
-            SetStatus($"{run.FormulaName}: {applied} unit(s) calculated automatically" + (failed.Count > 0 ? $", {failed.Count} could not be" : ""));
-            return;
-        }
-        if (Program.Smoke) { Program.AppLog($"smoke: run {run.FormulaName} needs input; dialog skipped in smoke"); return; }
-        using var dlg = new MissingInputDialog(_session, _actions!, run);
-        if (dlg.ShowDialog(this) == DialogResult.Retry
-            && _session?.Game?.State.Pending.FirstOrDefault(r => r.Id == run.Id) is { } fresh   // re-read: the dialog may have applied some units
-            && fresh.Units.Where(u => !u.Applied).ToList() is { Count: > 0 } left)
-            OpenPendingRunAsUnits(fresh, left);   // "Per unit..."
-    }
-
-    /// <summary>The checked UI for a run: the batch grid for several units, the unit dialog for one. Also "Per unit..." from the missing-input dialog.</summary>
-    void OpenPendingRunAsUnits(PendingRun run, List<PendingUnit> open)
-    {
-        if (_session == null || _phases == null) return;
-        if (open.Count > 1)
-        {
-            var model = new BatchModel(_session, _actions!, run.Id);
-            OpenChild(_docs, "batch:" + run.Id, () => new BatchGridWindow(model, _session, run.Id, row => Guard(() => OpenBatchRow(run.Id, row))));
-        }
-        else OpenUnitDialog(run, open[0]);
+        if (_session?.Game == null || _phases == null) return;
+        RunNow(_dispatch?.OpenPendingRun(runId));
     }
 
     /// <summary>The difficulty changed: every open formula dialog, batch grid and cheat sheet belongs to the old mode, so they close. Pending runs stay pending.</summary>
     void OnDifficultyChanged()
     {
         if (IsDisposed || _session == null) return;
-        CloseFormulaWindows("Difficulty changed — reopen from the phase panel");
+        _dispatch?.OnDifficultyChanged();
     }
 
-    /// <summary>Double-click in the batch grid: that unit's formula dialog, linked to the run so applying it counts for the batch.</summary>
-    void OpenBatchRow(string runId, int row)
+    /// <summary>The WinForms side of <see cref="PhaseRunDispatch"/>: its modal dialogs, formula windows and status line.</summary>
+    sealed class PhaseUi(MainForm f) : IPhaseUi
     {
-        if (_session?.Game is not { } game) return;
-        var run = game.State.Pending.FirstOrDefault(r => r.Id == runId);
-        if (run == null || row < 0 || row >= run.Units.Count || run.Units[row].Applied) return;
-        OpenUnitDialog(run, run.Units[row]);
-    }
+        public Task<bool> ConfirmOpenDecisions(IReadOnlyList<Decision> open)
+        {
+            if (Program.Smoke)
+            {
+                Program.AppLog($"smoke: Next Phase with {open.Count} open decision(s): continuing without the dialog");
+                return Task.FromResult(true);
+            }
+            using var dlg = new NextPhaseDialog(open);
+            if (dlg.ShowDialog(f) == DialogResult.OK) return Task.FromResult(true);
+            if (dlg.JumpTo is { } d) f.JumpToDecision(d);
+            return Task.FromResult(false);
+        }
 
-    void OpenUnitDialog(PendingRun run, PendingUnit unit)
-    {
-        if (_session?.Game is not { } game) return;
-        if (unit.PieceId != null && !game.State.Pieces.ContainsKey(unit.PieceId)) { SetStatus($"{unit.Label} is no longer on the map."); return; }
-        FormulaDialog.Show(_session, run.FormulaId, unit.PieceId, this, this, new RunLink(run.Id, unit.Moved));
+        public Task<CheckpointRow?> PickCheckpoint(IReadOnlyList<CheckpointRow> rows, bool confirmOnly)
+        {
+            if (f._history is not { } h) return Task.FromResult<CheckpointRow?>(null);
+            using var dlg = new StepBackDialog(rows, r => HistoryController.Describe(h.Preview(r)), confirmOnly);
+            return Task.FromResult(dlg.ShowDialog(f) == DialogResult.OK ? dlg.Selected : null);
+        }
+
+        public void OpenUnitDialog(string formulaId, string? pieceId, string runId, double? moved)
+        {
+            if (f._session is not { } s) return;
+            FormulaDialog.Show(s, formulaId, pieceId, f, f, new RunLink(runId, moved));
+        }
+
+        public void OpenBatch(string runId)
+        {
+            if (f._session is not { } s || f._dispatch is not { } dispatch) return;
+            var model = new BatchModel(s, f._actions!, runId);
+            f.OpenChild(f._docs, "batch:" + runId, () => new BatchGridWindow(model, s, runId, row => f.Guard(() => dispatch.OpenBatchRow(runId, row))));
+        }
+
+        public Task<MissingInputResult> AskMissing(PendingRun run)
+        {
+            if (f._session is not { } s) return Task.FromResult(MissingInputResult.Cancel);
+            if (Program.Smoke)
+            {
+                Program.AppLog($"smoke: run {run.FormulaName} needs input; dialog skipped in smoke");
+                return Task.FromResult(MissingInputResult.Cancel);
+            }
+            using var dlg = new MissingInputDialog(s, f._actions!, run);
+            return Task.FromResult(dlg.ShowDialog(f) switch
+            {
+                DialogResult.Retry => MissingInputResult.PerUnit,   // "Per unit..."
+                DialogResult.OK => MissingInputResult.Ok,
+                _ => MissingInputResult.Cancel,
+            });
+        }
+
+        public void CloseFormulaWindows() => f.CloseFormulaWindowsOnly();
+        public void Centre(string pieceId) => f.CentreOnPiece(pieceId);
+        public void Status(string text) => f.SetStatus(text);
+        public void RevealPhasePanel() => f._phaseDock?.Reveal();
+        public void SelectChecklist(int index) => f._phaseDock?.Panel?.SelectChecklist(index);
     }
 
     // ---------- smoke ----------

@@ -9,13 +9,13 @@ namespace Quartermaster.App;
 /// </summary>
 sealed class PhaseStrip : Panel
 {
-    public const string NoPhasesText = "No phases defined — add them in the Rules Workbench (Phases tab)";
+    public const string NoPhasesText = PhaseTexts.NoPhasesText;
     const int MaxRows = 3, PadX = 6, Gap = 4, Margin0 = 4;
 
     enum Kind { Label, Done, Current, Upcoming }
     sealed record Item(string Text, Kind Kind, Rectangle Bounds, string? Notes = null);
 
-    readonly Button _start = new() { Text = "Start game ▶", AutoSize = true, FlatStyle = FlatStyle.System, Visible = false };
+    readonly Button _start = new() { Text = PhaseTexts.StartGameText, AutoSize = true, FlatStyle = FlatStyle.System, Visible = false };
     readonly Font _bold;
     readonly ToolTip _tip = new() { ShowAlways = true, UseAnimation = false, UseFading = false, AutoPopDelay = 30000 };
     string? _tipText;
@@ -67,24 +67,11 @@ sealed class PhaseStrip : Panel
         if (_view != null && ClientSize.Width != _laidWidth) Relayout();
     }
 
-    List<(string Text, Kind Kind, string? Notes)> Build(PhaseView v)
-    {
-        var l = new List<(string, Kind, string?)>();
-        if (v.NoPhases) { l.Add((NoPhasesText, Kind.Label, null)); return l; }
-        if (v.BeforeStart) l.Add(("Before turn 1", Kind.Label, null));
-        else
+    static List<(string Text, Kind Kind, string? Notes)> Build(PhaseView v) =>
+        PhaseTexts.Strip(v).Select(c => (c.Text, c.State switch
         {
-            l.Add(($"Turn {v.Turn}", Kind.Label, null));
-            if (!string.IsNullOrWhiteSpace(v.StageText)) l.Add((v.StageText!, Kind.Label, null));
-        }
-        foreach (var c in v.Chips)
-        {
-            var text = c.State == ChipState.Current && v.PlayingText is { Length: > 0 } playing ? playing   // hot-seat: another side's phase
-                : c.State == ChipState.Current && !string.IsNullOrEmpty(v.SideName) ? $"{v.SideName} player — {c.Name}" : c.Name;
-            l.Add((text, c.State switch { ChipState.Done => Kind.Done, ChipState.Current => Kind.Current, _ => Kind.Upcoming }, c.Notes));
-        }
-        return l;
-    }
+            null => Kind.Label, ChipState.Done => Kind.Done, ChipState.Current => Kind.Current, _ => Kind.Upcoming,
+        }, c.Tooltip)).ToList();
 
     void Relayout()
     {
