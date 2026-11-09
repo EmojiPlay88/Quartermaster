@@ -65,6 +65,39 @@ public sealed class DocumentViewerTests : IDisposable
         return b.Build();
     }
 
+    /// <summary>
+    /// Hand-written invented 3-page PDF with correct xref offsets, each page showing Helvetica 20 pt "Zebra" at 100,200:
+    /// page 1 portrait 400x600, page 2 landscape 600x400, page 3 400x600 with /Rotate 90 (shown 600x400).
+    /// </summary>
+    static byte[] MixedPdf()
+    {
+        const string content = "BT /F1 20 Tf 100 200 Td (Zebra) Tj ET";
+        string Page(string box, string extra) =>
+            $"<< /Type /Page /Parent 2 0 R /MediaBox [{box}]{extra} /Contents 6 0 R /Resources << /Font << /F1 7 0 R >> >> >>";
+        var objs = new[]
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
+            Page("0 0 400 600", ""),
+            Page("0 0 600 400", ""),
+            Page("0 0 400 600", " /Rotate 90"),
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        };
+        var sb = new StringBuilder("%PDF-1.4\n");
+        var offsets = new List<int>();
+        for (var i = 0; i < objs.Length; i++)
+        {
+            offsets.Add(sb.Length);
+            sb.Append(i + 1).Append(" 0 obj\n").Append(objs[i]).Append("\nendobj\n");
+        }
+        var xref = sb.Length;
+        sb.Append("xref\n0 ").Append(objs.Length + 1).Append("\n0000000000 65535 f \n");
+        foreach (var o in offsets) sb.Append(o.ToString("D10")).Append(" 00000 n \n");
+        sb.Append("trailer\n<< /Size ").Append(objs.Length + 1).Append(" /Root 1 0 R >>\nstartxref\n").Append(xref).Append("\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(sb.ToString());
+    }
+
     static string Help(string title, string file) =>
         $"<VASSAL.build.module.documentation.HelpFile title=\"{title}\" fileName=\"{file}\" fileType=\"archive\"/>";
 
@@ -73,7 +106,7 @@ public sealed class DocumentViewerTests : IDisposable
         var xml = FixtureModule.MinimalBuildFile().Replace("</VASSAL.build.GameModule>",
             "<VASSAL.build.module.Documentation>" +
             Help("Rules", "rules.pdf") + Help("Notes", "docs/notes.txt") + Help("Guide", "guide.html") +
-            Help("Broken", "broken.pdf") + Help("Big", "big.pdf") + Help("Gone", "gone.pdf") +
+            Help("Broken", "broken.pdf") + Help("Big", "big.pdf") + Help("Gone", "gone.pdf") + Help("Mixed", "mixed.pdf") +
             "</VASSAL.build.module.Documentation></VASSAL.build.GameModule>");
         var fx = new FixtureModule().WithBuildFile(xml)
             .AddFile("rules.pdf", Pdf(PageSize.A4,
@@ -83,7 +116,8 @@ public sealed class DocumentViewerTests : IDisposable
             .AddFile("docs/notes.txt", Encoding.UTF8.GetBytes("Designer notes\r\n  column one\tcolumn two\r\n"))
             .AddFile("guide.html", Encoding.UTF8.GetBytes("<html><body>Invented guide</body></html>"))
             .AddFile("broken.pdf", Encoding.ASCII.GetBytes("%PDF-1.4 this is not really a pdf"))
-            .AddFile("big.pdf", Pdf(PageSize.A3, new[] { "A large invented page" }));
+            .AddFile("big.pdf", Pdf(PageSize.A3, new[] { "A large invented page" }))
+            .AddFile("mixed.pdf", MixedPdf());
         _fixtures.Add(fx);
         var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "cache"), null);
         _sessions.Add(s);
@@ -131,7 +165,7 @@ public sealed class DocumentViewerTests : IDisposable
     static void Click(Button b) => b.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
     static IEnumerable<T> All<T>(Visual root) where T : Visual =>
-        root.GetVisualDescendantsSafe().OfType<T>();
+        Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(root).OfType<T>();
 
     [AvaloniaFact]
     public void Opens_pdf_at_page_with_page_count()
@@ -463,6 +497,81 @@ public sealed class DocumentViewerTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Detach_during_a_failing_load_logs_once()
+    {
+        var (w, v, s) = Host();
+        var before = s.Log.Items.Count;
+        v.Open(Doc(s, "Broken"));
+        w.Content = null;   // detached while the PDF is still being read
+        Pump();
+        w.Content = v;      // re-attached: read again, fails again
+        Pump();
+        Settle(v);
+        for (var i = 0; i < 10; i++) Slice(10);
+        Assert.StartsWith("This document could not be opened: ", Assert.Single(v.BodyTexts));
+        Assert.Single(s.Log.Items.Skip(before));
+        w.Content = null;   // a failed document is not read again
+        Pump();
+        w.Content = v;
+        Pump();
+        Settle(v);
+        Assert.Single(s.Log.Items.Skip(before));
+    }
+
+    [AvaloniaFact]
+    public void Mixed_page_sizes_and_rotation_resize_refit_and_place_highlights()
+    {
+        var (_, v, s) = Host();
+        v.Open(Doc(s, "Mixed"), 1, "zebra");
+        Settle(v);
+        Assert.Equal(3, v.PageCount);
+
+        // Fit width: every page is re-fitted to its own width; the view has the page's shape; the box sits at 100,200 pt.
+        void Check(int page, double w, double h, Func<Rect, Rect> expectedPt)
+        {
+            Settle(v);
+            Pump();
+            Assert.Equal(page, v.PageView.ShownPage);
+            Assert.Equal(v.FitWidthZoom()!.Value, v.Zoom, 6);
+            var z = v.Zoom;
+            Assert.Equal(w * z, v.PageView.Width, 3);
+            Assert.Equal(h * z, v.PageView.Height, 3);
+            Assert.InRange(v.PageView.Bounds.Width - v.PageView.Width, -1, 1);   // layout rounds to whole pixels
+            Assert.InRange(v.PageView.Bounds.Height - v.PageView.Height, -1, 1);
+            var b = v.PageView.Bitmap!.PixelSize;
+            Assert.Equal(w / h, b.Width / (double)b.Height, 2);
+            var box = v.PageView.BoxRect(Assert.Single(v.PageView.Highlights));
+            var pt = new Rect(box.X / z, box.Y / z, box.Width / z, box.Height / z);
+            var want = expectedPt(pt);
+            Assert.True(Math.Abs(pt.X - want.X) < 4 && Math.Abs(pt.Y - want.Y) < 6, $"page {page}: box {pt} (pt), wanted near {want}");
+        }
+
+        // Portrait 400x600: "Zebra" starts at x 100, baseline 200 pt up, so its top is about 600 - 200 - 15 = 385 pt down.
+        Check(1, 400, 600, _ => new Rect(100, 385, 0, 0));
+        var portraitZoom = v.Zoom;
+        v.GoToPage(2, "zebra");
+        // Landscape 600x400: top about 400 - 200 - 15 = 185 pt down.
+        Check(2, 600, 400, _ => new Rect(100, 185, 0, 0));
+        Assert.True(v.Zoom < portraitZoom * 0.75, $"{v.Zoom} vs {portraitZoom}");
+        v.GoToPage(3, "zebra");
+        // /Rotate 90 (clockwise): shown 600x400, user point (x, y) lands at (y, x) from the top-left, text running down and
+        // glyphs rising to the right, so the box starts at x 200 and 100 pt down (a stretched view would put it near x 130).
+        Check(3, 600, 400, _ => new Rect(200, 100, 0, 0));
+        v.GoToPage(1, "zebra");
+        Check(1, 400, 600, _ => new Rect(100, 385, 0, 0));
+        Assert.Equal(portraitZoom, v.Zoom, 6);
+
+        // A fixed zoom keeps the zoom but still takes each page's shape.
+        v.Zoom = 1;
+        Settle(v);
+        v.GoToPage(2);
+        Settle(v);
+        Assert.Equal(1, v.Zoom);
+        Assert.Equal(600, v.PageView.Width, 3);
+        Assert.Equal(400, v.PageView.Height, 3);
+    }
+
+    [AvaloniaFact]
     public void Close_during_render_is_quiet()
     {
         var unobserved = new List<Exception>();
@@ -541,13 +650,5 @@ public sealed class DocumentViewerTests : IDisposable
         Assert.Equal(3, opened);
         Assert.Equal(3, v.Page);
         Assert.Equal(3, pages[^1]);
-    }
-}
-
-static class VisualExtensions
-{
-    public static IEnumerable<Visual> GetVisualDescendantsSafe(this Visual root)
-    {
-        foreach (var c in Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(root)) yield return c;
     }
 }

@@ -79,7 +79,7 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
     CancellationTokenSource? _renderCts;
     TaskCompletionSource _rendering = Done();
     string? _file;
-    bool _failed, _loading, _findPending, _renderPending, _syncing, _released, _disposed;
+    bool _failed, _loggedFailure, _loading, _findPending, _renderPending, _syncing, _released, _disposed;
     int _page = 1;
     int _pageCount;
     string? _search;
@@ -221,6 +221,7 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
             return;
         }
         _search = Normalize(search);
+        _loggedFailure = false;
         var newDoc = !Equals(Document, d);
         Document = d;
         var changed = page != _page;
@@ -272,6 +273,9 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
         if (_pages != null)
         {
             _scroller.Offset = new Vector(_scroller.Offset.X, 0);
+            // Pages can differ in size or orientation (landscape charts, /Rotate): re-fit or resize for the new page.
+            if (_fit != Fit.None) ApplyFit(debounce: false);
+            else UpdatePageSize();
             ShowPage(debounce: false);
             StartFind();
         }
@@ -351,7 +355,8 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
     void Fail(string message, Exception? ex)
     {
         System.Diagnostics.Trace.WriteLine("document viewer failed: " + ex);
-        _s.Log.Add(DiagnosticSeverity.Warning, "document", message, Document?.Title ?? "");
+        if (!_loggedFailure) _s.Log.Add(DiagnosticSeverity.Warning, "document", message, Document?.Title ?? "");   // once per Open
+        _loggedFailure = true;
         ShowText(message);
     }
 
@@ -693,19 +698,22 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
         _nav.IsVisible = false;
         SyncBar();
         _rendering.TrySetResult();
-        if (pages != null || hits != null) DisposeQuietly(pages, hits, wait: _released || _disposed);
+        if (pages != null || hits != null) DisposeQuietly(pages, hits);
     }
 
-    /// <summary>Disposes the PDF objects; each waits at most 2 s for running work. In the background unless <paramref name="wait"/>.</summary>
-    static void DisposeQuietly(PdfPages? pages, PdfHighlights? hits, bool wait = false)
+    /// <summary>
+    /// Disposes the PDF objects on the thread pool, never on the UI thread: PdfPages waits up to 2 s for a render and PdfHighlights
+    /// waits for a running Find. Faults are traced and observed.
+    /// </summary>
+    static void DisposeQuietly(PdfPages? pages, PdfHighlights? hits)
     {
         void Run()
         {
             try { pages?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine(ex.Message); }
             try { hits?.Dispose(); } catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine(ex.Message); }
         }
-        if (wait) Run();
-        else _ = Task.Run(Run);   // Run never throws
+        Task.Run(Run).ContinueWith(t => System.Diagnostics.Trace.WriteLine("document viewer dispose: " + t.Exception?.GetBaseException().Message),
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
