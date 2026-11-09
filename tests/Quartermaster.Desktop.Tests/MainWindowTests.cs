@@ -114,6 +114,21 @@ sealed class FakeDialogs : IDialogs
         TurnPrompts.Add(current);
         return Task.FromResult(Turn);
     }
+
+    /// <summary>Next Phase open-decisions dialogs shown (their decisions) and the answer: true = Continue anyway, false = Go back.
+    /// With <see cref="DecisionsGate"/> set, the next dialog waits for it; <see cref="JumpTo"/> picks a row to double-click (Go back).</summary>
+    public readonly List<IReadOnlyList<Decision>> DecisionPrompts = new();
+    public bool ContinueAnyway;
+    public TaskCompletionSource<bool>? DecisionsGate;
+    public int? JumpTo;
+
+    public Task<bool> ConfirmOpenDecisionsAsync(Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null)
+    {
+        DecisionPrompts.Add(open);
+        if (DecisionsGate is { } g) { DecisionsGate = null; return g.Task; }
+        if (JumpTo is { } i) { jumpTo?.Invoke(open[i]); return Task.FromResult(false); }
+        return Task.FromResult(ContinueAnyway);
+    }
 }
 
 /// <summary>Task 7: the main window shell, headless, with fake dialogs (menus, map tabs, palette, open/save, unsaved prompt, command line).</summary>

@@ -33,7 +33,6 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 - The hover delay is fixed at 600 ms until Settings (stage 4).
 - The log export picker has a single filter, "Log files (*.txt;*.html)" (default .txt); the format follows the extension. WinForms has two filters.
 - There is no chat line offline (WinForms shows it only online); the box comes with multiplayer (stage 5).
-- Ctrl+Right (Next turn) steps the plain turn counter. With a phased rules pack WinForms runs Next Phase there; that comes with the phase panel (stage 2b), so the key does nothing then.
 - The main toolbar shows only the buttons whose features exist in Desktop (no Diagnostics, Notes, Overview, Inventory, Palette, Step Back yet). Hiding buttons via Settings is stage 4.
 - The map toolbar sits inside each map tab (WinForms: one per map window); "Save map as picture" waits for stage 3.
 - The counter menu has no Show in Ledger until the Ledger (stage 3); no Delete counter until the game master setting exists.
@@ -94,7 +93,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Tools > Rules Workbench | 4 |  |  |  |  |
 | Tools > Inventory, Notes | 3 |  |  |  |  |
 | Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2a | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice wait for Settings (stage 4) |
-| Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right steps the turn; with a phased rules pack it is Next Phase in WinForms, which comes with the phase panel (stage 2b), so until then the key does nothing there. Turn label in the status bar |
+| Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right (Cmd+Right on macOS) steps the turn; with a phased rules pack it is Next Phase, as WinForms (2b). Turn label in the status bar |
 | Tools > Settings... | 4 |  |  |  |  |
 | Window > Cascade, Tile, Close All, Pop Out, floating list | - |  |  |  | Desktop uses tabs, not MDI; to be decided |
 | Help > Interface Tour, Check for updates, About | 5 |  |  |  |  |
@@ -116,8 +115,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches say "Open the Ledger to see ..." until the Ledger window; shown whenever a game is open (Settings toggle in stage 4) |
 | TourOverlay | 5 |  |  |  |  |
-| PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the plain step; the open-decisions question and floating panel come later in 2b); rule reference shown disabled until the rulebook viewer |
-| NextPhaseDialog | 2b |  |  |  |  |
+| PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the shared Next Phase flow with the open-decisions question and phase-boundary autosave; floating panel comes later in 2b); rule reference shown disabled until the rulebook viewer |
+| NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave at the WinForms default interval (5 min; no Settings yet) |
 | StepBackDialog | 2b |  |  |  |  |
 | ReplayBar | 5 |  |  |  |  |
 | UpdateBar, UpdateDialog, WhatsNewDialog, AppUpdates | 5 |  |  |  |  |

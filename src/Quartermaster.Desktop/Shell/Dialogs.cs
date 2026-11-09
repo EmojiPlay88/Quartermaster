@@ -60,6 +60,10 @@ public interface IDialogs
 
     /// <summary>The Set Turn dialog (WinForms TurnDialog) opened at <paramref name="current"/>; null when cancelled.</summary>
     Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current);
+
+    /// <summary>The Next Phase warning list (WinForms NextPhaseDialog): true = Continue anyway, false = Go back. A double-clicked decision goes
+    /// back and is handed to <paramref name="jumpTo"/> once the dialog has closed.</summary>
+    Task<bool> ConfirmOpenDecisionsAsync(Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -127,6 +131,14 @@ public sealed class Dialogs : IDialogs
 
     public Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current) =>
         new TurnDialog(current).ShowDialog<TurnChoice?>(owner);
+
+    public async Task<bool> ConfirmOpenDecisionsAsync(Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null)
+    {
+        var dlg = new NextPhaseDialog(open);
+        if (await dlg.ShowDialog<bool?>(owner) == true) return true;
+        if (dlg.JumpTo is { } d) jumpTo?.Invoke(d);
+        return false;
+    }
 }
 
 /// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>
