@@ -165,6 +165,16 @@ sealed class FakeDialogs : IDialogs
         ExportAsked.Add(mapName);
         return Task.FromResult(ExportChoices.Count > 0 ? ExportChoices.Dequeue() : null);
     }
+
+    /// <summary>Ledger tab editors shown (tabs, selected index, opened by "+") and what the next one answers: (tabs, addNew) => list, null = Cancel.</summary>
+    public readonly List<(IReadOnlyList<UserLedgerTab> Tabs, int Select, bool AddNew)> TabEdits = new();
+    public Func<IReadOnlyList<UserLedgerTab>, bool, IReadOnlyList<UserLedgerTab>?>? TabEditAnswer;
+
+    public Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false)
+    {
+        TabEdits.Add((tabs, select, addNew));
+        return Task.FromResult(TabEditAnswer?.Invoke(tabs, addNew));
+    }
 }
 
 /// <summary>Task 7: the main window shell, headless, with fake dialogs (menus, map tabs, palette, open/save, unsaved prompt, command line).</summary>

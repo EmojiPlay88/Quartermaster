@@ -13,7 +13,7 @@ namespace Quartermaster.Desktop.Ledgers;
 /// <summary>
 /// The Ledger's tab strip (Units, Depots &amp; Global, Everything, the player's ★ tabs, then "+"), the Side / Group by / Show counters toolbar and
 /// the per-module preferences behind them (<see cref="LedgerTabStore"/>: on this computer only, never in the rules pack, save or turn file).
-/// Edit tabs… and "+" open the tab editor, which comes in a later task: until then they are shown disabled.
+/// Edit tabs… and "+" open the tab editor (<see cref="EditTabsDialog"/>, through <see cref="IDialogs.EditLedgerTabsAsync"/>).
 /// </summary>
 public sealed partial class LedgerWindow
 {
@@ -93,8 +93,7 @@ public sealed partial class LedgerWindow
         _bar.Children.Add(_group);
         _bar.Children.Add(_showCounters);
         _bar.Children.Add(_editTabs);
-        _editTabs.IsEnabled = false;   // the tab editor comes with the next task; the tooltip stays as WinForms
-        ToolTip.SetShowOnDisabled(_editTabs, true);
+        _editTabs.Click += (_, _) => RunAsync(() => OpenEditTabsAsync(false));
         _side.SelectionChanged += (_, _) => Run(OnSidePicked);
         _group.SelectionChanged += (_, _) => Run(OnGroupPicked);
         _showCounters.IsCheckedChanged += (_, _) => Run(OnCountersToggled);
@@ -153,9 +152,8 @@ public sealed partial class LedgerWindow
                 if (!string.IsNullOrEmpty(t.User?.Notes)) ToolTip.SetTip(item, t.User!.Notes);
                 _tabStrip.Items.Add(item);
             }
-            var plus = new TabStripItem { Content = PlusTab, IsEnabled = false };   // opens the tab editor (next task)
+            var plus = new TabStripItem { Content = PlusTab };   // opens the tab editor with a fresh tab
             ToolTip.SetTip(plus, PlusTip);
-            ToolTip.SetShowOnDisabled(plus, true);
             _tabStrip.Items.Add(plus);
             _tabStrip.SelectedIndex = Math.Max(0, _tabDefs.ToList().FindIndex(t => t.Key == _tab.Key));
         }
@@ -196,10 +194,11 @@ public sealed partial class LedgerWindow
         if (_syncing) return;
         if (_tabStrip.SelectedItem is not TabStripItem { Tag: LedgerTabDef t })
         {
-            // "+" is a button, not a tab: put the selection back.
+            // "+" is a button, not a tab: put the selection back, then open the editor with a new tab.
             _syncing = true;
             try { _tabStrip.SelectedIndex = Math.Max(0, _tabDefs.ToList().FindIndex(d => d.Key == _tab.Key)); }
             finally { _syncing = false; }
+            Dispatcher.UIThread.Post(() => { if (!_closing) RunAsync(() => OpenEditTabsAsync(true)); });
             return;
         }
         if (t.Key == _tab.Key) return;
@@ -296,7 +295,24 @@ public sealed partial class LedgerWindow
         });
     }
 
-    /// <summary>Stores an edited tab list, rebuilds the strip and reloads; after "+" the newly added tab is opened (the tab editor, Task 5).</summary>
+    // ---------- Edit tabs ----------
+
+    bool _editingTabs;   // the tab editor is open (a second click on Edit tabs… or "+" opens nothing)
+
+    /// <summary>Edit tabs… / "+": the tab editor at the current user tab (or with a fresh tab when <paramref name="addNew"/>); OK applies the list.</summary>
+    async Task OpenEditTabsAsync(bool addNew)
+    {
+        if (_editingTabs || _closing) return;
+        var userIndex = _tab.Kind == LedgerTabKind.User ? _prefs.Tabs.ToList().FindIndex(t => t.Name == _tab.Title) : 0;
+        _editingTabs = true;
+        IReadOnlyList<UserLedgerTab>? result;
+        try { result = await _dialogs.EditLedgerTabsAsync(this, _prefs.Tabs, _s.Rules, Math.Max(0, userIndex), addNew); }
+        finally { _editingTabs = false; }
+        if (result == null || _closing) return;
+        ApplyEditedTabs(result, addNew);
+    }
+
+    /// <summary>Stores an edited tab list, rebuilds the strip and reloads; after "+" the newly added tab is opened.</summary>
     internal void ApplyEditedTabs(IReadOnlyList<UserLedgerTab> tabs, bool openNew)
     {
         var clean = LedgerTabStore.Normalize(tabs);
