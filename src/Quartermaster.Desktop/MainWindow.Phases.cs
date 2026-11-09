@@ -64,7 +64,7 @@ public partial class MainWindow
         CreateDispatch(s, c);
         _stripWatch = new PhaseWatch(s, RefreshStrip);
         StripHost.FlushHook = _stripWatch.Flush;
-        _phasePanel = new PhasePanel(s, c, () => _actions!, CentreOnPiece);
+        _phasePanel = new PhasePanel(s, c, () => _actions!, CentreOnPiece, OpenDocumentAtPage);
         _phasePanel.NextRequested += () => Guard(NextPhaseFromUi);
         _phasePanel.DecisionActivated += d => Guard(() => _dispatch?.JumpToDecision(d));
         PlacePhases(s, _phasePanel);
