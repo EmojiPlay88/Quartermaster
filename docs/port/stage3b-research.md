@@ -18,7 +18,8 @@ Input for the stage 3b plan (PDF rulebook viewer, charts, search, OCR on Windows
 
 ## OCR
 
-- **Primary candidate: TesseractOcrNet 0.1.19** (MIT, 2026-04-18, net10.0), https://www.nuget.org/packages/TesseractOcrNet.
+- **Dropped on 2026-11-09: TesseractOcrNet 0.1.19.** The package cannot be restored: its nuspec requires `tesseract_sharp.Core`, `.Interop` and `.Loader` 0.1.19, which were never published to nuget.org (its own `tesseract_sharp.dll` is an 8.7 KB facade). Replaced by the native packages `Tesseract.Native.runtime.{win-x64,linux-x64,osx-arm64}` 5.5.2.200 (jbtule/tesseract-nuget-platforms, Apache-2.0) plus our own P/Invoke layer over Tesseract's C API (`src/Quartermaster.Documents/Tesseract/TessApi.cs`).
+- ~~Primary candidate: TesseractOcrNet 0.1.19~~ (MIT, 2026-04-18, net10.0), https://www.nuget.org/packages/TesseractOcrNet.
   - It ships win-x64, linux-x64 and osx-arm64 natives under `runtimes/<rid>/native`.
   - Set `OcrOptions.TessdataPath` to a bundled tessdata folder, so OCR never downloads anything.
   - Risk: it is a small, new package. Pin it and test it on all three OSes.

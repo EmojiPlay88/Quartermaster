@@ -30,3 +30,14 @@ Ported files:
 rulebook page text for search. PdfPig is licensed under the Apache License, Version 2.0
 (https://www.apache.org/licenses/LICENSE-2.0). The full licence text is in [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt).
 PdfPig is used unmodified, as a binary package.
+
+## Tesseract, Leptonica and tessdata_fast
+
+`src/Quartermaster.Documents` reads scanned pages with Tesseract OCR. It calls the native libraries through its own small P/Invoke layer.
+
+- Tesseract (https://github.com/tesseract-ocr/tesseract) is licensed under the Apache License, Version 2.0.
+- Leptonica (https://github.com/DanBloomberg/leptonica) is licensed under the BSD 2-Clause licence.
+- The Tesseract and Leptonica binaries come from the NuGet packages `Tesseract.Native.runtime.win-x64`, `.linux-x64` and `.osx-arm64` (5.5.2.200, https://github.com/jbtule/tesseract-nuget-platforms). The packaging is licensed under the Apache License, Version 2.0. The binaries also bundle libraries such as libpng, libjpeg, libtiff, libwebp, zlib, libarchive and libcurl under their own permissive licences.
+- The English language data `tessdata/eng.traineddata` is `eng.traineddata` from tessdata_fast (https://github.com/tesseract-ocr/tessdata_fast), licensed under the Apache License, Version 2.0.
+
+The Apache-2.0 licence text is in [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt). These components are used unmodified.
