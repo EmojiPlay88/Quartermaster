@@ -1,4 +1,3 @@
-using System.Globalization;
 using Quartermaster.Render;
 using Quartermaster.Rules;
 
@@ -118,27 +117,22 @@ sealed class TablesTreePanel : Panel
                 _tree.Nodes.Add("(no rules pack)").ForeColor = SystemColors.GrayText;
                 return;
             }
-            var tables = _tree.Nodes.Add("Tables");
-            tables.Tag = TablesKey;
-            foreach (var t in pack.Tables.OrderBy(t => t.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(t => t.Id, StringComparer.Ordinal))
+            TreeNode? tables = null, formulas = null;
+            foreach (var root in TablesTreeModel.Build(pack))
             {
-                var rows = t.Cells.Count;
-                var cols = t.Cells.Count == 0 ? 0 : t.Cells.Max(r => r.Count);
-                var n = tables.Nodes.Add(t.Name);
-                n.Tag = (TablesKey, t.Id);
-                var info = string.Create(CultureInfo.InvariantCulture, $"{t.Kind}, {rows}\u00d7{cols}");
-                n.ToolTipText = string.IsNullOrWhiteSpace(t.Notes) ? info : t.Notes + "\n" + info;
+                var key = root.Tag as string;
+                var rn = _tree.Nodes.Add(root.Text);
+                rn.Tag = key;
+                if (key == TablesKey) tables = rn; else formulas = rn;
+                foreach (var c in root.Children)
+                {
+                    var n = rn.Nodes.Add(c.Text);
+                    n.Tag = c.Tag switch { TableRef t => (TablesKey, t.Id), FormulaRef f => (FormulasKey, f.Id), _ => null };
+                    if (c.Tooltip != null) n.ToolTipText = c.Tooltip;
+                }
             }
-            var formulas = _tree.Nodes.Add("Formulas");
-            formulas.Tag = FormulasKey;
-            foreach (var f in pack.Formulas.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(f => f.Id, StringComparer.Ordinal))
-            {
-                var n = formulas.Nodes.Add(f.Name);
-                n.Tag = (FormulasKey, f.Id);
-                if (!string.IsNullOrWhiteSpace(f.Notes)) n.ToolTipText = f.Notes;
-            }
-            if (_tablesOpen) tables.Expand();
-            if (_formulasOpen) formulas.Expand();
+            if (_tablesOpen) tables?.Expand();
+            if (_formulasOpen) formulas?.Expand();
             if (selected is { } sel)
             {
                 var again = FindRoot(sel.Kind)?.Nodes.Cast<TreeNode>().FirstOrDefault(n => Item(n)?.Id == sel.Id);
