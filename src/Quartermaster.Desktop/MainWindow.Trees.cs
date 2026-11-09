@@ -12,7 +12,7 @@ namespace Quartermaster.Desktop;
 /// </summary>
 public partial class MainWindow
 {
-    /// <summary>"Opens in a later version": chart and PDF windows come in stage 3.</summary>
+    /// <summary>"Opens in a later version": document windows come in stage 3b.</summary>
     internal const string LaterVersionText = "Opens in a later version";
 
     WindowLayoutStore _layout = null!;
@@ -145,6 +145,11 @@ public partial class MainWindow
         {
             var view = Maps.Views.FirstOrDefault(v => v.Map.Id == map.Id);
             if (view != null) Maps.Activate(view);
+            return;
+        }
+        if (n.Kind == WindowNodeKind.Chart && n.Ref is ChartDef chart)
+        {
+            OpenChart(chart);
             return;
         }
         if (n.Kind is WindowNodeKind.Chart or WindowNodeKind.Document) SetStatus(LaterVersionText);
