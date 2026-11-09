@@ -58,6 +58,8 @@ public sealed class AlertBar : Border
         _overflowChip.PointerReleased += (_, e) => { if (IsLeft(e)) OverflowClicked?.Invoke(OverflowChips, _overflowChip); };
         _overflowChip.IsVisible = false;
         _probe = MakeChip("+00", Colors.Gray);
+        _probe.Opacity = 0;   // only measured (width of the "+N" chip); arranged at zero size, its text must not show
+        _probe.IsHitTestVisible = false;
         _banner.PointerReleased += (_, e) => { if (IsLeft(e)) BannerClicked?.Invoke(); };
         _strip.Children.Add(_banner);
         _strip.Children.Add(_noticeChip);

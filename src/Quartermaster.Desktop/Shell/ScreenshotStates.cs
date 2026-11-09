@@ -4,6 +4,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Quartermaster.Core;
+using Quartermaster.Desktop.Formulas;
 using Quartermaster.Desktop.Map;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
@@ -18,7 +19,42 @@ namespace Quartermaster.Desktop.Shell;
 /// </summary>
 static class ScreenshotStates
 {
-    public static readonly string[] Names = { "menu", "hover", "los", "log", "rules" };
+    public static readonly string[] Names = { "menu", "hover", "los", "log", "rules", "phases", "nextphase", "stepback", "formula", "cheatsheet", "batch", "alerts", "tree", "floatlog", "floatphases" };
+
+    /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
+    public static Window? Target { get; private set; }
+
+    /// <summary>Closes the extra windows a state opened (before the main window closes).</summary>
+    public static void Cleanup(MainWindow window)
+    {
+        if (window.Session is { } s) FormulaWindows.CloseAllFor(s);
+        Target?.Close();
+        Target = null;
+    }
+
+    /// <summary>Start game, then Next Phase until North Combat (checklist, warnings), as a real turn would reach it.</summary>
+    static string? ToCombat(MainWindow window, Action? beforeClose = null)
+    {
+        if (window.Actions == null || window.PhaseControl == null) return "This state needs a rules pack with phases (--rules).";
+        for (var i = 0; i < 3; i++)
+        {
+            window.Actions.NextPhase();
+            Pump(300);
+        }
+        beforeClose?.Invoke();
+        CloseCalcWindows(window);
+        Pump(300);
+        return window.PhaseControl.View().BeforeStart ? "The game did not start." : null;
+    }
+
+    /// <summary>The queued runs of a phase start open formula windows / batch grids by themselves; states that picture something else close them.</summary>
+    static void CloseCalcWindows(MainWindow window)
+    {
+        if (window.Session is not { } s) return;
+        Pump(300);
+        foreach (var b in FormulaWindows.OpenBatchFor(s)) b.Close();
+        FormulaWindows.CloseAllFor(s);
+    }
 
     /// <returns>An error text, or null when the state is in place.</returns>
     public static string? Apply(string name, MainWindow window)
@@ -30,6 +66,112 @@ static class ScreenshotStates
         {
             case "rules":
                 return s.Rules == null ? "State 'rules' needs --rules or --new-rules." : null;
+            case "phases":
+                return ToCombat(window, () => window.Phases.SetChecked(0, true));
+            case "nextphase":
+            {
+                if (ToCombat(window) is { } e1) return e1;
+                var dlg = new NextPhaseDialog(window.PhaseControl!.View().Decisions);
+                dlg.Show(window);
+                Pump(200);
+                Target = dlg;
+                return null;
+            }
+            case "stepback":
+            {
+                if (ToCombat(window) is { } e2) return e2;
+                var h = window.History;
+                if (h == null) return "No history.";
+                var rows = h.Checkpoints();
+                if (rows.Count == 0) return "No checkpoints to list.";
+                var dlg = new StepBackDialog(rows, r => HistoryController.Describe(h.Preview(r)), confirmOnly: false);
+                dlg.Show(window);
+                Pump(200);
+                Target = dlg;
+                return null;
+            }
+            case "formula":
+            case "cheatsheet":
+            {
+                if (window.PhaseControl == null) return "This state needs --rules.";
+                window.PhaseControl.SetDifficulty(Difficulty.SemiAuto);
+                Pump(200);
+                var unit = FindPiece(s, view, true);
+                if (unit == null) return "No unit is visible.";
+                var fw = FormulaWindows.Show(window, s, "f-attack", unit.Value.Id, null);
+                if (fw == null) return "The formula window did not open.";
+                Pump(400);
+                fw.Type("Die", "4");
+                fw.Type("Readiness", "3");
+                Pump(500);
+                Target = name == "formula" ? fw : fw.CheatSheet;
+                return Target == null ? "The cheat sheet did not open." : null;
+            }
+            case "batch":
+            {
+                if (window.PhaseControl == null) return "This state needs --rules.";
+                window.PhaseControl.SetDifficulty(Difficulty.SemiAuto);
+                Pump(200);
+                window.Actions!.NextPhase();   // Start game: North Supply queues the weather, delivery and a fuel / ammo draw per unit
+                Pump(600);
+                var grid = FormulaWindows.OpenBatchFor(s).FirstOrDefault();
+                if (grid == null)
+                {
+                    var run = s.Game!.State.Pending.FirstOrDefault(r => r != null && r.FormulaId == "f-fuel-supply");
+                    if (run == null) return "No batch run is pending.";
+                    grid = FormulaWindows.ShowBatch(window, s, window.Actions!, run.Id, null);
+                }
+                if (grid == null) return "The batch grid did not open.";
+                Pump(500);
+                grid.TypeCell(0, 1, "3");
+                grid.TypeCell(0, 2, "2");
+                grid.SelectRow(0);
+                Pump(500);
+                Target = grid;
+                return null;
+            }
+            case "alerts":
+            {
+                if (window.PhaseControl == null) return "This state needs --rules.";
+                var game = s.Game!;
+                var low = 0;
+                foreach (var stack in s.View!.StacksOn(view.Map.Id))
+                    foreach (var pid in stack.PieceIds)
+                    {
+                        if (low >= 3) break;
+                        var key = LedgerKey.Piece(pid);
+                        var cur = Ledger.Get(game.State, key, "fuel");
+                        if (cur == null) continue;
+                        game.Execute(new LedgerDelta(key, "fuel", cur.Value, 1, "manual", null, null, "forced march", null));
+                        low++;
+                    }
+                window.Actions!.NextPhase();
+                Pump(300);
+                CloseCalcWindows(window);
+                window.FlushAlerts();
+                Pump(400);
+                return window.Alerts.ChipTexts.Count > 0 ? null : "No alert chips appeared.";
+            }
+            case "tree":
+                Pump(400);
+                return window.ModuleTreeShown ? null : "The module tree is hidden.";
+            case "floatlog":
+                window.Commands.Execute("dice.1d6");
+                window.Commands.Execute("dice.2d6");
+                if (window.Log is not { } lp) return "No log panel.";
+                Pump(500);
+                lp.PopButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                Pump(400);
+                Target = window.LogFloat;
+                return Target == null ? "The log did not pop out." : null;
+            case "floatphases":
+            {
+                if (ToCombat(window) is { } e3) return e3;
+                window.Phases.PopButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                Pump(500);
+                Target = window.PhaseFloat;
+                return Target == null ? "The phase panel did not pop out." : null;
+            }
             case "log":
                 window.Commands.Execute("dice.1d6");
                 window.Commands.Execute("dice.2d6");

@@ -7,8 +7,8 @@ How to read the columns:
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
 - **Linux**: ticked only for features verified by tests actually run on Linux. Stage 1 rows: verified by the headless tests in the CI workflow `.github/workflows/cross-platform.yml` on ubuntu-latest (green run 42510235329, 2026-11-08). Not yet opened on a real Linux desktop.
 - **Docs.Tests on Linux**: pass on ubuntu-latest in CI (run 42510235329).
-- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
-- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log (this branch); 2b = formulas, phases, step back, module tree, alerts; 3 ledger, notes, inventory, documents, search; 4 workbench and settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 2a are provisional.
+- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
+- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts (this branch); 3 ledger, notes, inventory, documents, search; 4 workbench and settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 2a are provisional.
 
 ## Stage-1 deviations from the WinForms app (deliberate or known)
 
@@ -27,7 +27,7 @@ How to read the columns:
 
 ## Stage-2a deviations from the WinForms app (deliberate or known)
 
-Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), dice and turn tools, main toolbar, log panel. Stage-2b items (formula dialogs, phases, step back, module tree, alerts) are still unticked below.
+Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), dice and turn tools, main toolbar, log panel. The 2b items are in the next section.
 
 - The hover popup and the breakdown tip are overlays inside the window, so they never leave it and flip sooner near the window edge. WinForms uses screen-sized popups.
 - The hover delay is fixed at 600 ms until Settings (stage 4).
@@ -45,6 +45,23 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 - Opening a rules pack made for another module only logs a warning, as WinForms.
 - The map toolbar's zoom drop-down button reads "Zoom ▾" (WinForms "Zoom" with a drawn drop-down arrow, which Avalonia buttons do not draw).
 - Real dialogs, menu placement and pointer positions were only exercised headless; see `docs/port/stage2a-mac-checklist.md`.
+
+## Stage-2b deviations from the WinForms app (deliberate or known)
+
+Stage 2b = phase strip and panel, Next Phase, Step Back, formula window and cheat sheet, batch grid and missing-input dialog, alert bar, module and tables trees, floating log and phase panels. Behaviour, labels and punctuation of the formula window, the batch grid and the missing-input dialog are copied from WinForms (the shared rules live in Quartermaster.Render: `FormulaWindowRules`, `BatchModel`, `PhaseRunDispatch`).
+
+- The batch grid's Unit cell has the unit's name only; the counter pictures come with the Ledger images in stage 3.
+- Rule ref (formula window, phase panel, rule links) is shown disabled with the tooltip "Rulebook viewer comes in a later version" until the rulebook viewer (stage 3).
+- Changing the difficulty in mid-game needs Settings (stage 4); a game keeps the difficulty it was started with. The windows follow the mode when it changes (tests drive it through the shared controller).
+- Holder alert matches ("Open the Ledger to see {name}") select nothing until the Ledger window exists (stage 3).
+- The notice chip on the alert bar is drawn, but clicking it does nothing until multiplayer (stage 5).
+- The map-tab pop-out and the Window menu items (Cascade, Tile, Pop Out Active Window, floating windows list) are not ported; Desktop uses tabs. Only the log and the phase panel pop out.
+- The phase-boundary autosave uses the WinForms default interval (5 minutes) until Settings (stage 4) offers the choice.
+- The formula window, cheat sheet, batch grid and dialogs are Avalonia windows owned by the main window; their placement is the platform's (centred on the owner), and the cheat sheet opens beside the formula window.
+- Tables-tree activation is ignored until the Rules Workbench (stage 4); the PDF and chart nodes of the module tree say "Opens in a later version".
+- Floating log and phase windows are clamped onto a screen that exists (primary screen as fallback). Real second-display behaviour is only checked by the Mac checklist (`docs/port/stage2b-mac-checklist.md`).
+- Open Autosave, Game > Send Turn and the other WinForms menus around phases wait for their own stages (4 and 5).
+- Fixed in the 2b screenshot pass: the alert bar's hidden measuring chip ("+00") was visible at the left of the banner text.
 
 ## Before the stage release
 
@@ -95,7 +112,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2a | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice wait for Settings (stage 4) |
 | Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right (Cmd+Right on macOS) steps the turn; with a phased rules pack it is Next Phase, as WinForms (2b). Turn label in the status bar |
 | Tools > Settings... | 4 |  |  |  |  |
-| Window > Cascade, Tile, Close All, Pop Out, floating list | - |  |  |  | Desktop uses tabs, not MDI; to be decided |
+| Window > Cascade, Tile, Close All, Pop Out, floating list | - |  |  |  | Desktop uses tabs, not MDI; not ported in 2b (only the log and phase panel pop out) |
 | Help > Interface Tour, Check for updates, About | 5 |  |  |  |  |
 
 ## Main window and shell
