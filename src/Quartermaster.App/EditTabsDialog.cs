@@ -127,7 +127,7 @@ sealed class EditTabsDialog : Form
         var at = _list.SelectedIndex;
         _list.BeginUpdate();
         _list.Items.Clear();
-        foreach (var t in _tabs) _list.Items.Add(string.IsNullOrWhiteSpace(t.Name) ? "(no name)" : "★ " + t.Name.Trim());
+        foreach (var t in _tabs) _list.Items.Add(LedgerViewRules.ListLabel(t));
         _list.EndUpdate();
         if (_tabs.Count > 0) _list.SelectedIndex = Math.Clamp(at, 0, _tabs.Count - 1);
         _loading = false;
@@ -178,7 +178,7 @@ sealed class EditTabsDialog : Form
     {
         if (_loading || IsDisposed || Current < 0 || Current >= _tabs.Count) return;
         _tabs[Current] = edit(_tabs[Current]);
-        var label = string.IsNullOrWhiteSpace(_tabs[Current].Name) ? "(no name)" : "★ " + _tabs[Current].Name.Trim();
+        var label = LedgerViewRules.ListLabel(_tabs[Current]);
         if (!Equals(_list.Items[Current], label))
         {
             var at = Current;
@@ -210,9 +210,7 @@ sealed class EditTabsDialog : Form
 
     void AddTab()
     {
-        var n = 1;
-        string name;
-        do name = n == 1 ? "New tab" : "New tab " + n; while (_tabs.Any(t => string.Equals(t.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)) && n++ < 1000);
+        var name = LedgerViewRules.NewTabName(_tabs);
         var at = Current < 0 ? _tabs.Count : Current + 1;
         _tabs.Insert(at, new UserLedgerTab(name, null, Array.Empty<string>(), false, null));
         RefreshList();
@@ -270,6 +268,6 @@ sealed class EditTabsDialog : Form
 
     sealed record ColumnItem(PropertyDef Def)
     {
-        public override string ToString() => Def.Name + (Def.Scope == PropertyScope.Holders ? "  (depots & Global)" : "");
+        public override string ToString() => Def.Name + (Def.Scope == PropertyScope.Holders ? LedgerViewRules.HolderColumnSuffix : "");
     }
 }

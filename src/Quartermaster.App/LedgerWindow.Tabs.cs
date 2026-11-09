@@ -115,12 +115,7 @@ sealed partial class LedgerWindow
         UpdateTabTools();
     }
 
-    static string TabTitle(LedgerTabDef t, int? count) => t.Kind switch
-    {
-        LedgerTabKind.User => "★ " + t.Title,
-        LedgerTabKind.Everything => t.Title,
-        _ => count is { } n ? $"{t.Title} ({n:N0})" : t.Title,
-    };
+    static string TabTitle(LedgerTabDef t, int? count) => LedgerViewRules.TabTitle(t, count);
 
     /// <summary>The fixed tabs' labels carry their row counts (with the current filter and side).</summary>
     void UpdateTabCounts(RulesPack? pack, GameSession? game)
@@ -140,13 +135,13 @@ sealed partial class LedgerWindow
     void ShowBanner(string? filterError)
     {
         var show = filterError != null;
-        if (show) _banner.Text = $"The unit filter of \"{_tab.Title}\" does not parse, so this tab shows no rows: {filterError}   (Edit tabs… to fix it)";
+        if (show) _banner.Text = LedgerViewRules.FilterBanner(_tab.Title, filterError!);
         if (_banner.Visible != show) _banner.Visible = show;
     }
 
     void UpdateTabTools()
     {
-        var unitTab = _tab.Kind is LedgerTabKind.Units or LedgerTabKind.User;
+        var unitTab = LedgerViewRules.SideAndGroupApply(_tab);
         _sideLabel.Visible = _side.Visible = _groupLabel.Visible = _group.Visible = unitTab;
     }
 
@@ -263,9 +258,7 @@ sealed partial class LedgerWindow
         }));
     }
 
-    static bool SameTabs(IReadOnlyList<UserLedgerTab> a, IReadOnlyList<UserLedgerTab> b) =>
-        a.Count == b.Count && a.Zip(b).All(p => p.First.Name == p.Second.Name && p.First.Filter == p.Second.Filter && p.First.IncludeHolders == p.Second.IncludeHolders
-            && p.First.Notes == p.Second.Notes && p.First.ColumnIds.SequenceEqual(p.Second.ColumnIds));
+    static bool SameTabs(IReadOnlyList<UserLedgerTab> a, IReadOnlyList<UserLedgerTab> b) => LedgerViewRules.SameTabs(a, b);
 
     // ---------- Edit tabs ----------
 
@@ -281,10 +274,8 @@ sealed partial class LedgerWindow
     /// <summary>Stores the edited list, rebuilds the strip and reloads; after "+" the newly added tab is opened.</summary>
     internal void ApplyEditedTabs(IReadOnlyList<UserLedgerTab> tabs, bool openNew)
     {
-        var before = _prefs.Tabs.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var clean = LedgerTabStore.Normalize(tabs);
-        var key = _tab.Key;
-        if (openNew && clean.FirstOrDefault(t => !before.Contains(t.Name)) is { } added) key = "user:" + added.Name;
+        var key = LedgerViewRules.TabToOpenAfterEdit(_prefs.Tabs, clean, _tab.Key, openNew);
         _prefs = _prefs with { Tabs = clean };
         RebuildTabStrip(key);
         _prefs = _prefs with { LastTab = _tab.Key };
