@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -49,7 +50,7 @@ public sealed partial class DocumentViewer
         DocumentOpened += SyncList;
 
         _usedTitle = new TextBlock { Text = UsedOnPageTitle, FontWeight = FontWeight.Bold };
-        _usedList = new ListBox { Foreground = GrayText };
+        _usedList = new ListBox();
         var inner = new DockPanel();
         DockPanel.SetDock(_usedTitle, Dock.Top);
         inner.Children.Add(_usedTitle);
@@ -133,7 +134,8 @@ public sealed partial class DocumentViewer
             _usedIds.Add((kind, id));
             _usedList.Items.Add(text);
         }
-        _usedList.Foreground = items.Count == 0 ? GrayText : null;
+        if (items.Count == 0) _usedList.Foreground = GrayText;
+        else _usedList.ClearValue(TemplatedControl.ForegroundProperty);
         if (items.Count == 0) _usedList.Items.Add(Document == null ? NoDocumentOpenText : NothingPointsHereText);
     }
 

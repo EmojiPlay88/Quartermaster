@@ -238,4 +238,28 @@ public sealed class DocumentViewerToolbarTests : IDisposable
         v.SetUsedOnPage(new[] { ("Formula", "f", "t") });
         Assert.Empty(v.BodyTexts);
     }
+
+    static IBrush? RowBrush(DocumentViewer v, string text)
+    {
+        Dispatcher.UIThread.RunJobs();
+        var tb = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(v.UsedList!).OfType<TextBlock>().Single(t => t.Text == text);
+        return tb.Foreground;
+    }
+
+    [AvaloniaFact]
+    public void Used_rows_render_grey_only_for_notes()
+    {
+        var (v, s) = Host();
+        v.EnableUsedOnPage();
+        v.Open(Doc(s, "Rules"));
+        v.SetUsedOnPage(Array.Empty<(string, string, string)>());
+        var grey = Color.FromRgb(0x6D, 0x6D, 0x6D);
+        Assert.Equal(grey, ((SolidColorBrush)RowBrush(v, "Nothing in the rules pack points here.")!).Color);
+        v.SetUsedOnPage(new[] { ("Formula", "f1", "Combat odds") });
+        var normal = RowBrush(v, "Combat odds");
+        Assert.NotNull(normal);
+        Assert.NotEqual(grey, (normal as SolidColorBrush)?.Color);
+        v.SetUsedOnPage(Array.Empty<(string, string, string)>());
+        Assert.Equal(grey, ((SolidColorBrush)RowBrush(v, "Nothing in the rules pack points here.")!).Color);
+    }
 }

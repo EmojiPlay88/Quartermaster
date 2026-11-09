@@ -135,7 +135,7 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
         UpdateZoomLabel();
     }
 
-    /// <summary>The <c>toolbar</c> flag given at construction (stage 3b task 8 builds on it).</summary>
+    /// <summary>The <c>toolbar</c> flag given at construction (document list, tool items and Used on this page exist only when true).</summary>
     public bool Toolbar { get; }
 
     public DocumentDef? Document { get; private set; }
