@@ -88,7 +88,7 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
     (int Page, double Dpi)? _inFlight;
     int _staleDropped;
 
-    /// <param name="toolbar">The document list and Used on this page (added by stage 3b task 8; ignored here).</param>
+    /// <param name="toolbar">Adds the document list, tool items and Used on this page (DocumentViewer.Toolbar.cs).</param>
     /// <param name="dialogs">Opens HTML documents in the browser; the real <see cref="Shell.Dialogs"/> when null.</param>
     public DocumentViewer(ModuleSession s, bool toolbar, IDialogs? dialogs = null)
     {
@@ -123,14 +123,19 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
         AddHandler(PointerWheelChangedEvent, OnPreviewWheel, RoutingStrategies.Tunnel);
 
         var root = new DockPanel();
-        DockPanel.SetDock(_nav, Dock.Top);
-        root.Children.Add(_nav);
+        if (toolbar) InitToolbar(root);   // DocumentViewer.Toolbar.cs: the toolbar row holds the navigation bar
+        else
+        {
+            DockPanel.SetDock(_nav, Dock.Top);
+            root.Children.Add(_nav);
+        }
         root.Children.Add(_body);
         Content = root;
+        if (toolbar) ShowText(_pdfDocs.Count == 0 ? NoPdfDocumentsText : ChooseDocumentText);
         UpdateZoomLabel();
     }
 
-    /// <summary>The <c>toolbar</c> flag given at construction (stage 3b task 8 builds on it).</summary>
+    /// <summary>The <c>toolbar</c> flag given at construction (document list, tool items and Used on this page exist only when true).</summary>
     public bool Toolbar { get; }
 
     public DocumentDef? Document { get; private set; }
