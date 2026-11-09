@@ -64,6 +64,9 @@ public interface IDialogs
     /// <summary>The Next Phase warning list (WinForms NextPhaseDialog): true = Continue anyway, false = Go back. A double-clicked decision goes
     /// back and is handed to <paramref name="jumpTo"/> once the dialog has closed.</summary>
     Task<bool> ConfirmOpenDecisionsAsync(Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null);
+
+    /// <summary>The fully automatic missing-input dialog (WinForms MissingInputDialog); OK has already applied the answers through <paramref name="port"/>.</summary>
+    Task<MissingInputResult> AskMissingAsync(Window owner, ModuleSession s, IActionPort port, PendingRun run);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -139,6 +142,9 @@ public sealed class Dialogs : IDialogs
         if (dlg.JumpTo is { } d) jumpTo?.Invoke(d);
         return false;
     }
+
+    public async Task<MissingInputResult> AskMissingAsync(Window owner, ModuleSession s, IActionPort port, PendingRun run) =>
+        await new MissingInputDialog(s, port, run).ShowDialog<MissingInputResult?>(owner) ?? MissingInputResult.Cancel;
 }
 
 /// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>

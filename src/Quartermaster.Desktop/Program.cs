@@ -100,5 +100,6 @@ static class Program
         public Task<TurnChoice?> AskTurnAsync(Avalonia.Controls.Window owner, TurnState current) => Task.FromResult<TurnChoice?>(null);
         public Task<bool> ConfirmOpenDecisionsAsync(Avalonia.Controls.Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null) =>
             Task.FromResult(false);   // Go back
+        public Task<Quartermaster.Render.MissingInputResult> AskMissingAsync(Avalonia.Controls.Window owner, Quartermaster.Render.ModuleSession s, Quartermaster.Render.IActionPort port, Quartermaster.Core.PendingRun run) => Task.FromResult(Quartermaster.Render.MissingInputResult.Cancel);
     }
 }
