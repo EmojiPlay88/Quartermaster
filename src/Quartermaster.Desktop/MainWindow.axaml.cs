@@ -71,6 +71,7 @@ public partial class MainWindow : Window
         _rulesRoot = rulesRoot;
         InitializeComponent();
         InitPhaseUi();
+        InitAlertUi();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         InitTrees(layoutRoot);
@@ -717,12 +718,14 @@ public partial class MainWindow : Window
         _actions = new ActionPortSwitch(new LocalActions(s, c, _history));
         HistoryCommands.Register(_router, s, _history, () => _actions, SetStatus);
         CreatePhaseUi(s, c);
+        CreateAlerts(s);
     }
 
     void CloseSession()
     {
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
+        DestroyAlerts();
         DestroyPhaseUi();
         DestroyLog();
         ClearTrees();

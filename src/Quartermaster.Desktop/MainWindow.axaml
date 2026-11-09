@@ -9,6 +9,7 @@
     <Menu x:Name="MainMenu" DockPanel.Dock="Top" />
     <shell:MainToolbar x:Name="ToolbarHost" DockPanel.Dock="Top" />
     <phases:PhaseStrip x:Name="StripHost" DockPanel.Dock="Top" />
+    <shell:AlertBar x:Name="AlertBarHost" DockPanel.Dock="Top" />
     <!-- Status bar as WinForms MainForm: module | message (springs) | tiling progress | turn | location (170) | zoom (50) -->
     <Border Classes="status" DockPanel.Dock="Bottom" BorderThickness="0,1,0,0">
       <Grid ColumnDefinitions="Auto,*,Auto,Auto,170,50" Height="22">
