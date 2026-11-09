@@ -73,6 +73,7 @@ public partial class MainWindow : Window
         InitPhaseUi(layoutRoot);
         InitAlertUi();
         InitTools();
+        InitLedger();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         InitTrees(layoutRoot);
@@ -379,6 +380,7 @@ public partial class MainWindow : Window
         view.Items.Add(_viewLog);
         view.Items.Add(_viewPhases);
         view.Items.Add(_viewOutliner);
+        Item(view, "&Ledger", () => OpenLedger(), "view.ledger");
         Item(view, "&Overview", ShowOverview, gate: "view.overview");
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
@@ -767,6 +769,7 @@ public partial class MainWindow : Window
     void CloseSession()
     {
         DestroyExport();
+        DestroyLedger();
         DestroyTools();
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
