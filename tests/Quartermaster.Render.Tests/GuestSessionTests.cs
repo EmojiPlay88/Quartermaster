@@ -99,6 +99,15 @@ public class GuestSessionTests : IDisposable
     internal static readonly string[] SecretMarkers =
         { SecretName, SecretStock.ToString(), SecretFuel.ToString(), SecretRoll.ToString(), "secret1" };
 
+    /// <summary>Asserts a secret marker does not leak into <paramref name="text"/>. A numeric marker only counts as
+    /// a whole token, so it cannot match inside timestamps, hashes, ids or base64 (e.g. "8461" in ".9846126").</summary>
+    internal static void AssertNoMarker(string marker, string text)
+    {
+        if (!marker.All(char.IsDigit)) { Assert.DoesNotContain(marker, text); return; }
+        var m = System.Text.RegularExpressions.Regex.Match(text, "(?<![0-9A-Za-z+/.])" + marker + "(?![0-9A-Za-z+/])");
+        Assert.False(m.Success, $"secret marker {marker} found at {m.Index}: ..{text.Substring(Math.Max(0, m.Index - 40), Math.Min(80, text.Length - Math.Max(0, m.Index - 40)))}..");
+    }
+
     private sealed class Rig
     {
         public required ModuleSession Host { get; init; }
@@ -260,7 +269,7 @@ public class GuestSessionTests : IDisposable
         Assert.True(bob.T.SealedReceived.Count > 5);
         foreach (var marker in SecretMarkers.Append((SecretFuel + 1).ToString()))
         {
-            Assert.DoesNotContain(marker, all);
+            AssertNoMarker(marker, all);
             Assert.Contains(marker, Json(r.Host.Game!.State));   // the test would prove nothing otherwise
         }
         Assert.Contains("Blue 1", all);   // the guest did see its own side
@@ -739,7 +748,7 @@ public class GuestSessionTests : IDisposable
         var path = Path.Combine(_tmp, "view.qmsave");
         bob.S.ExportViewerCopy(path);
         var text = File.ReadAllText(path);
-        foreach (var marker in SecretMarkers) Assert.DoesNotContain(marker, text);
+        foreach (var marker in SecretMarkers) AssertNoMarker(marker, text);
         Assert.Contains("\"viewerCopy\": true".Replace(" ", ""), text.Replace(" ", ""));
 
         // Opened anywhere (here a solo session of the same module): read-only, a banner, every action blocked.

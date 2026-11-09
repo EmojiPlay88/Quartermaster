@@ -166,14 +166,14 @@ public sealed class RelayEndToEndTests : IAsyncLifetime
         foreach (var f in frames)
         {
             var text = Encoding.UTF8.GetString(f);
-            foreach (var m in markers) Assert.DoesNotContain(m, text);
+            foreach (var m in markers) GuestSessionTests.AssertNoMarker(m, text);
             RelayMessage msg;
             try { msg = Framing.Decode<RelayMessage>(f); }
             catch (ProtocolException) { continue; }
             var sealed_ = msg switch { Send s => s.Sealed, Deliver dl => dl.Sealed, _ => null };
             if (sealed_ == null) continue;
             var raw = Encoding.UTF8.GetString(sealed_);
-            foreach (var m in markers) Assert.DoesNotContain(m, raw);
+            foreach (var m in markers) GuestSessionTests.AssertNoMarker(m, raw);
             // Only the players' key opens it (proof these frames carried the game).
             if (RelayTransport.TryOpen(game.Key, sealed_) != null) opened++;
         }

@@ -292,9 +292,9 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         var annAll = Json(ann.S.Game!.State) + "\n" + string.Join("\n", ann.Notices);
         var bobAll = Json(bob2.S.Game!.State) + "\n" + string.Join("\n", bob2.Notices);
         // Hidden-input formula working never reaches Red; Blue's own values do reach Blue.
-        Assert.DoesNotContain(GuestSessionTests.SecretStock.ToString(), bobAll);
+        GuestSessionTests.AssertNoMarker(GuestSessionTests.SecretStock.ToString(), bobAll);
         Assert.DoesNotContain(GuestSessionTests.SecretName, bobAll);
-        foreach (var marker in GuestSessionTests.SecretMarkers) Assert.DoesNotContain(marker, bobAll);
+        foreach (var marker in GuestSessionTests.SecretMarkers) GuestSessionTests.AssertNoMarker(marker, bobAll);
         Assert.Contains(GuestSessionTests.SecretName, annAll);   // Red's own secrets do reach Red (the check above proves something)
         Assert.Contains("Blue 1", bobAll);
         Assert.Contains("Red 1", annAll);
@@ -306,8 +306,8 @@ public sealed class Piece6bEndToEndTests : IAsyncLifetime
         var annRecv = ann.Tap.AllText();
         var bobRecv = bob.Tap.AllText() + "\n" + bob2.Tap.AllText();
         Assert.True(ann.Tap.Opened.Count > 0 && bob.Tap.Opened.Count > 0 && bob2.Tap.Opened.Count > 0);
-        foreach (var m in redMarkers) Assert.DoesNotContain(m, bobRecv);
-        foreach (var m in blueMarkers) { Assert.DoesNotContain(m, annRecv); Assert.Contains(m, bobRecv); }
+        foreach (var m in redMarkers) GuestSessionTests.AssertNoMarker(m, bobRecv);
+        foreach (var m in blueMarkers) { GuestSessionTests.AssertNoMarker(m, annRecv); Assert.Contains(m, bobRecv); }
         Assert.Contains(GuestSessionTests.SecretName, annRecv);
     }
 }
