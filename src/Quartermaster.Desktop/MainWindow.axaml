@@ -28,13 +28,22 @@
     </Border>
     <!-- The log docks under the maps and palette, like the WinForms default layout (170 high, 4 splitter) -->
     <Grid x:Name="BodyAndLog" RowDefinitions="*,0,0">
-      <Grid x:Name="Body" ColumnDefinitions="*,0,0">
+      <!-- Left column (WinForms: module tree over tables tree, 220 wide, split 0.6 / 0.4 by default) beside the maps and palette -->
+      <Grid x:Name="BodyWithTree" ColumnDefinitions="220,4,*">
+        <Grid x:Name="LeftColumnGrid" RowDefinitions="0.6*,4,0.4*">
+          <shell:ModuleTree x:Name="ModuleTreeHost" />
+          <GridSplitter x:Name="LeftSplitter" Grid.Row="1" ResizeDirection="Rows" HorizontalAlignment="Stretch" />
+          <shell:TablesTree x:Name="TablesTreeHost" Grid.Row="2" />
+        </Grid>
+        <GridSplitter x:Name="LeftColumnSplitter" Grid.Column="1" ResizeDirection="Columns" />
+      <Grid x:Name="Body" Grid.Column="2" ColumnDefinitions="*,0,0">
         <!-- Classic control colour behind the tab strip (WinForms DocumentTabStrip); the AppWorkspace grey is the MapView's own "no game" backdrop -->
         <Border Background="{DynamicResource Classic.FaceBrush}">
           <shell:MapTabs x:Name="Maps" />
         </Border>
         <GridSplitter x:Name="PaletteSplitter" Grid.Column="1" ResizeDirection="Columns" IsVisible="False" />
         <shell:PaletteDock x:Name="PaletteHost" Grid.Column="2" IsVisible="False" />
+      </Grid>
       </Grid>
       <GridSplitter x:Name="LogSplitter" Grid.Row="1" ResizeDirection="Rows" HorizontalAlignment="Stretch" IsVisible="False" />
       <Border x:Name="LogHost" Grid.Row="2" IsVisible="False" />

@@ -16,7 +16,7 @@ namespace Quartermaster.Desktop.Shell;
 /// <summary>
 /// The game log (WinForms LogPanel): one row per <see cref="LogEntry"/> of the player's view (other sides' private lines redacted),
 /// filterable by kind and text, copyable and exportable. The list is virtualised (a 10,000-row log stays fast), refreshes are debounced
-/// 150 ms, and the view follows new rows unless the user scrolled up. Floating comes in stage 2b; here it is the bottom dock only.
+/// 150 ms, and the view follows new rows unless the user scrolled up. Docks at the bottom or pops out into a floating window (the Pop out / Dock button).
 /// </summary>
 public sealed class LogPanel : UserControl
 {
@@ -31,6 +31,7 @@ public sealed class LogPanel : UserControl
     readonly TextBox _search = new() { Width = 140, Name = "LogSearch" };
     readonly Button _copy = new() { Content = "Copy" };
     readonly Button _export = new() { Content = "Export log…" };
+    readonly Button _pop = new() { Content = "Pop out", Name = "LogPop" };
     readonly ListBox _list = new() { SelectionMode = SelectionMode.Multiple, Name = "LogList" };
     readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(150) };
     readonly DockPanel _root = new();
@@ -65,6 +66,9 @@ public sealed class LogPanel : UserControl
         _export.Click += (_, _) => _ = ExportAsync();
         bar.Children.Add(_copy);
         bar.Children.Add(_export);
+        _pop.Margin = new Thickness(8, 0, 0, 0);
+        _pop.Click += (_, _) => PopToggleRequested?.Invoke();
+        bar.Children.Add(_pop);
         DockPanel.SetDock(bar, Dock.Top);
 
         // Column header, as the WinForms details view.
@@ -99,6 +103,15 @@ public sealed class LogPanel : UserControl
         Attach();
         Reload();
     }
+
+    /// <summary>Raised by the Pop out / Dock button; the host moves the panel.</summary>
+    public event Action? PopToggleRequested;
+
+    /// <summary>The Pop out / Dock button.</summary>
+    public Button PopButton => _pop;
+
+    /// <summary>Follows where the panel is: the button offers "Dock" while floating, "Pop out" while docked.</summary>
+    public void SetFloating(bool floating) => _pop.Content = floating ? "Dock" : "Pop out";
 
     static Grid Row(string time, string kind, string phase, string text, bool bold)
     {

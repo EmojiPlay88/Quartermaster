@@ -40,7 +40,6 @@ public partial class MainWindow : Window
     readonly MenuItem _viewLog;
     LogPanel? _log;
     double _logHeight = 170;   // WinForms default; follows the splitter
-    bool _logWanted = true;   // View > Log: whether the user wants the bottom dock shown
     MenuItem? _editUndo, _editRedo;
     Button? _tbUndo, _tbRedo;
     readonly DiceTools _dice;
@@ -58,12 +57,13 @@ public partial class MainWindow : Window
     Difficulty _lastDifficulty = Difficulty.SemiAuto;
 
     /// <summary>The app's window: real dialogs, the default cache and remembered-rules folders.</summary>
-    public MainWindow() : this(new Dialogs(), ModuleSession.DefaultCacheRoot, RulesMemory.DefaultRoot) { }
+    public MainWindow() : this(new Dialogs(), ModuleSession.DefaultCacheRoot, RulesMemory.DefaultRoot, null) { }
 
     /// <param name="dialogs">Every dialog the window shows (tests pass a fake).</param>
     /// <param name="cacheRoot">Where module caches (tiles) go (<see cref="ModuleSession.Open(string, string, string?)"/>).</param>
     /// <param name="rulesRoot">The remembered-rules index; null disables remembering.</param>
-    public MainWindow(IDialogs dialogs, string cacheRoot, string? rulesRoot)
+    /// <param name="layoutRoot">Where layout memory (left split, floating windows per module) is kept; null = the app data folder.</param>
+    public MainWindow(IDialogs dialogs, string cacheRoot, string? rulesRoot, string? layoutRoot = null)
     {
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
         _cacheRoot = cacheRoot;
@@ -71,6 +71,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
+        InitTrees(layoutRoot);
         _router.Guard = Guard;
         _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
@@ -158,6 +159,7 @@ public partial class MainWindow : Window
         CreatePhases(next);
         Maps.Bind(next, () => _actions);
         PaletteHost.Bind(next);
+        LoadTrees(next);
         CreateLog(next);
         SbModule.Text = $"{next.Model.Name} {next.Model.Version}".Trim();
         SbLocation.Text = "-";
@@ -352,6 +354,7 @@ public partial class MainWindow : Window
         var view = Top("&View");
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _showGrid.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) Maps.ShowGrid = _showGrid.IsChecked; };
+        view.Items.Add(_viewTree);
         view.Items.Add(_showGrid);
         // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.
         _viewLog.InputGesture = _router.Gesture("view.log");
@@ -709,6 +712,7 @@ public partial class MainWindow : Window
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
         DestroyLog();
+        ClearTrees();
         UnhookGame();
         if (_history != null) _history.Rewound -= RequestHistoryRefresh;
         _history = null;
@@ -733,29 +737,30 @@ public partial class MainWindow : Window
     /// <summary>The log panel of the open module; null without one.</summary>
     public LogPanel? Log => _log;
 
-    /// <summary>True while the log dock is shown (View > Log checked).</summary>
-    public bool LogShown => _log != null && _logWanted;
+    /// <summary>True while the log dock is shown at the bottom (View > Log checked and the panel not floating).</summary>
+    public bool LogShown => _log != null && _logState.Wanted && !_logState.Floating;
 
     void CreateLog(ModuleSession s)
     {
         _log = new LogPanel(s, CentreOnPiece, _dialogs, () => this);
-        LogHost.Child = _log;
+        PlaceLog(s, _log);
         ApplyLog();
     }
 
     void DestroyLog()
     {
+        ReleaseLog();
         _log?.Detach();
         _log = null;
         LogHost.Child = null;
         ApplyLog();
     }
 
-    /// <summary>View > Log: show or collapse the bottom panel.</summary>
+    /// <summary>View > Log: show or collapse the bottom panel; while it floats, dock it back instead.</summary>
     void ToggleLog()
     {
         if (_log == null) return;
-        _logWanted = !_logWanted;
+        _logState.Toggle();
         ApplyLog();
     }
 
@@ -767,7 +772,7 @@ public partial class MainWindow : Window
         var row = BodyAndLog.RowDefinitions[2];
         if (!shown && row.Height.Value >= 1) _logHeight = row.Height.Value;   // keep what the user dragged it to
         row.Height = new GridLength(shown ? _logHeight : 0);
-        _viewLog.IsChecked = shown;
+        _viewLog.IsChecked = _log != null && (_logState.Floating || _logState.Wanted);
     }
 
     /// <summary>Scrolls the map holding the piece to it and selects it (WinForms MainForm.CentreOnPiece); only pieces this player may see.</summary>
@@ -821,7 +826,7 @@ public partial class MainWindow : Window
     });
 
     /// <summary>The player's view changed: maps another side owns lose their tab.</summary>
-    void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(Maps.Rebuild));
+    void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(() => { Maps.Rebuild(); ModuleTreeHost.RefreshVisibility(); }));
 
     void OnRulesChangedAnyThread() => OnUi(() => { UpdateUi(); UpdateTitle(); });
 
