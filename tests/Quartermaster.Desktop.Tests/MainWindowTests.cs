@@ -227,7 +227,7 @@ public sealed class MainWindowTests : IDisposable
         Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools" }, menus.Keys);
         Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo", "Step &Back to Start of Phase", "Step Back &To..." }, menus["&Edit"]);
-        Assert.Equal(new[] { "Module &Tree", "&Diagnostics", "Show &Grid", "&Log", "&Phase panel", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
+        Assert.Equal(new[] { "Module &Tree", "&Diagnostics", "Show &Grid", "&Log", "&Phase panel", "&Ledger", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
         Assert.Equal(new[] { "25%", "50%", "100%", "200%", "Fit" },
             w.FindMenuItem("Zoom")!.Items.OfType<MenuItem>().Select(i => MenuText.ToWinForms((string)i.Header!)));
 

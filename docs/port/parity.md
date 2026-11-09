@@ -105,7 +105,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
 | View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown or floating; while floating it docks the panel back |
 | View > Outliner | 3 |  |  |  |  |
-| View > Ledger | 3 |  |  |  |  |
+| View > Ledger | 3 | ✔ |  |  | Ctrl/Cmd+L; needs a rules pack; opens the one Ledger window (owned, not modal, bounds under "doc:ledger"); the jump to the counters selected on the map comes with Show in Ledger |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3 |  |  |  |  | comes with the Desktop Ledger; decision logic already shared (`LedgerJump` in Quartermaster.Render) |
 | View > Overview | 3 |  |  |  |  |
 | View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | always visible in Desktop |
@@ -196,7 +196,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| LedgerWindow (+ Tabs, Counters), EditTabsDialog, CounterPreviewTip | 3 |  |  |  |  |
+| LedgerWindow (+ Tabs, Counters), EditTabsDialog, CounterPreviewTip | 3 | ✔ |  |  | "Ledger" 820×560: Filter:, Side: (All sides + the pack's sides), Group by: Map/Side/None, Show counters, Edit tabs…, Export CSV…, Show units without values, Refresh; tabs "Units (n)", "Depots & Global (n)", "Everything", "★ name" (notes as tooltip), "+"; broken user-tab filter banner; columns Name, Kind, one per property (notes as header tooltip; click sorts within groups, blanks last; drag the header edge to resize); virtualised rows; 64×48 counter pictures drawn on a worker from the viewed state only (rows on screen first, 600 kept), hover preview, double-click a unit row's Name/Kind/picture centres its piece; hover a value for its breakdown; double-click or F2 edits a value (number parsed invariant then the user's locale, required note, other side's values refused); CSV in UTF-8 with BOM; prefs per module via LedgerTabStore; reloads (debounced 200 ms) on game, rules and viewer changes. Edit tabs… and "+" are shown disabled until EditTabsDialog (next task); typing a digit does not start an edit (F2 or double-click) |
 | NotesWindow, InventoryWindow | 3 | ✔ |  |  | Notes: monospace box, commits after 1 s, on leaving the box and on close; the main window flushes it before the game closes or is replaced. Inventory: group by name / map / marker / ledger property, filter (300 ms), Total hover tip, double-click steps through the group's pieces; counts only what the viewer may see |
 | PdfWindow, PdfViewerControl, ChartWindow | 3 |  |  |  | needs a cross-platform PDF renderer |
 | DiagnosticsWindow | 3 | ✔ |  |  | Severity / Category / Message / Context, Show filter, Copy all (clipboard), live updates from any thread; the status-bar link ("n warning(s)/error(s) - click here to view diagnostics") opens it |
