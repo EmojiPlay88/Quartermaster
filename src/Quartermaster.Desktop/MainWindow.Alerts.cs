@@ -80,7 +80,7 @@ public partial class MainWindow
         AlertsUpdated?.Invoke(_alertHits);
     }
 
-    /// <summary>Chip click: cycles through the matches that can be shown (pieces centre on the map; a holder says to open the Ledger).</summary>
+    /// <summary>Chip click: cycles through the matches that can be shown (pieces centre on the map, holders select in the Ledger window).</summary>
     void GoToAlert(string alertId)
     {
         if (_alertModel?.NextTarget(alertId) is { } target) GoToMatch(target);
@@ -89,7 +89,8 @@ public partial class MainWindow
     void GoToMatch(AlertMatch m)
     {
         if (m.PieceId != null) CentreOnPiece(m.PieceId);
-        else if (m.HolderId != null) SetStatus("Open the Ledger to see " + m.Text);   // the Ledger window comes in a later stage; select nothing
+        else if (m.HolderId != null && _session != null)
+            OpenLedger()?.SelectHolder(m.HolderId);   // not ShowLedger: a depot alert must not jump to the counters selected on the map
     }
 
     static MenuItem PlainItem(string text, bool enabled = true) => new() { Header = new TextBlock { Text = text }, IsEnabled = enabled };

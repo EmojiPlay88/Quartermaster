@@ -165,10 +165,10 @@ public sealed class LedgerWindowTests : IDisposable
         Assert.True(lw.CountersButton.IsChecked);
         Assert.Equal("Filter by name or kind", ToolTip.GetTip(lw.FilterBox));
         Assert.Equal("Save the current tab's rows and columns as a CSV file", ToolTip.GetTip(lw.ExportButton));
-        // Edit tabs… and "+" are there but open nothing yet (the tab editor is the next task): disabled, WinForms tooltips.
-        Assert.False(lw.EditTabsButton.IsEnabled);
+        // Edit tabs… and "+" open the tab editor (LedgerTabsAndJumpTests); WinForms tooltips.
+        Assert.True(lw.EditTabsButton.IsEnabled);
         Assert.Equal("Add, remove or change your own Ledger tabs (kept on this PC)", ToolTip.GetTip(lw.EditTabsButton));
-        Assert.False(lw.PlusTabItem.IsEnabled);
+        Assert.True(lw.PlusTabItem.IsEnabled);
         Assert.Equal("Add a tab of your own (kept on this PC)", ToolTip.GetTip(lw.PlusTabItem));
         // Units tab: Name, Kind, then the pieces' properties; header tooltips are the notes.
         Assert.Equal(new[] { "Name", "Kind", "Ammo", "Fuel", "Readiness" }, lw.Headers);

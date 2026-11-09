@@ -96,6 +96,7 @@ public partial class MainWindow : Window
         {
             Dialogs = _dialogs, Gesture = _router.Gesture, SaveAsPicture = SaveMapAsPictureAsync,
             ShowFormula = (formulaId, pieceId) => { if (_session is { } s) FormulaWindows.Show(this, s, formulaId, pieceId, null); },
+            ShowInLedger = ShowInLedger,
         };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
         Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
@@ -380,7 +381,7 @@ public partial class MainWindow : Window
         view.Items.Add(_viewLog);
         view.Items.Add(_viewPhases);
         view.Items.Add(_viewOutliner);
-        Item(view, "&Ledger", () => OpenLedger(), "view.ledger");
+        Item(view, "&Ledger", ShowLedger, "view.ledger");
         Item(view, "&Overview", ShowOverview, gate: "view.overview");
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
