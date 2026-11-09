@@ -34,6 +34,16 @@ public sealed class ScreenshotTests
     [InlineData("hover")]
     [InlineData("los")]
     [InlineData("log")]
+    [InlineData("phases")]
+    [InlineData("nextphase")]
+    [InlineData("stepback")]
+    [InlineData("formula")]
+    [InlineData("cheatsheet")]
+    [InlineData("batch")]
+    [InlineData("alerts")]
+    [InlineData("tree")]
+    [InlineData("floatlog")]
+    [InlineData("floatphases")]
     public void Screenshot_state_flag_writes_png(string state)
     {
         var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");

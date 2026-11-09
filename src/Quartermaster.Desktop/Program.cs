@@ -33,7 +33,7 @@ static class Program
         foreach (var w in warnings) Console.Error.WriteLine(w);
         if (startup.ScreenshotPath is not { } png || startup.ModulePath is not { } module)
         {
-            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules]");
+            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules|phases|nextphase|stepback|formula|cheatsheet|batch|alerts|tree|floatlog|floatphases]");
             return 1;
         }
         if (Application.Current == null)
@@ -61,7 +61,7 @@ static class Program
             using (window.CaptureRenderedFrame()) { } // first frame lays out the final size
             Dispatcher.UIThread.RunJobs();
             if (startup.ScreenshotState is { } state && ScreenshotStates.Apply(state, window) is { } problem) { Console.Error.WriteLine(problem); return 1; }
-            using var frame = window.CaptureRenderedFrame();
+            using var frame = (ScreenshotStates.Target ?? window).CaptureRenderedFrame();
             if (frame == null) { Console.Error.WriteLine("No frame was rendered."); return 1; }
             if (Path.GetDirectoryName(Path.GetFullPath(png)) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
             frame.Save(png, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
@@ -75,6 +75,7 @@ static class Program
         }
         finally
         {
+            if (window != null) ScreenshotStates.Cleanup(window);
             window?.ForceClose();
             try { Directory.Delete(cache, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }

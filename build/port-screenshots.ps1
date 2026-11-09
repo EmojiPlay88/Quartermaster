@@ -4,6 +4,9 @@
 .DESCRIPTION
   Stage 2a adds Desktop state shots (--screenshot-state: menu, hover, los, log; all with the Riverland rules pack) as
   artifacts/port/stage2a-desktop-<state>.png, and the WinForms equivalents where a flag exists (--screenshot-log, --screenshot-breakdown).
+  Stage 2b adds the Desktop shots artifacts/port/stage2b-desktop-<state>.png (phases, nextphase, stepback, formula, cheatsheet, batch, alerts, tree,
+  floatlog, floatphases; dialogs and floating windows are drawn as their own picture, without a title bar) and the WinForms equivalents
+  stage2b-winforms-<flag>.png (--screenshot-phases / nextphase / stepback / alerts).
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -63,6 +66,12 @@ foreach ($state in 'menu', 'hover', 'los', 'log') {
     Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png "desktop-$state"
 }
 
+# Stage 2b states, Desktop, headless. Dialogs and floating windows are captured as their own window.
+foreach ($state in 'phases', 'nextphase', 'stepback', 'formula', 'cheatsheet', 'batch', 'alerts', 'tree', 'floatlog', 'floatphases') {
+    $png = Join-Path $out "stage2b-desktop-$state.png"
+    Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png "desktop-$state"
+}
+
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'
 $marker = Join-Path $demoRoot '.quartermaster-demo-root'
@@ -90,5 +99,14 @@ try {
     Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot-log', $logPng, '--smoke', '8', '--no-smoke-documents') $env2 $logPng 'winforms-log'
     $bdPng = Join-Path $out 'stage2a-winforms-breakdown.png'
     Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot-breakdown', $bdPng, '--smoke', '8', '--no-smoke-documents') $env2 $bdPng 'winforms-breakdown'
+    # Stage 2b equivalents (each flag needs --smoke 3 or more so the setup chooser does not hang the run). WinForms has no flag for the formula window
+    # on its own, the floating panels or the module tree; the ones below are what it can draw here.
+    # The cheat sheet, batch and outliner flags draw nothing on the Riverland demo (they belong to the phase smoke test, which the demo does not pass),
+    # so only the flags that do work here are run. A flag that fails is reported and skipped, it does not stop the rest.
+    foreach ($flag in 'phases', 'nextphase', 'stepback', 'alerts') {
+        $png = Join-Path $out "stage2b-winforms-$flag.png"
+        try { Invoke-Shot $appExe (@($vmod, '--rules', $rules, "--screenshot-$flag", $png, '--smoke', '8', '--no-smoke-documents')) $env2 $png "winforms-$flag" }
+        catch { Write-Warning "winforms-${flag}: $($_.Exception.Message)" }
+    }
 }
 finally { Reset-DemoRoot }
