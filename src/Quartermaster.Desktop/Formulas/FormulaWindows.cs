@@ -17,8 +17,9 @@ public static class FormulaWindows
     internal static string BatchKey(string runId) => "batch:" + runId;
 
     /// <summary>Shows the batch grid of a pending run (non-modal, owned by <paramref name="host"/>), or activates the one already open for it.
-    /// <paramref name="openRow"/> is called with the row index when a Unit cell is double-clicked.</summary>
-    public static BatchGridWindow ShowBatch(MainWindow host, ModuleSession s, IActionPort port, string runId, Action<int>? openRow)
+    /// <paramref name="openRow"/> is called with the row index when a Unit cell is double-clicked. Null (nothing opens) when the run is no longer
+    /// pending.</summary>
+    public static BatchGridWindow? ShowBatch(MainWindow host, ModuleSession s, IActionPort port, string runId, Action<int>? openRow)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(s);
@@ -31,6 +32,7 @@ public static class FormulaWindows
             existing.Activate();
             return existing;
         }
+        if (s.Game?.State.Pending.Any(r => r != null && r.Id == runId) != true) return null;   // finished meanwhile: nothing to open
         var win = new BatchGridWindow(host, s, port, runId, openRow);
         Batches.Add(win);
         win.Show(host);

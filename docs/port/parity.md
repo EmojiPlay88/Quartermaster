@@ -33,7 +33,7 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 - The hover delay is fixed at 600 ms until Settings (stage 4).
 - The log export picker has a single filter, "Log files (*.txt;*.html)" (default .txt); the format follows the extension. WinForms has two filters.
 - There is no chat line offline (WinForms shows it only online); the box comes with multiplayer (stage 5).
-- The main toolbar shows only the buttons whose features exist in Desktop (no Diagnostics, Notes, Overview, Inventory, Palette, Step Back yet). Hiding buttons via Settings is stage 4.
+- The main toolbar shows only the buttons whose features exist in Desktop (no Diagnostics, Notes, Overview, Inventory, Palette yet). Hiding buttons via Settings is stage 4.
 - The map toolbar sits inside each map tab (WinForms: one per map window); "Save map as picture" waits for stage 3.
 - The counter menu has no Show in Ledger until the Ledger (stage 3); no Delete counter until the game master setting exists.
 - Physical dice wait for Settings (stage 4); rolls and log lines are the shared WinForms ones.
@@ -77,13 +77,13 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
 | Edit > Undo / Redo (caption follows the history) | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z |
-| Edit > Step Back to Start of Phase / Step Back To... | 2b |  |  |  |  |
+| Edit > Step Back to Start of Phase / Step Back To... | 2b | ✔ |  |  | after Redo, as WinForms; Ctrl+Left (Cmd+Left on macOS) steps back to the start of the phase after the confirm dialog; Step Back To... lists the checkpoints; off with the WinForms reason tooltip (guest, replay, turn already sent, old save without history); autosaves first, closes the formula windows and batch grids, status "Stepped back — reopen from the phase panel"; Redo works afterwards |
 | View > Show Grid | 1 | ✔ | ✔ | ✔ |  |
 | View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
 | View > Module Tree | 2b | ✔ |  |  | checked by default; hides the left column (tree over tables tree) |
 | View > Diagnostics | 3 |  |  |  |  |
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
-| View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown; floating comes later in 2b |
+| View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown or floating; while floating it docks the panel back |
 | View > Outliner | 3 |  |  |  |  |
 | View > Ledger | 3 |  |  |  |  |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3 |  |  |  |  | comes with the Desktop Ledger; decision logic already shared (`LedgerJump` in Quartermaster.Render) |
@@ -102,7 +102,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability. Diagnostics, Notes, Overview, Inventory, Palette and Step Back are left out until their stage; hiding buttons (Settings) comes in stage 4 |
+| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes, Overview, Inventory and Palette are left out until their stage; hiding buttons (Settings) comes in stage 4 |
 | MainForm: status bar (module, message, tiling progress, location, zoom) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ | ✔ | ✔ |  |
@@ -115,9 +115,9 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches say "Open the Ledger to see ..." until the Ledger window; shown whenever a game is open (Settings toggle in stage 4) |
 | TourOverlay | 5 |  |  |  |  |
-| PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the shared Next Phase flow with the open-decisions question and phase-boundary autosave; floating panel comes later in 2b); rule reference shown disabled until the rulebook viewer |
+| PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the shared Next Phase flow with the open-decisions question and phase-boundary autosave). Pop out / Dock moves the panel to a floating "Phases" window (default beside the main window's right edge, bounds remembered per module under "phases", fitted onto a screen that exists with the primary screen as fallback); closing that window docks the panel back, shown; rule reference shown disabled until the rulebook viewer |
 | NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave at the WinForms default interval (5 min; no Settings yet) |
-| StepBackDialog | 2b |  |  |  |  |
+| StepBackDialog | 2b | ✔ |  |  | "Step Back to Start of Phase" (confirm text and summary) / "Step Back To" (Turn, Stage, Side, Phase, Reached, Actions; newest first, summary follows the selection, double-click picks); Step Back / Cancel |
 | ReplayBar | 5 |  |  |  |  |
 | UpdateBar, UpdateDialog, WhatsNewDialog, AppUpdates | 5 |  |  |  |  |
 
@@ -165,7 +165,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
 | FormulaDialog, FormulaFormView, CheatSheetWindow | 2b | ✔ |  |  | non-modal window owned by the main window, one per formula, unit and run; Calculate in Hardcore and Semi-auto, cheat sheet beside it in Semi-auto; online guests ask the host; closes when its run or unit is gone; Rule ref shown disabled (rulebook viewer, stage 3); the window rules are shared in Render FormulaWindowRules |
-| BatchGridWindow, MissingInputDialog | 2b | ✔ |  |  | batch grid is a non-modal window per run (virtualised rows, choice columns are editable dropdowns, Calculate all / Apply all / Apply row, cheat sheet docked in Semi-auto, Ledger breakdown tip); no counter pictures in the Unit cell yet; opened by the phase wiring (task 6); OK in the missing-input dialog also checks Min/Max |
+| BatchGridWindow, MissingInputDialog | 2b | ✔ |  |  | batch grid is a non-modal window per run (virtualised rows, choice columns are editable dropdowns, Calculate all / Apply all / Apply row, cheat sheet docked in Semi-auto, Ledger breakdown tip); no counter pictures in the Unit cell yet; queued runs open them through the shared run dispatch (several units: the batch grid, double-click a row for its unit window; fully automatic: the missing-input dialog, "Per unit…" opens the batch grid or the unit window); nothing opens for a run that is no longer pending; OK in the missing-input dialog needs non-blank answers only, as WinForms |
 | DiceTools, DiceDialog, TurnDialog | 2a | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
 | LogPanel, LogDock, LogFloatForm, ChatBox | 2a | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / Dock moves it to a floating window (bounds remembered per module); the chat line shows only online (stage 5) |
 | OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 |  |  |  |  |

@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Quartermaster.Desktop.Shell.StepBackDialog"
+        Title="Step Back To"
+        Width="640" Height="380" MinWidth="480" MinHeight="300"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+  <!-- As WinForms StepBackDialog: list mode shows the checkpoints newest first with the summary of what stepping back undoes;
+       confirm mode shows the one target and its summary. Step Back = OK (Enter), Cancel (Esc). -->
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6" Margin="8,6,8,8">
+      <Button x:Name="Ok" Content="Step Back" MinWidth="90" IsDefault="True" HorizontalContentAlignment="Center" />
+      <Button x:Name="Cancel" Content="Cancel" MinWidth="90" IsCancel="True" HorizontalContentAlignment="Center" />
+    </StackPanel>
+    <TextBlock x:Name="Head" DockPanel.Dock="Top" Margin="8,8,8,0" TextWrapping="Wrap" IsVisible="False" />
+    <TextBox x:Name="Summary" DockPanel.Dock="Bottom" Height="100" Margin="8,4,8,4" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" />
+    <DockPanel x:Name="ListHost" Margin="8,8,8,4">
+      <Grid x:Name="Header" DockPanel.Dock="Top" />
+      <ListBox x:Name="List" SelectionMode="Single" />
+    </DockPanel>
+  </DockPanel>
+</Window>

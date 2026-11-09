@@ -8,11 +8,14 @@ using Quartermaster.Vassal;
 
 namespace Quartermaster.Desktop;
 
-/// <summary>The turn sequencer's UI wiring (WinForms MainForm.Phases): the tracker strip under the toolbar, the docked phase panel and View > Phase panel.</summary>
+/// <summary>The turn sequencer's UI wiring (WinForms MainForm.Phases / PhaseDock): the tracker strip under the toolbar, the phase panel (docked at
+/// the right or floating in a "Phases" window, bounds remembered per module under "phases") and View > Phase panel.</summary>
 public partial class MainWindow
 {
     readonly MenuItem _viewPhases = new() { Header = MenuText.FromWinForms("&Phase panel"), ToggleType = MenuItemToggleType.CheckBox };
-    readonly PanelDockState _phaseDock = new("phases", () => PanelDockState.PhasesDefault(new RectangleI(0, 0, 1024, 768)));
+    PanelDockState _phaseDock = null!;
+    PanelFloat _phaseFloat = null!;
+    bool _phaseFloated;   // the phase window was shown for this module: its DPI is the current one
     PhasePanel? _phasePanel;
     PhaseWatch? _stripWatch;
     PhaseRunDispatch? _dispatch;
@@ -30,14 +33,25 @@ public partial class MainWindow
     /// <summary>The phase panel of the open module.</summary>
     public PhasePanel Phases => _phasePanel ?? throw new InvalidOperationException("Open a module first.");
 
+    /// <summary>The floating phase panel window (null while docked).</summary>
+    public FloatPanelWindow? PhaseFloat => _phaseFloat.Window;
+
     /// <summary>True while the panel is docked and showing (View > Phase panel checked).</summary>
     public bool PhasePanelShown => PhaseHost.IsVisible;
 
     void InitPhaseUi(string? layoutRoot)
     {
         _dataRoot = layoutRoot ?? AppDataRoot.Path;
+        // The floating window opens at the WinForms default beside the main window's right edge (PanelDockState.PhasesDefault).
+        _phaseDock = new PanelDockState("phases", () => PanelDockState.PhasesDefault(MainRect()));
+        _phaseFloat = new PanelFloat(_phaseDock, "Phases", PhaseHost, () => this, () => ScreensProvider?.Invoke() ?? PanelFloat.ScreensOf(this));
         _viewPhases.Click += (_, _) => Guard(_phaseDock.Toggle);
-        _phaseDock.Changed += UpdatePhaseUi;
+        _phaseDock.Changed += () =>
+        {
+            if (_phaseDock.Floating) _phaseFloated = true;
+            _phasePanel?.SetFloating(_phaseDock.Floating);
+            UpdatePhaseUi();
+        };
         StripHost.StartRequested += () => Guard(NextPhaseFromUi);
     }
 
@@ -53,8 +67,33 @@ public partial class MainWindow
         _phasePanel = new PhasePanel(s, c, () => _actions!, CentreOnPiece);
         _phasePanel.NextRequested += () => Guard(NextPhaseFromUi);
         _phasePanel.DecisionActivated += d => Guard(() => _dispatch?.JumpToDecision(d));
-        PhaseHost.Child = _phasePanel;
+        PlacePhases(s, _phasePanel);
         UpdatePhaseUi();
+    }
+
+    /// <summary>The module's layout memory for the phase window, then the panel in its place (dock host or floating window).</summary>
+    void PlacePhases(ModuleSession s, PhasePanel panel)
+    {
+        _phaseFloated = false;
+        _phaseDock.FloatBounds = null;
+        _phaseDock.Load(_layout.LoadModule(s.Archive.Sha256).TryGetValue("phases", out var saved) ? saved : null);
+        panel.PopToggleRequested += () => Guard(_phaseFloat.Toggle);
+        panel.SetFloating(_phaseDock.Floating);
+        _phaseFloat.Attach(panel);
+    }
+
+    /// <summary>Docks the panel back (the game is closing) and remembers where its window was, per module (WinForms: the panel docks
+    /// again when the game closes).</summary>
+    void ReleasePhases()
+    {
+        if (_phasePanel == null) return;
+        _phaseFloat.Detach();
+        if (_session is { } s && _phaseDock.Save() is { } saved)
+        {
+            if (_phaseFloated) saved = saved with { Dpi = (int)Math.Round(RenderScaling * 96) };
+            var all = new Dictionary<string, SavedWindow>(_layout.LoadModule(s.Archive.Sha256)) { ["phases"] = saved };
+            _layout.SaveModule(s.Archive.Sha256, all);
+        }
     }
 
     void DestroyPhaseUi()
@@ -70,6 +109,7 @@ public partial class MainWindow
         _stripWatch?.Dispose();
         _stripWatch = null;
         StripHost.FlushHook = null;
+        ReleasePhases();
         _phasePanel?.Detach();
         _phasePanel = null;
         PhaseHost.Child = null;
@@ -152,7 +192,11 @@ public partial class MainWindow
     }
 
     /// <summary>Shows the phase panel (docked or floating) so a checklist item can be selected.</summary>
-    internal void RevealPhasePanel() => _phaseDock.Reveal();
+    internal void RevealPhasePanel()
+    {
+        _phaseDock.Reveal();
+        _phaseFloat.Window?.Activate();
+    }
 
     internal IDialogs Dialogs => _dialogs;
 
@@ -170,6 +214,7 @@ public partial class MainWindow
     {
         StripHost.IsVisible = _session?.Game != null && _session.Rules != null;
         var has = _phasePanel != null && _session?.Game != null && _session.Rules is { Phases.Count: > 0 };
+        if (!has && _phaseDock.Floating) { _phaseDock.DockBack(); return; }   // no phases any more: no floating window either (Changed re-runs this)
         var shown = has && _phaseDock.Wanted && !_phaseDock.Floating;
         _viewPhases.IsEnabled = has;
         _viewPhases.IsChecked = has && (_phaseDock.Floating || _phaseDock.Wanted);

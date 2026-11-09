@@ -91,8 +91,9 @@ sealed class MissingInputDialog : Window
         _ => "",
     };
 
+    // As WinForms: OK on non-blank answers only; the engine reports out-of-range values when applying.
     void Sync() => _ok.IsEnabled = FormulaWindowRules.MissingOkEnabled(
-        _inputs.Keys.ToDictionary(k => k, k => (string?)Text(k), StringComparer.Ordinal), _missing);
+        _inputs.Keys.ToDictionary(k => k, k => (string?)Text(k), StringComparer.Ordinal), _missing, checkRange: false);
 
     void Accept()
     {

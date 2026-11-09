@@ -56,8 +56,11 @@ public sealed class BatchGridTests : IDisposable
         }
     }
 
-    /// <summary>A game at <paramref name="d"/> in the Movement phase with both red units moved: one pending Fuel run of two units.</summary>
-    (MainWindow W, PendingRun Run) Make(Difficulty d, bool terrainMissing = false)
+    /// <summary>A game at <paramref name="d"/> in the Movement phase with both red units moved (or only <paramref name="moved"/>): one pending Fuel
+    /// run. The phase wiring opens the run's UI as soon as it is queued; unless <paramref name="keepOpened"/>, those windows are closed again so
+    /// the tests below drive the windows themselves.</summary>
+    (MainWindow W, PendingRun Run) Make(Difficulty d, bool terrainMissing = false, bool keepOpened = false, string[]? moved = null,
+        Func<VariableBinding, VariableBinding>? terrain = null)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
@@ -72,21 +75,23 @@ public sealed class BatchGridTests : IDisposable
         s.UpdateRules(_ =>
         {
             var p = PhaseFixture.Pack(s.Archive.Sha256);
-            return terrainMissing
-                ? p with { Formulas = p.Formulas.Select(f => f.Id != "f-fuel" ? f : f with { Bindings = f.Bindings.Select(b => b.Variable == "Terrain" ? b with { AutoValue = null } : b).ToList() }).ToList() }
+            var tweak = terrain ?? (terrainMissing ? b => b with { AutoValue = null } : null);
+            return tweak != null
+                ? p with { Formulas = p.Formulas.Select(f => f.Id != "f-fuel" ? f : f with { Bindings = f.Bindings.Select(b => b.Variable == "Terrain" ? tweak(b) : b).ToList() }).ToList() }
                 : p;
         });
         Pump();
         var c = w.PhaseControl!;
         c.Start(); c.Advance(); c.Advance();   // Movement
-        c.ExecuteMove(new[] { new MovePieces(new[] { PhaseFixture.RedOne, PhaseFixture.RedTwo }, "Main Map", new PointD(130, 50), null) });
+        c.ExecuteMove(new[] { new MovePieces(moved ?? new[] { PhaseFixture.RedOne, PhaseFixture.RedTwo }, "Main Map", new PointD(130, 50), null) });
         Pump();
+        if (!keepOpened) FormulaWindows.CloseAllFor(s);
         return (w, Assert.Single(s.Game!.State.Pending, r => r.FormulaId == "f-fuel"));
     }
 
     BatchGridWindow Batch(MainWindow w, PendingRun run, Action<int>? openRow = null)
     {
-        var win = FormulaWindows.ShowBatch(w, w.Session!, w.Actions!, run.Id, openRow);
+        var win = FormulaWindows.ShowBatch(w, w.Session!, w.Actions!, run.Id, openRow)!;
         Pump();
         return win;
     }
@@ -291,5 +296,117 @@ public sealed class BatchGridTests : IDisposable
         Pump();
         Assert.Equal(MissingInputResult.PerUnit, result.GetAwaiter().GetResult());
         Assert.Contains(w.Session!.Game!.State.Pending, r => r.Id == run.Id);
+    }
+
+    // ---------- the phase wiring end to end (task 6): queued runs open these windows ----------
+
+    [AvaloniaFact]
+    public void Semi_auto_run_with_many_units_opens_batch()
+    {
+        var (w, run) = Make(Difficulty.SemiAuto, keepOpened: true);
+        var win = Assert.Single(FormulaWindows.OpenBatchFor(w.Session!));
+        Assert.True(win.IsVisible);
+        Assert.Equal(2, win.RowCount);
+        Assert.Equal("Fuel for movement — 0 of 2 applied", win.Title);
+        Assert.IsType<CheatSheetView>(win.CheatSheet);
+        Assert.Empty(FormulaWindows.OpenFor(w.Session!));   // no unit windows for a run of several units
+        Assert.Contains(w.Session!.Game!.State.Pending, r => r.Id == run.Id);
+    }
+
+    [AvaloniaFact]
+    public void Batch_row_double_click_opens_linked_unit_window()
+    {
+        var (w, run) = Make(Difficulty.Hardcore, keepOpened: true);
+        var win = Assert.Single(FormulaWindows.OpenBatchFor(w.Session!));
+        var at = win.UnitCellCenter(1);
+        win.MouseDown(at, MouseButton.Left);
+        win.MouseUp(at, MouseButton.Left);
+        win.MouseDown(at, MouseButton.Left);
+        win.MouseUp(at, MouseButton.Left);
+        Pump();
+        var unit = Assert.Single(FormulaWindows.OpenFor(w.Session!));
+        Assert.Equal(run.Id, unit.Link!.RunId);
+        Assert.Equal(FormulaWindowRules.Key("f-fuel", PhaseFixture.RedTwo, run.Id), unit.Key);
+    }
+
+    [AvaloniaFact]
+    public void Fully_auto_missing_input_ok_applies_all()
+    {
+        _dialogs.MissingHandler = new Dialogs().AskMissingAsync;   // the real dialog, driven below
+        var (w, run) = Make(Difficulty.FullyAuto, terrainMissing: true, keepOpened: true);
+        Assert.Equal(new[] { "Fuel for movement" }, _dialogs.MissingAsked);
+        var dlg = Assert.Single(w.OwnedWindows.OfType<MissingInputDialog>());
+        dlg.Type("Terrain", "Sand");
+        dlg.ClickOk();
+        Pump();
+        Assert.False(dlg.IsVisible);
+        Assert.DoesNotContain(w.Session!.Game!.State.Pending, r => r.Id == run.Id);
+        Assert.Equal(34, Fuel(w, PhaseFixture.RedOne));
+        Assert.Equal(34, Fuel(w, PhaseFixture.RedTwo));
+        Assert.Empty(FormulaWindows.OpenBatchFor(w.Session!));
+    }
+
+    [AvaloniaFact]
+    public void Per_unit_opens_units()
+    {
+        _dialogs.Missing.Enqueue(MissingInputResult.PerUnit);
+        var (w, run) = Make(Difficulty.FullyAuto, terrainMissing: true, keepOpened: true);
+        var win = Assert.Single(FormulaWindows.OpenBatchFor(w.Session!));   // several units: the batch grid
+        Assert.Equal(2, win.RowCount);
+        Assert.Contains(w.Session!.Game!.State.Pending, r => r.Id == run.Id);
+    }
+
+    [AvaloniaFact]
+    public void Per_unit_with_one_unit_opens_unit_window()
+    {
+        _dialogs.Missing.Enqueue(MissingInputResult.PerUnit);
+        var (w, run) = Make(Difficulty.FullyAuto, terrainMissing: true, keepOpened: true, moved: new[] { PhaseFixture.RedOne });
+        Assert.Empty(FormulaWindows.OpenBatchFor(w.Session!));
+        var unit = Assert.Single(FormulaWindows.OpenFor(w.Session!));
+        Assert.Equal(run.Id, unit.Link!.RunId);
+    }
+
+    [AvaloniaFact]
+    public void Step_back_closes_batch_grid()
+    {
+        var (w, _) = Make(Difficulty.Hardcore, keepOpened: true);
+        var win = Assert.Single(FormulaWindows.OpenBatchFor(w.Session!));
+        _dialogs.CheckpointPick = 0;
+        Assert.True(w.Commands.Execute("phase.stepBack"));
+        Pump();
+        Assert.Single(_dialogs.CheckpointPrompts);
+        Assert.False(win.IsVisible);
+        Assert.Empty(FormulaWindows.OpenBatchFor(w.Session!));
+        Assert.Equal(PhaseRunDispatch.SteppedBackText, w.StatusText);
+    }
+
+    [AvaloniaFact]
+    public void Show_batch_returns_null_when_run_is_not_pending()
+    {
+        var (w, run) = Make(Difficulty.Hardcore);
+        var s = w.Session!;
+        Assert.Null(FormulaWindows.ShowBatch(w, s, w.Actions!, "no-such-run", null));
+        w.PhaseControl!.Advance();   // clears the run
+        Pump();
+        Assert.DoesNotContain(s.Game!.State.Pending, r => r.Id == run.Id);
+        Assert.Null(FormulaWindows.ShowBatch(w, s, w.Actions!, run.Id, null));
+        Assert.Empty(FormulaWindows.OpenBatchFor(s));
+        Assert.Empty(w.OwnedWindows.OfType<BatchGridWindow>());
+    }
+
+    [AvaloniaFact]
+    public void Missing_ok_enabled_for_out_of_range_answer()
+    {
+        // WinForms enables OK on any non-blank answer; the engine reports out-of-range values when applying.
+        var (w, run) = Make(Difficulty.FullyAuto, terrain: b => b with { AutoValue = null, Min = 1, Max = 5 });
+        var dlg = new MissingInputDialog(w.Session!, w.Actions!, run);
+        dlg.Show(w);
+        Pump();
+        Assert.Equal(new[] { "Terrain" }, dlg.AskedVariables);
+        dlg.Type("Terrain", "99");
+        Assert.True(dlg.OkEnabled);
+        dlg.Type("Terrain", " ");
+        Assert.False(dlg.OkEnabled);
+        dlg.Close();
     }
 }

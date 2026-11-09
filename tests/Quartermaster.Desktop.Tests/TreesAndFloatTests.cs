@@ -24,6 +24,7 @@ public sealed class TreesAndFloatTests : IDisposable
     public void Dispose()
     {
         foreach (var w in _windows) w.ForceClose();
+        foreach (var f in _fixtures) f.Dispose();
         ShortcutGestures.IsMac = _wasMac;
         try { Directory.Delete(_tmp, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
@@ -269,5 +270,106 @@ public sealed class TreesAndFloatTests : IDisposable
         var b = w.LogFloat!.PixelBounds;
         var area = new Rectangle(0, 0, 1920, 1080);
         Assert.True(area.Contains(new Rectangle(b.X, b.Y, b.W, b.H)), $"{b} not inside {area}");
+    }
+
+    // ---------- the floating phase panel (task 6) ----------
+
+    readonly List<Quartermaster.TestFixtures.FixtureModule> _fixtures = new();
+
+    string PhaseModule()
+    {
+        var fx = Quartermaster.TestFixtures.PhaseFixture.Module();
+        _fixtures.Add(fx);
+        return fx.Build();
+    }
+
+    MainWindow PhaseGame(string module)
+    {
+        var w = NewWindow();
+        Assert.True(w.OpenModule(module));
+        var s = w.Session!;
+        w.StartSetup(0);
+        s.NewRules("t");
+        s.UpdateRules(_ => Quartermaster.TestFixtures.PhaseFixture.Pack(s.Archive.Sha256));
+        Pump();
+        return w;
+    }
+
+    static void ClickPop(MainWindow w)
+    {
+        w.Phases.PopButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Pump();
+    }
+
+    [AvaloniaFact]
+    public void Phase_panel_pops_out_and_docks_back()
+    {
+        var w = PhaseGame(PhaseModule());
+        var panel = w.Phases;
+        Assert.True(w.PhasePanelShown);
+        Assert.Null(w.PhaseFloat);
+        Assert.Equal("Pop out", panel.PopButton.Content);
+
+        ClickPop(w);
+        var f = w.PhaseFloat!;
+        Assert.Equal("Phases", f.Title);
+        Assert.Same(panel, f.Content);
+        Assert.False(w.PhasePanelShown);   // no right-hand dock while floating
+        Assert.Equal("Dock", panel.PopButton.Content);
+        Assert.True(w.FindMenuItem("&Phase panel")!.IsChecked);
+        // Default place: PanelDockState.PhasesDefault of the main window (320 x 520).
+        Assert.Equal((320, 520), (f.PixelBounds.W, f.PixelBounds.H));
+
+        ClickPop(w);   // Dock
+        Assert.Null(w.PhaseFloat);
+        Assert.True(w.PhasePanelShown);
+        Assert.Equal("Pop out", panel.PopButton.Content);
+
+        // Closing the floating window docks the panel back, shown (WinForms PhaseFloatForm).
+        ClickPop(w);
+        w.PhaseFloat!.Close();
+        Pump();
+        Assert.Null(w.PhaseFloat);
+        Assert.True(w.PhasePanelShown);
+        Assert.Equal("Pop out", panel.PopButton.Content);
+
+        // View > Phase panel while floating docks it back too.
+        ClickPop(w);
+        w.ClickMenu("&Phase panel");
+        Pump();
+        Assert.Null(w.PhaseFloat);
+        Assert.True(w.PhasePanelShown);
+        Assert.True(w.FindMenuItem("&Phase panel")!.IsChecked);
+    }
+
+    [AvaloniaFact]
+    public void Phase_float_bounds_persist_per_module()
+    {
+        var module = PhaseModule();
+        var w = PhaseGame(module);
+        var sha = w.Session!.Archive.Sha256;
+        ClickPop(w);
+        w.PhaseFloat!.PixelBounds = new RectangleI(300, 120, 360, 500);
+        Assert.True(w.OpenModule(module));   // closing the game saves where the window was
+        var saved = new WindowLayoutStore(LayoutRoot).LoadModule(sha);
+        Assert.True(saved.ContainsKey("phases"));
+        Assert.Equal(new Rectangle(300, 120, 360, 500), saved["phases"].Bounds);
+        Assert.False(saved["phases"].Floating);   // docked again when the game closes
+        Assert.Null(w.PhaseFloat);
+
+        var w2 = PhaseGame(module);
+        ClickPop(w2);
+        Assert.Equal(new RectangleI(300, 120, 360, 500), w2.PhaseFloat!.PixelBounds);
+    }
+
+    [AvaloniaFact]
+    public void Screens_put_the_primary_first()
+    {
+        var a = new ScreenInfo(new Rectangle(-1920, 0, 1920, 1040), 96);
+        var b = new ScreenInfo(new Rectangle(0, 0, 2560, 1400), 144);
+        var c = new ScreenInfo(new Rectangle(2560, 0, 1280, 1000), 96);
+        Assert.Equal(new[] { b, a, c }, PanelFloat.PrimaryFirst(new[] { a, b, c }, 1));
+        Assert.Equal(new[] { a, b, c }, PanelFloat.PrimaryFirst(new[] { a, b, c }, 0));
+        Assert.Equal(new[] { a, b, c }, PanelFloat.PrimaryFirst(new[] { a, b, c }, -1));   // no primary reported: as listed
     }
 }

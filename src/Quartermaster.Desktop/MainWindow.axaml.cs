@@ -41,8 +41,8 @@ public partial class MainWindow : Window
     readonly MenuItem _viewLog;
     LogPanel? _log;
     double _logHeight = 170;   // WinForms default; follows the splitter
-    MenuItem? _editUndo, _editRedo;
-    Button? _tbUndo, _tbRedo;
+    MenuItem? _editUndo, _editRedo, _editStepBack, _editStepBackTo;
+    Button? _tbUndo, _tbRedo, _tbStepBack;
     readonly DiceTools _dice;
 
     ModuleSession? _session;
@@ -351,10 +351,13 @@ public partial class MainWindow : Window
         file.Items.Add(new Separator());
         Item(file, "E&xit", Close);
 
-        // Edit (MainForm.History): Undo / Redo, captions follow the history ("&Undo Move …").
+        // Edit (MainForm.History): Undo / Redo, captions follow the history ("&Undo Move …"); then Step Back.
         var edit = Top("&Edit");
         _editUndo = Item(edit, "&Undo", () => { }, "edit.undo");
         _editRedo = Item(edit, "&Redo", () => { }, "edit.redo");
+        edit.Items.Add(new Separator());
+        _editStepBack = Item(edit, "Step &Back to Start of Phase", () => { }, "phase.stepBack");
+        _editStepBackTo = Item(edit, "Step Back &To...", () => { }, "phase.stepBackTo");
         edit.SubmenuOpened += (_, _) => RefreshHistoryUi();
 
         // View: MainForm "Show &Grid", the map context menu's "Zoom to Fit" / "Zoom 100%" and the map toolbar's "Zoom" presets.
@@ -396,7 +399,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The main toolbar in WinForms MainForm.BuildToolbar order. Buttons whose features are not in the Avalonia app yet (Diagnostics, Notes,
-    /// Overview, Inventory, Palette, Step Back) are left out until their stage.
+    /// Overview, Inventory, Palette) are left out until their stage.
     /// </summary>
     void BuildToolbar()
     {
@@ -409,9 +412,10 @@ public partial class MainWindow : Window
         Tool("tool.saveGame", "Save Game", () => RunAsync(() => SaveGameAsync(false)));
         bar.AddSeparator();
         Tool("tool.los", "LOS", () => _router.Execute("tool.los"));
-        // Undo / Redo are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
+        // Undo / Redo / Step Back are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
         _tbUndo = bar.Add("edit.undo", "Undo", () => _router.Execute("edit.undo"));
         _tbRedo = bar.Add("edit.redo", "Redo", () => _router.Execute("edit.redo"));
+        _tbStepBack = bar.Add("phase.stepBack", "◀ Step Back", () => _router.Execute("phase.stepBack"));
         // DiceTools' buttons (WinForms adds a separator first).
         bar.AddSeparator();
         void Dice(string id, Button b) { Gate(id, b); _dice.Track(b); }
@@ -481,7 +485,7 @@ public partial class MainWindow : Window
         Title = t;
     }
 
-    /// <summary>Caption and enabled state of Undo / Redo (WinForms RefreshHistoryUi).</summary>
+    /// <summary>Caption and enabled state of Undo / Redo / Step Back (WinForms RefreshHistoryUi).</summary>
     void RefreshHistoryUi()
     {
         try
@@ -492,6 +496,8 @@ public partial class MainWindow : Window
             var h = s == null || guest || replaying ? null : _history;
             var undo = s != null && h != null && HistoryCommands.CanUndo(s, h);
             var redo = s != null && h != null && HistoryCommands.CanRedo(s, h);
+            var start = s != null && h != null && HistoryCommands.CanStepBack(s, h);
+            var any = s != null && h != null && HistoryCommands.CanStepBackTo(s, h);
             // Why an item is off (WinForms MainForm.History.RefreshHistoryUi).
             var why = guest ? ModuleSession.GuestUndoText : replaying ? ModuleSession.ReplayingText
                 : h?.UndoBlockedBySentTurn == true ? HistoryController.AlreadySentText : h?.AtFloorFromOldSave == true ? FloorTip : null;
@@ -499,6 +505,9 @@ public partial class MainWindow : Window
             Set(_editRedo, h?.RedoText ?? "Redo", redo, guest || replaying ? why : null);
             SetButton(_tbUndo, undo, Tip(h?.UndoText ?? "Undo", "edit.undo"), !undo ? why : null);
             SetButton(_tbRedo, redo, Tip(h?.RedoText ?? "Redo", "edit.redo"), guest || replaying ? why : null);
+            SetItem(_editStepBack, start, !start ? why : null);
+            SetItem(_editStepBackTo, any, !any ? why : null);
+            SetButton(_tbStepBack, start, Tip("Step back to start of phase", "phase.stepBack"), !start ? why : null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -512,6 +521,14 @@ public partial class MainWindow : Window
             ToolTip.SetShowOnDisabled(mi, true);
             // "&" + the action label with its own ampersands escaped, so it cannot become a mnemonic (WinForms Mnemonic).
             mi.Header = MenuText.FromWinForms("&" + text.Replace("&", "&&", StringComparison.Ordinal));
+            mi.IsEnabled = enabled;
+        }
+
+        static void SetItem(MenuItem? mi, bool enabled, string? tip)
+        {
+            if (mi == null) return;
+            ToolTip.SetTip(mi, tip);
+            ToolTip.SetShowOnDisabled(mi, true);
             mi.IsEnabled = enabled;
         }
 
@@ -715,6 +732,7 @@ public partial class MainWindow : Window
         _actions = new ActionPortSwitch(new LocalActions(s, c, _history));
         HistoryCommands.Register(_router, s, _history, () => _actions, SetStatus);
         CreatePhaseUi(s, c);
+        HistoryCommands.RegisterStepBack(_router, s, _history, () => _dispatch, RunAsync);
         CreateAlerts(s);
     }
 
