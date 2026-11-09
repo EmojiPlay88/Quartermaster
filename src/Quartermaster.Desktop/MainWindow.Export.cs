@@ -22,6 +22,7 @@ public partial class MainWindow
     OverviewWindow? _overviewWin;
     bool _exporting;
     CancellationTokenSource? _exportCts;
+    Task<ExportResult>? _exportRender;   // the whole-map render in flight: waited for before the session is disposed
 
     /// <summary>The open overview window (null while closed).</summary>
     internal OverviewWindow? OverviewTool => _overviewWin;
@@ -33,6 +34,9 @@ public partial class MainWindow
     internal Action<double>? ExportProgressTap { get; set; }
 
     internal bool ExportRunning => _exporting;
+
+    /// <summary>The whole-map render in flight (tests; null when none).</summary>
+    internal Task<ExportResult>? ExportRenderTask => _exportRender;
 
     /// <summary>Takes the current view's picture (tests swap it to simulate running out of memory).</summary>
     internal Func<MapView, SKBitmap?> SnapshotSource { get; set; } = v => v.Snapshot();
@@ -135,9 +139,11 @@ public partial class MainWindow
         try
         {
             // The snapshot of what this player may see is taken inside, before the first await, on this (UI) thread.
-            r = await MapExportFlow.RunWholeAsync(s, view.Map.Id, choice.Zoom, path, progress, cts.Token, tiles, m => System.Diagnostics.Trace.WriteLine(m));
+            var render = MapExportFlow.RunWholeAsync(s, view.Map.Id, choice.Zoom, path, progress, cts.Token, tiles, m => System.Diagnostics.Trace.WriteLine(m));
+            _exportRender = render;
+            r = await render;
         }
-        finally { _exportDlg = null; dlg.Finish(); }
+        finally { _exportRender = null; _exportDlg = null; dlg.Finish(); }
         if (!ReferenceEquals(_session, s)) return;   // the window or the game went meanwhile
         if (r.Ok) SetStatus(r.Message);
         else if (r.Cancelled) SetStatus(MapExportFlow.CancelledText);
@@ -154,6 +160,10 @@ public partial class MainWindow
     void DestroyExport()
     {
         CancelExport();
+        // The render reads the session's images on its worker: let it stop (briefly) before the session is disposed. RunWholeAsync never
+        // throws and continues off the UI thread, so waiting here cannot deadlock.
+        try { _exportRender?.Wait(2000); }
+        catch (Exception ex) when (ex is AggregateException or OperationCanceledException) { }
         try { _exportDlg?.Finish(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("closing the progress dialog: " + ex.Message); }
         var w = _overviewWin;

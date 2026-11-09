@@ -328,6 +328,45 @@ public sealed class OverviewAndExportTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Export_finishes_before_session_is_disposed()
+    {
+        var w = Game();
+        var s = w.Session!;
+        var view = w.MapTabs.ActiveView!;
+        var path = Path.Combine(_tmp, "replaced.png");
+        _dialogs.ExportChoices.Enqueue(new ExportChoice(true, 1));
+        _dialogs.SaveFiles.Enqueue(path);
+        var inRender = new ManualResetEventSlim();
+        var sawDisposed = false;
+        // Holds the render on its worker for a while (no release from the test): closing the game must wait for it.
+        w.ExportProgressTap = _ =>
+        {
+            if (s.Disposed) sawDisposed = true;
+            if (inRender.IsSet) return;
+            inRender.Set();
+            Thread.Sleep(400);
+            if (s.Disposed) sawDisposed = true;
+        };
+        var t = w.SaveMapAsPictureAsync(view);
+        Assert.True(WaitFor(() => inRender.IsSet));
+        var render = w.ExportRenderTask;
+        Assert.NotNull(render);
+        Assert.False(render!.IsCompleted);
+
+        Assert.True(w.OpenModule(Demo()));   // CloseSession: DestroyExport, then the session is disposed
+        Assert.True(s.Disposed);
+        Assert.True(render.IsCompleted, "the export was still drawing when the session was disposed");
+        Assert.False(sawDisposed);
+        Assert.True(render.Result.Cancelled);
+        Assert.True(WaitFor(() => t.IsCompleted));
+        t.GetAwaiter().GetResult();
+        Assert.False(w.ExportRunning);
+        Assert.False(File.Exists(path));
+        Assert.Empty(Directory.GetFiles(_tmp, "replaced.png*"));
+        Assert.Empty(Leftovers(_tmp));
+    }
+
+    [AvaloniaFact]
     public void Export_current_view_out_of_memory_shows_warning()
     {
         var w = Game();
