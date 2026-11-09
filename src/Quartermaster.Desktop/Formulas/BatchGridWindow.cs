@@ -1,7 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -25,7 +27,11 @@ public sealed class BatchGridWindow : Window
     static readonly IBrush WrongBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xE4, 0xE1));   // MistyRose
     static readonly IBrush ExceptionBrush = new SolidColorBrush(Color.FromRgb(0xB2, 0x22, 0x22));   // Firebrick
     static readonly IBrush AppliedBrush = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80));   // GrayText
-    const double UnitWidth = 150, ResultWidth = 90, LedgerWidth = 200, ExceptionsWidth = 160, RowHeight = 28;
+    static readonly IBrush PlaceholderBrush = new SolidColorBrush(Color.FromRgb(0xC0, 0xC0, 0xC0));   // Silver
+    /// <summary>The counter picture in the Unit cell (WinForms ImageSize).</summary>
+    static readonly PixelSize ImageSize = new(64, 48);
+    // WinForms: Unit is 150 + picture + 8 wide (the picture is painted in the cell's left padding), rows are 52 high.
+    const double UnitWidth = 150 + 64 + 8, ResultWidth = 90, LedgerWidth = 200, ExceptionsWidth = 160, RowHeight = 52;
 
     readonly MainWindow _host;
     readonly ModuleSession _s;
@@ -39,6 +45,9 @@ public sealed class BatchGridWindow : Window
     readonly TextBlock _status = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
     readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
     readonly BreakdownTip _tip = new();
+    readonly CounterThumbnails _thumbs;
+    readonly CounterPreview _preview;
+    readonly Action<string> _pictureReady;
     readonly CheatSheetView? _cheat;
     readonly Control? _cheatBody;
     readonly ColumnDefinition? _cheatColumn;
@@ -58,6 +67,9 @@ public sealed class BatchGridWindow : Window
         _runId = runId;
         _openRow = openRow;
         _model = new BatchModel(s, port, runId);
+        _thumbs = new CounterThumbnails(s) { Shown = () => _rows.Select(r => r.Picture) };
+        _preview = new CounterPreview(s);
+        _pictureReady = id => Safe(() => { foreach (var r in _rows.Where(r => r.PieceId == id).ToList()) r.UpdatePicture(); });
         Title = _model.Title;
         Width = 900;
         Height = 520;
@@ -125,7 +137,12 @@ public sealed class BatchGridWindow : Window
         _applyAll.Click += (_, _) => Safe(ApplyAll);
         _applyRow.Click += (_, _) => Safe(ApplyRow);
         _debounce.Tick += (_, _) => { _debounce.Stop(); Safe(Refresh); };
-        Deactivated += (_, _) => _tip.Hide();
+        Deactivated += (_, _) => { _tip.Hide(); _preview.Hide(); };
+        // WinForms: scrolling or a click hides the counter preview.
+        _list.AddHandler(PointerPressedEvent, (_, _) => _preview.Hide(), RoutingStrategies.Tunnel, handledEventsToo: true);
+        _list.AddHandler(ScrollViewer.ScrollChangedEvent, (_, _) => _preview.Hide(), RoutingStrategies.Bubble, handledEventsToo: true);
+        scroller.ScrollChanged += (_, _) => _preview.Hide();
+        _list.PointerExited += (_, _) => _preview.Hide();
 
         _s.GameReplaced += OnGameReplaced;
         _s.ViewChanged += QueueRefresh;   // a new viewer: other sides' rows turn hidden
@@ -156,6 +173,18 @@ public sealed class BatchGridWindow : Window
     internal IReadOnlyList<string> Headers => _headers;
     internal CheatSheetView? CheatSheet => _cheat;
     internal int RowCount => _model.RowCount;
+    internal CounterThumbnails Thumbnails => _thumbs;
+    internal CounterPreview Preview => _preview;
+    internal double UnitColumnWidth => _widths[0];
+    internal double RowHeightOf(int row) => Need(row).Bounds.Height;
+    /// <summary>The counter picture of a row on screen; null while it is drawn, or when the unit is hidden.</summary>
+    internal Avalonia.Media.Imaging.Bitmap? PictureOf(int row) => Live(row)?.Picture as Avalonia.Media.Imaging.Bitmap;
+    internal bool PlaceholderShown(int row) => Need(row).PlaceholderShown;
+    internal Rect PictureBounds(int row) => BoundsIn(Need(row).PictureBox);
+    internal Rect UnitCellBounds(int row) => BoundsIn(Need(row).UnitCell);
+    internal double UnitTextLeft(int row) => BoundsIn(Need(row).UnitText).X;
+    BatchRow Need(int row) => Live(row) ?? throw new InvalidOperationException("Row is not on screen.");
+    Rect BoundsIn(Control c) => new(c.TranslatePoint(default, this) ?? default, c.Bounds.Size);
     int VarCount => _model.Variables.Count;
     int ResultCol => 1 + VarCount;
 
@@ -198,14 +227,36 @@ public sealed class BatchGridWindow : Window
         readonly BatchGridWindow _w;
         readonly Border[] _boxes;
         readonly Control[] _content;
+        readonly Image _picture = new() { Width = ImageSize.Width, Height = ImageSize.Height, Stretch = Stretch.None, IsHitTestVisible = false };
+        readonly Rectangle _placeholder = new()
+        {
+            Width = ImageSize.Width, Height = ImageSize.Height, Stroke = PlaceholderBrush, StrokeThickness = 1,
+            StrokeDashArray = new Avalonia.Collections.AvaloniaList<double> { 1, 1 }, IsVisible = false, IsHitTestVisible = false,
+        };
+        readonly Border _pictureBox;
         public int Index { get; }
+        public string? PieceId { get; private set; }
         public Control UnitCell => _boxes[0];
+        public Control UnitText => _content[0];
+        public Control PictureBox => _pictureBox;
+        public object? Picture => _picture.Source;
+        public bool PlaceholderShown => _placeholder.IsVisible;
 
         public BatchRow(BatchGridWindow w, int index)
         {
             _w = w;
             Index = index;
             Height = RowHeight;
+            _pictureBox = new Border
+            {
+                Width = ImageSize.Width, Height = ImageSize.Height, Margin = new Thickness(2, 0, 0, 0), Background = Brushes.Transparent,
+                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
+                Child = new Panel { Children = { _placeholder, _picture } },
+            };
+            // Hovering the picture shows the big counter preview (WinForms OnHoverImage); leaving it hides it.
+            _pictureBox.PointerEntered += (_, e) => _w.Safe(() => _w.ShowPreview(this, e.GetPosition(_pictureBox)));
+            _pictureBox.PointerMoved += (_, e) => _w.Safe(() => _w.ShowPreview(this, e.GetPosition(_pictureBox)));
+            _pictureBox.PointerExited += (_, _) => _w._preview.Hide();
             ColumnDefinitions = Columns(w._widths);
             var n = w._widths.Length;
             _boxes = new Border[n];
@@ -231,7 +282,15 @@ public sealed class BatchGridWindow : Window
                     }
                 }
                 else inner = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-                var cell = new Border { Child = inner, BorderThickness = new Thickness(0, 0, 1, 1), Padding = new Thickness(4, 0) };
+                var cell = new Border { BorderThickness = new Thickness(0, 0, 1, 1), Padding = new Thickness(4, 0) };
+                if (c == 0)
+                {
+                    // The unit's counter in the cell's left padding (WinForms paints it at Left + 2, centred vertically), the name after it.
+                    cell.Padding = default;
+                    inner.Margin = new Thickness(ImageSize.Width + 8 + 4, 0, 4, 0);
+                    cell.Child = new Panel { Children = { _pictureBox, inner } };
+                }
+                else cell.Child = inner;
                 cell.Bind(Border.BorderBrushProperty, cell.GetResourceObservable("Classic.BorderBrush"));
                 SetColumn(cell, c);
                 Children.Add(cell);
@@ -244,8 +303,8 @@ public sealed class BatchGridWindow : Window
             ledger.PointerEntered += (_, _) => _w.Safe(() => _w.ShowLedgerTip(Index, ledger));
             ledger.PointerExited += (_, _) => _w._tip.Hide();
             GotFocus += (_, _) => { if (_w._list.SelectedIndex != Index) _w._list.SelectedIndex = Index; };
-            AttachedToVisualTree += (_, _) => { if (!_w._rows.Contains(this)) _w._rows.Add(this); Update(); };
-            DetachedFromVisualTree += (_, _) => _w._rows.Remove(this);
+            AttachedToVisualTree += (_, _) => { if (!_w._rows.Contains(this)) _w._rows.Add(this); Update(); _w.PrioritiseShown(); };
+            DetachedFromVisualTree += (_, _) => { _w._rows.Remove(this); _w.PrioritiseShown(); };
         }
 
         public string TextOf(int col) => _content[col] switch
@@ -315,8 +374,20 @@ public sealed class BatchGridWindow : Window
                     }
                     _boxes[c].Background = wrong ? WrongBrush : Brushes.Transparent;   // transparent, not null: the cell must take clicks
                 }
+                PieceId = row.PieceId;
+                UpdatePicture();
             }
             finally { _w._updating = was; }
+        }
+
+        /// <summary>The unit's counter from the viewed state only: a dotted placeholder until the worker has drawn it, nothing when hidden.</summary>
+        public void UpdatePicture()
+        {
+            var id = PieceId;
+            var drawable = id != null && _w._s.View?.Pieces.TryGetValue(id, out var p) == true && p != null;
+            var bmp = drawable ? _w._thumbs.Get(id!, ImageSize, _w._pictureReady) : null;
+            if (!ReferenceEquals(_picture.Source, bmp)) _picture.Source = bmp;
+            _placeholder.IsVisible = drawable && bmp == null;
         }
 
         static void Style(Control c, IBrush? fore)
@@ -341,6 +412,18 @@ public sealed class BatchGridWindow : Window
         if (o.Count == 0) return;
         if (LedgerBreakdown.For(_s.View ?? _s.Game.State, _s.Rules, _s.Model, o[0].Key, o[0].PropertyId) is { } b)
             _tip.Show(anchor, new Point(0, anchor.Bounds.Height), b);
+    }
+
+    /// <summary>The rows on screen are drawn first and kept in the thumbnail cache.</summary>
+    void PrioritiseShown() => _thumbs.Prioritise(_rows.Select(r => r.PieceId).OfType<string>());
+
+    /// <summary>The big preview of the row's counter at the pointer (WinForms OnHoverImage); hidden for hidden or gone units.</summary>
+    void ShowPreview(BatchRow r, Point at)
+    {
+        if (_closing || r.Index >= _model.RowCount) { _preview.Hide(); return; }
+        var row = _model.Row(r.Index);
+        if (row.PieceId == null || _s.View?.Pieces.TryGetValue(row.PieceId, out var p) != true || p == null) { _preview.Hide(); return; }
+        _preview.Show(r.PictureBox, at, row.PieceId, row.Label);
     }
 
     // ---- actions ----
@@ -427,6 +510,7 @@ public sealed class BatchGridWindow : Window
         if (!RunExists) { Close(); return; }       // finished, or the game was replaced
         _model.Invalidate();
         _tip.Hide();
+        _preview.Hide();   // the viewed state may have changed (pictures follow in UpdateRows)
         var n = _model.RowCount;
         if (n != _shownRows)
         {
@@ -474,6 +558,8 @@ public sealed class BatchGridWindow : Window
         _game = null;
         _debounce.Stop();
         _tip.Hide();
+        _preview.Hide();
+        _thumbs.Dispose();
         FormulaWindows.ClosedBatch(this);
         base.OnClosed(e);
     }

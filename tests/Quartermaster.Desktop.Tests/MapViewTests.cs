@@ -81,6 +81,29 @@ public sealed class MapViewTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Map_snapshot_matches_view_pixels()
+    {
+        foreach (var scale in new[] { 1.0, 2.0 })
+        {
+            var (view, window, tiles) = Open(scaling: scale);
+            view.ZoomToFit();
+            view.CentreOn(view.ScreenToMap(new Point(300, 250)));   // something off-centre, so a wrong offset shows
+            Assert.Equal(tiles.Keys.OrderBy(k => k), view.Tiles.Keys.OrderBy(k => k));
+            Assert.All(tiles, kv => Assert.Same(kv.Value, view.Tiles[kv.Key]));
+            using var frame = window.CaptureRenderedFrame();
+            var actual = TestHelpers.Pixels(frame!);
+            using var snap = view.Snapshot();
+            Assert.NotNull(snap);
+            TestHelpers.AssertSamePixels(actual, snap!, 2);
+            using var later = view.SnapshotAsync().GetAwaiter().GetResult();
+            TestHelpers.AssertSamePixels(actual, later!, 2);
+            window.Close();
+            _s!.Dispose();
+            _s = null;
+        }
+    }
+
+    [AvaloniaFact]
     public void First_show_fits_the_map_capped_at_100_percent()
     {
         var (view, window, _) = Open();
