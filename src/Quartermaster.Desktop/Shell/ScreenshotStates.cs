@@ -19,7 +19,8 @@ namespace Quartermaster.Desktop.Shell;
 /// </summary>
 static class ScreenshotStates
 {
-    public static readonly string[] Names = { "menu", "hover", "los", "log", "rules", "phases", "nextphase", "stepback", "formula", "cheatsheet", "batch", "alerts", "tree", "floatlog", "floatphases" };
+    public static readonly string[] Names = { "menu", "hover", "los", "log", "rules", "phases", "nextphase", "stepback", "formula", "cheatsheet", "batch", "alerts", "tree", "floatlog", "floatphases",
+        "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -172,6 +173,69 @@ static class ScreenshotStates
                 Pump(500);
                 Target = window.PhaseFloat;
                 return Target == null ? "The phase panel did not pop out." : null;
+            }
+            case "ledger":
+            case "ledger-counters":
+            {
+                if (window.OpenLedger() is not { } lw) return "State 'ledger' needs --rules.";
+                Pump(400);
+                lw.SelectTab("units");   // the tab used last is remembered per module; the picture always shows the units
+                Pump(300);
+                lw.CountersButton.IsChecked = name == "ledger-counters";   // remembered per module, so set it explicitly
+                Pump(name == "ledger-counters" ? 1500 : 300);   // the counter pictures are drawn on a worker and posted back
+                Target = lw;
+                return null;
+            }
+            case "edittabs":
+            {
+                if (window.OpenLedger() is not { } lw2) return "State 'edittabs' needs --rules.";
+                Pump(300);
+                var dlg = new Quartermaster.Desktop.Ledgers.EditTabsDialog(lw2.Prefs.Tabs, s.Rules, 0, true);
+                dlg.Show(lw2);
+                Pump(300);
+                Target = dlg;
+                return null;
+            }
+            case "outliner":
+                if (window.Outliner == null) return "No outliner.";
+                if (!window.OutlinerShown) window.ClickMenu("&Outliner");
+                Pump(600);
+                return window.OutlinerShown ? null : "The outliner did not show.";
+            case "inventory":
+                window.ClickMenu("&Inventory");
+                Pump(600);
+                Target = window.InventoryTool;
+                return Target == null ? "The inventory did not open." : null;
+            case "notes":
+            {
+                window.ClickMenu("&Notes");
+                Pump(300);
+                if (window.NotesTool is not { } nw) return "The notes did not open.";
+                nw.Type("Fuel is short in the north." + Environment.NewLine + "Watch the river crossing on turn 3.");
+                Pump(300);
+                Target = nw;
+                return null;
+            }
+            case "diagnostics":
+                s.Log.Add(DiagnosticSeverity.Warning, "demo", "An invented warning for the picture.");
+                s.Log.Add(DiagnosticSeverity.Error, "demo", "An invented error for the picture.");
+                Pump(400);
+                window.ClickMenu("&Diagnostics");
+                Pump(400);
+                Target = window.DiagnosticsTool;
+                return Target == null ? "The diagnostics did not open." : null;
+            case "overview":
+                window.ClickMenu("&Overview");
+                Pump(800);
+                Target = window.OverviewTool;
+                return Target == null ? "The overview did not open." : null;
+            case "export-choice":
+            {
+                var dlg = new ExportChoiceDialog(view.Map.Name ?? "Map");
+                dlg.Show(window);
+                Pump(300);
+                Target = dlg;
+                return null;
             }
             case "log":
                 window.Commands.Execute("dice.1d6");

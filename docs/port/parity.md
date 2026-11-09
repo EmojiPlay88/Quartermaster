@@ -7,8 +7,8 @@ How to read the columns:
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
 - **Linux**: ticked only for features verified by tests actually run on Linux. Stage 1 rows: verified by the headless tests in the CI workflow `.github/workflows/cross-platform.yml` on ubuntu-latest (green run 42510235329, 2026-11-08). Not yet opened on a real Linux desktop.
 - **Docs.Tests on Linux**: pass on ubuntu-latest in CI (run 42510235329).
-- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
-- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts (this branch); 3 ledger, notes, inventory, documents, search; 4 workbench and settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 2a are provisional.
+- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
+- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures (this branch); 3b = rulebook PDF viewer, charts, search, OCR, Rule ref; 4 workbench and settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 3a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts, search or OCR (3b).
 
 ## Stage-1 deviations from the WinForms app (deliberate or known)
 
@@ -51,7 +51,7 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 Stage 2b = phase strip and panel, Next Phase, Step Back, formula window and cheat sheet, batch grid and missing-input dialog, alert bar, module and tables trees, floating log and phase panels. Behaviour, labels and punctuation of the formula window, the batch grid and the missing-input dialog are copied from WinForms (the shared rules live in Quartermaster.Render: `FormulaWindowRules`, `BatchModel`, `PhaseRunDispatch`).
 
 - The batch grid's Unit cell shows the unit's counter picture (64×48, rows 52 px) with the big hover preview since stage 3a, as WinForms.
-- Rule ref (formula window, phase panel, rule links) is shown disabled with the tooltip "Rulebook viewer comes in a later version" until the rulebook viewer (stage 3).
+- Rule ref (formula window, phase panel, rule links) is shown disabled with the tooltip "Rulebook viewer comes in a later version" until the rulebook viewer (3b).
 - Changing the difficulty in mid-game needs Settings (stage 4); a game keeps the difficulty it was started with. The windows follow the mode when it changes (tests drive it through the shared controller).
 - The notice chip on the alert bar is drawn, but clicking it does nothing until multiplayer (stage 5).
 - The map-tab pop-out and the Window menu items (Cascade, Tile, Pop Out Active Window, floating windows list) are not ported; Desktop uses tabs. Only the log and the phase panel pop out.
@@ -64,6 +64,23 @@ Stage 2b = phase strip and panel, Next Phase, Step Back, formula window and chea
 - Known: while a Desktop modal dialog (Step Back, Next Phase, missing input) is open, the floating Phases window and the formula and batch-grid windows still accept input (Avalonia ShowDialog disables only the owner); WinForms disables every window of the app.
 - Floating log and phase panels always reopen docked: the layout memory never stores Floating=true, the same as WinForms.
 - Fixed in the 2b screenshot pass: the alert bar's hidden measuring chip ("+00") was visible at the left of the banner text.
+
+## Stage-3a deviations from the WinForms app (deliberate or known)
+
+Stage 3a = Ledger window (tabs, counter pictures, editing, CSV), Edit Ledger tabs, Show in Ledger, holder alerts opening the Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures in the batch grid. The row logic is shared in Quartermaster.Render (`LedgerViewRules`, `LedgerJump`, `OutlinerRules`, `InventoryRules`, `DiagnosticsView`, `MapExportFlow`, `PreviewPlacement`). Not done in 3a and left for 3b: PDF rulebook viewer, charts, rulebook search, scans and OCR, Rule ref buttons (still disabled).
+
+- The Overview is always a floating owned window (WinForms can dock it as an MDI document under "doc:overview"); document-tab docking is not ported (see 2b: Desktop uses tabs).
+- The Ledger's CSV save dialog has a single filter ("CSV files (*.csv)") and the title "Save As" (WinForms: the SaveFileDialog default title; `IDialogs.SaveFileAsync` takes one filter, as the log export).
+- Grouping and visibility of the Outliner are not kept between runs until the Settings dialog (stage 4), as the dock state of the other panels; its floating bounds are kept per module under "outliner".
+- Known: F2, typing, or double-click on a Name or Kind cell of the Ledger starts editing the first value column (WinForms does nothing there); on a value cell the behaviour is the WinForms one.
+- Double-clicking a unit row's Name or Kind cell centres the piece on its map as well as the counter picture (WinForms: the picture only).
+- The Ledger's Export CSV picker and the Save map as picture file picker are the Avalonia storage dialogs (async), not the Windows common dialogs.
+- The Ledger, Inventory, Notes, Diagnostics and Overview windows are Avalonia windows owned by the main window, one of each per module; their placement is the platform's (centred on the owner) unless bounds were remembered under "doc:ledger", "doc:inventory", "doc:notes", "diag", "doc:overview". They are not MDI children. While a Desktop modal dialog is open they still accept input (as in 2b).
+- The counter preview text uses a fixed 12-px font instead of the WinForms status font, so its width can differ by a few pixels.
+- The Ledger toolbar wraps onto a second line at the default 820 px width (Show units without values and Refresh move down; the WinForms toolbar fits its buttons on two lines in a different place), seen in the screenshot pass.
+- Counter pictures are drawn from the player's view only; the batch grid no longer resets its pictures on a refresh (the content-keyed cache makes that unnecessary).
+- The Ledger's group header rows are a lighter grey than the WinForms ones (screenshot pass); the tab strip is a flat strip rather than owner-drawn tabs.
+- Real windows, pointer hover, second displays, Numbers and Preview were only exercised headless; see `docs/port/stage3a-mac-checklist.md`.
 
 ## Before the stage release
 
@@ -100,17 +117,17 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Show Grid | 1 | ✔ | ✔ | ✔ |  |
 | View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
 | View > Module Tree | 2b | ✔ |  |  | checked by default; hides the left column (tree over tables tree) |
-| View > Diagnostics | 3 | ✔ |  |  | Ctrl/Cmd+D; needs a module; opens the one Diagnostics window (also from the toolbar button and the status-bar link) |
+| View > Diagnostics | 3a | ✔ |  |  | Ctrl/Cmd+D; needs a module; opens the one Diagnostics window (also from the toolbar button and the status-bar link) |
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
 | View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown or floating; while floating it docks the panel back |
-| View > Outliner | 3 | ✔ |  |  | hidden by default (WinForms OutlinerVisible); docked at the right of the maps after the phase panel (440 wide, resizable) or floating; checked while shown or floating; while floating it docks back |
-| View > Ledger | 3 | ✔ |  |  | Ctrl/Cmd+L; needs a rules pack; opens the one Ledger window (owned, not modal, bounds under "doc:ledger"); with counters selected on the active map it is Show in Ledger |
-| Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3 | ✔ |  |  | counter menu "Show in Ledger" (after a separator; disabled with "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)." without one) and View > Ledger / Ctrl/Cmd+L with counters selected on the active map: opens the Ledger, moves to the tab that shows them (clearing the filter when it hides them, shared `LedgerJump`), selects their rows and scrolls to the first; status "Shown in the Ledger." / "{n} counters shown in the Ledger." or the reason some have no row (hidden counters never get one) |
-| View > Overview | 3 | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
+| View > Outliner | 3a | ✔ |  |  | hidden by default (WinForms OutlinerVisible); docked at the right of the maps after the phase panel (440 wide, resizable) or floating; checked while shown or floating; while floating it docks back |
+| View > Ledger | 3a | ✔ |  |  | Ctrl/Cmd+L; needs a rules pack; opens the one Ledger window (owned, not modal, bounds under "doc:ledger"); with counters selected on the active map it is Show in Ledger |
+| Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3a | ✔ |  |  | counter menu "Show in Ledger" (after a separator; disabled with "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)." without one) and View > Ledger / Ctrl/Cmd+L with counters selected on the active map: opens the Ledger, moves to the tab that shows them (clearing the filter when it hides them, shared `LedgerJump`), selects their rows and scrolls to the first; status "Shown in the Ledger." / "{n} counters shown in the Ledger." or the reason some have no row (hidden counters never get one) |
+| View > Overview | 3a | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
 | View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | always visible in Desktop |
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
 | Tools > Rules Workbench | 4 |  |  |  |  |
-| Tools > Inventory, Notes | 3 | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
+| Tools > Inventory, Notes | 3a | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
 | Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2a | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice wait for Settings (stage 4) |
 | Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right (Cmd+Right on macOS) steps the turn; with a phased rules pack it is Next Phase, as WinForms (2b). Turn label in the status bar |
 | Tools > Settings... | 4 |  |  |  |  |
@@ -128,13 +145,13 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MainForm: error guard (warning box on a bad file) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: command line <vmod> --setup N / --new | 1 | ✔ | ✔ | ✔ | --rules and --new-rules too (stage 2a); the other options come later |
 | MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | user-editable keys come with Settings |
-| ModuleTreePanel | 2b | ✔ |  |  | map nodes activate the tab; setup nodes open the setup chooser (no preselect yet); chart and PDF nodes say "Opens in a later version" (stage 3); rebuilds when the viewer changes |
+| ModuleTreePanel | 2b | ✔ |  |  | map nodes activate the tab; setup nodes open the setup chooser (no preselect yet); chart and PDF nodes say "Opens in a later version" (3b); rebuilds when the viewer changes |
 | TablesTreePanel | 2b | ✔ |  |  | Tables and Formulas folders, refreshed 200 ms after rules changes; activation ignored until stage 4; split with the module tree remembered (ui.json) |
 | DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches open the Ledger and select the holder's row (Depots & Global tab, filter cleared when it hides it; never the counters selected on the map); shown whenever a game is open (Settings toggle in stage 4) |
 | TourOverlay | 5 |  |  |  |  |
-| PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the shared Next Phase flow with the open-decisions question and phase-boundary autosave). Pop out / Dock moves the panel to a floating "Phases" window (default beside the main window's right edge, bounds remembered per module under "phases", fitted onto a screen that exists with the primary screen as fallback); closing that window docks the panel back, shown; rule reference shown disabled until the rulebook viewer |
+| PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the shared Next Phase flow with the open-decisions question and phase-boundary autosave). Pop out / Dock moves the panel to a floating "Phases" window (default beside the main window's right edge, bounds remembered per module under "phases", fitted onto a screen that exists with the primary screen as fallback); closing that window docks the panel back, shown; rule reference shown disabled until the rulebook viewer (3b) |
 | NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave at the WinForms default interval (5 min; no Settings yet) |
 | StepBackDialog | 2b | ✔ |  |  | "Step Back to Start of Phase" (confirm text and summary) / "Step Back To" (Turn, Stage, Side, Phase, Reached, Actions; newest first, summary follows the selection, double-click picks); Step Back / Cancel |
 | ReplayBar | 5 |  |  |  |  |
@@ -165,11 +182,11 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MapCanvas: Last moved highlight | 2a | ✔ |  |  | toolbar toggle; follows moves, undo and new games |
 | Cross-window drag preview and drops (OLE) | - |  |  |  | Windows-specific |
 | PropertySheetDialog | 2a | ✔ |  |  |  |
-| BreakdownTip | 2a | ✔ |  |  | on the popup's ledger lines; the ledger and inventory grid tips come with those windows (stage 3) |
-| CounterDetailPopup interactive ledger lines | 2a | ✔ |  |  | click-through away from the lines, as WinForms; the ledger and inventory tips come with those windows (stage 3) |
+| BreakdownTip | 2a | ✔ |  |  | on the popup's ledger lines; the ledger and inventory grid tips are in the Ledger and Inventory windows (3a) |
+| CounterDetailPopup interactive ledger lines | 2a | ✔ |  |  | click-through away from the lines, as WinForms |
 | InputDialog | 2a | ✔ |  |  | also the rules-pack name prompt |
-| ExportChoiceDialog, ExportProgressDialog, MapExport (save the map as a picture) | 3 | ✔ |  |  | choice (current view / whole map at 25, 50, 100%), file picker, progress dialog with Cancel; one export at a time; cancelled when the game or the main window closes; whole-map render off the UI thread via the shared MapExportFlow |
-| OverviewWindow | 3 | ✔ |  |  | floating owned window (260 x 240 at Left+Width-300, Top+110, or the bounds saved under doc:overview); follows the active map tab; coarsest tile level, grey where a board has no tiles, red viewport rectangle; click or drag centres the map; always floating (no MDI docking) |
+| ExportChoiceDialog, ExportProgressDialog, MapExport (save the map as a picture) | 3a | ✔ |  |  | choice (current view / whole map at 25, 50, 100%), file picker, progress dialog with Cancel; one export at a time; cancelled when the game or the main window closes; whole-map render off the UI thread via the shared MapExportFlow |
+| OverviewWindow | 3a | ✔ |  |  | floating owned window (260 x 240 at Left+Width-300, Top+110, or the bounds saved under doc:overview); follows the active map tab; coarsest tile level, grey where a board has no tiles, red viewport rectangle; click or drag centres the map; always floating (no MDI docking) |
 
 ## New game dialog
 
@@ -183,23 +200,23 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| FormulaDialog, FormulaFormView, CheatSheetWindow | 2b | ✔ |  |  | non-modal window owned by the main window, one per formula, unit and run; Calculate in Hardcore and Semi-auto, cheat sheet beside it in Semi-auto; online guests ask the host; closes when its run or unit is gone; Rule ref shown disabled (rulebook viewer, stage 3); the window rules are shared in Render FormulaWindowRules |
+| FormulaDialog, FormulaFormView, CheatSheetWindow | 2b | ✔ |  |  | non-modal window owned by the main window, one per formula, unit and run; Calculate in Hardcore and Semi-auto, cheat sheet beside it in Semi-auto; online guests ask the host; closes when its run or unit is gone; Rule ref shown disabled (rulebook viewer, 3b); the window rules are shared in Render FormulaWindowRules |
 | BatchGridWindow, MissingInputDialog | 2b | ✔ |  |  | batch grid is a non-modal window per run (virtualised rows, choice columns are editable dropdowns, Calculate all / Apply all / Apply row, cheat sheet docked in Semi-auto, Ledger breakdown tip); stage 3a: the unit's counter picture (64×48) in the Unit cell, drawn on a worker from the viewed state only (dotted placeholder while drawing, nothing for hidden units), rows 52 px, Unit column 150 + 72, hovering the picture shows the counter preview with the unit's name; queued runs open them through the shared run dispatch (several units: the batch grid, double-click a row for its unit window; fully automatic: the missing-input dialog, "Per unit…" opens the batch grid or the unit window); nothing opens for a run that is no longer pending; OK in the missing-input dialog needs non-blank answers only, as WinForms |
 | CounterPreviewTip, CounterCellImages (counter preview and list thumbnails) | 3a | ✔ |  |  | shared `CounterThumbnails` cache (worker-drawn, visible rows first, 600 cap, shown bitmaps never disposed; the palette uses it with its own 3000 cap) and `CounterPreview` popup (no activation; size from `CounterImages.PreviewSize`, placed by the shared `PreviewPlacement`: cursor + 16, flipped at the screen edges); only pieces in the viewed state; MapView exposes `Tiles` and `Snapshot()` (same pixels as on screen) for map export |
 | DiceTools, DiceDialog, TurnDialog | 2a | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
 | LogPanel, LogDock, LogFloatForm, ChatBox | 2a | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / Dock moves it to a floating window (bounds remembered per module); the chat line shows only online (stage 5) |
-| OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3 | ✔ |  |  | Now list (double-click jumps to the decision), Group: By map / org display or By side, folders / groups / pieces with 24x18 counter pictures (visible pieces only), units and aggregated property columns with breakdown tips and header notes, alert dots from the shared alert hub, column widths kept per column, expanded state kept across reloads, refresh put off while hidden. Pop out / Dock moves it to a floating "Outliner" window (bounds remembered per module under "outliner"). Grouping and visibility are not kept between runs until the Settings dialog (stage 4) |
+| OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3a | ✔ |  |  | Now list (double-click jumps to the decision), Group: By map / org display or By side, folders / groups / pieces with 24x18 counter pictures (visible pieces only), units and aggregated property columns with breakdown tips and header notes, alert dots from the shared alert hub, column widths kept per column, expanded state kept across reloads, refresh put off while hidden. Pop out / Dock moves it to a floating "Outliner" window (bounds remembered per module under "outliner"). Grouping and visibility are not kept between runs until the Settings dialog (stage 4) |
 | PhaseWatcher | 2b | ✔ |  |  | `PhaseWatch` + `Debouncer` (DispatcherTimer, 150 ms) |
 
 ## Ledger, notes, inventory, documents, search
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| LedgerWindow (+ Tabs, Counters), EditTabsDialog, CounterPreviewTip | 3 | ✔ |  |  | "Ledger" 820×560: Filter:, Side: (All sides + the pack's sides), Group by: Map/Side/None, Show counters, Edit tabs…, Export CSV…, Show units without values, Refresh; tabs "Units (n)", "Depots & Global (n)", "Everything", "★ name" (notes as tooltip), "+"; broken user-tab filter banner; columns Name, Kind, one per property (notes as header tooltip; click sorts within groups, blanks last; drag the header edge to resize); virtualised rows; 64×48 counter pictures drawn on a worker from the viewed state only (rows on screen first, 600 kept), hover preview, double-click a unit row's counter picture centres its piece (Show counters on); hover a value for its breakdown; double-click, F2 or typing edits a value (number parsed invariant then the user's locale, required note, other side's values refused); CSV in UTF-8 with BOM; prefs per module via LedgerTabStore; reloads (debounced 200 ms) on game, rules and viewer changes. Edit tabs… and "+" open "Edit Ledger tabs" (720×460, min 620×400): list with Add / Remove / Move up / Move down, Name:, Unit filter: (parse errors in red below; "Empty means all units. Example: Fuel < 5"), Columns: ticked and ordered with Up / Down ("None ticked means the same columns as the Units tab."; holder columns marked), "Include depots & Global", Notes:; problems listed in red, OK refused while any; "+" opens it with a fresh "New tab" and shows that tab after OK; other Ledger windows of the module follow the saved list (LedgerTabStore.Changed) |
-| NotesWindow, InventoryWindow | 3 | ✔ |  |  | Notes: monospace box, commits after 1 s, on leaving the box and on close; the main window flushes it before the game closes or is replaced. Inventory: group by name / map / marker / ledger property, filter (300 ms), Total hover tip, double-click steps through the group's pieces; counts only what the viewer may see |
-| PdfWindow, PdfViewerControl, ChartWindow | 3 |  |  |  | needs a cross-platform PDF renderer |
-| DiagnosticsWindow | 3 | ✔ |  |  | Severity / Category / Message / Context, Show filter, Copy all (clipboard), live updates from any thread; the status-bar link ("n warning(s)/error(s) - click here to view diagnostics") opens it |
-| SearchPanel, ScanPane, ImagePane, OcrPanel | 3 |  |  |  | OCR is Windows-only today; decision pending |
+| LedgerWindow (+ Tabs, Counters), EditTabsDialog, CounterPreviewTip | 3a | ✔ |  |  | "Ledger" 820×560: Filter:, Side: (All sides + the pack's sides), Group by: Map/Side/None, Show counters, Edit tabs…, Export CSV…, Show units without values, Refresh; tabs "Units (n)", "Depots & Global (n)", "Everything", "★ name" (notes as tooltip), "+"; broken user-tab filter banner; columns Name, Kind, one per property (notes as header tooltip; click sorts within groups, blanks last; drag the header edge to resize); virtualised rows; 64×48 counter pictures drawn on a worker from the viewed state only (rows on screen first, 600 kept), hover preview, double-click a unit row's counter picture centres its piece (Show counters on); hover a value for its breakdown; double-click, F2 or typing edits a value (number parsed invariant then the user's locale, required note, other side's values refused); CSV in UTF-8 with BOM; prefs per module via LedgerTabStore; reloads (debounced 200 ms) on game, rules and viewer changes. Edit tabs… and "+" open "Edit Ledger tabs" (720×460, min 620×400): list with Add / Remove / Move up / Move down, Name:, Unit filter: (parse errors in red below; "Empty means all units. Example: Fuel < 5"), Columns: ticked and ordered with Up / Down ("None ticked means the same columns as the Units tab."; holder columns marked), "Include depots & Global", Notes:; problems listed in red, OK refused while any; "+" opens it with a fresh "New tab" and shows that tab after OK; other Ledger windows of the module follow the saved list (LedgerTabStore.Changed) |
+| NotesWindow, InventoryWindow | 3a | ✔ |  |  | Notes: monospace box, commits after 1 s, on leaving the box and on close; the main window flushes it before the game closes or is replaced. Inventory: group by name / map / marker / ledger property, filter (300 ms), Total hover tip, double-click steps through the group's pieces; counts only what the viewer may see |
+| PdfWindow, PdfViewerControl, ChartWindow | 3b |  |  |  | needs a cross-platform PDF renderer |
+| DiagnosticsWindow | 3a | ✔ |  |  | Severity / Category / Message / Context, Show filter, Copy all (clipboard), live updates from any thread; the status-bar link ("n warning(s)/error(s) - click here to view diagnostics") opens it |
+| SearchPanel, ScanPane, ImagePane, OcrPanel | 3b |  |  |  | OCR is Windows-only today; decision pending (library research: docs/port/stage3b-research.md) |
 
 ## Rules Workbench and Settings
 
