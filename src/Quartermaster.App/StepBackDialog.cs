@@ -50,7 +50,7 @@ sealed class StepBackDialog : Form
             var head = new Label
             {
                 Dock = DockStyle.Top, Height = 60, Padding = new Padding(8, 8, 8, 0),
-                Text = $"Step back to the start of {Where(r)}?{Environment.NewLine}This undoes everything done since then. You can redo it afterwards.",
+                Text = PhaseTexts.StepBackConfirm(r),
             };
             boxHost.Dock = DockStyle.Fill;
             Controls.Add(boxHost);
@@ -60,14 +60,9 @@ sealed class StepBackDialog : Form
         }
         else
         {
-            foreach (var (name, w) in new[] { ("Turn", 50), ("Stage", 110), ("Side", 100), ("Phase", 150), ("Reached", 80), ("Actions", 60) })
-                _list.Columns.Add(name, w);
-            foreach (var r in rows)
-                _list.Items.Add(new ListViewItem(new[]
-                {
-                    r.Turn.ToString(), r.Stage ?? "", r.Side ?? "", r.Phase,
-                    r.At is { } at ? at.ToLocalTime().ToString("HH:mm") : "", r.ActionsSince.ToString(),
-                }));
+            var widths = new[] { 50, 110, 100, 150, 80, 60 };
+            for (var i = 0; i < PhaseTexts.StepBackColumns.Count; i++) _list.Columns.Add(PhaseTexts.StepBackColumns[i], widths[i]);
+            foreach (var r in rows) _list.Items.Add(new ListViewItem(PhaseTexts.StepBackCells(r).ToArray()));
             // The Phase column takes whatever width the other columns leave, so the list has no blank band on the right.
             void FitPhase()
             {
@@ -96,6 +91,4 @@ sealed class StepBackDialog : Form
     public string SummaryText => _box.Text;
 
     void ShowSummary() => _box.Text = Selected is { } r ? _summary(r) : "";
-
-    static string Where(CheckpointRow r) => r.Phase == $"Turn {r.Turn}" ? r.Phase : $"Turn {r.Turn} · {r.Phase}";
 }

@@ -20,6 +20,9 @@ public sealed class MapMenuServices
 
     /// <summary>Settings "ask before deleting" (WinForms Settings.ConfirmDelete, on by default). Null = on.</summary>
     public Func<bool>? ConfirmDelete { get; init; }
+
+    /// <summary>Opens the formula window for (formula id, piece id): the counter menu's Calculate entries. Null = they open nothing.</summary>
+    public Action<string, string>? ShowFormula { get; init; }
 }
 
 /// <summary>
@@ -49,8 +52,8 @@ public static class MapContextMenu
         return menu.Items.Count > 0 ? menu : null;
     }
 
-    /// <summary>The dialogs the shared counter menu opens from this view. No Ledger and no formula dialog in the Avalonia app yet: "Show in
-    /// Ledger" is left out (as a WinForms map window without a main window) and Calculate entries open nothing.</summary>
+    /// <summary>The dialogs the shared counter menu opens from this view. No Ledger in the Avalonia app yet: "Show in Ledger" is left out (as
+    /// a WinForms map window without a main window). Calculate entries open the formula window through the services.</summary>
     static PieceMenuHooks Hooks(MapView view)
     {
         var services = view.MenuServices;
@@ -65,6 +68,7 @@ public static class MapContextMenu
                 : services != null && Owner(view) is { } owner ? services.Dialogs.AskYesNoAsync(owner, question, Caption)
                 : Task.FromResult(false),
             EditSheet = (action, pieceId) => view.RunMenuCommand(() => EditSheetAsync(view, action, pieceId)),
+            ShowFormula = services?.ShowFormula,
         };
     }
 

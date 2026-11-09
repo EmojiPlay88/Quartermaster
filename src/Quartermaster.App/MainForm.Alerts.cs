@@ -16,8 +16,8 @@ sealed partial class MainForm
 
     readonly AlertBar _alertBar = new();
     PhaseWatcher? _alertWatch;
-    readonly Dictionary<string, int> _alertCycle = new();
     IReadOnlyList<AlertHit> _alertHits = Array.Empty<AlertHit>();
+    AlertBarModel? _alertModel;
 
     /// <summary>Raised on the UI thread each time the alerts were re-evaluated (also with an empty list).</summary>
     public event Action<IReadOnlyList<AlertHit>>? AlertsUpdated;
@@ -35,6 +35,7 @@ sealed partial class MainForm
 
     void CreateAlerts(ModuleSession session)
     {
+        _alertModel = new AlertBarModel(session);
         _alertWatch = new PhaseWatcher(this, session, RecomputeAlerts, AlertDebounceMs);
         RecomputeAlerts();
     }
@@ -43,7 +44,8 @@ sealed partial class MainForm
     {
         _alertWatch?.Dispose();
         _alertWatch = null;
-        _alertCycle.Clear();
+        _alertModel?.Reset();
+        _alertModel = null;
         _alertHits = Array.Empty<AlertHit>();
         _alertBar.SetHits(_alertHits);
         _alertBar.Visible = false;
@@ -69,7 +71,9 @@ sealed partial class MainForm
         var view = _phases.View();
         var acting = pack != null && view.Current != null ? Sequencer.ActingSide(pack, view.Current)?.Id : null;
         // Alerts are computed from what this player may see (the game itself in solo).
-        _alertHits = AlertEngine.Evaluate(_session.View ?? game.State, pack, _session.Model, view.Current, acting);
+        _alertModel ??= new AlertBarModel(_session);
+        _alertModel.Recompute(view.Current, acting, new HashSet<string>());
+        _alertHits = _alertModel.Hits;
         _alertBar.VisibleOnly = _session.ViewFiltered;
         var (text, tip) = Banner.For(view);
         _alertBar.SetBanner(text, tip);
@@ -81,11 +85,7 @@ sealed partial class MainForm
     /// <summary>Chip click: cycles through the matches that can be shown (pieces centre on the map, holders select in the Ledger window).</summary>
     void GoToAlert(AlertHit h)
     {
-        var targets = h.Matches.Where(m => m.PieceId != null || m.HolderId != null).ToList();
-        if (targets.Count == 0) return;
-        var next = _alertCycle.TryGetValue(h.Id, out var at) ? (at + 1) % targets.Count : 0;
-        _alertCycle[h.Id] = next;
-        GoToMatch(targets[next]);
+        if (_alertModel?.NextTarget(h.Id) is { } target) GoToMatch(target);
     }
 
     void GoToMatch(AlertMatch m)
@@ -121,8 +121,8 @@ sealed partial class MainForm
         foreach (var h in hits)
         {
             var hh = h;
-            var sub = new ToolStripMenuItem((h.Matches.Count > 1 ? $"{h.Name} ({h.Matches.Count})" : h.Name ?? "").Replace("&", "&&"));
-            var go = new ToolStripMenuItem("Go to next match") { Enabled = h.Matches.Any(m => m.PieceId != null || m.HolderId != null) };
+            var sub = new ToolStripMenuItem((AlertBarModel.Label(h) ?? "").Replace("&", "&&"));
+            var go = new ToolStripMenuItem(AlertBarModel.GoToNextMatchText) { Enabled = h.Matches.Any(m => m.PieceId != null || m.HolderId != null) };
             go.Click += (_, _) => Guard(() => GoToAlert(hh));
             sub.DropDownItems.Add(go);
             sub.DropDownItems.Add(HideItem(h));
@@ -140,7 +140,7 @@ sealed partial class MainForm
 
     ToolStripMenuItem HideItem(AlertHit h)
     {
-        var hide = new ToolStripMenuItem("Hide this alert until next turn");
+        var hide = new ToolStripMenuItem(AlertBarModel.HideUntilNextTurnText);
         hide.Click += (_, _) => Guard(() => HideAlert(h.Id, h.Name));
         return hide;
     }

@@ -13,10 +13,11 @@ sealed class LogDock
     readonly ToolStripMenuItem _menu;
     readonly Action<string> _centre;
     readonly Action<Action> _guard;
-    bool _wanted = true;
+    readonly PanelDockState _state;
 
     public LogDock(Form main, WindowManager wm, Panel host, Splitter splitter, ToolStripMenuItem menu, Action<string> centre, Action<Action> guard)
     {
+        _state = new PanelDockState("log", () => PanelDockState.LogDefault(new RectangleI(main.Left, main.Top, main.Width, main.Height)));
         _main = main; _wm = wm; Host = host; Splitter = splitter; _menu = menu; _centre = centre; _guard = guard;
     }
 
@@ -26,7 +27,7 @@ sealed class LogDock
     public LogFloatForm? Float { get; private set; }
 
     /// <summary>Whether the user wants the bottom dock shown (View, Log).</summary>
-    public bool Wanted { get => _wanted; set { _wanted = value; Apply(); } }
+    public bool Wanted { get => _state.Wanted; set { _state.Wanted = value; Apply(); } }
 
     public void Create(ModuleSession session)
     {
@@ -40,6 +41,7 @@ sealed class LogDock
     {
         var f = Float;
         Float = null;
+        _state.DockBack();
         f?.CloseForReal();
         Panel?.Dispose();
         Panel = null;
@@ -50,17 +52,17 @@ sealed class LogDock
 
     public void Apply()
     {
-        var docked = Panel != null && Float == null && _wanted;
+        var docked = Panel != null && Float == null && _state.Wanted;
         Host.Visible = Splitter.Visible = docked;
-        _menu.Checked = Panel != null && (Float != null || _wanted);
+        _menu.Checked = Panel != null && (Float != null || _state.Wanted);
     }
 
     /// <summary>View, Log: show or collapse the bottom panel; when it is floating, bring it back to the bottom dock instead.</summary>
     public void Toggle()
     {
         if (Panel == null) return;
-        if (Float != null) { _wanted = true; DockBack(); return; }
-        _wanted = !_wanted;
+        if (Float != null) { _state.Toggle(); DockBack(); return; }
+        _state.Toggle();
         Apply();
     }
 
@@ -73,9 +75,11 @@ sealed class LogDock
         f.Controls.Add(Panel);
         Panel.SetFloating(true);
         Float = f;
+        _state.FloatBounds = null; // default is recomputed from the main window each time, as before
+        _state.PopOut();
         _wm.Register(f, "log");
         var saved = _wm.Saved("log") is { Bounds.IsEmpty: false } s ? s
-            : new SavedWindow(true, new Rectangle(_main.Left + 40, _main.Bottom - 320, Math.Max(480, _main.Width - 80), 260), false, _main.DeviceDpi);
+            : new SavedWindow(true, new Rectangle(_state.FloatBounds!.Value.X, _state.FloatBounds.Value.Y, _state.FloatBounds.Value.W, _state.FloatBounds.Value.H), false, _main.DeviceDpi);
         _wm.ShowFloating(f, saved);
         Apply();
     }
@@ -84,6 +88,7 @@ sealed class LogDock
     {
         if (Float is not { } f) return;
         Float = null;
+        _state.DockBack();
         if (Panel != null)
         {
             f.Controls.Remove(Panel);

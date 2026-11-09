@@ -60,6 +60,17 @@ public interface IDialogs
 
     /// <summary>The Set Turn dialog (WinForms TurnDialog) opened at <paramref name="current"/>; null when cancelled.</summary>
     Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current);
+
+    /// <summary>The Next Phase warning list (WinForms NextPhaseDialog): true = Continue anyway, false = Go back. A double-clicked decision goes
+    /// back and is handed to <paramref name="jumpTo"/> once the dialog has closed.</summary>
+    Task<bool> ConfirmOpenDecisionsAsync(Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null);
+
+    /// <summary>The fully automatic missing-input dialog (WinForms MissingInputDialog); OK has already applied the answers through <paramref name="port"/>.</summary>
+    Task<MissingInputResult> AskMissingAsync(Window owner, ModuleSession s, IActionPort port, PendingRun run);
+
+    /// <summary>The Step Back dialog (WinForms StepBackDialog): the list of checkpoints, or with <paramref name="confirmOnly"/> the one row to
+    /// confirm. The chosen row, or null when cancelled.</summary>
+    Task<CheckpointRow?> PickCheckpointAsync(Window owner, IReadOnlyList<CheckpointRow> rows, bool confirmOnly);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -127,6 +138,26 @@ public sealed class Dialogs : IDialogs
 
     public Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current) =>
         new TurnDialog(current).ShowDialog<TurnChoice?>(owner);
+
+    public async Task<bool> ConfirmOpenDecisionsAsync(Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null)
+    {
+        var dlg = new NextPhaseDialog(open);
+        if (await dlg.ShowDialog<bool?>(owner) == true) return true;
+        if (dlg.JumpTo is { } d) jumpTo?.Invoke(d);
+        return false;
+    }
+
+    public async Task<MissingInputResult> AskMissingAsync(Window owner, ModuleSession s, IActionPort port, PendingRun run) =>
+        await new MissingInputDialog(s, port, run).ShowDialog<MissingInputResult?>(owner) ?? MissingInputResult.Cancel;
+
+    /// <summary>The summary under the list is the owner's history preview (WinForms HistoryController.Describe(h.Preview(r))).</summary>
+    public Task<CheckpointRow?> PickCheckpointAsync(Window owner, IReadOnlyList<CheckpointRow> rows, bool confirmOnly)
+    {
+        if (rows.Count == 0) return Task.FromResult<CheckpointRow?>(null);
+        var h = (owner as MainWindow)?.History;
+        Func<CheckpointRow, string> summary = h != null ? r => HistoryController.Describe(h.Preview(r)) : _ => "";
+        return new StepBackDialog(rows, summary, confirmOnly).ShowDialog<CheckpointRow?>(owner);
+    }
 }
 
 /// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>

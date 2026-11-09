@@ -33,7 +33,7 @@ sealed class PhasePanel : UserControl
     readonly Label _decCaption = new() { Text = "Decisions left", Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft };
     readonly CheckedListBox _checklist = new() { Dock = DockStyle.Fill, CheckOnClick = true, IntegralHeight = false };
     readonly ListBox _open = new() { Dock = DockStyle.Fill, IntegralHeight = false };
-    readonly Button _nextButton = new() { Text = "Next Phase ▶", Dock = DockStyle.Fill, FlatStyle = FlatStyle.System };
+    readonly Button _nextButton = new() { Text = PhaseTexts.NextPhaseText, Dock = DockStyle.Fill, FlatStyle = FlatStyle.System };
     readonly Label _count = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
     readonly Button _pop = new() { Text = "Pop out", Dock = DockStyle.Fill, FlatStyle = FlatStyle.System };
     readonly Label _none = new() { Text = PhaseStrip.NoPhasesText, Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopLeft, Visible = false };
@@ -135,29 +135,28 @@ sealed class PhasePanel : UserControl
             // Hot-seat: during another side's phase only that side's player may advance.
             // A received turn replaying: nothing here may change the game until it is done.
             var replaying = _s.IsReplaying;
-            _nextButton.Enabled = show && (v.BeforeStart || v.NextName != null) && v.PlayingText == null && !replaying;
+            var text = PhaseTexts.Panel(v, _s.ActorSide(), replaying, _s.Rules);
+            _nextButton.Enabled = text.NextEnabled;
             _nextTipText = show ? (replaying ? ModuleSession.ReplayingText : v.PlayingText) : null;
             _checklist.Enabled = !replaying;
             _nextTip.SetToolTip(_nextButton, _nextTipText ?? "");
             if (!show)
             {
-                _count.Text = "";
-                _nextButton.Text = "Next Phase ▶";
+                _count.Text = text.CountText;
+                _nextButton.Text = text.NextText;
                 return;
             }
-            _title.Text = v.BeforeStart ? "Before turn 1" : v.PlayingText is { } playing ? playing : v.Current is { } cur
-                ? (v.SideName != null ? $"{v.SideName} player — {cur.Name}" : cur.Name) : "";
+            _title.Text = text.Title;
             // Hot-seat: another side's phase shows none of its instructions, notes or rule reference.
             var mine = v.PlayingText == null;
             _instructions.Text = mine ? (v.Current?.Instructions ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n") : "";
             _notesTip.SetToolTip(_title, mine ? v.Current?.Notes ?? "" : "");
             ShowRef(v);
-            ShowWarnings(v);
-            ShowDecisions(v);
-            _nextButton.Text = v.BeforeStart ? "Start game ▶" : v.NextName != null ? "Next Phase ▶ " + v.NextName : "Next Phase ▶";
-            var n = v.Decisions.Count;
-            _count.Text = n == 1 ? "1 decision left" : $"{n} decisions left";
-            _count.ForeColor = n > 0 ? Color.Red : SystemColors.ControlText;
+            ShowWarnings(v, text.Warnings);
+            ShowDecisions(v, text.ChecklistHidden);
+            _nextButton.Text = text.NextText;
+            _count.Text = text.CountText;
+            _count.ForeColor = text.CountRed ? Color.Red : SystemColors.ControlText;
             _count.Visible = !v.BeforeStart;
         }
         finally { _updating = false; }
@@ -166,10 +165,10 @@ sealed class PhasePanel : UserControl
     void ShowRef(PhaseView v)
     {
         _refTarget = null;
-        if (v.PlayingText == null && v.Current?.RuleRefId is { Length: > 0 } id && _s.Rules?.ById<RuleRef>(id) is { } r)
+        if (PhaseTexts.RuleRefOf(v, _s.Rules) is { } r)
         {
             _refTarget = r;
-            _ref.Text = r.Page > 0 ? $"Rule: {r.Label} (p. {r.Page})" : $"Rule: {r.Label}";
+            _ref.Text = PhaseTexts.RuleLinkText(r);
             _ref.Links.Clear();
             _ref.Links.Add(0, _ref.Text.Length);
             _ref.Visible = true;
@@ -177,17 +176,16 @@ sealed class PhasePanel : UserControl
         else _ref.Visible = false;
     }
 
-    void ShowWarnings(PhaseView v)
+    void ShowWarnings(PhaseView v, IReadOnlyList<WarningLine> lines)
     {
         var open = _warnings.Nodes.Cast<TreeNode>().Where(n => n.IsExpanded && n.Tag is WarningHit).Select(n => ((WarningHit)n.Tag!).Index).ToHashSet();
         var selIndex = (_warnings.SelectedNode?.Tag as WarningHit)?.Index;
         _warnings.BeginUpdate();
         _warnings.Nodes.Clear();
-        foreach (var w in v.Warnings)
+        for (var k = 0; k < v.Warnings.Count; k++)
         {
-            var n = w.PieceIds.Count;
-            var head = w.Message.Replace("{unit}", "").Trim();
-            var node = new TreeNode($"{head} — {n} {(n == 1 ? "unit" : "units")}{(w.IsDecision ? (w.Acknowledged ? " (acknowledged)" : " (decision)") : "")}") { Tag = w };
+            var w = v.Warnings[k];
+            var node = new TreeNode(lines[k].Text) { Tag = w };
             for (var i = 0; i < w.UnitTexts.Count; i++)
                 node.Nodes.Add(new TreeNode(w.UnitTexts[i]) { Tag = i < w.PieceIds.Count ? w.PieceIds[i] : null });
             _warnings.Nodes.Add(node);
@@ -198,10 +196,10 @@ sealed class PhasePanel : UserControl
         UpdateAckEnabled();
     }
 
-    void ShowDecisions(PhaseView v)
+    void ShowDecisions(PhaseView v, bool checklistHidden)
     {
         // Hot-seat: another side's phase shows none of its decisions (its checklist included).
-        var items = v.PlayingText != null ? new List<string>() : v.Current?.Checklist ?? new List<string>();
+        var items = checklistHidden ? new List<string>() : v.Current?.Checklist ?? new List<string>();
         var ticked = _s.View?.Ticked;
         _checklist.BeginUpdate();
         _checklist.Items.Clear();
@@ -220,7 +218,7 @@ sealed class PhasePanel : UserControl
 
     WarningHit? SelectedWarning() => (_warnings.SelectedNode is { } n ? (n.Parent ?? n) : null)?.Tag as WarningHit;
 
-    void UpdateAckEnabled() => _ack.Enabled = !_s.IsReplaying && SelectedWarning() is { IsDecision: true, Acknowledged: false };
+    void UpdateAckEnabled() => _ack.Enabled = PhaseTexts.CanAck(SelectedWarning(), _s.IsReplaying);
 
     void AckSelected()
     {

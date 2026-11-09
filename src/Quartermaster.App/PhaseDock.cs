@@ -14,10 +14,11 @@ sealed class PhaseDock
     readonly ToolStripMenuItem _menu;
     readonly Action<Action> _guard;
     readonly Func<bool> _available;
-    bool _wanted = true;
+    readonly PanelDockState _state;
 
     public PhaseDock(Form main, WindowManager wm, Panel host, Splitter splitter, ToolStripMenuItem menu, Func<bool> available, Action<Action> guard)
     {
+        _state = new PanelDockState("phases", () => PanelDockState.PhasesDefault(new RectangleI(main.Left, main.Top, main.Width, main.Height)));
         _main = main; _wm = wm; Host = host; Splitter = splitter; _menu = menu; _available = available; _guard = guard;
     }
 
@@ -39,6 +40,7 @@ sealed class PhaseDock
     {
         var f = Float;
         Float = null;
+        _state.DockBack();
         f?.CloseForReal();
         Panel?.Dispose();
         Panel = null;
@@ -51,17 +53,17 @@ sealed class PhaseDock
     public void Apply()
     {
         var has = Panel != null && _available();
-        var docked = has && Float == null && _wanted;
+        var docked = has && Float == null && _state.Wanted;
         Host.Visible = Splitter.Visible = docked;
-        _menu.Checked = has && (Float != null || _wanted);
+        _menu.Checked = has && (Float != null || _state.Wanted);
     }
 
     /// <summary>View, Phase panel: show or hide the dock; when floating, bring it back to the dock instead.</summary>
     public void Toggle()
     {
         if (Panel == null) return;
-        if (Float != null) { _wanted = true; DockBack(); return; }
-        _wanted = !_wanted;
+        if (Float != null) { _state.Toggle(); DockBack(); return; }
+        _state.Toggle();
         Apply();
     }
 
@@ -69,7 +71,7 @@ sealed class PhaseDock
     public void Reveal()
     {
         if (Panel == null) return;
-        _wanted = true;
+        _state.Reveal();
         Apply();
         Float?.Activate();
     }
@@ -83,9 +85,11 @@ sealed class PhaseDock
         f.Controls.Add(Panel);
         Panel.SetFloating(true);
         Float = f;
+        _state.FloatBounds = null; // default is recomputed from the main window each time, as before
+        _state.PopOut();
         _wm.Register(f, "phases");
         var saved = _wm.Saved("phases") is { Bounds.IsEmpty: false } s ? s
-            : new SavedWindow(true, new Rectangle(_main.Right - 340, _main.Top + 120, 320, 520), false, _main.DeviceDpi);
+            : new SavedWindow(true, new Rectangle(_state.FloatBounds!.Value.X, _state.FloatBounds.Value.Y, _state.FloatBounds.Value.W, _state.FloatBounds.Value.H), false, _main.DeviceDpi);
         _wm.ShowFloating(f, saved);
         Apply();
     }
@@ -94,6 +98,7 @@ sealed class PhaseDock
     {
         if (Float is not { } f) return;
         Float = null;
+        _state.DockBack();
         if (Panel != null)
         {
             f.Controls.Remove(Panel);

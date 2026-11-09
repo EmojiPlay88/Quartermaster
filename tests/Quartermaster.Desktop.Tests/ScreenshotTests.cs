@@ -3,7 +3,9 @@ using Avalonia.Headless.XUnit;
 
 namespace Quartermaster.Desktop.Tests;
 
-/// <summary>Task 8: the --screenshot-main flag renders headless and writes a PNG.</summary>
+/// <summary>Task 8: the --screenshot-main flag renders headless and writes a PNG. In the non-parallel "MacFlag" collection: the states open real
+/// (headless) formula windows and set the static <see cref="Quartermaster.Desktop.Shell.ScreenshotStates.Target"/>.</summary>
+[Collection("MacFlag")]
 public sealed class ScreenshotTests
 {
     static string Demo(string file, [System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
@@ -34,6 +36,16 @@ public sealed class ScreenshotTests
     [InlineData("hover")]
     [InlineData("los")]
     [InlineData("log")]
+    [InlineData("phases")]
+    [InlineData("nextphase")]
+    [InlineData("stepback")]
+    [InlineData("formula")]
+    [InlineData("cheatsheet")]
+    [InlineData("batch")]
+    [InlineData("alerts")]
+    [InlineData("tree")]
+    [InlineData("floatlog")]
+    [InlineData("floatphases")]
     public void Screenshot_state_flag_writes_png(string state)
     {
         var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");
@@ -44,6 +56,40 @@ public sealed class ScreenshotTests
             Assert.True(new FileInfo(png).Length > 1000);
         }
         finally { try { File.Delete(png); } catch (IOException) { } }
+    }
+
+    [AvaloniaFact]
+    public void Apply_starts_without_previous_target()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "qm-shot-target-" + Guid.NewGuid().ToString("N"));
+        using var fx = Quartermaster.TestFixtures.PhaseFixture.Module();
+        var dialogs = new FakeDialogs();
+        var w = new MainWindow(dialogs, Path.Combine(tmp, "a"), null) { Width = 1024, Height = 768 };
+        var empty = new MainWindow(dialogs, Path.Combine(tmp, "b"), null) { Width = 1024, Height = 768 };
+        try
+        {
+            w.Show();
+            empty.Show();
+            Assert.True(w.OpenModule(fx.Build()));
+            var s = w.Session!;
+            w.StartSetup(0, Quartermaster.Core.Difficulty.FullyAuto);
+            s.NewRules("t");
+            s.UpdateRules(_ => Quartermaster.TestFixtures.PhaseFixture.Pack(s.Archive.Sha256));
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Null(Quartermaster.Desktop.Shell.ScreenshotStates.Apply("floatphases", w));
+            Assert.NotNull(Quartermaster.Desktop.Shell.ScreenshotStates.Target);
+
+            // A later state (here one that fails at once) never pictures the window an earlier state left behind.
+            Assert.NotNull(Quartermaster.Desktop.Shell.ScreenshotStates.Apply("los", empty));
+            Assert.Null(Quartermaster.Desktop.Shell.ScreenshotStates.Target);
+        }
+        finally
+        {
+            Quartermaster.Desktop.Shell.ScreenshotStates.Cleanup(w);
+            w.ForceClose();
+            empty.ForceClose();
+            try { Directory.Delete(tmp, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
     [AvaloniaFact]

@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Quartermaster.Core;
+using Quartermaster.Desktop.Formulas;
 using Quartermaster.Desktop.Input;
 using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Shell;
@@ -40,9 +41,8 @@ public partial class MainWindow : Window
     readonly MenuItem _viewLog;
     LogPanel? _log;
     double _logHeight = 170;   // WinForms default; follows the splitter
-    bool _logWanted = true;   // View > Log: whether the user wants the bottom dock shown
-    MenuItem? _editUndo, _editRedo;
-    Button? _tbUndo, _tbRedo;
+    MenuItem? _editUndo, _editRedo, _editStepBack, _editStepBackTo;
+    Button? _tbUndo, _tbRedo, _tbStepBack;
     readonly DiceTools _dice;
 
     ModuleSession? _session;
@@ -58,19 +58,23 @@ public partial class MainWindow : Window
     Difficulty _lastDifficulty = Difficulty.SemiAuto;
 
     /// <summary>The app's window: real dialogs, the default cache and remembered-rules folders.</summary>
-    public MainWindow() : this(new Dialogs(), ModuleSession.DefaultCacheRoot, RulesMemory.DefaultRoot) { }
+    public MainWindow() : this(new Dialogs(), ModuleSession.DefaultCacheRoot, RulesMemory.DefaultRoot, null) { }
 
     /// <param name="dialogs">Every dialog the window shows (tests pass a fake).</param>
     /// <param name="cacheRoot">Where module caches (tiles) go (<see cref="ModuleSession.Open(string, string, string?)"/>).</param>
     /// <param name="rulesRoot">The remembered-rules index; null disables remembering.</param>
-    public MainWindow(IDialogs dialogs, string cacheRoot, string? rulesRoot)
+    /// <param name="layoutRoot">Where layout memory (left split, floating windows per module) is kept; null = the app data folder.</param>
+    public MainWindow(IDialogs dialogs, string cacheRoot, string? rulesRoot, string? layoutRoot = null)
     {
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
         _cacheRoot = cacheRoot;
         _rulesRoot = rulesRoot;
         InitializeComponent();
+        InitPhaseUi(layoutRoot);
+        InitAlertUi();
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
+        InitTrees(layoutRoot);
         _router.Guard = Guard;
         _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
@@ -85,7 +89,11 @@ public partial class MainWindow : Window
         };
         Maps.DropMessage += SetStatus;
         // No settings or game master mode in the Avalonia app yet: no "Delete counter", and deletions are always asked (the WinForms default).
-        Maps.MenuServices = new MapMenuServices { Dialogs = _dialogs, Gesture = _router.Gesture };
+        Maps.MenuServices = new MapMenuServices
+        {
+            Dialogs = _dialogs, Gesture = _router.Gesture,
+            ShowFormula = (formulaId, pieceId) => { if (_session is { } s) FormulaWindows.Show(this, s, formulaId, pieceId, null); },
+        };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
         Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
         UpdateUi();
@@ -102,6 +110,9 @@ public partial class MainWindow : Window
 
     /// <summary>Undo / redo history of the open module's game.</summary>
     public HistoryController? History => _history;
+
+    /// <summary>The phase controller of the open module (WinForms MainForm.Phases); null without one.</summary>
+    public PhaseController? PhaseControl => _phases;
 
     /// <summary>Command ids (CommandDefaults) with their shortcuts and handlers; the window's KeyDown goes through it.</summary>
     public CommandRouter Commands => _router;
@@ -158,6 +169,7 @@ public partial class MainWindow : Window
         CreatePhases(next);
         Maps.Bind(next, () => _actions);
         PaletteHost.Bind(next);
+        LoadTrees(next);
         CreateLog(next);
         SbModule.Text = $"{next.Model.Name} {next.Model.Version}".Trim();
         SbLocation.Text = "-";
@@ -278,16 +290,13 @@ public partial class MainWindow : Window
         _router.SetHandler("turn.next", NextTurnCommand);
     }
 
-    /// <summary>
-    /// WinForms NextTurnCommand: Next Phase when the rules pack has phases, otherwise the plain turn counter. The phase flow (with its open
-    /// decisions dialog) comes with the phase panel in stage 2b; until then the key is let through when the pack has phases.
-    /// </summary>
+    /// <summary>WinForms NextTurnCommand (Ctrl+Right): Next Phase when the rules pack has phases, otherwise the plain turn counter.</summary>
     bool NextTurnCommand()
     {
-        if (_session?.Game == null) return false;
-        if (_session.Rules is { Phases.Count: > 0 }) return false;
-        _dice.Core.StepTurn(1);
-        return true;
+        if (_session?.Game == null || _dispatch == null) return false;
+        var t = _dispatch.NextTurnCommand(() => { _dice.Core.StepTurn(1); return true; });
+        RunAsync(() => t);
+        return !t.IsCompletedSuccessfully || t.Result;
     }
 
     /// <summary>Whether a gated command is available now (<see cref="CommandAvailability"/>, the WinForms rules).</summary>
@@ -342,22 +351,27 @@ public partial class MainWindow : Window
         file.Items.Add(new Separator());
         Item(file, "E&xit", Close);
 
-        // Edit (MainForm.History): Undo / Redo, captions follow the history ("&Undo Move …").
+        // Edit (MainForm.History): Undo / Redo, captions follow the history ("&Undo Move …"); then Step Back.
         var edit = Top("&Edit");
         _editUndo = Item(edit, "&Undo", () => { }, "edit.undo");
         _editRedo = Item(edit, "&Redo", () => { }, "edit.redo");
+        edit.Items.Add(new Separator());
+        _editStepBack = Item(edit, "Step &Back to Start of Phase", () => { }, "phase.stepBack");
+        _editStepBackTo = Item(edit, "Step Back &To...", () => { }, "phase.stepBackTo");
         edit.SubmenuOpened += (_, _) => RefreshHistoryUi();
 
         // View: MainForm "Show &Grid", the map context menu's "Zoom to Fit" / "Zoom 100%" and the map toolbar's "Zoom" presets.
         var view = Top("&View");
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _showGrid.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) Maps.ShowGrid = _showGrid.IsChecked; };
+        view.Items.Add(_viewTree);
         view.Items.Add(_showGrid);
         // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.
         _viewLog.InputGesture = _router.Gesture("view.log");
         _viewLog.Click += (_, _) => _router.Execute("view.log");
         Gate("view.log", _viewLog);
         view.Items.Add(_viewLog);
+        view.Items.Add(_viewPhases);
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
         Item(view, "Zoom 100%", () => Maps.ActiveView?.ZoomCentered(1f), needsModule: true);
@@ -385,7 +399,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The main toolbar in WinForms MainForm.BuildToolbar order. Buttons whose features are not in the Avalonia app yet (Diagnostics, Notes,
-    /// Overview, Inventory, Palette, Step Back) are left out until their stage.
+    /// Overview, Inventory, Palette) are left out until their stage.
     /// </summary>
     void BuildToolbar()
     {
@@ -398,9 +412,10 @@ public partial class MainWindow : Window
         Tool("tool.saveGame", "Save Game", () => RunAsync(() => SaveGameAsync(false)));
         bar.AddSeparator();
         Tool("tool.los", "LOS", () => _router.Execute("tool.los"));
-        // Undo / Redo are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
+        // Undo / Redo / Step Back are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
         _tbUndo = bar.Add("edit.undo", "Undo", () => _router.Execute("edit.undo"));
         _tbRedo = bar.Add("edit.redo", "Redo", () => _router.Execute("edit.redo"));
+        _tbStepBack = bar.Add("phase.stepBack", "◀ Step Back", () => _router.Execute("phase.stepBack"));
         // DiceTools' buttons (WinForms adds a separator first).
         bar.AddSeparator();
         void Dice(string id, Button b) { Gate(id, b); _dice.Track(b); }
@@ -421,6 +436,7 @@ public partial class MainWindow : Window
         PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
         Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
         Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
+        UpdatePhaseUi();
         RefreshHistoryUi();
     }
 
@@ -469,7 +485,7 @@ public partial class MainWindow : Window
         Title = t;
     }
 
-    /// <summary>Caption and enabled state of Undo / Redo (WinForms RefreshHistoryUi).</summary>
+    /// <summary>Caption and enabled state of Undo / Redo / Step Back (WinForms RefreshHistoryUi).</summary>
     void RefreshHistoryUi()
     {
         try
@@ -480,6 +496,8 @@ public partial class MainWindow : Window
             var h = s == null || guest || replaying ? null : _history;
             var undo = s != null && h != null && HistoryCommands.CanUndo(s, h);
             var redo = s != null && h != null && HistoryCommands.CanRedo(s, h);
+            var start = s != null && h != null && HistoryCommands.CanStepBack(s, h);
+            var any = s != null && h != null && HistoryCommands.CanStepBackTo(s, h);
             // Why an item is off (WinForms MainForm.History.RefreshHistoryUi).
             var why = guest ? ModuleSession.GuestUndoText : replaying ? ModuleSession.ReplayingText
                 : h?.UndoBlockedBySentTurn == true ? HistoryController.AlreadySentText : h?.AtFloorFromOldSave == true ? FloorTip : null;
@@ -487,6 +505,9 @@ public partial class MainWindow : Window
             Set(_editRedo, h?.RedoText ?? "Redo", redo, guest || replaying ? why : null);
             SetButton(_tbUndo, undo, Tip(h?.UndoText ?? "Undo", "edit.undo"), !undo ? why : null);
             SetButton(_tbRedo, redo, Tip(h?.RedoText ?? "Redo", "edit.redo"), guest || replaying ? why : null);
+            SetItem(_editStepBack, start, !start ? why : null);
+            SetItem(_editStepBackTo, any, !any ? why : null);
+            SetButton(_tbStepBack, start, Tip("Step back to start of phase", "phase.stepBack"), !start ? why : null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -500,6 +521,14 @@ public partial class MainWindow : Window
             ToolTip.SetShowOnDisabled(mi, true);
             // "&" + the action label with its own ampersands escaped, so it cannot become a mnemonic (WinForms Mnemonic).
             mi.Header = MenuText.FromWinForms("&" + text.Replace("&", "&&", StringComparison.Ordinal));
+            mi.IsEnabled = enabled;
+        }
+
+        static void SetItem(MenuItem? mi, bool enabled, string? tip)
+        {
+            if (mi == null) return;
+            ToolTip.SetTip(mi, tip);
+            ToolTip.SetShowOnDisabled(mi, true);
             mi.IsEnabled = enabled;
         }
 
@@ -700,21 +729,38 @@ public partial class MainWindow : Window
         _phases = c;
         _history = new HistoryController(s, c, (cmd, st) => CommandLog.Prepare(cmd, st, s));
         _history.Rewound += RequestHistoryRefresh;
+        _history.Rewound += OnHistoryRewoundAnyThread;
         _actions = new ActionPortSwitch(new LocalActions(s, c, _history));
         HistoryCommands.Register(_router, s, _history, () => _actions, SetStatus);
+        CreatePhaseUi(s, c);
+        HistoryCommands.RegisterStepBack(_router, s, _history, () => _dispatch, RunAsync);
+        CreateAlerts(s);
+    }
+
+    /// <summary>WinForms OnHistoryRewound: any rewind (undo, redo, step back, a remote rewind) closes every formula window, batch grid and
+    /// cheat sheet of the session.</summary>
+    void OnHistoryRewoundAnyThread()
+    {
+        var s = _session;
+        if (s == null) return;
+        OnUi(() => { if (ReferenceEquals(_session, s)) FormulaWindows.CloseAllFor(s); });
     }
 
     void CloseSession()
     {
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
+        DestroyAlerts();
+        DestroyPhaseUi();
         DestroyLog();
+        ClearTrees();
         UnhookGame();
-        if (_history != null) _history.Rewound -= RequestHistoryRefresh;
+        if (_history != null) { _history.Rewound -= RequestHistoryRefresh; _history.Rewound -= OnHistoryRewoundAnyThread; }
         _history = null;
         _phases = null;
         _actions = null;
         if (_session == null) return;
+        FormulaWindows.CloseAllFor(_session);
         _session.GameReplaced -= OnGameReplacedAnyThread;
         _session.ViewChanged -= OnViewChangedAnyThread;
         _session.RulesChanged -= OnRulesChangedAnyThread;
@@ -733,29 +779,30 @@ public partial class MainWindow : Window
     /// <summary>The log panel of the open module; null without one.</summary>
     public LogPanel? Log => _log;
 
-    /// <summary>True while the log dock is shown (View > Log checked).</summary>
-    public bool LogShown => _log != null && _logWanted;
+    /// <summary>True while the log dock is shown at the bottom (View > Log checked and the panel not floating).</summary>
+    public bool LogShown => _log != null && _logState.Wanted && !_logState.Floating;
 
     void CreateLog(ModuleSession s)
     {
         _log = new LogPanel(s, CentreOnPiece, _dialogs, () => this);
-        LogHost.Child = _log;
+        PlaceLog(s, _log);
         ApplyLog();
     }
 
     void DestroyLog()
     {
+        ReleaseLog();
         _log?.Detach();
         _log = null;
         LogHost.Child = null;
         ApplyLog();
     }
 
-    /// <summary>View > Log: show or collapse the bottom panel.</summary>
+    /// <summary>View > Log: show or collapse the bottom panel; while it floats, dock it back instead.</summary>
     void ToggleLog()
     {
         if (_log == null) return;
-        _logWanted = !_logWanted;
+        _logState.Toggle();
         ApplyLog();
     }
 
@@ -767,7 +814,7 @@ public partial class MainWindow : Window
         var row = BodyAndLog.RowDefinitions[2];
         if (!shown && row.Height.Value >= 1) _logHeight = row.Height.Value;   // keep what the user dragged it to
         row.Height = new GridLength(shown ? _logHeight : 0);
-        _viewLog.IsChecked = shown;
+        _viewLog.IsChecked = _log != null && (_logState.Floating || _logState.Wanted);
     }
 
     /// <summary>Scrolls the map holding the piece to it and selects it (WinForms MainForm.CentreOnPiece); only pieces this player may see.</summary>
@@ -821,7 +868,7 @@ public partial class MainWindow : Window
     });
 
     /// <summary>The player's view changed: maps another side owns lose their tab.</summary>
-    void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(Maps.Rebuild));
+    void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(() => { Maps.Rebuild(); ModuleTreeHost.RefreshVisibility(); }));
 
     void OnRulesChangedAnyThread() => OnUi(() => { UpdateUi(); UpdateTitle(); });
 

@@ -114,6 +114,47 @@ sealed class FakeDialogs : IDialogs
         TurnPrompts.Add(current);
         return Task.FromResult(Turn);
     }
+
+    /// <summary>Next Phase open-decisions dialogs shown (their decisions) and the answer: true = Continue anyway, false = Go back.
+    /// With <see cref="DecisionsGate"/> set, the next dialog waits for it; <see cref="JumpTo"/> picks a row to double-click (Go back).</summary>
+    public readonly List<IReadOnlyList<Decision>> DecisionPrompts = new();
+    public bool ContinueAnyway;
+    public TaskCompletionSource<bool>? DecisionsGate;
+    public int? JumpTo;
+
+    public Task<bool> ConfirmOpenDecisionsAsync(Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null)
+    {
+        DecisionPrompts.Add(open);
+        if (DecisionsGate is { } g) { DecisionsGate = null; return g.Task; }
+        if (JumpTo is { } i) { JumpTo = null; jumpTo?.Invoke(open[i]); return Task.FromResult(false); }
+        return Task.FromResult(ContinueAnyway);
+    }
+
+    /// <summary>Missing-input dialogs asked (formula names) and what the next one answers (default Cancel).</summary>
+    public readonly List<string> MissingAsked = new();
+    public readonly Queue<MissingInputResult> Missing = new();
+
+    public Task<MissingInputResult> AskMissingAsync(Window owner, ModuleSession s, IActionPort port, PendingRun run)
+    {
+        MissingAsked.Add(run.FormulaName);
+        if (MissingHandler is { } h) return h(owner, s, port, run);
+        return Task.FromResult(Missing.Count > 0 ? Missing.Dequeue() : MissingInputResult.Cancel);
+    }
+
+    /// <summary>When set, answers the missing-input dialogs instead of <see cref="Missing"/> (e.g. the real dialog, driven by the test).</summary>
+    public Func<Window, ModuleSession, IActionPort, PendingRun, Task<MissingInputResult>>? MissingHandler;
+
+    /// <summary>Step Back dialogs shown (their rows, confirm mode) and the row the next one picks: an index, negative from the end
+    /// (-1 = the oldest), null = Cancel.</summary>
+    public readonly List<(IReadOnlyList<CheckpointRow> Rows, bool ConfirmOnly)> CheckpointPrompts = new();
+    public int? CheckpointPick;
+
+    public Task<CheckpointRow?> PickCheckpointAsync(Window owner, IReadOnlyList<CheckpointRow> rows, bool confirmOnly)
+    {
+        CheckpointPrompts.Add((rows, confirmOnly));
+        if (CheckpointPick is not { } i || rows.Count == 0) return Task.FromResult<CheckpointRow?>(null);
+        return Task.FromResult<CheckpointRow?>(rows[i < 0 ? rows.Count + i : i]);
+    }
 }
 
 /// <summary>Task 7: the main window shell, headless, with fake dialogs (menus, map tabs, palette, open/save, unsaved prompt, command line).</summary>
@@ -185,8 +226,8 @@ public sealed class MainWindowTests : IDisposable
         var menus = w.MenuLabels();
         Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools" }, menus.Keys);
         Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
-        Assert.Equal(new[] { "&Undo", "&Redo" }, menus["&Edit"]);
-        Assert.Equal(new[] { "Show &Grid", "&Log", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
+        Assert.Equal(new[] { "&Undo", "&Redo", "Step &Back to Start of Phase", "Step Back &To..." }, menus["&Edit"]);
+        Assert.Equal(new[] { "Module &Tree", "Show &Grid", "&Log", "&Phase panel", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
         Assert.Equal(new[] { "25%", "50%", "100%", "200%", "Fit" },
             w.FindMenuItem("Zoom")!.Items.OfType<MenuItem>().Select(i => MenuText.ToWinForms((string)i.Header!)));
 
