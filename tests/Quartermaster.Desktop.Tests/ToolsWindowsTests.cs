@@ -256,15 +256,24 @@ public sealed class ToolsWindowsTests : IDisposable
         var w = Game();
         w.ClickMenu("&Notes");
         var notes = w.NotesTool!;
-        notes.Box.Focus();
-        Pump();
-        // Not focused (the main window is active): the box follows the game.
+
+        // Not focused, nothing pending: the box follows the game.
+        notes.FocusedForTest = false;
         w.Actions!.SetNotes("from elsewhere");
         Pump();
-        if (!notes.Box.IsFocused) Assert.Equal("from elsewhere", notes.Box.Text);
+        Assert.Equal("from elsewhere", notes.Box.Text);
 
-        // Pending text of its own is never replaced.
+        // Focused: the box is left alone, even without pending text.
+        notes.FocusedForTest = true;
+        w.Actions.SetNotes("while focused");
+        Pump();
+        Assert.Equal("from elsewhere", notes.Box.Text);
+
+        // Not focused but with pending text of its own: never replaced.
+        notes.FocusedForTest = false;
         notes.Type("my own pending text");
+        Pump();
+        Assert.True(notes.CommitPending);
         w.Actions.SetNotes("from elsewhere again");
         Pump();
         Assert.Equal("my own pending text", notes.Box.Text);
@@ -275,6 +284,34 @@ public sealed class ToolsWindowsTests : IDisposable
         w.StartSetup(null);
         Pump();
         Assert.Equal("", notes.Box.Text);
+    }
+
+    [AvaloniaFact]
+    public void Notes_commit_on_focus_loss()
+    {
+        var w = Game();
+        w.ClickMenu("&Notes");
+        var notes = w.NotesTool!;
+        // A second control in the window to move the focus to (the notes box is the window's only control otherwise).
+        var other = new TextBox();
+        var panel = new StackPanel();
+        notes.Content = null;
+        panel.Children.Add(notes.Box);
+        panel.Children.Add(other);
+        notes.Content = panel;
+        Pump();
+        notes.Box.Focus();
+        Pump();
+        Assert.True(notes.Box.IsFocused);
+        notes.Type("committed by leaving the box");
+        Pump();
+        Assert.True(notes.CommitPending);
+        Assert.NotEqual("committed by leaving the box", w.Session!.Game!.State.Notes);
+        other.Focus();
+        Pump();
+        Assert.False(notes.Box.IsFocused);
+        Assert.Equal("committed by leaving the box", w.Session.Game.State.Notes);
+        Assert.False(notes.CommitPending);
     }
 
     // ---------- diagnostics ----------
@@ -334,6 +371,27 @@ public sealed class ToolsWindowsTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Diagnostics_repopulate_never_duplicates_an_entry_logged_meanwhile()
+    {
+        var w = Game(false);
+        var log = w.Session!.Log;
+        w.ClickMenu("&Diagnostics");
+        var d = w.DiagnosticsTool!;
+        // Logged between the queue being looked at and the snapshot: in both the snapshot and the queue, shown once.
+        d.BeforeSnapshot = () => log.Add(DiagnosticSeverity.Warning, "race", "before snapshot");
+        // Logged right after the snapshot: only in the queue, shown once, after the snapshot's entries.
+        d.AfterSnapshot = () => log.Add(DiagnosticSeverity.Warning, "race", "after snapshot");
+        d.RepopulateForTest();
+        d.BeforeSnapshot = d.AfterSnapshot = null;
+        Assert.Single(d.Shown, x => x.Message == "before snapshot");
+        Assert.Single(d.Shown, x => x.Message == "after snapshot");
+        Pump();
+        Assert.Single(d.Shown, x => x.Message == "before snapshot");
+        Assert.Single(d.Shown, x => x.Message == "after snapshot");
+        Assert.Equal(log.Items.Count, d.Shown.Count);
+    }
+
+    [AvaloniaFact]
     public async Task Diagnostics_copy_all()
     {
         var w = Game(false);
@@ -369,6 +427,25 @@ public sealed class ToolsWindowsTests : IDisposable
         Assert.EndsWith("warning(s)/error(s) - click here to view diagnostics", w.StatusText);
 
         Assert.Null(w.DiagnosticsTool);
+        var msg = w.FindControl<TextBlock>("SbMessage")!;
+        var at = msg.TranslatePoint(new Avalonia.Point(5, msg.Bounds.Height / 2), w)!.Value;
+        w.MouseDown(at, MouseButton.Left);
+        w.MouseUp(at, MouseButton.Left);
+        Pump();
+        Assert.NotNull(w.DiagnosticsTool);
+    }
+
+    [AvaloniaFact]
+    public void Status_link_survives_set_status_as_winforms()
+    {
+        // WinForms SetStatus only replaces the text; the link flag stays and a click still opens the diagnostics.
+        var w = Game(false);
+        w.Session!.Log.Add(DiagnosticSeverity.Error, "x", "boom");
+        Pump();
+        Assert.True(w.StatusIsLink);
+        w.SetStatus("some other message");
+        Assert.Equal("some other message", w.StatusText);
+        Assert.True(w.StatusIsLink);
         var msg = w.FindControl<TextBlock>("SbMessage")!;
         var at = msg.TranslatePoint(new Avalonia.Point(5, msg.Bounds.Height / 2), w)!.Value;
         w.MouseDown(at, MouseButton.Left);

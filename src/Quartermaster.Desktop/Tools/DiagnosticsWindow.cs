@@ -121,9 +121,16 @@ public sealed class DiagnosticsWindow : Window
 
     void Repopulate()
     {
-        while (_pending.TryDequeue(out _)) { }
+        // Snapshot first, then the queue: an entry logged meanwhile is in the queue and maybe in the snapshot; the snapshot wins (no duplicate),
+        // and an entry only in the queue is added after it. The window subscribed before the first snapshot, so nothing falls between.
+        BeforeSnapshot?.Invoke();
+        var snapshot = _log.Items;
+        AfterSnapshot?.Invoke();
+        var seen = new HashSet<Diagnostic>(snapshot, ReferenceEqualityComparer.Instance);
         _shown.Clear();
-        _shown.AddRange(DiagnosticsView.Apply(_log.Items, Filter));
+        _shown.AddRange(DiagnosticsView.Apply(snapshot, Filter));
+        while (_pending.TryDequeue(out var d))
+            if (!seen.Contains(d) && DiagnosticsView.Passes(d, Filter)) _shown.Add(d);
         ShowRows();
     }
 
@@ -161,6 +168,11 @@ public sealed class DiagnosticsWindow : Window
     }
 
     // ---------- what tests read and drive ----------
+
+    /// <summary>Test seams: run inside <see cref="Repopulate"/> just before and just after the log is snapshotted.</summary>
+    internal Action? BeforeSnapshot, AfterSnapshot;
+
+    internal void RepopulateForTest() => Repopulate();
 
     /// <summary>The entries shown now.</summary>
     internal IReadOnlyList<Diagnostic> Shown => _shown;

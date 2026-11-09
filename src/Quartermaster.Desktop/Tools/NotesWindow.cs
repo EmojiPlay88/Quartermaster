@@ -65,8 +65,8 @@ public sealed class NotesWindow : Window
         if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnRewound; }
     }
 
-    void OnGameChanged(GameCommand _) => OnUi(() => { if (NotesSync.ShouldReload(_box.IsFocused, Pending)) Run(Reload); });
-    void OnRewound() => OnUi(() => { if (NotesSync.ShouldReload(_box.IsFocused, Pending)) Run(Reload); });
+    void OnGameChanged(GameCommand _) => OnUi(() => { if (NotesSync.ShouldReload(BoxFocused, Pending)) Run(Reload); });
+    void OnRewound() => OnUi(() => { if (NotesSync.ShouldReload(BoxFocused, Pending)) Run(Reload); });
     // Pending text was already flushed into the old game by the main window (FlushNow) before the replacement; this only reloads.
     void OnGameReplaced() => OnUi(() => { _commitTimer.Stop(); HookGame(); Run(Reload); });
 
@@ -111,6 +111,10 @@ public sealed class NotesWindow : Window
     }
 
     // ---------- what tests read and drive ----------
+
+    /// <summary>Forces the focus state the reload decision sees (headless focus is unreliable); null = the box's real state.</summary>
+    internal bool? FocusedForTest;
+    bool BoxFocused => FocusedForTest ?? _box.IsFocused;
 
     internal TextBox Box => _box;
     internal bool CommitPending => Pending;
