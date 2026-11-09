@@ -1,3 +1,4 @@
+using Quartermaster.Render;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.App;
@@ -69,8 +70,7 @@ sealed class ModuleTreePanel : Panel
         Rebuild();
     }
 
-    string HiddenSignature() =>
-        _model == null || _canSeeMap == null ? "" : string.Join("\u0001", _model.Maps.Where(m => !_canSeeMap(m.Id)).Select(m => m.Id));
+    string HiddenSignature() => _model == null ? "" : ModuleTreeModel.VisibilitySignature(_model, _canSeeMap);
 
     void Rebuild()
     {
@@ -79,19 +79,18 @@ sealed class ModuleTreePanel : Panel
         try
         {
             _tree.Nodes.Clear();
-            var root = Add(_tree.Nodes, _model.Tree);
+            var root = ModuleTreeModel.Build(_model, _canSeeMap).Select(i => Add(_tree.Nodes, i)).FirstOrDefault();
             root?.Expand();
         }
         finally { _tree.EndUpdate(); }
     }
 
-    TreeNode? Add(TreeNodeCollection into, WindowTreeNode n)
+    static TreeNode Add(TreeNodeCollection into, TreeItem item)
     {
-        if (n.Ref is MapDef m && _canSeeMap != null && !_canSeeMap(m.Id)) return null;
-        var tn = into.Add(n.Title);
-        tn.Tag = n;
-        tn.ToolTipText = n.Kind.ToString();
-        foreach (var c in n.Children) Add(tn.Nodes, c);
+        var tn = into.Add(item.Text);
+        tn.Tag = item.Tag;
+        tn.ToolTipText = item.Tooltip ?? "";
+        foreach (var c in item.Children) Add(tn.Nodes, c);
         return tn;
     }
 }
