@@ -114,8 +114,13 @@ public sealed class DiagnosticsWindow : Window
         Interlocked.Exchange(ref _drainQueued, 0);
         if (_closed) return;
         var added = false;
+        HashSet<Diagnostic>? shown = null;   // an entry logged while a snapshot was taken can be in the snapshot and in the queue
         while (_pending.TryDequeue(out var d))
-            if (DiagnosticsView.Passes(d, Filter)) { _shown.Add(d); added = true; }
+        {
+            if (!DiagnosticsView.Passes(d, Filter)) continue;
+            shown ??= new HashSet<Diagnostic>(_shown, ReferenceEqualityComparer.Instance);
+            if (shown.Add(d)) { _shown.Add(d); added = true; }
+        }
         if (added) ShowRows();
     }
 

@@ -392,6 +392,29 @@ public sealed class ToolsWindowsTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Diagnostics_drain_never_duplicates_an_entry_already_shown()
+    {
+        var w = Game(false);
+        var log = w.Session!.Log;
+        // A logger whose event reaches the window late: the entry is in the log (and so in a snapshot) before the window's handler queues it.
+        using var inHandler = new ManualResetEventSlim(false);
+        using var go = new ManualResetEventSlim(false);
+        log.Added += d => { if (d.Message == "slow") { inHandler.Set(); go.Wait(10000); } };   // runs before the window's handler
+        w.ClickMenu("&Diagnostics");
+        var dw = w.DiagnosticsTool!;
+        var logger = new Thread(() => log.Add(DiagnosticSeverity.Warning, "race", "slow")) { IsBackground = true };
+        logger.Start();
+        Assert.True(inHandler.Wait(10000));
+        dw.RepopulateForTest();   // the snapshot already has it; nothing is queued yet
+        Assert.Single(dw.Shown, x => x.Message == "slow");
+        go.Set();
+        logger.Join();   // now the window's handler queued it and posted a drain
+        Pump();
+        Assert.Single(dw.Shown, x => x.Message == "slow");
+        Assert.Equal(log.Items.Count, dw.Shown.Count);
+    }
+
+    [AvaloniaFact]
     public async Task Diagnostics_copy_all()
     {
         var w = Game(false);
