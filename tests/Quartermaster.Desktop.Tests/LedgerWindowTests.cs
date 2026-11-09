@@ -482,6 +482,41 @@ public sealed class LedgerWindowTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Manual_edit_note_answered_after_new_game_writes_nothing()
+    {
+        var w = Game();
+        var s = w.Session!;
+        var lw = Open(w);
+        var row = UnitRow(lw);
+        var key = lw.Rows[row].Row.Key;
+        var col = Col(lw, "Fuel");
+        var oldGame = s.Game!;
+        var before = Ledger.Get(oldGame.State, key, "fuel");
+        Assert.NotEqual(9, before);
+        Assert.True(lw.BeginEdit(row, col));
+        lw.Editor!.Text = "9";
+        var gate = new TaskCompletionSource<string?>();
+        _dialogs.TextGate = gate;   // the note prompt stays open; the main window is still usable
+        PressEnter(lw.Editor);
+        PumpUntil(() => _dialogs.TextPrompts.Count == 1);
+
+        w.StartSetup(null);   // a new game meanwhile (the Ledger window stays open)
+        Pump();
+        var newGame = s.Game!;
+        Assert.NotSame(oldGame, newGame);
+        var fresh = Ledger.Get(newGame.State, key, "fuel");
+        var oldHistory = oldGame.State.LedgerHistory.Count;
+        var newHistory = newGame.State.LedgerHistory.Count;
+
+        gate.SetResult("too late");
+        Pump();
+        Assert.Equal(before, Ledger.Get(oldGame.State, key, "fuel"));
+        Assert.Equal(fresh, Ledger.Get(newGame.State, key, "fuel"));
+        Assert.Equal(oldHistory, oldGame.State.LedgerHistory.Count);
+        Assert.Equal(newHistory, newGame.State.LedgerHistory.Count);
+    }
+
+    [AvaloniaFact]
     public void Manual_edit_not_a_number_warns()
     {
         var w = Game();
@@ -656,18 +691,91 @@ public sealed class LedgerWindowTests : IDisposable
         Assert.Equal("Manual change|Why is Fuel being set to 7? (required)|", _dialogs.TextPrompts.Last());
         Assert.Equal(7, Ledger.Get(s.Game!.State, key, "fuel"));
 
-        // On the Kind cell the keystroke edits the row's first value column, as F2 does.
+        // Name and Kind are read-only cells (WinForms): a keystroke or F2 there edits nothing.
         lw.Flush();
         row = UnitRow(lw, r => r.Row.Key == key);
-        at = lw.CellBounds(row, 1).Center;
+        foreach (var c in new[] { 1, 0 })
+        {
+            var cell = lw.CellBounds(row, c);
+            var p = c == 0 ? new Point(cell.Right - 10, cell.Center.Y) : cell.Center;
+            lw.MouseDown(p, MouseButton.Left);
+            lw.MouseUp(p, MouseButton.Left);
+            Pump();
+            lw.KeyTextInput("3");
+            Pump();
+            Assert.Null(lw.Editor);
+            lw.KeyPress(Key.F2, RawInputModifiers.None, PhysicalKey.F2, null);
+            Pump();
+            Assert.Null(lw.Editor);
+        }
+        Assert.Equal(7, Ledger.Get(s.Game.State, key, "fuel"));
+
+        // F2 on a value cell still edits it.
+        at = lw.CellBounds(row, col).Center;
         lw.MouseDown(at, MouseButton.Left);
         lw.MouseUp(at, MouseButton.Left);
         Pump();
-        lw.KeyTextInput("3");
+        lw.KeyPress(Key.F2, RawInputModifiers.None, PhysicalKey.F2, null);
         Pump();
-        Assert.Equal("3", lw.Editor?.Text);
+        Assert.Equal("7", lw.Editor?.Text);
         lw.EndEdit(false);
         Assert.Null(lw.Editor);
+    }
+
+    static ListBox RowList(LedgerWindow lw) => Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(lw).OfType<ListBox>().First();
+
+    static bool FocusInList(LedgerWindow lw) =>
+        lw.FocusManager?.GetFocusedElement() is Visual f && (ReferenceEquals(f, RowList(lw)) || Avalonia.VisualTree.VisualExtensions.IsVisualAncestorOf(RowList(lw), f));
+
+    [AvaloniaFact]
+    public void Keyboard_selected_row_has_no_cell_to_edit()
+    {
+        var w = Game();
+        var lw = Open(w);
+        var row = UnitRow(lw);
+        var key = lw.Rows[row].Row.Key;
+        // Show in Ledger selects the row with the keyboard's current cell on Name (WinForms CurrentCell column 0): nothing to edit there.
+        Assert.Null(lw.ShowPieces(new[] { lw.Rows[row].PieceId! }));
+        Pump();
+        Assert.Contains(key, lw.SelectedRowKeys);
+        var item = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(RowList(lw)).OfType<ListBoxItem>().First(i => i.IsSelected);
+        Assert.True(item.Focus());   // the keyboard is on the selected row
+        lw.KeyPress(Key.F2, RawInputModifiers.None, PhysicalKey.F2, null);
+        Pump();
+        Assert.Null(lw.Editor);
+        lw.KeyTextInput("5");
+        Pump();
+        Assert.Null(lw.Editor);
+    }
+
+    [AvaloniaFact]
+    public void Edit_ended_by_clicking_elsewhere_keeps_focus_there()
+    {
+        var w = Game();
+        var lw = Open(w);
+        var row = UnitRow(lw);
+        var col = Col(lw, "Fuel");
+        Assert.True(lw.BeginEdit(row, col));
+        var box = lw.Editor!;
+        Assert.True(box.IsFocused);
+        lw.FilterBox.Focus();   // the user clicks the Filter box: the edit ends (unchanged) and focus stays in the Filter box
+        Pump();
+        Assert.Null(lw.Editor);
+        Assert.True(lw.FilterBox.IsFocused);
+        Assert.Empty(_dialogs.TextPrompts);
+
+        // Escape and Enter give the keyboard back to the list (the edited row).
+        Assert.True(lw.BeginEdit(row, col));
+        lw.Editor!.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = lw.Editor });
+        Pump();
+        Assert.Null(lw.Editor);
+        Assert.True(FocusInList(lw), "focus: " + lw.FocusManager?.GetFocusedElement());
+        Assert.True(lw.BeginEdit(row, col));
+        PressEnter(lw.Editor!);   // checked before the posted commit runs (an unchanged value still reloads the rows, which rebuilds them)
+        Assert.Null(lw.Editor);
+        Assert.True(FocusInList(lw), "focus: " + lw.FocusManager?.GetFocusedElement());
+        Pump();
+        Assert.Empty(_dialogs.TextPrompts);
     }
 
     // ---------- large games ----------

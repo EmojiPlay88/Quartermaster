@@ -67,8 +67,12 @@ sealed class FakeDialogs : IDialogs
     public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial)
     {
         TextPrompts.Add($"{title}|{prompt}|{initial}");
+        if (TextGate is { } g) { TextGate = null; return g.Task; }
         return Task.FromResult(Texts.Count > 0 ? Texts.Dequeue() : null);
     }
+
+    /// <summary>When set, the next text prompt waits for it (a dialog left open while the main window is used).</summary>
+    public TaskCompletionSource<string?>? TextGate;
 
     /// <summary>Property sheets shown: title, rows, and each row's managed-by-ledger value.</summary>
     public readonly List<(string Title, IReadOnlyList<(string Name, string Value)> Rows, IReadOnlyList<string?> Managed)> Sheets = new();

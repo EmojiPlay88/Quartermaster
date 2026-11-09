@@ -500,12 +500,13 @@ public sealed partial class LedgerWindow : Window
 
     // ---------- manual edit ----------
 
-    /// <summary>The value cell F2 or a keystroke edits: the last clicked cell (a value column), else the selected row's first value.</summary>
+    /// <summary>The value cell F2 or a keystroke edits: the last clicked cell when it is a value cell. Name and Kind are read-only cells, and a row
+    /// selected with the keyboard only has its current cell on Name (WinForms CurrentCell column 0): nothing to edit then.</summary>
     (int Row, int Col)? EditTarget()
     {
+        if (_currentCell.Col < FixedCols) return null;
         var row = _currentCell.Row >= 0 && _currentCell.Row < _rows.Count ? _currentCell.Row : _list.SelectedIndex;
-        var col = _currentCell.Col >= FixedCols ? _currentCell.Col : FixedCols;
-        return row < 0 ? null : (row, col);
+        return row < 0 ? null : (row, _currentCell.Col);
     }
 
     void OnListKey(KeyEventArgs e)
@@ -537,21 +538,24 @@ public sealed partial class LedgerWindow : Window
             if (e.Key == Key.Enter) { e.Handled = true; EndEdit(true); }
             else if (e.Key == Key.Escape) { e.Handled = true; EndEdit(false); }
         };
-        box.LostFocus += (_, _) => EndEdit(true);
+        box.LostFocus += (_, _) => EndEdit(true, refocus: false);   // focus went elsewhere (the Filter box, another window): leave it there
         box.Focus();
         if (typed == null) box.SelectAll();
         else box.CaretIndex = typed.Length;   // the keystroke replaces the value, caret after it
         return true;
     }
 
-    /// <summary>Ends the edit: an empty entry cancels; a commit asks for the note once the edit has finished.</summary>
-    internal void EndEdit(bool commit)
+    /// <summary>Ends the edit: an empty entry cancels; a commit asks for the note once the edit has finished. Enter and Escape
+    /// (<paramref name="refocus"/>) give the keyboard back to the edited row; an edit ended by focus moving elsewhere leaves it there.</summary>
+    internal void EndEdit(bool commit, bool refocus = true)
     {
         if (_editing is not { } ed) return;
         _editing = null;
         var text = (ed.Box.Text ?? "").Trim();
+        // The list itself does not take focus: its row (the ListBoxItem) does.
+        var item = refocus ? ed.Row.FindAncestorOfType<ListBoxItem>() : null;
         ed.Row.EndEdit(ed.Col);
-        _list.Focus();
+        if (refocus && !(item?.Focus() ?? false)) _list.Focus();
         if (!commit || text.Length == 0) return;   // empty input cancels
         var data = ed.Row.Data;
         if (data.IsGroupHeader || ed.Col - FixedCols >= _cols.Count) return;
@@ -565,13 +569,15 @@ public sealed partial class LedgerWindow : Window
         var game = _s.Game;
         var check = LedgerViewRules.CheckManualEdit(_s, key, prop.Id, game == null ? null : CoreLedger.Get(game.State, key, prop.Id), text, prop.Name);
         if (check.Error != null) await WarnAsync(check.Error);
-        if (_closing) return;
+        // The dialogs are window-modal: the main window may have started or opened another game meanwhile. Never write into it.
+        if (_closing || !ReferenceEquals(_s.Game, game)) return;
         if (check.Reload) Reload();
         if (!check.Ok || check.Unchanged || game == null) return;   // unchanged: no history entry
         var after = check.Value;
         var note = await _dialogs.AskTextAsync(this, "Manual change", check.NotePrompt!, "");
-        if (_closing) return;
+        if (_closing || !ReferenceEquals(_s.Game, game)) return;
         if (string.IsNullOrWhiteSpace(note)) { Reload(); return; }
+        if (!_s.CanEditLedger(key)) { Reload(); return; }   // the viewer changed meanwhile
         if (_actions?.Invoke() is { } port) { port.EditLedger(key, prop.Id, after, note); return; }
         var before = CoreLedger.GetOrDefault(game.State, key, prop);
         game.Execute(CommandLog.Stamp(new LedgerDelta(key, prop.Id, before, after, "manual", null, null, note.Trim(), null)));
