@@ -15,8 +15,8 @@ public partial class MainWindow
     /// <summary>The open document windows by entry name (tests).</summary>
     internal IReadOnlyDictionary<string, DocumentWindow> DocumentWindows => _docWins;
 
-    /// <summary>Opens the document's window at page 1, or brings the one already open to the front.</summary>
-    public void OpenDocument(DocumentDef d) => OpenDocumentWindow(d, 1);
+    /// <summary>Opens the document's window (page 1), or only brings the one already open to the front, keeping its page.</summary>
+    public void OpenDocument(DocumentDef d) => OpenDocumentWindow(d, null);
 
     /// <summary>Opens (or activates) a module document and jumps to a 1-based page; an entry the module lacks is an error box.</summary>
     public void OpenDocumentAtPage(string documentEntry, int page)
@@ -31,17 +31,17 @@ public partial class MainWindow
         Guard(() => OpenDocumentWindow(doc, page));
     }
 
-    void OpenDocumentWindow(DocumentDef d, int page)
+    void OpenDocumentWindow(DocumentDef d, int? page)
     {
         if (_session is not { } s) return;
         if (_docWins.TryGetValue(d.EntryName, out var existing))
         {
             if (existing.WindowState == WindowState.Minimized) existing.WindowState = WindowState.Normal;
-            existing.GoToPage(page);
+            if (page is { } p) existing.GoToPage(p);
             existing.Activate();
             return;
         }
-        var w = new DocumentWindow(s, d, page, _dialogs);
+        var w = new DocumentWindow(s, d, page ?? 1, _dialogs);
         _docWins[d.EntryName] = w;
         var module = s.Archive.Sha256;
         var layoutKey = "doc:" + d.EntryName;

@@ -27,7 +27,7 @@ public sealed class PhasePanel : UserControl
 
     readonly TextBlock _title = new() { FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2) };
     readonly TextBox _instructions = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-    readonly TextBlock _ref = new() { IsVisible = false, Cursor = new Cursor(StandardCursorType.Hand), Foreground = Brushes.RoyalBlue, TextDecorations = Avalonia.Media.TextDecorations.Underline, Margin = new Thickness(0, 2) };
+    readonly TextBlock _ref = new() { IsVisible = false, Cursor = new Cursor(StandardCursorType.Hand), Foreground = new SolidColorBrush(Color.FromRgb(0, 0, 0xFF)), TextDecorations = Avalonia.Media.TextDecorations.Underline, Margin = new Thickness(0, 2) };
     readonly TextBlock _warnCaption = new() { Text = "Warnings", VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 4, 0, 0) };
     readonly TreeView _warnings = new();
     readonly Button _ack = new() { Content = "Acknowledge", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center, IsEnabled = false };

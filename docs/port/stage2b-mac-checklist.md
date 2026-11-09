@@ -57,7 +57,7 @@ The app is not signed, so macOS blocks it the first time (again, because this is
 
 18. **Right-click** a Northern League unit (for example NL 1 Rifles). In the menu choose **Calculate** and then **Attack roll**. A formula window opens (title "Attack roll — NL 1 Rifles" or similar). Close it with **Cancel**.
 19. Do the same with **Ctrl+click** instead of right-click. It should open the same menu and must not add the counter to the selection.
-20. Right-click a counter and pick **Fuel for movement**. In Hardcore and Semi-automatic the boxes start empty. Is there a Rule ref button (greyed out, with the tip "Rulebook viewer comes in a later version")? That is expected for now.
+20. Right-click a counter and pick **Fuel for movement**. In Hardcore and Semi-automatic the boxes start empty. Is there a Rule ref button? It is enabled only when the formula has a rule reference that exists in the rules pack; clicking it opens the referenced document at that page.
 21. Right-click an empty part of the map: there is no Calculate entry there (only counters have it). Press Esc in an open formula window: it closes without applying anything.
 
 ## F. Formula window and the Semi-automatic cheat sheet
@@ -105,7 +105,7 @@ Use a Semi-automatic game again (File > New Game, then Start game ▶ in the str
 48. **View > Module Tree** hides and shows the whole left column. Show it again.
 49. In the module tree open the **Maps** folder: the Riverland map is listed. Double-click it: its tab comes to the front. Press Return on the selected node: the same.
 50. Double-click **Setups**: the new game dialog opens (Riverland has no setups listed; cancel it).
-51. Rulebooks and Documents nodes: double-click one. It should say "Opens in a later version" in the status bar.
+51. Rulebooks and Documents nodes: double-click one. Its document window opens (a second double-click on the same node only brings that window to the front and keeps the page).
 52. In the Tables and Formulas tree below it: the table **SupplyByDistance** and the eight formulas are listed. Double-clicking does nothing yet (that is expected).
 53. Drag the line between the module tree and the Tables tree up and down. Quit (Cmd+Q) and start again with the same module: the split should be remembered.
 

@@ -21,8 +21,9 @@ sealed class FakeDialogs : IDialogs
 {
     /// <summary>Files handed to the browser (HTML documents).</summary>
     public readonly List<string> Browsed = new();
+    public readonly List<TopLevel?> BrowsedOwners = new();
 
-    public void OpenInBrowser(TopLevel? owner, string path) => Browsed.Add(path);
+    public void OpenInBrowser(TopLevel? owner, string path) { Browsed.Add(path); BrowsedOwners.Add(owner); }
 
     public readonly Queue<string?> OpenFiles = new();
     public readonly Queue<string?> SaveFiles = new();

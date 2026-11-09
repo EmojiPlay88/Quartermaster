@@ -123,8 +123,30 @@ public sealed class DocumentWindowTests : IDisposable
         Assert.Equal(2, a.Viewer.Page);
         a.GoToPage(4);
         Assert.Equal(4, a.Viewer.Page);
-        w.OpenDocument(d);   // no page: the window stays, still open
+        Assert.Equal(4, a.Viewer.Page);
+        w.ModuleTree.Activate(Node(d));   // the tree only activates: the page stays
+        Pump();
         Assert.Same(a, w.DocumentWindows[d.EntryName]);
+        Assert.Equal(4, a.Viewer.Page);
+    }
+
+    [AvaloniaFact]
+    public void Html_document_goes_to_browser_with_window_as_owner()
+    {
+        var fx = Module().EditBuildFile(x => x.Replace("</VASSAL.build.module.Documentation>",
+            Help("Guide", "guide.html") + "</VASSAL.build.module.Documentation>")).AddFile("guide.html", System.Text.Encoding.UTF8.GetBytes("<html><body>Invented guide</body></html>"));
+        _fixtures.Add(fx);
+        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null, LayoutRoot) { Width = 1024, Height = 768 };
+        _windows.Add(w);
+        w.Show();
+        Assert.True(w.OpenModule(fx.Build()));
+        Pump();
+        var d = w.Session!.Model.Documents.Single(x => x.Title == "Guide");
+        w.ModuleTree.Activate(Node(d));
+        Pump();
+        var win = w.DocumentWindows[d.EntryName];
+        Assert.Single(_dialogs.Browsed);
+        Assert.Same(win, _dialogs.BrowsedOwners[0]);
     }
 
     [AvaloniaFact]

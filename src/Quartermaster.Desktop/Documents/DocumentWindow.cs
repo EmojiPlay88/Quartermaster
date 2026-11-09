@@ -21,15 +21,21 @@ public sealed class DocumentWindow : Window
         Height = 700;
         _viewer = new DocumentViewer(s, toolbar: false, dialogs);
         Content = _viewer;
-        _viewer.Open(d, page);
+        // Opened once the viewer is in this window's tree, so an HTML document's browser hand-off has the window as its owner.
+        Opened += (_, _) => { if (!_started) { _started = true; _viewer.Open(d, page); } };
     }
+
+    bool _started;
 
     public DocumentDef Document { get; }
 
     internal DocumentViewer Viewer => _viewer;
 
     /// <summary>Shows a 1-based page.</summary>
-    public void GoToPage(int page) => _viewer.GoToPage(page);
+    public void GoToPage(int page)
+    {
+        if (_started) _viewer.GoToPage(page);
+    }
 
     protected override void OnClosed(EventArgs e)
     {
