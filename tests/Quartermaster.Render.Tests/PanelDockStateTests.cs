@@ -48,5 +48,6 @@ public class PanelDockStateTests
         Assert.Equal(new RectangleI(960, 170, 320, 520), PanelDockState.PhasesDefault(main));
         Assert.Equal(new RectangleI(140, 530, 1120, 260), PanelDockState.LogDefault(main));
         Assert.Equal(480, PanelDockState.LogDefault(new RectangleI(0, 0, 400, 600)).W);
+        Assert.Equal(new RectangleI(840, 150, 440, 520), PanelDockState.OutlinerDefault(main));   // WinForms OutlinerDock: (right - 460, top + 100, 440, 520)
     }
 }

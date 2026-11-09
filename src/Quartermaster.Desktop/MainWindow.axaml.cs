@@ -76,6 +76,7 @@ public partial class MainWindow : Window
         _showGrid = new MenuItem { Header = MenuText.FromWinForms("Show &Grid"), ToggleType = MenuItemToggleType.CheckBox };
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         InitTrees(layoutRoot);
+        InitOutliner();
         _router.Guard = Guard;
         _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
@@ -377,6 +378,7 @@ public partial class MainWindow : Window
         Gate("view.log", _viewLog);
         view.Items.Add(_viewLog);
         view.Items.Add(_viewPhases);
+        view.Items.Add(_viewOutliner);
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
         Item(view, "Zoom 100%", () => Maps.ActiveView?.ZoomCentered(1f), needsModule: true);
@@ -449,6 +451,7 @@ public partial class MainWindow : Window
         Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
         Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
         UpdatePhaseUi();
+        UpdateOutlinerUi();
         RefreshHistoryUi();
     }
 
@@ -748,6 +751,7 @@ public partial class MainWindow : Window
         CreatePhaseUi(s, c);
         HistoryCommands.RegisterStepBack(_router, s, _history, () => _dispatch, RunAsync);
         CreateAlerts(s);
+        CreateOutliner(s);
     }
 
     /// <summary>WinForms OnHistoryRewound: any rewind (undo, redo, step back, a remote rewind) closes every formula window, batch grid and
@@ -764,6 +768,7 @@ public partial class MainWindow : Window
         DestroyTools();
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
+        DestroyOutliner();
         DestroyAlerts();
         DestroyPhaseUi();
         DestroyLog();

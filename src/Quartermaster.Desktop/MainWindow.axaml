@@ -46,6 +46,8 @@
           <ColumnDefinition Width="0" />
           <ColumnDefinition Width="0" />
           <ColumnDefinition Width="0" />
+          <ColumnDefinition Width="0" />
+          <ColumnDefinition Width="0" />
         </Grid.ColumnDefinitions>
         <!-- Classic control colour behind the tab strip (WinForms DocumentTabStrip); the AppWorkspace grey is the MapView's own "no game" backdrop -->
         <Border Background="{DynamicResource Classic.FaceBrush}">
@@ -55,6 +57,8 @@
         <shell:PaletteDock x:Name="PaletteHost" Grid.Column="2" IsVisible="False" />
         <GridSplitter x:Name="PhaseSplitter" Grid.Column="3" ResizeDirection="Columns" IsVisible="False" />
         <Border x:Name="PhaseHost" Grid.Column="4" IsVisible="False" />
+        <GridSplitter x:Name="OutlinerSplitter" Grid.Column="5" ResizeDirection="Columns" IsVisible="False" />
+        <Border x:Name="OutlinerHost" Grid.Column="6" IsVisible="False" />
       </Grid>
       </Grid>
       <GridSplitter x:Name="LogSplitter" Grid.Row="1" ResizeDirection="Rows" HorizontalAlignment="Stretch" IsVisible="False" />
