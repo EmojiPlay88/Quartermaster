@@ -477,7 +477,7 @@ public sealed class ToolsWindowsTests : IDisposable
     {
         var w = NewWindow();
         var ids = w.Toolbar.Buttons.Select(b => b.Id).ToList();
-        // WinForms order (MainForm.cs): Diagnostics, Notes, Overview, Inventory; Overview is another task's button.
+        // WinForms order (MainForm.cs): Diagnostics, Notes, Overview, Inventory; Overview is checked in OverviewAndExportTests.
         Assert.True(ids.IndexOf("tool.diagnostics") > ids.IndexOf("tool.saveGame"));
         Assert.True(ids.IndexOf("tool.notes") > ids.IndexOf("tool.diagnostics"));
         Assert.True(ids.IndexOf("tool.inventory") > ids.IndexOf("tool.notes"));

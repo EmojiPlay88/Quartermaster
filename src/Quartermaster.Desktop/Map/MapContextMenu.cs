@@ -23,6 +23,9 @@ public sealed class MapMenuServices
 
     /// <summary>Opens the formula window for (formula id, piece id): the counter menu's Calculate entries. Null = they open nothing.</summary>
     public Action<string, string>? ShowFormula { get; init; }
+
+    /// <summary>"Save map as picture…" for a view (WinForms MapWindow.SaveAsPictureAsync, run inside the view's error guard). Null = the entry and the toolbar button do nothing.</summary>
+    public Func<MapView, Task>? SaveAsPicture { get; init; }
 }
 
 /// <summary>
@@ -98,7 +101,7 @@ public static class MapContextMenu
         }
     }
 
-    /// <summary>WinForms MapWindow.BuildMapMenu. "Save map as picture…" comes with stage 3.</summary>
+    /// <summary>WinForms MapWindow.BuildMapMenu.</summary>
     static void AddMapItems(ItemCollection items, MapView view, GameSession game)
     {
         MenuItem Item(string label, Action click)
@@ -126,6 +129,13 @@ public static class MapContextMenu
         hide.ToggleType = MenuItemToggleType.CheckBox;
         hide.IsChecked = view.HideCounters;
         Item("Centre on selected", view.CentreOnSelection);
+        Item("Save map as picture…", () => SaveAsPicture(view));
+    }
+
+    /// <summary>The map toolbar button and the empty-map entry.</summary>
+    internal static void SaveAsPicture(MapView view)
+    {
+        if (view.MenuServices?.SaveAsPicture is { } save) view.RunMenuCommand(() => save(view));
     }
 
     /// <summary>WinForms MapWindow.EditSheet: the property sheet dialog, then one SetTraitState through the action port.</summary>

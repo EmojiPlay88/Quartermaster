@@ -328,11 +328,11 @@ public sealed class DiceTurnTests : IDisposable
         var w = NewWindow();
         var bar = w.Toolbar;
         // WinForms MainForm.BuildToolbar order, without the buttons whose features are not in the Avalonia app yet
-        // (Overview, Palette).
+        // (Palette).
         var expected = new[]
         {
             ("tool.openModule", "Open Module"), ("tool.newGame", "New Game"), ("tool.loadSetup", "Load Setup"), ("tool.openGame", "Open Game"),
-            ("tool.saveGame", "Save Game"), ("tool.diagnostics", "Diagnostics"), ("tool.notes", "Notes"), ("tool.inventory", "Inventory"), ("tool.los", "LOS"), ("edit.undo", "Undo"), ("edit.redo", "Redo"), ("phase.stepBack", "◀ Step Back"),
+            ("tool.saveGame", "Save Game"), ("tool.diagnostics", "Diagnostics"), ("tool.notes", "Notes"), ("tool.overview", "Overview"), ("tool.inventory", "Inventory"), ("tool.los", "LOS"), ("edit.undo", "Undo"), ("edit.redo", "Redo"), ("phase.stepBack", "◀ Step Back"),
             ("dice.1d6", "1d6"), ("dice.2d6", "2d6"), ("dice.menu", "Dice ▾"), ("turn.next", "Next turn"),
         };
         Assert.Equal(expected, bar.Buttons.Select(b => (b.Id, b.Text)));

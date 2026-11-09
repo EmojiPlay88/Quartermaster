@@ -92,7 +92,7 @@ public partial class MainWindow : Window
         // No settings or game master mode in the Avalonia app yet: no "Delete counter", and deletions are always asked (the WinForms default).
         Maps.MenuServices = new MapMenuServices
         {
-            Dialogs = _dialogs, Gesture = _router.Gesture,
+            Dialogs = _dialogs, Gesture = _router.Gesture, SaveAsPicture = SaveMapAsPictureAsync,
             ShowFormula = (formulaId, pieceId) => { if (_session is { } s) FormulaWindows.Show(this, s, formulaId, pieceId, null); },
         };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
@@ -377,6 +377,7 @@ public partial class MainWindow : Window
         Gate("view.log", _viewLog);
         view.Items.Add(_viewLog);
         view.Items.Add(_viewPhases);
+        Item(view, "&Overview", ShowOverview, gate: "view.overview");
         view.Items.Add(new Separator());
         Item(view, "Zoom to Fit", () => Maps.ActiveView?.ZoomToFit(), needsModule: true);
         Item(view, "Zoom 100%", () => Maps.ActiveView?.ZoomCentered(1f), needsModule: true);
@@ -421,7 +422,7 @@ public partial class MainWindow : Window
         bar.AddSeparator();
         Tool("tool.diagnostics", "Diagnostics", ShowDiagnostics);
         Tool("tool.notes", "Notes", ShowNotes);
-        // Overview (WinForms order: Diagnostics, Notes, Overview, Inventory) is added here by the Overview task.
+        Tool("tool.overview", "Overview", ShowOverview);
         Tool("tool.inventory", "Inventory", ShowInventory);
         Tool("tool.los", "LOS", () => _router.Execute("tool.los"));
         // Undo / Redo / Step Back are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
@@ -761,6 +762,7 @@ public partial class MainWindow : Window
 
     void CloseSession()
     {
+        DestroyExport();
         DestroyTools();
         Maps.Bind(null, null);
         PaletteHost.Bind(null);

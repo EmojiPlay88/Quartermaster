@@ -34,7 +34,7 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 - The log export picker has a single filter, "Log files (*.txt;*.html)" (default .txt); the format follows the extension. WinForms has two filters.
 - There is no chat line offline (WinForms shows it only online); the box comes with multiplayer (stage 5).
 - The main toolbar shows only the buttons whose features exist in Desktop (no Overview, Palette yet; Diagnostics, Notes and Inventory are in, in the WinForms order). Hiding buttons via Settings is stage 4.
-- The map toolbar sits inside each map tab (WinForms: one per map window); "Save map as picture" waits for stage 3.
+- The map toolbar sits inside each map tab (WinForms: one per map window); it ends with Save map as picture… (tip "Save the view or the whole map as a PNG").
 - The counter menu has no Show in Ledger until the Ledger (stage 3); no Delete counter until the game master setting exists.
 - Physical dice wait for Settings (stage 4); rolls and log lines are the shared WinForms ones.
 - Rules-pack file pickers and prompts are the Avalonia ones (async); the dirty-pack question is asked only on module change and close, as WinForms.
@@ -107,7 +107,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Outliner | 3 |  |  |  |  |
 | View > Ledger | 3 |  |  |  |  |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3 |  |  |  |  | comes with the Desktop Ledger; decision logic already shared (`LedgerJump` in Quartermaster.Render) |
-| View > Overview | 3 |  |  |  |  |
+| View > Overview | 3 | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
 | View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | always visible in Desktop |
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
 | Tools > Rules Workbench | 4 |  |  |  |  |
@@ -122,7 +122,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes and Inventory follow Save Game; Overview and Palette are left out until their stage; hiding buttons (Settings) comes in stage 4 |
+| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes and Inventory follow Save Game; Overview follows Notes, Palette is left out until its stage; hiding buttons (Settings) comes in stage 4 |
 | MainForm: status bar (module, message, tiling progress, location, zoom) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ | ✔ | ✔ |  |
@@ -145,7 +145,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| MapWindow: map toolbar (Line of sight, Last moved, Hide counters, Centre on selected, Zoom) | 2a | ✔ |  |  | one toolbar above the tabs acting on the selected map; Save map as picture… waits for stage 3 |
+| MapWindow: map toolbar (Line of sight, Last moved, Hide counters, Centre on selected, Zoom) | 2a | ✔ |  |  | one toolbar above the tabs acting on the selected map and Save map as picture… |
 | MapWindow: one map per tab, board tiles prepared in the background, placeholder on failure | 1 | ✔ | ✔ | ✔ |  |
 | MapCanvas: pan (drag, wheel, trackpad) | 1 | ✔ | ✔ | ✔ | mac wheel = pan, Cmd+wheel = zoom |
 | MapCanvas: zoom (wheel, pinch, menus) | 1 | ✔ | ✔ | ✔ |  |
@@ -160,7 +160,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MapCanvas: hover stack popup (CounterDetailPopup) | 2a | ✔ |  |  | same layout and pixels as WinForms (shared `CounterPopupLayout`); shown in the window overlay, so it stays inside the map window rather than the screen; hover delay fixed at 600 ms until Settings |
 | MapCanvas: hover-stack highlight | 2a | ✔ |  |  |  |
 | MapCanvas: double-click stack expand | 2a | ✔ |  |  | online guests send it through their action port, as WinForms |
-| MapCanvas: right-click and Ctrl+click context menu | 2a | ✔ |  |  | counter menu from the shared PieceMenuModel; empty-map menu without Save map as picture (stage 3); macOS Ctrl+click opens it; Calculate opens the formula window (2b); Show in Ledger waits for the Ledger (stage 3) |
+| MapCanvas: right-click and Ctrl+click context menu | 2a | ✔ |  |  | counter menu from the shared PieceMenuModel; empty-map menu ends with Save map as picture…; macOS Ctrl+click opens it; Calculate opens the formula window (2b); Show in Ledger waits for the Ledger (stage 3) |
 | MapCanvas: Line of sight tool (LosTool), Esc cancels LOS | 2a | ✔ |  |  | L key or toolbar; left-drag measures, Esc or right-click cancels; drawn in the view's picture so it stays sharp on HiDPI; on macOS Ctrl+click counts as right-click |
 | MapCanvas: Hide counters (H) | 2a | ✔ |  |  | H key, toolbar and the empty-map menu; draws the board only (all counters) and clears the selection, as WinForms |
 | MapCanvas: Last moved highlight | 2a | ✔ |  |  | toolbar toggle; follows moves, undo and new games |
@@ -169,8 +169,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | BreakdownTip | 2a | ✔ |  |  | on the popup's ledger lines; the ledger and inventory grid tips come with those windows (stage 3) |
 | CounterDetailPopup interactive ledger lines | 2a | ✔ |  |  | click-through away from the lines, as WinForms; the ledger and inventory tips come with those windows (stage 3) |
 | InputDialog | 2a | ✔ |  |  | also the rules-pack name prompt |
-| ExportChoiceDialog, ExportProgressDialog, MapExport (save the map as a picture) | 3 |  |  |  |  |
-| OverviewWindow | 3 |  |  |  |  |
+| ExportChoiceDialog, ExportProgressDialog, MapExport (save the map as a picture) | 3 | ✔ |  |  | choice (current view / whole map at 25, 50, 100%), file picker, progress dialog with Cancel; one export at a time; cancelled when the game or the main window closes; whole-map render off the UI thread via the shared MapExportFlow |
+| OverviewWindow | 3 | ✔ |  |  | floating owned window (260 x 240 at Left+Width-300, Top+110, or the bounds saved under doc:overview); follows the active map tab; coarsest tile level, grey where a board has no tiles, red viewport rectangle; click or drag centres the map; always floating (no MDI docking) |
 
 ## New game dialog
 
