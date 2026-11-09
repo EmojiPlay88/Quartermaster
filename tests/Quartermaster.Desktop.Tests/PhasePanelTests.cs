@@ -247,7 +247,7 @@ public sealed class PhasePanelTests : IDisposable
         Assert.True(w.PhasePanelShown);
         Assert.True(item.IsChecked);
         Assert.True(w.Phases.IsEffectivelyVisible);
-        Assert.Equal(new[] { "Module &Tree", "Show &Grid", "&Log", "&Phase panel" }, w.MenuLabels()["&View"].Take(4));
+        Assert.Equal(new[] { "Module &Tree", "&Diagnostics", "Show &Grid", "&Log", "&Phase panel" }, w.MenuLabels()["&View"].Take(5));
 
         w.ClickMenu("&Phase panel");
         Assert.False(w.PhasePanelShown);
