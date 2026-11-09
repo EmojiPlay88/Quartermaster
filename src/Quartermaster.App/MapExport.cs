@@ -20,32 +20,14 @@ static class MapExport
     public static string? RunWhole(ModuleSession s, MapDef map, IReadOnlyDictionary<string, TileSet> tiles, GameState? snapshot, double zoom, string path,
         IProgress<double>? progress, CancellationToken ct)
     {
-        if (snapshot == null) return "There is no game in progress.";
-        try
-        {
-            // A private renderer: the canvas renderer's tile cache belongs to the UI thread.
-            var renderer = new MapRenderer(s.Images, new PieceRenderer(s.Images));
-            using var bmp = MapImageExporter.Render(map, tiles, snapshot, s.Model, renderer, zoom, MapImageExporter.DefaultMaxLongSide, false, progress, ct);
-            ct.ThrowIfCancellationRequested();
-            MapImageExporter.SavePng(bmp, path);
-            return null;
-        }
-        catch (OperationCanceledException) { return "Cancelled"; }
-        catch (OutOfMemoryException)
-        {
-            return "Not enough memory to render the map at this size. Try a smaller zoom.";
-        }
-        catch (Exception ex)
-        {
-            Program.AppLog("map export failed: " + ex);
-            return ex.Message;
-        }
+        var r = MapExportFlow.Run(s, map, tiles, snapshot, zoom, path, progress, ct, Program.AppLog);
+        return r.Ok ? null : r.Cancelled ? "Cancelled" : r.Detail;
     }
 
     /// <summary>The user-facing flow, started from the map window.</summary>
     public static async Task ShowAsync(MapWindow owner, ModuleSession s, MapCanvas canvas, Action<string> status)
     {
-        if (_running) { status("An export is already running"); return; }
+        if (_running) { status(MapExportFlow.AlreadyRunningText); return; }
         _running = true;
         try { await ShowCoreAsync(owner, s, canvas, status); }
         finally { _running = false; }
@@ -53,10 +35,10 @@ static class MapExport
 
     static async Task ShowCoreAsync(MapWindow owner, ModuleSession s, MapCanvas canvas, Action<string> status)
     {
-        if (s.Game == null) { MessageBox.Show(owner, "There is no game in progress.", "Save map as picture", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        if (s.Game == null) { MessageBox.Show(owner, MapExportFlow.NoGameText, "Save map as picture", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         using var choice = new ExportChoiceDialog(canvas.Map.Name);
         if (choice.ShowDialog(owner) != DialogResult.OK) return;
-        using var save = new SaveFileDialog { Filter = "PNG picture (*.png)|*.png", DefaultExt = "png", FileName = Sanitize(canvas.Map.Name) + ".png", Title = "Save map as picture" };
+        using var save = new SaveFileDialog { Filter = "PNG picture (*.png)|*.png", DefaultExt = "png", FileName = MapExportFlow.SanitizeFileName(canvas.Map.Name) + ".png", Title = "Save map as picture" };
         if (save.ShowDialog(owner) != DialogResult.OK) return;
         var path = save.FileName;
 
@@ -66,12 +48,12 @@ static class MapExport
             {
                 using var bmp = canvas.Snapshot();
                 MapImageExporter.SavePng(bmp, path);
-                status("Saved " + path);
+                status(MapExportFlow.SavedText(path));
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 Program.AppLog("map export failed: " + ex);
-                MessageBox.Show(owner, "The picture could not be saved: " + ex.Message, "Save map as picture", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(owner, MapExportFlow.FailurePrefix + ex.Message, "Save map as picture", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             return;
         }
@@ -89,16 +71,9 @@ static class MapExport
         try { error = await Task.Run(() => RunWhole(s, map, tiles, snapshot, zoom, path, progress, cts.Token)); }
         finally { owner.FormClosed -= onClosed; if (!dlg.IsDisposed) dlg.Close(); }
         if (owner.IsDisposed) return;
-        if (error == null) status("Saved " + path);
-        else if (error == "Cancelled") status("Export cancelled");
-        else MessageBox.Show(owner, "The picture could not be saved: " + error, "Save map as picture", MessageBoxButtons.OK, MessageBoxIcon.Error);
-    }
-
-    static string Sanitize(string name)
-    {
-        var bad = Path.GetInvalidFileNameChars();
-        var clean = new string(name.Select(c => bad.Contains(c) ? '_' : c).ToArray()).Trim();
-        return clean.Length == 0 ? "map" : clean;
+        if (error == null) status(MapExportFlow.SavedText(path));
+        else if (error == "Cancelled") status(MapExportFlow.CancelledText);
+        else MessageBox.Show(owner, MapExportFlow.FailurePrefix + error, "Save map as picture", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }
 
@@ -131,7 +106,7 @@ sealed class ExportChoiceDialog : Form
     }
 
     /// <summary>Null for the current view, else the zoom factor.</summary>
-    public double? Zoom => _whole.Checked ? _zoom.SelectedIndex switch { 0 => 0.25, 1 => 0.5, _ => 1.0 } : null;
+    public double? Zoom => _whole.Checked ? MapExportFlow.ZoomForChoice(_zoom.SelectedIndex) : null;
 }
 
 sealed class ExportProgressDialog : Form

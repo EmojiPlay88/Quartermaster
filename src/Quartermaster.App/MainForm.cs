@@ -701,10 +701,11 @@ sealed partial class MainForm : Form
 
     void RefreshProblemNotice()
     {
-        _problemCount = _session?.Log.Items.Count(d => d.Severity >= DiagnosticSeverity.Warning) ?? 0;
-        _sbMessage.Text = _problemCount > 0
-            ? $"{_problemCount} warning(s)/error(s) - click here to view diagnostics"
-            : "";
+        var items = _session?.Log.Items;
+        var warnings = items?.Count(d => d.Severity == DiagnosticSeverity.Warning) ?? 0;
+        var errors = items?.Count(d => d.Severity > DiagnosticSeverity.Warning) ?? 0;
+        _problemCount = warnings + errors;
+        _sbMessage.Text = DiagnosticsView.StatusLinkText(warnings, errors);
         _sbMessage.IsLink = _problemCount > 0;
     }
 

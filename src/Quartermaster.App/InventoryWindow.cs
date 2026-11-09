@@ -128,12 +128,7 @@ sealed class InventoryWindow : Form
     /// <summary>Repopulates the key-name combo for the current key, keeping the selection when it is still offered.</summary>
     void FillKeyNames()
     {
-        IReadOnlyList<string> names = CurrentKey switch
-        {
-            InventoryKey.Marker => _s.View is { } g ? InventoryQuery.MarkerKeys(g) : Array.Empty<string>(),
-            InventoryKey.LedgerProperty => _s.Rules?.Properties.Where(p => p.Scope is PropertyScope.Pieces or PropertyScope.Both).Select(p => p.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>(),
-            _ => Array.Empty<string>(),
-        };
+        var names = InventoryRules.KeyNames(_s.Rules, CurrentKey, _s.Model, _s.View);
         var keep = _keyName.SelectedItem as string;
         _loadingCombos = true;
         try
@@ -182,18 +177,8 @@ sealed class InventoryWindow : Form
         _tip.Hide();
         if (group == null || CurrentKey != InventoryKey.LedgerProperty || _s.View is not { } view || _s.Rules is not { } pack) return;
         var row = _rows.FirstOrDefault(r => string.Equals(r.Group, group, StringComparison.OrdinalIgnoreCase));
-        var prop = pack.PropertyByName((_keyName.SelectedItem as string ?? "").Trim());
-        if (row?.Total is not { } total || prop == null) return;
-        var parts = new List<(string, double)>();
-        foreach (var id in row.PieceIds)
-        {
-            if (!view.Pieces.TryGetValue(id, out var p) || Ledger.Get(view, LedgerKey.Piece(id), prop.Id) is not { } v) continue;
-            string name;
-            try { name = PieceInfo.Name(p); } catch (Exception ex) when (ex is not OutOfMemoryException) { name = ""; }
-            parts.Add((string.IsNullOrWhiteSpace(name) ? id : name, v));
-        }
-        var title = _s.VisibleOnly($"{prop.Name} {LedgerTable.FormatNumber(total)}  ({row.Group}, {row.Count} {(row.Count == 1 ? "piece" : "pieces")})");
-        _tip.Show(_list, new Point(at.X + 12, at.Y + 18), LedgerBreakdown.ForTotal(title, parts));
+        if (row == null || InventoryRules.TotalBreakdown(row, _keyName.SelectedItem as string ?? "", view, pack, _s.ViewFiltered) is not { } tip) return;
+        _tip.Show(_list, new Point(at.X + 12, at.Y + 18), tip);
     }
 
     void CycleSelected()
