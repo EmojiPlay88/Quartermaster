@@ -35,9 +35,9 @@ public interface IDialogs
     /// <summary>A path to save to (with <paramref name="defaultExtension"/> added when the name has none), or null when cancelled.</summary>
     Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null);
 
-    /// <summary>A Yes/No question, Yes focused unless <paramref name="defaultNo"/> (WinForms MessageBoxDefaultButton.Button2, used by delete
-    /// confirmations). True = Yes.</summary>
-    Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = false);
+    /// <summary>A Yes/No question, No focused unless <paramref name="defaultNo"/> is false (WinForms MessageBoxDefaultButton.Button2, used by delete
+    /// confirmations; the safer default). True = Yes.</summary>
+    Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = true);
 
     /// <summary>A Yes / No / Cancel question (WinForms MessageBoxButtons.YesNoCancel, Yes focused). Yes = true, No = false, Cancel = null.</summary>
     Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption);
@@ -148,7 +148,7 @@ public sealed class Dialogs : IDialogs
 
     static FilePickerFileType Type(FileFilter f) => new(f.Name) { Patterns = f.Patterns.ToList() };
 
-    public Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = false) =>
+    public Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = true) =>
         MessageBox.ShowAsync(owner, message, caption, yesNo: true, defaultNo);
 
     public Task ShowInfoAsync(Window owner, string message, string caption) =>
@@ -267,7 +267,7 @@ public sealed class Dialogs : IDialogs
 /// <summary>A small classic message box: the text, then OK (or Yes / No, Yes focused unless defaultNo, as WinForms Button1 / Button2).</summary>
 sealed class MessageBox : Window
 {
-    MessageBox(string message, string caption, bool yesNo, bool cancel = false, bool defaultNo = false)
+    MessageBox(string message, string caption, bool yesNo, bool cancel = false, bool defaultNo = true)
     {
         Title = caption;
         SizeToContent = SizeToContent.WidthAndHeight;
@@ -308,7 +308,7 @@ sealed class MessageBox : Window
         Opened += (_, _) => focus.Focus();
     }
 
-    public static async Task<bool> ShowAsync(Window owner, string message, string caption, bool yesNo, bool defaultNo = false) =>
+    public static async Task<bool> ShowAsync(Window owner, string message, string caption, bool yesNo, bool defaultNo = true) =>
         await new MessageBox(message, caption, yesNo, defaultNo: defaultNo).ShowDialog<bool?>(owner) == true;
 
     /// <summary>Yes / No / Cancel; closing the window counts as Cancel.</summary>
