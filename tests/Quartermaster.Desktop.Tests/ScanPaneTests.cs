@@ -314,6 +314,21 @@ public sealed class ScanPaneTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Failure_after_loading_is_logged_and_does_not_fault_the_task()
+    {
+        var before = _s.Log.Items.Count;
+        _pane.LoadOverride = (_, _, _) =>
+        {
+            // no bitmap: the code after the load then fails
+            return Task.FromResult(new Quartermaster.Documents.ScanImage(null!, 1, 1, null));
+        };
+        var t = _pane.ShowSource(ScanSource.File(ScanKit.WritePng(_tmp)));
+        Assert.True(ScanKit.WaitFor(() => t.IsCompleted), "the scan did not finish");
+        Assert.False(t.IsFaulted, "the load failure must be observed, not left on the task");
+        Assert.Contains(_s.Log.Items.Skip(before), e => e.Message.StartsWith("Scan failed:"));
+    }
+
+    [AvaloniaFact]
     public void Back_to_pdf_event()
     {
         var backs = 0;

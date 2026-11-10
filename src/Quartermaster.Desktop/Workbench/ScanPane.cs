@@ -238,6 +238,15 @@ public sealed class ScanPane : UserControl, IDisposable
     async Task LoadAsync(ScanSource src, int page, int gen, CancellationTokenSource cts)
     {
         try { await LoadCoreAsync(src, page, gen, cts.Token); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // nobody awaits the load: a failure after the loader returned (or an OOM) is logged here, never left on the task
+            if (gen == _loadGen && !_disposed)
+            {
+                System.Diagnostics.Trace.WriteLine("scan load failed: " + ex);
+                try { _s.Log.Add(DiagnosticSeverity.Warning, "rules", "Scan failed: " + ex.Message, ""); } catch (Exception) { }
+            }
+        }
         finally
         {
             if (ReferenceEquals(_loadCts, cts)) _loadCts = null;
