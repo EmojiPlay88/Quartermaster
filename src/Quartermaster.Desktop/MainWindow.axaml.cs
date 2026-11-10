@@ -295,6 +295,7 @@ public partial class MainWindow : Window
         _router.SetHandler("dice.1d6", () => _dice.Roll(DiceTurnActions.OneD6));
         _router.SetHandler("dice.2d6", () => _dice.Roll(DiceTurnActions.TwoD6));
         _router.SetHandler("turn.next", NextTurnCommand);
+        _router.SetHandler("tools.workbench", WorkbenchCommand);   // runs while replaying too: ShowWorkbench says why it refuses
     }
 
     /// <summary>WinForms NextTurnCommand (Ctrl+Right): Next Phase when the rules pack has phases, otherwise the plain turn counter.</summary>
@@ -394,8 +395,9 @@ public partial class MainWindow : Window
         }
         Item(zoom, "Fit", () => Maps.ActiveView?.ZoomToFit());
 
-        // Tools (WinForms: Rules Workbench, Inventory, Notes, -, Dice, Turn, -, Settings...): only Dice and Turn are in the Avalonia app so far.
+        // Tools (WinForms: Rules Workbench, Inventory, Notes, -, Dice, Turn, -, Settings...): all but Settings (stage 4b).
         var tools = Top("&Tools");
+        Item(tools, "&Rules Workbench", () => { }, "tools.workbench");
         Item(tools, "&Inventory", ShowInventory, gate: "tools.inventory");
         Item(tools, "&Notes", ShowNotes, gate: "tools.notes");
         tools.Items.Add(new Separator());
@@ -612,6 +614,7 @@ public partial class MainWindow : Window
     async Task SaveGameAsync(bool saveAs)
     {
         if (_session?.Game == null) return;
+        FlushWorkbench();   // the save records the pack's hash: pending workbench text first
         if (!_session.CanSave)
         {
             if (_session.IsReplaying) SetStatus(ModuleSession.ReplayingText);
@@ -643,6 +646,7 @@ public partial class MainWindow : Window
     /// </summary>
     async Task RulesFlowAsync(Func<RulesPackFlow, Task> run)
     {
+        FlushWorkbench();   // what is being typed in the workbench belongs to the pack the flow saves or replaces
         if (_rulesFlowBusy || RulesFlow() is not { } flow) return;
         _rulesFlowBusy = true;
         try { await run(flow); }
@@ -662,6 +666,7 @@ public partial class MainWindow : Window
     /// <summary>Offers to save an edited rules pack; false when the user cancels (WinForms ConfirmRulesSaved).</summary>
     async Task<bool> ConfirmRulesSavedAsync()
     {
+        FlushWorkbench();
         if (_session is not { RulesDirty: true } || RulesFlow() is not { } flow) return true;
         if (_rulesFlowBusy) return false;   // another rules dialog is open: not now
         _rulesFlowBusy = true;
@@ -688,6 +693,7 @@ public partial class MainWindow : Window
     string? DiscardQuestion()
     {
         FlushNotes();   // pending note text becomes a command first, so the dirty check below counts it
+        FlushWorkbench();   // and pending workbench text reaches the pack before RulesDirty is read
         if (_session?.IsGuest == true) return null;   // a guest's game is the host's
         if (_session?.IsReplaying == true) return AbandonReplayText;   // a half-replayed turn is never saved
         if (_session is { Game: not null, CanSave: false }) return null;   // a viewer copy: never saved
@@ -769,6 +775,7 @@ public partial class MainWindow : Window
 
     void CloseSession()
     {
+        DestroyWorkbench();   // first: its pending edits still reach the session
         DestroyExport();
         DestroyLedger();
         DestroyTools();

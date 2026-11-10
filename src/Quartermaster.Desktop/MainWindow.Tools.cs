@@ -105,6 +105,7 @@ public partial class MainWindow
             if (ReferenceEquals(_inventoryWin, w)) _inventoryWin = null;
             if (ReferenceEquals(_notesWin, w)) _notesWin = null;
             if (ReferenceEquals(_diagWin, w)) _diagWin = null;
+            if (ReferenceEquals(_workbenchWin, w)) _workbenchWin = null;
         };
         w.Show(this);
     }
