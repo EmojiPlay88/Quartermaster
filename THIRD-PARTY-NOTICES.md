@@ -38,8 +38,8 @@ PdfPig is used unmodified, as a binary package.
 | Component | Where it is bundled | Licence | Text |
 |---|---|---|---|
 | PDFtoImage 5.4.0 (NuGet package `PDFtoImage`, https://github.com/sungaila/PDFtoImage) | managed library | MIT | [`LICENSES/MIT-PDFtoImage.txt`](LICENSES/MIT-PDFtoImage.txt) |
-| PDFium (https://pdfium.googlesource.com/pdfium/), built by Benoît Blanchon (NuGet packages `bblanchon.PDFium.Win32`, `.Linux`, `.macOS`, 152.0.7961, https://github.com/bblanchon/pdfium-binaries) | pdfium.dll / libpdfium.so / libpdfium.dylib | Apache-2.0 (PDFium; its bundled third-party parts are BSD-style, see the licence files in the upstream packages) | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt) |
-| LibTiff.Net 2.4.649 (NuGet package `BitMiracle.LibTiff.NET`, https://github.com/BitMiracle/libtiff.net), Copyright (C) 2008-2020 Bit Miracle | managed library | BSD-3-Clause | [`LICENSES/BSD-3-Clause-LibTiff.NET.txt`](LICENSES/BSD-3-Clause-LibTiff.NET.txt) |
+| PDFium (https://pdfium.googlesource.com/pdfium/), built by Benoît Blanchon (NuGet packages `bblanchon.PDFium.Win32`, `.Linux`, `.macOS`, 152.0.7961, https://github.com/bblanchon/pdfium-binaries) | pdfium.dll / libpdfium.so / libpdfium.dylib | Apache-2.0 (PDFium) plus the licences of the third-party code PDFium bundles (FreeType, libjpeg-turbo, libpng, zlib, OpenJPEG, lcms2, libtiff, ICU, abseil, AGG and others) | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt); the pdfium-binaries licence and every bundled third-party licence are in [`LICENSES/pdfium-binaries/`](LICENSES/pdfium-binaries/LICENSE.txt) (copied from the pdfium-binaries 152.0.7961 release archive) |
+| LibTiff.Net 2.4.649 (NuGet package `BitMiracle.LibTiff.NET`, https://github.com/BitMiracle/libtiff.net), Copyright (c) 2008-2023 Bit Miracle | managed library | BSD-3-Clause | [`LICENSES/BSD-3-Clause-LibTiff.NET.txt`](LICENSES/BSD-3-Clause-LibTiff.NET.txt) |
 
 ## Tesseract, Leptonica and tessdata_fast
 
