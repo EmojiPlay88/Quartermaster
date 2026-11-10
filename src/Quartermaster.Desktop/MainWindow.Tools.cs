@@ -167,7 +167,8 @@ public partial class MainWindow
     /// <summary>A WinForms link label: blue, underlined, hand cursor.</summary>
     void ShowLinkStyle(bool link)
     {
-        SbMessage.Foreground = link ? new SolidColorBrush(Color.FromRgb(0, 0, 0xFF)) : null;
+        if (link) SbMessage.Foreground = new SolidColorBrush(Color.FromRgb(0, 0, 0xFF));
+        else SbMessage.ClearValue(TextBlock.ForegroundProperty);   // a null local value would hide the text
         SbMessage.TextDecorations = link ? TextDecorations.Underline : null;
         SbMessage.Cursor = link ? new Cursor(StandardCursorType.Hand) : null;
     }

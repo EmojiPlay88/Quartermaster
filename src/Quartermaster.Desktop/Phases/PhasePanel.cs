@@ -128,6 +128,7 @@ public sealed class PhasePanel : UserControl
     public string TitleText => _title.Text ?? "";
     public string InstructionsText => _instructions.Text ?? "";
     public string CountText => _count.Text ?? "";
+    internal bool CountHasLocalForeground => _count.IsSet(TextBlock.ForegroundProperty);
     public bool CountRed => _count.Foreground is ISolidColorBrush { Color: var c } && c == Colors.Red;
     public bool AckEnabled => _ack.IsEnabled;
     public string NoPhasesLabelText => _none.Text ?? "";
@@ -188,7 +189,8 @@ public sealed class PhasePanel : UserControl
             ShowWarnings(v, text.Warnings);
             ShowDecisions(v, text.ChecklistHidden);
             _count.Text = text.CountText;
-            _count.Foreground = text.CountRed ? Brushes.Red : null;
+            if (text.CountRed) _count.Foreground = Brushes.Red;
+            else _count.ClearValue(TextBlock.ForegroundProperty);   // a null local value would hide the count
             _count.IsVisible = !v.BeforeStart;
         }
         finally { _updating = false; }

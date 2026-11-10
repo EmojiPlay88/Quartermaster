@@ -34,7 +34,7 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
     readonly EditGrid _grid = new();
     readonly Button _addRow = new() { Content = "Add row" }, _delRow = new() { Content = "Remove row" }, _addCol = new() { Content = "Add column" },
         _delCol = new() { Content = "Remove column" }, _cols = new() { Content = "Columns…" }, _paste = new() { Content = "Paste from clipboard…" };
-    readonly Button _bNew = new() { Content = "New…", Width = 50 }, _bRename = new() { Content = "Rename…", Width = 62 }, _bDel = new() { Content = "Delete", Width = 50 };
+    readonly Button _bNew = new() { Content = "New…", Width = 50 }, _bRename = new() { Content = "Rename…", Width = 70 }, _bDel = new() { Content = "Delete", Width = 50 };
     readonly DispatcherTimer _notesTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     string? _selected;
     bool _selfEdit, _loadingUi;
