@@ -86,7 +86,7 @@ static class Program
     {
         public Task<string?> OpenFileAsync(Avalonia.Controls.Window owner, string title, IReadOnlyList<FileFilter> filters) => Task.FromResult<string?>(null);
         public Task<string?> SaveFileAsync(Avalonia.Controls.Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null) => Task.FromResult<string?>(null);
-        public Task<bool> AskYesNoAsync(Avalonia.Controls.Window owner, string message, string caption, bool defaultNo = false) => Task.FromResult(false);
+        public Task<bool> AskYesNoAsync(Avalonia.Controls.Window owner, string message, string caption, bool defaultNo = true) => Task.FromResult(false);
         public Task<IReadOnlyList<string>?> AskColumnsAsync(Avalonia.Controls.Window owner, IReadOnlyList<string> keys) => Task.FromResult<IReadOnlyList<string>?>(null);
         /// <summary>A scanned grid (tsvOnly) is confirmed with the default checkboxes, as the WinForms smoke run; a pasted one is cancelled.</summary>
         public Task<Quartermaster.Rules.Tables.PastedGrid?> PasteTableAsync(Avalonia.Controls.Window owner, string text, string? title = null, string? targetDescription = null, bool tsvOnly = false)

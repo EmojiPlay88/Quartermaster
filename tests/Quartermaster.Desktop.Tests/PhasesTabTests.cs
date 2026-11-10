@@ -477,6 +477,24 @@ public sealed class PhasesTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Side_filter_with_outer_spaces_is_not_rewritten_by_selecting()
+    {
+        var s = Session(true, p => p with { Sides = p.Sides.Select((x, i) => i == 0 ? x with { UnitFilter = "  name() != \"\"  " } : x).ToList() });
+        var pack = s.Rules;
+        var dirty = s.RulesDirty;
+        var tab = Tab(s);
+        tab.SideList.SelectedIndex = 0;
+        Pump();
+        tab.SelectPhase("ph-supply");
+        Pump();
+        tab.SideList.SelectedIndex = 1;
+        Pump();
+        tab.CommitPending();
+        Assert.Same(pack, s.Rules);
+        Assert.Equal(dirty, s.RulesDirty);
+    }
+
+    [AvaloniaFact]
     public void Refused_edit_in_guest_mode_redraws_from_the_pack()
     {
         var s = Session();

@@ -57,7 +57,7 @@ sealed class FakeDialogs : IDialogs
     /// <summary>The defaultNo flag of each Yes/No question asked, parallel to the Yes/No entries in <see cref="Questions"/>.</summary>
     public readonly List<bool> YesNoDefaultNo = new();
 
-    public Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = false)
+    public Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = true)
     {
         Questions.Add((message, caption));
         YesNoDefaultNo.Add(defaultNo);
@@ -79,10 +79,12 @@ sealed class FakeDialogs : IDialogs
     /// <summary>Paste / import previews shown and what the next one answers (null = Cancel).</summary>
     public readonly List<(string Text, string? Title, string? Target, bool TsvOnly)> PastePrompts = new();
     public Quartermaster.Rules.Tables.PastedGrid? PasteAnswer { get; set; }
+    public Action? OnPaste;
 
     public Task<Quartermaster.Rules.Tables.PastedGrid?> PasteTableAsync(Window owner, string text, string? title = null, string? targetDescription = null, bool tsvOnly = false)
     {
         PastePrompts.Add((text, title, targetDescription, tsvOnly));
+        OnPaste?.Invoke();
         return Task.FromResult(PasteAnswer);
     }
 

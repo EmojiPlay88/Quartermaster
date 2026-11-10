@@ -315,6 +315,25 @@ public sealed class TablesTabTests : IDisposable
     static PastedGrid Pasted(string tsv) => TablePaste.Parse(tsv, true, true, tsvOnly: true);
 
     [AvaloniaFact]
+    public async Task Import_into_new_table_rechecks_the_name_after_the_paste_dialog()
+    {
+        var s = Session(true, Cost());
+        var tab = Tab(s);
+        var tsv = "k\tA\tB\nr1\t1\t2";
+        _dialogs.ImportTargetAnswer = false;
+        _dialogs.Texts.Enqueue("Imported");
+        _dialogs.PasteAnswer = Pasted(tsv);
+        _dialogs.OnPaste = () => s.UpdateRules(p => p with { Tables = p.Tables.Append(TableEdit.New("imported", TableKind.OneD)).ToList() });   // appears while the dialog is open
+        var count = s.Rules!.Tables.Count;
+        var id = await tab.ImportGridAsync(tsv, "scan.png", null);
+        Pump();
+        Assert.Null(id);
+        Assert.Equal(count + 1, s.Rules.Tables.Count);
+        Assert.Equal(1, s.Rules.Tables.Count(t => t.Name.Equals("imported", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal("There is already an item named \"Imported\".", _dialogs.Infos[^1].Message);
+    }
+
+    [AvaloniaFact]
     public async Task Import_into_new_table_with_scan_rule_ref()
     {
         var s = Session(true, Cost());

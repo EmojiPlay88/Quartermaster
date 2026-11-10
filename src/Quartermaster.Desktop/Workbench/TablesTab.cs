@@ -473,6 +473,7 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
         var grid = await _dialogs.PasteTableAsync(w, tsv, ImportTitle, ScanSessionModel.TargetDescription(name, newTable: !intoExisting), tsvOnly: true);
         if (grid == null || _s.Rules == null) return null;
         if (intoExisting && StillCurrent(existing!.Id) == null) return null;
+        if (!intoExisting && NameRules.Problem(_s.Rules.Tables.Select(x => x.Name), name, null) is { } taken) { await Tell(w, taken); return null; }   // the name may have been taken while the dialog was open
 
         RuleRef? MakeRef(string label) =>
             ruleRefEntry == null || MakeRuleRef == null ? null : MakeRuleRef(label, ruleRefEntry, page ?? 0);

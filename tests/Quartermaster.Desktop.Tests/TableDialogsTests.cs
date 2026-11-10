@@ -185,7 +185,7 @@ public sealed class TableDialogsTests
     {
         var owner = Owner();
         IDialogs dialogs = new Dialogs();
-        var yes = dialogs.AskYesNoAsync(owner, "Delete?", "Quartermaster");
+        var yes = dialogs.AskYesNoAsync(owner, "Delete?", "Quartermaster", defaultNo: false);
         var box = owner.OwnedWindows.OfType<Window>().Single();
         var yesBtn = FindButtons(box).Single(b => (string?)b.Content == "Yes");
         Assert.True(yesBtn.IsDefault);
@@ -193,7 +193,7 @@ public sealed class TableDialogsTests
         Click(yesBtn);
         Assert.True(await yes);
 
-        var no = dialogs.AskYesNoAsync(owner, "Delete?", "Quartermaster", defaultNo: true);
+        var no = dialogs.AskYesNoAsync(owner, "Delete?", "Quartermaster");   // the default is No
         box = owner.OwnedWindows.OfType<Window>().Single();
         var noBtn = FindButtons(box).Single(b => (string?)b.Content == "No");
         Assert.True(noBtn.IsDefault);
