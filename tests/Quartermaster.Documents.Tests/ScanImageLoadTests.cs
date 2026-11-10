@@ -301,4 +301,90 @@ public sealed class ScanImageLoadTests : IDisposable
         }
         return ~crc;
     }
+
+    // Stored 3x2 pattern (row 0: A B C, row 1: D E F), each letter a distinct colour; upright results per TIFF Orientation value.
+    private static readonly (byte R, byte G, byte B)[] Letters =
+        [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (0, 255, 255), (255, 0, 255)];
+
+    private string OrientedTiff(int orientation)
+    {
+        string path = Path.Combine(_dir, $"t{orientation}.tif");
+        using var tiff = Tiff.Open(path, "w")!;
+        tiff.SetField(TiffTag.IMAGEWIDTH, 3);
+        tiff.SetField(TiffTag.IMAGELENGTH, 2);
+        tiff.SetField(TiffTag.SAMPLESPERPIXEL, 3);
+        tiff.SetField(TiffTag.BITSPERSAMPLE, 8);
+        tiff.SetField(TiffTag.PHOTOMETRIC, Photometric.RGB);
+        tiff.SetField(TiffTag.PLANARCONFIG, PlanarConfig.CONTIG);
+        tiff.SetField(TiffTag.ORIENTATION, (BitMiracle.LibTiff.Classic.Orientation)orientation);
+        tiff.SetField(TiffTag.ROWSPERSTRIP, 2);
+        for (int y = 0; y < 2; y++)
+        {
+            var row = new byte[9];
+            for (int x = 0; x < 3; x++)
+            {
+                var c = Letters[y * 3 + x];
+                row[x * 3] = c.R; row[x * 3 + 1] = c.G; row[x * 3 + 2] = c.B;
+            }
+            tiff.WriteScanline(row, y);
+        }
+        tiff.WriteDirectory();
+        return path;
+    }
+
+    [Theory]
+    [InlineData(1, 3, new[] { "ABC", "DEF" })]
+    [InlineData(2, 3, new[] { "CBA", "FED" })]
+    [InlineData(3, 3, new[] { "FED", "CBA" })]
+    [InlineData(4, 3, new[] { "DEF", "ABC" })]
+    [InlineData(5, 2, new[] { "AD", "BE", "CF" })]
+    [InlineData(6, 2, new[] { "DA", "EB", "FC" })]
+    [InlineData(7, 2, new[] { "FC", "EB", "DA" })]
+    [InlineData(8, 2, new[] { "CF", "BE", "AD" })]
+    public void Tiff_orientations_1_to_8_are_upright(int orientation, int width, string[] rows)
+    {
+        using var loaded = ScanImageLoad.Load(OrientedTiff(orientation));
+        Assert.Equal((width, rows.Length), (loaded.Width, loaded.Height));
+        for (int y = 0; y < rows.Length; y++)
+            for (int x = 0; x < width; x++)
+            {
+                var want = Letters[rows[y][x] - 'A'];
+                var got = loaded.GetPixel(x, y);
+                Assert.True((got.Red, got.Green, got.Blue) == want, $"orientation {orientation} at ({x},{y}): wanted {rows[y][x]}");
+            }
+    }
+
+    [Fact]
+    public void Tiff_load_allocates_one_raster()
+    {
+        const int n = 2000;
+        string path = Path.Combine(_dir, "big.tif");
+        using (var tiff = Tiff.Open(path, "w")!)
+        {
+            tiff.SetField(TiffTag.IMAGEWIDTH, n);
+            tiff.SetField(TiffTag.IMAGELENGTH, n);
+            tiff.SetField(TiffTag.SAMPLESPERPIXEL, 3);
+            tiff.SetField(TiffTag.BITSPERSAMPLE, 8);
+            tiff.SetField(TiffTag.PHOTOMETRIC, Photometric.RGB);
+            tiff.SetField(TiffTag.PLANARCONFIG, PlanarConfig.CONTIG);
+            tiff.SetField(TiffTag.ORIENTATION, BitMiracle.LibTiff.Classic.Orientation.TOPLEFT);
+            tiff.SetField(TiffTag.COMPRESSION, Compression.LZW); // a small file with small strips: the test measures the raster, not the file bytes
+            tiff.SetField(TiffTag.ROWSPERSTRIP, 32);
+            var row = new byte[n * 3];
+            for (int y = 0; y < n; y++)
+            {
+                for (int x = 0; x < n; x++) { row[x * 3] = (byte)(x / 500); row[x * 3 + 1] = (byte)(y / 500); row[x * 3 + 2] = 90; }
+                tiff.WriteScanline(row, y);
+            }
+            tiff.WriteDirectory();
+        }
+        // Budget 5 bytes per pixel: one managed raster (4) plus library/file overhead; the old double buffer was 8. The file is LZW with
+        // 32-row strips because libtiff allocates a decode buffer per strip (deflate or one big strip would eat the margin).
+        ScanImageLoad.Load(path).Dispose(); // warm up: type loading and the like are not the measure
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        using var loaded = ScanImageLoad.Load(path);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal((n, n), (loaded.Width, loaded.Height));
+        Assert.True(allocated <= 5L * n * n, $"allocated {allocated} bytes");
+    }
 }

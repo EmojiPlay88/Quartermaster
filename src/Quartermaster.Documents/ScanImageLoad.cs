@@ -56,33 +56,62 @@ public static class ScanImageLoad
         int h = tiff.GetField(TiffTag.IMAGELENGTH)?[0].ToInt() ?? 0;
         if (w <= 0 || h <= 0) throw new InvalidDataException("This file is not a readable image.");
         if ((long)w * h > MaxPixels) throw new InvalidDataException(TooLargeMessage);
+        // The Orientation tag (1-8). Out-of-range or missing means 1.
+        int orientation = tiff.GetFieldDefaulted(TiffTag.ORIENTATION)?[0].ToInt() ?? 1;
+        if (orientation is < 1 or > 8) orientation = 1;
+        // Transient peak: the file bytes, libtiff's strip buffer, this 4-bytes-per-pixel raster and then the destination bitmap (the raster
+        // is garbage once the copy ends), so a 100 MP scan briefly needs about 1 GB.
         var raster = new int[w * h];
-        // Oriented read: top-left origin, the TIFF Orientation tag already applied by the library.
-        if (!tiff.ReadRGBAImageOriented(w, h, raster, BitMiracle.LibTiff.Classic.Orientation.TOPLEFT))
+        // Request the file's own orientation so the library does no flipping at all: the raster is in stored order, and the Orientation
+        // tag is applied below while copying (the library never transposes, so 5-8 would otherwise come out sideways).
+        if (!tiff.ReadRGBAImageOriented(w, h, raster, (BitMiracle.LibTiff.Classic.Orientation)orientation))
             throw new InvalidDataException("This TIFF could not be decoded.");
-        var bmp = new SKBitmap(new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Premul));
+        bool swap = orientation >= 5;
+        var bmp = new SKBitmap(new SKImageInfo(swap ? h : w, swap ? w : h, SKColorType.Bgra8888, SKAlphaType.Premul));
         try
         {
-            var dst = bmp.GetPixels();
-            // The raster is packed ABGR in an int (R lowest byte); Bgra8888 wants B,G,R,A bytes.
-            var px = new int[w * h];
-            for (int i = 0; i < px.Length; i++)
-            {
-                uint v = (uint)raster[i];
-                uint r = v & 0xFF, g = (v >> 8) & 0xFF, b = (v >> 16) & 0xFF, a = (v >> 24) & 0xFF;
-                if (a != 255) // composite onto white
-                {
-                    r = (r * a + 255 * (255 - a)) / 255; g = (g * a + 255 * (255 - a)) / 255; b = (b * a + 255 * (255 - a)) / 255;
-                }
-                px[i] = unchecked((int)(b | (g << 8) | (r << 16) | 0xFF000000u));
-            }
-            System.Runtime.InteropServices.Marshal.Copy(px, 0, dst, px.Length);
+            CopyOriented(raster, w, h, orientation, bmp);
             return bmp;
         }
         catch
         {
             bmp.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Copies the packed ABGR raster (stored order, w x h) into <paramref name="bmp"/> (Bgra8888) upright for a TIFF/EXIF orientation 1-8,
+    /// compositing any transparency onto white.
+    /// </summary>
+    private static unsafe void CopyOriented(int[] raster, int w, int h, int orientation, SKBitmap bmp)
+    {
+        int dw = bmp.RowBytes / 4; // the stride in pixels
+        var dst = (uint*)bmp.GetPixels();
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                uint v = (uint)raster[y * w + x];
+                uint r = v & 0xFF, g = (v >> 8) & 0xFF, b = (v >> 16) & 0xFF, a = (v >> 24) & 0xFF;
+                if (a != 255) // composite onto white
+                {
+                    r = (r * a + 255 * (255 - a)) / 255; g = (g * a + 255 * (255 - a)) / 255; b = (b * a + 255 * (255 - a)) / 255;
+                }
+                int dx, dy;
+                switch (orientation)
+                {
+                    case 2: dx = w - 1 - x; dy = y; break;
+                    case 3: dx = w - 1 - x; dy = h - 1 - y; break;
+                    case 4: dx = x; dy = h - 1 - y; break;
+                    case 5: dx = y; dy = x; break;                       // transpose
+                    case 6: dx = h - 1 - y; dy = x; break;               // 90 clockwise
+                    case 7: dx = h - 1 - y; dy = w - 1 - x; break;       // transverse
+                    case 8: dx = y; dy = w - 1 - x; break;               // 270 clockwise
+                    default: dx = x; dy = y; break;
+                }
+                dst[dy * dw + dx] = b | (g << 8) | (r << 16) | 0xFF000000u;
+            }
         }
     }
 
