@@ -69,3 +69,14 @@ All of the components below are used unmodified, as binaries. The licence texts 
 | Zstandard (libzstd) | all three OSes | BSD-3-Clause (we take the BSD option) | [`LICENSES/zstd.txt`](LICENSES/zstd.txt) |
 | bzip2 (libbz2, bz2.dll) | all three OSes | bzip2 licence (BSD-style) | [`LICENSES/bzip2.txt`](LICENSES/bzip2.txt) |
 | libxml2 | Linux and macOS | MIT | [`LICENSES/libxml2.txt`](LICENSES/libxml2.txt) |
+
+## Windows OCR plugin (win-x64 only)
+
+On Windows, Quartermaster reads scans with Windows OCR (Windows.Media.Ocr) through a plugin. The plugin is shipped in the
+`ocr-windows/` folder of the win-x64 build only; the macOS and Linux builds do not contain it. Its two Microsoft binaries
+come from the NuGet package `Microsoft.Windows.SDK.NET.Ref` 10.0.19041.57 and are used unmodified.
+
+| Component | Where it is bundled | Licence | Text |
+|---|---|---|---|
+| Windows SDK projection for .NET, `Microsoft.Windows.SDK.NET.dll` 10.0.19041.55, Copyright (c) Microsoft Corporation | `ocr-windows/` (win-x64 only) | Microsoft Software License Terms for the Windows SDK (the package's `licenseUrl`, https://aka.ms/WinSDKLicenseURL) | [`LICENSES/Microsoft-Windows-SDK-NET.txt`](LICENSES/Microsoft-Windows-SDK-NET.txt) |
+| C#/WinRT runtime, `WinRT.Runtime.dll` 2.2.0 (https://github.com/microsoft/CsWinRT), Copyright (c) Microsoft Corporation | `ocr-windows/` (win-x64 only) | MIT | [`LICENSES/MIT-CsWinRT.txt`](LICENSES/MIT-CsWinRT.txt) |

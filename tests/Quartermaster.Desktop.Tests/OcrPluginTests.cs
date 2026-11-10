@@ -39,6 +39,13 @@ public class OcrPluginTests
                 Assert.Contains(typeof(IOcrRecognizer), type.GetInterfaces());
                 Assert.Same(typeof(SkiaSharp.SKBitmap).Assembly,
                     type.GetMethod(nameof(IOcrRecognizer.RecognizeAsync))!.GetParameters()[0].ParameterType.Assembly);
+                // The plugin's private assemblies load in its own context; Render and SkiaSharp never do.
+                var names = AssemblyLoadContext.GetLoadContext(type.Assembly)!.Assemblies.Select(a => a.GetName().Name).ToList();
+                Assert.Contains("Quartermaster.OcrWindows", names);
+                Assert.Contains("WinRT.Runtime", names);
+                Assert.Contains("Microsoft.Windows.SDK.NET", names);
+                Assert.DoesNotContain("Quartermaster.Render", names);
+                Assert.DoesNotContain("SkiaSharp", names);
                 // Loaded once per process: a second Create gives the same type.
                 var again = OcrEngines.Create(log: log.Add);
                 Assert.Same(type, again.GetType());

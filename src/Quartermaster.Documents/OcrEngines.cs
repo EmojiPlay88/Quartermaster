@@ -17,8 +17,18 @@ public static class OcrEngines
     private const string PluginAssembly = "Quartermaster.OcrWindows";
     private const string PluginType = "Quartermaster.OcrWindows.WindowsRecognizer";
 
-    /// <summary>One load context per plugin path for the life of the process (the plugin is never unloaded).</summary>
-    private static readonly ConcurrentDictionary<string, Lazy<Type>> Loaded = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// One entry per plugin path for the life of the process (the plugin is never unloaded and its files cannot change while the
+    /// app runs). A failure, of the load or of the recognizer's constructor, is kept too: later calls fail the same way without
+    /// a second load context or a second copy of WinRT.Runtime.
+    /// </summary>
+    private sealed class PluginEntry(string dll, Func<string, Type> loadType)
+    {
+        public readonly Lazy<Type> Type = new(() => loadType(dll)); // a load failure is cached with it
+        public volatile Exception? CreateFailure;
+    }
+
+    private static readonly ConcurrentDictionary<string, PluginEntry> Loaded = new(StringComparer.OrdinalIgnoreCase);
 
     public static IOcrRecognizer Create(string? baseDir = null, Action<string>? log = null)
     {
@@ -47,7 +57,10 @@ public static class OcrEngines
         return windows;
     }
 
-    internal static IOcrRecognizer? LoadWindows(string baseDir, Action<string>? log)
+    internal static IOcrRecognizer? LoadWindows(string baseDir, Action<string>? log) => LoadWindows(baseDir, log, LoadType);
+
+    /// <summary>Test seam: <paramref name="loadType"/> stands in for the plugin load context.</summary>
+    internal static IOcrRecognizer? LoadWindows(string baseDir, Action<string>? log, Func<string, Type> loadType)
     {
         var dll = Path.GetFullPath(Path.Combine(baseDir, PluginFolder, PluginAssembly + ".dll"));
         try
@@ -57,12 +70,18 @@ public static class OcrEngines
                 log?.Invoke($"OCR: the Windows OCR plugin was not found ({PluginFolder}/{PluginAssembly}.dll); using Tesseract.");
                 return null;
             }
-            var type = Loaded.GetOrAdd(dll, p => new Lazy<Type>(() => LoadType(p))).Value;
-            return (IOcrRecognizer)Activator.CreateInstance(type)!;
+            var entry = Loaded.GetOrAdd(dll, p => new PluginEntry(p, loadType));
+            var type = entry.Type.Value;
+            if (entry.CreateFailure is { } failed) throw failed;
+            try { return (IOcrRecognizer)Activator.CreateInstance(type)!; }
+            catch (Exception ex)
+            {
+                entry.CreateFailure = ex is System.Reflection.TargetInvocationException { InnerException: { } ie } ? ie : ex;
+                throw;
+            }
         }
         catch (Exception ex)
         {
-            Loaded.TryRemove(dll, out _); // a later Create tries again
             var inner = ex is System.Reflection.TargetInvocationException { InnerException: { } ie } ? ie : ex;
             log?.Invoke($"OCR: the Windows OCR plugin could not be loaded ({inner.GetType().Name}: {inner.Message}); using Tesseract.");
             return null;

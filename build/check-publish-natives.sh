@@ -2,7 +2,7 @@
 # Fails when a Quartermaster.Desktop publish folder lacks the native libraries the document viewer needs
 # (PDFium for PDF pages, Tesseract and Leptonica for OCR), the bundled tessdata/eng.traineddata, or the licence notices
 # (LICENSE, THIRD-PARTY-NOTICES.md, LICENSES/), or when the Windows OCR plugin is missing from a win-x64 publish
-# (ocr-windows/: the plugin dll, WinRT.Runtime.dll, Microsoft.Windows.SDK.NET.dll) or present in a macOS/Linux publish.
+# (ocr-windows/: the plugin dll and .deps.json, WinRT.Runtime.dll, Microsoft.Windows.SDK.NET.dll, and their licence texts) or present in a macOS/Linux publish.
 # Usage: build/check-publish-natives.sh <publish-folder> <win-x64|linux-x64|osx-arm64>
 set -u
 dir="${1:?usage: check-publish-natives.sh <publish-folder> <rid>}"
@@ -17,7 +17,7 @@ missing=0
 for f in $files tessdata/eng.traineddata LICENSE THIRD-PARTY-NOTICES.md LICENSES/pdfium-binaries/LICENSE.txt LICENSES/Apache-2.0.txt; do
   if [ -s "$dir/$f" ]; then echo "ok       $f"; else echo "MISSING  $f (in $dir)" >&2; missing=1; fi
 done
-plugin="ocr-windows/Quartermaster.OcrWindows.dll ocr-windows/WinRT.Runtime.dll ocr-windows/Microsoft.Windows.SDK.NET.dll"
+plugin="ocr-windows/Quartermaster.OcrWindows.dll ocr-windows/Quartermaster.OcrWindows.deps.json ocr-windows/WinRT.Runtime.dll ocr-windows/Microsoft.Windows.SDK.NET.dll LICENSES/MIT-CsWinRT.txt LICENSES/Microsoft-Windows-SDK-NET.txt"
 if [ "$rid" = "win-x64" ]; then
   for f in $plugin; do
     if [ -s "$dir/$f" ]; then echo "ok       $f"; else echo "MISSING  $f (in $dir)" >&2; missing=1; fi

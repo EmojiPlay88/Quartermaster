@@ -11,6 +11,8 @@
     <Nullable>enable</Nullable>
     <!-- A class library leaves the Windows SDK projection (WinRT.Runtime.dll, Microsoft.Windows.SDK.NET.dll) out of bin; the plugin needs them beside it. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- A win-x64 publish of the Desktop app from a macOS or Linux host builds this project there too. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
   <ItemGroup>
