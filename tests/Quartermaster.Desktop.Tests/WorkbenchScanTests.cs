@@ -290,9 +290,9 @@ public sealed class WorkbenchScanTests : IDisposable
         // a ref to a scan that is not open this session: the Open scan hint
         var other = wb.RefFor("Other", "scan:not-opened.png", 0)!;
         s.UpdateRules(p => p with { Tables = p.Tables.Select(t => t.Id == tableId ? t with { RuleRefId = other.Id } : t).ToList() });
-        wb.Tables.RefRow.ClickLink();
-        Pump();
-        Assert.Equal(WorkbenchRules.MissingRefText("scan:not-opened.png"), _dialogs.Infos[^1].Message);
+        Assert.False(wb.Tables.RefRow.IsLink);   // a missing scan is greyed with the hint in the row itself, not clickable
+        Assert.True(wb.Tables.RefRow.IsGreyed);
+        Assert.Contains("open it with Open scan…", wb.Tables.RefRow.Text);
     }
 
     [AvaloniaFact]

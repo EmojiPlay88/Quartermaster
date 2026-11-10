@@ -185,6 +185,7 @@ public sealed class PhasePanelTests : IDisposable
         Assert.Contains("Done: Resolve attacks", w.Session.Game.State.Log.Select(l => l.Text));
         Assert.Equal("0 decisions left", w.Phases.CountText);
         Assert.False(w.Phases.CountRed);
+        Assert.False(w.Phases.CountHasLocalForeground, "a null local foreground hides the count");
         Assert.True(w.Phases.IsChecked(0));
     }
 

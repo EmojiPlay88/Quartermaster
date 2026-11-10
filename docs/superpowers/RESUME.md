@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-10 (stage 3b COMPLETE on local port-stage3b, awaiting user OK to push + merge, see CURRENT STATE below); earlier text: after piece 8 (ledger images and tabs, updater, release script) was built on branch `piece8` (merge into master pending; pieces through 7 and the launcher are pushed). A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-10 (stage 4a built on local port-stage4a, final review next, see CURRENT STATE below); earlier text: after piece 8 (ledger images and tabs, updater, release script) was built on branch `piece8` (merge into master pending; pieces through 7 and the launcher are pushed). A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -116,7 +116,15 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-09, read this first; older items below are history):**
+**CURRENT STATE (2026-11-10, read this first; older items below are history):**
+
+- **Stage 4a built on local branch `port-stage4a`** (Rules Workbench with its six tabs and dialogs, rulebook search, scan pane / Open scan... / OCR import; tasks T1-T13 done, not pushed, not merged to master). Plan: `docs/superpowers/plans/2026-11-10-port-stage4a-workbench.md`; ledger (git-ignored): `.superpowers/sdd/2026-11-10-port-stage4a-workbench/progress.md` with briefs, reports, `common.md`. Parity rows and the "Stage-4a deviations" list are in `docs/port/parity.md`; Mac steps in `docs/port/stage4a-mac-checklist.md`; screenshots via `build/port-screenshots.ps1` (stage4a-*.png).
+- **Windows OCR** is a run-time plugin (`src/Quartermaster.OcrWindows`, copied to `ocr-windows/` in win-* publishes; Tesseract fallback and env override in `docs/port/stage3b-ocr-benchmark.md`). Mac and Linux use Tesseract (English only until 4b).
+- **Open user items:** (1) the Windows SDK projection DLLs shipped in `ocr-windows/` (`Microsoft.Windows.SDK.NET.dll`, `WinRT.Runtime.dll`) need their redistribution terms read before the next release; (2) the main checkout has two untracked CNA design notes in docs/ from another session that are NOT part of 4a and must never be committed from the public repo without the user's decision; (3) the Mac checklist for 4a is not done (no macOS tick in parity.md yet).
+- **Found in the T13 screenshot pass (fixed):** EditGrid cell text invisible (null local Foreground; same pattern fixed in RuleRefRow and the AlertsTab match status) and fixed-width grids centred in their pane. The same pattern in PhasePanel's count and the status-bar link message was fixed in fix round 1.
+- **Next:** final whole-branch review of port-stage4a, one fix wave, then ask the user to push / open the PR (CI runs mac/linux natives; CI has no win-x64 Desktop publish step yet). Stage 4b = Settings, then 5 (multiplayer, launcher, updates; a received turn must close the Workbench before replaying).
+
+**Older CURRENT STATE (2026-11-09, stage 3b):**
 
 - **Stage 3b in progress on local branch `port-stage3b` (all 9 tasks built)** (not merged, not pushed; master = c008458 + pushed history up to 22ae56e plus the 3b plan commit). Plan: `docs/superpowers/plans/2026-11-09-port-stage3b-documents.md`. SDD ledger (git-ignored, the recovery map): `.superpowers/sdd/2026-11-09-port-stage3b-documents/progress.md` with briefs `task-N-brief.md`, reports, reviews, `common.md`, reviewer instructions.
 - **Done and merged into port-stage3b (head 7e8fb2a), each task reviewed:** T1 `src/Quartermaster.Documents` (PdfPages over PDFtoImage 5.4.0/PDFium on one worker thread, ScanImageLoad Skia+LibTiff.NET); T2 Render `Ocr/IOcrRecognizer` + `OcrReader`; T3 Render `Search/PdfHighlights`; T4 Desktop `Documents/ChartWindow`; T5 `TesseractRecognizer` (TesseractOcrNet was unrestorable → Tesseract.Native.runtime.* 5.5.2.200 + own P/Invoke, Init5, bundled `tessdata/eng.traineddata`, licences in LICENSES/; benchmark `docs/port/stage3b-ocr-benchmark.md`: Windows OCR wins → stage 4 adds a Windows-only recognizer); T6 `DocumentViewer`/`PdfPageView`; T7 `DocumentWindow`, MainWindow.Documents, working Rule ref (formula window, phase panel), tree document nodes; T8 viewer toolbar mode (doc list, images list, Used on this page). Full slnx builds 0 errors (1 known MSB3277 App warning, pre-existing).

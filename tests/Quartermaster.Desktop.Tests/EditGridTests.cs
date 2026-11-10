@@ -44,6 +44,20 @@ public sealed class EditGridTests : IDisposable
     static void Key(Window w, Key k, RawInputModifiers m = RawInputModifiers.None) => w.KeyPress(k, m, (PhysicalKey)0, null);
 
     [AvaloniaFact]
+    public void Cell_text_is_not_hidden_by_a_null_foreground_and_fixed_columns_sit_left()
+    {
+        var (g, w, _) = Make();
+        g.SelectCell(0, 0);
+        Assert.False(g.CellControl(1, 0).IsSet(Avalonia.Controls.TextBlock.ForegroundProperty), "a local null foreground hides the text (found in the screenshot pass)");
+        Assert.Same(Brushes.White, g.CellControl(0, 0).GetValue(Avalonia.Controls.TextBlock.ForegroundProperty));
+        g.SetColumns([new EditColumn("A", Width: 60), new EditColumn("B", Width: 60)]);
+        g.SetRows([["1", "2"]]);
+        w.UpdateLayout();
+        Assert.True(g.CellControl(0, 0).TranslatePoint(new Point(0, 0), g)!.Value.X < 10, "the body of a fixed-width grid starts at the left edge, like its header");
+        w.Close();
+    }
+
+    [AvaloniaFact]
     public void Typing_starts_edit_and_enter_commits_and_moves_down()
     {
         var (g, w, log) = Make();

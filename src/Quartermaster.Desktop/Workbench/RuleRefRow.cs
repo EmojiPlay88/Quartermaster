@@ -68,7 +68,9 @@ public sealed class RuleRefRow : StackPanel
     {
         _display = describe?.Invoke(r) ?? (r == null ? new RefDisplay(SearchPanelModel.None, false, false) : new RefDisplay($"{r.Label}, page {r.Page}", true, false));
         _link.Text = _display.Text;
-        _link.Foreground = _display.Missing ? GreyBrush : _display.IsLink ? LinkBrush : null;
+        if (_display.Missing) _link.Foreground = GreyBrush;
+        else if (_display.IsLink) _link.Foreground = LinkBrush;
+        else _link.ClearValue(TextBlock.ForegroundProperty);   // a null local value would hide the text
         _link.TextDecorations = _display.IsLink ? TextDecorations.Underline : null;
         _link.Cursor = _display.IsLink ? new Cursor(StandardCursorType.Hand) : null;
     }

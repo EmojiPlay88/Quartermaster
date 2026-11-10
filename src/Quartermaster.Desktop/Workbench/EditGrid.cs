@@ -162,6 +162,7 @@ public sealed class EditGrid : UserControl
         _scroll.HorizontalScrollBarVisibility = _fixedCols ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
         _body.Width = double.NaN;
         _header.Width = double.NaN;
+        _body.HorizontalAlignment = _fixedCols ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;   // an explicit width would otherwise be centred in the viewport
         _header.Children.Clear();
         _header.ColumnDefinitions.Clear();
         _headerCells.Clear();
@@ -338,7 +339,9 @@ public sealed class EditGrid : UserControl
         else if (cell.ReadOnly) bg = ReadOnlyBrush;
         else bg = Brushes.White;
         cell.Block.Background = bg;
-        cell.Block.Foreground = current && plain ? Brushes.White : null;
+        // A null local value would hide the text (it overrides the inherited brush); clearing it falls back to the theme's.
+        if (current && plain) cell.Block.Foreground = Brushes.White;
+        else cell.Block.ClearValue(TextBlock.ForegroundProperty);
     }
 
     // test hooks
