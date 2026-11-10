@@ -11,7 +11,8 @@ using Quartermaster.Desktop.Input;
 
 namespace Quartermaster.Desktop.Workbench;
 
-public enum EditColumnKind { Text, Combo, Check }
+/// <summary>EditableCombo: free text plus a drop-down of suggestions (a WinForms DropDown-style combo).</summary>
+public enum EditColumnKind { Text, Combo, Check, EditableCombo }
 
 /// <param name="Weight">Relative width (star sizing); ignored when <paramref name="Width"/> is set.</param>
 /// <param name="Items">The choices of a Combo column (a cell can override them with <see cref="EditGrid.SetCellItems"/>).</param>
@@ -45,6 +46,25 @@ public sealed class EditGrid : UserControl
         public string? Tip;
         public IBrush? Tint;
         public TextBlock Block = null!;
+    }
+
+    /// <summary>The editor of an <see cref="EditColumnKind.EditableCombo"/> cell: a text box with a drop-down button listing the suggestions.</summary>
+    sealed class EditableEditor : Grid
+    {
+        public readonly TextBox Box = new() { MinHeight = 0, Height = RowHeight, Padding = new Thickness(3, 0), BorderThickness = new Thickness(1), VerticalContentAlignment = VerticalAlignment.Center, AcceptsReturn = false };
+        public readonly Button Drop = new() { Content = "▾", Focusable = false, MinHeight = 0, Height = RowHeight, Width = 18, Padding = new Thickness(0), VerticalContentAlignment = VerticalAlignment.Center, HorizontalContentAlignment = HorizontalAlignment.Center };
+        public readonly ListBox List = new() { MaxHeight = 160, MinWidth = 120, Focusable = false };
+        public readonly Avalonia.Controls.Primitives.Popup Pop = new() { IsLightDismissEnabled = true, Placement = Avalonia.Controls.PlacementMode.Bottom };
+        public EditableEditor()
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto");
+            SetColumn(Drop, 1);
+            Children.Add(Box);
+            Children.Add(Drop);
+            Pop.PlacementTarget = this;
+            Pop.Child = new Border { BorderThickness = new Thickness(1), BorderBrush = Brushes.Gray, Background = Brushes.White, Child = List };
+            Children.Add(Pop);
+        }
     }
 
     readonly Grid _header = new() { Height = RowHeight, HorizontalAlignment = HorizontalAlignment.Left };
@@ -326,6 +346,8 @@ public sealed class EditGrid : UserControl
     internal object? CellToolTip(int row, int col) => ToolTip.GetTip(_rows[row][col].Block);
     internal string CellShown(int row, int col) => _rows[row][col].Block.Text ?? "";
     internal Control? Editor => _editor;
+    internal TextBox? EditorText => (_editor as EditableEditor)?.Box;
+    internal ListBox? EditorList => (_editor as EditableEditor)?.List;
     internal Control CellControl(int row, int col) => _rows[row][col].Block;
     internal IBrush? HeaderBackground(int col) => _headerCells[col].Background;
     internal object? HeaderToolTip(int col) => ToolTip.GetTip(_headerCells[col]);
@@ -396,7 +418,7 @@ public sealed class EditGrid : UserControl
         if (!p.Properties.IsLeftButtonPressed) return;
         var kind = _cols[col].Kind;
         if (kind == EditColumnKind.Check && !_rows[row][col].ReadOnly) Toggle(row, col);
-        else if (e.ClickCount >= 2 || (kind == EditColumnKind.Combo && wasCurrent)) BeginEdit(row, col);
+        else if (e.ClickCount >= 2 || ((kind == EditColumnKind.Combo || kind == EditColumnKind.EditableCombo) && wasCurrent)) BeginEdit(row, col);
         e.Handled = true;
     }
 
@@ -515,6 +537,29 @@ public sealed class EditGrid : UserControl
             box.LostFocus += (_, _) => { if (_editing && _editor == box && !box.IsDropDownOpen) EndEdit(false, false); };
             ed = box;
         }
+        else if (_cols[col].Kind == EditColumnKind.EditableCombo)
+        {
+            var items = (cell.Items ?? _cols[col].Items ?? []).ToList();
+            var ee = new EditableEditor();
+            ee.Box.Text = initialText ?? cell.Text;
+            ee.Box.BorderBrush = CurrentBorderBrush;
+            ee.List.ItemsSource = items;
+            ee.Box.KeyDown += (s, e) =>
+            {
+                if (_editing && _editor == ee && (e.Key == Key.F4 || (e.Key == Key.Down && (e.KeyModifiers & KeyModifiers.Alt) != 0))) { ee.Pop.IsOpen = items.Count > 0; e.Handled = true; return; }
+                OnEditorKeyDown(s, e);
+            };
+            ee.Box.LostFocus += (_, _) => { if (_editing && _editor == ee && !ee.Pop.IsOpen) EndEdit(true, false); };
+            ee.Drop.Click += (_, _) => { if (_editing && _editor == ee) { ee.Pop.IsOpen = !ee.Pop.IsOpen && items.Count > 0; ee.Box.Focus(); } };
+            ee.List.SelectionChanged += (_, _) =>
+            {
+                if (!_editing || _editor != ee || ee.List.SelectedItem is not string s) return;
+                ee.Pop.IsOpen = false;
+                EndEdit(false, true);
+                if (row < _rows.Length && col < _cols.Count) Commit(row, col, s);
+            };
+            ed = ee;
+        }
         else
         {
             var text = initialText ?? cell.Text;
@@ -536,6 +581,7 @@ public sealed class EditGrid : UserControl
         ed.ZIndex = 10;
         _body.Children.Add(ed);
         if (ed is ComboBox cb) { cb.Focus(); cb.IsDropDownOpen = true; }
+        else if (ed is EditableEditor eed) { eed.Box.Focus(); eed.Box.CaretIndex = eed.Box.Text?.Length ?? 0; if (initialText == null) eed.Box.SelectAll(); }
         else if (ed is TextBox t) { t.Focus(); t.CaretIndex = t.Text?.Length ?? 0; if (initialText == null) t.SelectAll(); }
     }
 
@@ -574,7 +620,7 @@ public sealed class EditGrid : UserControl
         if (!_editing) return;
         var ed = _editor;
         var (r, c) = _editCell;
-        var text = commit && ed is TextBox tb ? tb.Text ?? "" : null;
+        var text = commit ? ed is TextBox tb ? tb.Text ?? "" : ed is EditableEditor ee ? ee.Box.Text ?? "" : null : null;
         _editing = false;
         _editor = null;
         if (ed != null) _body.Children.Remove(ed);
