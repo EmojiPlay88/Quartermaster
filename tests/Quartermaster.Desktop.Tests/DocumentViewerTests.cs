@@ -223,6 +223,23 @@ public sealed class DocumentViewerTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Page_cache_is_bounded_by_pixels_not_count()
+    {
+        var (_, v, s) = Host();
+        v.Open(Doc(s, "Rules"));
+        Settle(v);
+        v.CachePixelBudget = 1;   // far below one page: only the shown page may stay
+        foreach (var p in new[] { 2, 3, 1, 2 }) { v.GoToPage(p); Settle(v); }
+        Assert.Equal(1, v.CachedPageCount);
+        Assert.True(v.CachedPixels > 0);
+
+        v.CachePixelBudget = 1_000_000_000;   // roomy: all three pages stay cached
+        foreach (var p in new[] { 1, 3, 2 }) { v.GoToPage(p); Settle(v); }
+        Assert.Equal(3, v.CachedPageCount);
+        Assert.True(v.CachedPixels <= v.CachePixelBudget);
+    }
+
+    [AvaloniaFact]
     public void PageUp_PageDown_Home_End()
     {
         var (w, v, s) = Host();

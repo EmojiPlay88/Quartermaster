@@ -13,6 +13,8 @@ public sealed class PdfPages : IDisposable
 {
     /// <summary>A render is lowered in DPI until width x height fits this many pixels.</summary>
     public const long MaxPixels = 60_000_000;
+    /// <summary>Longest rendered side in pixels (GPU texture limit).</summary>
+    public const int MaxSide = 16384;
 
     /// <summary>Message the viewer shows when a PDF cannot be used as a scan (the WinForms PdfPageRender message).</summary>
     public const string CantOpenAsScanMessage = "This PDF can't be opened as a scan.";
@@ -108,25 +110,27 @@ public sealed class PdfPages : IDisposable
         }
     }
 
-    /// <summary>The DPI to render at: <paramref name="dpi"/>, lowered when the page would exceed <see cref="MaxPixels"/>.</summary>
+    /// <summary>The DPI to render at: <paramref name="dpi"/>, lowered when the page would exceed <see cref="MaxPixels"/> or a side
+    /// would exceed <see cref="MaxSide"/>.</summary>
     public static double ClampDpi(SizeD pagePoints, double dpi)
     {
         if (!double.IsFinite(dpi) || dpi <= 0) dpi = 72;
-        if (PixelCount(pagePoints, dpi) <= MaxPixels) return dpi;
-        double lowered = dpi * Math.Sqrt((double)MaxPixels / ((pagePoints.W * dpi / 72.0) * (pagePoints.H * dpi / 72.0)));
+        if (Fits(pagePoints, dpi)) return dpi;
+        double w = pagePoints.W * dpi / 72.0, h = pagePoints.H * dpi / 72.0;
+        double lowered = dpi * Math.Min(Math.Sqrt((double)MaxPixels / (w * h)), MaxSide / Math.Max(w, h));
         // Rounding the sides up can overshoot by a few pixels; nudge down until it fits.
-        while (PixelCount(pagePoints, lowered) > MaxPixels) lowered *= 0.99999;
+        while (!Fits(pagePoints, lowered)) lowered *= 0.99999;
         return lowered;
+    }
+
+    private static bool Fits(SizeD points, double dpi)
+    {
+        var (w, h) = PixelSize(points, dpi);
+        return (long)w * h <= MaxPixels && w <= MaxSide && h <= MaxSide;
     }
 
     private static (int W, int H) PixelSize(SizeD points, double dpi) =>
         (Math.Max(1, (int)Math.Ceiling(points.W * dpi / 72.0 - 1e-6)), Math.Max(1, (int)Math.Ceiling(points.H * dpi / 72.0 - 1e-6)));
-
-    private static long PixelCount(SizeD points, double dpi)
-    {
-        var (w, h) = PixelSize(points, dpi);
-        return (long)w * h;
-    }
 
     private int Clamp(int page) => Math.Clamp(page, 1, _sizes.Length);
 

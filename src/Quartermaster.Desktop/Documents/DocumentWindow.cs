@@ -22,10 +22,11 @@ public sealed class DocumentWindow : Window
         _viewer = new DocumentViewer(s, toolbar: false, dialogs);
         Content = _viewer;
         // Opened once the viewer is in this window's tree, so an HTML document's browser hand-off has the window as its owner.
-        Opened += (_, _) => { if (!_started) { _started = true; _viewer.Open(d, page); } };
+        Opened += (_, _) => { if (!_started) { _started = true; _viewer.Open(d, _pendingPage ?? page); _pendingPage = null; } };
     }
 
     bool _started;
+    int? _pendingPage;   // GoToPage before the window opened
 
     public DocumentDef Document { get; }
 
@@ -35,6 +36,7 @@ public sealed class DocumentWindow : Window
     public void GoToPage(int page)
     {
         if (_started) _viewer.GoToPage(page);
+        else _pendingPage = page;
     }
 
     protected override void OnClosed(EventArgs e)

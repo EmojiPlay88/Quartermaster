@@ -74,6 +74,21 @@ public sealed class PdfPagesTests : IDisposable
     }
 
     [Fact]
+    public void ClampDpi_also_caps_the_longest_side()
+    {
+        // 100 x 1000 pt (10:1): at 1200 dpi that is 1667 x 16667 px = 27.8 MP, under the area cap but over the texture side limit.
+        var tall = new SizeD(100, 1000);
+        double dpi = PdfPages.ClampDpi(tall, 1200);
+        long w = (long)Math.Ceiling(tall.W * dpi / 72), h = (long)Math.Ceiling(tall.H * dpi / 72);
+        Assert.True(Math.Max(w, h) <= PdfPages.MaxSide, $"{w}x{h}");
+        Assert.InRange(Math.Max(w, h), PdfPages.MaxSide * 0.99, PdfPages.MaxSide);
+        var wide = new SizeD(1000, 100);
+        dpi = PdfPages.ClampDpi(wide, 1200);
+        Assert.True(Math.Ceiling(wide.W * dpi / 72) <= PdfPages.MaxSide);
+        Assert.Equal(72.0, PdfPages.ClampDpi(new SizeD(100, 1000), 72));
+    }
+
+    [Fact]
     public async Task Page_out_of_range_is_clamped()
     {
         using var pdf = PdfPages.Open(ThreePages());
