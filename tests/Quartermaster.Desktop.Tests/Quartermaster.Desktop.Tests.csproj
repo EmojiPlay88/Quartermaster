@@ -22,6 +22,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Invented OCR tables drawn with Skia (scan pane tests). -->
+  <ItemGroup>
+    <Compile Include="..\Quartermaster.Documents.Tests\InventedTables.cs" Link="InventedTables.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quartermaster.Desktop\Quartermaster.Desktop.csproj" />
     <ProjectReference Include="..\..\src\Quartermaster.Render\Quartermaster.Render.csproj" />

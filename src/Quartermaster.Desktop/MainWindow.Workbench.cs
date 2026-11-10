@@ -1,5 +1,8 @@
 using Quartermaster.Desktop.Workbench;
+using Quartermaster.Documents;
 using Quartermaster.Render;
+using Quartermaster.Render.Ocr;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Desktop;
 
@@ -11,6 +14,20 @@ namespace Quartermaster.Desktop;
 public partial class MainWindow
 {
     WorkbenchWindow? _workbenchWin;
+    IOcrRecognizer? _ocrEngine;
+
+    /// <summary>Makes the app's OCR engine (Windows OCR or Tesseract, see <see cref="OcrEngines"/>); tests replace it.</summary>
+    internal static Func<Action<string>, IOcrRecognizer> CreateOcr = log => OcrEngines.Create(log: log);
+
+    /// <summary>The one OCR engine of the app: made on the first Workbench open, disposed when the main window closes (app exit),
+    /// after the session teardown has closed the workbench.</summary>
+    IOcrRecognizer AppOcr()
+    {
+        if (_ocrEngine != null) return _ocrEngine;
+        var engine = _ocrEngine = CreateOcr(m => _session?.Log.Add(DiagnosticSeverity.Info, "ocr", m, ""));
+        Closed += (_, _) => (engine as IDisposable)?.Dispose();
+        return engine;
+    }
 
     /// <summary>The open workbench (null while closed).</summary>
     internal WorkbenchWindow? WorkbenchTool => _workbenchWin;
@@ -21,7 +38,7 @@ public partial class MainWindow
         if (_session is not { } s) return;
         if (s.IsReplaying) { SetStatus(ModuleSession.ReplayingText); return; }   // no rules edits while a received turn replays
         Open(ref _workbenchWin, "bench:workbench",
-            () => new WorkbenchWindow(s, _dialogs, () => RulesFlowAsync(f => f.NewAsync()), () => RulesFlowAsync(f => f.OpenAsync())));
+            () => new WorkbenchWindow(s, _dialogs, () => RulesFlowAsync(f => f.NewAsync()), () => RulesFlowAsync(f => f.OpenAsync()), AppOcr()));
     }
 
     /// <summary>Opens (or activates) the workbench and runs the action on it (a no-op without a module).</summary>
