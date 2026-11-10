@@ -20,7 +20,8 @@ namespace Quartermaster.Desktop.Shell;
 static class ScreenshotStates
 {
     public static readonly string[] Names = { "menu", "hover", "los", "log", "rules", "phases", "nextphase", "stepback", "formula", "cheatsheet", "batch", "alerts", "tree", "floatlog", "floatphases",
-        "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice", "chart", "document", "document-search" };
+        "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice", "chart", "document", "document-search",
+        "workbench", "workbench-formulas", "workbench-phases", "workbench-search", "workbench-scan" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -31,7 +32,10 @@ static class ScreenshotStates
         if (window.Session is { } s) FormulaWindows.CloseAllFor(s);
         Target?.Close();
         Target = null;
+        if (_scanDir != null) { try { Directory.Delete(_scanDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } _scanDir = null; }
     }
+
+    static string? _scanDir;
 
     /// <summary>Start game, then Next Phase until North Combat (checklist, warnings), as a real turn would reach it.</summary>
     static string? ToCombat(MainWindow window, Action? beforeClose = null)
@@ -261,6 +265,58 @@ static class ScreenshotStates
                 Target = dw;
                 return null;
             }
+            case "workbench":
+            case "workbench-formulas":
+            case "workbench-phases":
+            {
+                if (s.Rules == null) return $"State '{name}' needs --rules.";
+                var wb = OpenWorkbench(window);
+                if (wb == null) return "The workbench did not open.";
+                var rules = s.Rules;
+                if (name == "workbench") { SelectWorkbenchTab(wb, "Tables"); if (rules.Tables.Count > 0) wb.ShowTable(rules.Tables[0].Id); }
+                else if (name == "workbench-formulas") { SelectWorkbenchTab(wb, "Formulas"); if (rules.Formulas.Count > 0) wb.ShowFormula(rules.Formulas[0].Id); }
+                else { SelectWorkbenchTab(wb, "Phases"); if (rules.Phases.Count > 0) wb.ShowPhase(rules.Phases[0].Id); }
+                Pump(600);
+                Target = wb;
+                return null;
+            }
+            case "workbench-search":
+            {
+                if (s.Rules == null) return "State 'workbench-search' needs the phases fixture (--rules phases.qrules, see build/port-screenshots.ps1).";
+                var wb = OpenWorkbench(window);
+                if (wb == null) return "The workbench did not open.";
+                if (!PumpUntil(() => wb.SearchIndexForTests != null, 60000)) return "The rulebook index was not ready after 60 s.";
+                wb.RunSearch("supply");
+                Pump(300);
+                var panel = wb.SearchPanelForTests;
+                if (!panel.SelectHit(2)) return "The search found no hit on page 2.";
+                panel.ActivateSelected();
+                var viewer = wb.Viewer;
+                var until = DateTime.UtcNow.AddSeconds(20);
+                do PumpUntil(() => viewer.Rendering.IsCompleted && !viewer.Busy, 500); while (DateTime.UtcNow < until && (viewer.Busy || viewer.PageCount == 0));
+                if (s.Rules.Formulas.Count > 0) { SelectWorkbenchTab(wb, "Formulas"); wb.ShowFormula(s.Rules.Formulas[0].Id); }
+                Pump(600);
+                Target = wb;
+                return null;
+            }
+            case "workbench-scan":
+            {
+                if (s.Rules == null) return "State 'workbench-scan' needs --rules.";
+                var wb = OpenWorkbench(window, 1280, 760);
+                if (wb == null) return "The workbench did not open.";
+                _scanDir = Path.Combine(Path.GetTempPath(), "qm-shot-scan-" + Guid.NewGuid().ToString("N"));
+                var (path, region) = WriteInventedTable(_scanDir);
+                var open = wb.OpenScanFile(path);
+                if (!PumpUntil(() => open.IsCompleted && wb.Scan.Loading.IsCompleted && wb.Scan.Image != null, 30000)) return "The scan did not open.";
+                wb.Scan.Pane.CommitRegion(region);
+                wb.Scan.Ocr.ShowGridTab();
+                wb.Scan.Ocr.ClickReadForSmoke();
+                PumpUntil(() => wb.Scan.Ocr.LastRead.IsCompleted, 60000);
+                Pump(600);
+                Console.Error.WriteLine("ocr status: " + wb.Scan.Ocr.StatusText);
+                Target = wb;
+                return null;
+            }
             case "log":
                 window.Commands.Execute("dice.1d6");
                 window.Commands.Execute("dice.2d6");
@@ -340,6 +396,54 @@ static class ScreenshotStates
             return (id, new Point(sp.X, sp.Y));
         }
         return null;
+    }
+
+    static Quartermaster.Desktop.Workbench.WorkbenchWindow? OpenWorkbench(MainWindow window, int w = 1100, int h = 720)
+    {
+        window.ShowWorkbench();
+        var wb = window.WorkbenchTool;
+        if (wb == null) return null;
+        wb.Width = w;
+        wb.Height = h;
+        Pump(500);
+        return wb;
+    }
+
+    static void SelectWorkbenchTab(Quartermaster.Desktop.Workbench.WorkbenchWindow wb, string header)
+    {
+        foreach (var item in wb.Tabs.Items.OfType<TabItem>())
+            if ((string?)item.Header == header) { wb.Tabs.SelectedItem = item; break; }
+        Pump(200);
+    }
+
+    /// <summary>An invented 6 x 4 table of two-digit numbers with borders, drawn with Skia (200 DPI look); returns the file and the table's region in pixels.</summary>
+    static (string Path, System.Drawing.Rectangle Region) WriteInventedTable(string dir)
+    {
+        const int cols = 6, rows = 4, cw = 200, ch = 70, margin = 60;
+        Directory.CreateDirectory(dir);
+        var rng = new Random(7341);
+        using var bmp = new SkiaSharp.SKBitmap(cols * cw + 2 * margin, rows * ch + 2 * margin);
+        using (var canvas = new SkiaSharp.SKCanvas(bmp))
+        {
+            canvas.Clear(SkiaSharp.SKColors.White);
+            using var face = SkiaSharp.SKTypeface.FromFamilyName("DejaVu Sans") ?? SkiaSharp.SKTypeface.Default;
+            using var font = new SkiaSharp.SKFont(face, 11f * 200f / 72f) { Edging = SkiaSharp.SKFontEdging.Antialias };
+            using var ink = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+            for (var r = 0; r < rows; r++)
+                for (var c = 0; c < cols; c++)
+                {
+                    var text = rng.Next(10, 100).ToString();
+                    var x = margin + c * cw + (cw - font.MeasureText(text)) / 2f;
+                    var y = margin + r * ch + ch / 2f - (font.Metrics.Ascent + font.Metrics.Descent) / 2f;
+                    canvas.DrawText(text, x, y, SkiaSharp.SKTextAlign.Left, font, ink);
+                }
+            using var pen = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, StrokeWidth = 2, Style = SkiaSharp.SKPaintStyle.Stroke };
+            for (var r = 0; r <= rows; r++) canvas.DrawLine(margin, margin + r * ch, margin + cols * cw, margin + r * ch, pen);
+            for (var c = 0; c <= cols; c++) canvas.DrawLine(margin + c * cw, margin, margin + c * cw, margin + rows * ch, pen);
+        }
+        var path = Path.Combine(dir, "invented-table.png");
+        using (var data = bmp.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)) File.WriteAllBytes(path, data.ToArray());
+        return (path, new System.Drawing.Rectangle(margin, margin, cols * cw, rows * ch));
     }
 
     static void Pump(int ms) => PumpUntil(() => false, ms);

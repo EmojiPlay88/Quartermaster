@@ -182,7 +182,7 @@ public sealed class AlertsTabTests : IDisposable
         tab.ConditionBox.Text = "";
         Pump();
         Assert.Equal("no condition", tab.MatchStatusText.Text);
-        Assert.Null(tab.MatchStatusText.Foreground);
+        Assert.NotSame(Avalonia.Media.Brushes.Firebrick, tab.MatchStatusText.Foreground);   // back to the theme brush
         var none = Session(withGame: false);
         Assert.Equal("no game open", Tab(none).MatchStatusText.Text);
     }

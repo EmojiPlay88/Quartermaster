@@ -7,8 +7,8 @@ How to read the columns:
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
 - **Linux**: ticked only for features verified by tests actually run on Linux. Stage 1 rows: verified by the headless tests in the CI workflow `.github/workflows/cross-platform.yml` on ubuntu-latest (green run 42510235329, 2026-11-08). Not yet opened on a real Linux desktop.
 - **Docs.Tests on Linux**: pass on ubuntu-latest in CI (run 42510235329).
-- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
-- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (this branch; search, scan and OCR panes moved to 4); 4 workbench and settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 3a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that name search, scans or OCR moved to stage 4.
+- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`, `docs/port/stage4a-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
+- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (search, scan and OCR panes moved to 4a); 4a = Rules Workbench, rulebook search, scans and OCR (this branch); 4b = Settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 4a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that say 4a name the Workbench, search, scans or OCR; rows that name Settings are 4b.
 
 ## Stage-1 deviations from the WinForms app (deliberate or known)
 
@@ -57,7 +57,7 @@ Stage 2b = phase strip and panel, Next Phase, Step Back, formula window and chea
 - The map-tab pop-out and the Window menu items (Cascade, Tile, Pop Out Active Window, floating windows list) are not ported; Desktop uses tabs. Only the log and the phase panel pop out.
 - The phase-boundary autosave uses the WinForms default interval (5 minutes) until Settings (stage 4) offers the choice.
 - The formula window, cheat sheet, batch grid and dialogs are Avalonia windows owned by the main window; their placement is the platform's (centred on the owner), and the cheat sheet opens beside the formula window.
-- Tables-tree activation is ignored until the Rules Workbench (stage 4); document and chart nodes of the module tree open their windows (3b).
+- Tables-tree activation opens the Rules Workbench since stage 4a; document and chart nodes of the module tree open their windows (3b).
 - Floating log and phase windows are clamped onto a screen that exists (primary screen as fallback). Real second-display behaviour is only checked by the Mac checklist (`docs/port/stage2b-mac-checklist.md`).
 - Open Autosave, Game > Send Turn and the other WinForms menus around phases wait for their own stages (4 and 5).
 - When a rules pack without phases replaces one with phases while the phase panel floats, Desktop docks the panel back (the column stays hidden); WinForms leaves the floating window open showing the no-phases text.
@@ -88,10 +88,28 @@ Stage 3b = chart windows, document windows (PDF, text, HTML), the module tree's 
 - A PDF is shown one page at a time, with its own bar (Page: n of N, previous / next, Zoom out / in, Fit width, Fit page, percent). WinForms shows the PDF in its own viewer window. Page Down / Page Up / Home / End change the page; Cmd or Ctrl with the wheel zooms, a plain wheel scrolls.
 - HTML documents are not shown inside the app: the window says "This document opens in your web browser." with an Open in browser button and the page opens in the system browser. Text documents are shown read-only in a monospace box.
 - Chart and document windows float: separate windows owned by the main window, one per chart or document entry, bounds remembered per module ("chart:name|file", "doc:entry"); there are no MDI children and no docking. They close with the game.
-- Rulebook search, the scan pane, image pane and OCR panel moved to stage 4 with the Rules Workbench. The viewer has no search box; a search term can only come from code (the rule-link flow and tests), and the page is then drawn with the term highlighted.
-- OCR engine: Windows OCR won the benchmark, so stage 4 adds a Windows-only recognizer; Tesseract (bundled, English only) serves Mac and Linux. No OCR runs in 3b.
+- Rulebook search, the scan pane, image pane and OCR panel moved to stage 4a with the Rules Workbench (done there). The viewer itself has no search box; the search lives in the Workbench and the page is drawn with the term highlighted.
+- OCR engine: Windows OCR won the benchmark, so stage 4a adds a Windows-only recognizer as a run-time plugin; Tesseract (bundled, English only) serves Mac and Linux. No OCR runs in 3b.
 - The chart window's wheel zooms at the cursor (as the map view); drag pans with the left or middle button.
 - Natives: PDFium, Tesseract, Leptonica and `tessdata/eng.traineddata` are in every publish folder; CI (`build/check-publish-natives.sh`) fails the publish step when one is missing. Loading them on macOS and Linux has only run in CI publishes so far, not on a real Mac or Linux desktop until the Mac checklist (`docs/port/stage3b-mac-checklist.md`) is done.
+
+## Stage-4a deviations from the WinForms app (deliberate or known)
+
+Stage 4a = Rules Workbench (Tables, Formulas, Properties, Phases, Alerts, Visibility), its dialogs, rulebook search, scan pane, Open scan..., OCR import. Settings (stage 4b) are not in.
+
+- The Workbench is a floating window owned by the main window (bounds remembered per module under `bench:workbench`), not an MDI child; it closes with the session.
+- The OCR import's "where to put the table" question is an Avalonia dialog of its own (the WinForms one is a message-box style prompt).
+- The edit grids have their own look (grey headers, white cells, blue current cell; cells are text blocks with an editor opened over the current one), not the DataGridView. Keyboard behaviour follows the WinForms grid; Tab out of the last cell, arrow keys inside an open combo dropdown and Ctrl/Cmd+C on cells are checked by hand on the Mac (checklist), not headless (cell copy is not built). Cell edits commit at the end of the edit (no 400 ms cell debounce); the notes boxes still debounce.
+- Windows OCR runs through the `ocr-windows` plugin (`Quartermaster.OcrWindows`, never referenced by the Desktop project) and falls back to Tesseract with one log line when the plugin or an OCR language is missing; `QUARTERMASTER_OCR_ENGINE=tesseract|windows` overrides. Mac and Linux use Tesseract, English only, until 4b (more languages need Settings).
+- Windows OCR lays the strips out with the gap after each cell (mode 2), which reproduces the WinForms per-strip result and meets the 24/24 gate; the per-cell code differs from WinForms (details in `docs/port/stage3b-ocr-benchmark.md`).
+- Flipping through TIFF or scan pages briefly holds two bitmaps (the old one is released when the new one is shown).
+- The FormulasTab test preview is embedded and preview-only: no Formula / Working group titles, no notes tooltip, no rule-ref button, no cheat sheet; the sample values typed into it are dropped when another formula is selected, and it is rebuilt on every pack commit.
+- The Columns dialog drops all blank lines (WinForms: trailing ones only).
+- Cmd instead of Ctrl in the texts and tooltips on macOS (Cmd+Shift+W, Cmd+Shift+F); the scan pane's zoom tooltips name Ctrl/Cmd literally.
+- The guest (read-only) Workbench is tested through the guest flag only; online play reaches Desktop in stage 5, which must also close the Workbench before a received turn replays (WinForms MainForm.Turns).
+- Screenshot pass (headless, `build/port-screenshots.ps1`): the Phases tab at 1100 px clips some button captions ("Duplicat", "Remov", "Move U"); the Tables shot shows "Choose a document above." in the left pane until a rulebook is chosen. Both are layout differences from the WinForms window, not data differences. The pass also found and fixed two bugs the headless tests could not see: grid cell text drawn invisible (a null local foreground; also in the Rule ref row and the alert match status) and fixed-width grids centred instead of left-aligned.
+- CI publishes macOS and Linux Desktop builds only: there is no win-x64 Desktop publish step yet (the `ocr-windows` plugin is only checked by local publishes with `build/check-publish-natives.sh`).
+- The Windows SDK projection DLLs shipped in `ocr-windows/` need their redistribution terms read before the next release (open user item).
 
 ## Before the stage release
 
@@ -137,7 +155,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Overview | 3a | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
 | View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | always visible in Desktop |
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
-| Tools > Rules Workbench | 4 |  |  |  |  |
+| Tools > Rules Workbench | 4a | ✔ |  |  | Cmd/Ctrl+Shift+W; one floating window per session (bounds under `bench:workbench`), refused while a received turn replays |
 | Tools > Inventory, Notes | 3a | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
 | Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2a | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice wait for Settings (stage 4) |
 | Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right (Cmd+Right on macOS) steps the turn; with a phased rules pack it is Next Phase, as WinForms (2b). Turn label in the status bar |
@@ -157,7 +175,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MainForm: command line <vmod> --setup N / --new | 1 | ✔ | ✔ | ✔ | --rules and --new-rules too (stage 2a); the other options come later |
 | MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | user-editable keys come with Settings |
 | ModuleTreePanel | 2b | ✔ |  |  | map nodes activate the tab; setup nodes open the setup chooser (no preselect yet); chart nodes open their chart window (3b); document nodes open their document window, one per document; rebuilds when the viewer changes |
-| TablesTreePanel | 2b | ✔ |  |  | Tables and Formulas folders, refreshed 200 ms after rules changes; activation ignored until stage 4; split with the module tree remembered (ui.json) |
+| TablesTreePanel | 2b | ✔ |  |  | Tables and Formulas folders, refreshed 200 ms after rules changes; double-click opens the Workbench on that table or formula (4a); split with the module tree remembered (ui.json) |
 | DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches open the Ledger and select the holder's row (Depots & Global tab, filter cleared when it hides it; never the counters selected on the map); shown whenever a game is open (Settings toggle in stage 4) |
@@ -228,16 +246,16 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | ChartWindow | 3b | ✔ |  |  | floating window owned by the main window, one per chart (name + file), titled with the chart name; toolbar "Fit" and "100%" ("100%" is 1 image pixel per DIP, 2 device pixels on a Retina screen, same as the map view; the image is fetched and sampled at zoom x screen scaling); the picture on the workspace grey, linear sampling (mipmaps below 100 %); first layout fits; wheel zooms ×1.25 / ×0.8 at the cursor; left or middle drag pans (size-all cursor); bounds remembered per module under "chart:name|file"; all close with the game |
 | PdfWindow, PdfViewerControl | 3b | ✔ |  |  | DocumentWindow hosts the DocumentViewer without its toolbar: one window per document entry owned by the main window, bounds remembered per module under "doc:{entry}", closed with the session; opened from the module tree or a Rule ref (OpenDocumentAtPage reuses the window and moves the page) |
 | DiagnosticsWindow | 3a | ✔ |  |  | Severity / Category / Message / Context, Show filter, Copy all (clipboard), live updates from any thread; the status-bar link ("n warning(s)/error(s) - click here to view diagnostics") opens it |
-| SearchPanel, ScanPane, ImagePane, OcrPanel | 4 |  |  |  | moved from 3b to stage 4 with the Rules Workbench (they are workbench tools). The OCR engine is chosen: the benchmark (docs/port/stage3b-ocr-benchmark.md) put Windows OCR ahead of Tesseract (24/24 against 21/24 on the invented test pages), so stage 4 adds a Windows-only recognizer behind `IOcrRecognizer`; Tesseract stays bundled (`TesseractRecognizer`, tessdata `eng.traineddata`) as the recognizer for Mac and Linux. The viewer can already draw search highlights (`PdfHighlights`); there is no search box until stage 4 |
+| SearchPanel, ScanPane, ImagePane, OcrPanel | 4a | ✔ |  |  | Workbench tools (4a): rulebook search with highlights and Use as rule ref, Scan this page, Open scan… (image, multi-page TIFF, PDF; an opened PDF joins the search and its refs are `scan:{file}`), region read, grid fix, Import into table. OCR engine per OS behind `IOcrRecognizer`: Windows OCR through the `ocr-windows` plugin (24/24 on the invented pages against Tesseract 21/24), with the fallback rules in `docs/port/stage3b-ocr-benchmark.md`; Tesseract (bundled, English only) on Mac and Linux until 4b |
 
 ## Rules Workbench and Settings
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| WorkbenchWindow and tabs (Tables, Formulas, Properties, Phases, Alerts, Visibility) | 4 |  |  |  |  |
-| ColumnsDialog, PasteTableDialog, BlockDialog | 4 |  |  |  |  |
-| SettingsDialog and SettingsTabs (General, Game, Display, Map, Dice and Log, Toolbar, Folders) | 4 |  |  |  |  |
-| KeyboardTab, ShortcutCaptureDialog | 4 |  |  |  |  |
+| WorkbenchWindow and tabs (Tables, Formulas, Properties, Phases, Alerts, Visibility) | 4a | ✔ |  |  | Tables-tree activation, problems list, rule ref row, Find in rulebook; headless-tested incl. guest read-only (guest flag only until stage 5 brings online to Desktop). `build/port-screenshots.ps1` writes stage4a-desktop-workbench*.png and the WinForms equivalents |
+| ColumnsDialog, PasteTableDialog, BlockDialog | 4a | ✔ |  |  | plus the import-target dialog of the OCR import (own Avalonia dialog, see the 4a deviations) |
+| SettingsDialog and SettingsTabs (General, Game, Display, Map, Dice and Log, Toolbar, Folders) | 4b |  |  |  |  |
+| KeyboardTab, ShortcutCaptureDialog | 4b |  |  |  |  |
 
 ## Multiplayer and launcher
 

@@ -11,6 +11,10 @@
   stage3a-winforms-ledger.png.
   Stage 3b adds stage3b-desktop-<state>.png (chart, document, document-search) on an invented module (documents.vmod: one chart picture and a two-page
   invented rulebook PDF) that the script writes with the SmokeFixtureWriter test (QM_WRITE_SMOKE_FIXTURE) into a temp folder it deletes afterwards.
+  Stage 4a adds stage4a-desktop-<state>.png (workbench, workbench-formulas, workbench-phases on the Riverland pack; workbench-search on the invented
+  phases.vmod/phases.qrules rulebook with the query "supply"; workbench-scan on an invented table image the state draws with Skia and reads with the
+  platform recognizer) and the WinForms equivalents stage4a-winforms-workbench-<tab>.png (--screenshot-workbench --workbench-tab tables|formulas|phases),
+  stage4a-winforms-search.png (--screenshot-search) and stage4a-winforms-ocr.png (--screenshot-ocr), all off-screen.
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -104,6 +108,62 @@ try {
 finally {
     $env:QM_WRITE_SMOKE_FIXTURE = $null
     if (Test-Path $fixDir) { Remove-Item $fixDir -Recurse -Force }
+}
+
+# Stage 4a states, Desktop, headless. The workbench window is captured as its own picture. The search state runs on the invented phases fixture
+# (a rulebook that mentions "supply"); the others on the Riverland pack. The scan state draws its own invented table image into a temp folder.
+$fix4 = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-fixture4a-' + [Guid]::NewGuid().ToString('N'))
+$phasesVmod = $null; $phasesRules = $null
+try {
+    $env:QM_WRITE_SMOKE_FIXTURE = $fix4
+    & dotnet test (Join-Path $repo 'tests\Quartermaster.Render.Tests') -c Release --nologo -v q --filter 'FullyQualifiedName~SmokeFixtureWriter'
+    if ($LASTEXITCODE -ne 0) { throw 'Writing the phases fixture failed' }
+    $env:QM_WRITE_SMOKE_FIXTURE = $null
+    $phasesVmod = Join-Path $fix4 'phases.vmod'
+    $phasesRules = Join-Path $fix4 'phases.qrules'
+    if (-not (Test-Path $phasesVmod) -or -not (Test-Path $phasesRules)) { throw "phases.vmod / phases.qrules were not written to $fix4" }
+    $layout4 = Join-Path $fix4 'layout'
+    New-Item -ItemType Directory -Force $layout4 | Out-Null
+    $env4 = @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_LAYOUT_ROOT = $layout4 }
+    foreach ($state in 'workbench', 'workbench-formulas', 'workbench-phases', 'workbench-scan') {
+        $png = Join-Path $out "stage4a-desktop-$state.png"
+        Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) $env4 $png "desktop-$state"
+    }
+    $png = Join-Path $out 'stage4a-desktop-workbench-search.png'
+    Invoke-Shot $deskExe @($phasesVmod, '--new', '--rules', $phasesRules, '--screenshot-state', 'workbench-search', '--screenshot-main', $png) $env4 $png 'desktop-workbench-search'
+
+    # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
+    $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'
+    $marker = Join-Path $demoRoot '.quartermaster-demo-root'
+    function Reset-DemoRoot {
+        if ((Test-Path $demoRoot) -and -not (Test-Path $marker)) { throw "$demoRoot exists but was not made by build/wiki-screenshots.ps1 or this script; remove it by hand." }
+        if (Test-Path $demoRoot) { Remove-Item $demoRoot -Recurse -Force }
+    }
+    Reset-DemoRoot
+    foreach ($d in 'AppData\Roaming', 'AppData\Local', 'Documents', 'layout') { New-Item -ItemType Directory -Force (Join-Path $demoRoot $d) | Out-Null }
+    Set-Content -Path $marker -Value 'made by build/port-screenshots.ps1' -Encoding ascii
+    try {
+        $env4wf = @{
+            APPDATA = Join-Path $demoRoot 'AppData\Roaming'; LOCALAPPDATA = Join-Path $demoRoot 'AppData\Local'; USERPROFILE = $demoRoot
+            QUARTERMASTER_LAYOUT_ROOT = Join-Path $demoRoot 'layout'; DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_SHOT_OFFSCREEN = '1'
+        }
+        foreach ($tab in 'tables', 'formulas', 'phases') {
+            $png = Join-Path $out "stage4a-winforms-workbench-$tab.png"
+            try { Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot-workbench', $png, '--workbench-tab', $tab, '--smoke', '8', '--no-smoke-documents') $env4wf $png "winforms-workbench-$tab" }
+            catch { Write-Warning "winforms-workbench-${tab}: $($_.Exception.Message)" }
+        }
+        $png = Join-Path $out 'stage4a-winforms-search.png'
+        try { Invoke-Shot $appExe @($phasesVmod, '--rules', $phasesRules, '--smoke-search', '--screenshot-search', $png, '--smoke', '8') $env4wf $png 'winforms-search' }
+        catch { Write-Warning "winforms-search: $($_.Exception.Message)" }
+        $png = Join-Path $out 'stage4a-winforms-ocr.png'
+        try { Invoke-Shot $appExe @($phasesVmod, '--rules', $phasesRules, '--smoke-ocr', '--screenshot-ocr', $png, '--smoke', '8') $env4wf $png 'winforms-ocr' }
+        catch { Write-Warning "winforms-ocr: $($_.Exception.Message)" }
+    }
+    finally { Reset-DemoRoot }
+}
+finally {
+    $env:QM_WRITE_SMOKE_FIXTURE = $null
+    if (Test-Path $fix4) { Remove-Item $fix4 -Recurse -Force }
 }
 
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
