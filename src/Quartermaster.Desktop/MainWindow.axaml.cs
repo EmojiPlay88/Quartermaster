@@ -695,7 +695,7 @@ public partial class MainWindow : Window
     }
 
     async Task<bool> ConfirmDiscardAsync() =>
-        DiscardQuestion() is not { } q || await _dialogs.AskYesNoAsync(this, q, Caption);
+        DiscardQuestion() is not { } q || await _dialogs.AskYesNoAsync(this, q, Caption, defaultNo: true);
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
@@ -713,7 +713,7 @@ public partial class MainWindow : Window
         _closeAsking = true;
         bool yes;
         // WinForms: ConfirmDiscard, then ConfirmRulesSaved.
-        try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption)) && await ConfirmRulesSavedAsync(); }
+        try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption, defaultNo: true)) && await ConfirmRulesSavedAsync(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("close question: " + ex); yes = false; }
         finally { _closeAsking = false; }
         if (!yes) return;

@@ -189,6 +189,7 @@ public sealed class TableDialogsTests
         var box = owner.OwnedWindows.OfType<Window>().Single();
         var yesBtn = FindButtons(box).Single(b => (string?)b.Content == "Yes");
         Assert.True(yesBtn.IsDefault);
+        Assert.True(yesBtn.IsFocused);
         Click(yesBtn);
         Assert.True(await yes);
 
@@ -196,6 +197,7 @@ public sealed class TableDialogsTests
         box = owner.OwnedWindows.OfType<Window>().Single();
         var noBtn = FindButtons(box).Single(b => (string?)b.Content == "No");
         Assert.True(noBtn.IsDefault);
+        Assert.True(noBtn.IsFocused);
         Click(noBtn);
         Assert.False(await no);
         owner.Close();

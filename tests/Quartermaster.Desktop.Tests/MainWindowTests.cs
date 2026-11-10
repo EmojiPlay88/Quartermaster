@@ -544,6 +544,7 @@ public sealed class MainWindowTests : IDisposable
         w.Close();
         Pump();
         Assert.Equal(2, _dialogs.Questions.Count);
+        Assert.All(_dialogs.YesNoDefaultNo, d => Assert.True(d));   // close discard is a WinForms Button2 (No) question
         Assert.False(w.IsVisible);
     }
 
@@ -907,6 +908,7 @@ public sealed class MainWindowTests : IDisposable
         Pump();
 
         Assert.Equal(new[] { ("The current game has unsaved changes. Discard them?", "Quartermaster") }, _dialogs.Questions);
+        Assert.Equal(new[] { true }, _dialogs.YesNoDefaultNo);   // ConfirmDiscard defaults to No
         Assert.Same(game, w.Session.Game);   // No: the same game stays, still dirty
         Assert.NotEqual(before, Json(w.Session.Game!.State));
         Assert.True(w.HasUnsavedChanges);
