@@ -32,12 +32,12 @@ What this build does not have yet, so you know what to expect:
 
 ## D. Editing
 
-9. **Tables tab.** Select a table. Click into a cell, type a number, press Return: the cell takes it. Press **Tab** repeatedly, past the last cell of a row, and from the **last cell of the grid**: focus should move on to the next control, not get stuck in the grid. Open a cell's dropdown (where a cell has one) and use the **arrow keys** and Return to pick an entry; the dropdown must follow the keys. Add a row and a column with the buttons, then remove them again.
+9. **Tables tab.** Select a table. Click into a cell, type a number, press Return: the cell takes it. Press **Tab** repeatedly, past the last cell of a row, and from the **last cell of the grid**: focus should move on to the next control, not get stuck in the grid. Add a row and a column with the buttons, then remove them again.
 10. **Formulas tab.** Edit a formula's expression, and type in the sample-values preview if it shows one: the result updates. Switch to another formula and back.
 11. **Properties tab.** Select a property and change its sheet field by **typing a value that is not in the list** (a free value) and pressing Tab: the value stays.
 12. **Phases tab.** Select a phase, change its instructions, add a checklist item and a warning, and remove them again.
-13. **Alerts** and **Visibility** tabs: add an alert and a visibility rule, change them, delete them.
-14. **Save and reopen.** Use **Save** in the Workbench (or File > Save Rules Pack), quit the app, start it again, open the same module and pack: all your edits from steps 9 to 13 are there. **Also open the saved pack in the Windows (WinForms) Quartermaster** if you have it at hand: it must load without an error and show the same edits.
+13. **Alerts** and **Visibility** tabs. On Alerts, add an alert, change it, delete it. On Visibility, open the **Visibility** dropdown of a property (and the **Owner side** dropdown of a holder or map, if the module has one) and use the **arrow keys** and Return to pick an entry; the dropdown must follow the keys. Change a property's visibility, change an owner, and tick **Private dice** on a formula in the Formulas box. There is no add or delete on this tab.
+14. **Save and reopen.** Use **File > Save Rules Pack** in the main window (the Workbench has no Save of its own), quit the app, start it again, open the same module and pack: all your edits from steps 9 to 13 are there. **Also open the saved pack in the Windows (WinForms) Quartermaster** if you have it at hand: it must load without an error and show the same edits.
 15. Break something on purpose (an unfinished formula such as `1 +`): the **problems list** at the bottom names it; double-click the entry: the Workbench jumps to it. Fix it: the entry disappears.
 
 ## E. Searching the rulebook
