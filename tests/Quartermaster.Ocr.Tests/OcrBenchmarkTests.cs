@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Text;
 using Quartermaster.Documents;
+using Quartermaster.OcrWindows;
 using Quartermaster.Render.Ocr;
 using SkiaSharp;
 using Xunit.Abstractions;
@@ -21,7 +22,10 @@ public sealed class OcrBenchFactAttribute : FactAttribute
     }
 }
 
-/// <summary>Windows.Media.Ocr vs Tesseract on the same invented tables (GDI-drawn, see OcrServiceTests.InventedTable).</summary>
+/// <summary>
+/// Windows.Media.Ocr (WinForms OcrService) vs Tesseract vs the 4a Windows plugin (OcrReader over WindowsRecognizer) on the same
+/// invented tables (GDI-drawn, see OcrServiceTests.InventedTable).
+/// </summary>
 public class OcrBenchmarkTests(ITestOutputHelper output)
 {
     private const int Cols = 6, Rows = 4, CellW = 200, CellH = 70, Margin = 60, Inset = 5;
@@ -67,11 +71,13 @@ public class OcrBenchmarkTests(ITestOutputHelper output)
     public async Task Tesseract_vs_Windows_on_invented_tables()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("| Table | Windows cells | Windows ms | Tesseract cells | Tesseract ms |");
-        sb.AppendLine("|---|---|---|---|---|");
+        sb.AppendLine("| Table | Windows cells | Windows ms | Tesseract cells | Tesseract ms | Windows (4a plugin) cells | Windows (4a plugin) ms |");
+        sb.AppendLine("|---|---|---|---|---|---|---|");
         var win = new OcrService();
         using var tess = new TesseractRecognizer();
         var reader = new OcrReader(tess);
+        using var plugin = new WindowsRecognizer();
+        var pluginReader = new OcrReader(plugin);
         foreach (var (name, bordered, factor) in new[] { ("bordered, 200 DPI", true, 1.0), ("unbordered, 200 DPI", false, 1.0), ("bordered, half size", true, 0.5), ("unbordered, half size", false, 0.5) })
         {
             var (full, expected) = OcrServiceTests.InventedTable(bordered);
@@ -84,6 +90,7 @@ public class OcrBenchmarkTests(ITestOutputHelper output)
 
             await win.ReadCellsAsync(img, boxes, pad, "en-US", CancellationToken.None);
             await reader.ReadCellsAsync(sk, skBoxes, pad, "eng", CancellationToken.None);
+            await pluginReader.ReadCellsAsync(sk, skBoxes, pad, "en-US", CancellationToken.None);
 
             var sw = Stopwatch.StartNew();
             var w = await win.ReadCellsAsync(img, boxes, pad, "en-US", CancellationToken.None);
@@ -91,7 +98,10 @@ public class OcrBenchmarkTests(ITestOutputHelper output)
             sw.Restart();
             var t = await reader.ReadCellsAsync(sk, skBoxes, pad, "eng", CancellationToken.None);
             long tMs = sw.ElapsedMilliseconds;
-            sb.AppendLine($"| {name} | {Score(w, expected)}/24 | {wMs} | {Score(t, expected)}/24 | {tMs} |");
+            sw.Restart();
+            var p = await pluginReader.ReadCellsAsync(sk, skBoxes, pad, "en-US", CancellationToken.None);
+            long pMs = sw.ElapsedMilliseconds;
+            sb.AppendLine($"| {name} | {Score(w, expected)}/24 | {wMs} | {Score(t, expected)}/24 | {tMs} | {Score(p, expected)}/24 | {pMs} |");
         }
         output.WriteLine(sb.ToString());
         var path = Path.Combine(Path.GetTempPath(), "qm-ocr-bench.md");

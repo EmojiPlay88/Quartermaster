@@ -6,6 +6,7 @@
     <Project Path="src/Quartermaster.Documents/Quartermaster.Documents.csproj" />
     <Project Path="src/Quartermaster.Net/Quartermaster.Net.csproj" />
     <Project Path="src/Quartermaster.Ocr/Quartermaster.Ocr.csproj" />
+    <Project Path="src/Quartermaster.OcrWindows/Quartermaster.OcrWindows.csproj" />
     <Project Path="src/Quartermaster.Relay/Quartermaster.Relay.csproj" />
     <Project Path="src/Quartermaster.Render/Quartermaster.Render.csproj" />
     <Project Path="src/Quartermaster.Rules/Quartermaster.Rules.csproj" />
