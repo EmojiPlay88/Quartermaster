@@ -343,6 +343,9 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
             UpdatePageSize();
             ShowPage(debounce: false);
             StartFind();
+            // A freshly opened document reacts to Page Down / zoom keys without a click first.
+            if (TopLevel.GetTopLevel(this) is { } top && !(top.FocusManager?.GetFocusedElement() is Visual f && Avalonia.VisualTree.VisualExtensions.IsVisualAncestorOf(this, f)))
+                _pageView.Focus();
         }, DispatcherPriority.Background);
         if (changed) PageChanged?.Invoke(_page);
     }

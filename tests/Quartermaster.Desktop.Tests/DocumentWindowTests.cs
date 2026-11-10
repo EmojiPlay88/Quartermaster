@@ -1,5 +1,7 @@
 using System.Drawing;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.Threading;
 using Quartermaster.Desktop.Documents;
 using Quartermaster.Desktop.Input;
@@ -105,6 +107,48 @@ public sealed class DocumentWindowTests : IDisposable
         Pump();
         Assert.False(w.DocumentWindows.ContainsKey(a.Document.EntryName));
         Assert.NotSame(a, Open(w, 0));   // closed: a new one opens
+    }
+
+    static void Settle(DocumentViewer v, int timeoutMs = 20000)
+    {
+        var until = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < until)
+        {
+            Pump();
+            if (v.Rendering.IsCompleted && !v.Busy) { Pump(); if (v.Rendering.IsCompleted && !v.Busy) return; }
+            using var slice = new CancellationTokenSource(10);
+            Dispatcher.UIThread.MainLoop(slice.Token);
+        }
+        throw new TimeoutException("viewer did not settle: " + v.StateForTests);
+    }
+
+    [AvaloniaFact]
+    public void Fresh_document_window_pages_and_zooms_without_a_click()
+    {
+        var w = Game();
+        var a = Open(w, 0);
+        Settle(a.Viewer);
+        var zoom = a.Viewer.Zoom;
+        a.KeyPress(Key.PageDown, RawInputModifiers.None, PhysicalKey.PageDown, null);
+        Assert.Equal(2, a.Viewer.Page);
+        a.KeyPress(Key.OemPlus, RawInputModifiers.Control, PhysicalKey.Equal, null);
+        Assert.True(a.Viewer.Zoom > zoom);
+    }
+
+    [AvaloniaFact]
+    public void GoToPage_before_the_window_opens_is_applied_on_open()
+    {
+        var w = Game();
+        var d = w.Session!.Model.Documents[0];
+        var win = new DocumentWindow(w.Session, d, 1, _dialogs);
+        try
+        {
+            win.GoToPage(3);   // not shown yet
+            win.Show();
+            Settle(win.Viewer);
+            Assert.Equal(3, win.Viewer.Page);
+        }
+        finally { win.Close(); }
     }
 
     [AvaloniaFact]
