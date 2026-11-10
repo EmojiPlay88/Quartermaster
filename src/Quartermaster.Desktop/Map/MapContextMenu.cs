@@ -72,7 +72,7 @@ public static class MapContextMenu
                 : Task.FromResult<string?>(null),
             // Settings "ask before deleting" off: always yes. Without dialogs nothing is deleted.
             ConfirmDeleteAsync = question => services?.ConfirmDelete?.Invoke() == false ? Task.FromResult(true)
-                : services != null && Owner(view) is { } owner ? services.Dialogs.AskYesNoAsync(owner, question, Caption)
+                : services != null && Owner(view) is { } owner ? services.Dialogs.AskYesNoAsync(owner, question, Caption, defaultNo: true)
                 : Task.FromResult(false),
             EditSheet = (action, pieceId) => view.RunMenuCommand(() => EditSheetAsync(view, action, pieceId)),
             ShowFormula = services?.ShowFormula,

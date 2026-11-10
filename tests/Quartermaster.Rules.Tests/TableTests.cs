@@ -103,6 +103,16 @@ public class TableTests
         Assert.Equal(2, csv.Cells[0].Count); // the clipboard path still reads commas as CSV
     }
 
+    [Fact] public void Problem_one_column_with_key_text()
+    {
+        var g = TablePaste.Parse("Cost\n10\n20\n", true, true, tsvOnly: true);
+        Assert.Equal("This grid has one column: with \"First column is the row key\" there are no values. Clear that box, or split the column.",
+            TablePaste.Problem(g, true));
+        Assert.Null(TablePaste.Problem(g, false));
+        Assert.Null(TablePaste.Problem(TablePaste.Parse("Key\tV\na\t1\n", true, true, tsvOnly: true), true));
+        Assert.Null(TablePaste.Problem(new PastedGrid(new(), new(), new()), true));
+    }
+
     [Fact] public void Paste_Csv_Quoted()
     {
         var g = TablePaste.Parse("Key,Value\n\"a,b\",\"say \"\"hi\"\"\"\nc,d", true, true);
