@@ -453,4 +453,93 @@ public sealed class TablesTabTests : IDisposable
         Assert.Equal("Notes here", back.Tables[0].Notes);
         Assert.Equal(["Wet", "Dry"], back.Tables[1].ColumnKeys);
     }
+
+    [AvaloniaFact]
+    public void Detaching_the_tab_flushes_typed_notes_and_open_edit()
+    {
+        var s = Session(true, Cost());
+        var tab = Tab(s);
+        var w = (Window)tab.Parent!;
+        tab.Notes.Text = "typed quickly";
+        tab.Grid.BeginEdit(0, 1, "42");
+        w.Content = null;   // a hidden tab is detached
+        Pump();
+        Assert.Equal("typed quickly", T(s, "t-cost").Notes);
+        Assert.Equal("42", T(s, "t-cost").Cells[0][0]);
+        w.Content = tab;
+        Pump();
+        Assert.Equal("typed quickly", tab.Notes.Text);
+    }
+
+    [AvaloniaFact]
+    public void Edited_table_deleted_externally_drops_edit_and_touches_nothing_else()
+    {
+        var s = Session(true, Cost(), Terrain());
+        var tab = Tab(s);
+        tab.Grid.BeginEdit(0, 1, "zzz");
+        s.UpdateRules(p => p with { Tables = p.Tables.Where(t => t.Id != "t-cost").ToList() });
+        Pump();
+        Assert.False(tab.Grid.IsEditing);
+        Assert.Equal("t-terrain", tab.SelectedTableId);
+        Assert.Equal("a", T(s, "t-terrain").Cells[0][0]);
+        Assert.Equal(Terrain().Cells[0], T(s, "t-terrain").Cells[0]);
+    }
+
+    [AvaloniaFact]
+    public void Tab_without_a_pack_is_empty_and_disabled()
+    {
+        var tab = Tab(Session(false));
+        Assert.Null(tab.SelectedTableId);
+        Assert.Equal(0, tab.Grid.RowCount);
+        Assert.False(tab.AddRowButton.IsEnabled);
+        Assert.False(tab.KindBox.IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Rename_dialog_answer_is_dropped_when_the_table_changed_meanwhile()
+    {
+        var s = Session(true, Cost(), Terrain());
+        var tab = Tab(s);
+        var gate = new TaskCompletionSource<string?>();
+        _dialogs.TextGate = gate;
+        Click(tab.RenameButton);   // waiting on "Cost"
+        s.UpdateRules(p => p with { Tables = p.Tables.Where(t => t.Id != "t-cost").ToList() });
+        Pump();
+        gate.SetResult("Zed");
+        Pump();
+        Assert.Equal(["Terrain"], s.Rules!.Tables.Select(t => t.Name).ToList());
+    }
+
+    [AvaloniaFact]
+    public void Opening_and_selecting_leaves_pack_untouched()
+    {
+        var s = Session(true, Cost() with { Notes = "a\r\nb" }, Terrain());
+        var pack = s.Rules;
+        var dirty = s.RulesDirty;
+        var tab = Tab(s);
+        tab.SelectTable("t-terrain");
+        Pump();
+        tab.SelectTable("t-cost");
+        Pump();
+        tab.Notes.Focus();
+        tab.Grid.Focus();   // leaving the notes box with CRLF notes and no edit
+        Pump();
+        tab.CommitPending();
+        Assert.Same(pack, s.Rules);
+        Assert.Equal(dirty, s.RulesDirty);
+    }
+
+    [AvaloniaFact]
+    public void Refused_edit_in_guest_mode_redraws_from_the_pack()
+    {
+        var s = Session(true, Cost());
+        var tab = Tab(s);
+        s.EnterGuestMode();
+        tab.Grid.BeginEdit(0, 1, "99");
+        tab.Grid.CommitEdit();
+        Pump();
+        Assert.Equal("2", tab.Grid.Cell(0, 1));
+        Assert.Equal("2", T(s, "t-cost").Cells[0][0]);
+        Assert.Contains(s.Log.Items, e => e.Message.StartsWith("Table edit failed"));
+    }
 }

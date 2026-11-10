@@ -96,7 +96,12 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
         _grid.CellCommitted += (r, c, text) => Run(() => OnCellCommitted(r, c, text));
 
         AttachedToVisualTree += (_, _) => { _s.RulesChanged += OnRulesChanged; Reload(); };
-        DetachedFromVisualTree += (_, _) => { _s.RulesChanged -= OnRulesChanged; _notesTimer.Stop(); };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            Run(() => { FlushNotes(); _grid.CommitEdit(); });   // a hidden tab is detached: what was typed must reach the pack first
+            _s.RulesChanged -= OnRulesChanged;
+            _notesTimer.Stop();
+        };
         Reload();
     }
 
@@ -129,9 +134,19 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
         catch (Exception ex) when (ex is not OutOfMemoryException) { Failed(ex); }
     }
 
-    void Failed(Exception ex) => _s.Log.Add(DiagnosticSeverity.Warning, "rules", "Table edit failed: " + ex.Message, "");
+    /// <summary>Logs the failure and redraws from the pack, so a refused edit (guest, replay) never leaves text the pack does not hold.</summary>
+    void Failed(Exception ex)
+    {
+        _s.Log.Add(DiagnosticSeverity.Warning, "rules", "Table edit failed: " + ex.Message, "");
+        try { Reload(); }
+        catch (Exception ex2) when (ex2 is not OutOfMemoryException) { _s.Log.Add(DiagnosticSeverity.Warning, "rules", "Table tab reload failed: " + ex2.Message, ""); }
+    }
 
     TableDef? Current => _selected == null ? null : _s.Rules?.ById<TableDef>(_selected);
+
+    /// <summary>The table <paramref name="id"/> when it is still the selected one and still in the pack. Async handlers capture the id
+    /// before awaiting a dialog and re-check it afterwards, so a change made meanwhile never lands on another table.</summary>
+    TableDef? StillCurrent(string id) => _selected == id ? Current : null;
 
     // ---------- model updates ----------
 
@@ -161,6 +176,7 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
         else Dispatcher.UIThread.Post(OnRulesChangedUi);
     }
 
+    // An external change reloads everything: unflushed notes and a cell being edited are dropped as stale (as in WinForms).
     void OnRulesChangedUi()
     {
         if (_selfEdit) return;
@@ -213,8 +229,10 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
     async Task RenameTableAsync()
     {
         if (Current is not { } t || Owner is not { } w) return;
+        var id = t.Id;
         var name = await _dialogs.AskTextAsync(w, "Rename table", "New name:", t.Name);
-        if (string.IsNullOrWhiteSpace(name)) return;
+        if (string.IsNullOrWhiteSpace(name) || StillCurrent(id) is not { } t2) return;
+        t = t2;
         if (NameRules.Problem(_s.Rules!.Tables.Select(x => x.Name), name, t.Name) is { } bad) { await _dialogs.ShowWarningAsync(w, bad, "Rename table"); return; }
         Commit(x => x with { Name = name.Trim() });
         Reload();
@@ -223,7 +241,9 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
     async Task DeleteTableAsync()
     {
         if (Current is not { } t || Owner is not { } w) return;
+        var id = t.Id;
         if (!await _dialogs.AskYesNoAsync(w, $"Delete the table \"{t.Name}\"? Formulas that use it will report an error.", "Delete table", defaultNo: true)) return;
+        if (StillCurrent(id) == null) return;
         _s.UpdateRules(p => p with { Tables = p.Tables.Where(x => x.Id != t.Id).ToList() });
     }
 
@@ -293,14 +313,19 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
         if (_loadingUi || Current is not { } t || _kind.SelectedIndex < 0 || Owner is not { } w) return;
         var kind = (TableKind)_kind.SelectedIndex;
         if (kind == t.Kind) return;
+        var id = t.Id;
         if (TableEdit.ChangeLosesData(t, kind) &&
             !await _dialogs.AskYesNoAsync(w, "Only the first column is kept for this kind of table; the other columns will be removed. Continue?", "Change kind", defaultNo: true))
         {
-            _loadingUi = true;
-            try { _kind.SelectedIndex = (int)t.Kind; }
-            finally { _loadingUi = false; }
+            if (StillCurrent(id) is { } cur)
+            {
+                _loadingUi = true;
+                try { _kind.SelectedIndex = (int)cur.Kind; }
+                finally { _loadingUi = false; }
+            }
             return;
         }
+        if (StillCurrent(id) == null) return;
         Structural(x => TableEdit.ChangeKind(x, kind));
         LoadDetails();
     }
@@ -310,9 +335,11 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
         _notesTimer.Stop();
         if (_loadingUi || Current is not { } t) return;
         var text = _notes.Text ?? "";
-        if ((t.Notes ?? "") == text) return;
+        if (Norm(t.Notes ?? "") == Norm(text)) return;   // the box may hand back LF for a stored CRLF: that is no edit
         Commit(x => x with { Notes = text.Length == 0 ? null : text });
     }
+
+    static string Norm(string s) => s.Replace("\r\n", "\n");
 
     void LinkPage()
     {
@@ -383,15 +410,17 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
     {
         if (Current is not { Kind: TableKind.TwoD } t || Owner is not { } w) return;
         _grid.CommitEdit();
-        if (await _dialogs.AskColumnsAsync(w, t.ColumnKeys) is { } keys) Structural(x => TableEdit.SetColumnKeys(x, keys));
+        var id = t.Id;
+        if (await _dialogs.AskColumnsAsync(w, t.ColumnKeys) is { } keys && StillCurrent(id) != null) Structural(x => TableEdit.SetColumnKeys(x, keys));
     }
 
     async Task PasteTableAsync()
     {
-        if (Current == null || Owner is not { } w) return;
+        if (Current is not { } t || Owner is not { } w) return;
         _grid.CommitEdit();
+        var id = t.Id;
         var text = await _dialogs.GetClipboardTextAsync(w) ?? "";
-        if (await _dialogs.PasteTableAsync(w, text) is { } grid) Structural(x => TableEdit.ApplyPaste(x, grid));
+        if (await _dialogs.PasteTableAsync(w, text) is { } grid && StillCurrent(id) != null) Structural(x => TableEdit.ApplyPaste(x, grid));
     }
 
     // ---------- import from a scan ----------
@@ -425,6 +454,7 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
             var choice = await _dialogs.AskImportTargetAsync(w, existing.Name);
             if (choice == null) return null;
             intoExisting = choice.Value;
+            if (intoExisting && StillCurrent(existing.Id) == null) return null;
         }
         string name;
         if (intoExisting) name = existing!.Name;
@@ -438,6 +468,7 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
         }
         var grid = await _dialogs.PasteTableAsync(w, tsv, ImportTitle, ScanSessionModel.TargetDescription(name, newTable: !intoExisting), tsvOnly: true);
         if (grid == null || _s.Rules == null) return null;
+        if (intoExisting && StillCurrent(existing!.Id) == null) return null;
 
         RuleRef? MakeRef(string label) =>
             ruleRefEntry == null || MakeRuleRef == null ? null : MakeRuleRef(label, ruleRefEntry, page ?? 0);
