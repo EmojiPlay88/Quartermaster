@@ -30,13 +30,13 @@ public class PdfHighlightsTests : IDisposable
     private static byte[] Pdf(params string[][] pages) => RulebookSearchTests.Pdf(pages);
 
     /// <summary>Hand-written one-page PDF (Helvetica 20 pt "Zebra" with its origin at 100,200 on a 400x600 page) with /Rotate.</summary>
-    private static byte[] RotatedPdf(int rotate)
+    private static byte[] RotatedPdf(int rotate, string? crop = null)
     {
         var objs = new[]
         {
             "<< /Type /Catalog /Pages 2 0 R >>",
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-            $"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Rotate {rotate} /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            $"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {(crop == null ? "400 600" : "612 792")}] {(crop == null ? "" : $"/CropBox [{crop}]")} /Rotate {rotate} /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
             null!, // stream
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         };
@@ -135,6 +135,30 @@ public class PdfHighlightsTests : IDisposable
         // Displayed dimensions: width in pixels is 400 (0/180) or 600 (90/270); text runs horizontally only for 0/180.
         // Displayed size is 400x600 (0/180) or 600x400 (90/270); the word is ~52 x 14 pt along the text direction.
         double pw = rotate % 180 == 0 ? 400 : 600, ph = rotate % 180 == 0 ? 600 : 400;
+        Assert.InRange(r.W * pw, wide ? 40 : 8, wide ? 60 : 20);
+        Assert.InRange(r.H * ph, wide ? 8 : 40, wide ? 20 : 60);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(90)]
+    [InlineData(180)]
+    [InlineData(270)]
+    public void Rotated_page_with_offset_crop_box_maps_boxes(int rotate)
+    {
+        using var h = Open(RotatedPdf(rotate, "50 60 562 752"));   // 512 x 692 visible; the word sits at 100,200 in user space
+        var r = h.Find(1, "zebra").Single();
+        double u = (127.0 - 50) / 512, vb = (207.0 - 60) / 692;   // fractions of the crop box, origin bottom-left
+        (double ex, double ey, bool wide) = rotate switch
+        {
+            90 => (vb, u, false),
+            180 => (1 - u, vb, true),
+            270 => (1 - vb, 1 - u, false),
+            _ => (u, 1 - vb, true),
+        };
+        Assert.InRange(r.X + r.W / 2, ex - 0.02, ex + 0.02);
+        Assert.InRange(r.Y + r.H / 2, ey - 0.02, ey + 0.02);
+        double pw = rotate % 180 == 0 ? 512 : 692, ph = rotate % 180 == 0 ? 692 : 512;
         Assert.InRange(r.W * pw, wide ? 40 : 8, wide ? 60 : 20);
         Assert.InRange(r.H * ph, wide ? 8 : 40, wide ? 20 : 60);
     }
