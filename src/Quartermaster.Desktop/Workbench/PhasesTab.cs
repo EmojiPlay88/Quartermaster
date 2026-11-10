@@ -513,7 +513,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
                 ShowIssues();
             }
         }
-        if (_selectedSide is { } sid && pack.Sides.FirstOrDefault(x => x.Id == sid) is { } sd && (sd.UnitFilter ?? "") != (_sideFilter.Text ?? "").Trim())
+        if (_selectedSide is { } sid && pack.Sides.FirstOrDefault(x => x.Id == sid) is { } sd && (sd.UnitFilter ?? "").Trim() != (_sideFilter.Text ?? "").Trim())
         {
             var f = _sideFilter.Text;
             CommitPack(p => PhaseEdit.SetSideFilter(p, sid, f).Pack);
