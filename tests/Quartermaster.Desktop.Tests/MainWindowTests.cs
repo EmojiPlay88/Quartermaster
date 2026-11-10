@@ -54,10 +54,76 @@ sealed class FakeDialogs : IDialogs
         return Task.FromResult(SaveFiles.Count > 0 ? SaveFiles.Dequeue() : null);
     }
 
-    public Task<bool> AskYesNoAsync(Window owner, string message, string caption)
+    /// <summary>The defaultNo flag of each Yes/No question asked, parallel to the Yes/No entries in <see cref="Questions"/>.</summary>
+    public readonly List<bool> YesNoDefaultNo = new();
+
+    public Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = false)
     {
         Questions.Add((message, caption));
+        YesNoDefaultNo.Add(defaultNo);
         return Task.FromResult(Answer);
+    }
+
+    // ---- table dialogs, block, import target, clipboard, info (port stage 4a task 2) ----
+
+    /// <summary>Columns dialogs shown (the keys they opened with) and what the next one answers (null = Cancel).</summary>
+    public readonly List<IReadOnlyList<string>> ColumnPrompts = new();
+    public IReadOnlyList<string>? ColumnsAnswer { get; set; }
+
+    public Task<IReadOnlyList<string>?> AskColumnsAsync(Window owner, IReadOnlyList<string> keys)
+    {
+        ColumnPrompts.Add(keys);
+        return Task.FromResult(ColumnsAnswer);
+    }
+
+    /// <summary>Paste / import previews shown and what the next one answers (null = Cancel).</summary>
+    public readonly List<(string Text, string? Title, string? Target, bool TsvOnly)> PastePrompts = new();
+    public Quartermaster.Rules.Tables.PastedGrid? PasteAnswer { get; set; }
+
+    public Task<Quartermaster.Rules.Tables.PastedGrid?> PasteTableAsync(Window owner, string text, string? title = null, string? targetDescription = null, bool tsvOnly = false)
+    {
+        PastePrompts.Add((text, title, targetDescription, tsvOnly));
+        return Task.FromResult(PasteAnswer);
+    }
+
+    public int BlockPrompts;
+    public (int Count, string Label)? BlockAnswer { get; set; }
+
+    public Task<(int Count, string Label)?> AskBlockAsync(Window owner)
+    {
+        BlockPrompts++;
+        return Task.FromResult(BlockAnswer);
+    }
+
+    /// <summary>Import-target prompts shown (the selected table) and the answer: true = replace, false = new table, null = Cancel.</summary>
+    public readonly List<string> ImportTargetPrompts = new();
+    public bool? ImportTargetAnswer { get; set; }
+
+    public Task<bool?> AskImportTargetAsync(Window owner, string selectedTable)
+    {
+        ImportTargetPrompts.Add(selectedTable);
+        return Task.FromResult(ImportTargetAnswer);
+    }
+
+    /// <summary>The fake clipboard: what <see cref="GetClipboardTextAsync"/> returns, and every text put on it.</summary>
+    public string? Clipboard;
+    public readonly List<string> ClipboardWrites = new();
+
+    public Task<string?> GetClipboardTextAsync(Window owner) => Task.FromResult(Clipboard);
+
+    public Task SetClipboardTextAsync(Window owner, string text)
+    {
+        Clipboard = text;
+        ClipboardWrites.Add(text);
+        return Task.CompletedTask;
+    }
+
+    public readonly List<(string Message, string Caption)> Infos = new();
+
+    public Task ShowInfoAsync(Window owner, string message, string caption)
+    {
+        Infos.Add((message, caption));
+        return Task.CompletedTask;
     }
 
     public readonly Queue<bool?> YesNoCancel = new();
