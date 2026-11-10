@@ -35,7 +35,8 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
     public const string HtmlText = "This document opens in your web browser.";
     public const string OpenInBrowserText = "Open in browser";
 
-    const int MaxCachedPages = 3;
+    /// <summary>Rendered pages are kept while their pixels total at most this (the shown page is always kept).</summary>
+    const long DefaultCachePixelBudget = 120_000_000;
     const double PageMargin = 8;
     /// <summary>Room left for the vertical scroll bar when fitting the width.</summary>
     const double ScrollBarAllowance = 18;
@@ -206,6 +207,11 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
     internal bool Busy => _loading || _renderPending || _findPending;
 
     internal bool RenderInFlight => _inFlight != null;
+
+    internal long CachePixelBudget { get; set; } = DefaultCachePixelBudget;
+    internal int CachedPageCount => _cache.Count;
+    internal long CachedPixels => _cache.Sum(c => PixelsOf(c.Bitmap));
+    static long PixelsOf(Bitmap b) => (long)b.PixelSize.Width * b.PixelSize.Height;
 
     internal string StateForTests =>
         $"loading={_loading} renderPending={_renderPending} find={_findPending} inFlight={_inFlight} rendering={_rendering.Task.Status} zoom={_zoom} cache={string.Join(",", _cache.Select(c => c.Page + "@" + c.Dpi))}";
@@ -624,7 +630,7 @@ public sealed partial class DocumentViewer : UserControl, IDisposable
         _cache.Add(new CachedPage(page, dpi, bitmap));
         if (page == _page) _pageView.Show(page, bitmap);
         if (old != null && !ReferenceEquals(old.Bitmap, _pageView.Bitmap)) old.Bitmap.Dispose();
-        while (_cache.Count > MaxCachedPages)
+        while (_cache.Count > 1 && _cache.Sum(c => PixelsOf(c.Bitmap)) > CachePixelBudget)
         {
             var victim = _cache.FirstOrDefault(c => !ReferenceEquals(c.Bitmap, _pageView.Bitmap));
             if (victim == null) break;
