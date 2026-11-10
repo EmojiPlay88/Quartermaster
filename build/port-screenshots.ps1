@@ -9,6 +9,8 @@
   stage2b-winforms-<flag>.png (--screenshot-phases / nextphase / stepback / alerts).
   Stage 3a adds stage3a-desktop-<state>.png (ledger, ledger-counters, edittabs, outliner, inventory, notes, diagnostics, overview, export-choice) and
   stage3a-winforms-ledger.png.
+  Stage 3b adds stage3b-desktop-<state>.png (chart, document, document-search) on an invented module (documents.vmod: one chart picture and a two-page
+  invented rulebook PDF) that the script writes with the SmokeFixtureWriter test (QM_WRITE_SMOKE_FIXTURE) into a temp folder it deletes afterwards.
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -79,6 +81,29 @@ foreach ($state in 'phases', 'nextphase', 'stepback', 'formula', 'cheatsheet', '
 foreach ($state in 'ledger', 'ledger-counters', 'edittabs', 'outliner', 'inventory', 'notes', 'diagnostics', 'overview', 'export-choice') {
     $png = Join-Path $out "stage3a-desktop-$state.png"
     Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png "desktop-$state"
+}
+
+# Stage 3b states, Desktop, headless: the chart window, the document window, and the document window on the rulebook page with a term highlighted.
+# The Riverland demo has no charts or rulebooks, so these run on an invented module the SmokeFixtureWriter test writes. QUARTERMASTER_LAYOUT_ROOT points
+# at a temp folder so the run does not write window positions into the real profile.
+$fixDir = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-fixture-' + [Guid]::NewGuid().ToString('N'))
+try {
+    $env:QM_WRITE_SMOKE_FIXTURE = $fixDir
+    & dotnet test (Join-Path $repo 'tests\Quartermaster.Render.Tests') -c Release --nologo -v q --filter 'FullyQualifiedName~SmokeFixtureWriter'
+    if ($LASTEXITCODE -ne 0) { throw 'Writing the documents fixture failed' }
+    $env:QM_WRITE_SMOKE_FIXTURE = $null
+    $docVmod = Join-Path $fixDir 'documents.vmod'
+    if (-not (Test-Path $docVmod)) { throw "documents.vmod was not written to $fixDir" }
+    $layoutTmp = Join-Path $fixDir 'layout'
+    New-Item -ItemType Directory -Force $layoutTmp | Out-Null
+    foreach ($state in 'chart', 'document', 'document-search') {
+        $png = Join-Path $out "stage3b-desktop-$state.png"
+        Invoke-Shot $deskExe @($docVmod, '--new', '--screenshot-state', $state, '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_LAYOUT_ROOT = $layoutTmp } $png "desktop-$state"
+    }
+}
+finally {
+    $env:QM_WRITE_SMOKE_FIXTURE = $null
+    if (Test-Path $fixDir) { Remove-Item $fixDir -Recurse -Force }
 }
 
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).

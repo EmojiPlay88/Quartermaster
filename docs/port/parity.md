@@ -7,8 +7,8 @@ How to read the columns:
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
 - **Linux**: ticked only for features verified by tests actually run on Linux. Stage 1 rows: verified by the headless tests in the CI workflow `.github/workflows/cross-platform.yml` on ubuntu-latest (green run 42510235329, 2026-11-08). Not yet opened on a real Linux desktop.
 - **Docs.Tests on Linux**: pass on ubuntu-latest in CI (run 42510235329).
-- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
-- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures (this branch); 3b = rulebook PDF viewer, charts, search, OCR, Rule ref; 4 workbench and settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 3a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts, search or OCR (3b).
+- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
+- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (this branch; search, scan and OCR panes moved to 4); 4 workbench and settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 3a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that name search, scans or OCR moved to stage 4.
 
 ## Stage-1 deviations from the WinForms app (deliberate or known)
 
@@ -79,6 +79,19 @@ Stage 3a = Ledger window (tabs, counter pictures, editing, CSV), Edit Ledger tab
 - Counter pictures are drawn from the player's view only; the batch grid no longer resets its pictures on a refresh (the content-keyed cache makes that unnecessary).
 - The Ledger's group header rows are a lighter grey than the WinForms ones (screenshot pass); the tab strip is a flat strip rather than owner-drawn tabs.
 - Real windows, pointer hover, second displays, Numbers and Preview were only exercised headless; see `docs/port/stage3a-mac-checklist.md`.
+
+
+## Stage-3b deviations from the WinForms app (deliberate or known)
+
+Stage 3b = chart windows, document windows (PDF, text, HTML), the module tree's chart and document nodes, working Rule ref (formula window, phase panel, rule links), the document list / images list / Used on this page in the viewer's toolbar mode. The PDF code lives in `src/Quartermaster.Documents` (PDFtoImage over PDFium on one worker thread; TIFF scans through LibTiff.Net), the page-term highlights in Render `PdfHighlights`.
+
+- A PDF is shown one page at a time, with its own bar (Page: n of N, previous / next, Zoom out / in, Fit width, Fit page, percent). WinForms shows the PDF in its own viewer window. Page Down / Page Up / Home / End change the page; Cmd or Ctrl with the wheel zooms, a plain wheel scrolls.
+- HTML documents are not shown inside the app: the window says "This document opens in your web browser." with an Open in browser button and the page opens in the system browser. Text documents are shown read-only in a monospace box.
+- Chart and document windows float: separate windows owned by the main window, one per chart or document entry, bounds remembered per module ("chart:name|file", "doc:entry"); there are no MDI children and no docking. They close with the game.
+- Rulebook search, the scan pane, image pane and OCR panel moved to stage 4 with the Rules Workbench. The viewer has no search box; a search term can only come from code (the rule-link flow and tests), and the page is then drawn with the term highlighted.
+- OCR engine: Windows OCR won the benchmark, so stage 4 adds a Windows-only recognizer; Tesseract (bundled, English only) serves Mac and Linux. No OCR runs in 3b.
+- The chart window's wheel zooms at the cursor (as the map view); drag pans with the left or middle button.
+- Natives: PDFium, Tesseract, Leptonica and `tessdata/eng.traineddata` are in every publish folder; CI (`build/check-publish-natives.sh`) fails the publish step when one is missing. Loading them on macOS and Linux has only run in CI publishes so far, not on a real Mac or Linux desktop until the Mac checklist (`docs/port/stage3b-mac-checklist.md`) is done.
 
 ## Before the stage release
 
@@ -215,7 +228,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | ChartWindow | 3b | ✔ |  |  | floating window owned by the main window, one per chart (name + file), titled with the chart name; toolbar "Fit" and "100%" ("100%" is 1 image pixel per DIP, 2 device pixels on a Retina screen, same as the map view; the image is fetched and sampled at zoom x screen scaling); the picture on the workspace grey, linear sampling (mipmaps below 100 %); first layout fits; wheel zooms ×1.25 / ×0.8 at the cursor; left or middle drag pans (size-all cursor); bounds remembered per module under "chart:name|file"; all close with the game |
 | PdfWindow, PdfViewerControl | 3b | ✔ |  |  | DocumentWindow hosts the DocumentViewer without its toolbar: one window per document entry owned by the main window, bounds remembered per module under "doc:{entry}", closed with the session; opened from the module tree or a Rule ref (OpenDocumentAtPage reuses the window and moves the page) |
 | DiagnosticsWindow | 3a | ✔ |  |  | Severity / Category / Message / Context, Show filter, Copy all (clipboard), live updates from any thread; the status-bar link ("n warning(s)/error(s) - click here to view diagnostics") opens it |
-| SearchPanel, ScanPane, ImagePane, OcrPanel | 3b |  |  |  | OCR is Windows-only today; decision pending (library research: docs/port/stage3b-research.md) |
+| SearchPanel, ScanPane, ImagePane, OcrPanel | 4 |  |  |  | moved from 3b to stage 4 with the Rules Workbench (they are workbench tools). The OCR engine is chosen: the benchmark (docs/port/stage3b-ocr-benchmark.md) put Windows OCR ahead of Tesseract (24/24 against 21/24 on the invented test pages), so stage 4 adds a Windows-only recognizer behind `IOcrRecognizer`; Tesseract stays bundled (`TesseractRecognizer`, tessdata `eng.traineddata`) as the recognizer for Mac and Linux. The viewer can already draw search highlights (`PdfHighlights`); there is no search box until stage 4 |
 
 ## Rules Workbench and Settings
 
