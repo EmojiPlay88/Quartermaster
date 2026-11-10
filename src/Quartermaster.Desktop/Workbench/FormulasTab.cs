@@ -17,7 +17,7 @@ namespace Quartermaster.Desktop.Workbench;
 /// <summary>
 /// Formulas editor of the rules workbench (port of WinForms FormulasTab). Everything is typed by the player: the formula text, what each variable
 /// means, what the result changes. Edits go through UpdateRules; the text, applies-to and notes are committed 400 ms after the last keystroke.
-/// The embedded preview of the WinForms tab is not part of this port.
+/// The preview ("Test piece" and the sample-value box) is <see cref="FormulaPreview"/>.
 /// </summary>
 public sealed partial class FormulasTab : UserControl, IRuleRefEditor
 {
@@ -37,6 +37,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     readonly TextBlock _appliesErr = new() { Foreground = ErrorText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
     readonly TextBox _notes = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
     readonly RuleRefRow _refRow = new();
+    readonly FormulaPreview _preview;
     readonly Button _bNew = new() { Content = "New…", Width = 50 }, _bRename = new() { Content = "Rename…", Width = 62 }, _bDel = new() { Content = "Delete", Width = 50 };
     readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     readonly AskGate _askGate = new();
@@ -50,6 +51,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     {
         _s = s;
         _dialogs = dialogs;
+        _preview = new FormulaPreview(s);
         _linkCurrentPage = linkCurrentPage;
         _showRef = showRef;
 
@@ -75,11 +77,13 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         rows.RowDefinitions.Add(new RowDefinition(52, GridUnitType.Pixel));
         rows.RowDefinitions.Add(new RowDefinition(38, GridUnitType.Star));
         rows.RowDefinitions.Add(new RowDefinition(22, GridUnitType.Star));
+        rows.RowDefinitions.Add(new RowDefinition(40, GridUnitType.Star));
         var cells = new Control[]
         {
             _text, errRow, appliesRow, _refRow,
             Group("Notes (shown as a tooltip on the formula title)", _notes),
             BuildBindingsBox(), BuildOutputsBox(),
+            Group("Preview (sample values are not saved)", _preview),
         };
         for (var i = 0; i < cells.Length; i++) { Grid.SetRow(cells[i], i); rows.Children.Add(cells[i]); }
         rows.Margin = new Thickness(4, 0, 0, 0);
@@ -223,6 +227,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         LoadDetails();
         RebuildBindings();
         RebuildOutputs();
+        _preview.SetFormula(_selected);
     }
 
     void OnListSelection()
@@ -235,6 +240,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         LoadDetails();
         RebuildBindings();
         RebuildOutputs();
+        _preview.SetFormula(_selected);
     }
 
     async Task NewFormulaAsync()
@@ -421,6 +427,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     }
 
     // test hooks
+    internal FormulaPreview Preview => _preview;
     internal ListBox List => _list;
     internal TextBox Text => _text;
     internal TextBox Applies => _applies;

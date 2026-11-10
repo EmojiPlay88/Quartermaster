@@ -42,7 +42,9 @@ public sealed class FormulasTabTests : IDisposable
 
     static FormulaDef Defend() => new() { Id = "f-def", Name = "Defend", Text = "x * 2", Bindings = new() { new() { Variable = "x", Kind = BindingKind.Input } } };
 
-    ModuleSession Session(bool withPack = true, params FormulaDef[] formulas)
+    ModuleSession Session(bool withPack = true, params FormulaDef[] formulas) => SessionWith(withPack, false, formulas);
+
+    ModuleSession SessionWith(bool withPack, bool game, params FormulaDef[] formulas)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
@@ -59,6 +61,7 @@ public sealed class FormulasTabTests : IDisposable
                 Formulas = formulas.ToList(),
             });
         }
+        if (game) s.LoadSetup(s.Model.Setups[0], null);
         return s;
     }
 
@@ -450,5 +453,95 @@ public sealed class FormulasTabTests : IDisposable
         gate.SetResult("Zed");
         Pump();
         Assert.Equal(["Defend"], s.Rules!.Formulas.Select(x => x.Name).ToList());
+    }
+
+    [AvaloniaFact]
+    public void Test_piece_lists_matching_pieces()
+    {
+        var s = SessionWith(true, true, Attack());
+        var tab = Tab(s);
+        var names = ((IEnumerable<string>)tab.Preview.PieceBox.ItemsSource!).ToList();
+        Assert.Equal("(no unit)", names[0]);
+        Assert.Equal(1 + s.View!.Pieces.Count, names.Count);
+        Assert.Contains(names, n => n.StartsWith("Red 1 ("));
+        Assert.Equal(0, tab.Preview.PieceBox.SelectedIndex);
+        Assert.Null(tab.Preview.PieceId);
+        tab.Preview.PieceBox.SelectedIndex = names.FindIndex(n => n.StartsWith("Red 1 ("));
+        Pump();
+        Assert.Equal(PhaseFixture.RedOne, tab.Preview.PieceId);
+        tab.Preview.PieceBox.SelectedIndex = 0;
+        Pump();
+        Assert.Null(tab.Preview.PieceId);
+    }
+
+    [AvaloniaFact]
+    public void Preview_updates_after_text_change()
+    {
+        var s = Session(true, Attack());
+        var tab = Tab(s);
+        Assert.True(tab.Preview.HasContent);
+        Assert.NotNull(tab.Preview.BoxText("a"));
+        Assert.Null(tab.Preview.BoxText("c"));
+        tab.Text.Text = "a + c";
+        Debounce(tab);
+        Pump();
+        Assert.NotNull(tab.Preview.BoxText("c"));
+        tab.Preview.Type("a", "2");
+        tab.Preview.Type("c", "3");
+        Pump();
+        tab.Preview.FireDebounce();
+        Assert.Equal("5", tab.Preview.ResultText);
+        tab.SelectFormula("nope");
+        tab.SelectFormula("f-att");
+        Assert.Equal("f-att", tab.Preview.FormulaId);
+    }
+
+    [AvaloniaFact]
+    public void Preview_never_changes_pack_state_or_log()
+    {
+        var s = SessionWith(true, true, Attack() with { Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "p-str", Op = OutputOp.Set } } });
+        var tab = Tab(s);
+        var pack = s.Rules;
+        var dirty = s.RulesDirty;
+        var commands = s.Game!.Log.Count;
+        var logged = s.Log.Items.Count;
+        var state = s.Game.State;
+        tab.Preview.PieceBox.SelectedIndex = 1;
+        Pump();
+        tab.Preview.Type("a", "2");
+        tab.Preview.Type("b", "3");
+        Pump();
+        tab.Preview.FireDebounce();
+        Assert.Equal("5", tab.Preview.ResultText);
+        tab.SelectFormula("f-att");
+        Pump();
+        Assert.Same(pack, s.Rules);
+        Assert.Equal(dirty, s.RulesDirty);
+        Assert.Equal(commands, s.Game.Log.Count);
+        Assert.Equal(logged, s.Log.Items.Count);
+        Assert.Same(state, s.Game.State);
+        Assert.False(s.Game.CanUndo);
+    }
+
+    [AvaloniaFact]
+    public void External_change_while_editing_drops_stale_edit()
+    {
+        var s = Session(true, Attack(), Defend());
+        var tab = Tab(s);
+        tab.Bindings.BeginEdit(0, 4, "stale");
+        Assert.True(tab.Bindings.IsEditing);
+        s.UpdateRules(p => p with { Formulas = p.Formulas.Select(f => f.Id == "f-att" ? f with { Text = "a * b" } : f).ToList() });
+        Pump();
+        Assert.False(tab.Bindings.IsEditing);
+        Assert.Equal("a * b", tab.Text.Text);
+        Assert.Null(B(s, "f-att", "a").Caption);
+
+        tab.Bindings.BeginEdit(0, 4, "stale2");
+        s.UpdateRules(p => p with { Formulas = p.Formulas.Where(f => f.Id != "f-att").ToList() });
+        Pump();
+        Assert.False(tab.Bindings.IsEditing);
+        Assert.Equal("f-def", tab.SelectedFormulaId);
+        Assert.Equal(Defend().Bindings, F(s, "f-def").Bindings);
+        Assert.Null(F(s, "f-def").Bindings[0].Caption);
     }
 }
