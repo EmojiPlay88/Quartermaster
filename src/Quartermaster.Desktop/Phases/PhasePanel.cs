@@ -17,18 +17,17 @@ namespace Quartermaster.Desktop.Phases;
 /// </summary>
 public sealed class PhasePanel : UserControl
 {
-    /// <summary>Tooltip of the rule reference link until the rulebook viewer exists.</summary>
-    public const string RuleViewerTip = "Rulebook viewer comes in a later version";
-
     readonly ModuleSession _s;
     readonly PhaseController _c;
     readonly Func<IActionPort> _actions;
     readonly Action<string> _centre;
+    readonly Action<string, int>? _openRule;
+    RuleRef? _refTarget;
     readonly PhaseWatch _watch;
 
     readonly TextBlock _title = new() { FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2) };
     readonly TextBox _instructions = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-    readonly TextBlock _ref = new() { IsVisible = false, IsEnabled = false, TextDecorations = Avalonia.Media.TextDecorations.Underline, Margin = new Thickness(0, 2) };
+    readonly TextBlock _ref = new() { IsVisible = false, Cursor = new Cursor(StandardCursorType.Hand), Foreground = new SolidColorBrush(Color.FromRgb(0, 0, 0xFF)), TextDecorations = Avalonia.Media.TextDecorations.Underline, Margin = new Thickness(0, 2) };
     readonly TextBlock _warnCaption = new() { Text = "Warnings", VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 4, 0, 0) };
     readonly TreeView _warnings = new();
     readonly Button _ack = new() { Content = "Acknowledge", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center, IsEnabled = false };
@@ -46,9 +45,9 @@ public sealed class PhasePanel : UserControl
     bool _updating;
     string? _nextTip;
 
-    public PhasePanel(ModuleSession s, PhaseController c, Func<IActionPort> actions, Action<string> centre)
+    public PhasePanel(ModuleSession s, PhaseController c, Func<IActionPort> actions, Action<string> centre, Action<string, int>? openRule = null)
     {
-        _s = s; _c = c; _actions = actions; _centre = centre;
+        _s = s; _c = c; _actions = actions; _centre = centre; _openRule = openRule;
         Name = "PhasePanel";
         MinWidth = 180;
 
@@ -65,8 +64,7 @@ public sealed class PhasePanel : UserControl
         Row(_open, 8);
         Row(_next, 9);
         Row(_count, 10);
-        ToolTip.SetTip(_ref, RuleViewerTip);
-        ToolTip.SetShowOnDisabled(_ref, true);
+        _ref.PointerPressed += (_, e) => { if (e.GetCurrentPoint(_ref).Properties.IsLeftButtonPressed) ClickRule(); };
         ToolTip.SetShowOnDisabled(_next, true);
 
         var root = new DockPanel { Margin = new Thickness(4) };
@@ -134,6 +132,12 @@ public sealed class PhasePanel : UserControl
     public bool AckEnabled => _ack.IsEnabled;
     public string NoPhasesLabelText => _none.Text ?? "";
     public bool ContentVisible => _body.IsVisible;
+    /// <summary>Opens the rule reference's document at its page (what clicking the link does).</summary>
+    public void ClickRule()
+    {
+        if (_refTarget is { } r && _ref.IsVisible) _openRule?.Invoke(r.DocumentEntry, r.Page);
+    }
+
     public string? RuleText => _ref.IsVisible ? _ref.Text : null;
     public IReadOnlyList<string> ChecklistTexts => _checklist.Children.OfType<CheckBox>().Select(b => b.Content as string ?? "").ToList();
     public IReadOnlyList<string> WarningTexts => _warnings.Items.OfType<TreeViewItem>().Select(i => i.Header as string ?? "").ToList();
@@ -178,8 +182,9 @@ public sealed class PhasePanel : UserControl
             var mine = v.PlayingText == null;
             _instructions.Text = mine ? (v.Current?.Instructions ?? "").Replace("\r\n", "\n") : "";
             ToolTip.SetTip(_title, mine && !string.IsNullOrWhiteSpace(v.Current?.Notes) ? v.Current!.Notes : null);
-            _ref.IsVisible = text.RuleText != null;
-            _ref.Text = text.RuleText ?? "";
+            _refTarget = PhaseTexts.RuleRefOf(v, _s.Rules);
+            _ref.IsVisible = _refTarget != null;
+            _ref.Text = _refTarget != null ? PhaseTexts.RuleLinkText(_refTarget) : "";
             ShowWarnings(v, text.Warnings);
             ShowDecisions(v, text.ChecklistHidden);
             _count.Text = text.CountText;

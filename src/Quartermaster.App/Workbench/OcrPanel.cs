@@ -195,7 +195,7 @@ sealed class OcrPanel : UserControl
             ReportReading(n, recovered, stillEmpty);
         }
         catch (OperationCanceledException) { /* the canceller has set the status */ }
-        catch (OcrUnavailableException ex) { if (_model.IsCurrent(ticket)) SetStatus(ex.Message, true); }
+        catch (Quartermaster.Ocr.OcrUnavailableException ex) { if (_model.IsCurrent(ticket)) SetStatus(ex.Message, true); }
         catch (InvalidDataException ex) { if (_model.IsCurrent(ticket)) SetStatus(ex.Message, true); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

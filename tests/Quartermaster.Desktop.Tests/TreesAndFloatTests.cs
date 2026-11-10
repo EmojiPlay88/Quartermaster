@@ -90,15 +90,9 @@ public sealed class TreesAndFloatTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void Chart_and_document_nodes_say_they_open_in_a_later_version()
+    public void Folder_node_does_nothing()
     {
         var w = Game();
-        foreach (var kind in new[] { WindowNodeKind.Chart, WindowNodeKind.Document })
-        {
-            w.SetStatus("");
-            w.ModuleTree.Activate(new WindowTreeNode("x", kind, null, Array.Empty<WindowTreeNode>()));
-            Assert.Equal("Opens in a later version", w.StatusText);
-        }
         w.SetStatus("");
         w.ModuleTree.Activate(new WindowTreeNode("folder", WindowNodeKind.Folder, null, Array.Empty<WindowTreeNode>()));
         Assert.Equal("", w.StatusText);

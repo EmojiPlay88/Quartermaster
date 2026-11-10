@@ -19,9 +19,6 @@ namespace Quartermaster.Desktop.Formulas;
 /// </summary>
 public sealed class FormulaWindow : Window
 {
-    /// <summary>Tooltip of the disabled Rule ref button (rulebook viewer: stage 3).</summary>
-    public const string RuleRefLaterText = "Rulebook viewer comes in a later version";
-
     readonly MainWindow _host;
     readonly ModuleSession _s;
     readonly FormulaDialogModel _model;
@@ -103,10 +100,8 @@ public sealed class FormulaWindow : Window
         _cancel.Click += (_, _) => Close();
         _cancel.IsCancel = true;
         _apply.IsDefault = true;
-        // The rulebook viewer comes with stage 3: Rule ref is shown, disabled.
-        _ruleRef.IsEnabled = false;
-        ToolTip.SetTip(_ruleRef, RuleRefLaterText);
-        ToolTip.SetShowOnDisabled(_ruleRef, true);
+        _ruleRef.Click += (_, _) => Guarded(OpenRuleRef);
+        UpdateRuleRef(formula);
         _physical.IsCheckedChanged += (_, _) => { _model.PhysicalDice = _physical.IsChecked == true; Recalc(); };
         _physical.IsVisible = !s.IsGuest;   // the host rolls a guest's dice
         s.RulesChanged += OnRulesChanged;
@@ -224,6 +219,7 @@ public sealed class FormulaWindow : Window
             _view = NewView(f);
             _formulaFrame.Child = _view;
             SetNotesTip(f.Notes);
+            UpdateRuleRef(f);
             _debounce.Stop();
             Recalc();
         }
@@ -232,6 +228,18 @@ public sealed class FormulaWindow : Window
             _status.Text = "Could not update: " + ex.Message;
         }
     }
+
+    /// <summary>Rule ref is enabled while the formula's reference resolves in the pack.</summary>
+    void UpdateRuleRef(FormulaDef f) => _ruleRef.IsEnabled = f.RuleRefId != null && _s.Rules?.ById<RuleRef>(f.RuleRefId) != null;
+
+    void OpenRuleRef()
+    {
+        var rr = _model.Formula.RuleRefId is { } id ? _s.Rules?.ById<RuleRef>(id) : null;
+        if (rr == null) return;
+        _host.OpenDocumentAtPage(rr.DocumentEntry, rr.Page);
+    }
+
+    internal Button RuleRefButton => _ruleRef;
 
     void Unhook()
     {

@@ -18,6 +18,7 @@
     <ProjectReference Include="..\Quartermaster.Core\Quartermaster.Core.csproj" />
     <ProjectReference Include="..\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
     <ProjectReference Include="..\Quartermaster.Render\Quartermaster.Render.csproj" />
+    <ProjectReference Include="..\Quartermaster.Documents\Quartermaster.Documents.csproj" />
   </ItemGroup>
 
   <!--
@@ -38,5 +39,21 @@
     <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="14.2.0" />
     <PackageReference Include="HarfBuzzSharp.NativeAssets.WebAssembly" Version="14.2.0" />
   </ItemGroup>
+
+  <!--
+    Licence notices travel with the binaries: the publish folder gets LICENSE, THIRD-PARTY-NOTICES.md and LICENSES/ (the texts for the bundled
+    PDFium, Tesseract, Leptonica and other native libraries). build/check-publish-natives.sh requires them.
+  -->
+  <Target Name="CopyLicenceNotices" AfterTargets="Publish">
+    <PropertyGroup>
+      <_QmRepoDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..'))</_QmRepoDir>
+      <_QmPubDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_QmPubDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_QmLicenceText Include="$(_QmRepoDir)LICENSES\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="$(_QmRepoDir)LICENSE;$(_QmRepoDir)THIRD-PARTY-NOTICES.md" DestinationFolder="$(_QmPubDir)" />
+    <Copy SourceFiles="@(_QmLicenceText)" DestinationFiles="@(_QmLicenceText->'$(_QmPubDir)LICENSES\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
 
 </Project>

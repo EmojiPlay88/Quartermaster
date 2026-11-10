@@ -20,7 +20,7 @@ namespace Quartermaster.Desktop.Shell;
 static class ScreenshotStates
 {
     public static readonly string[] Names = { "menu", "hover", "los", "log", "rules", "phases", "nextphase", "stepback", "formula", "cheatsheet", "batch", "alerts", "tree", "floatlog", "floatphases",
-        "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice" };
+        "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice", "chart", "document", "document-search" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -235,6 +235,30 @@ static class ScreenshotStates
                 dlg.Show(window);
                 Pump(300);
                 Target = dlg;
+                return null;
+            }
+            case "chart":
+            {
+                if (s.Model.Charts.Count == 0) return "State 'chart' needs a module with a chart (the documents fixture, see build/port-screenshots.ps1).";
+                window.OpenChart(s.Model.Charts[0]);
+                Pump(600);
+                Target = window.ChartWindows.Values.FirstOrDefault();
+                return Target == null ? "The chart window did not open." : null;
+            }
+            case "document":
+            case "document-search":
+            {
+                var doc = s.Model.Documents.FirstOrDefault(d => d.Kind == DocumentKind.Pdf);
+                if (doc == null) return "State 'document' needs a module with a PDF document (the documents fixture, see build/port-screenshots.ps1).";
+                var search = name == "document-search";
+                window.OpenDocument(doc);
+                if (!window.DocumentWindows.TryGetValue(doc.EntryName, out var dw)) return "The document window did not open.";
+                var viewer = dw.Viewer;
+                if (search) viewer.GoToPage(2, "supply");   // the viewer has no search box (search pane is stage 4): the page is drawn with the term highlighted
+                var until = DateTime.UtcNow.AddSeconds(20);
+                do PumpUntil(() => viewer.Rendering.IsCompleted && !viewer.Busy, 500); while (DateTime.UtcNow < until && (viewer.Busy || viewer.PageCount == 0));
+                Pump(400);
+                Target = dw;
                 return null;
             }
             case "log":

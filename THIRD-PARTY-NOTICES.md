@@ -30,3 +30,42 @@ Ported files:
 rulebook page text for search. PdfPig is licensed under the Apache License, Version 2.0
 (https://www.apache.org/licenses/LICENSE-2.0). The full licence text is in [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt).
 PdfPig is used unmodified, as a binary package.
+
+## PDFtoImage, PDFium and LibTiff.Net
+
+`src/Quartermaster.Documents` draws rulebook PDF pages with PDFtoImage and reads TIFF scans with LibTiff.Net. All are used unmodified, as binaries.
+
+| Component | Where it is bundled | Licence | Text |
+|---|---|---|---|
+| PDFtoImage 5.4.0 (NuGet package `PDFtoImage`, https://github.com/sungaila/PDFtoImage) | managed library | MIT | [`LICENSES/MIT-PDFtoImage.txt`](LICENSES/MIT-PDFtoImage.txt) |
+| PDFium (https://pdfium.googlesource.com/pdfium/), built by Benoît Blanchon (NuGet packages `bblanchon.PDFium.Win32`, `.Linux`, `.macOS`, 152.0.7961, https://github.com/bblanchon/pdfium-binaries) | pdfium.dll / libpdfium.so / libpdfium.dylib | Apache-2.0 (PDFium) plus the licences of the third-party code PDFium bundles (FreeType, libjpeg-turbo, libpng, zlib, OpenJPEG, lcms2, libtiff, ICU, abseil, AGG and others) | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt); the pdfium-binaries licence and every bundled third-party licence are in [`LICENSES/pdfium-binaries/`](LICENSES/pdfium-binaries/LICENSE.txt) (copied from the pdfium-binaries 152.0.7961 release archive) |
+| LibTiff.Net 2.4.649 (NuGet package `BitMiracle.LibTiff.NET`, https://github.com/BitMiracle/libtiff.net), Copyright (c) 2008-2023 Bit Miracle | managed library | BSD-3-Clause | [`LICENSES/BSD-3-Clause-LibTiff.NET.txt`](LICENSES/BSD-3-Clause-LibTiff.NET.txt) |
+
+## Tesseract, Leptonica and tessdata_fast
+
+`src/Quartermaster.Documents` reads scanned pages with Tesseract OCR. It calls the native libraries through its own small P/Invoke layer.
+The native binaries come from the NuGet packages `Tesseract.Native.runtime.win-x64`, `.linux-x64` and `.osx-arm64` (5.5.2.200,
+https://github.com/jbtule/tesseract-nuget-platforms, packaging licensed under the Apache License, Version 2.0).
+All of the components below are used unmodified, as binaries. The licence texts are in the `LICENSES/` folder.
+
+| Component | Where it is bundled | Licence | Text |
+|---|---|---|---|
+| Tesseract OCR 5.5.2 (https://github.com/tesseract-ocr/tesseract) | libtesseract / tesseract.dll | Apache-2.0 | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt) |
+| tessdata_fast `eng.traineddata` (https://github.com/tesseract-ocr/tessdata_fast) | `tessdata/` | Apache-2.0 | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt) |
+| Leptonica (https://github.com/DanBloomberg/leptonica), Copyright (C) 2001-2020 Leptonica | libleptonica / leptonica.dll | BSD-2-Clause (Leptonica form) | [`LICENSES/BSD-2-Clause-Leptonica.txt`](LICENSES/BSD-2-Clause-Leptonica.txt) |
+| libjpeg-turbo and the IJG JPEG library (libjpeg, libturbojpeg, jpeg62) | all three OSes | IJG, BSD-3-Clause, zlib | [`LICENSES/libjpeg-turbo-LICENSE.md`](LICENSES/libjpeg-turbo-LICENSE.md), [`LICENSES/libjpeg-turbo-README-ijg.txt`](LICENSES/libjpeg-turbo-README-ijg.txt) (this software is based in part on the work of the Independent JPEG Group) |
+| LibTIFF (libtiff, tiff.dll) | all three OSes | LibTIFF licence (BSD-style) | [`LICENSES/libtiff.txt`](LICENSES/libtiff.txt) |
+| libwebp (libwebp, libwebpdecoder, libwebpdemux, libwebpmux, libsharpyuv) | all three OSes | BSD-3-Clause | [`LICENSES/libwebp.txt`](LICENSES/libwebp.txt) |
+| libpng (libpng16) | all three OSes | PNG Reference Library License v2 | [`LICENSES/libpng.txt`](LICENSES/libpng.txt) |
+| zlib (libz, z.dll) | all three OSes | zlib | [`LICENSES/zlib.txt`](LICENSES/zlib.txt) |
+| OpenJPEG (libopenjp2) | all three OSes | BSD-2-Clause | [`LICENSES/openjpeg.txt`](LICENSES/openjpeg.txt) |
+| giflib (libgif, gif.dll) | all three OSes | MIT-style | [`LICENSES/giflib.txt`](LICENSES/giflib.txt) |
+| libarchive (libarchive, archive.dll) | all three OSes | BSD-2-Clause | [`LICENSES/libarchive.txt`](LICENSES/libarchive.txt) |
+| libcurl | all three OSes | curl licence | [`LICENSES/curl.txt`](LICENSES/curl.txt) |
+| OpenSSL 3 (libcrypto, libssl, legacy.dll) | all three OSes | Apache-2.0 | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt) |
+| Mbed TLS (libmbedcrypto, libmbedtls, libmbedx509, libeverest, libp256m) | macOS | Apache-2.0 (we take the Apache-2.0 option of the dual licence) | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt), [`LICENSES/mbedtls.txt`](LICENSES/mbedtls.txt) |
+| liblzma (xz) | all three OSes | 0BSD | [`LICENSES/xz.txt`](LICENSES/xz.txt) |
+| LZ4 (liblz4, lz4.dll) | all three OSes | BSD-2-Clause | [`LICENSES/lz4.txt`](LICENSES/lz4.txt) |
+| Zstandard (libzstd) | all three OSes | BSD-3-Clause (we take the BSD option) | [`LICENSES/zstd.txt`](LICENSES/zstd.txt) |
+| bzip2 (libbz2, bz2.dll) | all three OSes | bzip2 licence (BSD-style) | [`LICENSES/bzip2.txt`](LICENSES/bzip2.txt) |
+| libxml2 | Linux and macOS | MIT | [`LICENSES/libxml2.txt`](LICENSES/libxml2.txt) |
