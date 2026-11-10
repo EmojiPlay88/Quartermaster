@@ -425,6 +425,8 @@ public sealed class WorkbenchWindowTests : IDisposable
         var (wb, _) = Standalone();
         Assert.Equal(1, Grid.GetRow(wb.SearchSplitter));
         Assert.Contains(wb.SearchSplitter, wb.LeftPane.Children);
+        Assert.Contains(wb.SearchPanelForTests, wb.LeftPane.Children);   // task 11 fills the slot with the search panel
+        wb.LeftPane.Children.Remove(wb.SearchPanelForTests);
         Assert.False(wb.SearchSplitter.IsVisible);   // empty slot: the Auto row has no height
         var panel = new Border { Height = 80 };
         Grid.SetRow(panel, 2);
@@ -480,9 +482,14 @@ public sealed class WorkbenchWindowTests : IDisposable
         var (wb, _) = Standalone();
         wb.ShowPhase("ph-end");
         Pump();
+        // With the search part wired the ref reads "(missing)": greyed, not a link, so clicking does nothing.
+        Assert.True(wb.Phases.RefRow.IsGreyed);
+        Assert.False(wb.Phases.RefRow.IsLink);
+        Assert.EndsWith("(missing)", wb.Phases.RefRow.Text);
+        var infos = _dialogs.Infos.Count;
         wb.Phases.RefRow.ClickLink();
         Pump();
-        Assert.Equal((WorkbenchRules.MissingRefText("gone.pdf"), "Rules Workbench"), _dialogs.Infos[^1]);
+        Assert.Equal(infos, _dialogs.Infos.Count);
         Assert.Null(wb.Viewer.Document);
     }
 
