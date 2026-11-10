@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Windows.Media.Ocr recognizer, loaded at run time from the ocr-windows/ folder by Quartermaster.Documents.OcrEngines
+    (a plugin AssemblyLoadContext that takes Render and SkiaSharp from the host). Never referenced by the cross-platform
+    Desktop app: its project file builds this one on Windows and copies only the plugin's own files (see Quartermaster.Desktop.csproj).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- A class library leaves the Windows SDK projection (WinRT.Runtime.dll, Microsoft.Windows.SDK.NET.dll) out of bin; the plugin needs them beside it. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Quartermaster.Render\Quartermaster.Render.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Quartermaster.Ocr.Tests" />
+  </ItemGroup>
+
+</Project>

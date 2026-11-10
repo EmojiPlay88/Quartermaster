@@ -41,6 +41,35 @@
   </ItemGroup>
 
   <!--
+    Windows OCR plugin (port stage 4a, Scope rulings): when this app is built for Windows (a win-* RID, or no RID on a Windows host)
+    Quartermaster.OcrWindows is built (never referenced: no assembly of it is compiled against) and the plugin's own files are copied
+    to ocr-windows/ beside the app, so they also reach Desktop.Tests and the publish folder. Render and SkiaSharp are never copied
+    there: the plugin load context (Documents/OcrPluginLoadContext) takes them from the app. Mac and Linux builds never touch it.
+  -->
+  <PropertyGroup>
+    <_QmOcrWindows Condition="('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows'))) or $(RuntimeIdentifier.StartsWith('win'))">true</_QmOcrWindows>
+    <_QmOcrWindowsProject>$(MSBuildThisFileDirectory)..\Quartermaster.OcrWindows\Quartermaster.OcrWindows.csproj</_QmOcrWindowsProject>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_QmOcrWindows)' == 'true'">
+    <ProjectReference Include="$(_QmOcrWindowsProject)" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Private="false"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishDir;_IsPublishing" />
+  </ItemGroup>
+
+  <Target Name="QmAddOcrWindowsPlugin" BeforeTargets="AssignTargetPaths" Condition="'$(_QmOcrWindows)' == 'true'">
+    <MSBuild Projects="$(_QmOcrWindowsProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" RemoveProperties="RuntimeIdentifier;SelfContained;PublishDir;_IsPublishing;TargetFramework">
+      <Output TaskParameter="TargetOutputs" ItemName="_QmOcrWindowsTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <_QmOcrWindowsDir>@(_QmOcrWindowsTarget->'%(RootDir)%(Directory)')</_QmOcrWindowsDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_QmOcrWindowsFile Include="$(_QmOcrWindowsDir)Quartermaster.OcrWindows.dll;$(_QmOcrWindowsDir)Quartermaster.OcrWindows.deps.json;$(_QmOcrWindowsDir)WinRT.Runtime.dll;$(_QmOcrWindowsDir)Microsoft.Windows.SDK.NET.dll" />
+      <None Include="@(_QmOcrWindowsFile)" Link="ocr-windows\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+
+  <!--
     Licence notices travel with the binaries: the publish folder gets LICENSE, THIRD-PARTY-NOTICES.md and LICENSES/ (the texts for the bundled
     PDFium, Tesseract, Leptonica and other native libraries). build/check-publish-natives.sh requires them.
   -->
