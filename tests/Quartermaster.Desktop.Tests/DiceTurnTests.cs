@@ -174,7 +174,7 @@ public sealed class DiceTurnTests : IDisposable
         _fixtures.Add(fx);
         var w = Game(fx.Build(), face: 2);
 
-        Assert.Equal(new[] { "&Inventory", "&Notes", "&Dice", "&Turn" }, w.MenuLabels()["&Tools"]);
+        Assert.Equal(new[] { "&Rules Workbench", "&Inventory", "&Notes", "&Dice", "&Turn" }, w.MenuLabels()["&Tools"]);
         var dice = w.FindMenuItem("&Dice")!;
         Assert.Equal(new[] { "&1d6", "&2d6", "R&&D", "Blank", "&Custom...", "&Multi-roll..." }, Labels(dice));
         Assert.Equal(2, dice.Items.OfType<Separator>().Count());   // around the module dice, as WinForms

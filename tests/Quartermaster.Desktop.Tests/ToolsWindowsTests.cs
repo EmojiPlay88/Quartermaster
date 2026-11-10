@@ -528,6 +528,6 @@ public sealed class ToolsWindowsTests : IDisposable
         w.Toolbar.Find("tool.inventory")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
         Assert.NotNull(w.NotesTool);
         Assert.NotNull(w.InventoryTool);
-        Assert.Equal(new[] { "&Inventory", "&Notes" }, w.MenuLabels()["&Tools"].Take(2));
+        Assert.Equal(new[] { "&Rules Workbench", "&Inventory", "&Notes" }, w.MenuLabels()["&Tools"].Take(3));
     }
 }
