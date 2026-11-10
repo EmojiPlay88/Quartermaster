@@ -18,7 +18,8 @@ namespace Quartermaster.Desktop.Workbench;
 /// Shows a scan with zoom (fit, 25–400 %) and pan, and lets the user drag a region (image pixels) with handles to adjust it.
 /// Left-drag selects or adjusts; a click outside the region clears it; middle- or right-drag pans; Ctrl+wheel (Cmd on macOS) zooms
 /// at the cursor, the plain wheel scrolls. Scrollbars appear when the zoomed image is larger than the view.
-/// The bitmap is owned by the caller: the pane never disposes it, and the caller keeps it alive and unchanged while it is shown.
+/// The bitmap is owned by the caller: the pane never disposes it. The caller must not change its pixels while it is shown; disposing it
+/// is safe (the pane keeps its own reference to the pixel buffer for frames still in flight).
 /// Zoom is device pixels per image pixel, so the image is drawn at zoom x render scaling in device-independent units.
 /// </summary>
 public sealed class ImagePane : Panel
@@ -28,7 +29,8 @@ public sealed class ImagePane : Panel
     static readonly SKColor Accent = new(0, 102, 204);
 
     SKBitmap? _image;
-    SKImage? _skImage; // wraps the bitmap's own pixels (no copy); see Render
+    SDSize _imageSize; // read once: the caller may dispose the bitmap while it is still the pane's image
+    SKImage? _skImage; // wraps the bitmap's pixels (no copy, own reference); see PinnedImage. Replaced in SetImage.
     SDRect? _region;
     double _zoom = 1;
     bool _fit = true;
@@ -56,7 +58,7 @@ public sealed class ImagePane : Panel
         public override void Render(DrawingContext context) => owner.Draw(context);
     }
 
-    void Redraw()
+    internal void Redraw()
     {
         InvalidateVisual();
         _surface?.InvalidateVisual();
@@ -94,7 +96,7 @@ public sealed class ImagePane : Panel
     public bool HasVerticalScrollBar => _vOn;
     bool _hOn, _vOn;
 
-    SDSize Content() => new((int)Math.Ceiling(_image!.Width * _zoom - 1e-6), (int)Math.Ceiling(_image!.Height * _zoom - 1e-6));
+    SDSize Content() => new((int)Math.Ceiling(_imageSize.Width * _zoom - 1e-6), (int)Math.Ceiling(_imageSize.Height * _zoom - 1e-6));
 
     SDSize FullSize => new((int)Math.Round(Bounds.Width * Scaling), (int)Math.Round(Bounds.Height * Scaling));
 
@@ -168,13 +170,15 @@ public sealed class ImagePane : Panel
     /// <summary>The image view size in device pixels (the pane minus any scrollbars).</summary>
     SDSize ViewSize => Metrics().View;
 
-    SDSize ImageSize => _image == null ? SDSize.Empty : new SDSize(_image.Width, _image.Height);
+    SDSize ImageSize => _imageSize;
 
     public void SetImage(SKBitmap? image, SDRect? region)
     {
         _skImage?.Dispose();
         _skImage = null;
         _image = image;
+        _imageSize = image == null ? SDSize.Empty : new SDSize(image.Width, image.Height);
+        _skImage = image == null ? null : PinnedImage(image); // now, while the pixels are certainly alive
         _region = region;
         _drag = RegionHandle.None;
         _selecting = _panning = false;
@@ -252,8 +256,8 @@ public sealed class ImagePane : Panel
     // ---------- coordinates ----------
 
     SDPointF Origin() => _image == null ? SDPointF.Empty
-        : new SDPointF((float)ScanSessionModel.ImageOrigin(_image.Width, _zoom, ViewSize.Width, _scroll.X),
-                       (float)ScanSessionModel.ImageOrigin(_image.Height, _zoom, ViewSize.Height, _scroll.Y));
+        : new SDPointF((float)ScanSessionModel.ImageOrigin(_imageSize.Width, _zoom, ViewSize.Width, _scroll.X),
+                       (float)ScanSessionModel.ImageOrigin(_imageSize.Height, _zoom, ViewSize.Height, _scroll.Y));
 
     SDPointF ViewToImageF(SDPoint v) => _image == null ? SDPointF.Empty : ScanSessionModel.ViewToImage(v, _scroll, _zoom, ImageSize, ViewSize);
 
@@ -301,14 +305,27 @@ public sealed class ImagePane : Panel
             if (_image == null) return;
         }
         if (Bounds.Width <= 0 || Bounds.Height <= 0) return;
-        // Zero-copy: the image wraps the caller's pixels (SKImage.FromBitmap would copy a mutable bitmap: +4 bytes per pixel on a big scan).
-        _skImage ??= SKImage.FromPixels(_image.PeekPixels(), static (_, _) => { }, null);
+        // Zero-copy and pinned: see PinnedImage (SKImage.FromBitmap would copy a mutable bitmap: +4 bytes per pixel on a big scan).
         if (_skImage == null) return;
         using var recorder = new SKPictureRecorder();
         var c = recorder.BeginRecording(new SKRect(0, 0, (float)viewBounds.Width, (float)viewBounds.Height));
         try { Scene(c); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { /* skip the frame rather than crash */ }
         context.Custom(new SkiaDrawOperation(recorder.EndRecording(), viewBounds, _ => { }));
+    }
+
+    /// <summary>
+    /// An image over the bitmap's pixels without copying them. It holds its own reference to the pixel buffer (a subset bitmap shares the
+    /// buffer, which is reference counted), released when the last picture or image using it dies: a queued frame that still draws the
+    /// old image stays valid even if the caller disposes the bitmap right after SetImage.
+    /// </summary>
+    static SKImage? PinnedImage(SKBitmap bitmap)
+    {
+        var pin = new SKBitmap();
+        if (!bitmap.ExtractSubset(pin, new SKRectI(0, 0, bitmap.Width, bitmap.Height))) { pin.Dispose(); return null; }
+        var image = SKImage.FromPixels(pin.PeekPixels(), static (_, ctx) => ((SKBitmap)ctx!).Dispose(), pin);
+        if (image == null) pin.Dispose();
+        return image;
     }
 
     void Scene(SKCanvas c)
@@ -348,13 +365,6 @@ public sealed class ImagePane : Panel
             foreach (var y in new[] { r.Top, r.Top + r.Height / 2, r.Bottom })
                 if (!(x == r.Left + r.Width / 2 && y == r.Top + r.Height / 2))
                     yield return new SKRect(x - hs, y - hs, x + hs, y + hs);
-    }
-
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        base.OnDetachedFromVisualTree(e);
-        _skImage?.Dispose();
-        _skImage = null;
     }
 
     // ---------- pointer ----------

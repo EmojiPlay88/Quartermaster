@@ -266,4 +266,41 @@ public sealed class ImagePaneTests : IDisposable
         Assert.False(pane.HasHorizontalScrollBar || pane.HasVerticalScrollBar);
         w.Close();
     }
+
+    static SKBitmap Solid(SKColor color)
+    {
+        var b = new SKBitmap(64, 64);
+        using var c = new SKCanvas(b);
+        c.Clear(color);
+        return b;
+    }
+
+    static SKColor CenterOf(Window w)
+    {
+        using var frame = w.CaptureRenderedFrame()!;
+        var (width, height, px) = TestHelpers.Pixels(frame);
+        return px[(height / 2) * width + width / 2];
+    }
+
+    [AvaloniaFact]
+    public void Disposing_the_bitmap_after_it_was_drawn_is_safe()
+    {
+        var a = Solid(SKColors.Red);
+        var (pane, w) = Make(a);
+        pane.SetZoom(1);
+        Assert.Equal(SKColors.Red.Red, CenterOf(w).Red); // the pane built its image over A's pixels
+        // The caller disposes A and immediately reuses the memory; frames still using A's image must read valid pixels.
+        a.Dispose();
+        var churn = new List<SKBitmap>();
+        for (int i = 0; i < 8; i++) churn.Add(Solid(SKColors.Lime));
+        pane.Redraw();
+        var c = CenterOf(w);
+        Assert.True(c.Red > 200 && c.Green < 60, $"old pixels were lost: {c}");
+        var b = Solid(SKColors.Blue);
+        pane.SetImage(b, null);
+        Assert.True(CenterOf(w).Blue > 200);
+        foreach (var x in churn) x.Dispose();
+        b.Dispose();
+        w.Close();
+    }
 }
