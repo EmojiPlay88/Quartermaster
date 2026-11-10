@@ -169,4 +169,19 @@ public class TesseractTests
         var words = await t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Contains(words, w => w.Text.Contains("Alpha"));
     }
+
+    [Fact]
+    public async Task Last_read_frees_engines_after_timed_out_dispose()
+    {
+        using var release = new ManualResetEventSlim();
+        var t = new TesseractRecognizer(null, () => { release.Wait(); return Quartermaster.Documents.Tesseract.TessApiHandle.Create(); }) { DisposeWait = TimeSpan.FromMilliseconds(50) };
+        using var img = InventedTables.Line("Alpha", 30f);
+        var read = t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None);
+        await Task.Delay(300);   // the read owns the gate and sits in engine creation
+        t.Dispose();             // times out; the read is still running
+        release.Set();
+        await read;              // the running read may finish
+        Assert.Equal(0, t.EngineCount);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None));
+    }
 }

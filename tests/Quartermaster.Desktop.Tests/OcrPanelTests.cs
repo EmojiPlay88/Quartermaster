@@ -193,13 +193,33 @@ public sealed class OcrPanelTests
     public async Task Stale_read_dropped_after_new_target()
     {
         using var rig = new Rig(e => e.Gate = new TaskCompletionSource());
-        var read = rig.Panel.ReadTextAsync();
+        var gateA = rig.Engine.Gate!;
+        var readA = rig.Panel.ReadTextAsync();
         rig.Panel.CancelRead(); // another image or region was chosen
-        rig.Panel.ShowNote("Another image.");
-        rig.Engine.Gate!.SetResult();
-        await read;
-        Assert.False(rig.Panel.HasGrid);
-        Assert.Equal("Another image.", rig.Panel.StatusText);
+        rig.Engine.Gate = new TaskCompletionSource();
+        var gateB = rig.Engine.Gate;
+        rig.Engine.Words = [new OcrWord("77", 10, 10, 40, 24)];
+        var readB = rig.Panel.ReadTextAsync();
+        Assert.True(rig.Panel.IsReading);
+        gateA.SetResult();
+        await readA;
+        Assert.False(rig.Panel.HasGrid);              // A's result is dropped
+        Assert.True(rig.Panel.IsReading);             // and A finishing does not end B
+        gateB.SetResult();
+        await readB;
+        Assert.Equal(["77"], rig.Panel.Cells[0]);
+        Assert.False(rig.Panel.IsReading);
+    }
+
+    [AvaloniaFact]
+    public async Task Import_exception_is_reported_not_thrown()
+    {
+        using var rig = new Rig();
+        rig.Panel.ImportRequested += (_, _, _) => throw new InvalidOperationException("boom");
+        await rig.Panel.ReadTextAsync();
+        rig.Panel.ImportButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Assert.Equal("Something went wrong: boom", rig.Panel.StatusText);
+        Assert.True(rig.Panel.StatusIsProblem);
     }
 
     [AvaloniaFact]

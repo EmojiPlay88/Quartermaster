@@ -50,7 +50,7 @@ public sealed class OcrPanel : UserControl
         [ScrollViewer.HorizontalScrollBarVisibilityProperty] = ScrollBarVisibility.Auto, [ScrollViewer.VerticalScrollBarVisibilityProperty] = ScrollBarVisibility.Auto,
     };
     public EditGrid Grid { get; } = new();
-    public bool StatusIsProblem { get; private set; }
+    internal bool StatusIsProblem { get; private set; }
 
     readonly TextBlock _status = new() { Height = 34, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 2, 2, 0) };
     readonly TabItem _textPage = new() { Header = "Text" }, _gridPage = new() { Header = "Grid" };
@@ -121,7 +121,7 @@ public sealed class OcrPanel : UserControl
         ColumnsBox.SelectionChanged += (_, _) => _ = Guard(OnColumnsChosenAsync);
         MergeButton.Click += (_, _) => _ = Guard(MergeAsync);
         SplitButton.Click += (_, _) => _ = Guard(SplitAsync);
-        ImportButton.Click += (_, _) => Import();
+        ImportButton.Click += (_, _) => _ = Guard(() => { Import(); return Task.CompletedTask; });
         CopyButton.Click += (_, _) => _ = Guard(CopyAsync);
         Grid.CellCommitted += (r, c, t) => OnCellEdited(r, c, t);
         Tabs.SelectionChanged += (_, _) => UpdateButtons();
@@ -314,7 +314,13 @@ public sealed class OcrPanel : UserControl
     }
 
     /// <summary>Rebuild steps drop edits: confirm first.</summary>
-    async Task<bool> MayRebuildAsync() => _state?.HasEdits != true || await ConfirmAsync(RebuildQuestion);
+    async Task<bool> MayRebuildAsync()
+    {
+        if (_state?.HasEdits != true) return true;
+        var state = _state;
+        if (!await ConfirmAsync(RebuildQuestion)) return false;
+        return ReferenceEquals(state, _state) && !_model.IsReading; // the grid was replaced or a read started while the question was open
+    }
 
     async Task OnFixChangedAsync()
     {
@@ -360,7 +366,7 @@ public sealed class OcrPanel : UserControl
         var c = SelectedColumn;
         var width = Cells.Length == 0 ? 0 : Cells.Max(r => r.Length);
         if (c < 0 || c >= width - 1) { SetStatus("Select a cell in a column that has a column to its right, then Merge joins the two."); return; }
-        if (!await MayRebuildAsync()) return;
+        if (!await MayRebuildAsync() || SelectedColumn != c) return;
         _state.MergeColumns(c);
         FillGrid();
         SetStatus($"Columns {c + 1} and {c + 2} merged.");
@@ -372,7 +378,7 @@ public sealed class OcrPanel : UserControl
         Grid.CommitEdit();
         var c = SelectedColumn;
         if (c < 0) { SetStatus("Select a cell in the column to split."); return; }
-        if (!await MayRebuildAsync()) return;
+        if (!await MayRebuildAsync() || SelectedColumn != c) return;
         var before = Cells.Length == 0 ? 0 : Cells.Max(r => r.Length);
         _state.SplitColumn(c);
         FillGrid();
@@ -411,5 +417,5 @@ public sealed class OcrPanel : UserControl
     public void ShowGridTab() => Tabs.SelectedItem = _gridPage;
 
     /// <summary>Smoke: clicks Read text through the button.</summary>
-    public void ClickReadForSmoke() => _lastRead = ReadTextAsync();
+    internal void ClickReadForSmoke() => _lastRead = ReadTextAsync();
 }

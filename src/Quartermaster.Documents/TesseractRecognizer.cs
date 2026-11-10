@@ -73,7 +73,11 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             ct.ThrowIfCancellationRequested();
-            return await Task.Run<IReadOnlyList<OcrWord>>(() => Run(Engine(language), pixels, w, h, psm), ct).ConfigureAwait(false);
+            return await Task.Run<IReadOnlyList<OcrWord>>(() =>
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this); // Dispose may have returned (timed out) since the gate check
+                return Run(Engine(language), pixels, w, h, psm);
+            }, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -81,6 +85,8 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
             _gate.Release();
         }
     }
+
+    internal int EngineCount => _engines.Count;
 
     private void FreeEngines()
     {
