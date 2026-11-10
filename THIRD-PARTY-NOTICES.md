@@ -31,6 +31,16 @@ rulebook page text for search. PdfPig is licensed under the Apache License, Vers
 (https://www.apache.org/licenses/LICENSE-2.0). The full licence text is in [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt).
 PdfPig is used unmodified, as a binary package.
 
+## PDFtoImage, PDFium and LibTiff.Net
+
+`src/Quartermaster.Documents` draws rulebook PDF pages with PDFtoImage and reads TIFF scans with LibTiff.Net. All are used unmodified, as binaries.
+
+| Component | Where it is bundled | Licence | Text |
+|---|---|---|---|
+| PDFtoImage 5.4.0 (NuGet package `PDFtoImage`, https://github.com/sungaila/PDFtoImage) | managed library | MIT | [`LICENSES/MIT-PDFtoImage.txt`](LICENSES/MIT-PDFtoImage.txt) |
+| PDFium (https://pdfium.googlesource.com/pdfium/), built by Benoît Blanchon (NuGet packages `bblanchon.PDFium.Win32`, `.Linux`, `.macOS`, 152.0.7961, https://github.com/bblanchon/pdfium-binaries) | pdfium.dll / libpdfium.so / libpdfium.dylib | Apache-2.0 (PDFium; its bundled third-party parts are BSD-style, see the licence files in the upstream packages) | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt) |
+| LibTiff.Net 2.4.649 (NuGet package `BitMiracle.LibTiff.NET`, https://github.com/BitMiracle/libtiff.net), Copyright (C) 2008-2020 Bit Miracle | managed library | BSD-3-Clause | [`LICENSES/BSD-3-Clause-LibTiff.NET.txt`](LICENSES/BSD-3-Clause-LibTiff.NET.txt) |
+
 ## Tesseract, Leptonica and tessdata_fast
 
 `src/Quartermaster.Documents` reads scanned pages with Tesseract OCR. It calls the native libraries through its own small P/Invoke layer.
