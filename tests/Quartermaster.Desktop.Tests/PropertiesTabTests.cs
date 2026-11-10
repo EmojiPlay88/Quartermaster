@@ -136,7 +136,7 @@ public sealed class PropertiesTabTests : IDisposable
         Assert.Equal(OutlinerAggregate.Sum, w.Outliner);
         Assert.Equal("water", w.Id);
         g.BeginEdit(0, 3);   // sheet field: an empty choice first, the current value kept in the list
-        var items = ((IEnumerable<string>)((ComboBox)g.Editor!).ItemsSource!).ToList();
+        var items = g.EditorList!.Items.Cast<string>().ToList();
         Assert.Equal("", items[0]);
         Assert.Contains("Fuel", items);
         g.CancelEdit();
@@ -343,5 +343,65 @@ public sealed class PropertiesTabTests : IDisposable
         s.UpdateRules(p => p with { Properties = p.Properties.Select(x => x.Id == "fuel" ? x with { Name = "Petrol" } : x).ToList() });
         Pump();
         Assert.Equal("Petrol", tab.PropertyGrid.Cell(0, 0));
+    }
+
+    [AvaloniaFact]
+    public void SheetField_free_text_when_no_sheet_rows()
+    {
+        var s = Session();
+        var tab = Tab(s);
+        tab.PropertyGrid.BeginEdit(1, 3, "Brand new field");   // not offered by any piece
+        Assert.NotNull(tab.PropertyGrid.EditorText);
+        tab.PropertyGrid.CommitEdit();
+        Pump();
+        Assert.Equal("Brand new field", s.Rules!.Properties[1].SheetField);
+        Type(tab.PropertyGrid, 1, 3, "");
+        Assert.Null(s.Rules.Properties[1].SheetField);
+    }
+
+    /// <summary>Forwards everything to the fake dialogs but makes the Yes/No question wait for a gate.</summary>
+    public class GatedDialogs : System.Reflection.DispatchProxy
+    {
+        public object Inner = null!;
+        public TaskCompletionSource<bool>? Gate;
+        protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? args)
+        {
+            if (m!.Name == "AskYesNoAsync" && Gate is { } g) return g.Task;
+            return m.Invoke(Inner, args);
+        }
+    }
+
+    [AvaloniaFact]
+    public void Delete_answer_is_dropped_when_the_row_changed_meanwhile()
+    {
+        var s = Session();
+        var proxy = System.Reflection.DispatchProxy.Create<Quartermaster.Desktop.Shell.IDialogs, GatedDialogs>();
+        var gated = (GatedDialogs)(object)proxy;
+        gated.Inner = _dialogs;
+        gated.Gate = new();
+        var tab = new PropertiesTab(s, proxy);
+        var w = new Window { Width = 1000, Height = 700, Content = tab };
+        _windows.Add(w);
+        w.Show();
+        Pump();
+        tab.SelectProperty("water");
+        Pump();
+        Click(tab.DeletePropertyButton);   // waiting
+        tab.SelectProperty("fuel");        // another row is current now
+        Pump();
+        gated.Gate.SetResult(true);
+        Pump();
+        Assert.Equal(2, s.Rules!.Properties.Count);
+
+        gated.Gate = new();
+        tab.SelectProperty("water");
+        Pump();
+        Click(tab.DeletePropertyButton);
+        s.UpdateRules(p => p with { Properties = p.Properties.Where(x => x.Id != "water").ToList() });   // deleted elsewhere
+        Pump();
+        gated.Gate.SetResult(true);
+        Pump();
+        Assert.Equal(["fuel"], s.Rules.Properties.Select(x => x.Id).ToList());
+        Assert.DoesNotContain(s.Log.Items, e => e.Message.StartsWith("Property edit failed"));
     }
 }

@@ -399,4 +399,64 @@ public sealed class EditGridTests : IDisposable
         Assert.NotEqual(EditGrid.ErrorBrush, g.CellBackground(0, 0));
         w.Close();
     }
+
+    static (EditGrid G, Window W, List<(int, int, string)> Log) MakeEditable()
+    {
+        var g = new EditGrid();
+        var log = new List<(int, int, string)>();
+        g.CellCommitted += (r, c, t) => log.Add((r, c, t));
+        g.SetColumns([new("Name"), new("Field", EditColumnKind.EditableCombo, Items: ["Fuel", "Ammo"])]);
+        g.SetRows([["a", "Fuel"], ["b", ""]]);
+        var w = new Window { Width = 600, Height = 400, Content = g };
+        w.Show();
+        g.Focus();
+        return (g, w, log);
+    }
+
+    [AvaloniaFact]
+    public void Editable_combo_accepts_typed_text()
+    {
+        var (g, w, log) = MakeEditable();
+        g.BeginEdit(1, 1, "Morale");   // free text, not in the list
+        Assert.NotNull(g.EditorText);
+        Assert.Equal(["Fuel", "Ammo"], g.EditorList!.Items.Cast<string>().ToList());
+        Key(w, Avalonia.Input.Key.Enter);
+        Assert.False(g.IsEditing);
+        Assert.Equal([(1, 1, "Morale")], log);
+        Assert.Equal("Morale", g.Cell(1, 1));
+        g.BeginEdit(0, 1);
+        Assert.Equal("Fuel", g.EditorText!.Text);
+        g.EditorText.Text = "Fuel2";
+        Assert.True(g.CommitEdit());
+        Assert.Equal("Fuel2", g.Cell(0, 1));
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void Editable_combo_choice_commits()
+    {
+        var (g, w, log) = MakeEditable();
+        g.BeginEdit(1, 1);
+        g.EditorList!.SelectedItem = "Ammo";
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.False(g.IsEditing);
+        Assert.Equal([(1, 1, "Ammo")], log);
+        g.SetCellItems(0, 1, ["X"]);
+        g.BeginEdit(0, 1);
+        Assert.Equal(["X"], g.EditorList!.Items.Cast<string>().ToList());
+        g.CancelEdit();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void Editable_combo_escape_cancels()
+    {
+        var (g, w, log) = MakeEditable();
+        g.BeginEdit(0, 1, "zzz");
+        Key(w, Avalonia.Input.Key.Escape);
+        Assert.False(g.IsEditing);
+        Assert.Empty(log);
+        Assert.Equal("Fuel", g.Cell(0, 1));
+        w.Close();
+    }
 }

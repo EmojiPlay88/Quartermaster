@@ -40,7 +40,7 @@ public sealed class PropertiesTab : UserControl
             new EditColumn("Name", Weight: 90),
             new EditColumn("Scope", EditColumnKind.Combo, Weight: 60, Items: Enum.GetNames<PropertyScope>()),
             new EditColumn("Default", Weight: 50),
-            new EditColumn("SheetField", EditColumnKind.Combo, Weight: 80),
+            new EditColumn("SheetField", EditColumnKind.EditableCombo, Weight: 80),
             new EditColumn("AppliesTo", Weight: 120),
             new EditColumn("Outliner", EditColumnKind.Combo, Weight: 60, Items: Enum.GetNames<OutlinerAggregate>()),
             new EditColumn("Notes", Weight: 160),
