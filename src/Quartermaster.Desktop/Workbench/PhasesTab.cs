@@ -465,12 +465,14 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     void OnPhaseSelected()
     {
         if (_loading) return;
+        var id = SelectedIds().FirstOrDefault();   // read first: flushing refreshes the list, which re-selects the old phase
         Flush();
-        var id = SelectedIds().FirstOrDefault();
+        _start.CommitEdit(); _move.CommitEdit(); _warn.CommitEdit();
         if (id == null) return;   // multi-select clears and reselects; keep the last phase shown
         if (id == _selectedPhase) return;
-        _start.CommitEdit(); _move.CommitEdit(); _warn.CommitEdit();
+        if (_s.Rules?.Phases.All(p => p.Id != id) != false) return;
         _selectedPhase = id;
+        RefreshList();
         LoadPhase();
     }
 

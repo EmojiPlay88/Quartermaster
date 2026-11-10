@@ -523,4 +523,109 @@ public sealed class PhasesTabTests : IDisposable
         Assert.Equal(0, tab.PhaseCount);
         Assert.False(tab.NameBox.IsEffectivelyEnabled);
     }
+
+    [AvaloniaTheory]
+    [InlineData("name")]
+    [InlineData("instructions")]
+    [InlineData("notes")]
+    [InlineData("grid")]
+    public void Pending_edit_does_not_swallow_phase_click(string what)
+    {
+        var s = Session();
+        var tab = Tab(s);
+        tab.SelectPhase("ph-supply");
+        Pump();
+        switch (what)
+        {
+            case "name": tab.NameBox.Text = "Supply 2"; break;
+            case "instructions": tab.Instructions.Text = "do it"; break;
+            case "notes": tab.Notes.Text = "n"; break;
+            default: tab.StartGrid.BeginEdit(0, 2, "name() != \"\""); break;
+        }
+        tab.PhaseList.SelectedIndex = 4;   // End
+        Pump();
+        Assert.Equal("ph-end", tab.SelectedPhaseId);
+        Assert.Equal([4], tab.PhaseList.Selection.SelectedIndexes.ToList());
+        Assert.Equal("End", tab.NameBox.Text);
+        var sup = Ph(s, "ph-supply");
+        Assert.Equal(what switch { "name" => "Supply 2", _ => "Supply" }, sup.Name);
+        if (what == "instructions") Assert.Equal("do it", sup.Instructions);
+        if (what == "notes") Assert.Equal("n", sup.Notes);
+        if (what == "grid") Assert.Equal("name() != \"\"", sup.OnStart[0].UnitFilter);
+    }
+
+    [AvaloniaFact]
+    public void Make_block_overlapping_an_existing_block_is_refused()
+    {
+        var s = Session();
+        var tab = Tab(s);
+        tab.SelectPhase("ph-supply");
+        tab.PhaseList.Selection.Select(2);   // Supply..Movement, Movement is in Round
+        Pump();
+        _dialogs.BlockAnswer = (2, "x");
+        var before = s.Rules;
+        var rows = tab.PhaseRows.Select(r => r.Text).ToList();
+        Click(tab.BlockButton);
+        Assert.Equal("These phases are already in a block", _dialogs.Warnings[^1].Message);
+        Assert.Equal("Phases", _dialogs.Warnings[^1].Caption);
+        Assert.Same(before, s.Rules);
+        Assert.Equal(rows, tab.PhaseRows.Select(r => r.Text).ToList());
+    }
+
+    /// <summary>Forwards everything to the fake dialogs but makes the Make block dialog wait for a gate.</summary>
+    public class GatedDialogs : System.Reflection.DispatchProxy
+    {
+        public object Inner = null!;
+        public TaskCompletionSource<(int Count, string Label)?>? Gate;
+
+        protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? args)
+        {
+            if (m!.Name == "AskBlockAsync" && Gate is { } g) return g.Task;
+            return m.Invoke(Inner, args);
+        }
+    }
+
+    PhasesTab GatedTab(ModuleSession s, out GatedDialogs gated)
+    {
+        var proxy = System.Reflection.DispatchProxy.Create<Quartermaster.Desktop.Shell.IDialogs, GatedDialogs>();
+        gated = (GatedDialogs)(object)proxy;
+        gated.Inner = _dialogs;
+        gated.Gate = new();
+        var tab = new PhasesTab(s, proxy, _ => null);
+        var w = new Window { Width = 1000, Height = 800, Content = tab };
+        _windows.Add(w);
+        w.Show();
+        Pump();
+        return tab;
+    }
+
+    [AvaloniaFact]
+    public void Block_dialog_answer_is_dropped_when_the_selection_changed_meanwhile()
+    {
+        var s = Session(true, p => p with { Blocks = new() });
+        var tab = GatedTab(s, out var g);
+        tab.SelectPhase("ph-supply");
+        Pump();
+        Click(tab.BlockButton);   // waiting
+        tab.SelectPhase("ph-end");
+        Pump();
+        g.Gate!.SetResult((2, "x"));
+        Pump();
+        Assert.Empty(s.Rules!.Blocks);
+    }
+
+    [AvaloniaFact]
+    public void Block_dialog_answer_is_dropped_when_the_phase_was_removed_meanwhile()
+    {
+        var s = Session(true, p => p with { Blocks = new() });
+        var tab = GatedTab(s, out var g);
+        tab.SelectPhase("ph-supply");
+        Pump();
+        Click(tab.BlockButton);
+        s.UpdateRules(p => p with { Phases = p.Phases.Where(x => x.Id != "ph-supply").ToList() });
+        Pump();
+        g.Gate!.SetResult((2, "x"));
+        Pump();
+        Assert.Empty(s.Rules!.Blocks);
+    }
 }
