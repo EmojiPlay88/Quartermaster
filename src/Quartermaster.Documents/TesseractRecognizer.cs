@@ -15,10 +15,26 @@ namespace Quartermaster.Documents;
 public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
 {
     private readonly string _path;
-    private readonly object _gate = new();
+    private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, TessApiHandle> _engines = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<TessApiHandle> _create;
-    private bool _disposed;
+    private volatile bool _disposed;
+
+    /// <summary>How long Dispose waits for a running read before giving up (the read then frees the engines itself).</summary>
+    internal TimeSpan DisposeWait { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>Test hook: takes the read gate so reads queue behind it; dispose the result to release.</summary>
+    internal async Task<IDisposable> HoldGateAsync()
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        return new GateHold(_gate);
+    }
+
+    private sealed class GateHold(SemaphoreSlim gate) : IDisposable
+    {
+        private int _done;
+        public void Dispose() { if (Interlocked.Exchange(ref _done, 1) == 0) gate.Release(); }
+    }
 
     public TesseractRecognizer(string? tessdataPath = null) : this(tessdataPath, TessApiHandle.Create) { }
 
@@ -39,7 +55,7 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
     public string? DefaultLanguage { get; }
     public string UnavailableMessage => "No OCR language data was found. Reinstall Quartermaster to restore English.";
 
-    public Task<IReadOnlyList<OcrWord>> RecognizeAsync(SKBitmap gray, OcrLayout layout, string language, CancellationToken ct)
+    public async Task<IReadOnlyList<OcrWord>> RecognizeAsync(SKBitmap gray, OcrLayout layout, string language, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(gray);
         ct.ThrowIfCancellationRequested();
@@ -50,16 +66,26 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
         int w = gray.Width, h = gray.Height;
         var pixels = ToGray8(gray); // copied now; the caller's bitmap is not kept
         int psm = layout == OcrLayout.SingleLine ? TessApi.PsmSingleLine : TessApi.PsmSingleBlock;
-        return Task.Run<IReadOnlyList<OcrWord>>(() =>
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Queued reads wait on the semaphore without holding a pool thread; only the read that owns the gate runs on a worker.
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             ct.ThrowIfCancellationRequested();
-            lock (_gate)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                ct.ThrowIfCancellationRequested();
-                return Run(Engine(language), pixels, w, h, psm);
-            }
-        }, ct);
+            return await Task.Run<IReadOnlyList<OcrWord>>(() => Run(Engine(language), pixels, w, h, psm), ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_disposed) FreeEngines(); // Dispose gave up waiting for this read: free the engines now (the gate is still held)
+            _gate.Release();
+        }
+    }
+
+    private void FreeEngines()
+    {
+        foreach (var e in _engines.Values) e.Dispose();
+        _engines.Clear();
     }
 
     private unsafe TessApiHandle Engine(string language)
@@ -188,14 +214,10 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
 
     public void Dispose()
     {
-        bool got = Monitor.TryEnter(_gate, TimeSpan.FromSeconds(2));
-        try
-        {
-            if (_disposed || !got) return; // a read still runs after 2 s: give up quietly, the handles' finalizers free the engines
-            _disposed = true;
-            foreach (var e in _engines.Values) e.Dispose();
-            _engines.Clear();
-        }
-        finally { if (got) Monitor.Exit(_gate); }
+        if (_disposed) return;
+        _disposed = true; // before taking the gate: no read starts after Dispose returns, even when waiting for the gate times out
+        if (!_gate.Wait(DisposeWait)) return; // a read still runs: it frees the engines when it ends
+        try { FreeEngines(); }
+        finally { _gate.Release(); }
     }
 }
