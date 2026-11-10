@@ -122,7 +122,7 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
 
     /// <summary>The dialogs' owner while the tab is not in a window (a hidden workbench tab is detached): set by the workbench, so a
     /// scan import works whichever tab is shown.</summary>
-    public Window? DialogOwner { get; set; }
+    internal Window? DialogOwner { get; set; }
 
     Window? Owner => TopLevel.GetTopLevel(this) as Window ?? DialogOwner;
 

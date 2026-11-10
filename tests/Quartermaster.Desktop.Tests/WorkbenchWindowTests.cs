@@ -410,9 +410,31 @@ public sealed class WorkbenchWindowTests : IDisposable
 
         // Fixed: one "No problems found." row without an issue.
         s.UpdateRules(p => p with { Formulas = p.Formulas.Where(f => f.Id != "f-broken").ToList(), Alerts = new() });
-        Assert.True(WaitFor(() => wb.IssueRows.All(r => r.Issue == null || r.Severity != "Error")));
-        if (wb.IssueRows.Count == 1 && wb.IssueRows[0].Issue == null) Assert.Equal(WorkbenchRules.NoProblemsText, wb.IssueRows[0].Problem);
+        Assert.True(WaitFor(() => wb.IssueRows.Count == 1 && wb.IssueRows[0].Issue == null),
+            "issues left: " + string.Join("; ", wb.IssueRows.Select(r => r.Item + ": " + r.Problem)));
+        Assert.Equal(new IssueRow("", "", WorkbenchRules.NoProblemsText, null), wb.IssueRows[0]);
+        var shownBefore = Shown(wb);
+        wb.GoToIssue(0);    // the "No problems found." row: no-op
         wb.GoToIssue(99);   // out of range: no-op
+        Assert.Same(shownBefore, Shown(wb));
+    }
+
+    [AvaloniaFact]
+    public void Left_pane_search_splitter_shows_only_with_a_search_panel()
+    {
+        var (wb, _) = Standalone();
+        Assert.Equal(1, Grid.GetRow(wb.SearchSplitter));
+        Assert.Contains(wb.SearchSplitter, wb.LeftPane.Children);
+        Assert.False(wb.SearchSplitter.IsVisible);   // empty slot: the Auto row has no height
+        var panel = new Border { Height = 80 };
+        Grid.SetRow(panel, 2);
+        wb.LeftPane.Children.Add(panel);
+        Assert.True(wb.SearchSplitter.IsVisible);
+        panel.IsVisible = false;
+        wb.UpdateSearchSplitter();
+        Assert.False(wb.SearchSplitter.IsVisible);
+        wb.LeftPane.Children.Remove(panel);
+        Assert.False(wb.SearchSplitter.IsVisible);
     }
 
     // ---------- rule references ----------

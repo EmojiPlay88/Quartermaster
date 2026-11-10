@@ -69,6 +69,14 @@ public sealed partial class WorkbenchWindow : Window
     internal Button SearchButton { get; } = new() { Content = "Search", IsEnabled = false };
     internal Button OpenScanButton { get; } = new() { Content = "Open scan…", IsEnabled = false };
 
+    /// <summary>Row 1 of <see cref="LeftPane"/>: the splitter over the search panel slot (row 2). Shown only while the slot holds a visible
+    /// control (<see cref="UpdateSearchSplitter"/>; the search panel calls it again when it collapses or expands).</summary>
+    internal GridSplitter SearchSplitter { get; } = new() { ResizeDirection = GridResizeDirection.Rows, Height = 4, IsVisible = false };
+
+    /// <summary>Shows the search splitter while row 2 of the left pane holds a visible control, hides it otherwise.</summary>
+    internal void UpdateSearchSplitter() =>
+        SearchSplitter.IsVisible = LeftPane.Children.Any(c => Grid.GetRow(c) == 2 && c.IsVisible);
+
     public WorkbenchWindow(ModuleSession s, IDialogs dialogs, Func<Task> newPack, Func<Task> openPack, IOcrRecognizer? ocr = null)
     {
         _s = s;
@@ -100,6 +108,9 @@ public sealed partial class WorkbenchWindow : Window
 
         // left | splitter | tabs
         LeftPane.Children.Add(Viewer);
+        Grid.SetRow(SearchSplitter, 1);
+        LeftPane.Children.Add(SearchSplitter);
+        LeftPane.Children.CollectionChanged += (_, _) => UpdateSearchSplitter();
         Grid.SetColumn(LeftPane, 0);
         var splitter = new GridSplitter { ResizeDirection = GridResizeDirection.Columns };
         Grid.SetColumn(splitter, 1);
@@ -170,9 +181,10 @@ public sealed partial class WorkbenchWindow : Window
             }
         });
 
-        foreach (var e in Editors) { e.DescribeRef = Describe; e.RefreshRuleRef(); }
         WireSearch();
         WireScans();
+        // After the search and scan parts are wired: Describe is theirs (WorkbenchWindow.Search.cs), and the editors show refs through it.
+        foreach (var e in Editors) { e.DescribeRef = Describe; e.RefreshRuleRef(); }
 
         _validateTimer.Tick += (_, _) => { _validateTimer.Stop(); Guard(Validate); };
         _s.RulesChanged += OnRulesChanged;
