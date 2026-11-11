@@ -33,6 +33,9 @@ public interface IDialogs
     /// and exists.</summary>
     Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters, string? initialFolder = null);
 
+    /// <summary>Existing files' local paths (multi-select, as the launcher's Add module), or an empty list when cancelled.</summary>
+    Task<IReadOnlyList<string>> OpenFilesAsync(Window owner, string title, IReadOnlyList<FileFilter> filters);
+
     /// <summary>The "Set shortcut" prompt (WinForms ShortcutCaptureDialog) for <paramref name="commandLabel"/>: the canonical shortcut text pressed,
     /// "" = clear, null = cancelled.</summary>
     Task<string?> AskShortcutAsync(Window owner, string commandLabel);
@@ -140,6 +143,20 @@ public sealed class Dialogs : IDialogs
         if (files[0].TryGetLocalPath() is { } path) return path;
         await MessageBox.ShowAsync(owner, NotLocalText, "Quartermaster", yesNo: false);
         return null;
+    }
+
+    /// <summary>Items without a local path are dropped; when nothing local is left of a non-empty choice, says so (<see cref="NotLocalText"/>).</summary>
+    public async Task<IReadOnlyList<string>> OpenFilesAsync(Window owner, string title, IReadOnlyList<FileFilter> filters)
+    {
+        var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = true,
+            FileTypeFilter = filters.Select(Type).ToList(),
+        });
+        var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
+        if (files.Count > 0 && paths.Count == 0) await MessageBox.ShowAsync(owner, NotLocalText, "Quartermaster", yesNo: false);
+        return paths;
     }
 
     public async Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null)
