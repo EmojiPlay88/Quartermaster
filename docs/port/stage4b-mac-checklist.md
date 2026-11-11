@@ -7,7 +7,7 @@ The test needs about 30 minutes. Use your own module (or the Riverland demo in `
 What this build does not have yet:
 
 - Settings > Game shows Difficulty only; "Players: comes with multiplayer (stage 5)" sits where the Players box will be.
-- No extra OCR languages (stage 4c); no launcher or update check (stage 5), although their two General checkboxes are stored.
+- No extra OCR languages (they arrive with stage 4c, see `docs/port/stage4c-mac-checklist.md`); no launcher or update check (stage 5), although their two General checkboxes are stored.
 - The counter palette shows only in game master mode (Settings > General).
 
 ## A. Get the build

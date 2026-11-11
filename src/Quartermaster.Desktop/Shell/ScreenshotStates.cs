@@ -23,7 +23,8 @@ static class ScreenshotStates
     public static readonly string[] Names = { "menu", "hover", "los", "log", "rules", "phases", "nextphase", "stepback", "formula", "cheatsheet", "batch", "alerts", "tree", "floatlog", "floatphases",
         "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice", "chart", "document", "document-search",
         "workbench", "workbench-formulas", "workbench-phases", "workbench-search", "workbench-scan",
-        "settings", "settings-general", "settings-game", "settings-display", "settings-map", "settings-dice", "settings-toolbar", "settings-keyboard", "settings-folders" };
+        "settings", "settings-general", "settings-game", "settings-display", "settings-map", "settings-dice", "settings-toolbar", "settings-keyboard", "settings-folders",
+        "settings-ocr", "ocr-dropdown" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -39,7 +40,7 @@ static class ScreenshotStates
 
     static string? _scanDir;
 
-    static readonly string[] SettingsPages = { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders" };
+    static readonly string[] SettingsPages = { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders", "ocr" };
 
     /// <summary>Start game, then Next Phase until North Combat (checklist, warnings), as a real turn would reach it.</summary>
     static string? ToCombat(MainWindow window, Action? beforeClose = null)
@@ -293,6 +294,7 @@ static class ScreenshotStates
             case "settings-toolbar":
             case "settings-keyboard":
             case "settings-folders":
+            case "settings-ocr":
             {
                 // Pages in window order; plain "settings" is the first page, as Tools > Settings opens it.
                 var page = name == "settings" ? 0 : Array.IndexOf(SettingsPages, name["settings-".Length..]);
@@ -307,6 +309,22 @@ static class ScreenshotStates
                 if (name == "settings-folders" && win.Pages.OfType<FoldersPage>().FirstOrDefault() is { } fp) PumpUntil(() => fp.SizesLoaded, 10000);
                 Pump(300);
                 Target = win;
+                return null;
+            }
+            case "ocr-dropdown":
+            {
+                // The scan pane's OCR panel with its language list open: the real catalog's display names and "More languages…".
+                if (s.Rules == null) return "State 'ocr-dropdown' needs --rules.";
+                var wb = OpenWorkbench(window, 1280, 760);
+                if (wb == null) return "The workbench did not open.";
+                _scanDir = Path.Combine(Path.GetTempPath(), "qm-shot-scan-" + Guid.NewGuid().ToString("N"));
+                var (path, region) = WriteInventedTable(_scanDir);
+                var open = wb.OpenScanFile(path);
+                if (!PumpUntil(() => open.IsCompleted && wb.Scan.Loading.IsCompleted && wb.Scan.Image != null, 30000)) return "The scan did not open.";
+                wb.Scan.Pane.CommitRegion(region);
+                wb.Scan.Ocr.LanguageBox.IsDropDownOpen = true;
+                Pump(600);
+                Target = wb;
                 return null;
             }
             case "workbench-search":
