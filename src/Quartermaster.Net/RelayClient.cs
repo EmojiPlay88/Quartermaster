@@ -252,13 +252,11 @@ public sealed class RelayClient : IAsyncDisposable
                 await SendRaw(ws, new Hello(Protocol.ProtocolVersion, effective)).ConfigureAwait(false);
                 lock (_gate) _helloSent = true;
             }
+            // Set before sending: the relay's answer may be read by the receive pump before SendRaw returns, and a Refused
+            // answering this Post must not be taken as the answer to a pending Request.
+            lock (_gate) _postSinceRequest = isPost;
             await SendRaw(ws, msg).ConfigureAwait(false);
-            lock (_gate)
-            {
-                _role = effective;
-                // A Refused after a Post can't be attributed to the pending request.
-                _postSinceRequest = isPost;
-            }
+            lock (_gate) _role = effective;
             return true;
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or IOException)
