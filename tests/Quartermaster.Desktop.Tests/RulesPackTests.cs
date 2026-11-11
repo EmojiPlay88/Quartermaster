@@ -28,7 +28,7 @@ public sealed class RulesPackTests : IDisposable
 
     MainWindow NewWindow(FakeDialogs? dialogs = null, bool remember = false)
     {
-        var w = new MainWindow(dialogs ?? _dialogs, Path.Combine(_tmp, "cache"), remember ? Path.Combine(_tmp, "rules") : null) { Width = 1024, Height = 768 };
+        var w = new MainWindow(dialogs ?? _dialogs, Path.Combine(_tmp, "cache"), remember ? Path.Combine(_tmp, "rules") : null, Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         return w;

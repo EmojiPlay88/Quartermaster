@@ -1,3 +1,4 @@
+using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Quartermaster.Desktop.Input;
@@ -108,7 +109,65 @@ public sealed class DiceTools
     // ---------- dice ----------
 
     /// <summary>Rolls 1d6 or 2d6 ("Roll"), as the toolbar buttons, the menu items and F5 / F6.</summary>
-    public bool Roll(DiceSpec spec) => Core.RollSpec(spec, DiceTurnActions.RollPurpose);
+    public bool Roll(DiceSpec spec)
+    {
+        if (!PhysicalDice) return Core.RollSpec(spec, DiceTurnActions.RollPurpose);
+        if (_session()?.Game == null) return false;
+        _runAsync(() => RollPhysicalAsync(new[] { (spec.Count, spec.Sides) }, () => Core.RollSpec(spec, DiceTurnActions.RollPurpose)));
+        return true;
+    }
+
+    /// <summary>True while rolls ask for the dice values instead of rolling (Settings, Tools, Physical dice).</summary>
+    public bool PhysicalDice { get => Core.PhysicalDice; set => Core.PhysicalDice = value; }
+
+    /// <summary>
+    /// WinForms AskPhysical: asks for each of <paramref name="n"/> dice in turn ("Value of die i of n (1-sides):"); a wrong entry says why and
+    /// asks again, Cancel returns null (nothing is recorded).
+    /// </summary>
+    public async Task<IReadOnlyList<int>?> AskPhysicalAsync(int n, int sides)
+    {
+        var list = new List<int>();
+        for (var i = 1; i <= n; i++)
+        {
+            while (true)
+            {
+                var text = await _dialogs.AskTextAsync(_owner, "Physical dice", $"Value of die {i} of {n} (1–{sides}):", "");
+                if (text == null) return null;
+                if (int.TryParse(text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var v) && v >= 1 && v <= sides) { list.Add(v); break; }
+                await _dialogs.ShowInfoAsync(_owner, $"Enter a whole number from 1 to {sides}.", "Physical dice");
+            }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// A dialog cannot block the shared roll code, so every value is asked first (one entry of <paramref name="asks"/> per roll); then the
+    /// roll runs with a one-shot provider that hands the answers out. A cancelled question, a changed module or a refused game records nothing.
+    /// </summary>
+    async Task RollPhysicalAsync(IReadOnlyList<(int N, int Sides)> asks, Action roll)
+    {
+        var s = _session();
+        var game = s?.Game;
+        if (Core.Refused()) return;
+        var answers = new Queue<IReadOnlyList<int>>();
+        foreach (var (n, sides) in asks)
+        {
+            if (await AskPhysicalAsync(n, sides) is not { } r) return;
+            answers.Enqueue(r);
+        }
+        if (!ReferenceEquals(s, _session()) || game == null || !ReferenceEquals(game, s!.Game)) return;   // module or game replaced while asking
+        Core.AskPhysical = (_, _) => answers.Count > 0 ? answers.Dequeue() : null;
+        try { roll(); }
+        finally { Core.AskPhysical = null; }
+    }
+
+    /// <summary>Rolls a module die, asking for its face when physical dice are on.</summary>
+    bool RollDie(DieDef die)
+    {
+        if (!PhysicalDice || die.Faces.Count < 2) return Core.RollSpecial(die);
+        _runAsync(() => RollPhysicalAsync(new[] { (1, die.Faces.Count) }, () => Core.RollSpecial(die)));
+        return true;
+    }
 
     void RebuildDiceMenu()
     {
@@ -141,7 +200,7 @@ public sealed class DiceTools
             foreach (var die in s.Model.Dice)
             {
                 var d = die;
-                var mi = Item(d.Name.Replace("&", "&&", StringComparison.Ordinal), () => Core.RollSpecial(d));
+                var mi = Item(d.Name.Replace("&", "&&", StringComparison.Ordinal), () => RollDie(d));
                 if (d.Faces.Count < 2)
                 {
                     mi.IsEnabled = false;
@@ -166,12 +225,16 @@ public sealed class DiceTools
 
     async Task CustomRollAsync()
     {
-        if (await _dialogs.AskDiceAsync(_owner, "Custom Roll", false) is { } r) Core.RollSpec(r.Spec, DiceTurnActions.RollPurpose);
+        if (await _dialogs.AskDiceAsync(_owner, "Custom Roll", false) is not { } r) return;
+        if (PhysicalDice) await RollPhysicalAsync(new[] { (r.Spec.Count, r.Spec.Sides) }, () => Core.RollSpec(r.Spec, DiceTurnActions.RollPurpose));
+        else Core.RollSpec(r.Spec, DiceTurnActions.RollPurpose);
     }
 
     async Task MultiRollAsync()
     {
-        if (await _dialogs.AskDiceAsync(_owner, "Multi-roll", true) is { } r) Core.MultiRoll(r.Spec, r.Times);
+        if (await _dialogs.AskDiceAsync(_owner, "Multi-roll", true) is not { } r) return;
+        if (PhysicalDice) await RollPhysicalAsync(Enumerable.Repeat((r.Spec.Count, r.Spec.Sides), r.Times).ToList(), () => Core.MultiRoll(r.Spec, r.Times));
+        else Core.MultiRoll(r.Spec, r.Times);
     }
 
     void ShowResult(string text)

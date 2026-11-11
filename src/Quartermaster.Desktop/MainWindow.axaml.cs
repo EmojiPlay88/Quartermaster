@@ -55,7 +55,7 @@ public partial class MainWindow : Window
     bool _dirty;
     bool _historyRefreshQueued;
     bool _closeConfirmed, _closeAsking;
-    Difficulty _lastDifficulty = Difficulty.SemiAuto;
+    readonly string _layoutRoot;
 
     /// <summary>The app's window: real dialogs, the default cache and remembered-rules folders.</summary>
     public MainWindow() : this(new Dialogs(), ModuleSession.DefaultCacheRoot, RulesMemory.DefaultRoot, null) { }
@@ -69,6 +69,9 @@ public partial class MainWindow : Window
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
         _cacheRoot = cacheRoot;
         _rulesRoot = rulesRoot;
+        _layoutRoot = layoutRoot ?? AppDataRoot.Path;
+        SettingsStore = new SettingsStore(_layoutRoot);
+        LoadSettings();
         InitializeComponent();
         InitPhaseUi(layoutRoot);
         InitAlertUi();
@@ -91,15 +94,17 @@ public partial class MainWindow : Window
             SbZoom.Text = zoom;
         };
         Maps.DropMessage += SetStatus;
-        // No settings or game master mode in the Avalonia app yet: no "Delete counter", and deletions are always asked (the WinForms default).
+        // Game master mode adds "Delete counter"; Settings "ask before deleting" (WinForms MapWindow.PieceMenuHooks).
         Maps.MenuServices = new MapMenuServices
         {
             Dialogs = _dialogs, Gesture = _router.Gesture, SaveAsPicture = SaveMapAsPictureAsync,
+            GameMaster = () => GameMaster, ConfirmDelete = () => SettingsStore.Current.ConfirmDelete,
             ShowFormula = (formulaId, pieceId) => { if (_session is { } s) FormulaWindows.Show(this, s, formulaId, pieceId, null); },
             ShowInLedger = ShowInLedger,
         };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
         Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
+        StartSettings();
         UpdateUi();
         UpdateTitle();
     }
@@ -164,6 +169,7 @@ public partial class MainWindow : Window
 
         CloseSession();
         _session = next;
+        ReportSettingsProblems(next);
         _savePath = null;
         _recoveredAutosave = false;
         _dirty = false;
@@ -220,7 +226,7 @@ public partial class MainWindow : Window
         var s = _session ?? throw new InvalidOperationException("Open a module first.");
         FlushNotes();
         s.LoadNative(path);
-        _recoveredAutosave = Autosaver.IsAutosavePath(path, AppDataRoot.Path);
+        _recoveredAutosave = Autosaver.IsAutosavePath(path, _layoutRoot);
         _savePath = _recoveredAutosave ? null : path;
         _dirty = false;
         UpdateTitle();
@@ -296,6 +302,7 @@ public partial class MainWindow : Window
         _router.SetHandler("dice.2d6", () => _dice.Roll(DiceTurnActions.TwoD6));
         _router.SetHandler("turn.next", NextTurnCommand);
         _router.SetHandler("tools.workbench", WorkbenchCommand);   // runs while replaying too: ShowWorkbench says why it refuses
+        _router.SetHandler("tools.settings", () => RunAsync(ShowSettingsAsync));
     }
 
     /// <summary>WinForms NextTurnCommand (Ctrl+Right): Next Phase when the rules pack has phases, otherwise the plain turn counter.</summary>
@@ -327,6 +334,7 @@ public partial class MainWindow : Window
         if (cmd != null)
         {
             mi.InputGesture = _router.Gesture(cmd);   // display only: the CommandRouter dispatches the key (no HotKey, so no double fire)
+            ShowsShortcut(mi, cmd);
             mi.Click += (_, _) => _router.Execute(cmd);
         }
         else mi.Click += (_, _) => Guard(act);
@@ -348,6 +356,7 @@ public partial class MainWindow : Window
         Item(file, "&New Game", () => { }, "file.newGame");
         Item(file, "Load &Setup...", () => RunAsync(LoadSetupAsync), gate: "file.loadSetup");
         Item(file, "Open &Game...", () => { }, "file.openGame");
+        Item(file, "Open Auto&save...", () => RunAsync(OpenAutosaveDialogAsync), gate: "file.openAutosave");
         file.Items.Add(new Separator());
         Item(file, "&Save Game", () => { }, "file.saveGame");
         Item(file, "Save Game &As...", () => { }, "file.saveGameAs");
@@ -377,6 +386,7 @@ public partial class MainWindow : Window
         view.Items.Add(_showGrid);
         // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.
         _viewLog.InputGesture = _router.Gesture("view.log");
+        ShowsShortcut(_viewLog, "view.log");
         _viewLog.Click += (_, _) => _router.Execute("view.log");
         Gate("view.log", _viewLog);
         view.Items.Add(_viewLog);
@@ -395,7 +405,7 @@ public partial class MainWindow : Window
         }
         Item(zoom, "Fit", () => Maps.ActiveView?.ZoomToFit());
 
-        // Tools (WinForms: Rules Workbench, Inventory, Notes, -, Dice, Turn, -, Settings...): all but Settings (stage 4b).
+        // Tools (WinForms: Rules Workbench, Inventory, Notes, -, Dice, Turn, -, Settings...).
         var tools = Top("&Tools");
         Item(tools, "&Rules Workbench", () => { }, "tools.workbench");
         Item(tools, "&Inventory", ShowInventory, gate: "tools.inventory");
@@ -405,6 +415,8 @@ public partial class MainWindow : Window
         Gate("tools.dice", _dice.DiceMenu);
         tools.Items.Add(_dice.TurnMenu);
         Gate("tools.turn", _dice.TurnMenu);
+        tools.Items.Add(new Separator());
+        Item(tools, "&Settings...", () => { }, "tools.settings");
 
         MainMenu.Items.Add(file);
         MainMenu.Items.Add(edit);
@@ -432,13 +444,14 @@ public partial class MainWindow : Window
         Tool("tool.overview", "Overview", ShowOverview);
         Tool("tool.inventory", "Inventory", ShowInventory);
         Tool("tool.los", "LOS", () => _router.Execute("tool.los"));
+        ShowsShortcut(bar.Find("tool.los")!, "tool.los");
         // Undo / Redo / Step Back are not gated: RefreshHistoryUi sets them (WinForms BuildHistoryToolbar).
         _tbUndo = bar.Add("edit.undo", "Undo", () => _router.Execute("edit.undo"));
         _tbRedo = bar.Add("edit.redo", "Redo", () => _router.Execute("edit.redo"));
         _tbStepBack = bar.Add("phase.stepBack", "◀ Step Back", () => _router.Execute("phase.stepBack"));
         // DiceTools' buttons (WinForms adds a separator first).
         bar.AddSeparator();
-        void Dice(string id, Button b) { Gate(id, b); _dice.Track(b); }
+        void Dice(string id, Button b) { Gate(id, b); _dice.Track(b); if (id != "dice.menu") ShowsShortcut(b, id); }
         Dice("dice.1d6", bar.Add("dice.1d6", "1d6", () => Guard(() => _dice.Roll(DiceTurnActions.OneD6))));
         Dice("dice.2d6", bar.Add("dice.2d6", "2d6", () => Guard(() => _dice.Roll(DiceTurnActions.TwoD6))));
         Dice("dice.menu", bar.AddDropDown("dice.menu", "Dice ▾", _dice.BuildDiceItems));
@@ -452,13 +465,19 @@ public partial class MainWindow : Window
         foreach (var i in _needsGame) i.IsEnabled = _session?.Game != null;
         ApplyGates();
         RefreshDice();
-        var palette = _session?.Game != null;
-        PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
-        Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
-        Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
+        UpdatePaletteUi();
         UpdatePhaseUi();
         UpdateOutlinerUi();
         RefreshHistoryUi();
+    }
+
+    /// <summary>The counter palette shows only with a game in game master mode (WinForms MainForm.SetGameMaster).</summary>
+    void UpdatePaletteUi()
+    {
+        var palette = _session?.Game != null && GameMaster;
+        PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
+        Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
+        Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
     }
 
     /// <summary>Enabled state and the reason tooltip of every gated menu item (WinForms ApplyGates); other tooltips are left alone.</summary>
@@ -475,9 +494,6 @@ public partial class MainWindow : Window
             ToolTip.SetShowOnDisabled(mi, true);
         }
     }
-
-    /// <summary>A control's own tooltip once a reason is gone: a toolbar button's text, nothing for a menu item.</summary>
-    object? BaseTip(Control c) => ToolbarHost.BaseTip(c);
 
     /// <summary>WinForms DiceTools.Refresh (after the gates): dice and turn items off while the game may not change; the turn label.</summary>
     void RefreshDice()
@@ -597,16 +613,28 @@ public partial class MainWindow : Window
     async Task ChooseAndStartAsync(bool preselectNew)
     {
         if (_session is not { } s) return;
-        var choice = await _dialogs.ChooseSetupAsync(this, s.Model, preselectNew, _lastDifficulty);
+        var choice = await _dialogs.ChooseSetupAsync(this, s.Model, preselectNew, SettingsStore.Current.LastDifficulty);
         if (choice == null || !ReferenceEquals(s, _session)) return;
-        _lastDifficulty = choice.Difficulty;
+        if (SettingsStore.Current.LastDifficulty != choice.Difficulty) SettingsStore.Update(x => x with { LastDifficulty = choice.Difficulty });
         if (choice.Setup is { } setup) s.LoadSetup(setup, choice.Difficulty); else s.StartNewGame(choice.Difficulty);
     }
 
-    async Task OpenGameDialogAsync()
+    Task OpenGameDialogAsync() => OpenGameCoreAsync(autosaves: false);
+
+    Task OpenAutosaveDialogAsync() => OpenGameCoreAsync(autosaves: true);
+
+    /// <summary>WinForms OpenGameCore: Open Game, or Open Autosave starting in this module's autosave folder (else the autosave root).</summary>
+    async Task OpenGameCoreAsync(bool autosaves)
     {
         if (_session is not { } s || !await ConfirmDiscardAsync()) return;
-        var path = await _dialogs.OpenFileAsync(this, "Open Game", new[] { SaveFilter, AllFiles });
+        string? start = null;
+        if (autosaves)
+        {
+            var root = Autosaver.AutosaveRoot(_layoutRoot);
+            var mine = s.Archive.Sha256 is { Length: > 0 } sha ? Path.Combine(root, sha) : null;
+            start = mine != null && Directory.Exists(mine) ? mine : Directory.Exists(root) ? root : null;
+        }
+        var path = await _dialogs.OpenFileAsync(this, autosaves ? "Open Autosave" : "Open Game", new[] { SaveFilter, AllFiles }, start);
         if (path == null || !ReferenceEquals(s, _session)) return;   // the module changed while the picker was open
         OpenGame(path);
     }
@@ -625,7 +653,7 @@ public partial class MainWindow : Window
         {
             path = await _dialogs.SaveFileAsync(this, "Save Game", SaveFilter, "qsave");
             if (path == null) return;
-            if (Autosaver.IsAutosavePath(path, AppDataRoot.Path))
+            if (Autosaver.IsAutosavePath(path, _layoutRoot))
             {
                 ShowError("Saves inside the autosave folder are deleted automatically. Choose another folder.");
                 return;
@@ -741,6 +769,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _dice.Stop();
+        StopSettings();
         CloseSession();
         base.OnClosed(e);
     }
@@ -819,6 +848,7 @@ public partial class MainWindow : Window
     void CreateLog(ModuleSession s)
     {
         _log = new LogPanel(s, CentreOnPiece, _dialogs, () => this);
+        _log.ApplySettings(SettingsStore.Current);
         PlaceLog(s, _log);
         ApplyLog();
     }

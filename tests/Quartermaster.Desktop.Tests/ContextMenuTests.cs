@@ -385,7 +385,7 @@ public sealed class ContextMenuTests : IDisposable
     public void Main_window_maps_use_its_dialogs_and_status_bar()
     {
         ShortcutGestures.IsMac = false;
-        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
+        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null, Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         try
         {
             w.Show();

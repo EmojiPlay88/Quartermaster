@@ -55,8 +55,10 @@ public partial class MainWindow
         AlertsUpdated?.Invoke(_alertHits);
     }
 
-    /// <summary>Shown whenever a game is open, also without a rules pack: the banner then says it is free play. No Settings toggle until stage 4.</summary>
-    void UpdateAlertBarVisible() => AlertBarHost.IsVisible = _session?.Game != null && _phases != null;
+    /// <summary>Shown whenever a game is open (Settings permitting), also without a rules pack: the banner then says it is free play.
+    /// A notice (a waiting turn) shows even when the alert bar is switched off in Settings.</summary>
+    void UpdateAlertBarVisible() =>
+        AlertBarHost.IsVisible = _session?.Game != null && _phases != null && (SettingsStore.Current.AlertBarVisible || AlertBarHost.NoticeText != null);
 
     void RecomputeAlerts()
     {

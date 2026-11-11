@@ -56,14 +56,17 @@ public class RulebookSearchSessionTests : IDisposable
     {
         var statuses = new List<string>();
         var release = new TaskCompletionSource();
+        var subscribed = new TaskCompletionSource();   // the build starts in the constructor: report only once the test listens
         RulebookSearchSession? s = null;
         s = new RulebookSearchSession(new string('b', 64), new[] { Doc() }, async (sha, pdfs, progress, ct, prev, mem) =>
         {
+            await subscribed.Task;
             progress!.Report(0.5);
             await release.Task;
             return await RulebookIndex.BuildAsync(sha, pdfs, progress, ct, prev, mem);
         });
         s.Changed += () => { lock (statuses) statuses.Add(s!.Status); };
+        subscribed.SetResult();
         using var _ = s;
         Assert.True(WaitFor(() => { lock (statuses) return statuses.Contains("Indexing rulebooks… 50 %"); }));
         Assert.Null(s.Index);

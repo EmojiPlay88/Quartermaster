@@ -62,4 +62,25 @@ public static class ShortcutGestures
         return (mods.Contains("Alt") ? "⌥" : "") + (mods.Contains("Shift") ? "⇧" : "") + (mods.Contains("Ctrl") ? "⌘" : "")
                + (MacKeyText.TryGetValue(key, out var t) ? t : key);
     }
+
+    /// <summary>Canonical string for a pressed key using the runtime <see cref="IsMac"/>.</summary>
+    public static string? Format(Key key, KeyModifiers mods) => Format(key, mods, IsMac);
+
+    /// <summary>
+    /// Canonical string ("Ctrl+Alt+Shift+W") for a pressed key, the inverse of <see cref="Parse(string, bool)"/>; null for a modifier alone, an unsupported key,
+    /// or a modifier the registry cannot hold (Meta off mac, physical Control on mac). On mac, Meta (Cmd) becomes Ctrl.
+    /// </summary>
+    public static string? Format(Key key, KeyModifiers mods, bool mac)
+    {
+        if (mods.HasFlag(mac ? KeyModifiers.Control : KeyModifiers.Meta)) return null;
+        string? name = null;
+        foreach (var (n, k) in Named)
+            if (k == key) { name = n; break; }
+        if (name == null && key is >= Key.A and <= Key.Z) name = ((char)('A' + (key - Key.A))).ToString();
+        if (name == null && key is >= Key.D0 and <= Key.D9) name = ((char)('0' + (key - Key.D0))).ToString();
+        if (name == null && key is >= Key.F1 and <= Key.F24) name = "F" + (key - Key.F1 + 1);
+        if (name == null) return null;
+        var ctrl = mods.HasFlag(mac ? KeyModifiers.Meta : KeyModifiers.Control);
+        return (ctrl ? "Ctrl+" : "") + (mods.HasFlag(KeyModifiers.Alt) ? "Alt+" : "") + (mods.HasFlag(KeyModifiers.Shift) ? "Shift+" : "") + name;
+    }
 }

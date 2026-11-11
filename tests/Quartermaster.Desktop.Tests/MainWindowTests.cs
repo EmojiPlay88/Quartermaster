@@ -34,9 +34,31 @@ sealed class FakeDialogs : IDialogs
     public SetupChoice? Setup;
     public int SetupChooserShown;
     public bool LastPreselectNew;
+    /// <summary>The difficulty the last setup chooser was offered.</summary>
+    public Difficulty? LastChooserDifficulty;
 
-    public Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters)
+    /// <summary>The start folder the last open picker was given (null = none).</summary>
+    public string? LastOpenFolder;
+    public readonly Queue<string?> Shortcuts = new();
+    public readonly Queue<string?> Colours = new();
+    public readonly List<string> ShortcutPrompts = new();
+    public readonly List<string> ColourPrompts = new();
+
+    public Task<string?> AskShortcutAsync(Window owner, string commandLabel)
     {
+        ShortcutPrompts.Add(commandLabel);
+        return Task.FromResult(Shortcuts.Count > 0 ? Shortcuts.Dequeue() : null);
+    }
+
+    public Task<string?> AskColourAsync(Window owner, string initialHex)
+    {
+        ColourPrompts.Add(initialHex);
+        return Task.FromResult(Colours.Count > 0 ? Colours.Dequeue() : null);
+    }
+
+    public Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters, string? initialFolder = null)
+    {
+        LastOpenFolder = initialFolder;
         PickerTitles.Add(title);
         return Task.FromResult(OpenFiles.Count > 0 ? OpenFiles.Dequeue() : null);
     }
@@ -170,6 +192,7 @@ sealed class FakeDialogs : IDialogs
     {
         SetupChooserShown++;
         LastPreselectNew = preselectNew;
+        LastChooserDifficulty = difficulty;
         return Task.FromResult(Setup);
     }
 
@@ -276,9 +299,17 @@ public sealed class MainWindowTests : IDisposable
     static string Demo(string file, [System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "..", "..", "docs", "wiki", "demo", file));
 
-    MainWindow NewWindow(FakeDialogs? dialogs = null)
+    /// <param name="gameMaster">Game master mode in a temp settings file (the counter palette shows only then).</param>
+    MainWindow NewWindow(FakeDialogs? dialogs = null, bool gameMaster = false)
     {
-        var w = new MainWindow(dialogs ?? _dialogs, Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
+        string? layout = null;
+        if (gameMaster)
+        {
+            layout = Path.Combine(_tmp, "layout-gm");
+            Directory.CreateDirectory(layout);
+            File.WriteAllText(Path.Combine(layout, "settings.json"), """{ "GameMasterMode": true }""");
+        }
+        var w = new MainWindow(dialogs ?? _dialogs, Path.Combine(_tmp, "cache"), null, layout ?? Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         return w;
@@ -323,7 +354,7 @@ public sealed class MainWindowTests : IDisposable
         var w = NewWindow();
         var menus = w.MenuLabels();
         Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools" }, menus.Keys);
-        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
+        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "Open Auto&save...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo", "Step &Back to Start of Phase", "Step Back &To..." }, menus["&Edit"]);
         Assert.Equal(new[] { "Module &Tree", "&Diagnostics", "Show &Grid", "&Log", "&Phase panel", "&Outliner", "&Ledger", "&Overview", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
         Assert.Equal(new[] { "25%", "50%", "100%", "200%", "Fit" },
@@ -371,7 +402,7 @@ public sealed class MainWindowTests : IDisposable
     [AvaloniaFact]
     public void Open_demo_module_and_start_game()
     {
-        var w = NewWindow();
+        var w = NewWindow(gameMaster: true);
         Assert.True(w.OpenModule(Demo("Riverland-Demo.vmod")));
         var s = w.Session!;
         Assert.Empty(s.Model.Setups);   // the demo starts from its setup stacks ("New game from module")
@@ -611,7 +642,7 @@ public sealed class MainWindowTests : IDisposable
     [AvaloniaFact]
     public void Palette_drop_adds_piece()
     {
-        var w = NewWindow();
+        var w = NewWindow(gameMaster: true);
         w.OpenModule(Demo("Riverland-Demo.vmod"));
         w.StartSetup(null);
         Pump();
@@ -652,7 +683,7 @@ public sealed class MainWindowTests : IDisposable
     [AvaloniaFact]
     public void Palette_cache_eviction_never_disposes_a_shown_thumbnail()
     {
-        var w = NewWindow();
+        var w = NewWindow(gameMaster: true);
         w.OpenModule(Demo("Riverland-Demo.vmod"));
         w.StartSetup(null);
         var palette = w.Palette;
@@ -675,7 +706,7 @@ public sealed class MainWindowTests : IDisposable
     [AvaloniaFact]
     public void Palette_drop_off_the_boards_says_so()
     {
-        var w = NewWindow();
+        var w = NewWindow(gameMaster: true);
         w.OpenModule(Demo("Riverland-Demo.vmod"));
         w.StartSetup(null);
         Pump();

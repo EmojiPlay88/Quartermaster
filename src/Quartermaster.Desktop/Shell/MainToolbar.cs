@@ -16,6 +16,7 @@ public sealed class MainToolbar : Border
 
     readonly StackPanel _bar = new() { Orientation = Orientation.Horizontal };
     readonly List<Entry> _entries = new();
+    readonly List<Control> _separators = new();
     readonly Dictionary<string, Func<IReadOnlyList<Control>>> _dropDowns = new(StringComparer.Ordinal);
 
     public MainToolbar()
@@ -62,6 +63,32 @@ public sealed class MainToolbar : Border
         var line = new Border { Width = 1, Margin = new Thickness(4, 3), VerticalAlignment = VerticalAlignment.Stretch };
         line.Bind(BackgroundProperty, line.GetResourceObservable("Classic.SeparatorBrush"));
         _bar.Children.Add(line);
+        _separators.Add(line);
+    }
+
+    /// <summary>The separators in display order (tests).</summary>
+    internal IReadOnlyList<Control> Separators => _separators;
+
+    /// <summary>Shows or hides a button (Settings, Toolbar). A separator shows only between two visible buttons, so hiding a whole group
+    /// leaves no stray or doubled line.</summary>
+    public void SetVisible(string id, bool visible)
+    {
+        if (Find(id) is not { } b) return;
+        b.IsVisible = visible;
+        Control? pending = null;
+        var before = false;
+        foreach (var c in _bar.Children)
+        {
+            if (_separators.Contains(c))
+            {
+                c.IsVisible = false;
+                if (before) pending = c;
+                continue;
+            }
+            if (!c.IsVisible) continue;
+            if (pending != null) { pending.IsVisible = true; pending = null; }
+            before = true;
+        }
     }
 
     /// <summary>The tooltip a button shows when nothing else is said: its text (WinForms AutoToolTip).</summary>

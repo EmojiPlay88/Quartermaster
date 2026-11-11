@@ -15,6 +15,9 @@
   phases.vmod/phases.qrules rulebook with the query "supply"; workbench-scan on an invented table image the state draws with Skia and reads with the
   platform recognizer) and the WinForms equivalents stage4a-winforms-workbench-<tab>.png (--screenshot-workbench --workbench-tab tables|formulas|phases),
   stage4a-winforms-search.png (--screenshot-search) and stage4a-winforms-ocr.png (--screenshot-ocr), all off-screen.
+  Stage 4b adds stage4b-desktop-settings[-<page>].png (the Settings window, one picture per page: general, game, display, map, dice, toolbar, keyboard,
+  folders; run with a temp QUARTERMASTER_LAYOUT_ROOT so no real settings are touched) and the WinForms equivalents stage4b-winforms-settings-<page>.png
+  (--screenshot-settings --settings-tab), all off-screen.
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -51,6 +54,14 @@ if (-not $deskExe) { throw 'Quartermaster.exe (Desktop, Release) not found' }
 
 function Invoke-Shot([string]$Exe, [string[]]$ArgList, [hashtable]$Env, [string]$Png, [string]$Name) {
     if (Test-Path $Png) { Remove-Item $Png -Force }
+    # Desktop runs get a fresh temp layout root unless the caller gave one, so remembered window layouts of the real profile cannot change a state.
+    $ownLayout = $null
+    if ($Exe -eq $deskExe -and -not $Env.ContainsKey('QUARTERMASTER_LAYOUT_ROOT')) {
+        $ownLayout = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-run-' + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force $ownLayout | Out-Null
+        $Env = $Env.Clone(); $Env['QUARTERMASTER_LAYOUT_ROOT'] = $ownLayout
+    }
+    try {
     $psi = [Diagnostics.ProcessStartInfo]::new($Exe)
     $psi.Arguments = ($ArgList | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
     $psi.UseShellExecute = $false
@@ -63,6 +74,8 @@ function Invoke-Shot([string]$Exe, [string[]]$ArgList, [hashtable]$Env, [string]
     if (-not (Test-Path $Png) -or (Get-Item $Png).Length -eq 0) { throw "$Name produced no PNG (exit $($p.ExitCode))" }
     if ($p.ExitCode -ne 0) { Write-Warning "$Name exited with code $($p.ExitCode); the picture exists, check it by eye." }
     Write-Host ("{0,-10} ok  {1} bytes  {2}" -f $Name, (Get-Item $Png).Length, $Png)
+    }
+    finally { if ($ownLayout -and (Test-Path $ownLayout)) { Remove-Item $ownLayout -Recurse -Force -ErrorAction SilentlyContinue } }
 }
 
 # Desktop: headless, no window. The Riverland demo has no predefined setups, so --new.
@@ -166,6 +179,19 @@ finally {
     if (Test-Path $fix4) { Remove-Item $fix4 -Recurse -Force }
 }
 
+# Stage 4b states, Desktop, headless: the Settings window, one picture per page (the window is captured as its own picture). A temp layout root
+# keeps the run away from the real settings.json.
+$layout4b = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-layout4b-' + [Guid]::NewGuid().ToString('N'))
+try {
+    New-Item -ItemType Directory -Force $layout4b | Out-Null
+    $env4b = @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_LAYOUT_ROOT = $layout4b }
+    foreach ($state in 'settings', 'settings-general', 'settings-game', 'settings-display', 'settings-map', 'settings-dice', 'settings-toolbar', 'settings-keyboard', 'settings-folders') {
+        $png = Join-Path $out "stage4b-desktop-$state.png"
+        Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) $env4b $png "desktop-$state"
+    }
+}
+finally { if (Test-Path $layout4b) { Remove-Item $layout4b -Recurse -Force } }
+
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'
 $marker = Join-Path $demoRoot '.quartermaster-demo-root'
@@ -207,5 +233,11 @@ try {
     $ledPng = Join-Path $out 'stage3a-winforms-ledger.png'
     try { Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot-ledger', $ledPng, '--smoke', '8', '--no-smoke-documents') $env2 $ledPng 'winforms-ledger' }
     catch { Write-Warning "winforms-ledger: $($_.Exception.Message)" }
+    # Stage 4b equivalents: the Settings window per tab (--screenshot-settings --settings-tab).
+    foreach ($tab in 'general', 'game', 'display', 'map', 'dice', 'toolbar', 'keyboard', 'folders') {
+        $png = Join-Path $out "stage4b-winforms-settings-$tab.png"
+        try { Invoke-Shot $appExe @($vmod, '--rules', $rules, '--screenshot-settings', $png, '--settings-tab', $tab, '--smoke', '8', '--no-smoke-documents') $env2 $png "winforms-settings-$tab" }
+        catch { Write-Warning "winforms-settings-${tab}: $($_.Exception.Message)" }
+    }
 }
 finally { Reset-DemoRoot }

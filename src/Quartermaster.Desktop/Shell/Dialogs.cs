@@ -29,8 +29,16 @@ public sealed record TurnChoice(int Turn, string Phase);
 /// </summary>
 public interface IDialogs
 {
-    /// <summary>An existing file's local path, or null when cancelled.</summary>
-    Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters);
+    /// <summary>An existing file's local path, or null when cancelled. The picker starts in <paramref name="initialFolder"/> when it is given
+    /// and exists.</summary>
+    Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters, string? initialFolder = null);
+
+    /// <summary>The "Set shortcut" prompt (WinForms ShortcutCaptureDialog) for <paramref name="commandLabel"/>: the canonical shortcut text pressed,
+    /// "" = clear, null = cancelled.</summary>
+    Task<string?> AskShortcutAsync(Window owner, string commandLabel);
+
+    /// <summary>The colour chooser opened on <paramref name="initialHex"/>: "#RRGGBB" upper-case, or null when cancelled.</summary>
+    Task<string?> AskColourAsync(Window owner, string initialHex);
 
     /// <summary>A path to save to (with <paramref name="defaultExtension"/> added when the name has none), or null when cancelled.</summary>
     Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null);
@@ -113,13 +121,20 @@ public sealed class Dialogs : IDialogs
     /// <summary>Shown when a picker returns a location without a local path (e.g. a cloud or portal item).</summary>
     public const string NotLocalText = "This location can't be opened directly; choose a file on this computer.";
 
-    public async Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters)
+    public async Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters, string? initialFolder = null)
     {
+        IStorageFolder? start = null;
+        if (!string.IsNullOrEmpty(initialFolder))
+        {
+            try { start = await owner.StorageProvider.TryGetFolderFromPathAsync(initialFolder); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("start folder unavailable: " + ex.Message); }
+        }
         var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = title,
             AllowMultiple = false,
             FileTypeFilter = filters.Select(Type).ToList(),
+            SuggestedStartLocation = start,
         });
         if (files.Count == 0) return null;
         if (files[0].TryGetLocalPath() is { } path) return path;
@@ -200,6 +215,12 @@ public sealed class Dialogs : IDialogs
 
     public Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption) =>
         MessageBox.ShowYesNoCancelAsync(owner, message, caption);
+
+    public Task<string?> AskShortcutAsync(Window owner, string commandLabel) =>
+        new Preferences.ShortcutCaptureDialog(commandLabel).ShowDialog<string?>(owner);
+
+    public Task<string?> AskColourAsync(Window owner, string initialHex) =>
+        new Preferences.ColourDialog(initialHex).ShowDialog<string?>(owner);
 
     public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial) =>
         new InputDialog(title, prompt, initial).ShowDialog<string?>(owner);

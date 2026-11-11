@@ -41,7 +41,7 @@ public sealed class DiceTurnTests : IDisposable
 
     MainWindow NewWindow()
     {
-        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
+        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null, Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         return w;
@@ -174,7 +174,7 @@ public sealed class DiceTurnTests : IDisposable
         _fixtures.Add(fx);
         var w = Game(fx.Build(), face: 2);
 
-        Assert.Equal(new[] { "&Rules Workbench", "&Inventory", "&Notes", "&Dice", "&Turn" }, w.MenuLabels()["&Tools"]);
+        Assert.Equal(new[] { "&Rules Workbench", "&Inventory", "&Notes", "&Dice", "&Turn", "&Settings..." }, w.MenuLabels()["&Tools"]);
         var dice = w.FindMenuItem("&Dice")!;
         Assert.Equal(new[] { "&1d6", "&2d6", "R&&D", "Blank", "&Custom...", "&Multi-roll..." }, Labels(dice));
         Assert.Equal(2, dice.Items.OfType<Separator>().Count());   // around the module dice, as WinForms

@@ -102,6 +102,7 @@ public sealed class FormulaWindow : Window
         _apply.IsDefault = true;
         _ruleRef.Click += (_, _) => Guarded(OpenRuleRef);
         UpdateRuleRef(formula);
+        if (host.SettingsStore.Current.PhysicalDiceDefault && !s.IsGuest) { _physical.IsChecked = true; _model.PhysicalDice = true; }   // starts from Settings
         _physical.IsCheckedChanged += (_, _) => { _model.PhysicalDice = _physical.IsChecked == true; Recalc(); };
         _physical.IsVisible = !s.IsGuest;   // the host rolls a guest's dice
         s.RulesChanged += OnRulesChanged;

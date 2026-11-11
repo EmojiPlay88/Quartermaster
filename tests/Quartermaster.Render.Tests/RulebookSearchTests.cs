@@ -392,23 +392,24 @@ public class RulebookSearchTests : IDisposable
     }
 
     [Fact]
-    public async Task Index_SlowExtractor_PageEvery100ms_StallLimit300ms_Completes()
+    public async Task Index_SlowExtractor_PageEvery100ms_StallLimit800ms_Completes()
     {
         RulebookIndex.TextExtractor slow = (_, report, _) =>
         {
             var pages = new List<PageText>();
-            for (var p = 1; p <= 8; p++) // 800 ms in all: far past the stall limit, but never 300 ms without a page
+            // 1.6 s in all: twice the stall limit, but never 800 ms without a page (300 ms was too tight for a busy CI runner, PR #3)
+            for (var p = 1; p <= 16; p++)
             {
                 Thread.Sleep(100);
                 pages.Add(new PageText(p, $"Slow page {p} about supply"));
-                report(p / 8.0);
+                report(p / 16.0);
             }
             return (true, pages);
         };
         var ix = await RulebookIndex.BuildAsync("modS", new[] { Doc("slow.pdf", "Slow", Rules) }, null, CancellationToken.None, null, null,
-            slow, TimeSpan.FromMilliseconds(300));
+            slow, TimeSpan.FromMilliseconds(800));
         Assert.True(ix.Documents[0].Searchable);
-        Assert.Equal(8, ix.Search("supply").Count);
+        Assert.Equal(16, ix.Search("supply").Count);
     }
 
     [Fact]
