@@ -19,7 +19,7 @@ public partial class App : Application
     }
 
     /// <summary>True when startup shows the launcher: no module path and no screenshot run (<see cref="StartupDecision"/>); a module argument
-    /// opens the game window directly, as before.</summary>
+    /// opens the game window first (still inside the loop, so it has Back to launcher).</summary>
     internal static bool UsesLauncher(StartupArgs args) =>
         args.ScreenshotPath == null && StartupDecision.For(args.ModulePath, smoke: false) == StartupAction.Launcher;
 
@@ -29,33 +29,22 @@ public partial class App : Application
         {
             // Command line [<vmod>] [--setup <index>|--new]; applied once the window is up, so its dialogs have an owner.
             var args = StartupArgs.Parse(desktop.Args ?? Array.Empty<string>(), m => System.Diagnostics.Trace.WriteLine(m));
-            if (UsesLauncher(args)) StartLauncherLoop(desktop);
-            else StartDirect(desktop, args);
+            if (UsesLauncher(args)) StartLoop(desktop, null);
+            else if (args.ScreenshotPath == null) StartLoop(desktop, args);   // WinForms: LauncherHook ??= ShowLauncher, so a direct start loops too
+            else StartPlain(desktop);   // screenshot args (normally taken by Program.RunScreenshot first): no loop, no launcher
         }
         base.OnFrameworkInitializationCompleted();
     }
 
-    static void StartDirect(IClassicDesktopStyleApplicationLifetime desktop, StartupArgs args)
-    {
-        var window = new MainWindow();
-        desktop.MainWindow = window;
-        if (args.ModulePath != null)
-        {
-            void Once(object? sender, EventArgs e)
-            {
-                window.Opened -= Once;
-                window.ApplyStartup(args);
-            }
-            window.Opened += Once;
-        }
-    }
+    static void StartPlain(IClassicDesktopStyleApplicationLifetime desktop) => desktop.MainWindow = new MainWindow();
 
     /// <summary>
     /// Launcher ↔ game window loop. The launcher keeps its settings and module cache in the app data folder, the same root
     /// <c>new MainWindow()</c> uses (its cache is <see cref="ModuleSession.DefaultCacheRoot"/>), with a fresh store each time it shows,
-    /// as WinForms ShowLauncher.
+    /// as WinForms ShowLauncher. With <paramref name="direct"/> (a module on the command line) the game window comes first and gets the
+    /// command line once it is open; Back to launcher then shows the launcher with that module selected.
     /// </summary>
-    static void StartLauncherLoop(IClassicDesktopStyleApplicationLifetime desktop)
+    static void StartLoop(IClassicDesktopStyleApplicationLifetime desktop, StartupArgs? direct)
     {
         desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;   // the loop decides when the app ends, not the last window closing
         var loop = new LaunchLoop(
@@ -70,6 +59,6 @@ public partial class App : Application
             w => desktop.MainWindow = w,
             () => desktop.Shutdown());
         // Once the lifetime runs (its MainWindow is set by the loop); RunAsync never throws: failures are traced and end the app.
-        Avalonia.Threading.Dispatcher.UIThread.Post(() => _ = loop.RunAsync());
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => _ = direct is { } args ? loop.RunAsync(w => w.ApplyStartup(args)) : loop.RunAsync());
     }
 }

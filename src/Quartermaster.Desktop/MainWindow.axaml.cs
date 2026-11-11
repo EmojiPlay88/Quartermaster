@@ -240,6 +240,7 @@ public partial class MainWindow : Window
     public void ApplyStartup(StartupArgs args)
     {
         if (args.ModulePath is not { } path || !OpenModule(path)) return;
+        NoteModuleOpened(path);   // a window the launcher loop runs (WinForms marks a command-line module played too)
         Guard(() => LoadRulesFromArgs(args));   // as WinForms: the pack is in place before the first game starts
         if (args.SetupIndex is { } idx) Guard(() => StartSetup(idx));
         else if (args.NewGame) Guard(() => StartSetup(null));

@@ -70,7 +70,12 @@ public sealed class LaunchLoopTests : IDisposable
     /// <summary>Starts the loop with factories over the temp roots; returns once the first launcher is up and has hashed the library.</summary>
     Task Start()
     {
-        var loop = new LaunchLoop(
+        var run = Loop().RunAsync();
+        PumpUntil(() => _launchers.Count == 1 && _launchers[0].IsVisible && _launchers[0].RefreshTask.IsCompleted);
+        return run;
+    }
+
+    LaunchLoop Loop() => new LaunchLoop(
             jp =>
             {
                 _justPlayed.Add(jp);
@@ -86,9 +91,15 @@ public sealed class LaunchLoopTests : IDisposable
             },
             _mainWindows.Add,
             () => _shutdowns++);
-        var run = loop.RunAsync();
-        PumpUntil(() => _launchers.Count == 1 && _launchers[0].IsVisible && _launchers[0].RefreshTask.IsCompleted);
-        return run;
+
+    static StartupArgs Args(params string[] a) => StartupArgs.Parse(a, _ => { });
+
+    /// <summary>A direct start (module argument): the loop opens the game window first with the command line; returns once its game is up.</summary>
+    (Task Run, MainWindow Game) StartDirect()
+    {
+        var run = Loop().RunAsync(w => w.ApplyStartup(Args(_module, "--new")));
+        PumpUntil(() => _games.Count == 1 && _games[0].Session?.Game != null);
+        return (run, _games[0]);
     }
 
     LaunchRequest NewGame() => new(_module, null, LaunchKind.NewGame,
@@ -242,21 +253,52 @@ public sealed class LaunchLoopTests : IDisposable
     [AvaloniaFact]
     public void Module_argument_skips_launcher()
     {
-        static StartupArgs P(params string[] a) => StartupArgs.Parse(a, _ => { });
+        static StartupArgs P(params string[] a) => Args(a);
         Assert.True(App.UsesLauncher(P()));
         Assert.False(App.UsesLauncher(P("x.vmod")));
         Assert.False(App.UsesLauncher(P("x.vmod", "--new")));
         Assert.False(App.UsesLauncher(P("x.vmod", "--screenshot-main", "out.png")));
         Assert.False(App.UsesLauncher(P("--screenshot-main", "out.png")));
-        // The direct start: a plain game window that knows of no launcher.
-        var w = new MainWindow(_dialogs, _cache, null, _layout);
-        _games.Add(w);
-        w.Show();
-        w.ApplyStartup(P(_module, "--new"));
-        Pump();
-        Assert.NotNull(w.Session?.Game);
-        Assert.False(w.LauncherAvailable);
-        Assert.False(w.FindMenuItem("&Back to launcher")!.IsVisible);
+        // The direct start: the game window comes first, no launcher is shown.
+        var (run, w) = StartDirect();
+        Assert.Empty(_launchers);
+        Assert.Same(w, Assert.Single(_mainWindows));
         Assert.Equal(_module, w.OpenedModulePath);
+        Assert.False(run.IsCompleted);
+    }
+
+    /// <summary>WinForms parity (Program.cs LauncherHook ??= ShowLauncher): a game window opened from the command line also has Back to launcher.</summary>
+    [AvaloniaFact]
+    public void Direct_start_back_to_launcher_opens_launcher_with_module_selected()
+    {
+        Store().Update(s => s with { ReopenLastModule = false });
+        var (run, g) = StartDirect();
+        Assert.True(g.LauncherAvailable);
+        Assert.True(g.AutoTour);
+        Assert.True(g.FindMenuItem("&Back to launcher")!.IsVisible);
+        Assert.NotNull(Assert.Single(new ModuleLibrary(Store()).Rows).Entry.LastPlayed);   // the direct start is bookkept too
+
+        var back = g.BackToLauncherAsync();
+        PumpUntil(() => back.IsCompleted && _launchers.Count == 1 && _launchers[0].IsVisible && _launchers[0].RefreshTask.IsCompleted);
+        Assert.True(g.ReturnToLauncher);
+        Assert.Equal(new string?[] { _module }, _justPlayed);
+        Assert.Equal(Path.GetFullPath(_module), _launchers[0].SelectedRow!.Entry.Path, ignoreCase: true);
+        Assert.Same(_launchers[0], _mainWindows[^1]);
+        Assert.Equal(0, _shutdowns);
+
+        _launchers[0].Close();
+        PumpUntil(() => run.IsCompleted);
+        Assert.Equal(1, _shutdowns);
+    }
+
+    [AvaloniaFact]
+    public void Direct_start_closing_game_window_ends_app()
+    {
+        var (run, g) = StartDirect();
+        g.Close();
+        PumpUntil(() => run.IsCompleted);
+        Assert.False(g.ReturnToLauncher);
+        Assert.Empty(_launchers);
+        Assert.Equal(1, _shutdowns);
     }
 }

@@ -4,8 +4,9 @@ using Quartermaster.Render;
 namespace Quartermaster.Desktop.Launcher;
 
 /// <summary>
-/// The app's window loop without a module argument (WinForms Program.Main): launcher → game window → (File → Back to launcher) → launcher
-/// again, one window at a time. Closing the launcher, or closing the game window any other way, ends the app.
+/// The app's window loop (WinForms Program.Main): launcher → game window → (File → Back to launcher) → launcher again, one window at a
+/// time; a module on the command line starts with the game window instead. Closing the launcher, or closing the game window any other
+/// way, ends the app.
 /// </summary>
 public sealed class LaunchLoop
 {
@@ -27,13 +28,40 @@ public sealed class LaunchLoop
     }
 
     /// <summary>Runs the loop until the app should end, then calls the shutdown action (also when something in the loop failed).</summary>
-    public async Task RunAsync()
+    public Task RunAsync() => RunCoreAsync(null);
+
+    /// <summary>
+    /// The direct start (a module on the command line, WinForms Program.Main's first pass): the game window comes first and
+    /// <paramref name="startFirst"/> starts its game once it is open; after that the loop runs as <see cref="RunAsync()"/>.
+    /// </summary>
+    public Task RunAsync(Action<MainWindow> startFirst) => RunCoreAsync(startFirst ?? throw new ArgumentNullException(nameof(startFirst)));
+
+    async Task RunCoreAsync(Action<MainWindow>? startFirst)
     {
         try
         {
             string? justPlayed = null;
             while (true)
             {
+                if (startFirst is { } first)
+                {
+                    startFirst = null;
+                    var direct = NewGameWindow();
+                    var directClosed = ClosedTask(direct);
+                    void Once(object? sender, EventArgs e)
+                    {
+                        direct.Opened -= Once;
+                        first(direct);   // once the window is up, so its dialogs have an owner
+                    }
+                    direct.Opened += Once;
+                    _setMainWindow(direct);
+                    direct.Show();
+                    await directClosed;
+                    if (!direct.ReturnToLauncher) return;
+                    justPlayed = direct.OpenedModulePath;
+                    continue;
+                }
+
                 var launcher = _launcher(justPlayed);
                 var launcherClosed = ClosedTask(launcher);
                 _setMainWindow(launcher);
@@ -42,9 +70,7 @@ public sealed class LaunchLoop
                 var request = await launcher.Result;
                 if (request == null) return;
 
-                var game = _game();
-                game.LauncherAvailable = true;
-                game.AutoTour = true;
+                var game = NewGameWindow();
                 var gameClosed = ClosedTask(game);
                 _setMainWindow(game);
                 game.Show();
@@ -62,6 +88,14 @@ public sealed class LaunchLoop
         {
             _shutdown();
         }
+    }
+
+    MainWindow NewGameWindow()
+    {
+        var game = _game();
+        game.LauncherAvailable = true;
+        game.AutoTour = true;
+        return game;
     }
 
     static Task ClosedTask(Window w)
