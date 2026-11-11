@@ -73,6 +73,35 @@ public sealed class SettingsDialogsTests : IDisposable
         owner.Close();
     }
 
+    [AvaloniaTheory]
+    [InlineData(Key.Delete, KeyModifiers.Control, "Ctrl+Delete")]
+    [InlineData(Key.Escape, KeyModifiers.Shift, "Shift+Esc")]
+    [InlineData(Key.Back, KeyModifiers.Control, "Ctrl+Backspace")]
+    [InlineData(Key.Tab, KeyModifiers.None, "Tab")]
+    [InlineData(Key.Enter, KeyModifiers.None, "Enter")]
+    [InlineData(Key.Left, KeyModifiers.None, "Left")]
+    public async Task Capture_modified_and_navigation_keys_are_captured(Key key, KeyModifiers mods, string expected)
+    {
+        var owner = Owner();
+        var d = new ShortcutCaptureDialog("Open");
+        var t = d.ShowDialog<string?>(owner);
+        Press(d, key, mods);
+        Assert.Equal(expected, await t);
+        owner.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Capture_ignores_keys_after_the_result()
+    {
+        var owner = Owner();
+        var d = new ShortcutCaptureDialog("Open");
+        var t = d.ShowDialog<string?>(owner);
+        Press(d, Key.K, KeyModifiers.Control);
+        Press(d, Key.Escape);
+        Assert.Equal("Ctrl+K", await t);
+        owner.Close();
+    }
+
     [AvaloniaFact]
     public async Task Capture_modifier_alone_is_swallowed()
     {

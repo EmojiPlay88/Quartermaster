@@ -14,6 +14,7 @@ namespace Quartermaster.Desktop.Preferences;
 sealed class ShortcutCaptureDialog : Window
 {
     public TextBlock Prompt { get; }
+    bool _done;
 
     public ShortcutCaptureDialog(string commandLabel)
     {
@@ -38,11 +39,12 @@ sealed class ShortcutCaptureDialog : Window
     void OnKey(object? sender, KeyEventArgs e)
     {
         e.Handled = true;   // everything is ours, including unsupported keys
-        switch (e.Key)
+        if (_done) return;
+        if (e.KeyModifiers == KeyModifiers.None)   // as WinForms: only the bare keys cancel or clear
         {
-            case Key.Escape: Close(null); return;
-            case Key.Back or Key.Delete: Close(""); return;
+            if (e.Key == Key.Escape) { _done = true; Close(null); return; }
+            if (e.Key is Key.Back or Key.Delete) { _done = true; Close(""); return; }
         }
-        if (ShortcutGestures.Format(e.Key, e.KeyModifiers) is { } s) Close(s);
+        if (ShortcutGestures.Format(e.Key, e.KeyModifiers) is { } s) { _done = true; Close(s); }
     }
 }
