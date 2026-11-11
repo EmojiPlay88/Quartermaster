@@ -442,6 +442,21 @@ public sealed class SettingsApplyTests : IDisposable
         Assert.True(WaitFor(() => w.MapTabs.Views.All(v => v.ZoomStep == 1.9)));
     }
 
+    [AvaloniaFact]
+    public void Older_queued_change_does_not_overwrite_a_newer_one()
+    {
+        var w = Game();
+        // Inside one UI job: an older change is saved from another thread (its post queues behind this job), then a newer one on the UI thread.
+        Dispatcher.UIThread.Post(() =>
+        {
+            Task.Run(() => w.SettingsStore.Save(w.SettingsStore.Current with { WheelZoomStep = 1.3 })).Wait();
+            w.SettingsStore.Save(w.SettingsStore.Current with { WheelZoomStep = 1.9 });
+        });
+        Pump();   // the job, then the older post
+        Assert.Equal(1.9, w.SettingsStore.Current.WheelZoomStep);
+        Assert.All(w.MapTabs.Views, v => Assert.Equal(1.9, v.ZoomStep));
+    }
+
     // ---------- Tools > Settings ----------
 
     /// <summary>The text the open Tools menu really draws next to Settings... (the template's gesture TextBlock).</summary>

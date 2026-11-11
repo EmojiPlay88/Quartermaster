@@ -141,7 +141,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | New Game | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+N |
 | Load Setup... | 1 | ✔ | ✔ | ✔ |  |
 | Open Game... | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+G |
-| Open Autosave... | 4b | ✔ |  |  | File > Open Autosave...: the picker starts in the autosave folder (Settings > Folders or the default); the file opens as Open Game |
+| Open Autosave... | 4b | ✔ |  |  | File > Open Autosave...: the picker starts in this module's autosave folder (or the autosave root); the file opens as Open Game |
 | Open Turn File... | 5 |  |  |  |  |
 | Save Game | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+S |
 | Save Game As... | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+Shift+S |
@@ -168,7 +168,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Ledger | 3a | ✔ |  |  | Ctrl/Cmd+L; needs a rules pack; opens the one Ledger window (owned, not modal, bounds under "doc:ledger"); with counters selected on the active map it is Show in Ledger |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3a | ✔ |  |  | counter menu "Show in Ledger" (after a separator; disabled with "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)." without one) and View > Ledger / Ctrl/Cmd+L with counters selected on the active map: opens the Ledger, moves to the tab that shows them (clearing the filter when it hides them, shared `LedgerJump`), selects their rows and scrolls to the first; status "Shown in the Ledger." / "{n} counters shown in the Ledger." or the reason some have no row (hidden counters never get one) |
 | View > Overview | 3a | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
-| View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | shown only when a game is open and game master mode is on (Settings > General, as WinForms) |
+| View > Counter palette (GM only) | 1 | ✔ |  |  | shown only when a game is open and game master mode is on (Settings > General, as WinForms); game master mode only since 4b — re-check on macOS and Linux |
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
 | Tools > Rules Workbench | 4a | ✔ |  |  | Cmd/Ctrl+Shift+W; one floating window per session (bounds under `bench:workbench`), refused while a received turn replays |
 | Tools > Inventory, Notes | 3a | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
@@ -196,7 +196,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches open the Ledger and select the holder's row (Depots & Global tab, filter cleared when it hides it; never the counters selected on the map); shown when a game is open and Settings > Display "Alert bar" is on (applies live) |
 | TourOverlay | 5 |  |  |  |  |
 | PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the shared Next Phase flow with the open-decisions question and phase-boundary autosave). Pop out / Dock moves the panel to a floating "Phases" window (default beside the main window's right edge, bounds remembered per module under "phases", fitted onto a screen that exists with the primary screen as fallback); closing that window docks the panel back, shown; rule reference link opens the document at its page (3b) |
-| NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave interval comes from Settings > Folders (autosave minutes) |
+| NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave interval comes from Settings > General (autosave minutes) |
 | StepBackDialog | 2b | ✔ |  |  | "Step Back to Start of Phase" (confirm text and summary) / "Step Back To" (Turn, Stage, Side, Phase, Reached, Actions; newest first, summary follows the selection, double-click picks); Step Back / Cancel |
 | ReplayBar | 5 |  |  |  |  |
 | UpdateBar, UpdateDialog, WhatsNewDialog, AppUpdates | 5 |  |  |  |  |
@@ -270,7 +270,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | WorkbenchWindow and tabs (Tables, Formulas, Properties, Phases, Alerts, Visibility) | 4a | ✔ |  |  | Tables-tree activation, problems list, rule ref row, Find in rulebook; headless-tested incl. guest read-only (guest flag only until stage 5 brings online to Desktop). `build/port-screenshots.ps1` writes stage4a-desktop-workbench*.png and the WinForms equivalents |
 | ColumnsDialog, PasteTableDialog, BlockDialog | 4a | ✔ |  |  | plus the import-target dialog of the OCR import (own Avalonia dialog, see the 4a deviations) |
 | SettingsDialog and SettingsTabs (General, Game, Display, Map, Dice and Log, Toolbar, Folders) | 4b | ✔ |  |  | Pages General, Game, Display, Map, Dice & Log, Toolbar, Keyboard, Folders (the Keyboard page is a tab of its own as in WinForms); OK / Apply / Cancel / Restore defaults as WinForms; every setting applies live to the open windows. Game page: Difficulty only (Players come with stage 5); OCR language downloads are stage 4c |
-| KeyboardTab, ShortcutCaptureDialog | 4b | ✔ |  |  | Set / Clear / Default per command, conflict and reserved-key texts as WinForms; capture shows Ctrl+... (Cmd... on macOS), a physical Control key alone is swallowed on macOS |
+| KeyboardTab, ShortcutCaptureDialog | 4b | ✔ |  |  | Set... / Clear / Reset / Reset all, conflict and reserved-key texts as WinForms; capture shows Ctrl+... (Cmd... on macOS), a physical Control key alone is swallowed on macOS |
 
 ## Multiplayer and launcher
 

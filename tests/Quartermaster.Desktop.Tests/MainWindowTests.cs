@@ -309,7 +309,7 @@ public sealed class MainWindowTests : IDisposable
             Directory.CreateDirectory(layout);
             File.WriteAllText(Path.Combine(layout, "settings.json"), """{ "GameMasterMode": true }""");
         }
-        var w = new MainWindow(dialogs ?? _dialogs, Path.Combine(_tmp, "cache"), null, layout) { Width = 1024, Height = 768 };
+        var w = new MainWindow(dialogs ?? _dialogs, Path.Combine(_tmp, "cache"), null, layout ?? Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         return w;

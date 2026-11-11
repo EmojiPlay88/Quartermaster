@@ -303,6 +303,8 @@ static class ScreenshotStates
                 if (win == null) return "The settings window did not open.";
                 win.Show(window);
                 win.SelectPage(page);
+                // The folders page measures sizes off the UI thread; wait for them (as WinForms waits for FoldersLoadedForSmoke).
+                if (name == "settings-folders" && win.Pages.OfType<FoldersPage>().FirstOrDefault() is { } fp) PumpUntil(() => fp.SizesLoaded, 10000);
                 Pump(300);
                 Target = win;
                 return null;

@@ -47,7 +47,7 @@ public partial class MainWindow
         _onSettingsChanged = s =>
         {
             if (Dispatcher.UIThread.CheckAccess()) ApplySettings(s);
-            else Dispatcher.UIThread.Post(() => { if (_onSettingsChanged != null) ApplySettings(s); });
+            else Dispatcher.UIThread.Post(() => { if (_onSettingsChanged != null) ApplySettings(SettingsStore.Current); }); // the newest, not the captured one: an older queued change must not overwrite a newer one
         };
         SettingsStore.Changed += _onSettingsChanged;
         ApplySettings(SettingsStore.Current);

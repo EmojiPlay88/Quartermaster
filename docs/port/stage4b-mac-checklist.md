@@ -30,21 +30,21 @@ What this build does not have yet:
 7. In the capture window, press **Tab**, **Return** and the **arrow keys**, each alone. Expected: each is taken as the shortcut (or refused with the reserved-key text where the app reserves it), none of them moves focus out of the window or closes it by itself.
 8. Press the **Control key (⌃) alone**, then ⌃ with a letter. Expected: nothing happens (the key is swallowed); Cmd with a letter works.
 9. Accept ⌘⇧K, press OK. Open the menu that holds the command: its menu text shows **⌘⇧K**. Press the new keys: the command runs. Press the old keys: nothing happens. Hover the toolbar button of a command you changed (for example 1d6): the tooltip shows the new key, e.g. "1d6 (⌘…)".
-10. Set the same keys on two commands: OK / Apply refuse with a message and the Keyboard page is selected. Use **Clear** and **Default** on a command and check the text changes.
+10. Set the same keys on two commands: OK / Apply refuse with a message and the Keyboard page is selected. Use **Clear**, **Reset** (one command) and **Reset all** on the Keyboard page and check the shortcut text changes. (Note: macOS itself takes ⌘H, ⌘M and ⌘Q, so a command bound to Ctrl+H or Ctrl+M will not fire on a Mac; Mac-only reserved keys are a later stage.)
 
 ## E. Colours
 
-11. On the Display or Map page, click the **colour swatch**. The small colour window opens with 48 swatches and a box for #RRGGBB. Pick a swatch, then type a hex value and OK: the swatch on the page shows the colour, and after OK in Settings the map's highlight (or the setting you changed) uses it at once.
+11. On the Display page, click **Choose...** next to the highlight colour (the swatch itself is not clickable). The small colour window opens with 48 swatches and a box for #RRGGBB. Pick a swatch, then type a hex value and OK: the swatch on the page shows the colour, and after OK in Settings the map's highlight uses it at once.
 
 ## F. Live apply
 
-12. With a map open, change the wheel zoom step, hover delay, snap and label size on the Map page, press **Apply** without closing: every open map tab takes them at once. Toggle the alert bar, the log panel and the toolbar buttons (Toolbar page): they appear and disappear at once.
+12. With a map open, change the wheel zoom step, hover delay, snap and label size on the Map page, press **Apply** without closing: every open map tab takes them at once. Toggle **Show alert bar** (Display page) and the toolbar buttons (Toolbar page): they appear and disappear at once. On the Dice & Log page tick or untick **Show move, place and delete rows in the log panel** and change **Log time format**: the log panel follows.
 13. Tick **Game master mode** on General: the counter palette column shows when a game is open; untick: it goes.
 14. Game page: change **Difficulty** with a game open; the phase panel follows. Quit and start a new game: the new game offers the difficulty you last chose.
 
 ## G. Open Autosave
 
-15. Play until a phase boundary (or wait for the autosave interval you set on the Folders page), then choose **File > Open Autosave...**. The macOS file panel must **start in the autosave folder** (the folder set on the Folders page, or the default), listing the autosaves. Open one: the game loads. Change the folder on the Folders page and check the panel starts there next time.
+15. Play until a phase boundary (or wait for the autosave interval: **Settings > General**, "Autosave every (minutes, 0 = off):"), then choose **File > Open Autosave...**. The macOS file panel must **start in this module's autosave folder** (`autosave/<module sha>` under the app data folder; if that does not exist yet, the `autosave` folder itself), listing the autosaves. The autosave folder cannot be changed in Settings. Open one: the game loads.
 
 ## H. Physical dice
 
@@ -52,7 +52,7 @@ What this build does not have yet:
 
 ## I. Settings file and the Windows app
 
-17. Quit and start again: every setting is still as you left it (including the Outliner grouping and visibility, and the remembered last roll).
+17. Quit and start again: every setting is still as you left it (including the Outliner grouping and visibility, and the "Show the last roll in the status bar" setting; only the setting is stored, not a last roll).
 18. If you have the Windows app at hand, copy `settings.json` over and open it: it starts without an error and shows the same values. Open a `settings.json` written by Windows in the Mac build too.
 
 Write down every step that did not behave as described, with a screenshot if you can.

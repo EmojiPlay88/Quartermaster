@@ -14,6 +14,7 @@ public sealed class SettingsWindow : Window
 {
     readonly Action<Settings> _apply;
     readonly IReadOnlyList<SettingsPage> _pages;
+    internal IReadOnlyList<SettingsPage> Pages => _pages;
     readonly TabControl _tabs = new();
     readonly Func<Settings>? _latest;
     readonly IDialogs? _dialogs;
@@ -106,7 +107,11 @@ public sealed class SettingsWindow : Window
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             System.Diagnostics.Trace.WriteLine("settings window: " + ex);
-            if (_dialogs != null) await _dialogs.ShowWarningAsync(this, ex.Message, "Settings");
+            if (_dialogs != null)
+            {
+                try { await _dialogs.ShowWarningAsync(this, ex.Message, "Settings"); }
+                catch (Exception ex2) when (ex2 is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("settings window warning: " + ex2); }
+            }
         }
     }
 

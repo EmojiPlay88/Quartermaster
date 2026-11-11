@@ -94,8 +94,8 @@ public sealed class ScreenshotTests
         var tmp = Path.Combine(Path.GetTempPath(), "qm-shot-target-" + Guid.NewGuid().ToString("N"));
         using var fx = Quartermaster.TestFixtures.PhaseFixture.Module();
         var dialogs = new FakeDialogs();
-        var w = new MainWindow(dialogs, Path.Combine(tmp, "a"), null) { Width = 1024, Height = 768 };
-        var empty = new MainWindow(dialogs, Path.Combine(tmp, "b"), null) { Width = 1024, Height = 768 };
+        var w = new MainWindow(dialogs, Path.Combine(tmp, "a"), null, Path.Combine(tmp, "layout")) { Width = 1024, Height = 768 };
+        var empty = new MainWindow(dialogs, Path.Combine(tmp, "b"), null, Path.Combine(tmp, "layout")) { Width = 1024, Height = 768 };
         try
         {
             w.Show();

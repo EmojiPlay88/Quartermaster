@@ -281,7 +281,7 @@ public sealed class MapToolsTests : IDisposable
     {
         ShortcutGestures.IsMac = false;
         var dialogs = new FakeDialogs();
-        var w = new MainWindow(dialogs, Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
+        var w = new MainWindow(dialogs, Path.Combine(_tmp, "cache"), null, Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         Assert.True(w.OpenModule(Demo("Riverland-Demo.vmod")));
@@ -343,7 +343,7 @@ public sealed class MapToolsTests : IDisposable
     public void Map_tab_with_toolbar_renders()
     {
         ShortcutGestures.IsMac = false;
-        var w = new MainWindow(new FakeDialogs(), Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
+        var w = new MainWindow(new FakeDialogs(), Path.Combine(_tmp, "cache"), null, Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         w.OpenModule(Demo("Riverland-Demo.vmod"));

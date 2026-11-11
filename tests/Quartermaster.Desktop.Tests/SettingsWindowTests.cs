@@ -207,6 +207,27 @@ public sealed class SettingsWindowTests : IDisposable
         Assert.Equal(new[] { Difficulty.FullyAuto }, switched);
     }
 
+    sealed class ThrowingPage : SettingsPage
+    {
+        public override string Title => "Throws";
+        public override void Load(Settings s) { }
+        public override Settings Collect(Settings s) => throw new InvalidOperationException("collect boom");
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Failing_commit_warns_and_a_failing_warning_never_escapes(bool warningThrowsToo)
+    {
+        var (dialogs, state) = ThrowingDialogs.Create(warningThrowsToo);
+        var w = new SettingsWindow(new Settings(), _ => { }, new SettingsPage[] { new ThrowingPage() }, null, dialogs);
+        w.Show();
+        Click(w.OkButton);
+        Assert.Equal(new[] { ("collect boom", "Settings") }, state.Warnings);
+        Assert.True(w.IsVisible);   // the window stays open
+        w.Close();
+    }
+
     [AvaloniaFact]
     public void Display_choose_uses_the_colour_dialog()
     {

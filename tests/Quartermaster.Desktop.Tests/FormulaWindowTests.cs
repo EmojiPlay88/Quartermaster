@@ -111,7 +111,7 @@ public sealed class FormulaWindowTests : IDisposable
 
     MainWindow NewWindow()
     {
-        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache" + _windows.Count), null) { Width = 1024, Height = 768 };
+        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache" + _windows.Count), null, Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         return w;

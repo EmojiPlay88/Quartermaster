@@ -126,6 +126,24 @@ public sealed class KeyboardPageTests
         host.Close();
     }
 
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Failing_capture_dialog_shows_a_warning_and_never_escapes(bool warningThrowsToo)
+    {
+        var (dialogs, state) = ThrowingDialogs.Create(warningThrowsToo);
+        var host = new Window();
+        var page = new KeyboardPage(Reg(), dialogs, () => host);
+        page.Load(With());
+        host.Content = page;
+        host.Show();
+        page.SelectId("dice.1d6");
+        Click(page.SetButton);
+        WaitFor(() => state.Warnings.Count == 1);
+        Assert.Equal(("capture boom", "Settings"), state.Warnings[0]);
+        host.Close();
+    }
+
     [AvaloniaFact]
     public void Conflict_rows_red_and_status_text()
     {

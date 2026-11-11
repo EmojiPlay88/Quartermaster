@@ -102,10 +102,17 @@ public sealed class KeyboardPage : SettingsPage
         Refill();
     }
 
-    static async Task Guarded(Func<Task> a)
+    async Task Guarded(Func<Task> a)
     {
         try { await a(); }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("keyboard page: " + ex); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            System.Diagnostics.Trace.WriteLine("keyboard page: " + ex);
+            var owner = _owner() ?? TopLevel.GetTopLevel(this) as Window;
+            if (owner == null) return;
+            try { await _dialogs.ShowWarningAsync(owner, ex.Message, "Settings"); }
+            catch (Exception ex2) when (ex2 is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("keyboard page warning: " + ex2); }
+        }
     }
 
     void UpdateButtons() => SetButton.IsEnabled = ClearButton.IsEnabled = ResetButton.IsEnabled = SelectedId() != null;

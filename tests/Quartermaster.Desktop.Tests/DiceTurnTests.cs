@@ -41,7 +41,7 @@ public sealed class DiceTurnTests : IDisposable
 
     MainWindow NewWindow()
     {
-        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
+        var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null, Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         return w;
