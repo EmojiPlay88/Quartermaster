@@ -282,6 +282,42 @@ public sealed class AutosaveAndDiceTests : IDisposable
         Assert.False(Box(on).IsChecked);
     }
 
+    [AvaloniaFact]
+    public void Physical_roll_is_dropped_when_game_is_replaced_while_asking()
+    {
+        var w = Game();
+        Save(w, s => s with { PhysicalDiceDefault = true });
+        var gate = new TaskCompletionSource<string?>();
+        _dialogs.TextGate = gate;
+        w.ClickMenu("&1d6");
+        Assert.True(WaitFor(() => _dialogs.TextPrompts.Count == 1));
+        w.StartSetup(null);   // a new game while the dice dialog is open
+        Pump();
+        var fresh = w.Session!.Game!;
+        gate.SetResult("4");
+        Pump();
+        Assert.Empty(fresh.Log.OfType<RollDice>());
+    }
+
+    [AvaloniaFact]
+    public void Workbench_preview_physical_starts_from_setting()
+    {
+        var fx = PhaseFixture.Module();
+        _fixtures.Add(fx);
+        var w = NewWindow();
+        Assert.True(w.OpenModule(fx.Build()));
+        var s = w.Session!;
+        w.StartSetup(0, Difficulty.FullyAuto);
+        s.NewRules("t");
+        s.UpdateRules(_ => PhaseFixture.Pack(s.Archive.Sha256));
+        Save(w, x => x with { PhysicalDiceDefault = true });
+        w.ShowWorkbench();
+        Pump();
+        var wb = w.WorkbenchTool!;
+        wb.ShowFormula("f-water");   // the Formulas page is the one that shows
+        Assert.True(WaitFor(() => wb.Formulas.Preview.PhysicalBox.IsChecked == true));
+    }
+
     // ---------- remembered difficulty ----------
 
     [AvaloniaFact]
@@ -294,6 +330,7 @@ public sealed class AutosaveAndDiceTests : IDisposable
         _dialogs.Setup = new SetupChoice(null, Difficulty.Hardcore);
         w.ClickMenu("&New Game");
         Assert.True(WaitFor(() => _dialogs.SetupChooserShown == 1));
+        Assert.Equal(Difficulty.SemiAuto, _dialogs.LastChooserDifficulty);   // the default the very first time
         Assert.True(WaitFor(() => w.SettingsStore.Current.LastDifficulty == Difficulty.Hardcore));
         Assert.Contains("\"LastDifficulty\"", File.ReadAllText(Path.Combine(LayoutRoot, "settings.json")));
 
@@ -304,6 +341,7 @@ public sealed class AutosaveAndDiceTests : IDisposable
         _dialogs.Setup = new SetupChoice(null, Difficulty.FullyAuto);
         w2.ClickMenu("&New Game");
         Assert.True(WaitFor(() => w2.SettingsStore.Current.LastDifficulty == Difficulty.FullyAuto));
+        Assert.Equal(Difficulty.Hardcore, _dialogs.LastChooserDifficulty);   // offered the remembered one
     }
     // ---------- outliner ----------
 

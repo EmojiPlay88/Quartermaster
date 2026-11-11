@@ -34,6 +34,8 @@ sealed class FakeDialogs : IDialogs
     public SetupChoice? Setup;
     public int SetupChooserShown;
     public bool LastPreselectNew;
+    /// <summary>The difficulty the last setup chooser was offered.</summary>
+    public Difficulty? LastChooserDifficulty;
 
     /// <summary>The start folder the last open picker was given (null = none).</summary>
     public string? LastOpenFolder;
@@ -190,6 +192,7 @@ sealed class FakeDialogs : IDialogs
     {
         SetupChooserShown++;
         LastPreselectNew = preselectNew;
+        LastChooserDifficulty = difficulty;
         return Task.FromResult(Setup);
     }
 

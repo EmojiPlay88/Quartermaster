@@ -147,6 +147,7 @@ public sealed class DiceTools
     async Task RollPhysicalAsync(IReadOnlyList<(int N, int Sides)> asks, Action roll)
     {
         var s = _session();
+        var game = s?.Game;
         if (Core.Refused()) return;
         var answers = new Queue<IReadOnlyList<int>>();
         foreach (var (n, sides) in asks)
@@ -154,7 +155,7 @@ public sealed class DiceTools
             if (await AskPhysicalAsync(n, sides) is not { } r) return;
             answers.Enqueue(r);
         }
-        if (!ReferenceEquals(s, _session())) return;
+        if (!ReferenceEquals(s, _session()) || game == null || !ReferenceEquals(game, s!.Game)) return;   // module or game replaced while asking
         Core.AskPhysical = (_, _) => answers.Count > 0 ? answers.Dequeue() : null;
         try { roll(); }
         finally { Core.AskPhysical = null; }

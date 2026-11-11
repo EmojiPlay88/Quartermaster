@@ -112,10 +112,13 @@ public sealed class FormulaPreview : UserControl
     void ApplyPhysicalDefault()
     {
         if (_physicalDefaultApplied) return;
+        if (TopLevel.GetTopLevel(this) is not Window { Owner: MainWindow host }) return;   // not owned yet: try again on the next attach
         _physicalDefaultApplied = true;
-        if (TopLevel.GetTopLevel(this) is Window { Owner: MainWindow host } && host.SettingsStore.Current.PhysicalDiceDefault && !_s.IsGuest)
-            _physical.IsChecked = true;
+        if (host.SettingsStore.Current.PhysicalDiceDefault && !_s.IsGuest) _physical.IsChecked = true;
     }
+
+    /// <summary>The Physical dice box (tests).</summary>
+    internal CheckBox PhysicalBox => _physical;
 
     void Unhook()
     {
