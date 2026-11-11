@@ -6,15 +6,23 @@ using SkiaSharp;
 namespace Quartermaster.Documents;
 
 /// <summary>
-/// Tesseract OCR over the bundled tessdata folder. One engine per language, calls serialized; never downloads.
+/// Tesseract OCR over the bundled tessdata folder plus, when given an <see cref="OcrLanguageService"/>, the verified downloaded
+/// languages (bundled wins on a clash). The list is recomputed when the service reports a change; engines already loaded stay,
+/// and a removed language's engine is disposed at removal (after a running read) or by the next read. One engine per language,
+/// calls serialized; never downloads.
 /// Table-cell reads (single line) that end or start in a dangling slash or bar after a digit, such as "6/" for 67 (Tesseract
 /// misreads a 7 that way), are read once more restricted to number characters, and that reading is used if it is not shorter.
 /// Readings with a symbol that has a meaning ("1/2", "(2)", "5*") are never re-read. An interior slash that is a misread 7
 /// ("3/7" for 37) cannot be told from a fraction, so it is left alone.
 /// </summary>
-public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
+public sealed class TesseractRecognizer : IOcrRecognizer, IOcrLanguageList, IDisposable
 {
     private readonly string _path;
+    private readonly string[] _bundled;
+    private readonly OcrLanguageService? _downloads;
+    private readonly Func<string, Task>? _beforeRemove;
+    private readonly object _refresh = new();
+    private volatile LanguageSet _set;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, TessApiHandle> _engines = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<TessApiHandle> _create;
@@ -36,31 +44,90 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
         public void Dispose() { if (Interlocked.Exchange(ref _done, 1) == 0) gate.Release(); }
     }
 
-    public TesseractRecognizer(string? tessdataPath = null) : this(tessdataPath, TessApiHandle.Create) { }
+    /// <summary>All listed codes (bundled first) and the downloaded ones among them; replaced whole, never changed.</summary>
+    private sealed record LanguageSet(string[] All, string[] Downloaded);
+
+    /// <param name="tessdataPath">The bundled folder; null is the app's tessdata/.</param>
+    /// <param name="downloads">The app's language download service; null lists the bundled folder only.</param>
+    public TesseractRecognizer(string? tessdataPath = null, OcrLanguageService? downloads = null) : this(tessdataPath, TessApiHandle.Create, downloads) { }
 
     /// <summary>Test seam: <paramref name="create"/> makes the native engine (a failing one simulates a missing library).</summary>
-    internal TesseractRecognizer(string? tessdataPath, Func<TessApiHandle> create)
+    internal TesseractRecognizer(string? tessdataPath, Func<TessApiHandle> create, OcrLanguageService? downloads = null)
     {
         _create = create;
         _path = tessdataPath ?? Path.Combine(AppContext.BaseDirectory, "tessdata");
-        Languages = Directory.Exists(_path)
+        _bundled = Directory.Exists(_path)
             ? Directory.GetFiles(_path, "*.traineddata").Select(f => Path.GetFileNameWithoutExtension(f)).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray()
             : [];
-        DefaultLanguage = Languages.Contains("eng") ? "eng" : Languages.FirstOrDefault();
+        _downloads = downloads;
+        // Hashes the downloaded files not yet verified in this process on the calling thread (once per file: the service caches it).
+        _set = Compute();
+        if (downloads is not null)
+        {
+            downloads.LanguagesChanged += OnDownloadsChanged;
+            downloads.BeforeRemove = _beforeRemove = BeforeRemoveAsync;
+        }
     }
 
     public string Name => "Tesseract";
     public int MaxImageDimension => 10000;
-    public IReadOnlyList<string> Languages { get; }
-    public string? DefaultLanguage { get; }
+    public IReadOnlyList<string> Languages => _set.All;
+    public string? DefaultLanguage => _set.All.FirstOrDefault(l => l == "eng") ?? _set.All.FirstOrDefault();
+
+    /// <summary>The listed codes that come from the downloads folder (never the bundled ones).</summary>
+    internal IReadOnlyList<string> DownloadedLanguages => _set.Downloaded;
+
+    /// <summary>Raised on the service's thread after a download or removal changed <see cref="Languages"/>.</summary>
+    public event Action? LanguagesChanged;
+
+    /// <summary>The catalog's English name, or the code itself.</summary>
+    public string DisplayName(string language) => OcrLanguageCatalog.Find(language)?.Name ?? language;
+
+    private bool IsBundled(string code) => _bundled.Contains(code, StringComparer.OrdinalIgnoreCase);
+
+    private LanguageSet Compute()
+    {
+        var downloaded = _downloads?.InstalledCodes().Where(c => !IsBundled(c)).ToArray() ?? [];
+        return new LanguageSet([.. _bundled, .. downloaded], downloaded);
+    }
+
+    private void OnDownloadsChanged()
+    {
+        if (_disposed) return;
+        lock (_refresh) _set = Compute(); // serialized: an older, slower refresh cannot overwrite a newer one
+        LanguagesChanged?.Invoke();
+    }
+
+    /// <summary>Awaited by the service before it deletes <paramref name="code"/>: waits for a running read, then frees that engine.</summary>
+    private async Task BeforeRemoveAsync(string code)
+    {
+        if (IsBundled(code)) return;
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_engines.Remove(code, out var e)) e.Dispose();
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Frees the engines of languages no longer listed (the gate is held).</summary>
+    private void PruneEngines(string[] listed)
+    {
+        foreach (var code in _engines.Keys.Where(k => !listed.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList())
+        {
+            _engines[code].Dispose();
+            _engines.Remove(code);
+        }
+    }
     public string UnavailableMessage => "No OCR language data was found. Reinstall Quartermaster to restore English.";
 
     public async Task<IReadOnlyList<OcrWord>> RecognizeAsync(SKBitmap gray, OcrLayout layout, string language, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(gray);
         ct.ThrowIfCancellationRequested();
-        if (Languages.Count == 0) throw new OcrUnavailableException(UnavailableMessage);
-        var canonical = Languages.FirstOrDefault(l => string.Equals(l, language, StringComparison.OrdinalIgnoreCase))
+        var languages = _set.All;
+        if (languages.Length == 0) throw new OcrUnavailableException(UnavailableMessage);
+        var canonical = languages.FirstOrDefault(l => string.Equals(l, language, StringComparison.OrdinalIgnoreCase))
             ?? throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
         language = canonical;
         int w = gray.Width, h = gray.Height;
@@ -76,6 +143,10 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
             return await Task.Run<IReadOnlyList<OcrWord>>(() =>
             {
                 ObjectDisposedException.ThrowIf(_disposed, this); // Dispose may have returned (timed out) since the gate check
+                var listed = _set.All;
+                PruneEngines(listed);
+                if (!listed.Contains(language, StringComparer.OrdinalIgnoreCase)) // removed while this read waited for the gate
+                    throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
                 return Run(Engine(language), pixels, w, h, psm);
             }, ct).ConfigureAwait(false);
         }
@@ -103,7 +174,9 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
         try
         {
             if (api.IsInvalid) throw new OcrUnavailableException(UnavailableMessage);
-            var data = File.ReadAllBytes(Path.Combine(_path, language + ".traineddata"));
+            var file = IsBundled(language) ? Path.Combine(_path, language + ".traineddata") : _downloads?.VerifiedPath(language);
+            if (file is null) throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
+            var data = File.ReadAllBytes(file);
             int rc;
             try
             {
@@ -222,6 +295,11 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IDisposable
     {
         if (_disposed) return;
         _disposed = true; // before taking the gate: no read starts after Dispose returns, even when waiting for the gate times out
+        if (_downloads is not null)
+        {
+            _downloads.LanguagesChanged -= OnDownloadsChanged;
+            if (_downloads.BeforeRemove == _beforeRemove) _downloads.BeforeRemove = null;
+        }
         if (!_gate.Wait(DisposeWait)) return; // a read still runs: it frees the engines when it ends
         try { FreeEngines(); }
         finally { _gate.Release(); }

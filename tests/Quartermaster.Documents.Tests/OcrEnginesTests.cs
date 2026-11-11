@@ -132,6 +132,73 @@ public class OcrEnginesTests
         Assert.Same(win, Choose(true, "paper", win, calls));
     }
 
+    // ---- downloaded languages (stage 4c) ----
+
+    private static IOcrRecognizer Choose(bool isWindows, string? env, IOcrRecognizer? windows, Calls calls, OcrLanguageService? downloads) =>
+        OcrEngines.Choose(isWindows, env,
+            () => { calls.Windows++; return windows; },
+            () => { calls.Tesseract++; return new FakeEngine("Tesseract", "eng"); },
+            calls.Log.Add, downloads);
+
+    [Fact]
+    public void Windows_with_languages_and_downloads_gives_router()
+    {
+        using var fx = new OcrDownloadsFixture();
+        fx.Install();
+        using var svc = fx.Service();
+        var calls = new Calls();
+        var win = new FakeEngine("Windows", "en-US");
+        var e = Choose(true, null, win, calls, svc);
+        var router = Assert.IsType<OcrRouter>(e);
+        Assert.Equal("Windows", router.Name);
+        Assert.Equal(["en-US", "deu"], router.Languages);
+        Assert.Equal(0, calls.Tesseract);
+        Assert.Empty(calls.Log);
+        Assert.False(win.Disposed);
+        router.Dispose();
+        Assert.True(win.Disposed);
+        // Without a download service the plain Windows engine stays, as before.
+        Assert.Same(win, Choose(true, null, win, new Calls(), null));
+    }
+
+    [Fact]
+    public void Windows_without_languages_falls_back_to_tesseract_with_downloads()
+    {
+        using var fx = new OcrDownloadsFixture();
+        fx.Install();
+        using var svc = fx.Service();
+        var calls = new Calls();
+        var win = new FakeEngine("Windows");
+        var e = Choose(true, null, win, calls, svc);
+        Assert.Equal("Tesseract", e.Name);                    // the wholesale fallback, unchanged
+        Assert.Equal(1, calls.Tesseract);
+        Assert.True(win.Disposed);
+        Assert.Single(calls.Log);
+        // Create hands the service to its Tesseract: a folder without the plugin falls back (or is Tesseract off Windows).
+        var dir = Path.Combine(fx.Root, "app");
+        Directory.CreateDirectory(dir);
+        using var real = (IDisposable)OcrEngines.Create(dir, null, svc);
+        var tess = Assert.IsType<TesseractRecognizer>(real);
+        Assert.Equal(["eng", "deu"], tess.Languages);
+    }
+
+    [Fact]
+    public void Engine_variable_tesseract_and_windows_are_unchanged()
+    {
+        using var fx = new OcrDownloadsFixture();
+        using var svc = fx.Service();
+        var calls = new Calls();
+        var e = Choose(true, "tesseract", new FakeEngine("Windows", "en-US"), calls, svc);
+        Assert.Equal("Tesseract", e.Name);
+        Assert.IsType<FakeEngine>(e);
+        Assert.Equal(0, calls.Windows);
+        var win = new FakeEngine("Windows", "en-US");
+        Assert.Same(win, Choose(true, "windows", win, new Calls(), svc));   // Windows only, no router
+        var bare = new FakeEngine("Windows");
+        Assert.Same(bare, Choose(true, "windows", bare, new Calls(), svc));
+        Assert.IsType<FakeEngine>(Choose(false, null, win, new Calls(), svc)); // not Windows: Tesseract
+    }
+
     /// <summary>A plugin type whose constructor fails (as when WinRT is missing on an old Windows).</summary>
     public sealed class ThrowingRecognizer : IOcrRecognizer
     {
