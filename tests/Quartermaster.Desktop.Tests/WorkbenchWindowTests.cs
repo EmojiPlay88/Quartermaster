@@ -390,7 +390,8 @@ public sealed class WorkbenchWindowTests : IDisposable
         Assert.True(wb.ValidatePending);
         Assert.True(Find("Low fuel") < 0);   // not before the 300 ms pause
         Assert.True(WaitFor(() => Find("Low fuel") >= 0));
-        Assert.False(wb.ValidatePending);
+        // A later rules change (e.g. a tab flushing its edit) may restart the debounce on a slow runner (macos-latest, PR #2): wait for it to settle.
+        Assert.True(WaitFor(() => !wb.ValidatePending));
 
         wb.GoToIssue(Find("Low fuel"));
         Pump();
