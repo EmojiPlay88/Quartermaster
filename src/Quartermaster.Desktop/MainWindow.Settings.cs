@@ -78,7 +78,7 @@ public partial class MainWindow
             _showGrid.IsChecked = s.GridDefault == GridMode.Always;
         });
         Step(() => { foreach (var b in ToolbarHost.Buttons) ToolbarHost.SetVisible(b.Id, s.IsToolbarVisible(b.Id)); });
-        Step(() => _dice.Core.ShowLastRoll = s.ShowLastRollInStatus);
+        Step(() => { _dice.PhysicalDice = s.PhysicalDiceDefault; _dice.Core.ShowLastRoll = s.ShowLastRollInStatus; });
         Step(() => _log?.ApplySettings(s));
         Step(UpdatePaletteUi);
         Step(UpdateAlertBarVisible);

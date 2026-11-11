@@ -55,7 +55,7 @@ public partial class MainWindow : Window
     bool _dirty;
     bool _historyRefreshQueued;
     bool _closeConfirmed, _closeAsking;
-    Difficulty _lastDifficulty = Difficulty.SemiAuto;
+    readonly string _layoutRoot;
 
     /// <summary>The app's window: real dialogs, the default cache and remembered-rules folders.</summary>
     public MainWindow() : this(new Dialogs(), ModuleSession.DefaultCacheRoot, RulesMemory.DefaultRoot, null) { }
@@ -69,7 +69,8 @@ public partial class MainWindow : Window
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
         _cacheRoot = cacheRoot;
         _rulesRoot = rulesRoot;
-        SettingsStore = new SettingsStore(layoutRoot ?? AppDataRoot.Path);
+        _layoutRoot = layoutRoot ?? AppDataRoot.Path;
+        SettingsStore = new SettingsStore(_layoutRoot);
         LoadSettings();
         InitializeComponent();
         InitPhaseUi(layoutRoot);
@@ -225,7 +226,7 @@ public partial class MainWindow : Window
         var s = _session ?? throw new InvalidOperationException("Open a module first.");
         FlushNotes();
         s.LoadNative(path);
-        _recoveredAutosave = Autosaver.IsAutosavePath(path, AppDataRoot.Path);
+        _recoveredAutosave = Autosaver.IsAutosavePath(path, _layoutRoot);
         _savePath = _recoveredAutosave ? null : path;
         _dirty = false;
         UpdateTitle();
@@ -355,6 +356,7 @@ public partial class MainWindow : Window
         Item(file, "&New Game", () => { }, "file.newGame");
         Item(file, "Load &Setup...", () => RunAsync(LoadSetupAsync), gate: "file.loadSetup");
         Item(file, "Open &Game...", () => { }, "file.openGame");
+        Item(file, "Open Auto&save...", () => RunAsync(OpenAutosaveDialogAsync), gate: "file.openAutosave");
         file.Items.Add(new Separator());
         Item(file, "&Save Game", () => { }, "file.saveGame");
         Item(file, "Save Game &As...", () => { }, "file.saveGameAs");
@@ -611,16 +613,28 @@ public partial class MainWindow : Window
     async Task ChooseAndStartAsync(bool preselectNew)
     {
         if (_session is not { } s) return;
-        var choice = await _dialogs.ChooseSetupAsync(this, s.Model, preselectNew, _lastDifficulty);
+        var choice = await _dialogs.ChooseSetupAsync(this, s.Model, preselectNew, SettingsStore.Current.LastDifficulty);
         if (choice == null || !ReferenceEquals(s, _session)) return;
-        _lastDifficulty = choice.Difficulty;
+        if (SettingsStore.Current.LastDifficulty != choice.Difficulty) SettingsStore.Update(x => x with { LastDifficulty = choice.Difficulty });
         if (choice.Setup is { } setup) s.LoadSetup(setup, choice.Difficulty); else s.StartNewGame(choice.Difficulty);
     }
 
-    async Task OpenGameDialogAsync()
+    Task OpenGameDialogAsync() => OpenGameCoreAsync(autosaves: false);
+
+    Task OpenAutosaveDialogAsync() => OpenGameCoreAsync(autosaves: true);
+
+    /// <summary>WinForms OpenGameCore: Open Game, or Open Autosave starting in this module's autosave folder (else the autosave root).</summary>
+    async Task OpenGameCoreAsync(bool autosaves)
     {
         if (_session is not { } s || !await ConfirmDiscardAsync()) return;
-        var path = await _dialogs.OpenFileAsync(this, "Open Game", new[] { SaveFilter, AllFiles });
+        string? start = null;
+        if (autosaves)
+        {
+            var root = Autosaver.AutosaveRoot(_layoutRoot);
+            var mine = s.Archive.Sha256 is { Length: > 0 } sha ? Path.Combine(root, sha) : null;
+            start = mine != null && Directory.Exists(mine) ? mine : Directory.Exists(root) ? root : null;
+        }
+        var path = await _dialogs.OpenFileAsync(this, autosaves ? "Open Autosave" : "Open Game", new[] { SaveFilter, AllFiles }, start);
         if (path == null || !ReferenceEquals(s, _session)) return;   // the module changed while the picker was open
         OpenGame(path);
     }
@@ -639,7 +653,7 @@ public partial class MainWindow : Window
         {
             path = await _dialogs.SaveFileAsync(this, "Save Game", SaveFilter, "qsave");
             if (path == null) return;
-            if (Autosaver.IsAutosavePath(path, AppDataRoot.Path))
+            if (Autosaver.IsAutosavePath(path, _layoutRoot))
             {
                 ShowError("Saves inside the autosave folder are deleted automatically. Choose another folder.");
                 return;

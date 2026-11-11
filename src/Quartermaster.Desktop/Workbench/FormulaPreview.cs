@@ -38,7 +38,7 @@ public sealed class FormulaPreview : UserControl
     GameSession? _game;
     string? _formulaId;
     string? _pieceId;
-    bool _loading, _attached;
+    bool _loading, _attached, _physicalDefaultApplied;
 
     public FormulaPreview(ModuleSession s)
     {
@@ -104,7 +104,17 @@ public sealed class FormulaPreview : UserControl
         _s.ViewChanged += OnViewChanged;
         HookGame();
         RefreshPieces();
+        ApplyPhysicalDefault();
         Rebuild();   // the pack may have changed while the tab was hidden
+    }
+
+    /// <summary>The first time the preview shows, Physical dice starts from the setting (the workbench is owned by the main window); later it is the user's.</summary>
+    void ApplyPhysicalDefault()
+    {
+        if (_physicalDefaultApplied) return;
+        _physicalDefaultApplied = true;
+        if (TopLevel.GetTopLevel(this) is Window { Owner: MainWindow host } && host.SettingsStore.Current.PhysicalDiceDefault && !_s.IsGuest)
+            _physical.IsChecked = true;
     }
 
     void Unhook()

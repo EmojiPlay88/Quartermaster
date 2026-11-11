@@ -10,7 +10,7 @@ namespace Quartermaster.Desktop;
 /// <summary>
 /// The outliner dock's wiring (WinForms MainForm.Outliner / OutlinerDock): View > Outliner, the column at the right of the maps after the phase
 /// panel, and the floating "Outliner" window (bounds remembered per module under "outliner"). Hidden until asked for, as WinForms
-/// (OutlinerVisible defaults to false); there is no Settings dialog yet, so grouping and visibility are not kept between runs.
+/// (OutlinerVisible defaults to false); visibility and grouping are kept in the settings (OutlinerVisible / OutlinerGrouping).
 /// </summary>
 public partial class MainWindow
 {
@@ -44,6 +44,9 @@ public partial class MainWindow
         _outlinerState.Changed += () =>
         {
             if (_outlinerState.Floating) _outlinerFloated = true;
+            // WinForms SaveOutlinerVisible: the wish to see it is remembered between runs.
+            if (_outlinerPanel != null && SettingsStore.Current.OutlinerVisible != _outlinerState.Wanted)
+                SettingsStore.Update(x => x with { OutlinerVisible = _outlinerState.Wanted });
             _outlinerPanel?.SetFloating(_outlinerState.Floating);
             UpdateOutlinerUi();
         };
@@ -53,6 +56,14 @@ public partial class MainWindow
     {
         var panel = new OutlinerPanel(s, () => _phases, _alertHits, CentreOnPiece, OpenOutlinerMap, d => Guard(() => _dispatch?.JumpToDecision(d)));
         _outlinerPanel = panel;
+        // The remembered grouping goes in before the change handler is hooked, so loading it writes nothing.
+        panel.Grouping = SettingsStore.Current.OutlinerGrouping;
+        panel.GroupingBox.SelectionChanged += (_, _) =>
+        {
+            var g = panel.Grouping;
+            if (SettingsStore.Current.OutlinerGrouping != g) SettingsStore.Update(x => x with { OutlinerGrouping = g });
+        };
+        _outlinerState.Wanted = SettingsStore.Current.OutlinerVisible;
         AlertsUpdated += panel.AlertsChanged;   // one alert evaluation per change, shared with the alert bar
         _outlinerFloated = false;
         _outlinerState.FloatBounds = null;
