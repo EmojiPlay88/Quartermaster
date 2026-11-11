@@ -31,6 +31,8 @@ public sealed partial class MapView : Control
     readonly HashSet<string> _selected = new();
     Dictionary<string, TileSet> _tiles = new();
     double _zoomStep = 1.2;
+    SKColor? _highlight;
+    bool _moduleGrids = true;
     bool _initialView;
     TopLevel? _topLevel;
     int _playbackReported;
@@ -57,6 +59,30 @@ public sealed partial class MapView : Control
 
     /// <summary>Forces grids on for all boards; false (default) draws only grids the module marks visible.</summary>
     public bool ShowGrid { get; set { field = value; InvalidateVisual(); } }
+
+    /// <summary>Selection (and last-moved) outline colour from Settings; null keeps the renderer's default blue.</summary>
+    internal SKColor? Highlight => _highlight;
+
+    /// <summary>False hides the grids the module marks visible (Settings: grid never); <see cref="ShowGrid"/> still forces them on.</summary>
+    internal bool ModuleGrids => _moduleGrids;
+
+    /// <summary>Counter label size factor (Settings label font size / 8).</summary>
+    internal float LabelScale => _pieces.LabelScale;
+
+    /// <summary>The map settings, as WinForms MapCanvas.ApplySettings: wheel zoom step, drag threshold, hover delay, selection colour,
+    /// label size, snap on drop and the module grids (off for GridDefault Never).</summary>
+    public void ApplySettings(Settings s)
+    {
+        ZoomStep = s.WheelZoomStep;   // clamped 1.05..2
+        DragThreshold = s.DragThresholdPx;   // at least 0
+        HoverDelayMs = s.HoverDelayMs;   // at least 1
+        var (r, g, b) = s.HighlightRgb;
+        _highlight = new SKColor(r, g, b);
+        _pieces.LabelScale = Math.Clamp(s.LabelFontSize, 6, 20) / 8f;
+        Snap = s.SnapOnDrop;
+        _moduleGrids = s.GridDefault != GridMode.Never;
+        InvalidateVisual();
+    }
 
     /// <summary>0..1 while board tiles are being prepared; null once ready.</summary>
     public double? Preparing { get; set { field = value; InvalidateVisual(); } }

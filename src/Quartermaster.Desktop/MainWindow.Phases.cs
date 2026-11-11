@@ -161,15 +161,12 @@ public partial class MainWindow
             OnAutosaveError, () => _session?.Game?.State.Turn.Turn);
         _dispatch = new PhaseRunDispatch(s, c, _history!, () => _actions!, new DesktopPhaseUi(this, s, () => _dispatch), _autosaver, () => DateTimeOffset.UtcNow)
         {
-            AutosaveMinutes = () => AutosaveMinutes,
+            AutosaveMinutes = () => SettingsStore.Current.AutosaveMinutes,
             Failed = OnDispatchFailed,
             Log = m => System.Diagnostics.Trace.WriteLine(m),
         };
         _dispatch.Advanced += FlushPhaseViews;
     }
-
-    /// <summary>No Settings dialog in the Avalonia app yet: the WinForms default interval (<see cref="Settings.AutosaveMinutes"/>).</summary>
-    static int AutosaveMinutes => new Settings().AutosaveMinutes;
 
     void OnAutosaveError(string message)
     {

@@ -225,7 +225,7 @@ public sealed partial class MapView
     }
 
     MapDrawOptions Options(IReadOnlySet<string>? hidden, string? hover = null) =>
-        new(ShowGrid, _selected, hover, hidden, HighlightPieceIds: _highlightLast ? _lastMoved : null, HideAllPieces: _hideCounters, DeviceScale: DeviceScale);
+        new(ShowGrid, _selected, hover, hidden, _highlight, _moduleGrids, _highlightLast ? _lastMoved : null, _hideCounters, _highlight, DeviceScale);
 
     void DrawBand(SKCanvas c)
     {

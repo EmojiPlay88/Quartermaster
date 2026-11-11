@@ -32,6 +32,8 @@ public sealed class MapTabs : TabControl
     Func<IActionPort?>? _actions;
     CancellationTokenSource _cts = new();
     bool _showGrid;
+    Settings? _settings;
+    (double Min, double Max)? _tabWidths;
 
     public MapTabs()
     {
@@ -95,6 +97,28 @@ public sealed class MapTabs : TabControl
         }
     }
 
+    /// <summary>The map settings for every open view and every view opened later (<see cref="MapView.ApplySettings"/>).</summary>
+    public void ApplySettings(Settings s)
+    {
+        _settings = s;
+        foreach (var v in _views) v.ApplySettings(s);
+    }
+
+    /// <summary>Tab width limits (Settings TabMinWidth / TabMaxWidth), as WinForms DocumentTabStrip.SetWidths: min at least 20, max at least min.</summary>
+    public void SetTabWidths(int min, int max)
+    {
+        var lo = Math.Max(20, min);
+        _tabWidths = (lo, Math.Max(lo, max));
+        foreach (var t in Items.OfType<TabItem>()) SizeTab(t);
+    }
+
+    void SizeTab(TabItem t)
+    {
+        if (_tabWidths is not { } w) return;
+        t.MinWidth = w.Min;
+        t.MaxWidth = w.Max;
+    }
+
     /// <summary>Shows the session's maps (none for null). <paramref name="actions"/> is the main window's action port.</summary>
     public void Bind(ModuleSession? s, Func<IActionPort?>? actions)
     {
@@ -129,7 +153,7 @@ public sealed class MapTabs : TabControl
         _views.Clear();
         _views.AddRange(views);
         Items.Clear();
-        foreach (var t in tabs) Items.Add(t);
+        foreach (var t in tabs) { SizeTab(t); Items.Add(t); }
         SelectedItem = tabs.FirstOrDefault(t => ViewOf(t)?.Map == selected) ?? tabs.FirstOrDefault();
     }
 
@@ -164,6 +188,7 @@ public sealed class MapTabs : TabControl
     MapView Create(ModuleSession s, MapDef map)
     {
         var v = new MapView(s, map) { ShowGrid = _showGrid, Preparing = map.Boards.Count > 0 ? 0 : null, MenuServices = MenuServices };
+        if (_settings != null) v.ApplySettings(_settings);
         v.StatusMessage += m => DropMessage?.Invoke(m);
         v.Guarded = a => Run(s, map, a);
         v.Actions = () => _actions?.Invoke();

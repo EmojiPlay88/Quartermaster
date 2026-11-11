@@ -168,7 +168,10 @@ public sealed class CounterThumbnailTests : IDisposable
     [AvaloniaFact]
     public void Palette_uses_shared_cache()
     {
-        var w = new MainWindow(new FakeDialogs(), Path.Combine(_tmp, "cache-w"), null) { Width = 1024, Height = 768 };
+        var layout = Path.Combine(_tmp, "layout-gm");   // the palette shows only in game master mode
+        Directory.CreateDirectory(layout);
+        File.WriteAllText(Path.Combine(layout, "settings.json"), """{ "GameMasterMode": true }""");
+        var w = new MainWindow(new FakeDialogs(), Path.Combine(_tmp, "cache-w"), null, layout) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         w.OpenModule(Demo("Riverland-Demo.vmod"));

@@ -296,9 +296,17 @@ public sealed class MainWindowTests : IDisposable
     static string Demo(string file, [System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "..", "..", "docs", "wiki", "demo", file));
 
-    MainWindow NewWindow(FakeDialogs? dialogs = null)
+    /// <param name="gameMaster">Game master mode in a temp settings file (the counter palette shows only then).</param>
+    MainWindow NewWindow(FakeDialogs? dialogs = null, bool gameMaster = false)
     {
-        var w = new MainWindow(dialogs ?? _dialogs, Path.Combine(_tmp, "cache"), null) { Width = 1024, Height = 768 };
+        string? layout = null;
+        if (gameMaster)
+        {
+            layout = Path.Combine(_tmp, "layout-gm");
+            Directory.CreateDirectory(layout);
+            File.WriteAllText(Path.Combine(layout, "settings.json"), """{ "GameMasterMode": true }""");
+        }
+        var w = new MainWindow(dialogs ?? _dialogs, Path.Combine(_tmp, "cache"), null, layout) { Width = 1024, Height = 768 };
         _windows.Add(w);
         w.Show();
         return w;
@@ -391,7 +399,7 @@ public sealed class MainWindowTests : IDisposable
     [AvaloniaFact]
     public void Open_demo_module_and_start_game()
     {
-        var w = NewWindow();
+        var w = NewWindow(gameMaster: true);
         Assert.True(w.OpenModule(Demo("Riverland-Demo.vmod")));
         var s = w.Session!;
         Assert.Empty(s.Model.Setups);   // the demo starts from its setup stacks ("New game from module")
@@ -631,7 +639,7 @@ public sealed class MainWindowTests : IDisposable
     [AvaloniaFact]
     public void Palette_drop_adds_piece()
     {
-        var w = NewWindow();
+        var w = NewWindow(gameMaster: true);
         w.OpenModule(Demo("Riverland-Demo.vmod"));
         w.StartSetup(null);
         Pump();
@@ -672,7 +680,7 @@ public sealed class MainWindowTests : IDisposable
     [AvaloniaFact]
     public void Palette_cache_eviction_never_disposes_a_shown_thumbnail()
     {
-        var w = NewWindow();
+        var w = NewWindow(gameMaster: true);
         w.OpenModule(Demo("Riverland-Demo.vmod"));
         w.StartSetup(null);
         var palette = w.Palette;
@@ -695,7 +703,7 @@ public sealed class MainWindowTests : IDisposable
     [AvaloniaFact]
     public void Palette_drop_off_the_boards_says_so()
     {
-        var w = NewWindow();
+        var w = NewWindow(gameMaster: true);
         w.OpenModule(Demo("Riverland-Demo.vmod"));
         w.StartSetup(null);
         Pump();
