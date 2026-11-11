@@ -70,6 +70,7 @@ public partial class MainWindow
                 break;
         }
         NoteModuleOpened(r.ModulePath);
+        MaybeAutoTour();
     }
 
     /// <summary>File → Back to launcher: closes the window, asking about unsaved changes as any close; a cancelled close forgets the request.

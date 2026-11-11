@@ -371,7 +371,7 @@ public sealed class MainWindowTests : IDisposable
     {
         var w = NewWindow();
         var menus = w.MenuLabels();
-        Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools" }, menus.Keys);
+        Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools", "&Help" }, menus.Keys);
         Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "Open Auto&save...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "&Back to launcher", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo", "Step &Back to Start of Phase", "Step Back &To..." }, menus["&Edit"]);
         Assert.Equal(new[] { "Module &Tree", "&Diagnostics", "Show &Grid", "&Log", "&Phase panel", "&Outliner", "&Ledger", "&Overview", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);

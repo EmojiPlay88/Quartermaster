@@ -244,7 +244,12 @@ public partial class MainWindow : Window
         Guard(() => LoadRulesFromArgs(args));   // as WinForms: the pack is in place before the first game starts
         if (args.SetupIndex is { } idx) Guard(() => StartSetup(idx));
         else if (args.NewGame) Guard(() => StartSetup(null));
-        else RunAsync(() => ChooseAndStartAsync(preselectNew: false));
+        else
+        {
+            RunAsync(async () => { await ChooseAndStartAsync(preselectNew: false); MaybeAutoTour(); });
+            return;
+        }
+        MaybeAutoTour();
     }
 
     /// <summary>The menu bar in WinForms notation: top menu label → its item labels (separators skipped), in order.</summary>
@@ -424,10 +429,16 @@ public partial class MainWindow : Window
         tools.Items.Add(new Separator());
         Item(tools, "&Settings...", () => { }, "tools.settings");
 
+        // Help (WinForms MainForm.BuildMenu): the Interface Tour needs a game (help.tour); About.
+        var help = Top("&Help");
+        Item(help, "Interface &Tour", ShowTour, gate: "help.tour");
+        Item(help, "&About", () => RunAsync(() => _dialogs.ShowInfoAsync(this, $"Quartermaster {AppVersion.Text}\nA VASSAL module reader and engine.", "About Quartermaster")));
+
         MainMenu.Items.Add(file);
         MainMenu.Items.Add(edit);
         MainMenu.Items.Add(view);
         MainMenu.Items.Add(tools);
+        MainMenu.Items.Add(help);
         RefreshHistoryUi();
     }
 
@@ -780,6 +791,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
+        _tour?.Close();   // an open tour counts as skipped (WinForms: the owned balloon closes with the window)
         if (_backToLauncher) ReturnToLauncher = true;   // the close really completed
         _dice.Stop();
         StopSettings();
