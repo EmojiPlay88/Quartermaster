@@ -617,6 +617,7 @@ public partial class MainWindow : Window
         if (!OpenModule(path)) return;
         NoteModuleOpened(path);
         await ChooseAndStartAsync(preselectNew: false);
+        MaybeAutoTour();   // WinForms OpenModule: any module open in a loop window may start the first-run tour
     }
 
     async Task NewGameAsync()
@@ -764,6 +765,8 @@ public partial class MainWindow : Window
             if (!_closeAsking) _closeQuestion = AskThenCloseAsync(DiscardQuestion());
         }
         base.OnClosing(e);
+        // Refused without a question still to answer (and not already confirmed): a real cancel.
+        if (e.Cancel && !_closeAsking && !_closeConfirmed) CancelBackToLauncher();
     }
 
     /// <summary>Asks the close questions; never throws. No (or a failure) keeps the window and forgets a Back to launcher request.</summary>
@@ -775,7 +778,7 @@ public partial class MainWindow : Window
         try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption, defaultNo: true)) && await ConfirmRulesSavedAsync(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("close question: " + ex); yes = false; }
         finally { _closeAsking = false; }
-        if (!yes) { _backToLauncher = false; return; }
+        if (!yes) { CancelBackToLauncher(); return; }
         _closeConfirmed = true;
         Dispatcher.UIThread.Post(Close);
     }

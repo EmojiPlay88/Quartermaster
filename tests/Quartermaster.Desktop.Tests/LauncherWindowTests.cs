@@ -162,6 +162,41 @@ public sealed class LauncherWindowTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Play_offline_enables_after_refresh_even_when_hash_failed()
+    {
+        // Final review F1: the buttons are updated once the refresh has really finished, not while its task is still running.
+        var store = Store();
+        new ModuleLibrary(store).Add(_module);
+        var w = new LauncherWindow(store, _layout, _dialogs, null);
+        _windows.Add(w);
+        w.Library.Hasher = _ => throw new IOException("unreadable");
+        w.Show();
+        WaitFor(() => w.RefreshTask.IsCompleted);
+        Assert.Equal(0, w.Modules.SelectedIndex);
+        Assert.True(string.IsNullOrEmpty(w.Library.Rows[0].Entry.Sha256));
+        Assert.True(w.PlayButton.IsEnabled);
+        Assert.Null(ToolTip.GetTip(w.PlayButton));
+    }
+
+    /// <summary>Final review M5: a failing handler whose warning also fails never reaches the dispatcher.</summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Failing_handler_and_warning_never_escape(bool warningThrowsToo)
+    {
+        var (dialogs, state) = ThrowingDialogs.Create(warningThrowsToo);   // the file picker returns null: Add module fails
+        var w = new LauncherWindow(Store(), _layout, dialogs, null);
+        _windows.Add(w);
+        w.Show();
+        WaitFor(() => w.RefreshTask.IsCompleted);
+        Click(w.AddButton);
+        WaitFor(() => state.Warnings.Count == 1);
+        Assert.Equal("Quartermaster", state.Warnings[0].Caption);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(w.IsVisible);
+    }
+
+    [AvaloniaFact]
     public void Add_module_uses_multi_select_and_adds_each()
     {
         var store = Store();

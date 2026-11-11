@@ -56,8 +56,8 @@ public partial class MainWindow
         if (!LauncherAvailable || _updates is not { Feed: not null } updates) return;
         if (_session?.Game != null && !await _dialogs.AskYesNoAsync(this, DesktopUpdates.InGameText, DesktopUpdates.InGameCaption, defaultNo: false)) return;
         updates.CheckOnNextLauncher = true;
-        await BackToLauncherAsync();
-        if (!ReturnToLauncher) updates.CheckOnNextLauncher = false;   // the close was cancelled (unsaved changes kept)
+        // The close may complete after the questions (and after this returns): only a real cancel forgets the check.
+        if (!await BackToLauncherAsync()) updates.CheckOnNextLauncher = false;   // the close was cancelled (unsaved changes kept)
     }
 
     /// <summary>The Interface Tour runs on the first game open (set by the launcher loop only, never in tests or screenshot runs).</summary>
@@ -107,21 +107,33 @@ public partial class MainWindow
         MaybeAutoTour();
     }
 
-    /// <summary>File → Back to launcher: closes the window, asking about unsaved changes as any close; a cancelled close forgets the request.
-    /// Completes once the close has happened or was cancelled.</summary>
-    internal async Task BackToLauncherAsync()
+    /// <summary>
+    /// File → Back to launcher: closes the window, asking about unsaved changes as any close. Completes once the questions are answered;
+    /// true when the window is closing (or closed), false when the close was cancelled. Only a real cancel (No, or a close refused without
+    /// a question) forgets the request (see <see cref="CancelBackToLauncher"/>); the close itself may complete later (it is posted after
+    /// the questions, and may be asynchronous on some platforms), and <see cref="OnClosed"/> then sets <see cref="ReturnToLauncher"/>.
+    /// </summary>
+    internal async Task<bool> BackToLauncherAsync()
     {
         _backToLauncher = true;
         if (!_closeAsking) _closeQuestion = null;   // a stale, finished ask; one still open is waited for below
         Close();
         if (_closeQuestion is { } asking) await asking;
-        if (!_closed && !_closeConfirmed) _backToLauncher = false;   // cancelled: the next close (box, Exit) ends the app
+        // Cleared only by a real cancel: true when the close went ahead (_closed, or _closeConfirmed with the close posted) or is still on its way.
+        return _backToLauncher;
     }
 
+    /// <summary>The close was cancelled: a pending Back to launcher is forgotten, so the next close (box, Exit) ends the app.</summary>
+    void CancelBackToLauncher() => _backToLauncher = false;
+
     /// <summary>The launcher's "last played" (WinForms OpenModule bookkeeping); only in a window the launcher started.</summary>
+    /// <summary>Also remembers the module for "Select the last module in the launcher" (WinForms MainForm.Settings RememberModule).</summary>
     void NoteModuleOpened(string path)
     {
-        if (LauncherAvailable) Guard(() => LaunchBookkeeping.ModuleOpened(Library, path, DateTimeOffset.UtcNow));
+        if (!LauncherAvailable) return;
+        Guard(() => LaunchBookkeeping.ModuleOpened(Library, path, DateTimeOffset.UtcNow));
+        if (!string.Equals(SettingsStore.Current.LastModulePath, path, StringComparison.OrdinalIgnoreCase))
+            Guard(() => SettingsStore.Update(s => s with { LastModulePath = path }));
     }
 
     /// <summary>The launcher's recent saves (WinForms NoteRecentSave); autosaves never go there.</summary>

@@ -90,10 +90,15 @@ public sealed class DesktopUpdates : IUpdateSlot
     /// The app's instance: a <see cref="FolderFeed"/> when <see cref="UpdateFeeds.EnvVar"/> is set, otherwise no feed (never GitHub).
     /// With a feed, downloads of other versions left in the updates folder are removed (best effort).
     /// </summary>
-    public static DesktopUpdates FromEnvironment(string? appDataRoot = null)
+    public static DesktopUpdates FromEnvironment(string? appDataRoot = null) => FromEnvironment(appDataRoot, Environment.GetEnvironmentVariable);
+
+    /// <summary>As <see cref="FromEnvironment(string?)"/>, reading the environment through <paramref name="env"/> (tests pass their own, so
+    /// they never depend on, or change, the process environment).</summary>
+    internal static DesktopUpdates FromEnvironment(string? appDataRoot, Func<string, string?> env)
     {
+        ArgumentNullException.ThrowIfNull(env);
         var root = Path.Combine(appDataRoot ?? AppDataRoot.Path, FolderName);
-        var dir = Environment.GetEnvironmentVariable(UpdateFeeds.EnvVar);
+        var dir = env(UpdateFeeds.EnvVar);
         var feed = string.IsNullOrWhiteSpace(dir) ? null : new FolderFeed(dir);
         var u = new DesktopUpdates(feed, root);
         if (feed != null) UpdateInstaller.CleanupOld(root, AppVersion.Current);

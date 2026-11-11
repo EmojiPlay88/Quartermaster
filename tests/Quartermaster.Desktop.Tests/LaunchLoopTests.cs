@@ -199,6 +199,56 @@ public sealed class LaunchLoopTests : IDisposable
         Assert.Equal(1, _shutdowns);
     }
 
+    /// <summary>Final review I1/F2: unsaved changes answered Yes still go back to the launcher (the close completes after the question).</summary>
+    [AvaloniaFact]
+    public void Back_to_launcher_with_unsaved_changes_answered_yes_goes_back()
+    {
+        var (run, g) = StartGame();
+        MoveAPiece(g);
+        Pump();
+        Assert.True(g.HasUnsavedChanges);
+        _dialogs.Answer = true;
+        var back = g.BackToLauncherAsync();
+        PumpUntil(() => back.IsCompleted && _launchers.Count == 2 && _launchers[1].IsVisible && _launchers[1].RefreshTask.IsCompleted);
+        Assert.True(back.Result);
+        Assert.Equal(new[] { ("The current game has unsaved changes. Discard them?", "Quartermaster") }, _dialogs.Questions);
+        Assert.False(g.IsVisible);
+        Assert.True(g.ReturnToLauncher);
+        Assert.Same(_launchers[1], _mainWindows[^1]);
+        Assert.Equal(0, _shutdowns);
+        Assert.False(run.IsCompleted);
+    }
+
+    /// <summary>Final review I2 (WinForms MainForm.Settings RememberModule): a module opened in a loop window becomes Settings.LastModulePath,
+    /// so "Select the last module in the launcher" picks it in a fresh launcher (nothing just played).</summary>
+    [AvaloniaFact]
+    public void Opened_module_is_remembered_for_select_last_module()
+    {
+        var second = Path.Combine(_tmp, "mods", "Second.vmod");
+        File.Copy(_module, second);
+        new ModuleLibrary(Store()).Add(second);
+        Assert.True(Store().Current.ReopenLastModule);
+        var run = Start();
+        Assert.Equal(0, _launchers[0].Modules.SelectedIndex);   // nothing remembered yet: the first present row
+        Assert.Null(Store().Current.LastModulePath);
+        _launchers[0].Choose(NewGame() with { ModulePath = second });
+        PumpUntil(() => _games.Count == 1 && _games[0].Session?.Game != null);
+        Assert.Equal(second, Store().Current.LastModulePath);
+
+        var back = _games[0].BackToLauncherAsync();
+        PumpUntil(() => back.IsCompleted && _launchers.Count == 2 && _launchers[1].IsVisible && _launchers[1].RefreshTask.IsCompleted);
+        Assert.Equal(Path.GetFullPath(second), _launchers[1].SelectedRow!.Entry.Path, ignoreCase: true);
+        _launchers[1].Close();
+        PumpUntil(() => run.IsCompleted);
+
+        // A fresh launcher (a new app run): no module was just played, the remembered one is selected.
+        var fresh = new LauncherWindow(Store(), _layout, _dialogs, null);
+        _launchers.Add(fresh);
+        fresh.Show();
+        PumpUntil(() => fresh.RefreshTask.IsCompleted);
+        Assert.Equal(Path.GetFullPath(second), fresh.SelectedRow!.Entry.Path, ignoreCase: true);
+    }
+
     [AvaloniaFact]
     public void Closing_game_window_ends_loop()
     {

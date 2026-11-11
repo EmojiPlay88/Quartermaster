@@ -171,9 +171,11 @@ public sealed class DesktopUpdatesTests : IDisposable
     [AvaloniaFact]
     public void No_feed_means_no_update_ui_and_no_check()
     {
-        // The test process never sets the feed variable: the Desktop app then has no feed at all (never GitHub).
-        Assert.Null(Environment.GetEnvironmentVariable(UpdateFeeds.EnvVar));
-        var fromEnv = DesktopUpdates.FromEnvironment(_layout);
+        // Without the feed variable the Desktop app has no feed at all (never GitHub). The environment is read through a lookup, so the
+        // test does not depend on the machine's own QUARTERMASTER_UPDATE_FEED.
+        var asked = new List<string>();
+        var fromEnv = DesktopUpdates.FromEnvironment(_layout, n => { asked.Add(n); return null; });
+        Assert.Equal(new[] { UpdateFeeds.EnvVar }, asked);
         Assert.Null(fromEnv.Feed);
         Assert.Equal(Path.Combine(_layout, "Updates-desktop"), fromEnv.UpdatesRoot);
         Assert.Equal("Installing updates comes with the packaged release (stage 6).", DesktopUpdates.InstallLaterText);
@@ -455,6 +457,36 @@ public sealed class DesktopUpdatesTests : IDisposable
         Assert.True(updates.CheckedThisRun);
         Assert.Equal("Quartermaster 9.9.9 is available.", updates.Bar!.Message);
         Assert.True(w.IsVisible);
+    }
+
+    /// <summary>Final review I1: with unsaved changes, Yes (go back) then Yes (discard) closes after the question; the launcher still checks.</summary>
+    [AvaloniaFact]
+    public void Help_check_for_updates_with_unsaved_changes_still_checks()
+    {
+        WriteTestFeed("9.9.9");
+        var updates = Updates();
+        var g = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null, _layout) { Width = 1024, Height = 768, Updates = updates };
+        _windows.Add(g);
+        g.LauncherAvailable = true;
+        g.Show();
+        Assert.True(g.OpenModule(CopyDemo()));
+        g.StartSetup(null);
+        Dispatcher.UIThread.RunJobs();
+        var p = g.Session!.Game!.State.Pieces.Values.First(x => x.MapId == g.Session.Model.Maps[0].Id);
+        g.Actions!.Move(new[] { new Quartermaster.Core.MovePieces(new[] { p.Id }, p.MapId, new Quartermaster.Vassal.PointD(p.Pos.X + 40, p.Pos.Y + 40), null) });
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(g.HasUnsavedChanges);
+
+        _dialogs.Answer = true;   // Yes, go back; Yes, discard
+        g.ClickMenu("Check for &updates…");
+        WaitFor(() => !g.IsVisible);
+        Assert.Equal(2, _dialogs.Questions.Count);
+        Assert.Equal("The current game has unsaved changes. Discard them?", _dialogs.Questions[1].Message);
+        Assert.True(g.ReturnToLauncher);
+        Assert.True(updates.CheckOnNextLauncher);
+        Launcher(updates, Store(checkOnStart: false));
+        Assert.True(updates.CheckedThisRun);
+        Assert.Equal("Quartermaster 9.9.9 is available.", updates.Bar!.Message);
     }
 
     string CopyDemo()

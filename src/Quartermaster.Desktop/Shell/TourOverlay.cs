@@ -75,10 +75,30 @@ public sealed class TourOverlay : Window
         foreach (var c in new Control[] { _title, _text, buttons }) { DockPanel.SetDock(c, Dock.Top); _body.Children.Add(c); }
         Content = new Panel { Children = { _chrome, _body } };
 
+        Opened += (_, _) => ApplyTransparencyFallback(ActualTransparencyLevel);
+
         BackButton.Click += (_, _) => Go(_index - 1);
         NextButton.Click += (_, _) => { if (_index >= _steps.Count - 1) Finish(false); else Go(_index + 1); };
         SkipButton.Click += (_, _) => Finish(true);
     }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == ActualTransparencyLevelProperty) ApplyTransparencyFallback(ActualTransparencyLevel);
+    }
+
+    /// <summary>
+    /// Without a compositor (<paramref name="actual"/> is None) a transparent window paints its see-through parts black: the arrow strip
+    /// and the corners then get the control colour instead. Also used by the headless screenshot, whose frame has no alpha.
+    /// </summary>
+    internal void ApplyTransparencyFallback(WindowTransparencyLevel actual)
+    {
+        if (actual != WindowTransparencyLevel.None) return;
+        Background = this.TryFindResource("Classic.FaceBrush", ActualThemeVariant, out var b) && b is IBrush face ? face : SystemFace;
+    }
+
+    static readonly IBrush SystemFace = new ImmutableSolidColorBrush(Color.FromRgb(0xF0, 0xF0, 0xF0));   // SystemColors.Control
 
     public int Index => _index;
     public int Count => _steps.Count;

@@ -33,6 +33,7 @@ public sealed class LauncherWindow : Window
     IReadOnlyList<IReadOnlyList<string>> _cells = Array.Empty<IReadOnlyList<string>>();
     Task _refresh = Task.CompletedTask;
     bool _closing, _addedDuringRefresh;
+    bool _refreshing;   // a module check is running; cleared on the UI thread before the list is refilled (the task itself ends just after)
 
     /// <summary>What to play (Play offline's answer), or null when the launcher was closed.</summary>
     public Task<LaunchRequest?> Result => _result.Task;
@@ -181,7 +182,9 @@ public sealed class LauncherWindow : Window
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             System.Diagnostics.Trace.WriteLine("launcher: " + ex.Message);
-            if (!_closing) await Dialogs.ShowWarningAsync(this, ex.Message, Caption);
+            if (_closing) return;
+            try { await Dialogs.ShowWarningAsync(this, ex.Message, Caption); }
+            catch (Exception shown) when (shown is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("launcher: warning not shown: " + shown.Message); }
         }
     }
 
@@ -200,6 +203,7 @@ public sealed class LauncherWindow : Window
             done++;
             _progress.Text = $"Checking modules… {done} of {total}";
         });
+        _refreshing = true;
         _refresh = RefreshAsyncSafe(progress);
     }
 
@@ -212,6 +216,7 @@ public sealed class LauncherWindow : Window
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (_closing) return;
+            _refreshing = false;   // before Fill, so its button update already sees the check finished (a failed hash shows as ready)
             _progress.Text = "";
             Fill(preselectLast: false);
             // Only re-run for modules added since this refresh started (an unhashable file never loops).
@@ -257,7 +262,7 @@ public sealed class LauncherWindow : Window
     void UpdateButtons()
     {
         var row = SelectedRow;
-        var hashReady = row != null && (!string.IsNullOrEmpty(row.Entry.Sha256) || _refresh.IsCompleted);
+        var hashReady = row != null && (!string.IsNullOrEmpty(row.Entry.Sha256) || !_refreshing);
         var b = LauncherModel.Buttons(row, hashReady);
         PlayButton.IsEnabled = b.PlayOffline;
         RemoveButton.IsEnabled = b.Remove;
@@ -282,7 +287,7 @@ public sealed class LauncherWindow : Window
         Fill(preselectLast: false);
         if (last == null) return;
         Modules.SelectedIndex = IndexOf(last);
-        if (_refresh.IsCompleted) StartRefresh(); // hash what was just added
+        if (!_refreshing) StartRefresh();         // hash what was just added
         else _addedDuringRefresh = true;          // the running refresh took its snapshot before: run again when it ends
         UpdateButtons();
     }
@@ -327,7 +332,7 @@ public sealed class LauncherWindow : Window
             await Dialogs.ShowInfoAsync(this, LauncherModel.MissingModuleText, Caption);
             return;
         }
-        if (row.Entry.Sha256 is not { Length: > 0 } && !_refresh.IsCompleted)
+        if (row.Entry.Sha256 is not { Length: > 0 } && _refreshing)
         {
             await Dialogs.ShowInfoAsync(this, LauncherModel.NotReadyText, Caption);
             return;

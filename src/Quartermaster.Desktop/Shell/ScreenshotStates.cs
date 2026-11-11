@@ -35,10 +35,14 @@ static class ScreenshotStates
         if (window.Session is { } s) FormulaWindows.CloseAllFor(s);
         Target?.Close();
         Target = null;
+        // As WinForms SmokeTour: the tour state leaves TourShown as it found it (closing the balloon above marked it shown).
+        if (_tourShown is { } shown && window.SettingsStore.Current.TourShown != shown) window.SettingsStore.Update(x => x with { TourShown = shown });
+        _tourShown = null;
         if (_scanDir != null) { try { Directory.Delete(_scanDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } _scanDir = null; }
     }
 
     static string? _scanDir;
+    static bool? _tourShown;
 
     static readonly string[] SettingsPages = { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders", "ocr" };
 
@@ -313,9 +317,12 @@ static class ScreenshotStates
             }
             case "tour":
                 // Help > Interface Tour: the balloon on step 1, captured as its own (borderless, transparent-backed) window.
+                _tourShown = window.SettingsStore.Current.TourShown;   // closing the balloon marks the tour shown; Cleanup puts it back
                 window.ShowTour();
                 Pump(300);
                 if (window.Tour is not { } tour) return "The tour did not open.";
+                tour.ApplyTransparencyFallback(WindowTransparencyLevel.None);   // the headless frame has no alpha: no black arrow strip
+                Pump(100);
                 Target = tour;
                 return null;
             case "ocr-dropdown":

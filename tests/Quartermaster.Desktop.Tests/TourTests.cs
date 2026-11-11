@@ -327,6 +327,71 @@ public sealed class TourTests : IDisposable
         Assert.True(direct.SettingsStore.Current.TourShown);
     }
 
+    /// <summary>Final review M2 (WinForms MainForm.cs OpenModule → MaybeAutoTour): File > Open Module… in a loop window tours once too.</summary>
+    [AvaloniaFact]
+    public void Open_module_menu_starts_auto_tour()
+    {
+        var w = NewWindow();
+        w.AutoTour = true;
+        _dialogs.OpenFiles.Enqueue(_module);
+        _dialogs.Setup = new SetupChoice(null, Difficulty.SemiAuto);
+        w.ClickMenu("&Open Module...");
+        PumpUntil(() => w.Session?.Game != null);
+        PumpUntil(() => w.Tour != null);
+        Assert.Equal(0, w.Tour!.Index);
+        w.Tour.Close();
+        Pump();
+        Assert.True(w.SettingsStore.Current.TourShown);
+
+        var plain = NewWindow();   // not a loop window: never
+        _dialogs.OpenFiles.Enqueue(_module);
+        plain.ClickMenu("&Open Module...");
+        PumpUntil(() => plain.Session?.Game != null);
+        var until = DateTime.UtcNow.AddMilliseconds(1200);
+        PumpUntil(() => DateTime.UtcNow > until);
+        Assert.Null(plain.Tour);
+    }
+
+    /// <summary>Final review F3: without a compositor (headless) the transparent balloon window would show black corners and arrow strip.</summary>
+    [AvaloniaFact]
+    public void Balloon_uses_face_colour_without_transparency()
+    {
+        var w = Game();
+        w.ShowTour();
+        var tour = w.Tour!;
+        Pump();
+        var faceColor = ((Avalonia.Media.ISolidColorBrush)w.FindResource("Classic.FaceBrush")!).Color;
+        // The headless backend reports Transparent: the balloon keeps its see-through background there.
+        Assert.Equal(WindowTransparencyLevel.Transparent, tour.ActualTransparencyLevel);
+        Assert.Equal(Avalonia.Media.Brushes.Transparent, tour.Background);
+        // No compositor (ActualTransparencyLevel None): the arrow strip and corners get the control colour instead of black.
+        tour.ApplyTransparencyFallback(WindowTransparencyLevel.None);
+        Assert.Equal(faceColor, Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(tour.Background).Color);
+        tour.Close();
+        Pump();
+
+        // The headless screenshot flattens the frame without alpha: the tour state draws the balloon on the control colour too.
+        Assert.Null(ScreenshotStates.Apply("tour", w));
+        var shot = Assert.IsType<TourOverlay>(ScreenshotStates.Target);
+        Assert.Equal(faceColor, Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(shot.Background).Color);
+        ScreenshotStates.Cleanup(w);
+    }
+
+    /// <summary>Final review M1 (WinForms SmokeTour): the tour screenshot state puts TourShown back as it found it.</summary>
+    [AvaloniaFact]
+    public void Tour_screenshot_state_restores_tour_shown()
+    {
+        var w = Game();
+        Assert.False(w.SettingsStore.Current.TourShown);
+        Assert.Null(ScreenshotStates.Apply("tour", w));
+        Assert.NotNull(w.Tour);
+        ScreenshotStates.Cleanup(w);
+        Pump();
+        Assert.Null(w.Tour);
+        Assert.False(w.SettingsStore.Current.TourShown);
+        Assert.False(new SettingsStore(w.SettingsStore.Root).Load(null).TourShown);   // on disk too
+    }
+
     [AvaloniaFact]
     public void Balloon_prefers_below_for_wide_target_and_right_for_tall()
     {

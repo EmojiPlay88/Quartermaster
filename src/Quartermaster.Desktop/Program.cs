@@ -134,17 +134,23 @@ static class Program
         finally { w.Close(); }
     }
 
-    /// <summary>A TEST folder feed offering 9.9.9 under the scratch root, pointed to by QUARTERMASTER_UPDATE_FEED for this process (as WinForms
-    /// ShotUpdateBar); the launcher runs its normal automatic check against it and is drawn with the bar.</summary>
+    /// <summary>A TEST folder feed offering 9.9.9 under the scratch root, pointed to by QUARTERMASTER_UPDATE_FEED for this run (as WinForms
+    /// ShotUpdateBar); the launcher runs its normal automatic check against it and is drawn with the bar. The variable is put back afterwards.</summary>
     static bool ShotUpdateBar(SettingsStore store, string root, string png)
     {
         var feed = Path.Combine(root, "test-update-feed");
         WriteTestFeed(feed, "9.9.9");
-        Environment.SetEnvironmentVariable(Quartermaster.Render.Update.UpdateFeeds.EnvVar, feed);
-        store.Update(s => s with { CheckUpdatesOnStart = true });
-        var updates = Updates.DesktopUpdates.FromEnvironment(root);
-        if (updates.Feed == null) { Console.Error.WriteLine("The test feed was not picked up."); return false; }
-        return ShotLauncher(store, root, png, updates);
+        var envVar = Quartermaster.Render.Update.UpdateFeeds.EnvVar;
+        var previous = Environment.GetEnvironmentVariable(envVar);
+        Environment.SetEnvironmentVariable(envVar, feed);
+        try
+        {
+            store.Update(s => s with { CheckUpdatesOnStart = true });
+            var updates = Updates.DesktopUpdates.FromEnvironment(root);
+            if (updates.Feed == null) { Console.Error.WriteLine("The test feed was not picked up."); return false; }
+            return ShotLauncher(store, root, png, updates);
+        }
+        finally { Environment.SetEnvironmentVariable(envVar, previous); }
     }
 
     /// <summary>A release.json in the GitHub API shape plus a dummy zip and its .sha256 (TEST content, not a real build; WinForms LauncherShots.WriteTestFeed).</summary>
@@ -217,7 +223,7 @@ static class Program
         foreach (var w in warnings) Console.Error.WriteLine(w);
         if (startup.ScreenshotPath is not { } png || startup.ModulePath is not { } module)
         {
-            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules|phases|nextphase|stepback|formula|cheatsheet|batch|alerts|tree|floatlog|floatphases]");
+            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules|phases|nextphase|stepback|formula|cheatsheet|batch|alerts|tree|floatlog|floatphases|tour]");
             return 1;
         }
         if (Application.Current == null)
