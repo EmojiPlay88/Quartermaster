@@ -54,6 +54,14 @@ if (-not $deskExe) { throw 'Quartermaster.exe (Desktop, Release) not found' }
 
 function Invoke-Shot([string]$Exe, [string[]]$ArgList, [hashtable]$Env, [string]$Png, [string]$Name) {
     if (Test-Path $Png) { Remove-Item $Png -Force }
+    # Desktop runs get a fresh temp layout root unless the caller gave one, so remembered window layouts of the real profile cannot change a state.
+    $ownLayout = $null
+    if ($Exe -eq $deskExe -and -not $Env.ContainsKey('QUARTERMASTER_LAYOUT_ROOT')) {
+        $ownLayout = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-run-' + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force $ownLayout | Out-Null
+        $Env = $Env.Clone(); $Env['QUARTERMASTER_LAYOUT_ROOT'] = $ownLayout
+    }
+    try {
     $psi = [Diagnostics.ProcessStartInfo]::new($Exe)
     $psi.Arguments = ($ArgList | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
     $psi.UseShellExecute = $false
@@ -66,6 +74,8 @@ function Invoke-Shot([string]$Exe, [string[]]$ArgList, [hashtable]$Env, [string]
     if (-not (Test-Path $Png) -or (Get-Item $Png).Length -eq 0) { throw "$Name produced no PNG (exit $($p.ExitCode))" }
     if ($p.ExitCode -ne 0) { Write-Warning "$Name exited with code $($p.ExitCode); the picture exists, check it by eye." }
     Write-Host ("{0,-10} ok  {1} bytes  {2}" -f $Name, (Get-Item $Png).Length, $Png)
+    }
+    finally { if ($ownLayout -and (Test-Path $ownLayout)) { Remove-Item $ownLayout -Recurse -Force -ErrorAction SilentlyContinue } }
 }
 
 # Desktop: headless, no window. The Riverland demo has no predefined setups, so --new.

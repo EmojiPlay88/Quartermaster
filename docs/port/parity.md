@@ -35,7 +35,7 @@ Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), di
 - There is no chat line offline (WinForms shows it only online); the box comes with multiplayer (stage 5).
 - The main toolbar shows only the buttons whose features exist in Desktop (no Overview, Palette yet; Diagnostics, Notes and Inventory are in, in the WinForms order). Buttons are hidden and shown from Settings > Toolbar since 4b.
 - The map toolbar sits inside each map tab (WinForms: one per map window); it ends with Save map as picture… (tip "Save the view or the whole map as a PNG").
-- The counter menu has no Delete counter until the game master setting exists.
+- The counter menu's Delete counter shows in game master mode (Settings > General) and asks first when "Ask before deleting pieces" is on (since 4b).
 - Physical dice are in since 4b (Settings > Dice & Log); rolls and log lines are the shared WinForms ones.
 - Rules-pack file pickers and prompts are the Avalonia ones (async); the dirty-pack question is asked only on module change and close, as WinForms.
 - Masked counters cannot be right-clicked in either app (shared hit test); left as is.
@@ -59,7 +59,7 @@ Stage 2b = phase strip and panel, Next Phase, Step Back, formula window and chea
 - The formula window, cheat sheet, batch grid and dialogs are Avalonia windows owned by the main window; their placement is the platform's (centred on the owner), and the cheat sheet opens beside the formula window.
 - Tables-tree activation opens the Rules Workbench since stage 4a; document and chart nodes of the module tree open their windows (3b).
 - Floating log and phase windows are clamped onto a screen that exists (primary screen as fallback). Real second-display behaviour is only checked by the Mac checklist (`docs/port/stage2b-mac-checklist.md`).
-- Open Autosave, Game > Send Turn and the other WinForms menus around phases wait for their own stages (4 and 5).
+- Open Autosave is done in 4b; Game > Send Turn and the other multiplayer menus around phases wait for stage 5.
 - When a rules pack without phases replaces one with phases while the phase panel floats, Desktop docks the panel back (the column stays hidden); WinForms leaves the floating window open showing the no-phases text.
 - Known: while a Desktop modal dialog (Step Back, Next Phase, missing input) is open, the floating Phases window and the formula and batch-grid windows still accept input (Avalonia ShowDialog disables only the owner); WinForms disables every window of the app.
 - Floating log and phase panels always reopen docked: the layout memory never stores Floating=true, the same as WinForms.
@@ -100,7 +100,7 @@ Stage 4a = Rules Workbench (Tables, Formulas, Properties, Phases, Alerts, Visibi
 - The Workbench is a floating window owned by the main window (bounds remembered per module under `bench:workbench`), not an MDI child; it closes with the session.
 - The OCR import's "where to put the table" question is an Avalonia dialog of its own (the WinForms one is a message-box style prompt).
 - The edit grids have their own look (grey headers, white cells, blue current cell; cells are text blocks with an editor opened over the current one), not the DataGridView. Keyboard behaviour follows the WinForms grid; Tab out of the last cell, arrow keys inside an open combo dropdown and Ctrl/Cmd+C on cells are checked by hand on the Mac (checklist), not headless (cell copy is not built). Cell edits commit at the end of the edit (no 400 ms cell debounce); the notes boxes still debounce.
-- Windows OCR runs through the `ocr-windows` plugin (`Quartermaster.OcrWindows`, never referenced by the Desktop project) and falls back to Tesseract with one log line when the plugin or an OCR language is missing; `QUARTERMASTER_OCR_ENGINE=tesseract|windows` overrides. Mac and Linux use Tesseract, English only, until 4b (more languages need Settings).
+- Windows OCR runs through the `ocr-windows` plugin (`Quartermaster.OcrWindows`, never referenced by the Desktop project) and falls back to Tesseract with one log line when the plugin or an OCR language is missing; `QUARTERMASTER_OCR_ENGINE=tesseract|windows` overrides. Mac and Linux use Tesseract, English only, until 4c (OCR language downloads).
 - Windows OCR lays the strips out with the gap after each cell (mode 2), which reproduces the WinForms per-strip result and meets the 24/24 gate; the per-cell code differs from WinForms (details in `docs/port/stage3b-ocr-benchmark.md`).
 - Flipping through TIFF or scan pages briefly holds two bitmaps (the old one is released when the new one is shown).
 - The FormulasTab test preview is embedded and preview-only: no Formula / Working group titles, no notes tooltip, no rule-ref button, no cheat sheet; the sample values typed into it are dropped when another formula is selected, and it is rebuilt on every pack commit.
@@ -118,7 +118,8 @@ Stage 4b = Tools > Settings (General, Game, Display, Map, Dice & Log, Toolbar, K
 - OCR language downloads are not in 4b: the WinForms original has none and the feature needs a network fetch. They become stage 4c (own plan; the download source is approved first). OCR stays English only until then.
 - Settings > Game shows Difficulty and its hint only. Where WinForms has the Players box there is a grey label "Players: comes with multiplayer (stage 5)"; Players is ported with `PlayersEditor` in stage 5.
 - The counter palette is shown only in game master mode, as WinForms. Desktop has no `--gm` option: game master mode comes from the Settings > General checkbox only.
-- Toolbar tooltips show the shortcut, e.g. "1d6 (F9)", "LOS (L)"; WinForms toolbar tips have no key.
+- The counter menu's Delete counter follows Settings > General game master mode and asks first per "Ask before deleting pieces", as WinForms.
+- Toolbar tooltips show the shortcut, e.g. "1d6 (F5)", "LOS (L)"; WinForms toolbar tips have no key.
 - General > "Select the last module in the launcher" and "Check for updates on start" are shown and stored, but the launcher and updater are stage 5.
 - Colours are chosen in a small own dialog (48 basic swatches like the WinForms colour dialog plus a #RRGGBB box), not the system colour dialog.
 - On macOS a physical Control key (without Cmd) is not a shortcut modifier (Ctrl maps to Cmd); the capture dialog swallows it.
@@ -181,7 +182,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes and Inventory follow Save Game; Overview follows Notes, Palette is left out until its stage; buttons are hidden and shown live from Settings > Toolbar; tooltips show the shortcut, e.g. "1d6 (F9)" (WinForms tips have no key) |
+| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes and Inventory follow Save Game; Overview follows Notes, Palette is left out until its stage; buttons are hidden and shown live from Settings > Toolbar; tooltips show the shortcut, e.g. "1d6 (F5)" (WinForms tips have no key) |
 | MainForm: status bar (module, message, tiling progress, location, zoom) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ | ✔ | ✔ |  |
@@ -260,7 +261,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | ChartWindow | 3b | ✔ |  |  | floating window owned by the main window, one per chart (name + file), titled with the chart name; toolbar "Fit" and "100%" ("100%" is 1 image pixel per DIP, 2 device pixels on a Retina screen, same as the map view; the image is fetched and sampled at zoom x screen scaling); the picture on the workspace grey, linear sampling (mipmaps below 100 %); first layout fits; wheel zooms ×1.25 / ×0.8 at the cursor; left or middle drag pans (size-all cursor); bounds remembered per module under "chart:name|file"; all close with the game |
 | PdfWindow, PdfViewerControl | 3b | ✔ |  |  | DocumentWindow hosts the DocumentViewer without its toolbar: one window per document entry owned by the main window, bounds remembered per module under "doc:{entry}", closed with the session; opened from the module tree or a Rule ref (OpenDocumentAtPage reuses the window and moves the page) |
 | DiagnosticsWindow | 3a | ✔ |  |  | Severity / Category / Message / Context, Show filter, Copy all (clipboard), live updates from any thread; the status-bar link ("n warning(s)/error(s) - click here to view diagnostics") opens it |
-| SearchPanel, ScanPane, ImagePane, OcrPanel | 4a | ✔ |  |  | Workbench tools (4a): rulebook search with highlights and Use as rule ref, Scan this page, Open scan… (image, multi-page TIFF, PDF; an opened PDF joins the search and its refs are `scan:{file}`), region read, grid fix, Import into table. OCR engine per OS behind `IOcrRecognizer`: Windows OCR through the `ocr-windows` plugin (24/24 on the invented pages against Tesseract 21/24), with the fallback rules in `docs/port/stage3b-ocr-benchmark.md`; Tesseract (bundled, English only) on Mac and Linux until 4b |
+| SearchPanel, ScanPane, ImagePane, OcrPanel | 4a | ✔ |  |  | Workbench tools (4a): rulebook search with highlights and Use as rule ref, Scan this page, Open scan… (image, multi-page TIFF, PDF; an opened PDF joins the search and its refs are `scan:{file}`), region read, grid fix, Import into table. OCR engine per OS behind `IOcrRecognizer`: Windows OCR through the `ocr-windows` plugin (24/24 on the invented pages against Tesseract 21/24), with the fallback rules in `docs/port/stage3b-ocr-benchmark.md`; Tesseract (bundled, English only) on Mac and Linux until 4c |
 
 ## Rules Workbench and Settings
 

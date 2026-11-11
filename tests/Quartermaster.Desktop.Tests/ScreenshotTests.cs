@@ -72,6 +72,7 @@ public sealed class ScreenshotTests
     {
         var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");
         var layout = Path.Combine(Path.GetTempPath(), "qm-shot-layout-" + Guid.NewGuid().ToString("N"));
+        var previous = Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT");
         try
         {
             Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", layout);
@@ -81,7 +82,7 @@ public sealed class ScreenshotTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", null);
+            Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", previous);
             try { File.Delete(png); } catch (IOException) { }
             try { Directory.Delete(layout, true); } catch (IOException) { }
         }
