@@ -35,8 +35,28 @@ sealed class FakeDialogs : IDialogs
     public int SetupChooserShown;
     public bool LastPreselectNew;
 
-    public Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters)
+    /// <summary>The start folder the last open picker was given (null = none).</summary>
+    public string? LastOpenFolder;
+    public readonly Queue<string?> Shortcuts = new();
+    public readonly Queue<string?> Colours = new();
+    public readonly List<string> ShortcutPrompts = new();
+    public readonly List<string> ColourPrompts = new();
+
+    public Task<string?> AskShortcutAsync(Window owner, string commandLabel)
     {
+        ShortcutPrompts.Add(commandLabel);
+        return Task.FromResult(Shortcuts.Count > 0 ? Shortcuts.Dequeue() : null);
+    }
+
+    public Task<string?> AskColourAsync(Window owner, string initialHex)
+    {
+        ColourPrompts.Add(initialHex);
+        return Task.FromResult(Colours.Count > 0 ? Colours.Dequeue() : null);
+    }
+
+    public Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters, string? initialFolder = null)
+    {
+        LastOpenFolder = initialFolder;
         PickerTitles.Add(title);
         return Task.FromResult(OpenFiles.Count > 0 ? OpenFiles.Dequeue() : null);
     }

@@ -84,7 +84,9 @@ static class Program
     /// <summary>Dialogs for the screenshot run: nothing is ever shown; warnings go to stderr, questions are answered No.</summary>
     sealed class QuietDialogs : IDialogs
     {
-        public Task<string?> OpenFileAsync(Avalonia.Controls.Window owner, string title, IReadOnlyList<FileFilter> filters) => Task.FromResult<string?>(null);
+        public Task<string?> OpenFileAsync(Avalonia.Controls.Window owner, string title, IReadOnlyList<FileFilter> filters, string? initialFolder = null) => Task.FromResult<string?>(null);
+        public Task<string?> AskShortcutAsync(Avalonia.Controls.Window owner, string commandLabel) => Task.FromResult<string?>(null);
+        public Task<string?> AskColourAsync(Avalonia.Controls.Window owner, string initialHex) => Task.FromResult<string?>(null);
         public Task<string?> SaveFileAsync(Avalonia.Controls.Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null) => Task.FromResult<string?>(null);
         public Task<bool> AskYesNoAsync(Avalonia.Controls.Window owner, string message, string caption, bool defaultNo = true) => Task.FromResult(false);
         public Task<IReadOnlyList<string>?> AskColumnsAsync(Avalonia.Controls.Window owner, IReadOnlyList<string> keys) => Task.FromResult<IReadOnlyList<string>?>(null);
