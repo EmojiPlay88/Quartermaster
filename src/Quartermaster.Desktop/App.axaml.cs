@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Quartermaster.Desktop.Launcher;
 using Quartermaster.Desktop.Shell;
+using Quartermaster.Desktop.Updates;
 using Quartermaster.Render;
 
 namespace Quartermaster.Desktop;
@@ -47,15 +48,17 @@ public partial class App : Application
     static void StartLoop(IClassicDesktopStyleApplicationLifetime desktop, StartupArgs? direct)
     {
         desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;   // the loop decides when the app ends, not the last window closing
+        // One instance for the run (Offered / Later / checked-this-run carry across launchers); no feed unless the test feed is set.
+        var updates = DesktopUpdates.FromEnvironment();
         var loop = new LaunchLoop(
             justPlayed =>
             {
                 var root = AppDataRoot.Path;
                 var store = new SettingsStore(root);
                 store.Load(null);
-                return new LauncherWindow(store, root, new Dialogs(), justPlayed);
+                return new LauncherWindow(store, root, new Dialogs(), justPlayed, updates);
             },
-            () => new MainWindow(),
+            () => new MainWindow { Updates = updates },
             w => desktop.MainWindow = w,
             () => desktop.Shutdown());
         // Once the lifetime runs (its MainWindow is set by the loop); RunAsync never throws: failures are traced and end the app.

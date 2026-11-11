@@ -95,7 +95,8 @@ public sealed class TourTests : IDisposable
         var w = NewWindow();
         var menus = w.MenuLabels();
         Assert.Equal("&Help", menus.Keys.Last());
-        Assert.Equal(new[] { "Interface &Tour", "&About" }, menus["&Help"]);
+        Assert.Equal(new[] { "Interface &Tour", "Check for &updates…", "&About" }, menus["&Help"]);
+        Assert.False(w.FindMenuItem("Check for &updates…")!.IsVisible);   // no launcher loop and no test update feed
         Assert.False(w.FindMenuItem("Interface &Tour")!.IsEnabled);   // help.tour needs a game
         Assert.True(w.FindMenuItem("&About")!.IsEnabled);
         Assert.True(w.OpenModule(_module));

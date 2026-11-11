@@ -429,9 +429,12 @@ public partial class MainWindow : Window
         tools.Items.Add(new Separator());
         Item(tools, "&Settings...", () => { }, "tools.settings");
 
-        // Help (WinForms MainForm.BuildMenu): the Interface Tour needs a game (help.tour); About.
+        // Help (WinForms MainForm.BuildMenu): the Interface Tour needs a game (help.tour); Check for updates…; About.
         var help = Top("&Help");
         Item(help, "Interface &Tour", ShowTour, gate: "help.tour");
+        // Port stage 5a: only with the test update feed and a launcher to go back to (help.updates; see RefreshUpdatesItem).
+        _updatesItem = Item(help, "Check for &updates…", () => RunAsync(CheckForUpdatesAsync), gate: "help.updates");
+        RefreshUpdatesItem();
         Item(help, "&About", () => RunAsync(() => _dialogs.ShowInfoAsync(this, $"Quartermaster {AppVersion.Text}\nA VASSAL module reader and engine.", "About Quartermaster")));
 
         MainMenu.Items.Add(file);

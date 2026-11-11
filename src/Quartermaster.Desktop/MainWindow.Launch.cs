@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Quartermaster.Desktop.Updates;
 using Quartermaster.Render;
 
 namespace Quartermaster.Desktop;
@@ -10,6 +11,8 @@ namespace Quartermaster.Desktop;
 public partial class MainWindow
 {
     MenuItem? _backToLauncherItem;
+    MenuItem? _updatesItem;
+    DesktopUpdates? _updates;
     bool _launcherAvailable;
     bool _backToLauncher;   // Back to launcher is closing the window; cleared when the close is cancelled
     ModuleLibrary? _library;
@@ -23,7 +26,38 @@ public partial class MainWindow
         {
             _launcherAvailable = value;
             if (_backToLauncherItem != null) _backToLauncherItem.IsVisible = value;
+            RefreshUpdatesItem();
         }
+    }
+
+    /// <summary>The app's update screens (the launcher loop hands every game window the one instance); null in tests and screenshot runs.</summary>
+    internal DesktopUpdates? Updates
+    {
+        get => _updates;
+        set
+        {
+            _updates = value;
+            RefreshUpdatesItem();
+        }
+    }
+
+    /// <summary>Help → Check for updates… shows only when the window has a launcher to go back to and the test update feed is set.</summary>
+    void RefreshUpdatesItem()
+    {
+        if (_updatesItem != null) _updatesItem.IsVisible = LauncherAvailable && _updates?.Feed != null;
+    }
+
+    /// <summary>
+    /// Help → Check for updates… (WinForms MainForm.CheckForUpdates): updates happen in the launcher only. With a game open it says so and
+    /// offers File → Back to launcher; without one it goes back to the launcher, which checks at once.
+    /// </summary>
+    internal async Task CheckForUpdatesAsync()
+    {
+        if (!LauncherAvailable || _updates is not { Feed: not null } updates) return;
+        if (_session?.Game != null && !await _dialogs.AskYesNoAsync(this, DesktopUpdates.InGameText, DesktopUpdates.InGameCaption, defaultNo: false)) return;
+        updates.CheckOnNextLauncher = true;
+        await BackToLauncherAsync();
+        if (!ReturnToLauncher) updates.CheckOnNextLauncher = false;   // the close was cancelled (unsaved changes kept)
     }
 
     /// <summary>The Interface Tour runs on the first game open (set by the launcher loop only, never in tests or screenshot runs).</summary>
