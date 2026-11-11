@@ -42,7 +42,14 @@ public sealed class DisplayPage : SettingsPage
     internal async Task ChooseColourAsync()
     {
         if (TopLevel.GetTopLevel(this) is not Window owner) return;
-        if (await _ctx.Dialogs.AskColourAsync(owner, _color) is { } hex) SetColour(hex);
+        try
+        {
+            if (await _ctx.Dialogs.AskColourAsync(owner, _color) is { } hex) SetColour(hex);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            System.Diagnostics.Trace.WriteLine("settings display: " + ex);
+        }
     }
 
     void SetColour(string hex)

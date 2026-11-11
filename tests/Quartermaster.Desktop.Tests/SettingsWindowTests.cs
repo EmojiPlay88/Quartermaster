@@ -327,13 +327,17 @@ public sealed class SettingsWindowTests : IDisposable
     {
         MakeModuleCache('a', "tiles", 2 * 1048576);
         MakeModuleCache('b', "docs", 1048576 + 524288);
-        var w = Open(new Settings());
-        var f = w.GetVisualDescendantsOf<FoldersPage>().SingleOrDefault();
-        Assert.Null(f); // not shown yet: not computed yet
-        w.SelectPage(7);
+        var onUi = new List<bool>();
+        var folders = new FoldersPage(Ctx());
+        var inner = folders.SizesOf;
+        folders.SizesOf = r => { onUi.Add(Dispatcher.UIThread.CheckAccess()); return inner(r); };
+        var w = Open(new Settings(), extra: folders);
+        Assert.Empty(onUi); // not shown yet: not computed yet
+        w.SelectPage(8);
         Dispatcher.UIThread.RunJobs();
-        f = w.GetVisualDescendantsOf<FoldersPage>().Single();
+        var f = folders;
         WaitFor(() => f.SizesLoaded);
+        Assert.Equal(new[] { false }, onUi);
         Assert.Equal("Tile cache: 2.0 MB     Document cache: 1.5 MB", f.Sizes.Text);
         w.Close();
     }
@@ -354,6 +358,37 @@ public sealed class SettingsWindowTests : IDisposable
         Assert.True(Directory.Exists(Path.Combine(open, "tiles")));
         Assert.False(Directory.Exists(Path.Combine(_root, new string('b', 64), "tiles")));
         WaitFor(() => f.SizesLoaded && f.Sizes.Text == "Tile cache: 1.0 MB     Document cache: 0.0 MB");
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Validate_problem_without_dialogs_still_blocks()
+    {
+        var bad = new StubPage("Bad") { Problem = "nope" };
+        var applied = 0;
+        var w = new SettingsWindow(new Settings(), _ => applied++, new SettingsPage[] { new GeneralPage(), bad });
+        w.Show();
+        Assert.False(await w.CommitAsync());
+        Assert.Equal((1, 0), (w.SelectedPage, applied));
+        w.Close();
+    }
+
+    public class ThrowingColours : System.Reflection.DispatchProxy
+    {
+        protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? args) =>
+            m!.Name == "AskColourAsync" ? throw new InvalidOperationException("boom") : null;
+    }
+
+    [AvaloniaFact]
+    public async Task Display_choose_survives_a_throwing_dialog()
+    {
+        var dialogs = System.Reflection.DispatchProxy.Create<Quartermaster.Desktop.Shell.IDialogs, ThrowingColours>();
+        var page = new DisplayPage(new SettingsContext(Items, _root, () => null, _ => Task.CompletedTask, dialogs));
+        var w = new Window { Content = page };
+        w.Show();
+        page.Load(new Settings { HighlightColor = "#112233" });
+        await page.ChooseColourAsync();
+        Assert.Equal("#112233", page.Colour);
         w.Close();
     }
 

@@ -83,6 +83,7 @@ public sealed class SettingsWindow : Window
         {
             if (_pages[i].Validate() is not { } problem) continue;
             SelectPage(i);
+            System.Diagnostics.Trace.WriteLine("settings dialog: " + problem);
             if (_dialogs != null) await _dialogs.ShowWarningAsync(this, problem, "Settings");
             return false;
         }
