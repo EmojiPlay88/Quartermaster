@@ -7,14 +7,14 @@ How to read the columns:
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
 - **Linux**: ticked only for features verified by tests actually run on Linux. Stage 1 rows: verified by the headless tests in the CI workflow `.github/workflows/cross-platform.yml` on ubuntu-latest (green run 42510235329, 2026-11-08). Not yet opened on a real Linux desktop.
 - **Docs.Tests on Linux**: pass on ubuntu-latest in CI (run 42510235329).
-- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`, `docs/port/stage4a-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
-- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (search, scan and OCR panes moved to 4a); 4a = Rules Workbench, rulebook search, scans and OCR (this branch); 4b = Settings; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 4a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that say 4a name the Workbench, search, scans or OCR; rows that name Settings are 4b.
+- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`, `docs/port/stage4a-mac-checklist.md`, `docs/port/stage4b-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
+- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (search, scan and OCR panes moved to 4a); 4a = Rules Workbench, rulebook search, scans and OCR; 4b = Settings (this branch); 4c = OCR language downloads; 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 4a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that say 4a name the Workbench, search, scans or OCR; rows that name Settings are 4b.
 
 ## Stage-1 deviations from the WinForms app (deliberate or known)
 
-- The counter palette is always visible once a game exists. WinForms shows it only in game master mode (View > Counter palette).
+- The counter palette follows game master mode (Settings > General), as WinForms. (Stage 1 showed it always; changed in 4b.)
 - The new game dialog has no Players page (comes with multiplayer).
-- The difficulty chosen in the new game dialog is not saved as the default for next time (comes with Settings).
+- The difficulty chosen in the new game dialog is remembered as the default for the next game (`LastDifficulty`, since 4b).
 - Mouse wheel on macOS pans and Cmd+wheel zooms (deliberate: trackpad convention). On Windows and Linux the wheel zooms, as WinForms. Pinch zoom is for macOS trackpads.
 - The look is the classic grey theme on all three systems, with Tahoma 11px where present, else Verdana, DejaVu Sans.
 - Shortcuts use Cmd instead of Ctrl on macOS. There is no native macOS menu bar; the menu bar sits in the window.
@@ -23,20 +23,20 @@ How to read the columns:
 ### Map behaviour not yet ported
 
 - Dragging between windows: the OLE drag preview in the target window and drops across windows (a drop released outside the view is cancelled).
-- Applying Settings to the map (wheel step, drag threshold, hover delay, highlight colour, label size, snap, grid default).
+- (Done in 4b) Settings apply to every open map view: wheel step, drag threshold, hover delay, highlight colour, label size, snap, grid default.
 
 ## Stage-2a deviations from the WinForms app (deliberate or known)
 
 Stage 2a = rules packs, map tools (menu, hover popup, LOS, hide, last moved), dice and turn tools, main toolbar, log panel. The 2b items are in the next section.
 
 - The hover popup and the breakdown tip are overlays inside the window, so they never leave it and flip sooner near the window edge. WinForms uses screen-sized popups.
-- The hover delay is fixed at 600 ms until Settings (stage 4).
+- The hover delay comes from Settings > Map (since 4b); it applies to every open map tab at once.
 - The log export picker has a single filter, "Log files (*.txt;*.html)" (default .txt); the format follows the extension. WinForms has two filters.
 - There is no chat line offline (WinForms shows it only online); the box comes with multiplayer (stage 5).
-- The main toolbar shows only the buttons whose features exist in Desktop (no Overview, Palette yet; Diagnostics, Notes and Inventory are in, in the WinForms order). Hiding buttons via Settings is stage 4.
+- The main toolbar shows only the buttons whose features exist in Desktop (no Overview, Palette yet; Diagnostics, Notes and Inventory are in, in the WinForms order). Buttons are hidden and shown from Settings > Toolbar since 4b.
 - The map toolbar sits inside each map tab (WinForms: one per map window); it ends with Save map as picture… (tip "Save the view or the whole map as a PNG").
 - The counter menu has no Delete counter until the game master setting exists.
-- Physical dice wait for Settings (stage 4); rolls and log lines are the shared WinForms ones.
+- Physical dice are in since 4b (Settings > Dice & Log); rolls and log lines are the shared WinForms ones.
 - Rules-pack file pickers and prompts are the Avalonia ones (async); the dirty-pack question is asked only on module change and close, as WinForms.
 - Masked counters cannot be right-clicked in either app (shared hit test); left as is.
 - WinForms draws popup counters scale-squared at more than 100% Windows scaling; Desktop draws them at the intended size. Identical at 100%.
@@ -52,10 +52,10 @@ Stage 2b = phase strip and panel, Next Phase, Step Back, formula window and chea
 
 - The batch grid's Unit cell shows the unit's counter picture (64×48, rows 52 px) with the big hover preview since stage 3a, as WinForms.
 - Rule ref (formula window, phase panel, rule links) opens the referenced document in its window at the referenced page (3b); a reference to a document the module lacks shows an error box.
-- Changing the difficulty in mid-game needs Settings (stage 4); a game keeps the difficulty it was started with. The windows follow the mode when it changes (tests drive it through the shared controller).
+- Changing the difficulty in mid-game works from Settings > Game since 4b (a guest is told the host decides). The windows follow the mode when it changes.
 - The notice chip on the alert bar is drawn, but clicking it does nothing until multiplayer (stage 5).
 - The map-tab pop-out and the Window menu items (Cascade, Tile, Pop Out Active Window, floating windows list) are not ported; Desktop uses tabs. Only the log and the phase panel pop out.
-- The phase-boundary autosave uses the WinForms default interval (5 minutes) until Settings (stage 4) offers the choice.
+- The phase-boundary autosave interval comes from Settings since 4b (default 5 minutes).
 - The formula window, cheat sheet, batch grid and dialogs are Avalonia windows owned by the main window; their placement is the platform's (centred on the owner), and the cheat sheet opens beside the formula window.
 - Tables-tree activation opens the Rules Workbench since stage 4a; document and chart nodes of the module tree open their windows (3b).
 - Floating log and phase windows are clamped onto a screen that exists (primary screen as fallback). Real second-display behaviour is only checked by the Mac checklist (`docs/port/stage2b-mac-checklist.md`).
@@ -71,7 +71,7 @@ Stage 3a = Ledger window (tabs, counter pictures, editing, CSV), Edit Ledger tab
 
 - The Overview is always a floating owned window (WinForms can dock it as an MDI document under "doc:overview"); document-tab docking is not ported (see 2b: Desktop uses tabs).
 - The Ledger's CSV save dialog has a single filter ("CSV files (*.csv)") and the title "Save As" (WinForms: the SaveFileDialog default title; `IDialogs.SaveFileAsync` takes one filter, as the log export).
-- Grouping and visibility of the Outliner are not kept between runs until the Settings dialog (stage 4), as the dock state of the other panels; its floating bounds are kept per module under "outliner".
+- Visibility and grouping of the Outliner are kept between runs since 4b (in `settings.json`); its floating bounds are kept per module under "outliner".
 - The Ledger's Export CSV picker and the Save map as picture file picker are the Avalonia storage dialogs (async), not the Windows common dialogs.
 - The Ledger, Inventory, Notes, Diagnostics and Overview windows are Avalonia windows owned by the main window, one of each per module; their placement is the platform's (centred on the owner) unless bounds were remembered under "doc:ledger", "doc:inventory", "doc:notes", "diag", "doc:overview". They are not MDI children. While a Desktop modal dialog is open they still accept input (as in 2b).
 - The counter preview text uses a fixed 12-px font instead of the WinForms status font, so its width can differ by a few pixels.
@@ -95,7 +95,7 @@ Stage 3b = chart windows, document windows (PDF, text, HTML), the module tree's 
 
 ## Stage-4a deviations from the WinForms app (deliberate or known)
 
-Stage 4a = Rules Workbench (Tables, Formulas, Properties, Phases, Alerts, Visibility), its dialogs, rulebook search, scan pane, Open scan..., OCR import. Settings (stage 4b) are not in.
+Stage 4a = Rules Workbench (Tables, Formulas, Properties, Phases, Alerts, Visibility), its dialogs, rulebook search, scan pane, Open scan..., OCR import. Settings are stage 4b (next section).
 
 - The Workbench is a floating window owned by the main window (bounds remembered per module under `bench:workbench`), not an MDI child; it closes with the session.
 - The OCR import's "where to put the table" question is an Avalonia dialog of its own (the WinForms one is a message-box style prompt).
@@ -110,6 +110,20 @@ Stage 4a = Rules Workbench (Tables, Formulas, Properties, Phases, Alerts, Visibi
 - Screenshot pass (headless, `build/port-screenshots.ps1`): the Phases tab at 1100 px clips some button captions ("Duplicat", "Remov", "Move U"; the Tables tab's Rename button was widened to fit); the Tables shot shows "Choose a document above." in the left pane until a rulebook is chosen. Both are layout differences from the WinForms window, not data differences. The pass also found and fixed two bugs the headless tests could not see: grid cell text drawn invisible (a null local foreground; also in the Rule ref row and the alert match status) and fixed-width grids centred instead of left-aligned.
 - CI publishes macOS and Linux Desktop builds only: there is no win-x64 Desktop publish step yet (the `ocr-windows` plugin is only checked by local publishes with `build/check-publish-natives.sh`).
 - The Windows SDK projection DLLs shipped in `ocr-windows/` need their redistribution terms read before the next release (open user item).
+
+## Stage-4b deviations from the WinForms app (deliberate or known)
+
+Stage 4b = Tools > Settings (General, Game, Display, Map, Dice & Log, Toolbar, Keyboard, Folders), live application of every setting, File > Open Autosave..., physical dice entry, remembered difficulty and Outliner state. `settings.json` is read and written by the same `SettingsStore` as WinForms; no new fields.
+
+- OCR language downloads are not in 4b: the WinForms original has none and the feature needs a network fetch. They become stage 4c (own plan; the download source is approved first). OCR stays English only until then.
+- Settings > Game shows Difficulty and its hint only. Where WinForms has the Players box there is a grey label "Players: comes with multiplayer (stage 5)"; Players is ported with `PlayersEditor` in stage 5.
+- The counter palette is shown only in game master mode, as WinForms. Desktop has no `--gm` option: game master mode comes from the Settings > General checkbox only.
+- Toolbar tooltips show the shortcut, e.g. "1d6 (F9)", "LOS (L)"; WinForms toolbar tips have no key.
+- General > "Select the last module in the launcher" and "Check for updates on start" are shown and stored, but the launcher and updater are stage 5.
+- Colours are chosen in a small own dialog (48 basic swatches like the WinForms colour dialog plus a #RRGGBB box), not the system colour dialog.
+- On macOS a physical Control key (without Cmd) is not a shortcut modifier (Ctrl maps to Cmd); the capture dialog swallows it.
+- The settings window is a modal Avalonia window with the same eight tabs as WinForms.
+- Real macOS panels (Open Autosave start folder, number boxes, shortcut capture) are only checked by `docs/port/stage4b-mac-checklist.md`.
 
 ## Before the stage release
 
@@ -126,7 +140,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | New Game | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+N |
 | Load Setup... | 1 | ✔ | ✔ | ✔ |  |
 | Open Game... | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+G |
-| Open Autosave... | 4 |  |  |  |  |
+| Open Autosave... | 4b | ✔ |  |  | File > Open Autosave...: the picker starts in the autosave folder (Settings > Folders or the default); the file opens as Open Game |
 | Open Turn File... | 5 |  |  |  |  |
 | Save Game | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+S |
 | Save Game As... | 1 | ✔ | ✔ | ✔ | Ctrl/Cmd+Shift+S |
@@ -153,13 +167,13 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Ledger | 3a | ✔ |  |  | Ctrl/Cmd+L; needs a rules pack; opens the one Ledger window (owned, not modal, bounds under "doc:ledger"); with counters selected on the active map it is Show in Ledger |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3a | ✔ |  |  | counter menu "Show in Ledger" (after a separator; disabled with "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)." without one) and View > Ledger / Ctrl/Cmd+L with counters selected on the active map: opens the Ledger, moves to the tab that shows them (clearing the filter when it hides them, shared `LedgerJump`), selects their rows and scrolls to the first; status "Shown in the Ledger." / "{n} counters shown in the Ledger." or the reason some have no row (hidden counters never get one) |
 | View > Overview | 3a | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
-| View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | always visible in Desktop |
+| View > Counter palette (GM only) | 1 | ✔ | ✔ | ✔ | shown only when a game is open and game master mode is on (Settings > General, as WinForms) |
 | Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
 | Tools > Rules Workbench | 4a | ✔ |  |  | Cmd/Ctrl+Shift+W; one floating window per session (bounds under `bench:workbench`), refused while a received turn replays |
 | Tools > Inventory, Notes | 3a | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
-| Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2a | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice wait for Settings (stage 4) |
+| Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2a | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice entry (Settings > Dice & Log) asks for each die by hand with "Enter a whole number from 1 to N."; Cancel records nothing; the last roll and the default are remembered |
 | Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right (Cmd+Right on macOS) steps the turn; with a phased rules pack it is Next Phase, as WinForms (2b). Turn label in the status bar |
-| Tools > Settings... | 4 |  |  |  |  |
+| Tools > Settings... | 4b | ✔ |  |  | Ctrl+, (Cmd+, on macOS); opens the Settings window over the shared SettingsStore; a failed save is shown |
 | Window > Cascade, Tile, Close All, Pop Out, floating list | - |  |  |  | Desktop uses tabs, not MDI; not ported in 2b (only the log and phase panel pop out) |
 | Help > Interface Tour, Check for updates, About | 5 |  |  |  |  |
 
@@ -167,21 +181,21 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes and Inventory follow Save Game; Overview follows Notes, Palette is left out until its stage; hiding buttons (Settings) comes in stage 4 |
+| MainForm: toolbar | 2a | ✔ |  |  | WinForms order: Open Module, New Game, Load Setup, Open Game, Save Game, LOS, Undo, Redo, ◀ Step Back, 1d6, 2d6, Dice, Next turn; gated by CommandAvailability (Undo / Redo / Step Back by the history, with the WinForms tooltips). Diagnostics, Notes and Inventory follow Save Game; Overview follows Notes, Palette is left out until its stage; buttons are hidden and shown live from Settings > Toolbar; tooltips show the shortcut, e.g. "1d6 (F9)" (WinForms tips have no key) |
 | MainForm: status bar (module, message, tiling progress, location, zoom) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: title text (name, version, file, unsaved star, rules name) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: unsaved-changes prompt on close, Abandon replay prompt | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: error guard (warning box on a bad file) | 1 | ✔ | ✔ | ✔ |  |
 | MainForm: command line <vmod> --setup N / --new | 1 | ✔ | ✔ | ✔ | --rules and --new-rules too (stage 2a); the other options come later |
-| MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | user-editable keys come with Settings |
+| MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | keys are user-editable in Settings > Keyboard and apply at once to the key dispatch, menu gestures and toolbar tooltips; unknown override ids in `settings.json` are kept on save |
 | ModuleTreePanel | 2b | ✔ |  |  | map nodes activate the tab; setup nodes open the setup chooser (no preselect yet); chart nodes open their chart window (3b); document nodes open their document window, one per document; rebuilds when the viewer changes |
 | TablesTreePanel | 2b | ✔ |  |  | Tables and Formulas folders, refreshed 200 ms after rules changes; double-click opens the Workbench on that table or formula (4a); split with the module tree remembered (ui.json) |
 | DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
 | WindowManager (floating windows) | - |  |  |  |  |
-| AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches open the Ledger and select the holder's row (Depots & Global tab, filter cleared when it hides it; never the counters selected on the map); shown whenever a game is open (Settings toggle in stage 4) |
+| AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches open the Ledger and select the holder's row (Depots & Global tab, filter cleared when it hides it; never the counters selected on the map); shown when a game is open and Settings > Display "Alert bar" is on (applies live) |
 | TourOverlay | 5 |  |  |  |  |
 | PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the shared Next Phase flow with the open-decisions question and phase-boundary autosave). Pop out / Dock moves the panel to a floating "Phases" window (default beside the main window's right edge, bounds remembered per module under "phases", fitted onto a screen that exists with the primary screen as fallback); closing that window docks the panel back, shown; rule reference link opens the document at its page (3b) |
-| NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave at the WinForms default interval (5 min; no Settings yet) |
+| NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave interval comes from Settings > Folders (autosave minutes) |
 | StepBackDialog | 2b | ✔ |  |  | "Step Back to Start of Phase" (confirm text and summary) / "Step Back To" (Turn, Stage, Side, Phase, Reached, Actions; newest first, summary follows the selection, double-click picks); Step Back / Cancel |
 | ReplayBar | 5 |  |  |  |  |
 | UpdateBar, UpdateDialog, WhatsNewDialog, AppUpdates | 5 |  |  |  |  |
@@ -202,7 +216,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Grid overlay and grid location names | 1 | ✔ | ✔ | ✔ |  |
 | PaletteDock / PalettePanel: search, folder tree, counter thumbnails | 1 | ✔ | ✔ | ✔ |  |
 | PaletteDrop: drag a counter onto a map | 1 | ✔ | ✔ | ✔ |  |
-| MapCanvas: hover stack popup (CounterDetailPopup) | 2a | ✔ |  |  | same layout and pixels as WinForms (shared `CounterPopupLayout`); shown in the window overlay, so it stays inside the map window rather than the screen; hover delay fixed at 600 ms until Settings |
+| MapCanvas: hover stack popup (CounterDetailPopup) | 2a | ✔ |  |  | same layout and pixels as WinForms (shared `CounterPopupLayout`); shown in the window overlay, so it stays inside the map window rather than the screen; hover delay from Settings > Map (applies live to every map tab) |
 | MapCanvas: hover-stack highlight | 2a | ✔ |  |  |  |
 | MapCanvas: double-click stack expand | 2a | ✔ |  |  | online guests send it through their action port, as WinForms |
 | MapCanvas: right-click and Ctrl+click context menu | 2a | ✔ |  |  | counter menu from the shared PieceMenuModel; empty-map menu ends with Save map as picture…; macOS Ctrl+click opens it; Calculate opens the formula window (2b); Show in Ledger opens the Ledger at the counters' rows (3a) |
@@ -234,7 +248,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | CounterPreviewTip, CounterCellImages (counter preview and list thumbnails) | 3a | ✔ |  |  | shared `CounterThumbnails` cache (worker-drawn, visible rows first, 600 cap, shown bitmaps never disposed; the palette uses it with its own 3000 cap) and `CounterPreview` popup (no activation; size from `CounterImages.PreviewSize`, placed by the shared `PreviewPlacement`: cursor + 16, flipped at the screen edges); only pieces in the viewed state; MapView exposes `Tiles` and `Snapshot()` (same pixels as on screen) for map export |
 | DiceTools, DiceDialog, TurnDialog | 2a | ✔ |  |  | the UI-free part is Render DiceTurnActions, used by both apps |
 | LogPanel, LogDock, LogFloatForm, ChatBox | 2a | ✔ |  |  | kind toggles, search, Copy, Export log (txt/html, one picker filter), virtualised list, double-click centres the piece; row logic shared in Render LogPanelRules. Pop out / Dock moves it to a floating window (bounds remembered per module); the chat line shows only online (stage 5) |
-| OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3a | ✔ |  |  | Now list (double-click jumps to the decision), Group: By map / org display or By side, folders / groups / pieces with 24x18 counter pictures (visible pieces only), units and aggregated property columns with breakdown tips and header notes, alert dots from the shared alert hub, column widths kept per column, expanded state kept across reloads, refresh put off while hidden. Pop out / Dock moves it to a floating "Outliner" window (bounds remembered per module under "outliner"). Grouping and visibility are not kept between runs until the Settings dialog (stage 4) |
+| OutlinerPanel, OutlinerDock, OutlinerFloatForm | 3a | ✔ |  |  | Now list (double-click jumps to the decision), Group: By map / org display or By side, folders / groups / pieces with 24x18 counter pictures (visible pieces only), units and aggregated property columns with breakdown tips and header notes, alert dots from the shared alert hub, column widths kept per column, expanded state kept across reloads, refresh put off while hidden. Pop out / Dock moves it to a floating "Outliner" window (bounds remembered per module under "outliner"). Visibility and grouping are kept between runs in `settings.json` |
 | PhaseWatcher | 2b | ✔ |  |  | `PhaseWatch` + `Debouncer` (DispatcherTimer, 150 ms) |
 
 ## Ledger, notes, inventory, documents, search
@@ -254,8 +268,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 |---|---|---|---|---|---|
 | WorkbenchWindow and tabs (Tables, Formulas, Properties, Phases, Alerts, Visibility) | 4a | ✔ |  |  | Tables-tree activation, problems list, rule ref row, Find in rulebook; headless-tested incl. guest read-only (guest flag only until stage 5 brings online to Desktop). `build/port-screenshots.ps1` writes stage4a-desktop-workbench*.png and the WinForms equivalents |
 | ColumnsDialog, PasteTableDialog, BlockDialog | 4a | ✔ |  |  | plus the import-target dialog of the OCR import (own Avalonia dialog, see the 4a deviations) |
-| SettingsDialog and SettingsTabs (General, Game, Display, Map, Dice and Log, Toolbar, Folders) | 4b |  |  |  |  |
-| KeyboardTab, ShortcutCaptureDialog | 4b |  |  |  |  |
+| SettingsDialog and SettingsTabs (General, Game, Display, Map, Dice and Log, Toolbar, Folders) | 4b | ✔ |  |  | Pages General, Game, Display, Map, Dice & Log, Toolbar, Keyboard, Folders (the Keyboard page is a tab of its own as in WinForms); OK / Apply / Cancel / Restore defaults as WinForms; every setting applies live to the open windows. Game page: Difficulty only (Players come with stage 5); OCR language downloads are stage 4c |
+| KeyboardTab, ShortcutCaptureDialog | 4b | ✔ |  |  | Set / Clear / Default per command, conflict and reserved-key texts as WinForms; capture shows Ctrl+... (Cmd... on macOS), a physical Control key alone is swallowed on macOS |
 
 ## Multiplayer and launcher
 

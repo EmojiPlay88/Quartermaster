@@ -5,6 +5,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Formulas;
 using Quartermaster.Desktop.Input;
@@ -442,6 +443,39 @@ public sealed class SettingsApplyTests : IDisposable
     }
 
     // ---------- Tools > Settings ----------
+
+    /// <summary>The text the open Tools menu really draws next to Settings... (the template's gesture TextBlock).</summary>
+    string SettingsGestureText(MainWindow w)
+    {
+        var tools = w.FindMenuItem("&Tools")!;
+        tools.IsSubMenuOpen = true;
+        Pump();
+        var item = w.FindMenuItem("&Settings...")!;
+        item.ApplyTemplate();
+        var texts = item.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text ?? "").ToList();
+        tools.IsSubMenuOpen = false;
+        return string.Join("|", texts);
+    }
+
+    [AvaloniaFact]
+    public void Settings_menu_draws_comma_not_OemComma()
+    {
+        var w = Game();
+        var drawn = SettingsGestureText(w);
+        Assert.DoesNotContain("OemComma", drawn);
+        Assert.Contains("Ctrl+,", drawn);
+    }
+
+    [AvaloniaFact]
+    public void Settings_menu_gesture_is_meta_comma_on_mac()
+    {
+        ShortcutGestures.IsMac = true;
+        var w = Game();
+        var drawn = SettingsGestureText(w);
+        Assert.DoesNotContain("OemComma", drawn);
+        Assert.Contains(",", drawn.Split('|')[^1]);   // the glyph (Cmd/⌘) is chosen by Avalonia from the real OS; on macOS it draws ⌘,
+        Assert.Equal(new KeyGesture(Key.OemComma, KeyModifiers.Meta), w.FindMenuItem("&Settings...")!.InputGesture);
+    }
 
     [AvaloniaFact]
     public void Tools_settings_menu_and_ctrl_comma()

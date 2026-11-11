@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Formulas;
 using Quartermaster.Desktop.Map;
+using Quartermaster.Desktop.Preferences;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -21,7 +22,8 @@ static class ScreenshotStates
 {
     public static readonly string[] Names = { "menu", "hover", "los", "log", "rules", "phases", "nextphase", "stepback", "formula", "cheatsheet", "batch", "alerts", "tree", "floatlog", "floatphases",
         "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice", "chart", "document", "document-search",
-        "workbench", "workbench-formulas", "workbench-phases", "workbench-search", "workbench-scan" };
+        "workbench", "workbench-formulas", "workbench-phases", "workbench-search", "workbench-scan",
+        "settings", "settings-general", "settings-game", "settings-display", "settings-map", "settings-dice", "settings-toolbar", "settings-keyboard", "settings-folders" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -36,6 +38,8 @@ static class ScreenshotStates
     }
 
     static string? _scanDir;
+
+    static readonly string[] SettingsPages = { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders" };
 
     /// <summary>Start game, then Next Phase until North Combat (checklist, warnings), as a real turn would reach it.</summary>
     static string? ToCombat(MainWindow window, Action? beforeClose = null)
@@ -278,6 +282,29 @@ static class ScreenshotStates
                 else { SelectWorkbenchTab(wb, "Phases"); if (rules.Phases.Count > 0) wb.ShowPhase(rules.Phases[0].Id); }
                 Pump(600);
                 Target = wb;
+                return null;
+            }
+            case "settings":
+            case "settings-general":
+            case "settings-game":
+            case "settings-display":
+            case "settings-map":
+            case "settings-dice":
+            case "settings-toolbar":
+            case "settings-keyboard":
+            case "settings-folders":
+            {
+                // Pages in window order; plain "settings" is the first page, as Tools > Settings opens it.
+                var page = name == "settings" ? 0 : Array.IndexOf(SettingsPages, name["settings-".Length..]);
+                SettingsWindow? win = null;
+                window.ShowSettingsHook = w => { win = w; return Task.CompletedTask; };
+                _ = window.ShowSettingsAsync();
+                window.ShowSettingsHook = null;
+                if (win == null) return "The settings window did not open.";
+                win.Show(window);
+                win.SelectPage(page);
+                Pump(300);
+                Target = win;
                 return null;
             }
             case "workbench-search":

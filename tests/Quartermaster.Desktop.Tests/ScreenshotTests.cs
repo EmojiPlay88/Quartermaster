@@ -58,6 +58,35 @@ public sealed class ScreenshotTests
         finally { try { File.Delete(png); } catch (IOException) { } }
     }
 
+    [AvaloniaTheory]
+    [InlineData("settings")]
+    [InlineData("settings-general")]
+    [InlineData("settings-game")]
+    [InlineData("settings-display")]
+    [InlineData("settings-map")]
+    [InlineData("settings-dice")]
+    [InlineData("settings-toolbar")]
+    [InlineData("settings-keyboard")]
+    [InlineData("settings-folders")]
+    public void Settings_states_render(string state)
+    {
+        var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");
+        var layout = Path.Combine(Path.GetTempPath(), "qm-shot-layout-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", layout);
+            var code = Program.RunScreenshot(new[] { Demo("Riverland-Demo.vmod"), "--new", "--rules", Demo("Riverland-Demo.qrules"), "--screenshot-state", state, "--screenshot-main", png });
+            Assert.Equal(0, code);
+            Assert.True(new FileInfo(png).Length > 1000);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", null);
+            try { File.Delete(png); } catch (IOException) { }
+            try { Directory.Delete(layout, true); } catch (IOException) { }
+        }
+    }
+
     [AvaloniaFact]
     public void Apply_starts_without_previous_target()
     {
