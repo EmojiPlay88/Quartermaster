@@ -375,6 +375,26 @@ public sealed class WorkbenchWindowTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Hidden_tabs_never_write_stale_text_over_an_outside_change()
+    {
+        // Avalonia raises TextBox.TextChanged through the dispatcher, after a tab's loading flag is reset: a hidden tab
+        // must not take its own load for typing and later write the loaded text over a change made elsewhere.
+        var (wb, s) = Standalone();
+        Pump();   // Tables is shown; Phases and Alerts are hidden (detached)
+        s.UpdateRules(p => p with
+        {
+            Alerts = p.Alerts.Select(a => a with { Condition = "Fuel < 9", Name = a.Name + " X", Notes = "n" }).ToList(),
+            Phases = p.Phases.Select(ph => ph with { Name = ph.Name + " X", Notes = "n", Instructions = "i" }).ToList(),
+            Tables = p.Tables.Select(t => t with { Notes = "n" }).ToList(),
+        });
+        WaitFor(() => false, 900);   // well past the 400 ms commit pause
+        var r = s.Rules!;
+        Assert.All(r.Alerts, a => { Assert.Equal("Fuel < 9", a.Condition); Assert.EndsWith(" X", a.Name); Assert.Equal("n", a.Notes); });
+        Assert.All(r.Phases, ph => { Assert.EndsWith(" X", ph.Name); Assert.Equal("n", ph.Notes); Assert.Equal("i", ph.Instructions); });
+        Assert.All(r.Tables, t => Assert.Equal("n", t.Notes));
+    }
+
+    [AvaloniaFact]
     public void Issues_debounced_and_go_to_issue_selects_tab_and_item()
     {
         var (wb, s) = Standalone();
@@ -390,8 +410,7 @@ public sealed class WorkbenchWindowTests : IDisposable
         Assert.True(wb.ValidatePending);
         Assert.True(Find("Low fuel") < 0);   // not before the 300 ms pause
         Assert.True(WaitFor(() => Find("Low fuel") >= 0));
-        // A later rules change (e.g. a tab flushing its edit) may restart the debounce on a slow runner (macos-latest, PR #2): wait for it to settle.
-        Assert.True(WaitFor(() => !wb.ValidatePending));
+        Assert.False(wb.ValidatePending);
 
         wb.GoToIssue(Find("Low fuel"));
         Pump();

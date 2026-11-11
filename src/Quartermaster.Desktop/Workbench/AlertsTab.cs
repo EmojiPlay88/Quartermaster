@@ -115,10 +115,10 @@ public sealed class AlertsTab : UserControl
         _list.SelectionChanged += (_, _) => Run(OnSelected);
         foreach (var t in new[] { _name, _condition, _message, _notes })
         {
-            t.TextChanged += (_, _) => { if (!_loading) Kick(); };
+            t.OnTextSet(() => { if (!_loading) Kick(); });
             t.LostFocus += (_, _) => Run(Flush);
         }
-        _condition.TextChanged += (_, _) => { if (!_loading) ShowStatus(); };
+        _condition.OnTextSet(() => { if (!_loading) ShowStatus(); });
         _timer.Tick += (_, _) => Run(Flush);
         _severity.SelectionChanged += (_, _) => Run(OnSeverityChosen);
         _side.SelectionChanged += (_, _) => Run(OnSideChosen);

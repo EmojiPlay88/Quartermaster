@@ -81,7 +81,7 @@ public sealed class TablesTab : UserControl, IRuleRefEditor
         _bDel.Click += (_, _) => Run(DeleteTableAsync);
         _list.SelectionChanged += (_, _) => Run(OnListSelection);
         _kind.SelectionChanged += (_, _) => Run(OnKindChosenAsync);
-        _notes.TextChanged += (_, _) => { if (!_loadingUi) { _notesTimer.Stop(); _notesTimer.Start(); } };
+        _notes.OnTextSet(() => { if (!_loadingUi) { _notesTimer.Stop(); _notesTimer.Start(); } });
         _notes.LostFocus += (_, _) => Run(FlushNotes);
         _notesTimer.Tick += (_, _) => Run(FlushNotes);
         _refRow.LinkButton.Click += (_, _) => Run(LinkPage);

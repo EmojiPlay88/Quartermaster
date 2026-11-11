@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.Rules;
 
@@ -102,7 +103,7 @@ sealed class FormulaFormView : StackPanel
             HorizontalContentAlignment = HorizontalAlignment.Center };
         ToolTip.SetTip(re, "Roll again");
         var name = b.Variable;
-        tb.TextChanged += (_, _) => { if (!_updating) _onEdit(name, tb.Text ?? ""); };
+        tb.OnTextSet(() => { if (!_updating) _onEdit(name, tb.Text ?? ""); });
         re.Click += (_, _) => _onReroll(name);
         var top = new StackPanel { Orientation = Orientation.Horizontal };
         top.Children.Add(tb);

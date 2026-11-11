@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Quartermaster.Core;
+using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -36,7 +37,7 @@ public sealed class NotesWindow : Window
         Height = 360;
         ShowInTaskbar = false;
         Content = _box;
-        _box.TextChanged += (_, _) => { if (!_loading) { _commitTimer.Stop(); _commitTimer.Start(); } };
+        _box.OnTextSet(() => { if (!_loading) { _commitTimer.Stop(); _commitTimer.Start(); } });
         _box.LostFocus += (_, _) => Run(Flush);
         _commitTimer.Tick += (_, _) => Run(Flush);
         s.GameReplaced += OnGameReplaced;

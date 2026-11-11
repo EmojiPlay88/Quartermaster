@@ -146,7 +146,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         _bSideRename.Click += (_, _) => Run(RenameSideAsync);
         _bSideDel.Click += (_, _) => Run(RemoveSideAsync);
         _sides.SelectionChanged += (_, _) => Run(OnSideSelected);
-        _sideFilter.TextChanged += (_, _) => { if (_loading) return; _sideFilterErr.Text = FormulaEdit.SyntaxProblem(_sideFilter.Text) ?? ""; Kick(); };
+        _sideFilter.OnTextSet(() => { if (_loading) return; _sideFilterErr.Text = FormulaEdit.SyntaxProblem(_sideFilter.Text) ?? ""; Kick(); });
         _sideFilter.LostFocus += (_, _) => Run(Flush);
 
         _bAdd.Click += (_, _) => Run(AddPhaseAsync);
@@ -158,9 +158,9 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         _bUnblock.Click += (_, _) => Run(RemoveBlockAsync);
         _phases.SelectionChanged += (_, _) => Run(OnPhaseSelected);
 
-        _name.TextChanged += (_, _) => { if (!_loading) Kick(); };
-        _instr.TextChanged += (_, _) => { if (!_loading) Kick(); };
-        _notes.TextChanged += (_, _) => { if (!_loading) Kick(); };
+        _name.OnTextSet(() => { if (!_loading) Kick(); });
+        _instr.OnTextSet(() => { if (!_loading) Kick(); });
+        _notes.OnTextSet(() => { if (!_loading) Kick(); });
         _notes.LostFocus += (_, _) => Run(Flush);
         _name.LostFocus += (_, _) => Run(Flush);
         _instr.LostFocus += (_, _) => Run(Flush);
