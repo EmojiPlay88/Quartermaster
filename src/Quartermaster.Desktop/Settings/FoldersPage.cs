@@ -49,7 +49,8 @@ public sealed class FoldersPage : SettingsPage
     /// <summary>Runs work on a worker thread and posts done back to the UI thread (dropped when the window is gone).</summary>
     void OffUi<T>(Func<T> work, Action<T> done)
     {
-        _ = Task.Run(work).ContinueWith(r => Dispatcher.UIThread.Post(() =>
+        var ui = Dispatcher.UIThread;   // taken on the UI thread: the continuation runs on a worker and must not reach the static getter
+        _ = Task.Run(work).ContinueWith(r => ui.Post(() =>
         {
             if (_closed) return;
             if (r.IsFaulted)

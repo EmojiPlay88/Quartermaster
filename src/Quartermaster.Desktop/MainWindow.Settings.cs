@@ -44,10 +44,13 @@ public partial class MainWindow
     /// <summary>Applies the loaded settings and follows the store from now on (changes from another thread are posted to the UI thread).</summary>
     void StartSettings()
     {
+        // The UI dispatcher is taken here, on the UI thread: a worker must never reach the static Dispatcher.UIThread getter,
+        // which (in headless tests, after the dispatcher was reset) would create a dispatcher on that worker.
+        var ui = Dispatcher.UIThread;
         _onSettingsChanged = s =>
         {
-            if (Dispatcher.UIThread.CheckAccess()) ApplySettings(s);
-            else Dispatcher.UIThread.Post(() => { if (_onSettingsChanged != null) ApplySettings(SettingsStore.Current); }); // the newest, not the captured one: an older queued change must not overwrite a newer one
+            if (ui.CheckAccess()) ApplySettings(s);
+            else ui.Post(() => { if (_onSettingsChanged != null) ApplySettings(SettingsStore.Current); }); // the newest, not the captured one: an older queued change must not overwrite a newer one
         };
         SettingsStore.Changed += _onSettingsChanged;
         ApplySettings(SettingsStore.Current);
