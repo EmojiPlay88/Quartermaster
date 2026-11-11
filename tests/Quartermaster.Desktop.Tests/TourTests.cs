@@ -242,6 +242,32 @@ public sealed class TourTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void New_game_or_closed_module_ends_the_tour()
+    {
+        // WinForms OnGameReplaced / CloseSession: the balloon never stays on stale targets; it ends as skipped.
+        var w = Game();
+        w.ShowTour();
+        var tour = w.Tour!;
+        Click(tour.NextButton);
+        w.StartSetup(null);   // a new game replaces the old one
+        Pump();
+        Assert.True(tour.IsDone);
+        Assert.False(tour.IsVisible);
+        Assert.Null(w.Tour);
+        Assert.True(w.SettingsStore.Current.TourShown);
+
+        w.SettingsStore.Update(s => s with { TourShown = false });
+        PumpUntil(() => w.Alerts.IsVisible);
+        w.ShowTour();
+        tour = w.Tour!;
+        Assert.True(w.OpenModule(_module));   // the session closes (a new module, no game yet)
+        Pump();
+        Assert.True(tour.IsDone);
+        Assert.Null(w.Tour);
+        Assert.True(w.SettingsStore.Current.TourShown);
+    }
+
+    [AvaloniaFact]
     public void Tour_needs_a_game()
     {
         var w = NewWindow();

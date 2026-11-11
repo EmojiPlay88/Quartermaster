@@ -829,6 +829,7 @@ public partial class MainWindow : Window
 
     void CloseSession()
     {
+        _tour?.Close();   // WinForms CloseSession: the balloon never outlives its targets (ends as skipped)
         DestroyWorkbench();   // first: its pending edits still reach the session
         DestroyExport();
         DestroyLedger();
@@ -948,6 +949,7 @@ public partial class MainWindow : Window
     /// <summary>WinForms OnGameReplaced: a new game (setup, new, opened) starts clean, without a file.</summary>
     void OnGameReplacedAnyThread() => OnUi(() =>
     {
+        _tour?.Close();   // WinForms OnGameReplaced: a new game, an opened save or a rewind to it ends the tour (on the UI thread)
         HookGame();
         _dirty = false;
         _savePath = null;
