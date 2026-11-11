@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Threading;
 using Quartermaster.Core;
+using Quartermaster.Render;
 using Quartermaster.Vassal;
 using Quartermaster.Desktop.Shell;
 
@@ -13,7 +14,190 @@ static class Program
     public static int Main(string[] args)
     {
         if (args.Contains("--screenshot-main", StringComparer.Ordinal)) return RunScreenshot(args);
+        if (args.Any(a => LauncherShotFlags.Contains(a, StringComparer.Ordinal))) return RunLauncherScreenshot(args);
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
+
+    static readonly string[] LauncherShotFlags = { "--screenshot-launcher", "--screenshot-offline", "--screenshot-update-bar" };
+
+    /// <summary>
+    /// <c>&lt;vmod&gt; [--screenshot-launcher &lt;png&gt;] [--screenshot-offline &lt;png&gt;] [--screenshot-update-bar &lt;png&gt;]</c> (WinForms LauncherShots):
+    /// the pre-game windows drawn headless. These runs write a module library, saves and settings, so they refuse unless
+    /// <c>QUARTERMASTER_LAYOUT_ROOT</c> points at a scratch folder. The module is listed; the offline picture also gets an autosave (turn 3,
+    /// Movement) and a recent save; the update-bar picture runs the launcher's normal check against a TEST folder feed offering 9.9.9 written
+    /// under the scratch root (dummy assets, never installable; nothing reaches the network). Returns 0, or 1 on any failure (message on stderr).
+    /// </summary>
+    internal static int RunLauncherScreenshot(string[] args)
+    {
+        string? module = null, launcherPng = null, offlinePng = null, barPng = null;
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--screenshot-launcher" when i + 1 < args.Length: launcherPng = args[++i]; break;
+                case "--screenshot-offline" when i + 1 < args.Length: offlinePng = args[++i]; break;
+                case "--screenshot-update-bar" when i + 1 < args.Length: barPng = args[++i]; break;
+                default:
+                    if (!args[i].StartsWith("--", StringComparison.Ordinal) && module == null) module = args[i];
+                    else Console.Error.WriteLine("Ignored argument: " + args[i]);
+                    break;
+            }
+        }
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(AppDataRoot.EnvVar)))
+        {
+            Console.Error.WriteLine(AppDataRoot.EnvVar + " must be set for launcher screenshots.");   // before anything is read or written
+            return 1;
+        }
+        if (module == null || (launcherPng ?? offlinePng ?? barPng) == null)
+        {
+            Console.Error.WriteLine("Usage: <vmod> [--screenshot-launcher <png>] [--screenshot-offline <png>] [--screenshot-update-bar <png>]");
+            return 1;
+        }
+        if (Application.Current == null)
+            AppBuilder.Configure<App>().UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
+        try
+        {
+            var root = AppDataRoot.Path;
+            var store = new SettingsStore(root);
+            store.Load(null);
+            SeedLauncher(store, root, module, offlinePng != null);
+            var ok = true;
+            if (launcherPng != null) ok &= ShotLauncher(store, root, launcherPng, null);
+            if (offlinePng != null) ok &= ShotOffline(store, root, offlinePng);
+            if (barPng != null) ok &= ShotUpdateBar(store, root, barPng);
+            return ok ? 0 : 1;
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException
+            or DllNotFoundException or TypeInitializationException or TimeoutException or NotSupportedException or System.Text.Json.JsonException)
+        {
+            Console.Error.WriteLine("launcher screenshot failed: " + e.Message);
+            return 1;
+        }
+    }
+
+    /// <summary>Screenshot fixture (WinForms LauncherShots.Seed): lists the module; for the offline window also an autosave and a recent save.</summary>
+    static void SeedLauncher(SettingsStore store, string root, string modulePath, bool withGames)
+    {
+        var lib = new ModuleLibrary(store);
+        lib.Add(modulePath);
+        Task.Run(() => lib.RefreshAsync(null, CancellationToken.None)).GetAwaiter().GetResult();
+        if (!withGames) return;
+        var sha = lib.Rows.First(r => !r.Missing).Entry.Sha256!;
+        var dir = Path.Combine(Autosaver.AutosaveRoot(root), sha);
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "autosave-20260101-000000000-t3.qsave"),
+            "{\"format\":7,\"moduleSha256\":\"" + sha + "\",\"snapshot\":{\"turn\":{\"turn\":3,\"phase\":\"Movement\"},\"pieces\":{}},\"log\":[]}");
+        var save = Path.Combine(root, "saves", "Campaign one.qsave");
+        Directory.CreateDirectory(Path.GetDirectoryName(save)!);
+        File.WriteAllText(save, "{}");
+        new RecentGames(store, root).Add(sha, save);
+    }
+
+    static bool ShotLauncher(SettingsStore store, string root, string png, Updates.DesktopUpdates? updates)
+    {
+        var w = new Launcher.LauncherWindow(store, root, new QuietDialogs(), null, updates);
+        try
+        {
+            w.Show();
+            if (!PumpUntil(() => w.RefreshTask.IsCompleted && (updates == null || updates.CheckTask.IsCompleted), 30000))
+            {
+                Console.Error.WriteLine("Timed out waiting for the launcher.");
+                return false;
+            }
+            if (updates != null)
+            {
+                var text = updates.Bar?.Message;
+                var actions = updates.Bar == null ? "" : string.Join(" | ", updates.Bar.Actions);
+                if (text != "Quartermaster 9.9.9 is available." || actions != "What's new | Update now | Later | Skip this version" || updates.LastCheckUtc == null)
+                {
+                    Console.Error.WriteLine($"update bar FAILED ('{text}' [{actions}])");
+                    return false;
+                }
+            }
+            return Save(w, png);
+        }
+        finally { w.Close(); }
+    }
+
+    static bool ShotOffline(SettingsStore store, string root, string png)
+    {
+        var lib = new ModuleLibrary(store);
+        Task.Run(() => lib.RefreshAsync(null, CancellationToken.None)).GetAwaiter().GetResult();
+        if (lib.Rows.FirstOrDefault(r => !r.Missing) is not { } row) { Console.Error.WriteLine("No module in the library."); return false; }
+        var w = new Launcher.PlayOfflineWindow(row, lib, new RecentGames(store, root), store, new QuietDialogs(), Path.Combine(root, "cache"));
+        try
+        {
+            w.Show();
+            PumpUntil(() => false, 300);
+            return Save(w, png);
+        }
+        finally { w.Close(); }
+    }
+
+    /// <summary>A TEST folder feed offering 9.9.9 under the scratch root, pointed to by QUARTERMASTER_UPDATE_FEED for this process (as WinForms
+    /// ShotUpdateBar); the launcher runs its normal automatic check against it and is drawn with the bar.</summary>
+    static bool ShotUpdateBar(SettingsStore store, string root, string png)
+    {
+        var feed = Path.Combine(root, "test-update-feed");
+        WriteTestFeed(feed, "9.9.9");
+        Environment.SetEnvironmentVariable(Quartermaster.Render.Update.UpdateFeeds.EnvVar, feed);
+        store.Update(s => s with { CheckUpdatesOnStart = true });
+        var updates = Updates.DesktopUpdates.FromEnvironment(root);
+        if (updates.Feed == null) { Console.Error.WriteLine("The test feed was not picked up."); return false; }
+        return ShotLauncher(store, root, png, updates);
+    }
+
+    /// <summary>A release.json in the GitHub API shape plus a dummy zip and its .sha256 (TEST content, not a real build; WinForms LauncherShots.WriteTestFeed).</summary>
+    static void WriteTestFeed(string dir, string version)
+    {
+        Directory.CreateDirectory(dir);
+        var zipName = $"Quartermaster-{version}-win-x64.zip";
+        var zip = System.Text.Encoding.UTF8.GetBytes("TEST dummy update asset - not a Quartermaster build");
+        File.WriteAllBytes(Path.Combine(dir, zipName), zip);
+        File.WriteAllText(Path.Combine(dir, zipName + ".sha256"), Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(zip)) + "  " + zipName + "\n");
+        var tag = "quartermaster-v" + version;
+        var download = $"https://github.com/EmojiPlay88/Quartermaster/releases/download/{tag}/";
+        var release = new Dictionary<string, object>
+        {
+            ["tag_name"] = tag,
+            ["name"] = "TEST " + version,
+            ["draft"] = false,
+            ["prerelease"] = false,
+            ["html_url"] = "https://github.com/EmojiPlay88/Quartermaster/releases/tag/" + tag,
+            ["body"] = "TEST release notes for the update bar screenshot.\n\n- TEST: an invented change\n- TEST: another invented change",
+            ["assets"] = new object[]
+            {
+                new Dictionary<string, object> { ["name"] = zipName, ["size"] = zip.Length, ["browser_download_url"] = download + zipName },
+                new Dictionary<string, object> { ["name"] = zipName + ".sha256", ["size"] = 64 + 2 + zipName.Length + 1, ["browser_download_url"] = download + zipName + ".sha256" },
+            },
+        };
+        File.WriteAllText(Path.Combine(dir, "release.json"), System.Text.Json.JsonSerializer.Serialize(release));
+    }
+
+    static bool Save(Avalonia.Controls.Window w, string png)
+    {
+        Dispatcher.UIThread.RunJobs();
+        using (w.CaptureRenderedFrame()) { }   // first frame lays out the final size
+        Dispatcher.UIThread.RunJobs();
+        using var frame = w.CaptureRenderedFrame();
+        if (frame == null) { Console.Error.WriteLine("No frame was rendered."); return false; }
+        if (Path.GetDirectoryName(Path.GetFullPath(png)) is { Length: > 0 } dir) Directory.CreateDirectory(dir);
+        frame.Save(png, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+        return File.Exists(png) && new FileInfo(png).Length > 0;
+    }
+
+    static bool PumpUntil(Func<bool> done, int ms)
+    {
+        var end = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < end)
+        {
+            Dispatcher.UIThread.RunJobs();
+            if (done()) return true;
+            using var slice = new CancellationTokenSource(10);
+            Dispatcher.UIThread.MainLoop(slice.Token);
+        }
+        Dispatcher.UIThread.RunJobs();
+        return done();
     }
 
     /// <summary>The app builder; also used by the Avalonia designer.</summary>
