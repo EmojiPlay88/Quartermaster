@@ -104,4 +104,42 @@ public class ShortcutGestureTests
             Assert.True(ShortcutGestures.Parse(d.DefaultShortcut, false) != null, d.Id + " non-mac");
         }
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Format_round_trips_every_default(bool mac)
+    {
+        foreach (var d in CommandDefaults.All.Where(d => d.DefaultShortcut.Length > 0))
+        {
+            var g = ShortcutGestures.Parse(d.DefaultShortcut, mac)!;
+            CommandRegistry.TryNormalize(d.DefaultShortcut, out var canon);
+            Assert.Equal(canon, ShortcutGestures.Format(g.Key, g.KeyModifiers, mac));
+        }
+    }
+
+    [Fact]
+    public void Format_mac_meta_is_ctrl()
+    {
+        Assert.Equal("Ctrl+,", ShortcutGestures.Format(Key.OemComma, KeyModifiers.Meta, true));
+        Assert.Null(ShortcutGestures.Format(Key.A, KeyModifiers.Control, true));
+        Assert.Null(ShortcutGestures.Format(Key.A, KeyModifiers.Meta, false));
+        Assert.Null(ShortcutGestures.Format(Key.LeftShift, KeyModifiers.Shift, false));
+        Assert.Equal("F5", ShortcutGestures.Format(Key.F5, KeyModifiers.None, false));
+        Assert.Equal("Ctrl+Alt+Shift+Z", ShortcutGestures.Format(Key.Z, KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Control, false));
+    }
+
+    [Fact]
+    public void Format_uses_runtime_IsMac()
+    {
+        var old = ShortcutGestures.IsMac;
+        try
+        {
+            ShortcutGestures.IsMac = true;
+            Assert.Equal("Ctrl+S", ShortcutGestures.Format(Key.S, KeyModifiers.Meta));
+            ShortcutGestures.IsMac = false;
+            Assert.Equal("Ctrl+S", ShortcutGestures.Format(Key.S, KeyModifiers.Control));
+        }
+        finally { ShortcutGestures.IsMac = old; }
+    }
 }
