@@ -22,6 +22,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Ocr\tessdata-fast-4.1.0.json" LogicalName="Quartermaster.Documents.Ocr.tessdata-fast-4.1.0.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Quartermaster.Documents.Tests" />
   </ItemGroup>
 
