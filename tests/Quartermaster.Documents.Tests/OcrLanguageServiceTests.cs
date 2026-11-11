@@ -170,6 +170,33 @@ public class OcrLanguageServiceTests : IDisposable
     }
 
     [Fact]
+    public void Connect_timeout_is_an_error_not_a_cancel()
+    {
+        var logs = new List<string>();
+        using var s = Make(new Stub((_, _) => throw new TaskCanceledException("timed out", new TimeoutException())), logs.Add);
+        s.Enqueue(["aaa"]);
+        Wait(s.Idle);
+        var st = Status(s, "aaa");
+        Assert.Equal(OcrLanguageState.NotInstalled, st.State);
+        Assert.Contains("timed out", st.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(logs);
+    }
+
+    [Fact]
+    public void Verified_download_is_cached_without_rehash()
+    {
+        using var s = Make(new Stub(Serve));
+        s.Enqueue(["aaa"]);
+        Wait(s.Idle);
+        // Same length and last-write as the verified file: a cache hit means it is not hashed again.
+        var path = Path.Combine(Folder, "aaa.traineddata");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        File.WriteAllBytes(path, Bytes(_aaa.Length, 9));
+        File.SetLastWriteTimeUtc(path, stamp);
+        Assert.Equal(OcrLanguageState.Installed, Status(s, "aaa").State);
+    }
+
+    [Fact]
     public void Https_redirect_is_followed()
     {
         using var s = Make(new Stub((req, ct) =>

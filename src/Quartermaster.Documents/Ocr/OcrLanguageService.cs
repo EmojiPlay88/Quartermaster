@@ -76,54 +76,45 @@ public sealed class OcrLanguageService : IDisposable
 
     public IReadOnlyList<OcrLanguageStatus> Statuses()
     {
-        var result = new List<OcrLanguageStatus>(_catalog.Count);
+        string? current; double progress; string[] queued; Dictionary<string, string> errors;
         lock (_gate)
         {
-            foreach (var e in _catalog)
-            {
-                _errors.TryGetValue(e.Code, out var error);
-                if (e.Bundled) { result.Add(new(e, OcrLanguageState.Bundled, 0, error)); continue; }
-                if (string.Equals(_current, e.Code, StringComparison.OrdinalIgnoreCase))
-                {
-                    result.Add(new(e, OcrLanguageState.Downloading, _progress, error));
-                    continue;
-                }
-                if (_queue.Contains(e.Code, StringComparer.OrdinalIgnoreCase))
-                {
-                    result.Add(new(e, OcrLanguageState.Queued, 0, error));
-                    continue;
-                }
-                var state = FileState(e);
-                result.Add(new(e, state, 0, error));
-            }
+            current = _current; progress = _progress; queued = [.. _queue]; errors = new(_errors, StringComparer.OrdinalIgnoreCase);
+        }
+        var result = new List<OcrLanguageStatus>(_catalog.Count);
+        foreach (var e in _catalog)
+        {
+            errors.TryGetValue(e.Code, out var error);
+            if (e.Bundled) result.Add(new(e, OcrLanguageState.Bundled, 0, error));
+            else if (string.Equals(current, e.Code, StringComparison.OrdinalIgnoreCase)) result.Add(new(e, OcrLanguageState.Downloading, progress, error));
+            else if (queued.Contains(e.Code, StringComparer.OrdinalIgnoreCase)) result.Add(new(e, OcrLanguageState.Queued, 0, error));
+            else result.Add(new(e, FileState(e), 0, error)); // hashing happens here, outside the gate
         }
         return result;
     }
 
-    public IReadOnlyList<string> InstalledCodes()
-    {
-        lock (_gate)
-            return _catalog.Where(e => !e.Bundled && FileState(e) == OcrLanguageState.Installed).Select(e => e.Code).ToList();
-    }
+    public IReadOnlyList<string> InstalledCodes() =>
+        _catalog.Where(e => !e.Bundled && FileState(e) == OcrLanguageState.Installed).Select(e => e.Code).ToList();
 
     public string? VerifiedPath(string code)
     {
         if (!_byCode.TryGetValue(code ?? "", out var e) || e.Bundled) return null;
-        lock (_gate) return FileState(e) == OcrLanguageState.Installed ? FinalPath(e) : null;
+        return FileState(e) == OcrLanguageState.Installed ? FinalPath(e) : null;
     }
 
     public void Enqueue(IEnumerable<string> codes)
     {
+        var wanted = new List<OcrLanguageEntry>();
+        foreach (var code in codes)
+            if (_byCode.TryGetValue(code ?? "", out var e) && !e.Bundled && FileState(e) != OcrLanguageState.Installed) wanted.Add(e);
         bool start = false;
         lock (_gate)
         {
             if (_disposed) return;
-            foreach (var code in codes)
+            foreach (var e in wanted)
             {
-                if (!_byCode.TryGetValue(code ?? "", out var e) || e.Bundled) continue;
                 if (string.Equals(_current, e.Code, StringComparison.OrdinalIgnoreCase)) continue;
                 if (_queue.Contains(e.Code, StringComparer.OrdinalIgnoreCase)) continue;
-                if (FileState(e) == OcrLanguageState.Installed) continue;
                 _errors.Remove(e.Code);
                 _queue.Add(e.Code);
             }
@@ -257,9 +248,10 @@ public sealed class OcrLanguageService : IDisposable
                     throw new InvalidDataException("The downloaded file does not match the expected checksum.");
             }
             File.Move(part, final, overwrite: true);
-            lock (_gate) { _verified.Remove(final); _errors.Remove(e.Code); }
+            var fi = new FileInfo(final);
+            lock (_gate) { _verified[final] = (fi.Length, fi.LastWriteTimeUtc, true); _errors.Remove(e.Code); }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             DeletePart(part);
             lock (_gate) _errors.Remove(e.Code);
@@ -310,7 +302,7 @@ public sealed class OcrLanguageService : IDisposable
 
     string FinalPath(OcrLanguageEntry e) => Path.Combine(Folder, e.Code + Extension);
 
-    /// <summary>Installed / Damaged / NotInstalled from the file on disk. Caller holds the gate. A file is hashed once per (length, last-write).</summary>
+    /// <summary>Installed / Damaged / NotInstalled from the file on disk. Takes the gate only for the cache; the hashing runs outside it. A file is hashed once per (length, last-write).</summary>
     OcrLanguageState FileState(OcrLanguageEntry e)
     {
         var path = FinalPath(e);
@@ -320,7 +312,10 @@ public sealed class OcrLanguageService : IDisposable
             if (!info.Exists) return OcrLanguageState.NotInstalled;
             var len = info.Length;
             var written = info.LastWriteTimeUtc;
-            if (_verified.TryGetValue(path, out var c) && c.Length == len && c.Written == written)
+            (long Length, DateTime Written, bool Ok) c;
+            bool hit;
+            lock (_gate) hit = _verified.TryGetValue(path, out c);
+            if (hit && c.Length == len && c.Written == written)
                 return c.Ok ? OcrLanguageState.Installed : OcrLanguageState.Damaged;
             var ok = false;
             if (len == e.Bytes)
@@ -328,7 +323,7 @@ public sealed class OcrLanguageService : IDisposable
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 ok = string.Equals(Convert.ToHexStringLower(SHA256.HashData(fs)), e.Sha256, StringComparison.OrdinalIgnoreCase);
             }
-            _verified[path] = (len, written, ok);
+            lock (_gate) _verified[path] = (len, written, ok);
             return ok ? OcrLanguageState.Installed : OcrLanguageState.Damaged;
         }
         catch (IOException) { return OcrLanguageState.Damaged; }
@@ -346,6 +341,7 @@ public sealed class OcrLanguageService : IDisposable
     {
         HttpRequestException { InnerException: System.Net.Sockets.SocketException } => "Could not reach the server. Check the network connection.",
         HttpRequestException h => h.Message,
+        OperationCanceledException => "The connection timed out. Check the network connection.",
         IOException io => "Could not write the file: " + io.Message,
         UnauthorizedAccessException u => "Could not write to the folder: " + u.Message,
         _ => ex.Message,
