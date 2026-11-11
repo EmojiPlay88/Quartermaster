@@ -165,7 +165,13 @@ public sealed class OcrLanguagesPage : SettingsPage
         {
             _refreshing = false;
             if (!_attached) return;
-            if (t.IsFaulted) ErrorLine.Text = "The languages could not be read: " + t.Exception?.GetBaseException().Message;
+            if (t.IsFaulted)
+            {
+                var message = t.Exception?.GetBaseException().Message;
+                System.Diagnostics.Trace.WriteLine("ocr languages: " + message);
+                ErrorLine.Text = "The languages could not be read: " + message;
+                ErrorLine.IsVisible = true;
+            }
             else Show(t.Result);
             if (_again) { _again = false; Refresh(); }
         }), TaskScheduler.Default);
@@ -199,7 +205,7 @@ public sealed class OcrLanguagesPage : SettingsPage
     {
         OcrLanguageState.Bundled => "Bundled",
         OcrLanguageState.Installed => "Installed",
-        OcrLanguageState.Damaged => "Damaged",
+        OcrLanguageState.Damaged => "Damaged — download again",
         OcrLanguageState.Queued => "Queued",
         OcrLanguageState.Downloading => "Downloading " + ((int)Math.Floor(Math.Clamp(s.Progress, 0, 1) * 100)).ToString(CultureInfo.InvariantCulture) + "%",
         _ => "Not installed",

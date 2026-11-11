@@ -7,7 +7,7 @@ The test needs about 45 minutes. Use **your own module and rules pack** (copy th
 What this build does not have yet, so you know what to expect:
 
 - No Settings dialog (stage 4b).
-- On the Mac, text recognition uses Tesseract and reads **English only**. On Windows the app uses the Windows recognizer instead, which is a little more accurate. Expect more mistakes in a Mac reading; fixing a cell by hand is part of the test.
+- On the Mac, text recognition uses Tesseract and reads the bundled **English** unless you add more languages in Settings > OCR languages (stage 4c). On Windows the app uses the Windows recognizer instead, which is a little more accurate. Expect more mistakes in a Mac reading; fixing a cell by hand is part of the test.
 - The Workbench is a floating window, not a child of the main window.
 
 ## A. Get the build

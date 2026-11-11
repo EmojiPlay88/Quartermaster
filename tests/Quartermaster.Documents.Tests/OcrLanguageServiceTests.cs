@@ -251,17 +251,11 @@ public class OcrLanguageServiceTests : IDisposable
         Directory.CreateDirectory(feed);
         File.WriteAllBytes(Path.Combine(feed, "aaa.traineddata"), _aaa);
         var calls = 0;
-        var old = Environment.GetEnvironmentVariable(OcrLanguageService.FeedVariable);
-        Environment.SetEnvironmentVariable(OcrLanguageService.FeedVariable, feed);
-        try
-        {
-            using var s = Make(new Stub((_, _) => { calls++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)); }));
-            s.Enqueue(["aaa"]);
-            Wait(s.Idle);
-            Assert.Equal(0, calls);
-            Assert.Equal(OcrLanguageState.Installed, Status(s, "aaa").State);
-        }
-        finally { Environment.SetEnvironmentVariable(OcrLanguageService.FeedVariable, old); }
+        using var s = new OcrLanguageService(Folder, new Stub((_, _) => { calls++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)); }), null, _catalog, feed);
+        s.Enqueue(["aaa"]);
+        Wait(s.Idle);
+        Assert.Equal(0, calls);
+        Assert.Equal(OcrLanguageState.Installed, Status(s, "aaa").State);
     }
 
     [Fact]

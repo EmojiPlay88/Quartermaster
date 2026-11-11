@@ -205,7 +205,9 @@ try {
     $png = Join-Path $out 'stage4c-desktop-settings-ocr.png'
     Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', 'settings-ocr', '--screenshot-main', $png) $env4c $png 'desktop-settings-ocr'
     $png = Join-Path $out 'stage4c-desktop-ocr-dropdown.png'
-    Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', 'ocr-dropdown', '--screenshot-main', $png) $env4c $png 'desktop-ocr-dropdown'
+    # No invariant globalization here: Windows OCR display names ("English (United States)") need ICU culture data; invariant mode shows raw tags.
+    $env4cDrop = @{ QUARTERMASTER_LAYOUT_ROOT = $layout4c; QUARTERMASTER_OCR_FEED = $feed4c }
+    Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', 'ocr-dropdown', '--screenshot-main', $png) $env4cDrop $png 'desktop-ocr-dropdown'
 }
 finally { foreach ($d in $layout4c, $feed4c) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } } }
 

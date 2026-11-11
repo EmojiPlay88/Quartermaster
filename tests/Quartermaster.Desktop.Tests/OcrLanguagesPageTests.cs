@@ -147,6 +147,15 @@ public sealed class OcrLanguagesPageTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Damaged_file_says_download_again()
+    {
+        Directory.CreateDirectory(Folder);
+        File.WriteAllBytes(Path.Combine(Folder, "deu.traineddata"), new byte[DeuData.Length]);   // right size, wrong bytes
+        var (_, page) = Open(Service());
+        Assert.Equal("Damaged — download again", StatusOf(page, "deu"));
+    }
+
+    [AvaloniaFact]
     public void Remove_is_disabled_for_bundled_and_not_installed()
     {
         Directory.CreateDirectory(Folder);

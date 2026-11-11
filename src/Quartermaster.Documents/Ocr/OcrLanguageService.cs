@@ -39,15 +39,15 @@ public sealed class OcrLanguageService : IDisposable
     TaskCompletionSource _idle = Completed();
 
     public OcrLanguageService(string? folder = null, HttpMessageHandler? handler = null, Action<string>? log = null)
-        : this(folder, handler, log, OcrLanguageCatalog.Entries) { }
+        : this(folder, handler, log, OcrLanguageCatalog.Entries, Environment.GetEnvironmentVariable(FeedVariable)) { }
 
-    internal OcrLanguageService(string? folder, HttpMessageHandler? handler, Action<string>? log, IReadOnlyList<OcrLanguageEntry> catalog)
+    /// <summary>Tests pass the feed folder explicitly; only the public constructor reads the environment variable.</summary>
+    internal OcrLanguageService(string? folder, HttpMessageHandler? handler, Action<string>? log, IReadOnlyList<OcrLanguageEntry> catalog, string? feed = null)
     {
         Folder = folder ?? AppDataRoot.Sub("OcrLanguages");
         _log = log;
         _catalog = catalog;
         _byCode = catalog.ToDictionary(e => e.Code, StringComparer.OrdinalIgnoreCase);
-        var feed = Environment.GetEnvironmentVariable(FeedVariable);
         _feed = string.IsNullOrWhiteSpace(feed) ? null : feed;
 
         if (handler is null)
@@ -100,6 +100,13 @@ public sealed class OcrLanguageService : IDisposable
     {
         if (!_byCode.TryGetValue(code ?? "", out var e) || e.Bundled) return null;
         return FileState(e) == OcrLanguageState.Installed ? FinalPath(e) : null;
+    }
+
+    /// <summary>True when the bytes' length and SHA-256 equal the catalog's for the code (used on the bytes about to be loaded).</summary>
+    public bool MatchesCatalog(string code, byte[] data)
+    {
+        if (!_byCode.TryGetValue(code ?? "", out var e)) return false;
+        return data.LongLength == e.Bytes && string.Equals(Convert.ToHexStringLower(SHA256.HashData(data)), e.Sha256, StringComparison.OrdinalIgnoreCase);
     }
 
     public void Enqueue(IEnumerable<string> codes)
@@ -274,7 +281,8 @@ public sealed class OcrLanguageService : IDisposable
         var uri = new Uri(OcrLanguageCatalog.Url(e.Code));
         for (var hop = 0; ; hop++)
         {
-            var response = await _http.SendAsync(new HttpRequestMessage(HttpMethod.Get, uri), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             try
             {
                 if ((int)response.StatusCode is >= 300 and < 400 && response.Headers.Location is { } loc)
@@ -283,6 +291,7 @@ public sealed class OcrLanguageService : IDisposable
                     var next = loc.IsAbsoluteUri ? loc : new Uri(uri, loc);
                     if (next.Scheme != Uri.UriSchemeHttps) throw new HttpRequestException("Refused a redirect to a non-HTTPS address.");
                     uri = next;
+                    response.Dispose();
                     continue;
                 }
                 if (!response.IsSuccessStatusCode)

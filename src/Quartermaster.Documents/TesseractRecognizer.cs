@@ -177,6 +177,9 @@ public sealed class TesseractRecognizer : IOcrRecognizer, IOcrLanguageList, IDis
             var file = IsBundled(language) ? Path.Combine(_path, language + ".traineddata") : _downloads?.VerifiedPath(language);
             if (file is null) throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
             var data = File.ReadAllBytes(file);
+            // The cached verification is by (length, last-write): check the very bytes handed to Tesseract.
+            if (!IsBundled(language) && !(_downloads?.MatchesCatalog(language, data) ?? false))
+                throw new OcrUnavailableException(OcrReader.LanguageNotInstalledMessage(language));
             int rc;
             try
             {

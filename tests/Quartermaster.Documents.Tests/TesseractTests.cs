@@ -205,6 +205,26 @@ public class TesseractTests
     }
 
     [Fact]
+    public async Task Downloaded_file_changed_after_verification_is_not_loaded()
+    {
+        using var fx = new OcrDownloadsFixture();
+        fx.Install();
+        using var svc = fx.Service();
+        using var t = new TesseractRecognizer(null, svc);
+        Assert.Equal(["eng", "deu"], t.Languages); // verified and cached by (length, last-write)
+        var path = Path.Combine(fx.Folder, "deu.traineddata");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var bytes = File.ReadAllBytes(path);
+        bytes[^1] ^= 0xFF;                                             // same length, one byte different (still loadable by Tesseract)
+        File.WriteAllBytes(path, bytes);
+        File.SetLastWriteTimeUtc(path, stamp);                         // same mtime: the cache still trusts it
+        using var img = InventedTables.Line("Alpha");
+        var ex = await Assert.ThrowsAsync<OcrUnavailableException>(() => t.RecognizeAsync(img, OcrLayout.Block, "deu", CancellationToken.None));
+        Assert.Equal(OcrReader.LanguageNotInstalledMessage("deu"), ex.Message);
+        Assert.Equal(0, t.EngineCount);
+    }
+
+    [Fact]
     public async Task Remove_waits_for_running_read()
     {
         using var fx = new OcrDownloadsFixture();
