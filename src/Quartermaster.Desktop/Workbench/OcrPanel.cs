@@ -32,11 +32,28 @@ public sealed class OcrPanel : UserControl
     readonly OcrReader _reader;
     readonly ScanSessionModel _model;
     readonly IDialogs _dialogs;
-    readonly IReadOnlyList<string> _langs;
+    readonly IOcrRecognizer _engine;
+    readonly IOcrLanguageList? _list;
+    readonly Func<Task>? _openLanguages;
+    IReadOnlyList<string> _langs = [];
+    string _selected = "";
+    bool _refreshing;
+
+    public const string MoreLanguagesText = "More languages…";
+    const string ReadyText = "Drag a region on the image (or read the whole image), then Read text.";
+
+    /// <summary>A dropdown item: the engine tag (null for the "More languages…" item) and the text shown.</summary>
+    sealed record LangItem(string? Tag, string Text)
+    {
+        public override string ToString() => Text;
+    }
+
+    /// <summary>The engine tag of the chosen language ("" when there is none); this is what a read passes to the engine.</summary>
+    public string SelectedLanguage => _selected;
 
     public Button ReadButton { get; } = new() { Content = "Read text" };
     public Button CancelButton { get; } = new() { Content = "Cancel", IsEnabled = false };
-    public ComboBox LanguageBox { get; } = new() { Width = 90 };
+    public ComboBox LanguageBox { get; } = new() { MinWidth = 90 };
     public CheckBox FixBox { get; } = new() { Content = "Fix common OCR digit mistakes", IsChecked = true };
     public ComboBox ColumnsBox { get; } = new() { Width = 70 };
     public Button MergeButton { get; } = new() { Content = "Merge" };
@@ -63,8 +80,11 @@ public sealed class OcrPanel : UserControl
     int _columnsShown;
     Task _lastRead = Task.CompletedTask;
 
-    public OcrPanel(IOcrRecognizer engine, ScanSessionModel model, IDialogs dialogs)
+    public OcrPanel(IOcrRecognizer engine, ScanSessionModel model, IDialogs dialogs, Func<Task>? openLanguages = null)
     {
+        _engine = engine;
+        _list = engine as IOcrLanguageList;
+        _openLanguages = openLanguages;
         _reader = new OcrReader(engine);
         _model = model;
         _dialogs = dialogs;
@@ -107,13 +127,8 @@ public sealed class OcrPanel : UserControl
         root.Children.Add(Tabs);
         Content = root;
 
-        _langs = engine.Languages;
-        foreach (var l in _langs) LanguageBox.Items.Add(l);
-        var def = engine.DefaultLanguage;
-        if (def != null) LanguageBox.SelectedItem = _langs.FirstOrDefault(l => string.Equals(l, def, StringComparison.OrdinalIgnoreCase)) ?? def;
-        if (LanguageBox.SelectedIndex < 0 && LanguageBox.Items.Count > 0) LanguageBox.SelectedIndex = 0;
-        LanguageBox.IsEnabled = _langs.Count > 0;
-        SetStatus(_langs.Count == 0 ? engine.UnavailableMessage : "Drag a region on the image (or read the whole image), then Read text.", _langs.Count == 0);
+        RefreshLanguages();
+        LanguageBox.SelectionChanged += (_, _) => OnLanguageChosen();
 
         ReadButton.Click += (_, _) => _lastRead = ReadTextAsync();
         CancelButton.Click += (_, _) => CancelRead("Cancelled.");
@@ -127,6 +142,76 @@ public sealed class OcrPanel : UserControl
         Tabs.SelectionChanged += (_, _) => UpdateButtons();
         TextBox.GetObservable(TextBox.TextProperty).Subscribe(new ActionObserver(UpdateButtons));
         UpdateButtons();
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        if (_list == null) return;
+        _list.LanguagesChanged -= OnLanguagesChanged;
+        _list.LanguagesChanged += OnLanguagesChanged;
+        RefreshLanguages(); // it may have changed while the panel was detached
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        if (_list != null) _list.LanguagesChanged -= OnLanguagesChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    // Raised on any thread.
+    void OnLanguagesChanged() => Avalonia.Threading.Dispatcher.UIThread.Post(RefreshLanguages);
+
+    /// <summary>Rebuilds the dropdown from the engine: keeps the chosen language while it exists, else the engine default.</summary>
+    void RefreshLanguages()
+    {
+        var wasEmpty = _langs.Count == 0;
+        var first = LanguageBox.Items.Count == 0 && _selected.Length == 0;
+        var langs = _engine.Languages.ToList();
+        _refreshing = true;
+        try
+        {
+            _langs = langs;
+            LanguageBox.Items.Clear();
+            foreach (var l in langs) LanguageBox.Items.Add(new LangItem(l, _list?.DisplayName(l) ?? l));
+            if (_openLanguages != null) LanguageBox.Items.Add(new LangItem(null, MoreLanguagesText));
+            var def = _engine.DefaultLanguage;
+            var pick = langs.FirstOrDefault(l => string.Equals(l, _selected, StringComparison.OrdinalIgnoreCase))
+                ?? (def == null ? null : langs.FirstOrDefault(l => string.Equals(l, def, StringComparison.OrdinalIgnoreCase)) ?? def)
+                ?? langs.FirstOrDefault();
+            _selected = pick ?? "";
+            LanguageBox.SelectedIndex = pick == null ? -1 : IndexOfTag(pick);
+            LanguageBox.IsEnabled = langs.Count > 0 || _openLanguages != null;
+        }
+        finally { _refreshing = false; }
+        if (first || wasEmpty != (langs.Count == 0))
+            SetStatus(langs.Count == 0 ? _engine.UnavailableMessage : ReadyText, langs.Count == 0);
+        UpdateButtons();
+    }
+
+    int IndexOfTag(string tag)
+    {
+        for (var i = 0; i < LanguageBox.Items.Count; i++)
+            if (LanguageBox.Items[i] is LangItem { Tag: { } t } && string.Equals(t, tag, StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
+    }
+
+    void OnLanguageChosen()
+    {
+        if (_refreshing) return;
+        switch (LanguageBox.SelectedItem)
+        {
+            case LangItem { Tag: { } tag }:
+                _selected = tag;
+                break;
+            case LangItem { Tag: null }:
+                // "More languages…" never stays selected: go back to the language that was chosen, then open Settings.
+                _refreshing = true;
+                try { LanguageBox.SelectedIndex = _selected.Length == 0 ? -1 : IndexOfTag(_selected); }
+                finally { _refreshing = false; }
+                if (_openLanguages is { } open) _ = Guard(open);
+                break;
+        }
     }
 
     static void Add(Panel p, Control c) { c.Margin = new Thickness(0, 0, 4, 2); p.Children.Add(c); }
@@ -201,7 +286,7 @@ public sealed class OcrPanel : UserControl
         try { target = Target?.Invoke(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("ocr target: " + ex); target = null; }
         if (target == null) { SetStatus("Open a scan first: Open scan…, Scan this page, or an image from the document list.", true); return; }
-        var lang = LanguageBox.SelectedItem as string ?? "";
+        var lang = _selected;
         var ticket = _model.BeginRead();
         UpdateButtons();
         SetStatus(target.Region is { } r ? $"Reading text in the region ({r.Width}×{r.Height} px)…" : "Reading text in the whole image…");
