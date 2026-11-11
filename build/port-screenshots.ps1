@@ -18,6 +18,8 @@
   Stage 4b adds stage4b-desktop-settings[-<page>].png (the Settings window, one picture per page: general, game, display, map, dice, toolbar, keyboard,
   folders; run with a temp QUARTERMASTER_LAYOUT_ROOT so no real settings are touched) and the WinForms equivalents stage4b-winforms-settings-<page>.png
   (--screenshot-settings --settings-tab), all off-screen.
+  Stage 4c adds stage4c-desktop-settings-ocr.png (Settings > OCR languages, real catalog, nothing downloaded) and stage4c-desktop-ocr-dropdown.png
+  (the Workbench OCR language list open); both run with a temp QUARTERMASTER_LAYOUT_ROOT and an empty QUARTERMASTER_OCR_FEED folder (no network).
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -191,6 +193,23 @@ try {
     }
 }
 finally { if (Test-Path $layout4b) { Remove-Item $layout4b -Recurse -Force } }
+
+# Stage 4c states, Desktop, headless: the OCR languages settings page and the Workbench OCR language list, both with the real catalog and nothing
+# downloaded (eng Bundled, the rest Not installed). A temp layout root keeps the run away from real settings and downloads; QUARTERMASTER_OCR_FEED
+# points at an empty folder so nothing can reach the network.
+$layout4c = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-layout4c-' + [Guid]::NewGuid().ToString('N'))
+$feed4c = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-feed4c-' + [Guid]::NewGuid().ToString('N'))
+try {
+    New-Item -ItemType Directory -Force $layout4c, $feed4c | Out-Null
+    $env4c = @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_LAYOUT_ROOT = $layout4c; QUARTERMASTER_OCR_FEED = $feed4c }
+    $png = Join-Path $out 'stage4c-desktop-settings-ocr.png'
+    Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', 'settings-ocr', '--screenshot-main', $png) $env4c $png 'desktop-settings-ocr'
+    $png = Join-Path $out 'stage4c-desktop-ocr-dropdown.png'
+    # No invariant globalization here: Windows OCR display names ("English (United States)") need ICU culture data; invariant mode shows raw tags.
+    $env4cDrop = @{ QUARTERMASTER_LAYOUT_ROOT = $layout4c; QUARTERMASTER_OCR_FEED = $feed4c }
+    Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', 'ocr-dropdown', '--screenshot-main', $png) $env4cDrop $png 'desktop-ocr-dropdown'
+}
+finally { foreach ($d in $layout4c, $feed4c) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } } }
 
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'

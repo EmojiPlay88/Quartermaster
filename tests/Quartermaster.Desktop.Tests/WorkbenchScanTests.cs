@@ -26,7 +26,7 @@ public sealed class WorkbenchScanTests : IDisposable
 {
     readonly bool _wasMac = ShortcutGestures.IsMac;
     readonly Action<string> _prune = WorkbenchWindow.PruneCaches;
-    readonly Func<Action<string>, IOcrRecognizer> _createOcr = MainWindow.CreateOcr;
+    readonly Func<Action<string>, OcrLanguageService, IOcrRecognizer> _createOcr = MainWindow.CreateOcr;
     readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-wbscan-" + Guid.NewGuid().ToString("N"));
     readonly List<Window> _windows = new();
     readonly List<MainWindow> _mains = new();
@@ -407,7 +407,8 @@ public sealed class WorkbenchScanTests : IDisposable
     {
         var engines = new List<TableOcr>();
         var logs = new List<Action<string>>();
-        MainWindow.CreateOcr = log => { logs.Add(log); var e = new TableOcr(); engines.Add(e); return e; };
+        var downloads = new List<OcrLanguageService>();
+        MainWindow.CreateOcr = (log, langs) => { logs.Add(log); downloads.Add(langs); var e = new TableOcr(); engines.Add(e); return e; };
         var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache-main"), null, Path.Combine(_tmp, "layout")) { Width = 1200, Height = 800 };
         _mains.Add(w);
         w.Show();
@@ -419,6 +420,8 @@ public sealed class WorkbenchScanTests : IDisposable
         var wb = w.WorkbenchTool!;
         var engine = Assert.Single(engines);
         Assert.Same(engine, wb.OcrEngine);
+        Assert.Same(w.OcrLanguages, Assert.Single(downloads));   // the engine lists the app's one download service
+        Assert.NotNull(wb.OpenOcrLanguages);
         logs[0]("OCR: invented engine line.");
         Assert.Contains(w.Session!.Log.Items, e => e is { Severity: DiagnosticSeverity.Info, Category: "ocr", Message: "OCR: invented engine line." });
         wb.Close();

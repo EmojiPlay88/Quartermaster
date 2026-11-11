@@ -165,4 +165,107 @@ public class TesseractTests
         Assert.Equal(0, t.EngineCount);
         await Assert.ThrowsAsync<ObjectDisposedException>(() => t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None));
     }
+
+    // ---- downloaded languages (stage 4c) ----
+
+    [Fact]
+    public async Task Downloaded_language_appears_after_LanguagesChanged()
+    {
+        using var fx = new OcrDownloadsFixture();
+        using var svc = fx.Service();
+        using var t = new TesseractRecognizer(null, svc);
+        Assert.Equal(["eng"], t.Languages);
+        Assert.Equal("eng", t.DefaultLanguage);
+        using var raised = new ManualResetEventSlim();
+        ((IOcrLanguageList)t).LanguagesChanged += raised.Set;
+        svc.Enqueue(["deu"]);
+        await svc.Idle.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(raised.Wait(TimeSpan.FromSeconds(5)));
+        Assert.Equal(["eng", "deu"], t.Languages);
+        Assert.Equal(["deu"], t.DownloadedLanguages);
+        Assert.Equal("German", t.DisplayName("deu"));
+        Assert.Equal("English", t.DisplayName("eng"));
+        Assert.Equal("zzz", t.DisplayName("zzz"));
+        using var img = InventedTables.Line("Alpha Bravo Charlie");
+        var words = await t.RecognizeAsync(img, OcrLayout.Block, "DEU", CancellationToken.None);
+        Assert.Contains(words, w => w.Text.Contains("Bravo"));
+    }
+
+    [Fact]
+    public async Task Damaged_file_is_not_a_language()
+    {
+        using var fx = new OcrDownloadsFixture();
+        File.WriteAllBytes(Path.Combine(fx.Folder, "deu.traineddata"), new byte[1000]);
+        using var svc = fx.Service();
+        using var t = new TesseractRecognizer(null, svc);
+        Assert.Equal(["eng"], t.Languages);
+        using var img = InventedTables.Line("Hello");
+        var ex = await Assert.ThrowsAsync<OcrUnavailableException>(() => t.RecognizeAsync(img, OcrLayout.Block, "deu", CancellationToken.None));
+        Assert.Equal(OcrReader.LanguageNotInstalledMessage("deu"), ex.Message);
+    }
+
+    [Fact]
+    public async Task Downloaded_file_changed_after_verification_is_not_loaded()
+    {
+        using var fx = new OcrDownloadsFixture();
+        fx.Install();
+        using var svc = fx.Service();
+        using var t = new TesseractRecognizer(null, svc);
+        Assert.Equal(["eng", "deu"], t.Languages); // verified and cached by (length, last-write)
+        var path = Path.Combine(fx.Folder, "deu.traineddata");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var bytes = File.ReadAllBytes(path);
+        bytes[^1] ^= 0xFF;                                             // same length, one byte different (still loadable by Tesseract)
+        File.WriteAllBytes(path, bytes);
+        File.SetLastWriteTimeUtc(path, stamp);                         // same mtime: the cache still trusts it
+        using var img = InventedTables.Line("Alpha");
+        var ex = await Assert.ThrowsAsync<OcrUnavailableException>(() => t.RecognizeAsync(img, OcrLayout.Block, "deu", CancellationToken.None));
+        Assert.Equal(OcrReader.LanguageNotInstalledMessage("deu"), ex.Message);
+        Assert.Equal(0, t.EngineCount);
+    }
+
+    [Fact]
+    public async Task Remove_waits_for_running_read()
+    {
+        using var fx = new OcrDownloadsFixture();
+        fx.Install();
+        using var svc = fx.Service();
+        using var t = new TesseractRecognizer(null, svc);
+        Assert.Equal(["eng", "deu"], t.Languages);
+        using var img = InventedTables.Line("Alpha", 30f);
+        await t.RecognizeAsync(img, OcrLayout.Block, "deu", CancellationToken.None); // loads the deu engine
+        Assert.Equal(1, t.EngineCount);
+
+        var hold = await t.HoldGateAsync();   // a running read
+        var remove = svc.RemoveAsync("deu");
+        await Task.Delay(300);
+        Assert.False(remove.IsCompleted);     // waits for the read
+        Assert.True(File.Exists(Path.Combine(fx.Folder, "deu.traineddata")));
+        hold.Dispose();
+        await remove.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, t.EngineCount);       // the deu engine was disposed
+        Assert.False(File.Exists(Path.Combine(fx.Folder, "deu.traineddata")));
+        Assert.Equal(["eng"], t.Languages);
+        await Assert.ThrowsAsync<OcrUnavailableException>(() => t.RecognizeAsync(img, OcrLayout.Block, "deu", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Bundled_wins_over_a_downloaded_file_of_the_same_code()
+    {
+        using var fx = new OcrDownloadsFixture();
+        fx.Install();                                         // downloaded deu
+        var bundled = Path.Combine(fx.Root, "tessdata");
+        Directory.CreateDirectory(bundled);
+        File.Copy(OcrDownloadsFixture.BundledEng, Path.Combine(bundled, "deu.traineddata")); // bundled deu too
+        using var svc = fx.Service();
+        using var t = new TesseractRecognizer(bundled, svc);
+        Assert.Equal(["deu"], t.Languages);                   // listed once
+        Assert.Empty(t.DownloadedLanguages);
+        // A removal does not touch the bundled engine.
+        using var img = InventedTables.Line("Alpha", 30f);
+        await t.RecognizeAsync(img, OcrLayout.Block, "deu", CancellationToken.None);
+        await svc.RemoveAsync("deu");
+        Assert.Equal(1, t.EngineCount);
+        Assert.Equal(["deu"], t.Languages);
+    }
 }

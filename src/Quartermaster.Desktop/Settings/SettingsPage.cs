@@ -11,6 +11,15 @@ public abstract class SettingsPage : UserControl
 {
     public abstract string Title { get; }
 
+    /// <summary>The page's key for opening Settings on it (the lower-case title unless a page names its own).</summary>
+    public virtual string Key => Title.ToLowerInvariant();
+
+    /// <summary>A yes/no question to ask before the window closes (work still running), or null to close without asking.</summary>
+    public virtual string? CloseQuestion => null;
+
+    /// <summary>Stops the page's running work: the close question was answered Yes, or the window closes without asking.</summary>
+    public virtual void StopForClose() { }
+
     /// <summary>Shows the values of <paramref name="s"/> in the page's controls.</summary>
     public abstract void Load(Settings s);
 

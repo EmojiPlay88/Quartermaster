@@ -1,4 +1,5 @@
 using Quartermaster.Core;
+using Quartermaster.Documents;
 using Quartermaster.Desktop.Shell;
 
 namespace Quartermaster.Desktop.Preferences;
@@ -11,5 +12,7 @@ namespace Quartermaster.Desktop.Preferences;
 /// <param name="Dialogs">The dialogs (colour chooser).</param>
 /// <param name="GameDifficulty">Difficulty of the open game, or null when no game is open.</param>
 /// <param name="SetGameDifficulty">Switches the open game's difficulty (takes effect from the next run).</param>
+/// <param name="OcrLanguages">The app's OCR language downloads; when set, the OCR languages page is shown (last).</param>
 public sealed record SettingsContext(IReadOnlyList<(string Id, string Text)> ToolbarItems, string CacheRoot, Func<string?> OpenModuleCache,
-    Func<string, Task> Notify, IDialogs Dialogs, Func<Difficulty?>? GameDifficulty = null, Action<Difficulty>? SetGameDifficulty = null);
+    Func<string, Task> Notify, IDialogs Dialogs, Func<Difficulty?>? GameDifficulty = null, Action<Difficulty>? SetGameDifficulty = null,
+    OcrLanguageService? OcrLanguages = null);

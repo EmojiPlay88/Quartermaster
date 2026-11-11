@@ -64,7 +64,7 @@ public sealed partial class WorkbenchWindow
     {
         if (_scan != null) return _scan;
         _scanLoader = new ScanLoader(_s.Archive.OpenEntry, _s.Archive.Sha256);
-        var scan = new ScanPane(_s, ScanModel, _scanLoader, OcrEngine, _dialogs) { IsVisible = false };
+        var scan = new ScanPane(_s, ScanModel, _scanLoader, OcrEngine, _dialogs, OpenOcrLanguages) { IsVisible = false };
         _scan = scan;
         scan.DocumentChosen += i => ScanGuard(() =>
         {

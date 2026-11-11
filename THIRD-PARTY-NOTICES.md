@@ -51,7 +51,7 @@ All of the components below are used unmodified, as binaries. The licence texts 
 | Component | Where it is bundled | Licence | Text |
 |---|---|---|---|
 | Tesseract OCR 5.5.2 (https://github.com/tesseract-ocr/tesseract) | libtesseract / tesseract.dll | Apache-2.0 | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt) |
-| tessdata_fast `eng.traineddata` (https://github.com/tesseract-ocr/tessdata_fast) | `tessdata/` | Apache-2.0 | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt) |
+| tessdata_fast 4.1.0 (https://github.com/tesseract-ocr/tessdata_fast, tag 4.1.0): `eng.traineddata` is bundled; further languages are downloaded on request from the same tag, unmodified | `tessdata/` (`eng`); downloaded files go to the app data folder | Apache-2.0 | [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt) |
 | Leptonica (https://github.com/DanBloomberg/leptonica), Copyright (C) 2001-2020 Leptonica | libleptonica / leptonica.dll | BSD-2-Clause (Leptonica form) | [`LICENSES/BSD-2-Clause-Leptonica.txt`](LICENSES/BSD-2-Clause-Leptonica.txt) |
 | libjpeg-turbo and the IJG JPEG library (libjpeg, libturbojpeg, jpeg62) | all three OSes | IJG, BSD-3-Clause, zlib | [`LICENSES/libjpeg-turbo-LICENSE.md`](LICENSES/libjpeg-turbo-LICENSE.md), [`LICENSES/libjpeg-turbo-README-ijg.txt`](LICENSES/libjpeg-turbo-README-ijg.txt) (this software is based in part on the work of the Independent JPEG Group) |
 | LibTIFF (libtiff, tiff.dll) | all three OSes | LibTIFF licence (BSD-style) | [`LICENSES/libtiff.txt`](LICENSES/libtiff.txt) |

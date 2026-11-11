@@ -10,7 +10,7 @@ namespace Quartermaster.Desktop.Tests;
 public sealed class OcrPanelTests
 {
     /// <summary>Scripted engine: Block reads return <see cref="Words"/>, single-line cell reads return <see cref="CellText"/>.</summary>
-    sealed class FakeOcr : IOcrRecognizer
+    class FakeOcr : IOcrRecognizer
     {
         public string Name => "Fake";
         public int MaxImageDimension => 10000;
@@ -30,6 +30,13 @@ public sealed class OcrPanelTests
             if (Throw != null) throw Throw;
             return layout == OcrLayout.Block ? Words : [new OcrWord(CellText, gray.Width * 0.3, gray.Height * 0.3, gray.Width * 0.4, gray.Height * 0.4)];
         }
+    }
+
+    sealed class ListOcr : FakeOcr, IOcrLanguageList
+    {
+        public event Action? LanguagesChanged;
+        public string DisplayName(string language) => language switch { "eng" => "English", "deu" => "German", "fra" => "French", _ => language };
+        public void Change(params string[] langs) { Languages = langs; LanguagesChanged?.Invoke(); }
     }
 
     /// <summary>2 rows x 3 columns of invented numbers, words 24 px high; optionally without the cell in row 1, column 1.</summary>
@@ -59,7 +66,8 @@ public sealed class OcrPanelTests
 
     sealed class Rig : IDisposable
     {
-        public FakeOcr Engine = new();
+        public FakeOcr Engine;
+        public int OpenCalls;
         public FakeDialogs Dialogs = new();
         public ScanSessionModel Model = new();
         public SKBitmap Bmp = Image();
@@ -71,10 +79,11 @@ public sealed class OcrPanelTests
         public bool NoTarget;
         public List<(string Tsv, ScanSource Source, int Page)> Imports = new();
 
-        public Rig(Action<FakeOcr>? setup = null)
+        public Rig(Action<FakeOcr>? setup = null, bool open = false, bool list = false)
         {
+            Engine = list ? new ListOcr() : new FakeOcr();
             setup?.Invoke(Engine);
-            Panel = new OcrPanel(Engine, Model, Dialogs) { Target = () => NoTarget ? null : new OcrTarget(Bmp, Region, Source, Page) };
+            Panel = new OcrPanel(Engine, Model, Dialogs, open ? () => { OpenCalls++; return Task.CompletedTask; } : null) { Target = () => NoTarget ? null : new OcrTarget(Bmp, Region, Source, Page) };
             Panel.ImportRequested += (t, s, p) => Imports.Add((t, s, p));
             Win = new Window { Width = 500, Height = 600, Content = Panel };
             Win.Show();
@@ -90,7 +99,7 @@ public sealed class OcrPanelTests
     {
         using var rig = new Rig();
         Assert.Equal("Drag a region on the image (or read the whole image), then Read text.", rig.Panel.StatusText);
-        Assert.Equal("eng", rig.Panel.LanguageBox.SelectedItem);
+        Assert.Equal("eng", rig.Panel.SelectedLanguage);
         await rig.Panel.ReadTextAsync();
         Assert.Equal(["10", "11", "12"], rig.Panel.Cells[0]);
         Assert.Equal(["13", "14", "15"], rig.Panel.Cells[1]);
@@ -340,5 +349,90 @@ public sealed class OcrPanelTests
         Assert.Equal("Reading text in the whole image…", rig.Panel.StatusText);
         Assert.False(rig.Panel.IsReading);
         Assert.False(rig.Panel.HasGrid);
+    }
+
+    static string[] Texts(OcrPanel p) => p.LanguageBox.Items.Select(i => i!.ToString()!).ToArray();
+
+    [AvaloniaFact]
+    public async Task Dropdown_shows_display_names_and_reads_with_tags()
+    {
+        using var rig = new Rig(list: true);
+        Assert.Equal(["English", "German"], Texts(rig.Panel));
+        rig.Panel.LanguageBox.SelectedIndex = 1;
+        Assert.Equal("deu", rig.Panel.SelectedLanguage);
+        await rig.Panel.ReadTextAsync();
+        Assert.Equal(["deu"], rig.Engine.Languages_Used.Distinct());
+    }
+
+    [AvaloniaFact]
+    public void Engine_without_language_list_shows_tags()
+    {
+        using var rig = new Rig();
+        Assert.Equal(["eng", "deu"], Texts(rig.Panel));
+    }
+
+    [AvaloniaFact]
+    public void More_languages_item_is_last_and_opens_settings()
+    {
+        using var rig = new Rig(open: true, list: true);
+        Assert.Equal(["English", "German", "More languages…"], Texts(rig.Panel));
+        rig.Panel.LanguageBox.SelectedIndex = 1;
+        rig.Panel.LanguageBox.SelectedIndex = 2;
+        Assert.Equal(1, rig.OpenCalls);
+        Assert.Equal("deu", rig.Panel.SelectedLanguage);
+        Assert.Equal(1, rig.Panel.LanguageBox.SelectedIndex);
+    }
+
+    [AvaloniaFact]
+    public async Task LanguagesChanged_refreshes_list_and_keeps_selection()
+    {
+        using var rig = new Rig(open: true, list: true);
+        rig.Panel.LanguageBox.SelectedIndex = 1;
+        ((ListOcr)rig.Engine).Change("eng", "deu", "fra");
+        await Task.Delay(50);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["English", "German", "French", "More languages…"], Texts(rig.Panel));
+        Assert.Equal("deu", rig.Panel.SelectedLanguage);
+        Assert.Equal(0, rig.OpenCalls);
+    }
+
+    [AvaloniaFact]
+    public void Removing_selected_language_selects_default()
+    {
+        using var rig = new Rig(list: true);
+        rig.Panel.LanguageBox.SelectedIndex = 1;
+        ((ListOcr)rig.Engine).Change("eng", "fra");
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.Equal("eng", rig.Panel.SelectedLanguage);
+    }
+
+    [AvaloniaFact]
+    public void No_more_languages_item_without_callback()
+    {
+        using var rig = new Rig(list: true);
+        Assert.DoesNotContain("More languages…", Texts(rig.Panel));
+    }
+
+    [AvaloniaFact]
+    public void Empty_engine_still_offers_more_languages()
+    {
+        using var rig = new Rig(e => e.Languages = [], open: true, list: true);
+        Assert.Equal("Fake OCR has no data.", rig.Panel.StatusText);
+        Assert.True(rig.Panel.StatusIsProblem);
+        Assert.False(rig.Panel.ReadButton.IsEnabled);
+        Assert.True(rig.Panel.LanguageBox.IsEnabled);
+        Assert.Equal(["More languages…"], Texts(rig.Panel));
+        rig.Panel.LanguageBox.SelectedIndex = 0;
+        Assert.Equal(1, rig.OpenCalls);
+        Assert.Equal("", rig.Panel.SelectedLanguage);
+    }
+
+    [AvaloniaFact]
+    public void Language_refresh_from_another_thread_is_posted()
+    {
+        using var rig = new Rig(list: true);
+        Task.Run(() => ((ListOcr)rig.Engine).Change("eng", "deu", "fra")).Wait();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["English", "German", "French"], Texts(rig.Panel));
     }
 }

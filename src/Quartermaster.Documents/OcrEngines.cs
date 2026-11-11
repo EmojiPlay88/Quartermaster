@@ -7,7 +7,9 @@ namespace Quartermaster.Documents;
 /// Picks the OCR engine at run time (port stage 4a, Scope rulings). Not Windows: Tesseract. Windows: Windows OCR, loaded from
 /// the ocr-windows/ plugin folder, unless <see cref="EngineVariable"/> is "tesseract", the plugin fails to load, or Windows has
 /// no OCR language installed; then Tesseract (bundled English) and one log line. "windows" forces Windows OCR even with no
-/// language, so its unavailable message shows.
+/// language, so its unavailable message shows. With the app's language download service (stage 4c): Windows OCR with at least one
+/// language becomes an <see cref="OcrRouter"/> (Windows languages to Windows OCR, downloaded ones to Tesseract), and every Tesseract
+/// fallback also lists the downloads. "windows" still means Windows OCR only.
 /// </summary>
 public static class OcrEngines
 {
@@ -30,14 +32,16 @@ public static class OcrEngines
 
     private static readonly ConcurrentDictionary<string, PluginEntry> Loaded = new(StringComparer.OrdinalIgnoreCase);
 
-    public static IOcrRecognizer Create(string? baseDir = null, Action<string>? log = null)
+    public static IOcrRecognizer Create(string? baseDir = null, Action<string>? log = null, OcrLanguageService? downloads = null)
     {
         var dir = baseDir ?? AppContext.BaseDirectory;
         return Choose(OperatingSystem.IsWindows(), Environment.GetEnvironmentVariable(EngineVariable),
-            () => LoadWindows(dir, log), () => new TesseractRecognizer(), log);
+            () => LoadWindows(dir, log), () => new TesseractRecognizer(null, downloads), log, downloads);
     }
 
-    internal static IOcrRecognizer Choose(bool isWindows, string? engineVariable, Func<IOcrRecognizer?> loadWindows, Func<IOcrRecognizer> tesseract, Action<string>? log)
+    /// <param name="downloads">When set, Windows OCR with a language is wrapped in an <see cref="OcrRouter"/> whose Tesseract lists these downloads.</param>
+    internal static IOcrRecognizer Choose(bool isWindows, string? engineVariable, Func<IOcrRecognizer?> loadWindows, Func<IOcrRecognizer> tesseract, Action<string>? log,
+        OcrLanguageService? downloads = null)
     {
         if (!isWindows) return tesseract();
         var asked = engineVariable?.Trim();
@@ -54,6 +58,8 @@ public static class OcrEngines
             log?.Invoke("OCR: Windows has no OCR language installed; using Tesseract.");
             return tesseract();
         }
+        if (downloads is not null && windows.Languages.Count > 0 && !string.Equals(asked, "windows", StringComparison.OrdinalIgnoreCase))
+            return new OcrRouter(windows, new TesseractRecognizer(null, downloads));
         return windows;
     }
 

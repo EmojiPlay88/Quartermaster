@@ -58,12 +58,12 @@ public sealed class ScanPane : UserControl, IDisposable
     /// <summary>Test seam: replaces <see cref="ScanLoader.LoadAsync"/>.</summary>
     internal Func<ScanSource, int, CancellationToken, Task<ScanImage>>? LoadOverride { get; set; }
 
-    public ScanPane(ModuleSession s, ScanSessionModel model, ScanLoader loader, IOcrRecognizer ocr, IDialogs dialogs)
+    public ScanPane(ModuleSession s, ScanSessionModel model, ScanLoader loader, IOcrRecognizer ocr, IDialogs dialogs, Func<Task>? openOcrLanguages = null)
     {
         _s = s;
         _model = model;
         _loader = loader;
-        _ocr = new OcrPanel(ocr, model, dialogs);
+        _ocr = new OcrPanel(ocr, model, dialogs, openOcrLanguages);
 
         var primary = ShortcutGestures.IsMac ? "Cmd" : "Ctrl";
         ToolTip.SetTip(PrevButton, "Previous page");
