@@ -19,6 +19,7 @@ public partial class MainWindow
     GridMode? _appliedGrid;
     Action<Settings>? _onSettingsChanged;
     bool _settingsOpen;
+    SettingsWindow? _settingsWin;   // the open settings window (null while closed)
 
     /// <summary>The settings of this window (<c>settings.json</c> under the layout root, the WinForms file).</summary>
     public SettingsStore SettingsStore { get; }
@@ -137,18 +138,39 @@ public partial class MainWindow
                 else _phases?.SetDifficulty(d);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("set difficulty: " + ex.Message); }
-        });
+        },
+        OcrLanguages);
 
-    /// <summary>Tools > Settings (Ctrl+,): the settings window over the store; afterwards a failed save is shown, as WinForms.</summary>
-    public async Task ShowSettingsAsync()
+    /// <summary>Tools > Settings (Ctrl+,): the settings window on its first page.</summary>
+    public Task ShowSettingsAsync() => ShowSettingsAsync(null);
+
+    /// <summary>
+    /// Tools > Settings: the settings window over the store, on the page keyed <paramref name="startPage"/> (null = the first page, as WinForms);
+    /// afterwards a failed save is shown, as WinForms. While Settings is open, a call brings it to the front on that page instead of a second window.
+    /// </summary>
+    public async Task ShowSettingsAsync(string? startPage)
     {
-        if (_settingsOpen) return;
+        if (_settingsOpen)
+        {
+            if (_settingsWin is { } open)
+            {
+                try
+                {
+                    if (startPage != null) open.SelectPage(startPage);
+                    open.Activate();
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("settings: " + ex.Message); }
+            }
+            return;
+        }
         _settingsOpen = true;
         try
         {
             SettingsWindow? win = null;
             var keyboard = new KeyboardPage(_router.Registry, _dialogs, () => win);
             win = new SettingsWindow(SettingsStore.Current, SettingsStore.Save, SettingsWindow.StandardPages(SettingsCtx(), keyboard), () => SettingsStore.Current, _dialogs);
+            if (startPage != null) win.SelectPage(startPage);
+            _settingsWin = win;
             if (ShowSettingsHook is { } hook) await hook(win);
             else await win.ShowDialog(this);
         }
@@ -158,7 +180,11 @@ public partial class MainWindow
             ShowError(ex.Message);
             return;
         }
-        finally { _settingsOpen = false; }
+        finally
+        {
+            _settingsOpen = false;
+            _settingsWin = null;
+        }
         if (SettingsStore.LastSaveError is { } err) ShowError("The settings could not be saved: " + err);
     }
 }

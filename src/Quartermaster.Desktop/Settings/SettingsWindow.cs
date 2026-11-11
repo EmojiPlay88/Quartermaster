@@ -19,6 +19,7 @@ public sealed class SettingsWindow : Window
     readonly Func<Settings>? _latest;
     readonly IDialogs? _dialogs;
     Settings _current;
+    bool _closeConfirmed, _askingClose;
 
     public Button OkButton { get; } = new() { Name = nameof(OkButton), Content = "OK", Width = 80, IsDefault = true, HorizontalContentAlignment = HorizontalAlignment.Center };
     public Button CancelButton { get; } = new() { Name = nameof(CancelButton), Content = "Cancel", Width = 80, IsCancel = true, HorizontalContentAlignment = HorizontalAlignment.Center };
@@ -73,6 +74,58 @@ public sealed class SettingsWindow : Window
         if (i >= 0 && i < _pages.Count) _tabs.SelectedIndex = i;
     }
 
+    /// <summary>Shows the page with this <see cref="SettingsPage.Key"/>; false (nothing changes) when there is none.</summary>
+    public bool SelectPage(string key)
+    {
+        for (var i = 0; i < _pages.Count; i++)
+        {
+            if (!string.Equals(_pages[i].Key, key, StringComparison.OrdinalIgnoreCase)) continue;
+            SelectPage(i);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>A page with running work asks first (default No); Yes stops the work and closes. A close the user did not start
+    /// (owner or app closing) stops the work without asking.</summary>
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel || _closeConfirmed) return;
+        var busy = _pages.Where(p => p.CloseQuestion != null).ToList();
+        if (busy.Count == 0) return;
+        if (e.CloseReason != WindowCloseReason.WindowClosing || _dialogs == null)
+        {
+            StopForClose(busy);
+            return;
+        }
+        e.Cancel = true;
+        if (!_askingClose) _ = AskCloseAsync(busy);
+    }
+
+    async Task AskCloseAsync(IReadOnlyList<SettingsPage> busy)
+    {
+        _askingClose = true;
+        try
+        {
+            if (!await _dialogs!.AskYesNoAsync(this, busy[0].CloseQuestion ?? "", "Settings", defaultNo: true)) return;
+            StopForClose(busy);
+            _closeConfirmed = true;
+            Close();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("settings close: " + ex); }
+        finally { _askingClose = false; }
+    }
+
+    static void StopForClose(IEnumerable<SettingsPage> pages)
+    {
+        foreach (var p in pages)
+        {
+            try { p.StopForClose(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("settings close: " + ex.Message); }
+        }
+    }
+
     public Settings CollectForTest() => Collect(_current);
 
     Settings Collect(Settings from) => _pages.Aggregate(from, (s, p) => p.Collect(s));
@@ -115,9 +168,15 @@ public sealed class SettingsWindow : Window
         }
     }
 
-    /// <summary>The pages in WinForms order; <paramref name="keyboard"/> is the Keyboard page.</summary>
-    public static IReadOnlyList<SettingsPage> StandardPages(SettingsContext ctx, SettingsPage keyboard) => new SettingsPage[]
+    /// <summary>The pages in WinForms order; <paramref name="keyboard"/> is the Keyboard page. OCR languages (no WinForms counterpart) comes last,
+    /// when the context has the app's language service.</summary>
+    public static IReadOnlyList<SettingsPage> StandardPages(SettingsContext ctx, SettingsPage keyboard)
     {
-        new GeneralPage(), new GamePage(ctx), new DisplayPage(ctx), new MapPage(), new DiceLogPage(), new ToolbarPage(ctx.ToolbarItems), keyboard, new FoldersPage(ctx),
-    };
+        var pages = new List<SettingsPage>
+        {
+            new GeneralPage(), new GamePage(ctx), new DisplayPage(ctx), new MapPage(), new DiceLogPage(), new ToolbarPage(ctx.ToolbarItems), keyboard, new FoldersPage(ctx),
+        };
+        if (ctx.OcrLanguages is { } langs) pages.Add(new OcrLanguagesPage(langs));
+        return pages;
+    }
 }

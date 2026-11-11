@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Quartermaster.Documents.Tests" />
+    <InternalsVisibleTo Include="Quartermaster.Desktop.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

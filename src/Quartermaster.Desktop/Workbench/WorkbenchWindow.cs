@@ -43,6 +43,10 @@ public sealed partial class WorkbenchWindow : Window
     readonly Func<Task> _newPack, _openPack;
     /// <summary>The OCR engine the scan pane uses (WorkbenchWindow.Scans.cs); null = the platform's choice.</summary>
     readonly IOcrRecognizer? _ocr;
+
+    /// <summary>Opens Settings on the OCR languages page (the OCR panel's "More languages…"); null when the window was made without a main window.</summary>
+    internal Func<Task>? OpenOcrLanguages { get; }
+
     readonly TabItem _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage, _visibilityPage;
     readonly Grid _split = new() { ColumnDefinitions = new ColumnDefinitions("40*,4,60*") };
     readonly ListBox _issues = new() { SelectionMode = SelectionMode.Single };
@@ -77,8 +81,9 @@ public sealed partial class WorkbenchWindow : Window
     internal void UpdateSearchSplitter() =>
         SearchSplitter.IsVisible = LeftPane.Children.Any(c => Grid.GetRow(c) == 2 && c.IsVisible);
 
-    public WorkbenchWindow(ModuleSession s, IDialogs dialogs, Func<Task> newPack, Func<Task> openPack, IOcrRecognizer? ocr = null)
+    public WorkbenchWindow(ModuleSession s, IDialogs dialogs, Func<Task> newPack, Func<Task> openPack, IOcrRecognizer? ocr = null, Func<Task>? openOcrLanguages = null)
     {
+        OpenOcrLanguages = openOcrLanguages;
         _s = s;
         _dialogs = dialogs;
         _newPack = newPack;
