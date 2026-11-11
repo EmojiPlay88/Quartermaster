@@ -346,6 +346,13 @@ public sealed class LauncherWindow : Window
         Close();
     }
 
+    /// <summary>Completes <see cref="Result"/> with <paramref name="request"/> and closes, as a Play offline choice does (tests drive the loop with it).</summary>
+    internal void Choose(LaunchRequest request)
+    {
+        _result.TrySetResult(request);
+        Close();
+    }
+
     // ---------- shared look (also the Play offline window) ----------
 
     static readonly IBrush LinkBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x66, 0xCC));

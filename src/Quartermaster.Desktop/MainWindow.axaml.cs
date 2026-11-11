@@ -54,7 +54,8 @@ public partial class MainWindow : Window
     bool _recoveredAutosave;   // the open game came from an autosave file; Save goes to Save As
     bool _dirty;
     bool _historyRefreshQueued;
-    bool _closeConfirmed, _closeAsking;
+    bool _closeConfirmed, _closeAsking, _closed;
+    Task? _closeQuestion;   // the close questions being asked (Back to launcher waits for them)
     readonly string _layoutRoot;
 
     /// <summary>The app's window: real dialogs, the default cache and remembered-rules folders.</summary>
@@ -169,6 +170,7 @@ public partial class MainWindow : Window
 
         CloseSession();
         _session = next;
+        OpenedModulePath = path;
         ReportSettingsProblems(next);
         _savePath = null;
         _recoveredAutosave = false;
@@ -366,6 +368,9 @@ public partial class MainWindow : Window
         Item(file, "Save Rules Pac&k", () => SaveRulesPack(false), gate: "file.saveRules");
         Item(file, "Save Rules Pack A&s...", () => SaveRulesPack(true), gate: "file.saveRulesAs");
         file.Items.Add(new Separator());
+        // WinForms: shown only while a launcher is there to go back to (the id is CommandAvailability.BackToLauncher, not gated).
+        _backToLauncherItem = Item(file, "&Back to launcher", () => RunAsync(BackToLauncherAsync), gate: CommandAvailability.BackToLauncher);
+        _backToLauncherItem.IsVisible = LauncherAvailable;
         Item(file, "E&xit", Close);
 
         // Edit (MainForm.History): Undo / Redo, captions follow the history ("&Undo Move …"); then Step Back.
@@ -594,7 +599,9 @@ public partial class MainWindow : Window
     {
         var path = await _dialogs.OpenFileAsync(this, "Open Module", new[] { ModuleFilter, AllFiles });
         if (path == null || !await ConfirmDiscardAsync() || !await ConfirmRulesSavedAsync()) return;
-        if (OpenModule(path)) await ChooseAndStartAsync(preselectNew: false);
+        if (!OpenModule(path)) return;
+        NoteModuleOpened(path);
+        await ChooseAndStartAsync(preselectNew: false);
     }
 
     async Task NewGameAsync()
@@ -637,6 +644,7 @@ public partial class MainWindow : Window
         var path = await _dialogs.OpenFileAsync(this, autosaves ? "Open Autosave" : "Open Game", new[] { SaveFilter, AllFiles }, start);
         if (path == null || !ReferenceEquals(s, _session)) return;   // the module changed while the picker was open
         OpenGame(path);
+        NoteRecentSave(path);
     }
 
     async Task SaveGameAsync(bool saveAs)
@@ -660,6 +668,7 @@ public partial class MainWindow : Window
             }
         }
         SaveGame(path);
+        NoteRecentSave(path);
     }
 
     // ---------- rules packs ----------
@@ -737,12 +746,13 @@ public partial class MainWindow : Window
         {
             // Dialogs are asynchronous: keep the window, ask, and close again when everything is answered.
             e.Cancel = true;
-            if (!_closeAsking) AskThenClose(DiscardQuestion());
+            if (!_closeAsking) _closeQuestion = AskThenCloseAsync(DiscardQuestion());
         }
         base.OnClosing(e);
     }
 
-    async void AskThenClose(string? question)
+    /// <summary>Asks the close questions; never throws. No (or a failure) keeps the window and forgets a Back to launcher request.</summary>
+    async Task AskThenCloseAsync(string? question)
     {
         _closeAsking = true;
         bool yes;
@@ -750,7 +760,7 @@ public partial class MainWindow : Window
         try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption, defaultNo: true)) && await ConfirmRulesSavedAsync(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("close question: " + ex); yes = false; }
         finally { _closeAsking = false; }
-        if (!yes) return;
+        if (!yes) { _backToLauncher = false; return; }
         _closeConfirmed = true;
         Dispatcher.UIThread.Post(Close);
     }
@@ -768,6 +778,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _closed = true;
+        if (_backToLauncher) ReturnToLauncher = true;   // the close really completed
         _dice.Stop();
         StopSettings();
         CloseSession();
