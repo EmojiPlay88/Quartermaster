@@ -203,9 +203,12 @@ public sealed class RulebookIndex
                         catch (TimeoutException) { } // check whether a page finished meanwhile
                     }
                 }
-                catch (OperationCanceledException) when (!work.IsCompleted)
+                catch (OperationCanceledException)
                 {
-                    abandoned = work;
+                    // The extraction watches the same token and may have ended (faulted) a moment before the wait noticed:
+                    // observe it now, or keep it as abandoned (it owns the streams until it ends).
+                    if (work.IsCompleted) _ = work.Exception;
+                    else abandoned = work;
                     throw;
                 }
                 if (stalled)
