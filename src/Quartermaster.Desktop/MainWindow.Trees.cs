@@ -68,6 +68,9 @@ public partial class MainWindow
                 if (!_applyingSplit && e.Property == RowDefinition.HeightProperty) _layout.SaveLeftSplit(LeftSplit);
             };
         ModuleTreeHost.NodeActivated += n => Guard(() => OnTreeNodeActivated(n));
+        // WinForms MainForm: activating a table or formula opens the workbench at it.
+        TablesTreeHost.TableActivated += id => Guard(() => ShowWorkbenchItem(w => w.ShowTable(id)));
+        TablesTreeHost.FormulaActivated += id => Guard(() => ShowWorkbenchItem(w => w.ShowFormula(id)));
 
         _logState = new PanelDockState("log", () => PanelDockState.LogDefault(MainRect()));
         _logFloat = new PanelFloat(_logState, "Log", LogHost, () => this, () => ScreensProvider?.Invoke() ?? PanelFloat.ScreensOf(this));

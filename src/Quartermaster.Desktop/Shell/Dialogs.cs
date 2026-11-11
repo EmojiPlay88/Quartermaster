@@ -35,8 +35,9 @@ public interface IDialogs
     /// <summary>A path to save to (with <paramref name="defaultExtension"/> added when the name has none), or null when cancelled.</summary>
     Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null);
 
-    /// <summary>A Yes/No question with No as the default (WinForms MessageBoxDefaultButton.Button2). True = Yes.</summary>
-    Task<bool> AskYesNoAsync(Window owner, string message, string caption);
+    /// <summary>A Yes/No question, No focused unless <paramref name="defaultNo"/> is false (WinForms MessageBoxDefaultButton.Button2, used by delete
+    /// confirmations; the safer default). True = Yes.</summary>
+    Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = true);
 
     /// <summary>A Yes / No / Cancel question (WinForms MessageBoxButtons.YesNoCancel, Yes focused). Yes = true, No = false, Cancel = null.</summary>
     Task<bool?> AskYesNoCancelAsync(Window owner, string message, string caption);
@@ -78,6 +79,28 @@ public interface IDialogs
     /// <summary>The Ledger tab editor (WinForms EditTabsDialog) opened at user tab <paramref name="select"/>, or with a fresh tab added and
     /// selected when <paramref name="addNew"/> (the "+" tab); the edited list, or null when cancelled.</summary>
     Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false);
+
+    /// <summary>The Columns dialog (WinForms ColumnsDialog): one key per line, opened on <paramref name="keys"/>; the trimmed non-blank keys, or null when cancelled.</summary>
+    Task<IReadOnlyList<string>?> AskColumnsAsync(Window owner, IReadOnlyList<string> keys);
+
+    /// <summary>The paste / import preview (WinForms PasteTableDialog) of <paramref name="text"/>; the parsed grid, or null when cancelled.
+    /// <paramref name="tsvOnly"/> is a scanned grid: split on tabs only, OK refused while <see cref="Quartermaster.Rules.Tables.TablePaste.Problem"/> says so.</summary>
+    Task<Quartermaster.Rules.Tables.PastedGrid?> PasteTableAsync(Window owner, string text, string? title = null, string? targetDescription = null, bool tsvOnly = false);
+
+    /// <summary>The "Make block" dialog (WinForms PhasesTab.BlockDialog): repeat count and label; null when cancelled.</summary>
+    Task<(int Count, string Label)?> AskBlockAsync(Window owner);
+
+    /// <summary>"Where should the scanned rows go?": true = replace <paramref name="selectedTable"/>, false = a new table, null = cancel.</summary>
+    Task<bool?> AskImportTargetAsync(Window owner, string selectedTable);
+
+    /// <summary>The clipboard's text, or null when it holds none or is unavailable.</summary>
+    Task<string?> GetClipboardTextAsync(Window owner);
+
+    /// <summary>Puts <paramref name="text"/> on the clipboard; never throws (a busy clipboard is only traced).</summary>
+    Task SetClipboardTextAsync(Window owner, string text);
+
+    /// <summary>An information box with an OK button (WinForms MessageBoxIcon.Information).</summary>
+    Task ShowInfoAsync(Window owner, string message, string caption);
 
     /// <summary>Opens a local file (an extracted HTML document) in the system browser through <paramref name="owner"/>'s launcher (the
     /// main window's when null). Returns at once; a failed launch is only traced.</summary>
@@ -125,8 +148,52 @@ public sealed class Dialogs : IDialogs
 
     static FilePickerFileType Type(FileFilter f) => new(f.Name) { Patterns = f.Patterns.ToList() };
 
-    public Task<bool> AskYesNoAsync(Window owner, string message, string caption) =>
-        MessageBox.ShowAsync(owner, message, caption, yesNo: true);
+    public Task<bool> AskYesNoAsync(Window owner, string message, string caption, bool defaultNo = true) =>
+        MessageBox.ShowAsync(owner, message, caption, yesNo: true, defaultNo);
+
+    public Task ShowInfoAsync(Window owner, string message, string caption) =>
+        MessageBox.ShowAsync(owner, message, caption, yesNo: false);
+
+    public Task<IReadOnlyList<string>?> AskColumnsAsync(Window owner, IReadOnlyList<string> keys) =>
+        new Workbench.ColumnsDialog(keys).ShowDialog<IReadOnlyList<string>?>(owner);
+
+    public Task<Quartermaster.Rules.Tables.PastedGrid?> PasteTableAsync(Window owner, string text, string? title = null, string? targetDescription = null, bool tsvOnly = false) =>
+        new Workbench.PasteTableDialog(text, title, targetDescription, tsvOnly).ShowDialog<Quartermaster.Rules.Tables.PastedGrid?>(owner);
+
+    public Task<(int Count, string Label)?> AskBlockAsync(Window owner) =>
+        new Workbench.BlockDialog().ShowDialog<(int Count, string Label)?>(owner);
+
+    public Task<bool?> AskImportTargetAsync(Window owner, string selectedTable) =>
+        new Workbench.ImportTargetDialog(selectedTable).ShowDialog<bool?>(owner);
+
+    public async Task<string?> GetClipboardTextAsync(Window owner)
+    {
+        try
+        {
+            var cb = TopLevel.GetTopLevel(owner)?.Clipboard;
+            return cb == null ? null : await Avalonia.Input.Platform.ClipboardExtensions.TryGetTextAsync(cb);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            System.Diagnostics.Trace.WriteLine("clipboard busy: " + ex.Message);
+            return null;
+        }
+    }
+
+    public async Task SetClipboardTextAsync(Window owner, string text)
+    {
+        try
+        {
+            if (TopLevel.GetTopLevel(owner)?.Clipboard is not { } cb) return;
+            var t = new Avalonia.Input.DataTransfer();
+            t.Add(Avalonia.Input.DataTransferItem.CreateText(text));
+            await cb.SetDataAsync(t);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            System.Diagnostics.Trace.WriteLine("clipboard busy: " + ex.Message);
+        }
+    }
 
     public Task ShowWarningAsync(Window owner, string message, string caption) =>
         MessageBox.ShowAsync(owner, message, caption, yesNo: false);
@@ -197,10 +264,10 @@ public sealed class Dialogs : IDialogs
     }
 }
 
-/// <summary>A small classic message box: the text, then OK (or Yes / No with No focused, as WinForms Button2 default).</summary>
+/// <summary>A small classic message box: the text, then OK (or Yes / No, Yes focused unless defaultNo, as WinForms Button1 / Button2).</summary>
 sealed class MessageBox : Window
 {
-    MessageBox(string message, string caption, bool yesNo, bool cancel = false)
+    MessageBox(string message, string caption, bool yesNo, bool cancel = false, bool defaultNo = true)
     {
         Title = caption;
         SizeToContent = SizeToContent.WidthAndHeight;
@@ -227,8 +294,9 @@ sealed class MessageBox : Window
         }
         else if (yesNo)
         {
-            Add("Yes", true);
-            focus = Add("No", false, isDefault: true, isCancel: true);
+            var yes = Add("Yes", true, isDefault: !defaultNo);
+            var no = Add("No", false, isDefault: defaultNo, isCancel: true);
+            focus = defaultNo ? no : yes;
         }
         else focus = Add("OK", true, isDefault: true, isCancel: true);
 
@@ -240,8 +308,8 @@ sealed class MessageBox : Window
         Opened += (_, _) => focus.Focus();
     }
 
-    public static async Task<bool> ShowAsync(Window owner, string message, string caption, bool yesNo) =>
-        await new MessageBox(message, caption, yesNo).ShowDialog<bool?>(owner) == true;
+    public static async Task<bool> ShowAsync(Window owner, string message, string caption, bool yesNo, bool defaultNo = true) =>
+        await new MessageBox(message, caption, yesNo, defaultNo: defaultNo).ShowDialog<bool?>(owner) == true;
 
     /// <summary>Yes / No / Cancel; closing the window counts as Cancel.</summary>
     public static Task<bool?> ShowYesNoCancelAsync(Window owner, string message, string caption) =>

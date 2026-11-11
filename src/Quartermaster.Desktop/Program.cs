@@ -86,7 +86,25 @@ static class Program
     {
         public Task<string?> OpenFileAsync(Avalonia.Controls.Window owner, string title, IReadOnlyList<FileFilter> filters) => Task.FromResult<string?>(null);
         public Task<string?> SaveFileAsync(Avalonia.Controls.Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null) => Task.FromResult<string?>(null);
-        public Task<bool> AskYesNoAsync(Avalonia.Controls.Window owner, string message, string caption) => Task.FromResult(false);
+        public Task<bool> AskYesNoAsync(Avalonia.Controls.Window owner, string message, string caption, bool defaultNo = true) => Task.FromResult(false);
+        public Task<IReadOnlyList<string>?> AskColumnsAsync(Avalonia.Controls.Window owner, IReadOnlyList<string> keys) => Task.FromResult<IReadOnlyList<string>?>(null);
+        /// <summary>A scanned grid (tsvOnly) is confirmed with the default checkboxes, as the WinForms smoke run; a pasted one is cancelled.</summary>
+        public Task<Quartermaster.Rules.Tables.PastedGrid?> PasteTableAsync(Avalonia.Controls.Window owner, string text, string? title = null, string? targetDescription = null, bool tsvOnly = false)
+        {
+            if (!tsvOnly) return Task.FromResult<Quartermaster.Rules.Tables.PastedGrid?>(null);
+            var g = Quartermaster.Rules.Tables.TablePaste.Parse(text, true, true, tsvOnly: true);
+            var ok = g.Cells.Count > 0 && Quartermaster.Rules.Tables.TablePaste.Problem(g, true) == null;
+            return Task.FromResult<Quartermaster.Rules.Tables.PastedGrid?>(ok ? g : null);
+        }
+        public Task<(int Count, string Label)?> AskBlockAsync(Avalonia.Controls.Window owner) => Task.FromResult<(int Count, string Label)?>(null);
+        public Task<bool?> AskImportTargetAsync(Avalonia.Controls.Window owner, string selectedTable) => Task.FromResult<bool?>(false);   // a new table
+        public Task<string?> GetClipboardTextAsync(Avalonia.Controls.Window owner) => Task.FromResult<string?>(null);
+        public Task SetClipboardTextAsync(Avalonia.Controls.Window owner, string text) => Task.CompletedTask;
+        public Task ShowInfoAsync(Avalonia.Controls.Window owner, string message, string caption)
+        {
+            Console.Error.WriteLine(message);
+            return Task.CompletedTask;
+        }
         public Task<bool?> AskYesNoCancelAsync(Avalonia.Controls.Window owner, string message, string caption) => Task.FromResult<bool?>(null);
         public Task<string?> AskTextAsync(Avalonia.Controls.Window owner, string title, string prompt, string initial) => Task.FromResult<string?>(null);
         public Task<IReadOnlyList<string>?> EditPropertySheetAsync(Avalonia.Controls.Window owner, string title,

@@ -357,6 +357,41 @@ public class RulebookSearchTests : IDisposable
     }
 
     [Fact]
+    public async Task Cancel_while_extractor_also_cancels_leaves_no_unobserved_exception()
+    {
+        // Closing during a build cancels the token the extraction also watches: whichever side notices first, the extraction's
+        // own exception must be observed (it used to reach the finalizer when the extraction finished first; PR #2 CI).
+        const string Tag = "rulebook-cancel-race-probe";
+        var unobserved = 0;
+        void OnUnobserved(object? _, UnobservedTaskExceptionEventArgs e)
+        {
+            if (e.Exception.Flatten().InnerExceptions.Any(x => x.Message == Tag)) Interlocked.Increment(ref unobserved);
+        }
+        RulebookIndex.TextExtractor waitsForCancel = (_, _, ct) =>
+        {
+            ct.WaitHandle.WaitOne();
+            throw new OperationCanceledException(Tag, ct);
+        };
+        TaskScheduler.UnobservedTaskException += OnUnobserved;
+        try
+        {
+            for (var i = 0; i < 60; i++)
+            {
+                using var cts = new CancellationTokenSource();
+                var build = RulebookIndex.BuildAsync("modC" + i, new[] { Doc("c.pdf", "C", Rules) }, null, cts.Token, null, new[] { "c.pdf" },
+                    waitsForCancel, TimeSpan.FromSeconds(30));
+                await Task.Delay(5);
+                cts.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => build);
+            }
+            await Task.Delay(100);   // let abandoned extractions end and their continuations observe them
+            for (var k = 0; k < 3; k++) { GC.Collect(); GC.WaitForPendingFinalizers(); }
+        }
+        finally { TaskScheduler.UnobservedTaskException -= OnUnobserved; }
+        Assert.Equal(0, unobserved);
+    }
+
+    [Fact]
     public async Task Index_SlowExtractor_PageEvery100ms_StallLimit300ms_Completes()
     {
         RulebookIndex.TextExtractor slow = (_, report, _) =>

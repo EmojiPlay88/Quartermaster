@@ -269,6 +269,7 @@ public sealed class ContextMenuTests : IDisposable
         Click(Item(view.OpenMenu!, "Delete"));
         var q = Assert.Single(_dialogs.Questions);
         Assert.Equal(("Delete " + PieceInfo.Name(St.Pieces[id]) + "?", "Quartermaster"), q);
+        Assert.Equal(new[] { true }, _dialogs.YesNoDefaultNo);   // delete confirmations default to No
         Assert.True(St.Pieces.ContainsKey(id));
 
         RightClick(window, at);

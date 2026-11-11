@@ -23,6 +23,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quartermaster.Ocr\Quartermaster.Ocr.csproj" />
     <ProjectReference Include="..\..\src\Quartermaster.Documents\Quartermaster.Documents.csproj" />
+    <ProjectReference Include="..\..\src\Quartermaster.OcrWindows\Quartermaster.OcrWindows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Quartermaster.Documents.Tests\InventedTables.cs" Link="InventedTables.cs" />
   </ItemGroup>
 
 </Project>

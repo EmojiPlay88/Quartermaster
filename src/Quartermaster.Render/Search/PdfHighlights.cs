@@ -60,13 +60,11 @@ public sealed class PdfHighlights : IDisposable
         try
         {
             var page = _doc.GetPage(pageNumber);
-            // PdfPig already puts letters in the displayed orientation (after /Rotate): Width/Height are the displayed size, the
-            // origin is bottom-left. Only an unrotated page can have a crop box that does not start at 0,0.
+            // PdfPig already puts letters in the displayed frame: after /Rotate and relative to the crop box's corner (whatever the
+            // rotation), origin bottom-left, with Width/Height the displayed (cropped) size. So no crop-box offset is added here.
             double w = page.Width, h = page.Height;
             if (w <= 0 || h <= 0) return null;
-            var rot = ((page.Rotation.Value % 360) + 360) % 360;
             double x0 = 0, y0 = 0;
-            if (rot == 0) { var box = page.CropBox.Bounds; x0 = box.Left; y0 = box.Bottom; }
 
             var raw = new StringBuilder();
             var rawToGlyph = new List<int>();

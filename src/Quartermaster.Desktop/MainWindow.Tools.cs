@@ -105,6 +105,7 @@ public partial class MainWindow
             if (ReferenceEquals(_inventoryWin, w)) _inventoryWin = null;
             if (ReferenceEquals(_notesWin, w)) _notesWin = null;
             if (ReferenceEquals(_diagWin, w)) _diagWin = null;
+            if (ReferenceEquals(_workbenchWin, w)) _workbenchWin = null;
         };
         w.Show(this);
     }
@@ -166,7 +167,8 @@ public partial class MainWindow
     /// <summary>A WinForms link label: blue, underlined, hand cursor.</summary>
     void ShowLinkStyle(bool link)
     {
-        SbMessage.Foreground = link ? new SolidColorBrush(Color.FromRgb(0, 0, 0xFF)) : null;
+        if (link) SbMessage.Foreground = new SolidColorBrush(Color.FromRgb(0, 0, 0xFF));
+        else SbMessage.ClearValue(TextBlock.ForegroundProperty);   // a null local value would hide the text
         SbMessage.TextDecorations = link ? TextDecorations.Underline : null;
         SbMessage.Cursor = link ? new Cursor(StandardCursorType.Hand) : null;
     }

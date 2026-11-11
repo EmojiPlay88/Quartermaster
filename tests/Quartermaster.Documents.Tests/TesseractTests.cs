@@ -123,4 +123,65 @@ public class TesseractTests
         var ex = await Assert.ThrowsAsync<OcrUnavailableException>(() => t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None));
         Assert.Equal("OCR could not be started on this computer: libtesseract missing", ex.Message);
     }
+
+    [Fact]
+    public async Task Read_after_timed_out_dispose_throws_object_disposed()
+    {
+        var t = new TesseractRecognizer { DisposeWait = TimeSpan.FromMilliseconds(50) };
+        using var img = InventedTables.Line("Hello");
+        var hold = await t.HoldGateAsync(); // a "running read" that outlasts Dispose
+        t.Dispose();                        // times out waiting for the gate, but must still refuse later reads
+        hold.Dispose();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Queued_reads_hold_no_pool_threads()
+    {
+        using var t = new TesseractRecognizer();
+        using var img = InventedTables.Line("Alpha", 30f);
+        var hold = await t.HoldGateAsync();
+        int before = ThreadPool.ThreadCount;
+        var reads = Enumerable.Range(0, 64).Select(_ => t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None)).ToArray();
+        await Task.Delay(400);
+        int grown = ThreadPool.ThreadCount - before;
+        Assert.True(grown <= 4, $"pool grew by {grown}");
+        var fresh = Task.Run(() => 1);
+        Assert.Same(fresh, await Task.WhenAny(fresh, Task.Delay(500)));
+        Assert.All(reads, r => Assert.False(r.IsCompleted));
+        hold.Dispose();
+        var all = await Task.WhenAll(reads);
+        Assert.Equal(64, all.Length);
+    }
+
+    [Fact]
+    public async Task Cancelled_queued_read_leaves_queue()
+    {
+        using var t = new TesseractRecognizer();
+        using var img = InventedTables.Line("Alpha", 30f);
+        var hold = await t.HoldGateAsync();
+        using var cts = new CancellationTokenSource();
+        var queued = t.RecognizeAsync(img, OcrLayout.Block, "eng", cts.Token);
+        Assert.False(queued.IsCompleted);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued);
+        hold.Dispose();
+        var words = await t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Contains(words, w => w.Text.Contains("Alpha"));
+    }
+
+    [Fact]
+    public async Task Last_read_frees_engines_after_timed_out_dispose()
+    {
+        using var release = new ManualResetEventSlim();
+        var t = new TesseractRecognizer(null, () => { release.Wait(); return Quartermaster.Documents.Tesseract.TessApiHandle.Create(); }) { DisposeWait = TimeSpan.FromMilliseconds(50) };
+        using var img = InventedTables.Line("Alpha", 30f);
+        var read = t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None);
+        await Task.Delay(300);   // the read owns the gate and sits in engine creation
+        t.Dispose();             // times out; the read is still running
+        release.Set();
+        await read;              // the running read may finish
+        Assert.Equal(0, t.EngineCount);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => t.RecognizeAsync(img, OcrLayout.Block, "eng", CancellationToken.None));
+    }
 }
