@@ -223,7 +223,7 @@ static class Program
         foreach (var w in warnings) Console.Error.WriteLine(w);
         if (startup.ScreenshotPath is not { } png || startup.ModulePath is not { } module)
         {
-            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules|phases|nextphase|stepback|formula|cheatsheet|batch|alerts|tree|floatlog|floatphases|tour]");
+            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules|phases|nextphase|stepback|formula|cheatsheet|batch|alerts|tree|floatlog|floatphases|tour|handover|players-page|settings-players|player-menu]");
             return 1;
         }
         if (Application.Current == null)
