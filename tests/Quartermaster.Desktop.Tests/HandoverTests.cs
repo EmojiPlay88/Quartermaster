@@ -394,6 +394,45 @@ public sealed class HandoverTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Guest_stop_while_up_restores_windows()
+    {
+        var w = Game();
+        var (ledger, chart) = OpenWindows(w);
+        ToCombat(w);
+        Assert.True(w.HandoverShowing);
+        Assert.False(ledger.IsVisible);
+        var h = w.Handover!;
+        w.Session!.EnterGuestMode();   // the game is not closing: its windows come back
+        Pump();
+        Assert.Null(w.HotSeat);
+        Assert.False(w.HandoverShowing);
+        Assert.Null(w.Handover);
+        Assert.False(h.IsVisible);
+        Assert.True(w.IsVisible);
+        Assert.True(ledger.IsVisible);
+        Assert.True(chart.IsVisible);
+        Assert.Same(w, ledger.Owner);
+    }
+
+    [AvaloniaFact]
+    public void Handover_closed_elsewhere_brings_main_window_back()
+    {
+        var w = Game();
+        var (ledger, _) = OpenWindows(w);
+        ToCombat(w);
+        var h = w.Handover!;
+        h.CloseForReal();   // as an application / OS shutdown closes it: not through DismissHandover, no CloseRequested
+        Pump();
+        Assert.False(h.IsVisible);
+        Assert.False(w.HandoverShowing);
+        Assert.Null(w.Handover);
+        Assert.True(w.IsVisible);
+        Assert.True(ledger.IsVisible);
+        Assert.Empty(w.Session!.ViewSides!);   // still public-only: the handover is pending in the controller
+        Assert.Equal(Ben.Id, w.HotSeat!.Pending?.Id);
+    }
+
+    [AvaloniaFact]
     public void Closing_module_while_up_dismisses()
     {
         var w = Game();

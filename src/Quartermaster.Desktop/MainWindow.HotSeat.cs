@@ -49,8 +49,11 @@ public partial class MainWindow
         _hotSeat = hs;
     }
 
-    /// <summary>The module is closing (or the window): the handover screen goes without bringing back the windows of the closed game.</summary>
-    void DestroyHotSeat()
+    /// <summary>
+    /// Hot-seat ends: the module is closing (or the window), and the handover screen goes without bringing back the windows of the closed
+    /// game; or the session became a guest (<paramref name="restoreWindows"/>, WinForms StopHotSeatForOnline), and the game's windows come back.
+    /// </summary>
+    void DestroyHotSeat(bool restoreWindows = false)
     {
         if (_hotSeat is { } hs)
         {
@@ -62,7 +65,7 @@ public partial class MainWindow
         _hotSeat = null;
         _onHandoverRequired = null;
         _onHandoverCancelled = _onCurrentChanged = null;
-        DismissHandover(restoreWindows: false);
+        DismissHandover(restoreWindows);
         _runsAfterHandover.Clear();
     }
 
@@ -72,7 +75,7 @@ public partial class MainWindow
         {
             if (!ReferenceEquals(_hotSeat, hs)) return;
             // A guest's view is the host's snapshot (WinForms StopHotSeatForOnline; stage 5c brings the online session): hot-seat stops for good.
-            if (_session?.IsGuest == true) { DestroyHotSeat(); return; }
+            if (_session?.IsGuest == true) { DestroyHotSeat(restoreWindows: true); return; }
             Guard(a);
         }
         if (Dispatcher.UIThread.CheckAccess()) Run();
@@ -182,6 +185,7 @@ public partial class MainWindow
         if (WindowState == WindowState.Maximized) h.WindowState = WindowState.Maximized;
         h.Continued += () => Guard(ContinueHandover);
         h.CloseRequested += () => Dispatcher.UIThread.Post(() => { if (!_closed) Close(); });
+        h.Closed += (_, _) => OnHandoverClosedElsewhere(h);
         _handover = h;
         h.Show();
         // The main window goes too.
@@ -189,6 +193,18 @@ public partial class MainWindow
         if (IsVisible) Hide();
         h.Activate();
         System.Diagnostics.Trace.WriteLine($"handover: {h.Message}");
+    }
+
+    /// <summary>
+    /// The screen closed without <see cref="DismissHandover"/> (an application or OS shutdown closes it for real): the main window and the
+    /// hidden windows come back, so nothing is left running invisibly and the main window's own close questions have a visible owner.
+    /// The view stays public-only (the hot-seat handover is still pending).
+    /// </summary>
+    void OnHandoverClosedElsewhere(HandoverWindow h)
+    {
+        if (!ReferenceEquals(_handover, h)) return;   // DismissHandover cleared it first: an ordinary dismiss
+        _handover = null;
+        Guard(() => DismissHandover());
     }
 
     void OnHiddenWindowClosed(object? sender, EventArgs e)
