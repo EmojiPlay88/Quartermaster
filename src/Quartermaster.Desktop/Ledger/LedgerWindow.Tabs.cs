@@ -50,6 +50,7 @@ public sealed partial class LedgerWindow
 
     // ---------- what tests and Task 5 read ----------
 
+    internal IReadOnlyList<string> TabKeys => _tabDefs.Select(t => t.Key).ToList();
     internal IReadOnlyList<string> TabTitles => _tabStrip.Items.OfType<TabStripItem>().Select(t => t.Content as string ?? "").ToList();
     internal TabStripItem PlusTabItem => _tabStrip.Items.OfType<TabStripItem>().Last();
     internal string? TabTip(int index) => _tabStrip.Items.OfType<TabStripItem>().ElementAtOrDefault(index) is { } t ? ToolTip.GetTip(t) as string : null;

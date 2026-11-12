@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Quartermaster.Desktop.Preferences;
+using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -139,7 +140,13 @@ public partial class MainWindow
             }
             catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("set difficulty: " + ex.Message); }
         },
-        OcrLanguages);
+        OcrLanguages,
+        GamePlayers,
+        p =>
+        {
+            try { SetGamePlayers(p); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("set players: " + ex.Message); }
+        });
 
     /// <summary>Tools > Settings (Ctrl+,): the settings window on its first page.</summary>
     public Task ShowSettingsAsync() => ShowSettingsAsync(null);
@@ -171,8 +178,8 @@ public partial class MainWindow
             win = new SettingsWindow(SettingsStore.Current, SettingsStore.Save, SettingsWindow.StandardPages(SettingsCtx(), keyboard), () => SettingsStore.Current, _dialogs);
             if (startPage != null) win.SelectPage(startPage);
             _settingsWin = win;
-            if (ShowSettingsHook is { } hook) await hook(win);
-            else await win.ShowDialog(this);
+            if (ShowSettingsHook is { } hook) await ModalTracker.Track(() => hook(win));   // stands for the modal window
+            else await win.ShowDialogTracked(this);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

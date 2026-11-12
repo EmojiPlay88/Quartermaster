@@ -188,7 +188,8 @@ public sealed class SettingsWindowTests : IDisposable
         Assert.Equal("Open a game first", p.Hint.Text);
         p.DifficultyBox.SelectedIndex = 0;
         Assert.Equal(Difficulty.SemiAuto, p.Collect(new Settings()).LastDifficulty);
-        Assert.Equal("Players: comes with multiplayer (stage 5)", p.PlayersNote.Text);
+        Assert.Equal("Open a game first", p.NoGameText.Text);
+        Assert.Same(p.NoGameText, p.PlayersBox.Child);
     }
 
     [AvaloniaFact]

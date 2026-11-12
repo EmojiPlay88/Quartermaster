@@ -10,21 +10,23 @@
     <shell:MainToolbar x:Name="ToolbarHost" DockPanel.Dock="Top" />
     <phases:PhaseStrip x:Name="StripHost" DockPanel.Dock="Top" />
     <shell:AlertBar x:Name="AlertBarHost" DockPanel.Dock="Top" />
-    <!-- Status bar as WinForms MainForm: module | message (springs) | tiling progress | turn | location (170) | zoom (50) -->
+    <!-- Status bar as WinForms MainForm: module | message (springs) | tiling progress | player (hot-seat) | turn | location (170) | zoom (50) -->
     <Border Classes="status" DockPanel.Dock="Bottom" BorderThickness="0,1,0,0">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto,170,50" Height="22">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,170,50" Height="22">
         <Border Grid.Column="0" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="0,0,1,0" Padding="4,0">
           <TextBlock x:Name="SbModule" Text="No module" VerticalAlignment="Center" />
         </Border>
         <TextBlock x:Name="SbMessage" Grid.Column="1" VerticalAlignment="Center" Margin="4,0" TextTrimming="CharacterEllipsis" />
         <ProgressBar x:Name="SbTiling" Grid.Column="2" Width="100" Height="14" Minimum="0" Maximum="100" IsVisible="False" Margin="4,0" />
-        <Border x:Name="SbTurnBox" Grid.Column="3" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0" IsVisible="False">
+        <!-- The hot-seat player switcher (WinForms _sbPlayer, "status.player"): its drop-down button is made in MainWindow.HotSeat -->
+        <Border x:Name="SbPlayerBox" Grid.Column="3" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" IsVisible="False" />
+        <Border x:Name="SbTurnBox" Grid.Column="4" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0" IsVisible="False">
           <TextBlock x:Name="SbTurn" Text="Turn 1" VerticalAlignment="Center" />
         </Border>
-        <Border Grid.Column="4" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0">
+        <Border Grid.Column="5" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0">
           <TextBlock x:Name="SbLocation" Text="-" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
         </Border>
-        <Border Grid.Column="5" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0">
+        <Border Grid.Column="6" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1,0,0,0" Padding="4,0">
           <TextBlock x:Name="SbZoom" Text="-" VerticalAlignment="Center" />
         </Border>
       </Grid>

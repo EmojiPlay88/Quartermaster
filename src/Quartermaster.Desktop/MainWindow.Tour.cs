@@ -48,7 +48,7 @@ public partial class MainWindow
     /// <summary>Starts the tour on the first visible step. Does nothing while a tour is already open or no game is open.</summary>
     internal void ShowTour()
     {
-        if (_tour != null || _session?.Game == null) return;
+        if (_tour != null || _session?.Game == null || HandoverShowing) return;   // never over the handover screen (which closes the tour)
         var steps = TourOverlay.VisibleSteps(ResolveTourTarget);
         if (steps.Count == 0) return;
         var tour = new TourOverlay(steps, ResolveTourTarget, _ => MarkTourShown());

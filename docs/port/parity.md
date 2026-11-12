@@ -7,13 +7,13 @@ How to read the columns:
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
 - **Linux**: ticked only for features verified by tests actually run on Linux. Stage 1 rows: verified by the headless tests in the CI workflow `.github/workflows/cross-platform.yml` on ubuntu-latest (green run 42510235329, 2026-11-08). Not yet opened on a real Linux desktop.
 - **Docs.Tests on Linux**: pass on ubuntu-latest in CI (run 42510235329).
-- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`, `docs/port/stage4a-mac-checklist.md`, `docs/port/stage4b-mac-checklist.md`, `docs/port/stage4c-mac-checklist.md`, `docs/port/stage5a-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
-- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (search, scan and OCR panes moved to 4a); 4a = Rules Workbench, rulebook search, scans and OCR; 4b = Settings; 4c = OCR language downloads; 5a = app lifecycle: launcher, Back to launcher, Interface Tour, About, update screens (this branch); 5 (5b and later) multiplayer, turn files, installing updates (stage 6); `-` = no plan yet or not applicable off Windows. The stage numbers after 4a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that say 4a name the Workbench, search, scans or OCR; rows that name Settings are 4b; rows that name OCR languages are 4c; rows that name the launcher, the tour, About or the update screens are 5a.
+- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`, `docs/port/stage4a-mac-checklist.md`, `docs/port/stage4b-mac-checklist.md`, `docs/port/stage4c-mac-checklist.md`, `docs/port/stage5a-mac-checklist.md`, `docs/port/stage5b-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
+- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (search, scan and OCR panes moved to 4a); 4a = Rules Workbench, rulebook search, scans and OCR; 4b = Settings; 4c = OCR language downloads; 5a = app lifecycle: launcher, Back to launcher, Interface Tour, About, update screens; 5b = hot-seat: the new-game Players page, Settings > Game > Players, the handover screen, the status-bar player switcher (this branch); 5 (5c and later) online multiplayer, turn files, installing updates (stage 6); `-` = no plan yet or not applicable off Windows. The stage numbers after 4a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that say 4a name the Workbench, search, scans or OCR; rows that name Settings are 4b; rows that name OCR languages are 4c; rows that name the launcher, the tour, About or the update screens are 5a.
 
 ## Stage-1 deviations from the WinForms app (deliberate or known)
 
 - The counter palette follows game master mode (Settings > General), as WinForms. (Stage 1 showed it always; changed in 4b.)
-- The new game dialog has no Players page (comes with multiplayer).
+- The new game dialog has no Players page (comes with multiplayer). Done in 5b: Next > opens the Players page.
 - The difficulty chosen in the new game dialog is remembered as the default for the next game (`LastDifficulty`, since 4b).
 - Mouse wheel on macOS pans and Cmd+wheel zooms (deliberate: trackpad convention). On Windows and Linux the wheel zooms, as WinForms. Pinch zoom is for macOS trackpads.
 - The look is the classic grey theme on all three systems, with Tahoma 11px where present, else Verdana, DejaVu Sans.
@@ -116,7 +116,7 @@ Stage 4a = Rules Workbench (Tables, Formulas, Properties, Phases, Alerts, Visibi
 Stage 4b = Tools > Settings (General, Game, Display, Map, Dice & Log, Toolbar, Keyboard, Folders), live application of every setting, File > Open Autosave..., physical dice entry, remembered difficulty and Outliner state. `settings.json` is read and written by the same `SettingsStore` as WinForms; no new fields.
 
 - OCR language downloads are not in 4b: the WinForms original has none and the feature needs a network fetch. They are stage 4c (next section).
-- Settings > Game shows Difficulty and its hint only. Where WinForms has the Players box there is a grey label "Players: comes with multiplayer (stage 5)"; Players is ported with `PlayersEditor` in stage 5.
+- Settings > Game shows Difficulty and its hint only. Where WinForms has the Players box there is a grey label "Players: comes with multiplayer (stage 5)"; Players is ported with `PlayersEditor` in stage 5. Done in 5b: the Players box is live.
 - The counter palette is shown only in game master mode, as WinForms. Desktop has no `--gm` option: game master mode comes from the Settings > General checkbox only.
 - The counter menu's Delete counter follows Settings > General game master mode and asks first per "Ask before deleting pieces", as WinForms.
 - Toolbar tooltips show the shortcut, e.g. "1d6 (F5)", "LOS (L)"; WinForms toolbar tips have no key.
@@ -149,6 +149,24 @@ Stage 5a = app lifecycle: the launcher and Play offline windows, the launcher �
 - The automatic first tour starts 500 ms after the game opens (after the alert bar's 250 ms debounce, so the bar is on screen when the steps are chosen); WinForms starts it at once. As WinForms it may start after any module open (from the launcher, a module on the command line, or File > Open Module…), but only in a window the launcher loop opened, never in tests or screenshot runs.
 - WinForms is unchanged.
 - Real macOS menus (Cmd shortcut text), windows and the tour balloon's transparency are only checked by `docs/port/stage5a-mac-checklist.md`.
+
+## Stage-5b deviations from the WinForms app (deliberate or known)
+
+Stage 5b = hot-seat: the Players page of the new-game dialog, Settings > Game > Players, the handover screen, the status-bar player switcher, and every window following the current player's view. Formats are unchanged (rules pack 4, save 7, `settings.json` has no new field); a game saved with players opens with the same players in either app. The player at the screen is not saved: on load the handover goes to whoever acts now (both apps).
+
+- **Game > Players… is not in 5b.** In WinForms it exists only while online (SeatsDialog); offline the list is edited in Settings > Game > Players, as in Desktop. It comes with 5c.
+- **Turn games** (turn files stopping hot-seat, the turn view sides) come with 5d; Desktop has no turn files yet.
+- **Online guards** in the Players edit: the guest refusal ("only the host...") is ported; the "While the game is online, change seats with Game → Players…." refusal sits behind a placeholder `IsOnline` that is always false until 5c. A guest session detaches hot-seat and restores the hidden windows (stand-in for WinForms StopHotSeatForOnline; 5c reuses it).
+- **SidesWatch is not a class** (see its row): each Desktop tab subscribes to the view change itself.
+- **No `--smoke-handover` / `--smoke-player-view`**: headless tests cover them. The screenshots come from `--screenshot-state handover | players-page | settings-players | player-menu`.
+- **A Players page without two sides:** the page is still reachable with Next >, Add player is disabled, the WinForms hint is shown and the game is solo (WinForms parity).
+- **A guest changing Players:** the host-only message appears twice on Apply (difficulty and players), as WinForms.
+- **Hiding windows:** the handover hides the windows owned by or opened for this game (Desktop's window tracking); a launcher or another game's main window is untouched. A dialog owned by the hidden main window (the discard question) is re-owned by the handover screen.
+- **Players box stretches to page width** (WinForms 440 px): Settings > Game > Players keeps the WinForms height (210) but fills the page, so a row's Remove button is never cut off.
+- **A stray close of the handover screen** (Cmd+Q / OS shutdown closes it for real, past the close interception): the hidden windows come back for the main window's own close question; if the app does not end (No), the handover screen comes back for the pending player.
+- The handover screen uses the main window's current bounds, not its restore bounds when that window is maximised or minimised (WinForms RestoreBounds); a maximised main window gives a maximised screen.
+- The editor and the handover screen live in `Quartermaster.Desktop.Shell` (files under `Players/`), the models in `Quartermaster.Render` (a `.Players` namespace would shadow Core `Players`). WinForms is unchanged (the optional refactor onto the shared models was skipped).
+- Real macOS behaviour (nothing but the handover screen visible in Mission Control and Cmd+Tab, Cmd+Q on the screen) is only checked by `docs/port/stage5b-mac-checklist.md`.
 
 ## Before the stage release
 
@@ -193,7 +211,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3a | ✔ |  |  | counter menu "Show in Ledger" (after a separator; disabled with "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)." without one) and View > Ledger / Ctrl/Cmd+L with counters selected on the active map: opens the Ledger, moves to the tab that shows them (clearing the filter when it hides them, shared `LedgerJump`), selects their rows and scrolls to the first; status "Shown in the Ledger." / "{n} counters shown in the Ledger." or the reason some have no row (hidden counters never get one) |
 | View > Overview | 3a | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
 | View > Counter palette (GM only) | 1 | ✔ |  |  | shown only when a game is open and game master mode is on (Settings > General, as WinForms); game master mode only since 4b — re-check on macOS and Linux |
-| Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  |  |
+| Game > Send Turn..., Players..., Leave Online Game | 5 |  |  |  | open: Players… exists in WinForms only while online (SeatsDialog, 5c); offline the list is edited in Settings > Game > Players (5b) |
 | Tools > Rules Workbench | 4a | ✔ |  |  | Cmd/Ctrl+Shift+W; one floating window per session (bounds under `bench:workbench`), refused while a received turn replays |
 | Tools > Inventory, Notes | 3a | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
 | Tools > Dice (1d6, 2d6, module dice, Custom, Multi-roll) | 2a | ✔ |  |  | F5, F6; rolls go through the shared DiceTurnActions (Render), so the log lines are the WinForms ones; the roll's line shows in the status bar for 5 s. Physical dice entry (Settings > Dice & Log) asks for each die by hand with "Enter a whole number from 1 to N."; Cancel records nothing; the last roll and the default are remembered |
@@ -260,8 +278,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| SetupChooserDialog: New game from module + setups, difficulty, double-click = OK | 1 | ✔ | ✔ | ✔ | no Players page, difficulty not saved |
-| PlayersEditor | 5 |  |  |  |  |
+| SetupChooserDialog: New game from module + setups, difficulty, double-click = OK | 1 | ✔ | ✔ | ✔ | difficulty remembered since 4b; Next > opens the Players page since 5b (Back / OK / Cancel there) |
+| PlayersEditor | 5b | ✔ |  |  | one row per player (name, a check box per side, Remove), Add player, the WinForms hint; used on the new-game Players page and in Settings > Game > Players (210 high, as wide as the page; WinForms 440×210). Row rules and texts are shared in Render (`PlayersEditModel`). `build/port-screenshots.ps1` writes stage5b-desktop-players-page.png and stage5b-desktop-settings-players.png |
 | Remembered rules pack per module (RulesMemory) | 2a | ✔ |  |  | the pack is loaded with the module; a missing file is ignored |
 
 ## Rules, formulas, dice, log
@@ -293,7 +311,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 |---|---|---|---|---|---|
 | WorkbenchWindow and tabs (Tables, Formulas, Properties, Phases, Alerts, Visibility) | 4a | ✔ |  |  | Tables-tree activation, problems list, rule ref row, Find in rulebook; headless-tested incl. guest read-only (guest flag only until stage 5 brings online to Desktop). `build/port-screenshots.ps1` writes stage4a-desktop-workbench*.png and the WinForms equivalents |
 | ColumnsDialog, PasteTableDialog, BlockDialog | 4a | ✔ |  |  | plus the import-target dialog of the OCR import (own Avalonia dialog, see the 4a deviations) |
-| SettingsDialog and SettingsTabs (General, Game, Display, Map, Dice and Log, Toolbar, Folders) | 4b | ✔ |  |  | Pages General, Game, Display, Map, Dice & Log, Toolbar, Keyboard, Folders (the Keyboard page is a tab of its own as in WinForms); OK / Apply / Cancel / Restore defaults as WinForms; every setting applies live to the open windows. Game page: Difficulty only (Players come with stage 5); the OCR languages page was added in 4c |
+| SettingsDialog and SettingsTabs (General, Game, Display, Map, Dice and Log, Toolbar, Folders) | 4b | ✔ |  |  | Pages General, Game, Display, Map, Dice & Log, Toolbar, Keyboard, Folders (the Keyboard page is a tab of its own as in WinForms); OK / Apply / Cancel / Restore defaults as WinForms; every setting applies live to the open windows. Game page: Difficulty and Players (5b); the OCR languages page was added in 4c |
 | OCR languages page (Settings), OCR panel language list | 4c | ✔ |  |  | New in 4c, no WinForms counterpart: download / remove tessdata_fast 4.1.0 languages (SHA-256 checked, nothing without a click), "More languages..." in the OCR panel opens the page; see the Stage-4c deviations |
 | KeyboardTab, ShortcutCaptureDialog | 4b | ✔ |  |  | Set... / Clear / Reset / Reset all, conflict and reserved-key texts as WinForms; capture shows Ctrl+... (Cmd... on macOS), a physical Control key alone is swallowed on macOS |
 
@@ -302,10 +320,11 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
 | LauncherForm, PlayOfflineForm | 5a | ✔ |  |  | app start without arguments shows the launcher (module list with hashing progress, Add module… / Remove, rules pack per module with change… / use (none), Play offline ▶); Play offline: Continue (newest autosave), recent games, New game…, Open saved game…, Open selected, Back; Online lobby ▶ and Open turn file… are shown disabled (stages 5c, 5d). `build/port-screenshots.ps1` writes stage5a-desktop-launcher / offline / update-bar / tour.png |
-| HandoverForm (hot seat) | 5 |  |  |  |  |
+| HandoverForm (hot seat) | 5b | ✔ |  |  | "Pass to Anna (Red)" + Continue, in the main window's place with every other Quartermaster window hidden; closing it asks the main window's discard question; waits for an open modal dialog. stage5b-desktop-handover.png |
 | OnlineLobbyForm, JoinDialog, HostSavedDialog, HostSidesPanel | 5 |  |  |  |  |
 | SeatsDialog, SideChoiceDialog, SendTurnDialog, SendWaitForm, WhoAreYouDialog, MailboxOptions | 5 |  |  |  |  |
-| SidesWatch | 5 |  |  |  |  |
+| SidesWatch | 5b | ✔ |  |  | not a class: each Desktop window and Workbench tab follows `ViewChanged` (coalesced through the existing post pattern), so every window shows only the current player's view |
+| Status bar player item (hot seat) | 5b | ✔ |  |  | "Player: Anna ▾" at the right of the status bar, only in a hot-seat game; the menu lists the players with the current one ticked, a choice hands over. stage5b-desktop-player-menu.png |
 
 ## Shared behaviour that must stay identical
 

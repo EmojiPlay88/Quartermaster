@@ -24,6 +24,9 @@
   --screenshot-offline, --screenshot-update-bar; the module listed, an invented autosave and recent save for the offline window, a TEST folder feed
   offering 9.9.9 for the update bar, all inside a temp QUARTERMASTER_LAYOUT_ROOT; nothing reaches the network) and stage5a-desktop-tour.png (the Interface
   Tour balloon on step 1, captured as its own window).
+  Stage 5b adds stage5b-desktop-handover.png (the hot-seat handover screen for Ben, captured as its own window), stage5b-desktop-players-page.png (the new-game
+  Players page), stage5b-desktop-settings-players.png (Settings > Game with the Players box) and stage5b-desktop-player-menu.png (the status-bar player menu
+  open); all on the Riverland pack with invented players Anna and Ben, inside a temp QUARTERMASTER_LAYOUT_ROOT.
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -223,6 +226,18 @@ foreach ($shot in @(@('launcher', '--screenshot-launcher'), @('offline', '--scre
 }
 $png = Join-Path $out 'stage5a-desktop-tour.png'
 Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', 'tour', '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png 'desktop-tour'
+
+# Stage 5b states, Desktop, headless: the hot-seat screens (two invented players on the Riverland pack; a temp layout root keeps the run away from real settings).
+$layout5b = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-layout5b-' + [Guid]::NewGuid().ToString('N'))
+try {
+    New-Item -ItemType Directory -Force $layout5b | Out-Null
+    $env5b = @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_LAYOUT_ROOT = $layout5b }
+    foreach ($state in 'handover', 'players-page', 'settings-players', 'player-menu') {
+        $png = Join-Path $out "stage5b-desktop-$state.png"
+        Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) $env5b $png "desktop-$state"
+    }
+}
+finally { if (Test-Path $layout5b) { Remove-Item $layout5b -Recurse -Force } }
 
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'

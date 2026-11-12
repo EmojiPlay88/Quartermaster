@@ -205,9 +205,13 @@ sealed class FakeDialogs : IDialogs
     /// <summary>When set, the next setup chooser waits for it (the chooser left open).</summary>
     public TaskCompletionSource<SetupChoice?>? SetupGate;
 
-    public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty)
+    /// <summary>The rules pack the last setup chooser was offered (its Players page).</summary>
+    public Quartermaster.Rules.RulesPack? LastChooserPack;
+
+    public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, Quartermaster.Rules.RulesPack? pack)
     {
         SetupChooserShown++;
+        LastChooserPack = pack;
         LastPreselectNew = preselectNew;
         LastChooserDifficulty = difficulty;
         if (SetupGate is { } g) { SetupGate = null; return g.Task; }
@@ -616,6 +620,7 @@ public sealed class MainWindowTests : IDisposable
     {
         var w = NewWindow();
         w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.Session!.OpenRules(Demo("Riverland-Demo.qrules"));
         w.StartSetup(null);
         MoveAPiece(w);
         var before = Json(w.Session!.Game!.State);
@@ -633,6 +638,8 @@ public sealed class MainWindowTests : IDisposable
         Pump();
         Assert.Equal(1, _dialogs.SetupChooserShown);
         Assert.True(_dialogs.LastPreselectNew);
+        Assert.NotNull(_dialogs.LastChooserPack);
+        Assert.Same(w.Session.Rules, _dialogs.LastChooserPack);   // the chooser's Players page is offered the open rules pack
         Assert.False(w.HasUnsavedChanges);
         Assert.Equal(Difficulty.FullyAuto, w.Session.Game!.State.Difficulty);
     }

@@ -342,7 +342,7 @@ public sealed class LauncherWindow : Window
         LaunchRequest? req;
         try
         {
-            _ = w.ShowDialog(this);
+            _ = w.ShowDialogTracked(this);
             req = await w.Result;
         }
         finally { Offline = null; }

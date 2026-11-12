@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Avalonia.Controls;
 using Quartermaster.Desktop.Launcher;
+using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.Render.Update;
 
@@ -256,7 +257,7 @@ public sealed class DesktopUpdates : IUpdateSlot
         if (ui.Closed) return;
         var dlg = new WhatsNewWindow(info, OpenPage);
         WhatsNew = dlg;
-        _ = Guarded(ui, () => dlg.ShowDialog(ui.Window));
+        _ = Guarded(ui, () => dlg.ShowDialogTracked(ui.Window));
     }
 
     void StartUpdateNow(LauncherUi ui, UpdateInfo info)
@@ -273,7 +274,7 @@ public sealed class DesktopUpdates : IUpdateSlot
     {
         var dlg = new UpdateWindow(feed, info, UpdatesRoot);
         Updating = dlg;
-        _ = dlg.ShowDialog(ui.Window);
+        _ = dlg.ShowDialogTracked(ui.Window);
         await dlg.Done;
         if (ui.Closed) return;
         if (dlg.Error is { } error)

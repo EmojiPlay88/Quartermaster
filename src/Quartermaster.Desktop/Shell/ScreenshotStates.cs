@@ -24,7 +24,7 @@ static class ScreenshotStates
         "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice", "chart", "document", "document-search",
         "workbench", "workbench-formulas", "workbench-phases", "workbench-search", "workbench-scan",
         "settings", "settings-general", "settings-game", "settings-display", "settings-map", "settings-dice", "settings-toolbar", "settings-keyboard", "settings-folders",
-        "settings-ocr", "ocr-dropdown", "tour" };
+        "settings-ocr", "ocr-dropdown", "tour", "handover", "players-page", "settings-players", "player-menu" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -39,6 +39,18 @@ static class ScreenshotStates
         if (_tourShown is { } shown && window.SettingsStore.Current.TourShown != shown) window.SettingsStore.Update(x => x with { TourShown = shown });
         _tourShown = null;
         if (_scanDir != null) { try { Directory.Delete(_scanDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } _scanDir = null; }
+    }
+
+    /// <summary>Anna holds the rules pack's first side, Ben the second (invented names); the first handover is continued, so Anna is at the screen.</summary>
+    static string? TwoPlayers(MainWindow window)
+    {
+        if (window.Session is not { Game: { } g, Rules: { Sides.Count: >= 2 } pack }) return "This state needs --rules with two sides.";
+        g.Execute(new SetPlayers(new[] { new PlayerDef("p1", "Anna", new[] { pack.Sides[0].Id }), new PlayerDef("p2", "Ben", new[] { pack.Sides[1].Id }) }));
+        Pump(300);
+        if (window.Handover is not { } first) return "The first handover did not come up.";
+        first.ContinueButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+        Pump(300);
+        return window.HandoverShowing ? "The handover did not continue." : null;
     }
 
     static string? _scanDir;
@@ -311,6 +323,54 @@ static class ScreenshotStates
                 win.SelectPage(page);
                 // The folders page measures sizes off the UI thread; wait for them (as WinForms waits for FoldersLoadedForSmoke).
                 if (name == "settings-folders" && win.Pages.OfType<FoldersPage>().FirstOrDefault() is { } fp) PumpUntil(() => fp.SizesLoaded, 10000);
+                Pump(300);
+                Target = win;
+                return null;
+            }
+            case "handover":
+            {
+                // Hot-seat: Anna (first side) has the screen; the status-bar switch hands over to Ben, and the screen for Ben is the picture.
+                if (TwoPlayers(window) is { } e5) return e5;
+                var ben = window.PlayerMenuItems().FirstOrDefault(i => ((string?)i.Header ?? "").StartsWith("Ben (", StringComparison.Ordinal));
+                if (ben == null) return "The player menu has no Ben.";
+                ben.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+                Pump(300);
+                if (window.Handover is not { } h) return "The handover screen did not open.";
+                Target = h;
+                return null;
+            }
+            case "player-menu":
+            {
+                if (TwoPlayers(window) is { } e6) return e6;
+                window.PlayerButton.Flyout?.ShowAt(window.PlayerButton);
+                Pump(300);
+                return null;
+            }
+            case "players-page":
+            {
+                // New game, Next > : the Players page with two invented players, captured as its own window.
+                if (s.Rules is not { Sides.Count: >= 2 } pack) return "State 'players-page' needs --rules with two sides.";
+                var chooser = new SetupChooser(s.Model, Difficulty.SemiAuto, true, pack);
+                chooser.Show(window);
+                chooser.ShowPlayersPage();
+                chooser.Editor.Model.FillTwoPlayersForTests();
+                chooser.Editor.NameBoxes[0].Text = "Anna";
+                chooser.Editor.NameBoxes[1].Text = "Ben";
+                Pump(300);
+                Target = chooser;
+                return null;
+            }
+            case "settings-players":
+            {
+                // Settings > Game with the Players box of a two-player game.
+                if (TwoPlayers(window) is { } e7) return e7;
+                SettingsWindow? win = null;
+                window.ShowSettingsHook = w => { win = w; return Task.CompletedTask; };
+                _ = window.ShowSettingsAsync();
+                window.ShowSettingsHook = null;
+                if (win == null) return "The settings window did not open.";
+                win.Show(window);
+                win.SelectPage(Array.IndexOf(SettingsPages, "game"));
                 Pump(300);
                 Target = win;
                 return null;

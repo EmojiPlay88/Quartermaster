@@ -223,7 +223,7 @@ static class Program
         foreach (var w in warnings) Console.Error.WriteLine(w);
         if (startup.ScreenshotPath is not { } png || startup.ModulePath is not { } module)
         {
-            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules|phases|nextphase|stepback|formula|cheatsheet|batch|alerts|tree|floatlog|floatphases|tour]");
+            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules|phases|nextphase|stepback|formula|cheatsheet|batch|alerts|tree|floatlog|floatphases|tour|handover|players-page|settings-players|player-menu]");
             return 1;
         }
         if (Application.Current == null)
@@ -307,7 +307,8 @@ static class Program
             Console.Error.WriteLine(message);
             return Task.CompletedTask;
         }
-        public Task<SetupChoice?> ChooseSetupAsync(Avalonia.Controls.Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty) => Task.FromResult<SetupChoice?>(null);
+        public Task<SetupChoice?> ChooseSetupAsync(Avalonia.Controls.Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty,
+            Quartermaster.Rules.RulesPack? pack) => Task.FromResult<SetupChoice?>(null);
         public Task<DiceChoice?> AskDiceAsync(Avalonia.Controls.Window owner, string title, bool multi) => Task.FromResult<DiceChoice?>(null);
         public Task<TurnChoice?> AskTurnAsync(Avalonia.Controls.Window owner, TurnState current) => Task.FromResult<TurnChoice?>(null);
         public Task<bool> ConfirmOpenDecisionsAsync(Avalonia.Controls.Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null) =>
