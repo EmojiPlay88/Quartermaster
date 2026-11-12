@@ -24,7 +24,7 @@ static class ScreenshotStates
         "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice", "chart", "document", "document-search",
         "workbench", "workbench-formulas", "workbench-phases", "workbench-search", "workbench-scan",
         "settings", "settings-general", "settings-game", "settings-display", "settings-map", "settings-dice", "settings-toolbar", "settings-keyboard", "settings-folders",
-        "settings-ocr", "ocr-dropdown" };
+        "settings-ocr", "ocr-dropdown", "tour" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -35,10 +35,14 @@ static class ScreenshotStates
         if (window.Session is { } s) FormulaWindows.CloseAllFor(s);
         Target?.Close();
         Target = null;
+        // As WinForms SmokeTour: the tour state leaves TourShown as it found it (closing the balloon above marked it shown).
+        if (_tourShown is { } shown && window.SettingsStore.Current.TourShown != shown) window.SettingsStore.Update(x => x with { TourShown = shown });
+        _tourShown = null;
         if (_scanDir != null) { try { Directory.Delete(_scanDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } _scanDir = null; }
     }
 
     static string? _scanDir;
+    static bool? _tourShown;
 
     static readonly string[] SettingsPages = { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders", "ocr" };
 
@@ -311,6 +315,16 @@ static class ScreenshotStates
                 Target = win;
                 return null;
             }
+            case "tour":
+                // Help > Interface Tour: the balloon on step 1, captured as its own (borderless, transparent-backed) window.
+                _tourShown = window.SettingsStore.Current.TourShown;   // closing the balloon marks the tour shown; Cleanup puts it back
+                window.ShowTour();
+                Pump(300);
+                if (window.Tour is not { } tour) return "The tour did not open.";
+                tour.ApplyTransparencyFallback(WindowTransparencyLevel.None);   // the headless frame has no alpha: no black arrow strip
+                Pump(100);
+                Target = tour;
+                return null;
             case "ocr-dropdown":
             {
                 // The scan pane's OCR panel with its language list open: the real catalog's display names and "More languages…".

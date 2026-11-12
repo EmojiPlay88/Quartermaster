@@ -56,11 +56,25 @@ sealed class FakeDialogs : IDialogs
         return Task.FromResult(Colours.Count > 0 ? Colours.Dequeue() : null);
     }
 
+    /// <summary>The filters the last single-file open picker was given.</summary>
+    public IReadOnlyList<FileFilter>? LastOpenFilters;
+
     public Task<string?> OpenFileAsync(Window owner, string title, IReadOnlyList<FileFilter> filters, string? initialFolder = null)
     {
         LastOpenFolder = initialFolder;
+        LastOpenFilters = filters;
         PickerTitles.Add(title);
         return Task.FromResult(OpenFiles.Count > 0 ? OpenFiles.Dequeue() : null);
+    }
+
+    /// <summary>Multi-select open pickers shown (title, filters) and what the next ones answer (none queued = cancelled, an empty list).</summary>
+    public readonly List<(string Title, IReadOnlyList<FileFilter> Filters)> MultiPickers = new();
+    public readonly Queue<IReadOnlyList<string>> OpenFileLists = new();
+
+    public Task<IReadOnlyList<string>> OpenFilesAsync(Window owner, string title, IReadOnlyList<FileFilter> filters)
+    {
+        MultiPickers.Add((title, filters));
+        return Task.FromResult(OpenFileLists.Count > 0 ? OpenFileLists.Dequeue() : (IReadOnlyList<string>)Array.Empty<string>());
     }
 
     public readonly List<string?> SuggestedNames = new();
@@ -188,11 +202,15 @@ sealed class FakeDialogs : IDialogs
         return Task.CompletedTask;
     }
 
+    /// <summary>When set, the next setup chooser waits for it (the chooser left open).</summary>
+    public TaskCompletionSource<SetupChoice?>? SetupGate;
+
     public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty)
     {
         SetupChooserShown++;
         LastPreselectNew = preselectNew;
         LastChooserDifficulty = difficulty;
+        if (SetupGate is { } g) { SetupGate = null; return g.Task; }
         return Task.FromResult(Setup);
     }
 
@@ -353,8 +371,8 @@ public sealed class MainWindowTests : IDisposable
     {
         var w = NewWindow();
         var menus = w.MenuLabels();
-        Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools" }, menus.Keys);
-        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "Open Auto&save...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, menus["&File"]);
+        Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools", "&Help" }, menus.Keys);
+        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "Open Auto&save...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "&Back to launcher", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo", "Step &Back to Start of Phase", "Step Back &To..." }, menus["&Edit"]);
         Assert.Equal(new[] { "Module &Tree", "&Diagnostics", "Show &Grid", "&Log", "&Phase panel", "&Outliner", "&Ledger", "&Overview", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
         Assert.Equal(new[] { "25%", "50%", "100%", "200%", "Fit" },

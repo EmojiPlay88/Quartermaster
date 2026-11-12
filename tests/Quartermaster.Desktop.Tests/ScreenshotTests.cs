@@ -46,6 +46,7 @@ public sealed class ScreenshotTests
     [InlineData("tree")]
     [InlineData("floatlog")]
     [InlineData("floatphases")]
+    [InlineData("tour")]
     public void Screenshot_state_flag_writes_png(string state)
     {
         var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");

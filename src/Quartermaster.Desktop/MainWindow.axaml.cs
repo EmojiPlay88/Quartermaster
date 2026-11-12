@@ -54,7 +54,8 @@ public partial class MainWindow : Window
     bool _recoveredAutosave;   // the open game came from an autosave file; Save goes to Save As
     bool _dirty;
     bool _historyRefreshQueued;
-    bool _closeConfirmed, _closeAsking;
+    bool _closeConfirmed, _closeAsking, _closed;
+    Task? _closeQuestion;   // the close questions being asked (Back to launcher waits for them)
     readonly string _layoutRoot;
 
     /// <summary>The app's window: real dialogs, the default cache and remembered-rules folders.</summary>
@@ -169,6 +170,7 @@ public partial class MainWindow : Window
 
         CloseSession();
         _session = next;
+        OpenedModulePath = path;
         ReportSettingsProblems(next);
         _savePath = null;
         _recoveredAutosave = false;
@@ -238,10 +240,16 @@ public partial class MainWindow : Window
     public void ApplyStartup(StartupArgs args)
     {
         if (args.ModulePath is not { } path || !OpenModule(path)) return;
+        NoteModuleOpened(path);   // a window the launcher loop runs (WinForms marks a command-line module played too)
         Guard(() => LoadRulesFromArgs(args));   // as WinForms: the pack is in place before the first game starts
         if (args.SetupIndex is { } idx) Guard(() => StartSetup(idx));
         else if (args.NewGame) Guard(() => StartSetup(null));
-        else RunAsync(() => ChooseAndStartAsync(preselectNew: false));
+        else
+        {
+            RunAsync(async () => { await ChooseAndStartAsync(preselectNew: false); MaybeAutoTour(); });
+            return;
+        }
+        MaybeAutoTour();
     }
 
     /// <summary>The menu bar in WinForms notation: top menu label → its item labels (separators skipped), in order.</summary>
@@ -366,6 +374,9 @@ public partial class MainWindow : Window
         Item(file, "Save Rules Pac&k", () => SaveRulesPack(false), gate: "file.saveRules");
         Item(file, "Save Rules Pack A&s...", () => SaveRulesPack(true), gate: "file.saveRulesAs");
         file.Items.Add(new Separator());
+        // WinForms: shown only while a launcher is there to go back to (the id is CommandAvailability.BackToLauncher, not gated).
+        _backToLauncherItem = Item(file, "&Back to launcher", () => RunAsync(BackToLauncherAsync), gate: CommandAvailability.BackToLauncher);
+        _backToLauncherItem.IsVisible = LauncherAvailable;
         Item(file, "E&xit", Close);
 
         // Edit (MainForm.History): Undo / Redo, captions follow the history ("&Undo Move …"); then Step Back.
@@ -418,10 +429,19 @@ public partial class MainWindow : Window
         tools.Items.Add(new Separator());
         Item(tools, "&Settings...", () => { }, "tools.settings");
 
+        // Help (WinForms MainForm.BuildMenu): the Interface Tour needs a game (help.tour); Check for updates…; About.
+        var help = Top("&Help");
+        Item(help, "Interface &Tour", ShowTour, gate: "help.tour");
+        // Port stage 5a: only with the test update feed and a launcher to go back to (help.updates; see RefreshUpdatesItem).
+        _updatesItem = Item(help, "Check for &updates…", () => RunAsync(CheckForUpdatesAsync), gate: "help.updates");
+        RefreshUpdatesItem();
+        Item(help, "&About", () => RunAsync(() => _dialogs.ShowInfoAsync(this, $"Quartermaster {AppVersion.Text}\nA VASSAL module reader and engine.", "About Quartermaster")));
+
         MainMenu.Items.Add(file);
         MainMenu.Items.Add(edit);
         MainMenu.Items.Add(view);
         MainMenu.Items.Add(tools);
+        MainMenu.Items.Add(help);
         RefreshHistoryUi();
     }
 
@@ -594,7 +614,10 @@ public partial class MainWindow : Window
     {
         var path = await _dialogs.OpenFileAsync(this, "Open Module", new[] { ModuleFilter, AllFiles });
         if (path == null || !await ConfirmDiscardAsync() || !await ConfirmRulesSavedAsync()) return;
-        if (OpenModule(path)) await ChooseAndStartAsync(preselectNew: false);
+        if (!OpenModule(path)) return;
+        NoteModuleOpened(path);
+        await ChooseAndStartAsync(preselectNew: false);
+        MaybeAutoTour();   // WinForms OpenModule: any module open in a loop window may start the first-run tour
     }
 
     async Task NewGameAsync()
@@ -637,6 +660,7 @@ public partial class MainWindow : Window
         var path = await _dialogs.OpenFileAsync(this, autosaves ? "Open Autosave" : "Open Game", new[] { SaveFilter, AllFiles }, start);
         if (path == null || !ReferenceEquals(s, _session)) return;   // the module changed while the picker was open
         OpenGame(path);
+        NoteRecentSave(path);
     }
 
     async Task SaveGameAsync(bool saveAs)
@@ -660,6 +684,7 @@ public partial class MainWindow : Window
             }
         }
         SaveGame(path);
+        NoteRecentSave(path);
     }
 
     // ---------- rules packs ----------
@@ -737,12 +762,15 @@ public partial class MainWindow : Window
         {
             // Dialogs are asynchronous: keep the window, ask, and close again when everything is answered.
             e.Cancel = true;
-            if (!_closeAsking) AskThenClose(DiscardQuestion());
+            if (!_closeAsking) _closeQuestion = AskThenCloseAsync(DiscardQuestion());
         }
         base.OnClosing(e);
+        // Refused without a question still to answer (and not already confirmed): a real cancel.
+        if (e.Cancel && !_closeAsking && !_closeConfirmed) CancelBackToLauncher();
     }
 
-    async void AskThenClose(string? question)
+    /// <summary>Asks the close questions; never throws. No (or a failure) keeps the window and forgets a Back to launcher request.</summary>
+    async Task AskThenCloseAsync(string? question)
     {
         _closeAsking = true;
         bool yes;
@@ -750,7 +778,7 @@ public partial class MainWindow : Window
         try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption, defaultNo: true)) && await ConfirmRulesSavedAsync(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("close question: " + ex); yes = false; }
         finally { _closeAsking = false; }
-        if (!yes) return;
+        if (!yes) { CancelBackToLauncher(); return; }
         _closeConfirmed = true;
         Dispatcher.UIThread.Post(Close);
     }
@@ -768,6 +796,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _closed = true;
+        _tour?.Close();   // an open tour counts as skipped (WinForms: the owned balloon closes with the window)
+        if (_backToLauncher) ReturnToLauncher = true;   // the close really completed
         _dice.Stop();
         StopSettings();
         CloseSession();
@@ -804,6 +835,7 @@ public partial class MainWindow : Window
 
     void CloseSession()
     {
+        _tour?.Close();   // WinForms CloseSession: the balloon never outlives its targets (ends as skipped)
         DestroyWorkbench();   // first: its pending edits still reach the session
         DestroyExport();
         DestroyLedger();
@@ -923,6 +955,7 @@ public partial class MainWindow : Window
     /// <summary>WinForms OnGameReplaced: a new game (setup, new, opened) starts clean, without a file.</summary>
     void OnGameReplacedAnyThread() => OnUi(() =>
     {
+        _tour?.Close();   // WinForms OnGameReplaced: a new game, an opened save or a rewind to it ends the tour (on the UI thread)
         HookGame();
         _dirty = false;
         _savePath = null;

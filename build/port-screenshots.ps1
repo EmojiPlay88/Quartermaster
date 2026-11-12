@@ -20,6 +20,10 @@
   (--screenshot-settings --settings-tab), all off-screen.
   Stage 4c adds stage4c-desktop-settings-ocr.png (Settings > OCR languages, real catalog, nothing downloaded) and stage4c-desktop-ocr-dropdown.png
   (the Workbench OCR language list open); both run with a temp QUARTERMASTER_LAYOUT_ROOT and an empty QUARTERMASTER_OCR_FEED folder (no network).
+  Stage 5a adds stage5a-desktop-launcher.png, stage5a-desktop-offline.png and stage5a-desktop-update-bar.png (the pre-game windows: --screenshot-launcher,
+  --screenshot-offline, --screenshot-update-bar; the module listed, an invented autosave and recent save for the offline window, a TEST folder feed
+  offering 9.9.9 for the update bar, all inside a temp QUARTERMASTER_LAYOUT_ROOT; nothing reaches the network) and stage5a-desktop-tour.png (the Interface
+  Tour balloon on step 1, captured as its own window).
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -210,6 +214,15 @@ try {
     Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', 'ocr-dropdown', '--screenshot-main', $png) $env4cDrop $png 'desktop-ocr-dropdown'
 }
 finally { foreach ($d in $layout4c, $feed4c) { if (Test-Path $d) { Remove-Item $d -Recurse -Force } } }
+
+# Stage 5a, Desktop, headless: the launcher, Play offline and the launcher with the update bar (each run gets its own temp layout root, which the
+# pre-game flags require; the update bar's TEST feed is written inside it), and the Interface Tour balloon on step 1.
+foreach ($shot in @(@('launcher', '--screenshot-launcher'), @('offline', '--screenshot-offline'), @('update-bar', '--screenshot-update-bar'))) {
+    $png = Join-Path $out "stage5a-desktop-$($shot[0]).png"
+    Invoke-Shot $deskExe @($vmod, $shot[1], $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png "desktop-$($shot[0])"
+}
+$png = Join-Path $out 'stage5a-desktop-tour.png'
+Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', 'tour', '--screenshot-main', $png) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } $png 'desktop-tour'
 
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'

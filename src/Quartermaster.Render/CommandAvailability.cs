@@ -57,6 +57,12 @@ public static class CommandAvailability
         ["turn.next"] = new(Game: true),
     };
 
+    /// <summary>
+    /// File → Back to launcher. Not gated (WinForms leaves it ungated, so it is not in the table): it is shown only while a launcher is
+    /// there to go back to, and the usual unsaved-changes questions run when it closes the window.
+    /// </summary>
+    public const string BackToLauncher = "file.backToLauncher";
+
     /// <summary>Every command id this class reports on.</summary>
     public static IReadOnlyList<string> Ids { get; } = Table.Keys.ToArray();
 

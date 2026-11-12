@@ -49,7 +49,7 @@ public sealed class RulesPackTests : IDisposable
         var file = w.MenuLabels()["&File"].ToList();
         var i = file.IndexOf("New &Rules Pack...");
         Assert.True(i > file.IndexOf("Save Game &As..."));
-        Assert.Equal(new[] { "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "E&xit" }, file.Skip(i));
+        Assert.Equal(new[] { "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "&Back to launcher", "E&xit" }, file.Skip(i));
 
         // Enablement from CommandAvailability: nothing without a module; Save needs a pack.
         Assert.False(w.FindMenuItem("New &Rules Pack...")!.IsEnabled);

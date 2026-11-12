@@ -7,8 +7,8 @@ How to read the columns:
 - **Windows**: ticked when Desktop covers the row and headless tests (Avalonia.Headless) pass on Windows in this branch.
 - **Linux**: ticked only for features verified by tests actually run on Linux. Stage 1 rows: verified by the headless tests in the CI workflow `.github/workflows/cross-platform.yml` on ubuntu-latest (green run 42510235329, 2026-11-08). Not yet opened on a real Linux desktop.
 - **Docs.Tests on Linux**: pass on ubuntu-latest in CI (run 42510235329).
-- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`, `docs/port/stage4a-mac-checklist.md`, `docs/port/stage4b-mac-checklist.md`, `docs/port/stage4c-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
-- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (search, scan and OCR panes moved to 4a); 4a = Rules Workbench, rulebook search, scans and OCR; 4b = Settings; 4c = OCR language downloads (this branch); 5 multiplayer, launcher, updates; `-` = no plan yet or not applicable off Windows. The stage numbers after 4a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that say 4a name the Workbench, search, scans or OCR; rows that name Settings are 4b; rows that name OCR languages are 4c.
+- **macOS**: ticked only after the user has worked through the stage's Mac checklist on the M1 Mac (`docs/port/stage1-mac-checklist.md`, `docs/port/stage2a-mac-checklist.md`, `docs/port/stage2b-mac-checklist.md`, `docs/port/stage3a-mac-checklist.md`, `docs/port/stage3b-mac-checklist.md`, `docs/port/stage4a-mac-checklist.md`, `docs/port/stage4b-mac-checklist.md`, `docs/port/stage4c-mac-checklist.md`, `docs/port/stage5a-mac-checklist.md`). Stage 1 rows: all checklist steps OK on the user's M1 Mac (2026-11-08), including real GPU rendering.
+- **Stage**: 1 = shell, map, pieces; 2a = rules packs, map tools, dice, turn, log; 2b = formulas, phases, step back, module tree, alerts; 3a = Ledger, Outliner, Inventory, Notes, Diagnostics, Overview, Save map as picture, counter pictures; 3b = rulebook PDF viewer, charts, text and HTML documents, Rule ref (search, scan and OCR panes moved to 4a); 4a = Rules Workbench, rulebook search, scans and OCR; 4b = Settings; 4c = OCR language downloads; 5a = app lifecycle: launcher, Back to launcher, Interface Tour, About, update screens (this branch); 5 (5b and later) multiplayer, turn files, installing updates (stage 6); `-` = no plan yet or not applicable off Windows. The stage numbers after 4a are provisional. Rows that say 3 below are done in 3a unless they name the PDF viewer, charts or documents (3b); rows that say 4a name the Workbench, search, scans or OCR; rows that name Settings are 4b; rows that name OCR languages are 4c; rows that name the launcher, the tour, About or the update screens are 5a.
 
 ## Stage-1 deviations from the WinForms app (deliberate or known)
 
@@ -120,7 +120,7 @@ Stage 4b = Tools > Settings (General, Game, Display, Map, Dice & Log, Toolbar, K
 - The counter palette is shown only in game master mode, as WinForms. Desktop has no `--gm` option: game master mode comes from the Settings > General checkbox only.
 - The counter menu's Delete counter follows Settings > General game master mode and asks first per "Ask before deleting pieces", as WinForms.
 - Toolbar tooltips show the shortcut, e.g. "1d6 (F5)", "LOS (L)"; WinForms toolbar tips have no key.
-- General > "Select the last module in the launcher" and "Check for updates on start" are shown and stored, but the launcher and updater are stage 5.
+- General > "Check for updates on start" is shown and stored, but stays inactive until installing updates comes with stage 6 (5a uses it only with the test feed, see the Stage-5a deviations). "Select the last module in the launcher" is live since 5a: every module opened in a game window the launcher loop started is remembered (`LastModulePath`, as WinForms), and a fresh launcher selects it.
 - Colours are chosen in a small own dialog (48 basic swatches like the WinForms colour dialog plus a #RRGGBB box), not the system colour dialog.
 - On macOS a physical Control key (without Cmd) is not a shortcut modifier (Ctrl maps to Cmd); the capture dialog swallows it.
 - The settings window is a modal Avalonia window with the same eight tabs as WinForms.
@@ -135,6 +135,20 @@ Stage 4c = OCR language downloads: Settings > OCR languages (last page), a catal
 - `QUARTERMASTER_OCR_FEED=<folder>` replaces the network with a folder of `.traineddata` files (tests and screenshots).
 - Screenshots use the real catalog with nothing downloaded; `build/port-screenshots.ps1` writes `stage4c-desktop-settings-ocr.png` and `stage4c-desktop-ocr-dropdown.png`. There are no WinForms equivalents.
 - Real downloads, removal and the offline message on macOS are only checked by `docs/port/stage4c-mac-checklist.md`.
+
+## Stage-5a deviations from the WinForms app (deliberate or known)
+
+Stage 5a = app lifecycle: the launcher and Play offline windows, the launcher ↔ game loop with File > Back to launcher, Help > Interface Tour (and the automatic first tour), Help > About, and the update *screens* on a test feed. Formats are unchanged (rules pack 4, save 7, `settings.json` has no new field).
+
+- The launcher's **Online lobby ▶** is shown, disabled, with the tooltip "Online play comes with stage 5c."; Play offline's **Open turn file…** is shown, disabled, with "Turn files come with stage 5d.".
+- No update notices after an update (`--updated-from`, `--update-failed`, `--update-refused`, `UpdateStartup`): they belong to installing, which is stage 6. There is no `--smoke-launcher`; headless tests cover the launcher ↔ game loop instead.
+- The update UI exists only while `QUARTERMASTER_UPDATE_FEED` points at a folder feed (tests and screenshots): without it there is no update bar, no "Check for updates" link and no Help > Check for updates…, so nothing can reach GitHub. Update now shows the Update window and stops with "Installing updates comes with the packaged release (stage 6).".
+- Desktop update state (last check, skipped version) lives in `Updates-desktop/state.json` under the app data folder, not in the shared `settings.json`; `LastUpdateCheckUtc` and `SkippedVersion` there stay WinForms-only. "Check for updates on start" is read from `settings.json` as WinForms.
+- **Play offline ▶** is disabled, with the "not ready" text as tooltip, while the selected module is still being checked (hashed); WinForms enables it and shows that text in a message box on click.
+- The tour shows only the steps whose target is on screen, so the count is smaller when panels are hidden (for example "(1 of 7)" with the Outliner hidden, "(1 of 4)" without a rules pack).
+- The automatic first tour starts 500 ms after the game opens (after the alert bar's 250 ms debounce, so the bar is on screen when the steps are chosen); WinForms starts it at once. As WinForms it may start after any module open (from the launcher, a module on the command line, or File > Open Module…), but only in a window the launcher loop opened, never in tests or screenshot runs.
+- WinForms is unchanged.
+- Real macOS menus (Cmd shortcut text), windows and the tour balloon's transparency are only checked by `docs/port/stage5a-mac-checklist.md`.
 
 ## Before the stage release
 
@@ -159,7 +173,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | New Rules Pack... | 2a | ✔ |  |  |  |
 | Open Rules Pack... | 2a | ✔ |  |  |  |
 | Save Rules Pack / Save Rules Pack As... | 2a | ✔ |  |  |  |
-| Back to launcher | 5 |  |  |  |  |
+| Back to launcher | 5a | ✔ |  |  | closes the game (unsaved-changes prompt as Exit) and shows the launcher with that module selected; also on a game started with a module on the command line; no shortcut (as WinForms); hidden in screenshot runs and tests that start the window outside the launcher loop |
 | Exit | 1 | ✔ | ✔ | ✔ | asks about unsaved changes, as WinForms |
 
 ## Menu bar: Edit, View, Game, Tools, Window, Help
@@ -186,7 +200,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right (Cmd+Right on macOS) steps the turn; with a phased rules pack it is Next Phase, as WinForms (2b). Turn label in the status bar |
 | Tools > Settings... | 4b | ✔ |  |  | Ctrl+, (Cmd+, on macOS); opens the Settings window over the shared SettingsStore; a failed save is shown |
 | Window > Cascade, Tile, Close All, Pop Out, floating list | - |  |  |  | Desktop uses tabs, not MDI; not ported in 2b (only the log and phase panel pop out) |
-| Help > Interface Tour, Check for updates, About | 5 |  |  |  |  |
+| Help > Interface Tour, Check for updates, About | 5a | ✔ |  |  | Interface Tour needs a game; Check for updates… is shown only with the test feed (`QUARTERMASTER_UPDATE_FEED`) and, in a game, offers to go back to the launcher (WinForms text); About shows "Quartermaster <version>" and "A VASSAL module reader and engine." |
 
 ## Main window and shell
 
@@ -204,12 +218,12 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (click does nothing until stage 5); holder matches open the Ledger and select the holder's row (Depots & Global tab, filter cleared when it hides it; never the counters selected on the map); shown when a game is open and Settings > Display "Alert bar" is on (applies live) |
-| TourOverlay | 5 |  |  |  |  |
+| TourOverlay | 5a | ✔ |  |  | classic tooltip-yellow balloon with an arrow toward the step's target; Back / Next / Skip tour, Esc skips; steps whose target is hidden are left out; starts once by itself on the first game opened in a launcher-loop window (from the launcher, the command line or File > Open Module…; `TourShown`); without a compositor the arrow strip and corners take the control colour instead of black; closes when the game is replaced or the module closes |
 | PhaseStrip, PhasePanel, PhaseDock, PhaseFloatForm | 2b | ✔ |  |  | Strip and docked panel done (Next Phase button runs the shared Next Phase flow with the open-decisions question and phase-boundary autosave). Pop out / Dock moves the panel to a floating "Phases" window (default beside the main window's right edge, bounds remembered per module under "phases", fitted onto a screen that exists with the primary screen as fallback); closing that window docks the panel back, shown; rule reference link opens the document at its page (3b) |
 | NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave interval comes from Settings > General (autosave minutes) |
 | StepBackDialog | 2b | ✔ |  |  | "Step Back to Start of Phase" (confirm text and summary) / "Step Back To" (Turn, Stage, Side, Phase, Reached, Actions; newest first, summary follows the selection, double-click picks); Step Back / Cancel |
 | ReplayBar | 5 |  |  |  |  |
-| UpdateBar, UpdateDialog, WhatsNewDialog, AppUpdates | 5 |  |  |  |  |
+| UpdateBar, UpdateDialog, WhatsNewDialog, AppUpdates | 5a | ✔ |  |  | screens only; installing is stage 6. Only with the test feed (`QUARTERMASTER_UPDATE_FEED`): the launcher's bar (What's new / Update now / Later / Skip this version), Check for updates link, What's new window, Update window; Update now stops with "Installing updates comes with the packaged release (stage 6)." |
 
 ## Map and pieces
 
@@ -287,7 +301,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 
 | Feature (WinForms class or menu) | Stage | Windows | macOS | Linux | Note |
 |---|---|---|---|---|---|
-| LauncherForm, PlayOfflineForm | 5 |  |  |  |  |
+| LauncherForm, PlayOfflineForm | 5a | ✔ |  |  | app start without arguments shows the launcher (module list with hashing progress, Add module… / Remove, rules pack per module with change… / use (none), Play offline ▶); Play offline: Continue (newest autosave), recent games, New game…, Open saved game…, Open selected, Back; Online lobby ▶ and Open turn file… are shown disabled (stages 5c, 5d). `build/port-screenshots.ps1` writes stage5a-desktop-launcher / offline / update-bar / tour.png |
 | HandoverForm (hot seat) | 5 |  |  |  |  |
 | OnlineLobbyForm, JoinDialog, HostSavedDialog, HostSidesPanel | 5 |  |  |  |  |
 | SeatsDialog, SideChoiceDialog, SendTurnDialog, SendWaitForm, WhoAreYouDialog, MailboxOptions | 5 |  |  |  |  |
