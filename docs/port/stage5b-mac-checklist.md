@@ -27,12 +27,12 @@ The test needs about 20 minutes. Use the Riverland demo module and its rules pac
 
 ## E. Settings > Game > Players
 
-10. **Tools > Settings > Game**. Expected: Difficulty and a **Players** box with Anna's and Ben's rows (the box is 440 wide; part of each row's Remove button may be cut off at the right edge: the scroll bar at the bottom of the box reaches it). Change a name or move a side, click **Apply**. Expected: the status bar and the menu show the change; if the current player's sides changed, a handover comes up.
+10. **Tools > Settings > Game**. Expected: Difficulty and a **Players** box with Anna's and Ben's rows (the box fills the page width; each row's Remove button is fully visible, with no scroll bar at the bottom of the box). Change a name or move a side, click **Apply**. Expected: the status bar and the menu show the change; if the current player's sides changed, a handover comes up.
 11. Untick all sides of one player and click **Apply** or **OK**: a warning "Players" with the reason; the window stays open. Remove the second player and **Apply**: the game is solo again and **Player:** disappears from the status bar.
 
 ## F. Closing and undo
 
-12. Add Ben again (Settings > Game > Players) and move a counter so the game has unsaved changes. Use **Next Phase** until a handover screen shows. Press **Cmd+Q** (or the red close button of the screen). Expected: the unsaved-changes question about the game (as on File > Exit); answer **Cancel**: the handover screen stays and nothing else is visible. Press Cmd+Q again and answer **No** (do not save): the app ends and no window is left.
+12. Add Ben again (Settings > Game > Players) and move a counter so the game has unsaved changes. Use **Next Phase** until a handover screen shows. Press **Cmd+Q**. Expected: the question **"The current game has unsaved changes. Discard them?"** with **Yes** / **No** (as on File > Exit). Answer **No**: the app keeps running and the handover screen comes back for the same player (nothing else visible; repeat the Mission Control / Cmd+Tab check). Press **Cmd+Q** again and answer **Yes**: the app ends and no window is left.
 13. Start again (New game, two players). Reach a handover with **Next Phase**, and while the screen is up use **Edit > Undo** if the menu is reachable (otherwise after Continue use **Step Back**): going back into the earlier player's phase must dismiss the handover screen and show that player's view, without a stray screen. Write down what you saw.
 14. Save the game (**File > Save Game As…**, `Mac hot-seat`), go back to the launcher and open it from **Recent games**. Expected: the same players, and the current player at the screen after the first Continue.
 
