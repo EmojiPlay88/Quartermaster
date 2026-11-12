@@ -1,4 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Formulas;
@@ -9,7 +12,7 @@ namespace Quartermaster.Desktop;
 
 /// <summary>
 /// Hot-seat (port of WinForms MainForm.HotSeat): the handover screen (every Quartermaster window hidden while it is up, restored after
-/// Continue) and the player list edits from Settings > Game > Players. Hot-seat undo stays global (spec 8a.3).
+/// Continue), the status-bar player switcher and the player list edits from Settings > Game > Players. Hot-seat undo stays global (spec 8a.3).
 /// </summary>
 public partial class MainWindow
 {
@@ -25,6 +28,15 @@ public partial class MainWindow
     readonly List<PendingRun> _runsAfterHandover = new();
     bool _mainHiddenForHandover;
     DispatcherTimer? _handoverRetry;
+    // The status-bar player switcher (WinForms _sbPlayer, a ToolStripDropDownButton named "status.player"): shown only in a hot-seat game.
+    readonly Button _sbPlayer = new()
+    {
+        Name = "status.player", IsVisible = false, Focusable = false, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+        Padding = new Thickness(4, 0), Margin = new Thickness(0), VerticalAlignment = VerticalAlignment.Stretch,
+        VerticalContentAlignment = VerticalAlignment.Center,
+    };
+    readonly TextBlock _sbPlayerText = new() { Text = "Player:", VerticalAlignment = VerticalAlignment.Center };
+    readonly MenuFlyout _playerMenu = new();
 
     /// <summary>The hot-seat controller of the open module (null without one).</summary>
     public HotSeat? HotSeat => _hotSeat;
@@ -34,6 +46,26 @@ public partial class MainWindow
 
     /// <summary>The handover screen while it is up (tests).</summary>
     internal HandoverWindow? Handover => _handover;
+
+    /// <summary>The status-bar player switcher (tests).</summary>
+    internal Button PlayerButton => _sbPlayer;
+
+    /// <summary>The switcher's text, "Player: Anna" (tests).</summary>
+    internal string PlayerButtonText => _sbPlayerText.Text ?? "";
+
+    /// <summary>The items the switcher's menu would show now (tests).</summary>
+    internal IReadOnlyList<MenuItem> PlayerMenuItems() => BuildPlayerMenu();
+
+    void InitHotSeat()
+    {
+        var arrow = new TextBlock { Text = "▾", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(3, 0, 0, 0) };
+        _sbPlayer.Content = new StackPanel { Orientation = Orientation.Horizontal, Children = { _sbPlayerText, arrow } };
+        ToolTip.SetTip(_sbPlayer, HandoverText.PlayerTip);
+        _playerMenu.Opening += (_, _) => Guard(FillPlayerMenu);
+        _playerMenu.Items.Add(NoPlayersItem());   // as WinForms: the menu is never empty before its first open
+        _sbPlayer.Flyout = _playerMenu;
+        SbPlayerBox.Child = _sbPlayer;
+    }
 
     void CreateHotSeat(ModuleSession s, PhaseController phases, HistoryController history)
     {
@@ -47,6 +79,7 @@ public partial class MainWindow
         hs.HandoverCancelled += _onHandoverCancelled;
         hs.CurrentChanged += _onCurrentChanged;
         _hotSeat = hs;
+        UpdatePlayerButton();
     }
 
     /// <summary>
@@ -67,6 +100,7 @@ public partial class MainWindow
         _onHandoverCancelled = _onCurrentChanged = null;
         DismissHandover(restoreWindows);
         _runsAfterHandover.Clear();
+        UpdatePlayerButton();
     }
 
     void OnHotSeatUi(HotSeat hs, Action a)
@@ -102,6 +136,7 @@ public partial class MainWindow
 
     void OnCurrentPlayerChanged()
     {
+        UpdatePlayerButton();
         // The game became solo while a deliberate swap was on screen: nothing to hand over any more.
         if (_hotSeat is { Active: false } && _handoverFor != null) { DismissHandover(); OpenRunsAfterHandover(); }
     }
@@ -279,6 +314,57 @@ public partial class MainWindow
         return true;
     }
 
+    // ---------- player switcher (status bar) ----------
+
+    void UpdatePlayerButton()
+    {
+        var active = _hotSeat?.Active == true;
+        _sbPlayer.IsVisible = active;
+        SbPlayerBox.IsVisible = active;
+        if (!active) return;
+        _sbPlayerText.Text = HandoverText.StatusText(_hotSeat!.Current);
+    }
+
+    static MenuItem NoPlayersItem() => new() { Header = HandoverText.NoPlayers, IsEnabled = false };
+
+    /// <summary>One item per player ("Anna (Red)"), the one at the screen checked; "(no players)" when there are none.</summary>
+    List<MenuItem> BuildPlayerMenu()
+    {
+        var items = new List<MenuItem>();
+        if (_session?.Game is { } g && _hotSeat is { } hs)
+        {
+            foreach (var p in Players.Effective(g.State, _session.Rules))
+            {
+                var target = p;
+                var mi = new MenuItem
+                {
+                    Header = HandoverText.MenuText(p, _session.Rules).Replace("_", "__"),   // a name's "_" is no access key
+                    ToggleType = MenuItemToggleType.CheckBox,
+                    IsChecked = hs.Current?.Id == p.Id,
+                };
+                mi.Click += (_, _) => Guard(() => SwitchPlayer(target));
+                items.Add(mi);
+            }
+        }
+        if (items.Count == 0) items.Add(NoPlayersItem());
+        return items;
+    }
+
+    void FillPlayerMenu()
+    {
+        _playerMenu.Items.Clear();
+        foreach (var mi in BuildPlayerMenu()) _playerMenu.Items.Add(mi);
+    }
+
+    /// <summary>A deliberate swap: the handover screen comes first, for the chosen player too (spec 4).</summary>
+    void SwitchPlayer(PlayerDef p)
+    {
+        if (_session == null || _hotSeat is not { Active: true }) return;
+        _session.SetViewSides(new HashSet<string>());   // nothing of the leaving player stays on screen
+        CloseFormulaWindows($"Pass to {p.Name}");
+        RequestHandover(p);
+    }
+
     // ---------- player list (Settings > Game > Players) ----------
 
     (Quartermaster.Rules.RulesPack? Pack, IReadOnlyList<PlayerDef> Players)? GamePlayers() =>
@@ -302,5 +388,6 @@ public partial class MainWindow
             if (problem != null) { ShowError(problem); return; }
         }
         g.Execute(CommandLog.Prepare(new SetPlayers(players.ToList()), g.State, _session));
+        UpdatePlayerButton();
     }
 }

@@ -259,6 +259,9 @@ public sealed class EditGrid : UserControl
 
     public void SetCellItems(int row, int col, IReadOnlyList<string> items) { Check(row, col); _rows[row][col].Items = items; }
 
+    /// <summary>The choices a cell offers (its own, else its column's; tests).</summary>
+    internal IReadOnlyList<string>? CellItems(int row, int col) { Check(row, col); return _rows[row][col].Items ?? _cols[col].Items; }
+
     public void SetCellReadOnly(int row, int col, bool readOnly)
     {
         Check(row, col);

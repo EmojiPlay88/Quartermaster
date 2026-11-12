@@ -82,6 +82,7 @@ public partial class MainWindow : Window
         _viewLog = new MenuItem { Header = MenuText.FromWinForms("&Log"), ToggleType = MenuItemToggleType.CheckBox };
         InitTrees(layoutRoot);
         InitOutliner();
+        InitHotSeat();
         _router.Guard = Guard;
         _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
@@ -489,6 +490,7 @@ public partial class MainWindow : Window
         UpdatePhaseUi();
         UpdateOutlinerUi();
         RefreshHistoryUi();
+        UpdatePlayerButton();
     }
 
     /// <summary>The counter palette shows only with a game in game master mode (WinForms MainForm.SetGameMaster).</summary>
@@ -965,8 +967,8 @@ public partial class MainWindow : Window
         UpdateTitle();
     });
 
-    /// <summary>The player's view changed: maps another side owns lose their tab.</summary>
-    void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(() => { Maps.Rebuild(); ModuleTreeHost.RefreshVisibility(); }));
+    /// <summary>The player's view changed: maps another side owns lose their tab; the player switcher follows.</summary>
+    void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(() => { Maps.Rebuild(); ModuleTreeHost.RefreshVisibility(); UpdatePlayerButton(); }));
 
     void OnRulesChangedAnyThread() => OnUi(() => { UpdateUi(); UpdateTitle(); });
 
