@@ -14,8 +14,9 @@ public sealed record FileFilter(string Name, IReadOnlyList<string> Patterns)
     public FileFilter(string name, params string[] patterns) : this(name, (IReadOnlyList<string>)patterns) { }
 }
 
-/// <summary>The setup chooser's answer: a predefined setup (null = "New game from module") and the difficulty.</summary>
-public sealed record SetupChoice(SetupDef? Setup, Difficulty Difficulty);
+/// <summary>The setup chooser's answer: a predefined setup (null = "New game from module"), the difficulty and the players
+/// (null = solo; otherwise at least two, checked against the rules pack).</summary>
+public sealed record SetupChoice(SetupDef? Setup, Difficulty Difficulty, IReadOnlyList<PlayerDef>? Players = null);
 
 /// <summary>The dice dialog's answer: the dice and how many times to roll them (1 except for Multi-roll).</summary>
 public sealed record DiceChoice(DiceSpec Spec, int Times);
@@ -64,8 +65,9 @@ public interface IDialogs
     /// <summary>A warning with an OK button.</summary>
     Task ShowWarningAsync(Window owner, string message, string caption);
 
-    /// <summary>The setup chooser (WinForms SetupChooserDialog); null when cancelled.</summary>
-    Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty);
+    /// <summary>The setup chooser (WinForms SetupChooserDialog); null when cancelled. Its Players page offers <paramref name="pack"/>'s sides
+    /// (null: one player plays everything).</summary>
+    Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, Quartermaster.Rules.RulesPack? pack);
 
     /// <summary>The dice expression prompt (WinForms DiceDialog), with Times when <paramref name="multi"/>; null when cancelled.</summary>
     Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi);
@@ -246,8 +248,8 @@ public sealed class Dialogs : IDialogs
         Func<string, string?>? managedValue) =>
         new PropertySheetDialog(title, rows, managedValue).ShowDialog<IReadOnlyList<string>?>(owner);
 
-    public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty) =>
-        new SetupChooser(model, difficulty, preselectNew).ShowDialog<SetupChoice?>(owner);
+    public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, Quartermaster.Rules.RulesPack? pack) =>
+        new SetupChooser(model, difficulty, preselectNew, pack, this).ShowDialog<SetupChoice?>(owner);
 
     public Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi) =>
         new DiceDialog(title, multi).ShowDialog<DiceChoice?>(owner);

@@ -7,16 +7,27 @@
         WindowStartupLocation="CenterOwner">
   <DockPanel Margin="4">
     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6" Margin="4">
+      <Button x:Name="Back" Content="&lt; _Back" MinWidth="75" IsVisible="False" HorizontalContentAlignment="Center" />
+      <Button x:Name="Next" Content="_Next &gt;" MinWidth="75" HorizontalContentAlignment="Center" />
       <Button x:Name="Ok" Content="OK" MinWidth="75" IsDefault="True" HorizontalContentAlignment="Center" />
       <Button x:Name="Cancel" Content="Cancel" MinWidth="75" IsCancel="True" HorizontalContentAlignment="Center" />
     </StackPanel>
-    <!-- WinForms GroupBox "Difficulty" -->
-    <StackPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
-      <TextBlock Text="Difficulty" Margin="6,0,0,2" />
-      <Border BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1" Padding="6,2,6,4">
-        <StackPanel x:Name="Modes" />
-      </Border>
-    </StackPanel>
-    <ListBox x:Name="Setups" />
+    <Panel>
+      <DockPanel x:Name="GamePanel">
+        <!-- WinForms GroupBox "Difficulty" -->
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
+          <TextBlock Text="Difficulty" Margin="6,0,0,2" />
+          <Border BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1" Padding="6,2,6,4">
+            <StackPanel x:Name="Modes" />
+          </Border>
+        </StackPanel>
+        <ListBox x:Name="Setups" />
+      </DockPanel>
+      <!-- WinForms GroupBox "Players" (the second page) -->
+      <DockPanel x:Name="PlayersPanel" IsVisible="False">
+        <TextBlock DockPanel.Dock="Top" Text="Players" Margin="6,0,0,2" />
+        <Border x:Name="PlayersFrame" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1" Padding="6" />
+      </DockPanel>
+    </Panel>
   </DockPanel>
 </Window>

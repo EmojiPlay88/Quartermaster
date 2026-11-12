@@ -307,7 +307,8 @@ static class Program
             Console.Error.WriteLine(message);
             return Task.CompletedTask;
         }
-        public Task<SetupChoice?> ChooseSetupAsync(Avalonia.Controls.Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty) => Task.FromResult<SetupChoice?>(null);
+        public Task<SetupChoice?> ChooseSetupAsync(Avalonia.Controls.Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty,
+            Quartermaster.Rules.RulesPack? pack) => Task.FromResult<SetupChoice?>(null);
         public Task<DiceChoice?> AskDiceAsync(Avalonia.Controls.Window owner, string title, bool multi) => Task.FromResult<DiceChoice?>(null);
         public Task<TurnChoice?> AskTurnAsync(Avalonia.Controls.Window owner, TurnState current) => Task.FromResult<TurnChoice?>(null);
         public Task<bool> ConfirmOpenDecisionsAsync(Avalonia.Controls.Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null) =>

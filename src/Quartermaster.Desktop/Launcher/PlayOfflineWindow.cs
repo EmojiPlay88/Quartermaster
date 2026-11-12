@@ -229,10 +229,11 @@ public sealed class PlayOfflineWindow : Window
         {
             if (!IsVisible) return;
             Cursor = null;
-            var choice = await _dialogs.ChooseSetupAsync(this, session.Model, preselectNew: false, _store.Current.LastDifficulty);
+            var choice = await _dialogs.ChooseSetupAsync(this, session.Model, preselectNew: false, _store.Current.LastDifficulty, session.Rules);
             if (choice == null) return;
             _store.Update(cur => cur with { LastDifficulty = choice.Difficulty });
-            Finish(LaunchKind.NewGame, new NewGameRequest(GameMode.Offline, choice.Setup, choice.Difficulty, null, null, null), null);
+            var players = choice.Players is { Count: >= 2 } p ? p : null;
+            Finish(LaunchKind.NewGame, new NewGameRequest(GameMode.Offline, choice.Setup, choice.Difficulty, players, null, null), null);
         }
     }
 }

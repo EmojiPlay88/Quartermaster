@@ -139,7 +139,13 @@ public partial class MainWindow
             }
             catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("set difficulty: " + ex.Message); }
         },
-        OcrLanguages);
+        OcrLanguages,
+        GamePlayers,
+        p =>
+        {
+            try { SetGamePlayers(p); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("set players: " + ex.Message); }
+        });
 
     /// <summary>Tools > Settings (Ctrl+,): the settings window on its first page.</summary>
     public Task ShowSettingsAsync() => ShowSettingsAsync(null);

@@ -13,6 +13,10 @@ namespace Quartermaster.Desktop.Preferences;
 /// <param name="GameDifficulty">Difficulty of the open game, or null when no game is open.</param>
 /// <param name="SetGameDifficulty">Switches the open game's difficulty (takes effect from the next run).</param>
 /// <param name="OcrLanguages">The app's OCR language downloads; when set, the OCR languages page is shown (last).</param>
+/// <param name="GamePlayers">The open game's rules pack and player list, or null when no game is open.</param>
+/// <param name="SetGamePlayers">Gives the open game a new player list (an empty one = solo).</param>
 public sealed record SettingsContext(IReadOnlyList<(string Id, string Text)> ToolbarItems, string CacheRoot, Func<string?> OpenModuleCache,
     Func<string, Task> Notify, IDialogs Dialogs, Func<Difficulty?>? GameDifficulty = null, Action<Difficulty>? SetGameDifficulty = null,
-    OcrLanguageService? OcrLanguages = null);
+    OcrLanguageService? OcrLanguages = null,
+    Func<(Quartermaster.Rules.RulesPack? Pack, IReadOnlyList<PlayerDef> Players)?>? GamePlayers = null,
+    Action<IReadOnlyList<PlayerDef>>? SetGamePlayers = null);

@@ -636,10 +636,11 @@ public partial class MainWindow : Window
     async Task ChooseAndStartAsync(bool preselectNew)
     {
         if (_session is not { } s) return;
-        var choice = await _dialogs.ChooseSetupAsync(this, s.Model, preselectNew, SettingsStore.Current.LastDifficulty);
+        var choice = await _dialogs.ChooseSetupAsync(this, s.Model, preselectNew, SettingsStore.Current.LastDifficulty, s.Rules);
         if (choice == null || !ReferenceEquals(s, _session)) return;
         if (SettingsStore.Current.LastDifficulty != choice.Difficulty) SettingsStore.Update(x => x with { LastDifficulty = choice.Difficulty });
-        if (choice.Setup is { } setup) s.LoadSetup(setup, choice.Difficulty); else s.StartNewGame(choice.Difficulty);
+        var players = choice.Players is { Count: >= 2 } p ? p : null;
+        if (choice.Setup is { } setup) s.LoadSetup(setup, choice.Difficulty, players); else s.StartNewGame(choice.Difficulty, players);
     }
 
     Task OpenGameDialogAsync() => OpenGameCoreAsync(autosaves: false);
