@@ -62,6 +62,7 @@ public partial class MainWindow
         c.RunsQueued += OnPhaseRunsQueued;
         c.DifficultyChanged += OnDifficultyChangedAnyThread;
         CreateDispatch(s, c);
+        CreateHotSeat(s, c, _history!);
         _stripWatch = new PhaseWatch(s, RefreshStrip);
         StripHost.FlushHook = _stripWatch.Flush;
         _phasePanel = new PhasePanel(s, c, () => _actions!, CentreOnPiece, OpenDocumentAtPage);
@@ -98,6 +99,7 @@ public partial class MainWindow
 
     void DestroyPhaseUi()
     {
+        DestroyHotSeat();
         if (_phases is { } c)
         {
             c.PhaseBoundary -= OnPhaseBoundaryAnyThread;
@@ -162,6 +164,7 @@ public partial class MainWindow
         _dispatch = new PhaseRunDispatch(s, c, _history!, () => _actions!, new DesktopPhaseUi(this, s, () => _dispatch), _autosaver, () => DateTimeOffset.UtcNow)
         {
             AutosaveMinutes = () => SettingsStore.Current.AutosaveMinutes,
+            HoldRuns = HoldRunsForHandover,
             Failed = OnDispatchFailed,
             Log = m => System.Diagnostics.Trace.WriteLine(m),
         };

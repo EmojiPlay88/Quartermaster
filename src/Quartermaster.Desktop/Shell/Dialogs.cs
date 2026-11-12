@@ -134,13 +134,13 @@ public sealed class Dialogs : IDialogs
             try { start = await owner.StorageProvider.TryGetFolderFromPathAsync(initialFolder); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("start folder unavailable: " + ex.Message); }
         }
-        var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        var files = await ModalTracker.Track(() => owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = title,
             AllowMultiple = false,
             FileTypeFilter = filters.Select(Type).ToList(),
             SuggestedStartLocation = start,
-        });
+        }));
         if (files.Count == 0) return null;
         if (files[0].TryGetLocalPath() is { } path) return path;
         await MessageBox.ShowAsync(owner, NotLocalText, "Quartermaster", yesNo: false);
@@ -150,12 +150,12 @@ public sealed class Dialogs : IDialogs
     /// <summary>Items without a local path are dropped; when nothing local is left of a non-empty choice, says so (<see cref="NotLocalText"/>).</summary>
     public async Task<IReadOnlyList<string>> OpenFilesAsync(Window owner, string title, IReadOnlyList<FileFilter> filters)
     {
-        var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        var files = await ModalTracker.Track(() => owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = title,
             AllowMultiple = true,
             FileTypeFilter = filters.Select(Type).ToList(),
-        });
+        }));
         var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
         if (files.Count > 0 && paths.Count == 0) await MessageBox.ShowAsync(owner, NotLocalText, "Quartermaster", yesNo: false);
         return paths;
@@ -163,14 +163,14 @@ public sealed class Dialogs : IDialogs
 
     public async Task<string?> SaveFileAsync(Window owner, string title, FileFilter filter, string defaultExtension, string? suggestedFileName = null)
     {
-        var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        var file = await ModalTracker.Track(() => owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = title,
             DefaultExtension = defaultExtension,
             SuggestedFileName = suggestedFileName,
             FileTypeChoices = new[] { Type(filter) },
             ShowOverwritePrompt = true,
-        });
+        }));
         if (file == null) return null;
         if (file.TryGetLocalPath() is not { } path)
         {
@@ -189,16 +189,16 @@ public sealed class Dialogs : IDialogs
         MessageBox.ShowAsync(owner, message, caption, yesNo: false);
 
     public Task<IReadOnlyList<string>?> AskColumnsAsync(Window owner, IReadOnlyList<string> keys) =>
-        new Workbench.ColumnsDialog(keys).ShowDialog<IReadOnlyList<string>?>(owner);
+        new Workbench.ColumnsDialog(keys).ShowDialogTracked<IReadOnlyList<string>?>(owner);
 
     public Task<Quartermaster.Rules.Tables.PastedGrid?> PasteTableAsync(Window owner, string text, string? title = null, string? targetDescription = null, bool tsvOnly = false) =>
-        new Workbench.PasteTableDialog(text, title, targetDescription, tsvOnly).ShowDialog<Quartermaster.Rules.Tables.PastedGrid?>(owner);
+        new Workbench.PasteTableDialog(text, title, targetDescription, tsvOnly).ShowDialogTracked<Quartermaster.Rules.Tables.PastedGrid?>(owner);
 
     public Task<(int Count, string Label)?> AskBlockAsync(Window owner) =>
-        new Workbench.BlockDialog().ShowDialog<(int Count, string Label)?>(owner);
+        new Workbench.BlockDialog().ShowDialogTracked<(int Count, string Label)?>(owner);
 
     public Task<bool?> AskImportTargetAsync(Window owner, string selectedTable) =>
-        new Workbench.ImportTargetDialog(selectedTable).ShowDialog<bool?>(owner);
+        new Workbench.ImportTargetDialog(selectedTable).ShowDialogTracked<bool?>(owner);
 
     public async Task<string?> GetClipboardTextAsync(Window owner)
     {
@@ -236,37 +236,37 @@ public sealed class Dialogs : IDialogs
         MessageBox.ShowYesNoCancelAsync(owner, message, caption);
 
     public Task<string?> AskShortcutAsync(Window owner, string commandLabel) =>
-        new Preferences.ShortcutCaptureDialog(commandLabel).ShowDialog<string?>(owner);
+        new Preferences.ShortcutCaptureDialog(commandLabel).ShowDialogTracked<string?>(owner);
 
     public Task<string?> AskColourAsync(Window owner, string initialHex) =>
-        new Preferences.ColourDialog(initialHex).ShowDialog<string?>(owner);
+        new Preferences.ColourDialog(initialHex).ShowDialogTracked<string?>(owner);
 
     public Task<string?> AskTextAsync(Window owner, string title, string prompt, string initial) =>
-        new InputDialog(title, prompt, initial).ShowDialog<string?>(owner);
+        new InputDialog(title, prompt, initial).ShowDialogTracked<string?>(owner);
 
     public Task<IReadOnlyList<string>?> EditPropertySheetAsync(Window owner, string title, IReadOnlyList<(string Name, string Value)> rows,
         Func<string, string?>? managedValue) =>
-        new PropertySheetDialog(title, rows, managedValue).ShowDialog<IReadOnlyList<string>?>(owner);
+        new PropertySheetDialog(title, rows, managedValue).ShowDialogTracked<IReadOnlyList<string>?>(owner);
 
     public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, Quartermaster.Rules.RulesPack? pack) =>
-        new SetupChooser(model, difficulty, preselectNew, pack, this).ShowDialog<SetupChoice?>(owner);
+        new SetupChooser(model, difficulty, preselectNew, pack, this).ShowDialogTracked<SetupChoice?>(owner);
 
     public Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi) =>
-        new DiceDialog(title, multi).ShowDialog<DiceChoice?>(owner);
+        new DiceDialog(title, multi).ShowDialogTracked<DiceChoice?>(owner);
 
     public Task<TurnChoice?> AskTurnAsync(Window owner, TurnState current) =>
-        new TurnDialog(current).ShowDialog<TurnChoice?>(owner);
+        new TurnDialog(current).ShowDialogTracked<TurnChoice?>(owner);
 
     public async Task<bool> ConfirmOpenDecisionsAsync(Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null)
     {
         var dlg = new NextPhaseDialog(open);
-        if (await dlg.ShowDialog<bool?>(owner) == true) return true;
+        if (await dlg.ShowDialogTracked<bool?>(owner) == true) return true;
         if (dlg.JumpTo is { } d) jumpTo?.Invoke(d);
         return false;
     }
 
     public async Task<MissingInputResult> AskMissingAsync(Window owner, ModuleSession s, IActionPort port, PendingRun run) =>
-        await new MissingInputDialog(s, port, run).ShowDialog<MissingInputResult?>(owner) ?? MissingInputResult.Cancel;
+        await new MissingInputDialog(s, port, run).ShowDialogTracked<MissingInputResult?>(owner) ?? MissingInputResult.Cancel;
 
     /// <summary>The summary under the list is the owner's history preview (WinForms HistoryController.Describe(h.Preview(r))).</summary>
     public Task<CheckpointRow?> PickCheckpointAsync(Window owner, IReadOnlyList<CheckpointRow> rows, bool confirmOnly)
@@ -274,14 +274,14 @@ public sealed class Dialogs : IDialogs
         if (rows.Count == 0) return Task.FromResult<CheckpointRow?>(null);
         var h = (owner as MainWindow)?.History;
         Func<CheckpointRow, string> summary = h != null ? r => HistoryController.Describe(h.Preview(r)) : _ => "";
-        return new StepBackDialog(rows, summary, confirmOnly).ShowDialog<CheckpointRow?>(owner);
+        return new StepBackDialog(rows, summary, confirmOnly).ShowDialogTracked<CheckpointRow?>(owner);
     }
 
     public Task<ExportChoice?> AskExportChoiceAsync(Window owner, string mapName) =>
-        new ExportChoiceDialog(mapName).ShowDialog<ExportChoice?>(owner);
+        new ExportChoiceDialog(mapName).ShowDialogTracked<ExportChoice?>(owner);
 
     public Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false) =>
-        new Ledgers.EditTabsDialog(tabs, pack, select, addNew).ShowDialog<IReadOnlyList<UserLedgerTab>?>(owner);
+        new Ledgers.EditTabsDialog(tabs, pack, select, addNew).ShowDialogTracked<IReadOnlyList<UserLedgerTab>?>(owner);
 
     public void OpenInBrowser(TopLevel? owner, string path)
     {
@@ -349,9 +349,9 @@ sealed class MessageBox : Window
     }
 
     public static async Task<bool> ShowAsync(Window owner, string message, string caption, bool yesNo, bool defaultNo = true) =>
-        await new MessageBox(message, caption, yesNo, defaultNo: defaultNo).ShowDialog<bool?>(owner) == true;
+        await new MessageBox(message, caption, yesNo, defaultNo: defaultNo).ShowDialogTracked<bool?>(owner) == true;
 
     /// <summary>Yes / No / Cancel; closing the window counts as Cancel.</summary>
     public static Task<bool?> ShowYesNoCancelAsync(Window owner, string message, string caption) =>
-        new MessageBox(message, caption, yesNo: true, cancel: true).ShowDialog<bool?>(owner);
+        new MessageBox(message, caption, yesNo: true, cancel: true).ShowDialogTracked<bool?>(owner);
 }

@@ -88,6 +88,15 @@ public sealed class PhasePanelTests : IDisposable
 
     static void Flush(MainWindow w) { w.Strip.Flush(); w.Phases.Flush(); }
 
+    /// <summary>Clicks Continue on the hot-seat handover screen.</summary>
+    static void ContinueHandover(MainWindow w)
+    {
+        Pump();
+        w.Handover!.ContinueButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Pump();
+        Flush(w);
+    }
+
     static void ToCombat(MainWindow w)
     {
         for (var i = 0; i < 4; i++) w.Actions!.NextPhase();   // Start (Weather), Supply, Movement, Combat
@@ -225,16 +234,16 @@ public sealed class PhasePanelTests : IDisposable
         var w = PhaseGame(p => p with { Phases = p.Phases.Select(x => x.Id == "ph-combat" ? x with { SideId = "blue" } : x).ToList() });
         var s = w.Session!;
         s.Game!.Execute(new SetPlayers(new[] { new PlayerDef("p1", "Alice", new[] { "red" }), new PlayerDef("p2", "Bob", new[] { "blue" }) }));
-        s.SetViewSides(new HashSet<string> { "red" });
+        ContinueHandover(w);   // Alice (red) takes the screen (stage 5b: two players make it a hot-seat game)
+        Assert.Equal(new[] { "red" }, s.ViewSides!.ToArray());
         ToCombat(w);
         Assert.Empty(w.Phases.ChecklistTexts);
         Assert.False(w.Phases.NextEnabled);
         Assert.NotNull(w.Phases.NextTip);
         Assert.Equal("", w.Phases.InstructionsText);
 
-        s.SetViewSides(new HashSet<string> { "blue" });
-        Pump();
-        Flush(w);
+        ContinueHandover(w);   // Bob (blue)
+        Assert.Equal(new[] { "blue" }, s.ViewSides!.ToArray());
         Assert.Equal(new[] { "Resolve attacks" }, w.Phases.ChecklistTexts);
         Assert.Equal("Blue player — Combat", w.Phases.TitleText);
     }
