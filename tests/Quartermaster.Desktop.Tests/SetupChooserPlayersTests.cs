@@ -161,7 +161,11 @@ public sealed class SetupChooserPlayersTests : IDisposable
         _dialogs.Setup = new SetupChoice(null, Difficulty.SemiAuto, new[] { anna, ben });
 
         var row = new ModuleRow(new ModuleEntry(Path.GetFullPath(module), new string('a', 64), 1, DateTime.UtcNow, "Riverland Demo", "1.0", null), false);
-        var offline = new PlayOfflineWindow(row, new ModuleLibrary(store), new RecentGames(store, layout), store, _dialogs, Path.Combine(_tmp, "cache"));
+        var rules = Path.Combine(_tmp, "mods", "Riverland-Demo.qrules");
+        File.Copy(Demo("Riverland-Demo.qrules"), rules);
+        var library = new ModuleLibrary(store);
+        library.SetRulesPack(row.Entry, rules);   // the remembered pack: the chooser's Players page is offered it
+        var offline = new PlayOfflineWindow(row, library, new RecentGames(store, layout), store, _dialogs, Path.Combine(_tmp, "cache"));
         _windows.Add(offline);
         offline.Show();
         Dispatcher.UIThread.RunJobs();
@@ -176,6 +180,10 @@ public sealed class SetupChooserPlayersTests : IDisposable
         var start = game.StartFromLaunchAsync(req);
         WaitFor(() => start.IsCompleted && game.Session?.Game != null, 60);
         Assert.Equal(new[] { "Anna", "Ben" }, game.Session!.Game!.State.Players.Select(p => p.Name));
+        // The chooser was offered the module's rules pack (the launcher's own short-lived session, so the same pack, not the same object).
+        var offered = _dialogs.LastChooserPack;
+        Assert.NotNull(offered);
+        Assert.Equal(game.Session.Rules!.Sides.Select(x => x.Id), offered!.Sides.Select(x => x.Id));
     }
 
     static string Demo(string file, [System.Runtime.CompilerServices.CallerFilePath] string here = "") =>

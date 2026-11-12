@@ -385,6 +385,46 @@ public sealed class PlayerViewWindowsTests : IDisposable
         Assert.Equal("40", o.CellText(RowOf(o, "Blue 1"), 3));
     }
 
+    /// <summary>Final review: the Outliner is hidden with the main window (or its own window) during the handover; right after Continue,
+    /// with only the dispatcher's jobs run (no debounce timer), it must not still show the leaving player's tree.</summary>
+    void Outliner_right_after_continue_shows_nothing_of_previous_player(bool floating)
+    {
+        var w = _games.Game();
+        w.ClickMenu("&Outliner");
+        var o = w.Outliner!;
+        if (floating)
+        {
+            o.PopButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Pump();
+            Assert.True(w.OutlinerFloat!.IsVisible);
+        }
+        w.FlushAlerts();
+        Pump();
+        o.Flush();
+        o.ExpandAll();
+        Assert.True(RowOf(o, "Red Scout") >= 0);
+        var item = w.PlayerMenuItems().Single(i => ((string)i.Header!).StartsWith("Ben (", StringComparison.Ordinal));
+        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Pump();
+        Assert.True(w.HandoverShowing);
+        o.ExpandAll();
+        Assert.Equal(-1, RowOf(o, "Red Scout"));   // what is hidden behind the screen is public-only already
+        HotSeatGames.Continue(w);                  // jobs only
+        if (floating) Assert.True(w.OutlinerFloat!.IsVisible);
+        else Assert.True(w.OutlinerShown);
+        o.ExpandAll();
+        Assert.Equal(-1, RowOf(o, "Red Scout"));
+        Assert.True(RowOf(o, "Blue Scout") >= 0);  // Ben's own tree at once
+    }
+
+    [AvaloniaFact]
+    public void Outliner_docked_right_after_continue_shows_nothing_of_previous_player() =>
+        Outliner_right_after_continue_shows_nothing_of_previous_player(floating: false);
+
+    [AvaloniaFact]
+    public void Outliner_floating_right_after_continue_shows_nothing_of_previous_player() =>
+        Outliner_right_after_continue_shows_nothing_of_previous_player(floating: true);
+
     [AvaloniaFact]
     public void Phase_panel_and_strip_follow_current_player()
     {

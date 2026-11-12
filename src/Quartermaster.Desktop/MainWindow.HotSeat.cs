@@ -200,6 +200,10 @@ public partial class MainWindow
         _tour?.Close();
         foreach (var v in Maps.Views) v.HidePopup();
         if (_session != null) FormulaWindows.CloseAllFor(_session);
+        // The view is public-only by now: what stays behind the screen is rebuilt for it while still visible (a hidden Outliner only marks
+        // itself stale, and the alert hub would refresh it 250 ms later at the earliest).
+        _alertWatch?.Flush();
+        _outlinerPanel?.Flush();
         _hiddenForHandover.Clear();
         CollectOwned(this, _hiddenForHandover);
         // Children first. Avalonia drops a hidden window's owner, so each comes back with the owner remembered here.
@@ -240,6 +244,9 @@ public partial class MainWindow
         if (!ReferenceEquals(_handover, h)) return;   // DismissHandover cleared it first: an ordinary dismiss
         _handover = null;
         Guard(() => DismissHandover());
+        // The app did not end after all (its discard question answered No): the handover is still pending, so the screen comes back, once
+        // any modal question has closed (ShowHandoverWhenFree waits for it).
+        if (!_closed && _hotSeat?.Pending is { } p) Guard(() => RequestHandover(p));
     }
 
     void OnHiddenWindowClosed(object? sender, EventArgs e)
@@ -254,6 +261,7 @@ public partial class MainWindow
         if (_handoverFor is not { } p) return;
         // The view switches while everything is still hidden, so windows reappear already showing this player's view.
         _hotSeat?.TakeOver(p);
+        _alertWatch?.Flush();   // the new player's alerts now; a hidden Outliner marks itself stale and reloads when shown
         DismissHandover();
         SetStatus(HandoverText.StatusText(p));
         OpenRunsAfterHandover();
@@ -283,7 +291,7 @@ public partial class MainWindow
                 Activate();
             }
         }
-        if (!restoreWindows || _closed) return;
+        if (!restoreWindows || _closed) { _outlinerPanel?.ShownChanged(); return; }
         foreach (var (w, owner) in hidden)
         {
             try
@@ -293,6 +301,8 @@ public partial class MainWindow
             }
             catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("handover restore: " + ex.Message); }
         }
+        // Showing a window again does not re-attach the Outliner (docked or floating): a refresh put off while hidden is done now.
+        _outlinerPanel?.ShownChanged();
     }
 
     /// <summary>Calculations queued by the phase the new player starts in open once they are at the screen.</summary>

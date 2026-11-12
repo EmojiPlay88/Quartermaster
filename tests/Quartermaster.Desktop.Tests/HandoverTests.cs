@@ -422,14 +422,26 @@ public sealed class HandoverTests : IDisposable
         ToCombat(w);
         var h = w.Handover!;
         h.CloseForReal();   // as an application / OS shutdown closes it: not through DismissHandover, no CloseRequested
-        Pump();
         Assert.False(h.IsVisible);
-        Assert.False(w.HandoverShowing);
         Assert.Null(w.Handover);
         Assert.True(w.IsVisible);
         Assert.True(ledger.IsVisible);
         Assert.Empty(w.Session!.ViewSides!);   // still public-only: the handover is pending in the controller
         Assert.Equal(Ben.Id, w.HotSeat!.Pending?.Id);
+        // The shutdown did not end the app (its discard question answered No, say) and no modal is open: the screen comes back for Ben.
+        Pump();
+        Assert.True(w.HandoverShowing);
+        var again = w.Handover!;
+        Assert.NotSame(h, again);
+        Assert.True(again.IsVisible);
+        Assert.Equal("Pass to Ben (Blue)", again.Message);
+        Assert.False(w.IsVisible);
+        Assert.False(ledger.IsVisible);
+        Assert.Empty(w.Session!.ViewSides!);
+        Continue(w);
+        Assert.Equal(new[] { "blue" }, w.Session!.ViewSides!.ToArray());
+        Assert.True(w.IsVisible);
+        Assert.True(ledger.IsVisible);
     }
 
     [AvaloniaFact]

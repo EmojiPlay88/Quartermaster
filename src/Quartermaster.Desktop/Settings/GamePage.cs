@@ -19,9 +19,10 @@ public sealed class GamePage : SettingsPage
     readonly SettingsContext _ctx;
     internal readonly ComboBox DifficultyBox = new() { Width = 160, ItemsSource = Modes.Select(m => m.Name).ToArray() };
     internal readonly TextBlock Hint = new() { Foreground = Brushes.Gray };
-    /// <summary>The WinForms GroupBox "Players" (440×210): its title and its frame, holding the editor or <see cref="NoGameText"/>.</summary>
+    /// <summary>The WinForms GroupBox "Players" (440×210): its title and its frame, holding the editor or <see cref="NoGameText"/>. It keeps the
+    /// height but stretches to the page width (a fixed 440 px cut off the Remove buttons of a row with several sides).</summary>
     internal readonly TextBlock PlayersTitle = new() { Text = "Players", Margin = new Thickness(6, 0, 0, 2) };
-    internal readonly Border PlayersBox = new() { Width = 440, Height = 210, BorderThickness = new Thickness(1), Padding = new Thickness(6) };
+    internal readonly Border PlayersBox = new() { Height = 210, BorderThickness = new Thickness(1), Padding = new Thickness(6) };
     internal readonly TextBlock NoGameText = new() { Text = "Open a game first", Foreground = Brushes.Gray };
 
     /// <summary>The open game's players (null without a game).</summary>
@@ -34,7 +35,7 @@ public sealed class GamePage : SettingsPage
         Row(t, "Difficulty:", DifficultyBox);
         Full(t, Hint);
         PlayersBox.Bind(Border.BorderBrushProperty, PlayersBox.GetResourceObservable("Classic.BorderBrush"));
-        var group = new StackPanel { HorizontalAlignment = HorizontalAlignment.Left };
+        var group = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
         group.Children.Add(PlayersTitle);
         group.Children.Add(PlayersBox);
         Full(t, group);

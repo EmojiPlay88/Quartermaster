@@ -1,6 +1,8 @@
 using Avalonia.Controls;
+using Avalonia;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Formulas;
 using Quartermaster.Desktop.Preferences;
@@ -69,7 +71,8 @@ public sealed class GamePagePlayersTests : IDisposable
         p.Load(new Settings());
         Assert.Null(p.Editor);
         Assert.Equal("Players", p.PlayersTitle.Text);
-        Assert.Equal((440d, 210d), (p.PlayersBox.Width, p.PlayersBox.Height));
+        Assert.Equal(210d, p.PlayersBox.Height);
+        Assert.True(double.IsNaN(p.PlayersBox.Width));   // stretches to the page (WinForms fixed 440 px clipped the Remove buttons)
         Assert.Equal("Open a game first", p.NoGameText.Text);
         Assert.Same(p.NoGameText, p.PlayersBox.Child);
         Assert.Null(p.Validate());
@@ -110,6 +113,38 @@ public sealed class GamePagePlayersTests : IDisposable
         Assert.Equal(new[] { "Anna", "Ben" }, g.State.Players.Select(p => p.Name));
         Assert.Single(g.Log.OfType<SetPlayers>());
         Assert.Single(_dialogs.Warnings);
+    }
+
+    /// <summary>Final review: the Players box stretches to the page, so a three-side row's Remove button is whole, with no horizontal scroll.</summary>
+    [AvaloniaFact]
+    public void Players_box_shows_remove_buttons_whole()
+    {
+        var w = Game();
+        w.Session!.UpdateRules(p => p with { Sides = PlayersEditorTests.Pack("Red Coalition", "Blue Federation", "Green").Sides });
+        Pump();
+        var win = Settings(w);
+        var page = Page(win);
+        page.Editor!.Model.FillTwoPlayersForTests();
+        Pump();
+        win.Show(w);   // headless: never on screen
+        try
+        {
+            Assert.True(win.SelectPage("game"));
+            Pump();
+            win.UpdateLayout();
+            Assert.True(page.PlayersBox.Bounds.Width > 440);
+            var box = page.PlayersBox.Bounds.Width - page.PlayersBox.Padding.Right;
+            Assert.Equal(2, page.Editor!.RemoveButtons.Count);
+            foreach (var b in page.Editor.RemoveButtons)
+            {
+                var right = b.TranslatePoint(new Avalonia.Point(b.Bounds.Width, 0), page.PlayersBox);
+                Assert.NotNull(right);
+                Assert.True(right!.Value.X <= box, $"Remove ends at {right.Value.X}, box inner edge {box}");
+            }
+            var sv = page.Editor.GetVisualDescendants().OfType<ScrollViewer>().First();
+            Assert.True(sv.Extent.Width <= sv.Viewport.Width + 0.5, $"horizontal scroll: extent {sv.Extent.Width}, viewport {sv.Viewport.Width}");
+        }
+        finally { win.Close(); }
     }
 
     [AvaloniaFact]

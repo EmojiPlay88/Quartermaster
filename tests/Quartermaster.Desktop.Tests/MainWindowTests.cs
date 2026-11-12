@@ -620,6 +620,7 @@ public sealed class MainWindowTests : IDisposable
     {
         var w = NewWindow();
         w.OpenModule(Demo("Riverland-Demo.vmod"));
+        w.Session!.OpenRules(Demo("Riverland-Demo.qrules"));
         w.StartSetup(null);
         MoveAPiece(w);
         var before = Json(w.Session!.Game!.State);
@@ -637,6 +638,8 @@ public sealed class MainWindowTests : IDisposable
         Pump();
         Assert.Equal(1, _dialogs.SetupChooserShown);
         Assert.True(_dialogs.LastPreselectNew);
+        Assert.NotNull(_dialogs.LastChooserPack);
+        Assert.Same(w.Session.Rules, _dialogs.LastChooserPack);   // the chooser's Players page is offered the open rules pack
         Assert.False(w.HasUnsavedChanges);
         Assert.Equal(Difficulty.FullyAuto, w.Session.Game!.State.Difficulty);
     }
