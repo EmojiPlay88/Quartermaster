@@ -25,6 +25,41 @@ sealed class FakeDialogs : IDialogs
 
     public void OpenInBrowser(TopLevel? owner, string path) { Browsed.Add(path); BrowsedOwners.Add(owner); }
 
+    /// <summary>Scripted answers of the online dialogs (null = cancelled) and how often the Players dialog was asked for.</summary>
+    public IReadOnlyList<string>? SidesAnswer = null;
+    public Quartermaster.Desktop.Online.JoinChoice? JoinAnswer = null;
+    public Quartermaster.Desktop.Online.HostSavedChoice? HostSavedAnswer = null;
+    public int SeatsShown;
+
+    /// <summary>When set, the side choice stays open until the test completes this source (its answer, null = cancelled).</summary>
+    public TaskCompletionSource<IReadOnlyList<string>?>? HoldSides;
+
+    public Task<IReadOnlyList<string>?> ChooseSidesAsync(Window owner, string title, string prompt, IReadOnlyList<Quartermaster.Rules.SideDef> sides,
+        IReadOnlyCollection<string>? ticked = null, string? note = null) => HoldSides?.Task ?? Task.FromResult(SidesAnswer);
+
+    public Task<Quartermaster.Desktop.Online.JoinChoice?> AskJoinAsync(Window owner, Quartermaster.Render.LobbyRow row, string playerName) =>
+        Task.FromResult(JoinAnswer);
+
+    public Task<Quartermaster.Desktop.Online.HostSavedChoice?> AskHostSavedAsync(Window owner, Quartermaster.Rules.RulesPack pack, string playerName,
+        string lobbyName, IReadOnlyCollection<string> hostSides) => Task.FromResult(HostSavedAnswer);
+
+    public Task ShowSeatsAsync(Window owner, Quartermaster.Render.HostSession host, Quartermaster.Rules.RulesPack? pack)
+    {
+        SeatsShown++;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The Create lobby setup choosers shown (pack, host name, lobby name, difficulty) and what the next one answers (null = Cancel).</summary>
+    public readonly List<(Quartermaster.Rules.RulesPack Pack, string HostName, string LobbyName, Difficulty Difficulty)> OnlineSetups = new();
+    public NewGameRequest? OnlineSetupAnswer;
+
+    public Task<NewGameRequest?> ChooseOnlineSetupAsync(Window owner, ModuleModel model, Difficulty difficulty, Quartermaster.Rules.RulesPack pack,
+        string hostName, string lobbyName)
+    {
+        OnlineSetups.Add((pack, hostName, lobbyName, difficulty));
+        return Task.FromResult(OnlineSetupAnswer);
+    }
+
     public readonly Queue<string?> OpenFiles = new();
     public readonly Queue<string?> SaveFiles = new();
     public readonly List<(string Message, string Caption)> Questions = new();

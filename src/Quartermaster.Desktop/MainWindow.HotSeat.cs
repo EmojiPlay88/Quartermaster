@@ -16,9 +16,6 @@ namespace Quartermaster.Desktop;
 /// </summary>
 public partial class MainWindow
 {
-    /// <summary>Placeholder until stage 5c brings the online session (WinForms MainForm.IsOnline); the Desktop app is never online yet.</summary>
-    bool IsOnline => false;
-
     HotSeat? _hotSeat;
     Action<PlayerDef>? _onHandoverRequired;
     Action? _onHandoverCancelled, _onCurrentChanged;

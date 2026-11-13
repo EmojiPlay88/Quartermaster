@@ -7,6 +7,7 @@ using Quartermaster.Core;
 using Quartermaster.Desktop.Formulas;
 using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Preferences;
+using Quartermaster.Net;
 using Quartermaster.Render;
 using Quartermaster.Vassal;
 
@@ -24,7 +25,8 @@ static class ScreenshotStates
         "ledger", "ledger-counters", "edittabs", "outliner", "inventory", "notes", "diagnostics", "overview", "export-choice", "chart", "document", "document-search",
         "workbench", "workbench-formulas", "workbench-phases", "workbench-search", "workbench-scan",
         "settings", "settings-general", "settings-game", "settings-display", "settings-map", "settings-dice", "settings-toolbar", "settings-keyboard", "settings-folders",
-        "settings-ocr", "ocr-dropdown", "tour", "handover", "players-page", "settings-players", "player-menu" };
+        "settings-ocr", "ocr-dropdown", "tour", "handover", "players-page", "settings-players", "player-menu",
+        "online-lobby", "online-host", "online-guest", "seats", "side-choice" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -38,7 +40,12 @@ static class ScreenshotStates
         // As WinForms SmokeTour: the tour state leaves TourShown as it found it (closing the balloon above marked it shown).
         if (_tourShown is { } shown && window.SettingsStore.Current.TourShown != shown) window.SettingsStore.Update(x => x with { TourShown = shown });
         _tourShown = null;
-        if (_scanDir != null) { try { Directory.Delete(_scanDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } _scanDir = null; }
+        foreach (var dir in new[] { _scanDir, _tokensDir })
+        {
+            if (dir == null) continue;
+            try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+        _scanDir = _tokensDir = null;
     }
 
     /// <summary>Anna holds the rules pack's first side, Ben the second (invented names); the first handover is continued, so Anna is at the screen.</summary>
@@ -53,7 +60,35 @@ static class ScreenshotStates
         return window.HandoverShowing ? "The handover did not continue." : null;
     }
 
-    static string? _scanDir;
+    /// <summary>A host session over a transport that goes nowhere: Anna holds the rules pack's first side, the others are open (invented TEST lobby).</summary>
+    static string? OpenHost(MainWindow window, ModuleSession s, out HostSession? host, out NullTransport transport)
+    {
+        host = null;
+        transport = new NullTransport();
+        if (s.Rules is not { Sides.Count: >= 2 } pack || window.PhaseControl is not { } phases) return "This state needs --rules with two sides.";
+        var draft = OnlineLobbyModel.Draft("abc-234", "TEST lobby", "Anna", s.Archive.Sha256, s.Model.Name, pack, new[] { pack.Sides[0].Id }, false);
+        host = new HostSession(s, new IntentExecutor(s, phases), transport, "", "abc-234", draft, a => Dispatcher.UIThread.Post(a));
+        return null;
+    }
+
+#pragma warning disable CS0067   // the screenshot transport never raises most of the events
+    /// <summary>Stands in for the relay: sends go nowhere, nothing is received unless <see cref="Inject"/> says so. No network, no Quartermaster.Relay.</summary>
+    sealed class NullTransport : ITransport
+    {
+        public Task Send(string? to, byte[] payload) => Task.CompletedTask;
+        public Task UpdateListing(LobbyListing listing) => Task.CompletedTask;
+        public void Inject(string from, GamePayload p) => Received?.Invoke(from, Framing.Encode(p));
+        public event Action<string, byte[]>? Received;
+        public event Action<string>? MemberLeft;
+        public event Action<string>? Disconnected;
+        public event Action? Reconnected;
+        public event Action<IReadOnlyList<string>>? MembersListed;
+        public event Action? HostLeft;
+        public event Action? HostBack;
+    }
+#pragma warning restore CS0067
+
+    static string? _scanDir, _tokensDir;
     static bool? _tourShown;
 
     static readonly string[] SettingsPages = { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders", "ocr" };
@@ -373,6 +408,72 @@ static class ScreenshotStates
                 win.SelectPage(Array.IndexOf(SettingsPages, "game"));
                 Pump(300);
                 Target = win;
+                return null;
+            }
+            case "online-lobby":
+            {
+                // The Online lobby window with invented TEST lobbies; shown as if listed, no connection is ever made.
+                var entry = new ModuleEntry(Path.Combine(Path.GetTempPath(), "test-module.vmod"), s.Archive.Sha256, 0, DateTime.UtcNow, s.Model.Name, "1.0", null);
+                var lobby = new Quartermaster.Desktop.Launcher.OnlineLobbyWindow(new ModuleRow(entry, false), new ModuleLibrary(window.SettingsStore), window.SettingsStore, window.Dialogs)
+                {
+                    NoAutoRefresh = true,   // never a refresh from the remembered relay address (Opened) or the 10 s timer: no connection, no DNS
+                };
+                lobby.Show(window);
+                Pump(200);
+                var sha = s.Archive.Sha256;
+                var listings = new LobbyListing?[]
+                {
+                    new("abc-234", "TEST lobby", "Anna", sha, s.Model.Name, new[] { "Red", "Blue", "Green" }, new[] { "Blue", "Green" }, 1, 3, false, Protocol.ProtocolVersion),
+                    new("def-567", "TEST locked lobby", "Ben", sha, s.Model.Name, new[] { "Red", "Blue", "Green" }, new[] { "Green" }, 2, 3, true, Protocol.ProtocolVersion),
+                    new("ghi-892", "TEST full lobby", "Cy", sha, s.Model.Name, new[] { "Red", "Blue" }, Array.Empty<string>(), 2, 2, false, Protocol.ProtocolVersion),
+                };
+                lobby.ShowRowsForScreenshot(OnlineLobbyModel.Rows(listings, sha));
+                lobby.List.SelectedIndex = 0;
+                Pump(300);
+                Target = lobby;
+                return null;
+            }
+            case "online-host":
+            {
+                if (OpenHost(window, s, out var host, out var transport) is { } e8) return e8;
+                transport.Inject("m1", new JoinRequest("Ben", null, s.Archive.Sha256));
+                Pump(300);
+                window.ShowOnlineForScreenshot(host, null, "abc-234");
+                host!.Chat("Welcome to the TEST lobby.");
+                Pump(600);
+                return null;
+            }
+            case "online-guest":
+            {
+                // A guest still joining (left in Joining over a transport that never answers): banner and status bar text.
+                // Its rejoin tokens folder is a temp folder of its own that Cleanup deletes.
+                _tokensDir = Path.Combine(Path.GetTempPath(), "qm-shot-tokens-" + Guid.NewGuid().ToString("N"));
+                var guest = new GuestSession(s, new NullTransport(), "abc-234", "Ben", a => Dispatcher.UIThread.Post(a), new RejoinTokens(_tokensDir));
+                window.ShowOnlineForScreenshot(null, guest, "abc-234");
+                Pump(300);
+                return window.OnlineStatusText.Length > 0 ? null : "The online status text did not show.";
+            }
+            case "seats":
+            {
+                // Game > Players… of a host: its own seat, a guest who joined and holds no side yet, and the open seat.
+                if (OpenHost(window, s, out var host, out var transport) is { } e9) return e9;
+                transport.Inject("m1", new JoinRequest("Ben", null, s.Archive.Sha256));
+                Pump(300);
+                window.ShowOnlineForScreenshot(host, null, "abc-234");
+                var dlg = new Quartermaster.Desktop.Online.SeatsDialog(host!, s.Rules);
+                dlg.Show(window);
+                Pump(300);
+                Target = dlg;
+                return null;
+            }
+            case "side-choice":
+            {
+                // The guest's side question: the sides the host left open, with the join note.
+                if (s.Rules is not { Sides.Count: >= 2 } pack) return "State 'side-choice' needs --rules with two sides.";
+                var dlg = new Quartermaster.Desktop.Online.SideChoiceDialog(SideChoiceModel.ChooseTitle, SideChoiceModel.ChoosePrompt, pack.Sides.Skip(1).ToList(), null, OnlineLobbyModel.JoinNote);
+                dlg.Show(window);
+                Pump(300);
+                Target = dlg;
                 return null;
             }
             case "tour":

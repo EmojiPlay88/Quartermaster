@@ -3,7 +3,9 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Quartermaster.Core;
+using Quartermaster.Desktop.Online;
 using Quartermaster.Render;
+using Quartermaster.Rules;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.Desktop.Shell;
@@ -67,7 +69,11 @@ public interface IDialogs
 
     /// <summary>The setup chooser (WinForms SetupChooserDialog); null when cancelled. Its Players page offers <paramref name="pack"/>'s sides
     /// (null: one player plays everything).</summary>
-    Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, Quartermaster.Rules.RulesPack? pack);
+    Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, RulesPack? pack);
+
+    /// <summary>The setup chooser in Online mode ("Create lobby", WinForms SetupChooserDialog with GameMode.Online): lobby name and password,
+    /// then the host's name and sides of <paramref name="pack"/>. The request (its one player is the host), or null when cancelled.</summary>
+    Task<NewGameRequest?> ChooseOnlineSetupAsync(Window owner, ModuleModel model, Difficulty difficulty, RulesPack pack, string hostName, string lobbyName);
 
     /// <summary>The dice expression prompt (WinForms DiceDialog), with Times when <paramref name="multi"/>; null when cancelled.</summary>
     Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi);
@@ -91,7 +97,7 @@ public interface IDialogs
 
     /// <summary>The Ledger tab editor (WinForms EditTabsDialog) opened at user tab <paramref name="select"/>, or with a fresh tab added and
     /// selected when <paramref name="addNew"/> (the "+" tab); the edited list, or null when cancelled.</summary>
-    Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false);
+    Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, RulesPack? pack, int select = 0, bool addNew = false);
 
     /// <summary>The Columns dialog (WinForms ColumnsDialog): one key per line, opened on <paramref name="keys"/>; the trimmed non-blank keys, or null when cancelled.</summary>
     Task<IReadOnlyList<string>?> AskColumnsAsync(Window owner, IReadOnlyList<string> keys);
@@ -118,6 +124,20 @@ public interface IDialogs
     /// <summary>Opens a local file (an extracted HTML document) in the system browser through <paramref name="owner"/>'s launcher (the
     /// main window's when null). Returns at once; a failed launch is only traced.</summary>
     void OpenInBrowser(TopLevel? owner, string path);
+
+    /// <summary>The tick-box side chooser (a guest choosing its side, or the host assigning sides to a seat); the ticked side ids in pack order,
+    /// or null when cancelled. OK with nothing ticked is refused inside the dialog.</summary>
+    Task<IReadOnlyList<string>?> ChooseSidesAsync(Window owner, string title, string prompt, IReadOnlyList<SideDef> sides,
+        IReadOnlyCollection<string>? ticked = null, string? note = null);
+
+    /// <summary>The Join dialog (WinForms JoinDialog) for a lobby: the player name and the password (when the lobby is locked); null when cancelled.</summary>
+    Task<JoinChoice?> AskJoinAsync(Window owner, LobbyRow row, string playerName);
+
+    /// <summary>The Host a saved game dialog (WinForms HostSavedDialog); null when cancelled.</summary>
+    Task<HostSavedChoice?> AskHostSavedAsync(Window owner, RulesPack pack, string playerName, string lobbyName, IReadOnlyCollection<string> hostSides);
+
+    /// <summary>The host's Players dialog (WinForms SeatsDialog); returns when it is closed.</summary>
+    Task ShowSeatsAsync(Window owner, HostSession host, RulesPack? pack);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -248,8 +268,11 @@ public sealed class Dialogs : IDialogs
         Func<string, string?>? managedValue) =>
         new PropertySheetDialog(title, rows, managedValue).ShowDialogTracked<IReadOnlyList<string>?>(owner);
 
-    public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, Quartermaster.Rules.RulesPack? pack) =>
+    public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, RulesPack? pack) =>
         new SetupChooser(model, difficulty, preselectNew, pack, this).ShowDialogTracked<SetupChoice?>(owner);
+
+    public Task<NewGameRequest?> ChooseOnlineSetupAsync(Window owner, ModuleModel model, Difficulty difficulty, RulesPack pack, string hostName, string lobbyName) =>
+        new SetupChooser(model, difficulty, preselectNew: false, pack, this, GameMode.Online, hostName, lobbyName).ShowDialogTracked<NewGameRequest?>(owner);
 
     public Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi) =>
         new DiceDialog(title, multi).ShowDialogTracked<DiceChoice?>(owner);
@@ -280,8 +303,21 @@ public sealed class Dialogs : IDialogs
     public Task<ExportChoice?> AskExportChoiceAsync(Window owner, string mapName) =>
         new ExportChoiceDialog(mapName).ShowDialogTracked<ExportChoice?>(owner);
 
-    public Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false) =>
+    public Task<IReadOnlyList<UserLedgerTab>?> EditLedgerTabsAsync(Window owner, IReadOnlyList<UserLedgerTab> tabs, RulesPack? pack, int select = 0, bool addNew = false) =>
         new Ledgers.EditTabsDialog(tabs, pack, select, addNew).ShowDialogTracked<IReadOnlyList<UserLedgerTab>?>(owner);
+
+    public Task<IReadOnlyList<string>?> ChooseSidesAsync(Window owner, string title, string prompt, IReadOnlyList<SideDef> sides,
+        IReadOnlyCollection<string>? ticked = null, string? note = null) =>
+        new SideChoiceDialog(title, prompt, sides, ticked, note).ShowDialogTracked<IReadOnlyList<string>?>(owner);
+
+    public Task<JoinChoice?> AskJoinAsync(Window owner, LobbyRow row, string playerName) =>
+        new JoinDialog(row, playerName).ShowDialogTracked<JoinChoice?>(owner);
+
+    public Task<HostSavedChoice?> AskHostSavedAsync(Window owner, RulesPack pack, string playerName, string lobbyName, IReadOnlyCollection<string> hostSides) =>
+        new HostSavedDialog(pack, playerName, lobbyName, hostSides).ShowDialogTracked<HostSavedChoice?>(owner);
+
+    public Task ShowSeatsAsync(Window owner, HostSession host, RulesPack? pack) =>
+        new SeatsDialog(host, pack).ShowDialogTracked(owner);
 
     public void OpenInBrowser(TopLevel? owner, string path)
     {

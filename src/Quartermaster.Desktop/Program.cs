@@ -309,6 +309,8 @@ static class Program
         }
         public Task<SetupChoice?> ChooseSetupAsync(Avalonia.Controls.Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty,
             Quartermaster.Rules.RulesPack? pack) => Task.FromResult<SetupChoice?>(null);
+        public Task<NewGameRequest?> ChooseOnlineSetupAsync(Avalonia.Controls.Window owner, ModuleModel model, Difficulty difficulty,
+            Quartermaster.Rules.RulesPack pack, string hostName, string lobbyName) => Task.FromResult<NewGameRequest?>(null);
         public Task<DiceChoice?> AskDiceAsync(Avalonia.Controls.Window owner, string title, bool multi) => Task.FromResult<DiceChoice?>(null);
         public Task<TurnChoice?> AskTurnAsync(Avalonia.Controls.Window owner, TurnState current) => Task.FromResult<TurnChoice?>(null);
         public Task<bool> ConfirmOpenDecisionsAsync(Avalonia.Controls.Window owner, IReadOnlyList<Decision> open, Action<Decision>? jumpTo = null) =>
@@ -320,5 +322,12 @@ static class Program
         public Task<IReadOnlyList<Quartermaster.Core.UserLedgerTab>?> EditLedgerTabsAsync(Avalonia.Controls.Window owner, IReadOnlyList<Quartermaster.Core.UserLedgerTab> tabs,
             Quartermaster.Rules.RulesPack? pack, int select = 0, bool addNew = false) => Task.FromResult<IReadOnlyList<Quartermaster.Core.UserLedgerTab>?>(null);
         public void OpenInBrowser(Avalonia.Controls.TopLevel? owner, string path) { }
+        public Task<IReadOnlyList<string>?> ChooseSidesAsync(Avalonia.Controls.Window owner, string title, string prompt, IReadOnlyList<Quartermaster.Rules.SideDef> sides,
+            IReadOnlyCollection<string>? ticked = null, string? note = null) => Task.FromResult<IReadOnlyList<string>?>(null);
+        public Task<Quartermaster.Desktop.Online.JoinChoice?> AskJoinAsync(Avalonia.Controls.Window owner, Quartermaster.Render.LobbyRow row, string playerName) =>
+            Task.FromResult<Quartermaster.Desktop.Online.JoinChoice?>(null);
+        public Task<Quartermaster.Desktop.Online.HostSavedChoice?> AskHostSavedAsync(Avalonia.Controls.Window owner, Quartermaster.Rules.RulesPack pack, string playerName,
+            string lobbyName, IReadOnlyCollection<string> hostSides) => Task.FromResult<Quartermaster.Desktop.Online.HostSavedChoice?>(null);
+        public Task ShowSeatsAsync(Avalonia.Controls.Window owner, Quartermaster.Render.HostSession host, Quartermaster.Rules.RulesPack? pack) => Task.CompletedTask;
     }
 }

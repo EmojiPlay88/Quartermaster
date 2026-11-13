@@ -9,9 +9,10 @@ using Quartermaster.Vassal;
 namespace Quartermaster.Desktop.Shell;
 
 /// <summary>
-/// The setup chooser, as WinForms SetupChooserDialog (offline): "New game from module" plus the module's setups (with their folder path),
-/// and the difficulty; Next goes to the Players page (one player holding every side by default = solo). Closes with a
-/// <see cref="SetupChoice"/>, or null when cancelled.
+/// The setup chooser, as WinForms SetupChooserDialog: "New game from module" plus the module's setups (with their folder path),
+/// and the difficulty; Next goes to the Players page (one player holding every side by default = solo). Offline it closes with a
+/// <see cref="SetupChoice"/>, or null when cancelled. Online ("Create lobby") the game page also asks the lobby name and password, the
+/// second page is the host's own name and sides (<see cref="HostSidesPanel"/>), and it closes with the <see cref="NewGameRequest"/>.
 /// </summary>
 public partial class SetupChooser : Window
 {
@@ -28,6 +29,7 @@ public partial class SetupChooser : Window
     readonly Difficulty _difficulty;
     readonly RulesPack? _pack;
     readonly IDialogs? _dialogs;
+    readonly GameMode _mode;
     bool _accepting;
 
     /// <summary>For the XAML designer only.</summary>
@@ -35,14 +37,33 @@ public partial class SetupChooser : Window
 
     /// <param name="pack">The rules pack whose sides the Players page offers (null: one player plays everything).</param>
     /// <param name="dialogs">Shows the warnings that keep the chooser open (none shown without it).</param>
-    public SetupChooser(ModuleModel? model, Difficulty defaultDifficulty, bool preselectNew, RulesPack? pack = null, IDialogs? dialogs = null)
+    /// <param name="mode">Online: "Create lobby" with the lobby panel and the host's sides page.</param>
+    /// <param name="hostName">Online: the name the host plays under (preset on the second page).</param>
+    /// <param name="lobbyName">Online: the preset lobby name.</param>
+    public SetupChooser(ModuleModel? model, Difficulty defaultDifficulty, bool preselectNew, RulesPack? pack = null, IDialogs? dialogs = null,
+        GameMode mode = GameMode.Offline, string? hostName = null, string? lobbyName = null)
     {
         InitializeComponent();
         _difficulty = defaultDifficulty;
         _pack = pack;
         _dialogs = dialogs;
+        _mode = mode;
         Editor = new PlayersEditor(pack, Array.Empty<PlayerDef>());
-        PlayersFrame.Child = Editor;
+        LobbyNameBox.MaxLength = NewGameRules.MaxLobbyName;
+        OpenWarning.Text = OnlineLobbyModel.OpenLobbyWarning;
+        LobbyPasswordBox.OnTextSet(() => OpenWarning.IsVisible = (LobbyPasswordBox.Text ?? "").Length == 0);
+        if (mode == GameMode.Online)
+        {
+            // Online: the host's own sides; every other side is an open seat (launcher spec 3.4).
+            Title = "Create lobby";
+            Height = 410;
+            LobbyPanel.IsVisible = true;
+            LobbyNameBox.Text = lobbyName ?? "";
+            HostSides = new Online.HostSidesPanel(pack, hostName ?? "");
+            PlayersTitle.Text = "You and the open seats";
+            PlayersFrame.Child = HostSides;
+        }
+        else PlayersFrame.Child = Editor;
 
         var names = new List<string> { "New game from module" };
         _items.Add(null);
@@ -69,8 +90,14 @@ public partial class SetupChooser : Window
         Cancel.Click += (_, _) => Close(null);
     }
 
-    /// <summary>The Players page's editor.</summary>
+    /// <summary>The Players page's editor (offline).</summary>
     internal PlayersEditor Editor { get; }
+
+    /// <summary>Online: the host's name and sides page (null offline).</summary>
+    internal Online.HostSidesPanel? HostSides { get; }
+
+    /// <summary>Online: the request OK closed with (null until then, when cancelled, and offline).</summary>
+    public NewGameRequest? Request { get; private set; }
 
     /// <summary>True while the Players page (the second page) is shown.</summary>
     public bool OnPlayersPage => PlayersPanel.IsVisible;
@@ -122,17 +149,28 @@ public partial class SetupChooser : Window
         _accepting = true;
         try
         {
-            if (Editor.Problem is { } problem)
+            if ((HostSides != null ? HostSides.Problem : Editor.Problem) is { } problem)
             {
                 ShowPlayersPage();
                 if (_dialogs != null) await _dialogs.ShowWarningAsync(this, problem, "Players");
                 return;
             }
             var choice = Current;
-            var req = new NewGameRequest(GameMode.Offline, choice.Setup, choice.Difficulty, choice.Players, null, null);
+            var online = _mode == GameMode.Online;
+            // Online, the one player is the host (its sides); the game itself starts solo and the seats follow from the lobby.
+            var req = online && HostSides != null
+                ? new NewGameRequest(GameMode.Online, choice.Setup, choice.Difficulty, new[] { HostSides.ToPlayer() },
+                    (LobbyNameBox.Text ?? "").Trim(), LobbyPasswordBox.Text ?? "")
+                : new NewGameRequest(GameMode.Offline, choice.Setup, choice.Difficulty, choice.Players, null, null);
             if (NewGameRules.Validate(req, _pack) is { } bad)
             {
                 if (_dialogs != null) await _dialogs.ShowWarningAsync(this, bad, Title ?? "");
+                return;
+            }
+            if (online)
+            {
+                Request = req;
+                Close(req);
                 return;
             }
             Result = choice;
