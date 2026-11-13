@@ -25,6 +25,27 @@ sealed class FakeDialogs : IDialogs
 
     public void OpenInBrowser(TopLevel? owner, string path) { Browsed.Add(path); BrowsedOwners.Add(owner); }
 
+    /// <summary>Scripted answers of the online dialogs (null = cancelled) and how often the Players dialog was asked for.</summary>
+    public IReadOnlyList<string>? SidesAnswer = null;
+    public Quartermaster.Desktop.Online.JoinChoice? JoinAnswer = null;
+    public Quartermaster.Desktop.Online.HostSavedChoice? HostSavedAnswer = null;
+    public int SeatsShown;
+
+    public Task<IReadOnlyList<string>?> ChooseSidesAsync(Window owner, string title, string prompt, IReadOnlyList<Quartermaster.Rules.SideDef> sides,
+        IReadOnlyCollection<string>? ticked = null, string? note = null) => Task.FromResult(SidesAnswer);
+
+    public Task<Quartermaster.Desktop.Online.JoinChoice?> AskJoinAsync(Window owner, Quartermaster.Render.LobbyRow row, string playerName) =>
+        Task.FromResult(JoinAnswer);
+
+    public Task<Quartermaster.Desktop.Online.HostSavedChoice?> AskHostSavedAsync(Window owner, Quartermaster.Rules.RulesPack pack, string playerName,
+        string lobbyName, IReadOnlyCollection<string> hostSides) => Task.FromResult(HostSavedAnswer);
+
+    public Task ShowSeatsAsync(Window owner, Quartermaster.Render.HostSession host, Quartermaster.Rules.RulesPack? pack)
+    {
+        SeatsShown++;
+        return Task.CompletedTask;
+    }
+
     public readonly Queue<string?> OpenFiles = new();
     public readonly Queue<string?> SaveFiles = new();
     public readonly List<(string Message, string Caption)> Questions = new();
