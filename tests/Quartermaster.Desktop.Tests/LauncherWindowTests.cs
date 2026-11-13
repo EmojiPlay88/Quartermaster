@@ -261,15 +261,20 @@ public sealed class LauncherWindowTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void Online_lobby_is_disabled_with_stage_tip()
+    public void Online_lobby_follows_selection_with_its_tips()
     {
         var store = Store();
+        store.Update(s => s with { ReopenLastModule = false });
         new ModuleLibrary(store).Add(_module);
         var w = Launcher(store);
         Assert.Equal("Online lobby ▶", w.OnlineButton.Content);
         Assert.False(w.OnlineButton.IsEnabled);
-        Assert.Equal("Online play comes with stage 5c.", ToolTip.GetTip(w.OnlineButton));
+        Assert.Equal("Select a module first.", ToolTip.GetTip(w.OnlineButton));
         Assert.True(ToolTip.GetShowOnDisabled(w.OnlineButton));
+        w.Modules.SelectedIndex = 0;
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(w.OnlineButton.IsEnabled);
+        Assert.Equal("Join or host a live online game of this module.", ToolTip.GetTip(w.OnlineButton));
     }
 
     [AvaloniaFact]

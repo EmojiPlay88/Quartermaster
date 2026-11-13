@@ -46,6 +46,17 @@ sealed class FakeDialogs : IDialogs
         return Task.CompletedTask;
     }
 
+    /// <summary>The Create lobby setup choosers shown (pack, host name, lobby name, difficulty) and what the next one answers (null = Cancel).</summary>
+    public readonly List<(Quartermaster.Rules.RulesPack Pack, string HostName, string LobbyName, Difficulty Difficulty)> OnlineSetups = new();
+    public NewGameRequest? OnlineSetupAnswer;
+
+    public Task<NewGameRequest?> ChooseOnlineSetupAsync(Window owner, ModuleModel model, Difficulty difficulty, Quartermaster.Rules.RulesPack pack,
+        string hostName, string lobbyName)
+    {
+        OnlineSetups.Add((pack, hostName, lobbyName, difficulty));
+        return Task.FromResult(OnlineSetupAnswer);
+    }
+
     public readonly Queue<string?> OpenFiles = new();
     public readonly Queue<string?> SaveFiles = new();
     public readonly List<(string Message, string Caption)> Questions = new();

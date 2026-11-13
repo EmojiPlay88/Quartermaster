@@ -12,8 +12,9 @@ using Quartermaster.Render;
 namespace Quartermaster.Desktop.Launcher;
 
 /// <summary>
-/// The first window (WinForms LauncherForm): the module list with Add/Remove, the module's rules pack, Online lobby (stage 5c) and Play offline.
-/// <see cref="Result"/> is what to play once Play offline chose something; it completes with null when the window is closed otherwise.
+/// The first window (WinForms LauncherForm): the module list with Add/Remove, the module's rules pack, Online lobby and Play offline.
+/// <see cref="Result"/> is what to play once Play offline or the Online lobby chose something; it completes with null when the window is
+/// closed otherwise.
 /// </summary>
 public sealed class LauncherWindow : Window
 {
@@ -35,7 +36,7 @@ public sealed class LauncherWindow : Window
     bool _closing, _addedDuringRefresh;
     bool _refreshing;   // a module check is running; cleared on the UI thread before the list is refilled (the task itself ends just after)
 
-    /// <summary>What to play (Play offline's answer), or null when the launcher was closed.</summary>
+    /// <summary>What to play (Play offline's or the Online lobby's answer), or null when the launcher was closed.</summary>
     public Task<LaunchRequest?> Result => _result.Task;
 
     /// <summary>The module check started when the window opened (and after Add module).</summary>
@@ -59,6 +60,8 @@ public sealed class LauncherWindow : Window
 
     internal Button AddButton { get; } = new() { Content = "Add module…", MinWidth = 90 };
     internal Button RemoveButton { get; } = new() { Content = "Remove", MinWidth = 75 };
+    /// <summary>The tooltips of Online lobby ▶ (WinForms LauncherForm.UpdateButtons; a missing module shows the missing-file hint).</summary>
+    internal const string SelectFirstTip = "Select a module first.", OnlineTip = "Join or host a live online game of this module.";
     internal Button OnlineButton { get; } = new() { Content = "Online lobby ▶", MinWidth = 110, IsEnabled = false };
     internal Button PlayButton { get; } = new() { Content = "Play offline ▶", MinWidth = 110, IsDefault = true };
     internal Button ChangeLink { get; } = Link("change…");
@@ -69,6 +72,9 @@ public sealed class LauncherWindow : Window
 
     /// <summary>The Play offline window while it is open.</summary>
     internal PlayOfflineWindow? Offline { get; private set; }
+
+    /// <summary>The Online lobby window while it is open.</summary>
+    internal OnlineLobbyWindow? Lobby { get; private set; }
 
     internal IReadOnlyList<string> ColumnHeaders => Headers;
     internal IReadOnlyList<IReadOnlyList<string>> Cells => _cells;
@@ -98,7 +104,7 @@ public sealed class LauncherWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         AddLinkStyle(this);
 
-        ToolTip.SetTip(OnlineButton, "Online play comes with stage 5c.");
+        ToolTip.SetTip(OnlineButton, SelectFirstTip);
         ToolTip.SetShowOnDisabled(OnlineButton, true);
         ToolTip.SetShowOnDisabled(PlayButton, true);
         ToolTip.SetTip(NoneLink, "Play this module without a rules pack.");
@@ -150,6 +156,7 @@ public sealed class LauncherWindow : Window
         AddButton.Click += async (_, _) => await Guarded(AddModulesAsync);
         RemoveButton.Click += async (_, _) => await Guarded(() => { RemoveSelected(); return Task.CompletedTask; });
         PlayButton.Click += async (_, _) => await Guarded(PlayOfflineAsync);
+        OnlineButton.Click += async (_, _) => await Guarded(OpenLobbyAsync);
         ChangeLink.Click += async (_, _) => await Guarded(ChangeRulesAsync);
         NoneLink.Click += async (_, _) => await Guarded(() => { ClearRules(); return Task.CompletedTask; });
         Modules.SelectionChanged += (_, _) => UpdateButtons();
@@ -267,6 +274,9 @@ public sealed class LauncherWindow : Window
         PlayButton.IsEnabled = b.PlayOffline;
         RemoveButton.IsEnabled = b.Remove;
         ToolTip.SetTip(PlayButton, b.PlayOfflineTip);
+        // Online lobby ▶ (WinForms): any present module; a module still being checked is refused when clicked.
+        OnlineButton.IsEnabled = row is { Missing: false };
+        ToolTip.SetTip(OnlineButton, row == null ? SelectFirstTip : row.Missing ? LauncherModel.MissingTooltip : OnlineTip);
         ChangeLink.IsEnabled = row is { Missing: false };
         var pack = row == null ? null : Library.RulesPackFor(row.Entry);
         _rules.Text = LauncherModel.RulesLabel(pack);
@@ -326,7 +336,7 @@ public sealed class LauncherWindow : Window
     /// and closes the launcher, Back returns here.</summary>
     internal async Task PlayOfflineAsync()
     {
-        if (Offline != null || _closing || SelectedRow is not { } row) return;
+        if (Offline != null || Lobby != null || _closing || SelectedRow is not { } row) return;
         if (row.Missing)
         {
             await Dialogs.ShowInfoAsync(this, LauncherModel.MissingModuleText, Caption);
@@ -347,6 +357,35 @@ public sealed class LauncherWindow : Window
         }
         finally { Offline = null; }
         if (req == null || _closing) return;
+        _result.TrySetResult(req);
+        Close();
+    }
+
+    /// <summary>Online lobby ▶: the selected module's lobbies; a join or a new lobby completes <see cref="Result"/> and closes the launcher.</summary>
+    internal async Task OpenLobbyAsync()
+    {
+        if (Lobby != null || Offline != null || _closing || SelectedRow is not { Missing: false } row) return;
+        if (row.Entry.Sha256 is not { Length: > 0 })
+        {
+            await Dialogs.ShowInfoAsync(this, LauncherModel.NotReadyText, Caption);
+            return;
+        }
+        var w = new OnlineLobbyWindow(row, Library, Store, Dialogs);
+        Lobby = w;
+        LaunchRequest? req;
+        try
+        {
+            _ = w.ShowDialogTracked(this);
+            req = await w.Result;
+        }
+        finally { Lobby = null; }
+        if (req == null) return;
+        if (_closing)
+        {
+            // Nobody takes a joined connection any more.
+            if (req.Online?.Client is { } c) await c.DisposeAsync();
+            return;
+        }
         _result.TrySetResult(req);
         Close();
     }

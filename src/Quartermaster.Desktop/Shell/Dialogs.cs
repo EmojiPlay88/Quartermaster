@@ -71,6 +71,10 @@ public interface IDialogs
     /// (null: one player plays everything).</summary>
     Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, RulesPack? pack);
 
+    /// <summary>The setup chooser in Online mode ("Create lobby", WinForms SetupChooserDialog with GameMode.Online): lobby name and password,
+    /// then the host's name and sides of <paramref name="pack"/>. The request (its one player is the host), or null when cancelled.</summary>
+    Task<NewGameRequest?> ChooseOnlineSetupAsync(Window owner, ModuleModel model, Difficulty difficulty, RulesPack pack, string hostName, string lobbyName);
+
     /// <summary>The dice expression prompt (WinForms DiceDialog), with Times when <paramref name="multi"/>; null when cancelled.</summary>
     Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi);
 
@@ -266,6 +270,9 @@ public sealed class Dialogs : IDialogs
 
     public Task<SetupChoice?> ChooseSetupAsync(Window owner, ModuleModel model, bool preselectNew, Difficulty difficulty, RulesPack? pack) =>
         new SetupChooser(model, difficulty, preselectNew, pack, this).ShowDialogTracked<SetupChoice?>(owner);
+
+    public Task<NewGameRequest?> ChooseOnlineSetupAsync(Window owner, ModuleModel model, Difficulty difficulty, RulesPack pack, string hostName, string lobbyName) =>
+        new SetupChooser(model, difficulty, preselectNew: false, pack, this, GameMode.Online, hostName, lobbyName).ShowDialogTracked<NewGameRequest?>(owner);
 
     public Task<DiceChoice?> AskDiceAsync(Window owner, string title, bool multi) =>
         new DiceDialog(title, multi).ShowDialogTracked<DiceChoice?>(owner);

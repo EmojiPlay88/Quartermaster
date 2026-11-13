@@ -14,6 +14,15 @@
     </StackPanel>
     <Panel>
       <DockPanel x:Name="GamePanel">
+        <!-- Online (Create lobby): lobby name, password and the open-lobby warning, under the difficulty -->
+        <Grid x:Name="LobbyPanel" DockPanel.Dock="Bottom" IsVisible="False" Margin="4,6,0,0"
+              ColumnDefinitions="88,Auto" RowDefinitions="Auto,Auto,Auto">
+          <TextBlock Grid.Row="0" Text="Lobby name:" VerticalAlignment="Center" Margin="4,2" />
+          <TextBox x:Name="LobbyNameBox" Grid.Row="0" Grid.Column="1" Width="200" Margin="0,2" />
+          <TextBlock Grid.Row="1" Text="Password:" VerticalAlignment="Center" Margin="4,2" />
+          <TextBox x:Name="LobbyPasswordBox" Grid.Row="1" Grid.Column="1" Width="200" PasswordChar="*" Margin="0,2" />
+          <TextBlock x:Name="OpenWarning" Grid.Row="2" Grid.Column="1" Foreground="DarkGoldenrod" Margin="0,2" />
+        </Grid>
         <!-- WinForms GroupBox "Difficulty" -->
         <StackPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
           <TextBlock Text="Difficulty" Margin="6,0,0,2" />
@@ -25,7 +34,7 @@
       </DockPanel>
       <!-- WinForms GroupBox "Players" (the second page) -->
       <DockPanel x:Name="PlayersPanel" IsVisible="False">
-        <TextBlock DockPanel.Dock="Top" Text="Players" Margin="6,0,0,2" />
+        <TextBlock x:Name="PlayersTitle" DockPanel.Dock="Top" Text="Players" Margin="6,0,0,2" />
         <Border x:Name="PlayersFrame" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="1" Padding="6" />
       </DockPanel>
     </Panel>
