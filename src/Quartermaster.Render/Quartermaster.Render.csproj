@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Quartermaster.Render.Tests" />
+    <InternalsVisibleTo Include="Quartermaster.Desktop.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

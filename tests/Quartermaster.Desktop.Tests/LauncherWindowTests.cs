@@ -405,8 +405,8 @@ public sealed class LauncherWindowTests : IDisposable
         Assert.Equal("Continue: (no autosave yet)", none.ContinueText);
         Assert.False(none.ContinueButton.IsEnabled);
         Assert.Equal(new[] { "Recent games", "Saved" }, none.ColumnHeaders);
-        Assert.Equal("Turn files come with stage 5d.", ToolTip.GetTip(none.OpenTurnButton));
-        Assert.False(none.OpenTurnButton.IsEnabled);
+        Assert.Null(ToolTip.GetTip(none.OpenTurnButton));   // stage 5d: turn files open from here (WinForms has no tooltip)
+        Assert.True(none.OpenTurnButton.IsEnabled);
         Assert.False(none.OpenSelectedButton.IsEnabled);
         none.Close();
 

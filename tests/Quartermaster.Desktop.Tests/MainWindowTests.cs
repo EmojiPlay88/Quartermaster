@@ -49,6 +49,50 @@ sealed class FakeDialogs : IDialogs
         return Task.CompletedTask;
     }
 
+    /// <summary>Scripted answers of the turn dialogs (null / -1 = cancelled or closed) and what they were asked.</summary>
+    public Quartermaster.Desktop.Turns.SendTurnChoice? SendTurnAnswer = null;
+    public Quartermaster.Desktop.Turns.WhoChoice? WhoAnswer = null;
+    public int ChooseAnswer = -1;
+    public string? PasswordAnswer = null;
+    public bool WaitResult = true;
+    public readonly List<(string Message, IReadOnlyList<string> Buttons)> ChooseCalls = new();
+    public readonly List<(string FromName, Quartermaster.Render.MailboxValues Mailbox)> SendTurnCalls = new();
+    public readonly List<(string Prompt, string? Preselect, Quartermaster.Render.MailboxValues? Mailbox)> WhoCalls = new();
+    public readonly List<(string Caption, string Prompt)> PasswordCalls = new();
+    public readonly List<TimeSpan> WaitLimits = new();
+
+    public Task<Quartermaster.Desktop.Turns.SendTurnChoice?> AskSendTurnAsync(Window owner, string fromName, IReadOnlyList<Quartermaster.Core.PlayerDef> players,
+        string localPlayerId, Quartermaster.Rules.RulesPack? pack, Quartermaster.Render.MailboxValues mailbox)
+    {
+        SendTurnCalls.Add((fromName, mailbox));
+        return Task.FromResult(SendTurnAnswer);
+    }
+
+    public Task<Quartermaster.Desktop.Turns.WhoChoice?> AskWhoAreYouAsync(Window owner, string prompt, IReadOnlyList<Quartermaster.Core.PlayerDef> players,
+        Quartermaster.Rules.RulesPack? pack, string? preselect, Quartermaster.Render.MailboxValues? mailbox)
+    {
+        WhoCalls.Add((prompt, preselect, mailbox));
+        return Task.FromResult(WhoAnswer);
+    }
+
+    public Task<int> ChooseAsync(Window owner, string message, string caption, IReadOnlyList<string> buttons, int defaultIndex)
+    {
+        ChooseCalls.Add((message, buttons));
+        return Task.FromResult(ChooseAnswer);
+    }
+
+    public Task<string?> AskPasswordAsync(Window owner, string caption, string prompt)
+    {
+        PasswordCalls.Add((caption, prompt));
+        return Task.FromResult(PasswordAnswer);
+    }
+
+    public Task<bool> WaitForAsync(Window owner, Task work, TimeSpan limit)
+    {
+        WaitLimits.Add(limit);
+        return Task.FromResult(WaitResult);
+    }
+
     /// <summary>The Create lobby setup choosers shown (pack, host name, lobby name, difficulty) and what the next one answers (null = Cancel).</summary>
     public readonly List<(Quartermaster.Rules.RulesPack Pack, string HostName, string LobbyName, Difficulty Difficulty)> OnlineSetups = new();
     public NewGameRequest? OnlineSetupAnswer;
@@ -411,7 +455,7 @@ public sealed class MainWindowTests : IDisposable
         var w = NewWindow();
         var menus = w.MenuLabels();
         Assert.Equal(new[] { "&File", "&Edit", "&View", "&Tools", "&Help" }, menus.Keys);
-        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "Open Auto&save...", "&Save Game", "Save Game &As...", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "&Back to launcher", "E&xit" }, menus["&File"]);
+        Assert.Equal(new[] { "&Open Module...", "&New Game", "Load &Setup...", "Open &Game...", "Open Auto&save...", "Open &Turn File…", "&Save Game", "Save Game &As...", "&Export Viewer Copy…", "New &Rules Pack...", "Open Rules &Pack...", "Save Rules Pac&k", "Save Rules Pack A&s...", "&Back to launcher", "E&xit" }, menus["&File"]);
         Assert.Equal(new[] { "&Undo", "&Redo", "Step &Back to Start of Phase", "Step Back &To..." }, menus["&Edit"]);
         Assert.Equal(new[] { "Module &Tree", "&Diagnostics", "Show &Grid", "&Log", "&Phase panel", "&Outliner", "&Ledger", "&Overview", "Zoom to Fit", "Zoom 100%", "Zoom" }, menus["&View"]);
         Assert.Equal(new[] { "25%", "50%", "100%", "200%", "Fit" },

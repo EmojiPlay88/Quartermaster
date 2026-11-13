@@ -1,5 +1,6 @@
 using Quartermaster.Core;
 using Quartermaster.Render;
+using Quartermaster.Rules;
 using Quartermaster.TestFixtures;
 using Quartermaster.Vassal;
 
@@ -792,6 +793,70 @@ public class TurnTests : IDisposable
         Assert.Equal(1, ReceivedTurns.Prune(t.GameId, root));
         Assert.Empty(ReceivedTurns.List(t.GameId, root));
         Assert.Equal(0, ReceivedTurns.Prune("not a game id", root));
+    }
+
+    /// <summary>A session whose pack has Red and Blue sides and a private Fuel; a fresh game of Alice and Bob when <paramref name="newGame"/>.</summary>
+    private ModuleSession PrivateFuel(bool newGame)
+    {
+        var s = Open();
+        s.NewRules("t");
+        s.UpdateRules(_ => PhaseFixture.Pack(s.Archive.Sha256) with
+        {
+            Properties = new()
+            {
+                new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, SheetField = "Fuel", Visibility = Visibility.Private },
+            },
+        });
+        if (newGame) s.LoadSetup(s.Model.Setups[0], Difficulty.FullyAuto, new[] { Alice, Bob });
+        return s;
+    }
+
+    [Fact]
+    public void Replay_CurrentLine_ComesFromTheFilteredView()
+    {
+        // Alice: a private value with a private note, a line about a piece the view cannot place (dropped), and a public roll.
+        var alice = PrivateFuel(newGame: true);
+        var g = alice.Game!;
+        var key = LedgerKey.Piece(PhaseFixture.RedOne);
+        using (g.BeginAction())
+            g.Execute(new LedgerDelta(key, "fuel", 0, 1717, "manual", null, null, "TEST red secret", null, PieceId: PhaseFixture.RedOne, SideId: "red"));
+        using (g.BeginAction()) g.Execute(new AddLogLine(LogKind.Note, "TEST red secret plan", PieceId: "gone"));
+        using (g.BeginAction()) g.Execute(new RollDice("Red attack", 1, 6, new[] { 4 }));
+        var t = TurnSender.Build(alice, Bob.Id, Identity("alice", g.State.GameId!, Alice.Id));
+        Assert.Equal(3, t.Commands.Count);
+        Assert.Contains(g.State.Log, l => l.Text.Contains("secret", StringComparison.Ordinal));   // the full log holds both secrets
+
+        var bob = PrivateFuel(newGame: false);
+        var m = bob.OpenTurn(t, Bob.Id, Identity("bob", t.GameId));
+        Assert.Equal(0, bob.ViewSides?.Count);   // public-only while it runs
+
+        m.Next();   // the private ledger line: redacted, as the log shows it
+        Assert.DoesNotContain("secret", m.CurrentLine!, StringComparison.Ordinal);
+        Assert.DoesNotContain("1717", m.CurrentLine!, StringComparison.Ordinal);
+        Assert.Equal(bob.View!.Log[^1].Text, m.CurrentLine);
+        Assert.Equal("Red ledger changed", m.CurrentLine);
+
+        m.Next();   // a line the view dropped: a neutral text
+        Assert.Equal(TurnReplayModel.HiddenStepText, m.CurrentLine);
+        Assert.DoesNotContain(bob.View!.Log, l => l.Text.Contains("secret", StringComparison.Ordinal));
+
+        m.Next();   // a public line shows as it is
+        Assert.Contains("Red attack", m.CurrentLine);
+        Assert.True(m.Done);
+        Assert.True(m.EndMatches);
+    }
+
+    [Fact]
+    public void Replay_CurrentLine_SoloShowsTheFullLine()
+    {
+        var alice = NewGame();
+        var g = alice.Game!;
+        using (g.BeginAction()) g.Execute(new AddLogLine(LogKind.Note, "TEST plain note"));
+        var t = TurnSender.Build(alice, Bob.Id, Identity("alice", g.State.GameId!, Alice.Id));
+        var bob = Open();
+        var m = bob.OpenTurn(t, Bob.Id, Identity("bob", t.GameId));
+        m.Next();
+        Assert.Equal("TEST plain note", m.CurrentLine);   // no pack: nothing is hidden, the line is the game's own
     }
 
     [Fact]

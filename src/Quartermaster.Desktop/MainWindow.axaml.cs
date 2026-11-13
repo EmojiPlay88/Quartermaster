@@ -83,6 +83,7 @@ public partial class MainWindow : Window
         InitTrees(layoutRoot);
         InitOutliner();
         InitHotSeat();
+        InitTurns();
         _router.Guard = Guard;
         _dice = new DiceTools(this, () => _session, () => _actions, _dialogs, _router, Guard, RunAsync, SetStatus, () => StatusText);
         RegisterCommands();
@@ -366,9 +367,12 @@ public partial class MainWindow : Window
         Item(file, "Load &Setup...", () => RunAsync(LoadSetupAsync), gate: "file.loadSetup");
         Item(file, "Open &Game...", () => { }, "file.openGame");
         Item(file, "Open Auto&save...", () => RunAsync(OpenAutosaveDialogAsync), gate: "file.openAutosave");
+        Item(file, "Open &Turn File…", () => RunAsync(OpenTurnFileDialogAsync), gate: "file.openTurn");
         file.Items.Add(new Separator());
         Item(file, "&Save Game", () => { }, "file.saveGame");
         Item(file, "Save Game &As...", () => { }, "file.saveGameAs");
+        _exportViewer = Item(file, "&Export Viewer Copy…", () => RunAsync(ExportViewerCopyAsync));   // guests only (ApplyGuestLimits)
+        _exportViewer.IsVisible = false;
         file.Items.Add(new Separator());
         Item(file, "New &Rules Pack...", NewRulesPack, gate: "file.newRules");
         Item(file, "Open Rules &Pack...", OpenRulesPack, gate: "file.openRules");
@@ -492,6 +496,7 @@ public partial class MainWindow : Window
         UpdateOutlinerUi();
         RefreshHistoryUi();
         UpdatePlayerButton();
+        UpdateTurnUi();
     }
 
     /// <summary>The counter palette shows only with a game in game master mode (WinForms MainForm.SetGameMaster).</summary>
@@ -757,16 +762,19 @@ public partial class MainWindow : Window
         return _dirty && _session?.Game != null ? UnsavedText : null;
     }
 
-    async Task<bool> ConfirmDiscardAsync() =>
-        DiscardQuestion() is not { } q || await _dialogs.AskYesNoAsync(this, q, Caption, defaultNo: true);
+    async Task<bool> ConfirmDiscardAsync()
+    {
+        if (!await ConfirmSendDoneAsync()) return false;   // a turn still on its way to the relay gets its chance first
+        return DiscardQuestion() is not { } q || await _dialogs.AskYesNoAsync(this, q, Caption, defaultNo: true);
+    }
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        if (!e.Cancel && !_closeConfirmed && (DiscardQuestion() is not null || _session is { RulesDirty: true }))
+        if (!e.Cancel && !_closeConfirmed && (_sendAttempt != null || DiscardQuestion() is not null || _session is { RulesDirty: true }))
         {
             // Dialogs are asynchronous: keep the window, ask, and close again when everything is answered.
             e.Cancel = true;
-            if (!_closeAsking) _closeQuestion = AskThenCloseAsync(DiscardQuestion());
+            if (!_closeAsking) _closeQuestion = AskThenCloseAsync();
         }
         base.OnClosing(e);
         // Refused without a question still to answer (and not already confirmed): a real cancel.
@@ -774,12 +782,12 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Asks the close questions; never throws. No (or a failure) keeps the window and forgets a Back to launcher request.</summary>
-    async Task AskThenCloseAsync(string? question)
+    async Task AskThenCloseAsync()
     {
         _closeAsking = true;
         bool yes;
-        // WinForms: ConfirmDiscard, then ConfirmRulesSaved.
-        try { yes = (question == null || await _dialogs.AskYesNoAsync(this, question, Caption, defaultNo: true)) && await ConfirmRulesSavedAsync(); }
+        // WinForms: ConfirmDiscard (a turn still being sent first), then ConfirmRulesSaved.
+        try { yes = await ConfirmDiscardAsync() && await ConfirmRulesSavedAsync(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Trace.WriteLine("close question: " + ex); yes = false; }
         finally { _closeAsking = false; }
         if (!yes) { CancelBackToLauncher(); return; }
@@ -806,6 +814,7 @@ public partial class MainWindow : Window
         _dice.Stop();
         StopSettings();
         CloseSession();
+        DisposeTurns();
         base.OnClosed(e);
     }
 
@@ -818,6 +827,7 @@ public partial class MainWindow : Window
         c.IsOwnerThread = () => Dispatcher.UIThread.CheckAccess();   // game changes run on the UI thread
         _phases = c;
         _history = new HistoryController(s, c, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        _history.IsTurnGame = () => _turnIdentity is { LocalPlayerId.Length: > 0 };   // a sent turn cannot be undone
         _history.Rewound += RequestHistoryRefresh;
         _history.Rewound += OnHistoryRewoundAnyThread;
         _localActions = new LocalActions(s, c, _history);
@@ -841,6 +851,9 @@ public partial class MainWindow : Window
     void CloseSession()
     {
         EndOnline(notifyGuests: true);   // WinForms CloseSession: the guests are told first
+        EndReplayUi();
+        StopMailbox();
+        _turnIdentity = null;
         _tour?.Close();   // WinForms CloseSession: the balloon never outlives its targets (ends as skipped)
         DestroyWorkbench();   // first: its pending edits still reach the session
         DestroyExport();
@@ -970,6 +983,9 @@ public partial class MainWindow : Window
         UpdateUi();
         UpdateTitle();
         UpdateOnlineUi();   // WinForms OnGameReplaced: a guest's first snapshot, a viewer copy's banner
+        // WinForms OnTurnGameReplaced: a play-by-email game gets its player's view, any other local game hot-seat; a replay starting
+        // changes nothing (its view stays public-only until it ends).
+        OnTurnGameReplaced();
     });
 
     /// <summary>The player's view changed: maps another side owns lose their tab; the player switcher follows.</summary>

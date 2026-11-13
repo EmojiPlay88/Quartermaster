@@ -30,6 +30,10 @@
   Stage 5c adds stage5c-desktop-<state>.png (online-lobby: the Online lobby window with invented TEST lobbies; online-host: a hosted game with its
   status text, a guest seat and a chat line; online-guest: a guest still joining; seats: the host's Players dialog; side-choice: the guest's side
   question). No network: the states use a null transport and invented rows, never Quartermaster.Relay. Temp QUARTERMASTER_LAYOUT_ROOT.
+  Stage 5d adds stage5d-desktop-<state>.png (send-turn: the Send Turn dialog with the mailbox on an invented relay; who-are-you: the player question
+  for a turn from Ben; replay-bar: a fixture turn from Ben replayed one step, the bar under the alert bar; turn-notice: the "New turn waiting from
+  Ben" chip, set through the window's hook; open-turn-choice: Open anyway / Cancel for a turn already played). No mailbox watch, no network; the
+  replay's identities live in a temp folder the state deletes. Temp QUARTERMASTER_LAYOUT_ROOT.
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -39,7 +43,8 @@
 .PARAMETER SkipBuild
   Reuse the existing Release builds.
 .PARAMETER Only
-  Stage 5c state names (online-lobby, online-host, online-guest, seats, side-choice): run only those and stop (no WinForms, no other stage).
+  Stage 5c or 5d state names (online-lobby, online-host, online-guest, seats, side-choice; send-turn, who-are-you, replay-bar, turn-notice,
+  open-turn-choice): run only those and stop (no WinForms, no other stage).
 #>
 [CmdletBinding()]
 param(
@@ -93,26 +98,31 @@ function Invoke-Shot([string]$Exe, [string[]]$ArgList, [hashtable]$Env, [string]
     finally { if ($ownLayout -and (Test-Path $ownLayout)) { Remove-Item $ownLayout -Recurse -Force -ErrorAction SilentlyContinue } }
 }
 
-# Stage 5c states, Desktop, headless: the online screens, with invented TEST lobbies and a transport that goes nowhere (no network, no relay).
-function Invoke-Stage5c([string[]]$States) {
-    $layout5c = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-layout5c-' + [Guid]::NewGuid().ToString('N'))
+# Stage 5c and 5d states, Desktop, headless: the online screens (invented TEST lobbies, a transport that goes nowhere) and the turn-file screens
+# (a fixture turn, no mailbox watch). No network, no relay. Each stage runs in a temp layout root of its own.
+function Invoke-StageStates([string]$Stage, [string[]]$States) {
+    if (-not $States) { return }
+    $layout = Join-Path ([IO.Path]::GetTempPath()) ("qm-shot-layout$Stage-" + [Guid]::NewGuid().ToString('N'))
     try {
-        New-Item -ItemType Directory -Force $layout5c | Out-Null
-        $env5c = @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_LAYOUT_ROOT = $layout5c }
+        New-Item -ItemType Directory -Force $layout | Out-Null
+        $envStage = @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_LAYOUT_ROOT = $layout }
         foreach ($state in $States) {
-            $png = Join-Path $out "stage5c-desktop-$state.png"
-            Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) $env5c $png "desktop-$state"
+            $png = Join-Path $out "stage$Stage-desktop-$state.png"
+            Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) $envStage $png "desktop-$state"
         }
     }
-    finally { if (Test-Path $layout5c) { Remove-Item $layout5c -Recurse -Force } }
+    finally { if (Test-Path $layout) { Remove-Item $layout -Recurse -Force } }
 }
 $states5c = 'online-lobby', 'online-host', 'online-guest', 'seats', 'side-choice'
+$states5d = 'send-turn', 'who-are-you', 'replay-bar', 'turn-notice', 'open-turn-choice'
 if ($Only) {
     # powershell -File passes "a,b" as one string: split it, so both call styles name the same states.
     $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    $unknown = @($Only | Where-Object { $states5c -notcontains $_ })
-    if ($unknown.Count -gt 0) { throw "-Only: not a stage 5c state: $($unknown -join ', ') (known: $($states5c -join ', '))" }
-    Invoke-Stage5c ($states5c | Where-Object { $Only -contains $_ }); return
+    $known = $states5c + $states5d
+    $unknown = @($Only | Where-Object { $known -notcontains $_ })
+    if ($unknown.Count -gt 0) { throw "-Only: not a stage 5c or 5d state: $($unknown -join ', ') (known: $($known -join ', '))" }
+    Invoke-StageStates '5c' @($states5c | Where-Object { $Only -contains $_ })
+    Invoke-StageStates '5d' @($states5d | Where-Object { $Only -contains $_ }); return
 }
 
 # Desktop: headless, no window. The Riverland demo has no predefined setups, so --new.
@@ -267,7 +277,8 @@ try {
 }
 finally { if (Test-Path $layout5b) { Remove-Item $layout5b -Recurse -Force } }
 
-Invoke-Stage5c $states5c
+Invoke-StageStates '5c' $states5c
+Invoke-StageStates '5d' $states5d
 
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'

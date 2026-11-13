@@ -223,7 +223,8 @@ static class Program
         foreach (var w in warnings) Console.Error.WriteLine(w);
         if (startup.ScreenshotPath is not { } png || startup.ModulePath is not { } module)
         {
-            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state menu|hover|los|log|rules|phases|nextphase|stepback|formula|cheatsheet|batch|alerts|tree|floatlog|floatphases|tour|handover|players-page|settings-players|player-menu]");
+            Console.Error.WriteLine("Usage: <vmod> --screenshot-main <png> [--setup N|--new] [--rules <qrules>] [--screenshot-state "
+                + string.Join("|", ScreenshotStates.Names) + "]");
             return 1;
         }
         if (Application.Current == null)
@@ -329,5 +330,12 @@ static class Program
         public Task<Quartermaster.Desktop.Online.HostSavedChoice?> AskHostSavedAsync(Avalonia.Controls.Window owner, Quartermaster.Rules.RulesPack pack, string playerName,
             string lobbyName, IReadOnlyCollection<string> hostSides) => Task.FromResult<Quartermaster.Desktop.Online.HostSavedChoice?>(null);
         public Task ShowSeatsAsync(Avalonia.Controls.Window owner, Quartermaster.Render.HostSession host, Quartermaster.Rules.RulesPack? pack) => Task.CompletedTask;
+        public Task<Quartermaster.Desktop.Turns.SendTurnChoice?> AskSendTurnAsync(Avalonia.Controls.Window owner, string fromName, IReadOnlyList<Quartermaster.Core.PlayerDef> players,
+            string localPlayerId, Quartermaster.Rules.RulesPack? pack, Quartermaster.Render.MailboxValues mailbox) => Task.FromResult<Quartermaster.Desktop.Turns.SendTurnChoice?>(null);
+        public Task<Quartermaster.Desktop.Turns.WhoChoice?> AskWhoAreYouAsync(Avalonia.Controls.Window owner, string prompt, IReadOnlyList<Quartermaster.Core.PlayerDef> players,
+            Quartermaster.Rules.RulesPack? pack, string? preselect, Quartermaster.Render.MailboxValues? mailbox) => Task.FromResult<Quartermaster.Desktop.Turns.WhoChoice?>(null);
+        public Task<int> ChooseAsync(Avalonia.Controls.Window owner, string message, string caption, IReadOnlyList<string> buttons, int defaultIndex) => Task.FromResult(-1);
+        public Task<string?> AskPasswordAsync(Avalonia.Controls.Window owner, string caption, string prompt) => Task.FromResult<string?>(null);
+        public Task<bool> WaitForAsync(Avalonia.Controls.Window owner, Task work, TimeSpan limit) => Task.FromResult(false);
     }
 }

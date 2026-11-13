@@ -26,7 +26,8 @@ static class ScreenshotStates
         "workbench", "workbench-formulas", "workbench-phases", "workbench-search", "workbench-scan",
         "settings", "settings-general", "settings-game", "settings-display", "settings-map", "settings-dice", "settings-toolbar", "settings-keyboard", "settings-folders",
         "settings-ocr", "ocr-dropdown", "tour", "handover", "players-page", "settings-players", "player-menu",
-        "online-lobby", "online-host", "online-guest", "seats", "side-choice" };
+        "online-lobby", "online-host", "online-guest", "seats", "side-choice",
+        "send-turn", "who-are-you", "replay-bar", "turn-notice", "open-turn-choice" };
 
     /// <summary>Set by a state whose picture is a window of its own (a dialog, the formula window, a floating panel) instead of the main window.</summary>
     public static Window? Target { get; private set; }
@@ -40,12 +41,12 @@ static class ScreenshotStates
         // As WinForms SmokeTour: the tour state leaves TourShown as it found it (closing the balloon above marked it shown).
         if (_tourShown is { } shown && window.SettingsStore.Current.TourShown != shown) window.SettingsStore.Update(x => x with { TourShown = shown });
         _tourShown = null;
-        foreach (var dir in new[] { _scanDir, _tokensDir })
+        foreach (var dir in new[] { _scanDir, _tokensDir, _turnsDir })
         {
             if (dir == null) continue;
             try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
-        _scanDir = _tokensDir = null;
+        _scanDir = _tokensDir = _turnsDir = null;
     }
 
     /// <summary>Anna holds the rules pack's first side, Ben the second (invented names); the first handover is continued, so Anna is at the screen.</summary>
@@ -88,7 +89,15 @@ static class ScreenshotStates
     }
 #pragma warning restore CS0067
 
-    static string? _scanDir, _tokensDir;
+    static string? _scanDir, _tokensDir, _turnsDir;
+
+    /// <summary>Anna holds the rules pack's first side, Ben the second (invented names), as in <see cref="TwoPlayers"/>.</summary>
+    static IReadOnlyList<PlayerDef> TurnPlayers(Quartermaster.Rules.RulesPack pack) => new[]
+    {
+        new PlayerDef("p1", "Anna", new[] { pack.Sides[0].Id }),
+        new PlayerDef("p2", "Ben", new[] { pack.Sides[1].Id }),
+    };
+
     static bool? _tourShown;
 
     static readonly string[] SettingsPages = { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders", "ocr" };
@@ -471,6 +480,67 @@ static class ScreenshotStates
                 // The guest's side question: the sides the host left open, with the join note.
                 if (s.Rules is not { Sides.Count: >= 2 } pack) return "State 'side-choice' needs --rules with two sides.";
                 var dlg = new Quartermaster.Desktop.Online.SideChoiceDialog(SideChoiceModel.ChooseTitle, SideChoiceModel.ChoosePrompt, pack.Sides.Skip(1).ToList(), null, OnlineLobbyModel.JoinNote);
+                dlg.Show(window);
+                Pump(300);
+                Target = dlg;
+                return null;
+            }
+            case "send-turn":
+            {
+                // Game > Send Turn…: Anna sends to Ben through the mailbox on an invented relay (nothing connects), captured as its own window.
+                if (s.Rules is not { Sides.Count: >= 2 } pack) return "State 'send-turn' needs --rules with two sides.";
+                var dlg = new Quartermaster.Desktop.Turns.SendTurnDialog("Anna", TurnPlayers(pack), "p1", pack, new MailboxValues(true, "relay.example.test", "TEST pw"));
+                dlg.Show(window);
+                Pump(300);
+                Target = dlg;
+                return null;
+            }
+            case "who-are-you":
+            {
+                // A turn from Ben opened on a computer that does not know its player yet: Anna preselected, the mailbox off.
+                if (s.Rules is not { Sides.Count: >= 2 } pack) return "State 'who-are-you' needs --rules with two sides.";
+                var dlg = new Quartermaster.Desktop.Turns.WhoAreYouDialog(TurnDialogRules.FromPrompt("Ben"), TurnPlayers(pack), pack, "p1", new MailboxValues(false, "", ""));
+                dlg.Show(window);
+                Pump(300);
+                Target = dlg;
+                return null;
+            }
+            case "replay-bar":
+            {
+                // A fixture turn from Ben (a move and a roll), opened as Anna's computer and replayed one step: the bar under the alert bar.
+                // Both identities live in a temp folder of their own that Cleanup deletes; no mailbox, no network.
+                if (TwoPlayers(window) is { } e10) return e10;
+                var g = s.Game!;
+                _turnsDir = Path.Combine(Path.GetTempPath(), "qm-shot-turns-" + Guid.NewGuid().ToString("N"));
+                window.TurnsRoot = Path.Combine(_turnsDir, "anna");
+                var anna = TurnIdentity.Load(g.State.GameId, window.TurnsRoot, null);
+                anna.LocalPlayerId = "p1";
+                anna.Save();
+                var ben = TurnIdentity.Load(g.State.GameId, Path.Combine(_turnsDir, "ben"), null);
+                ben.LocalPlayerId = "p2";
+                TurnSender.AfterSend(s);   // Ben's turn starts here
+                if (g.State.Pieces.Values.FirstOrDefault(p => p.StackId != null && p.MapId != null) is not { } moved) return "No piece to move.";
+                using (g.BeginAction()) g.Execute(new MovePieces(new[] { moved.Id }, moved.MapId!, new PointD(moved.Pos.X + 60, moved.Pos.Y), null));
+                using (g.BeginAction()) g.Execute(new RollDice("TEST roll", 1, 6, new[] { 4 }));
+                var t = TurnSender.Build(s, "p1", ben);
+                while (g.Log.Count > g.TurnBase && g.CanUndo) g.Undo();   // Anna's computer is still at the turn's start
+                var path = Path.Combine(_turnsDir, "ben.qturn");
+                TurnFiles.Write(path, t);
+                var open = window.OpenTurnFileAsync(path);
+                if (!PumpUntil(() => open.IsCompleted, 10000) || !open.Result || window.TurnReplay == null) return "The turn did not open.";
+                window.ReplayBarControl.NextButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+                Pump(300);
+                return window.TurnReplay == null ? "The replay ended at once." : null;
+            }
+            case "turn-notice":
+                // The "New turn waiting from Ben" chip in the alert bar, set through the window's hook (no mailbox watch, no network).
+                window.ShowTurnNoticeForScreenshot("Ben");
+                Pump(300);
+                return window.TurnNoticeText.Length > 0 ? null : "The turn notice did not show.";
+            case "open-turn-choice":
+            {
+                // Open Turn File… on a turn already played here: Open anyway / Cancel (Cancel the default), captured as its own window.
+                var dlg = new ChoiceDialog(TurnUiModel.AlreadyPlayedText, "Open Turn File", new[] { TurnUiModel.OpenAnywayText, "Cancel" }, 1);
                 dlg.Show(window);
                 Pump(300);
                 Target = dlg;

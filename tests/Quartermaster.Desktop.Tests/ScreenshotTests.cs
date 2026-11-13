@@ -121,6 +121,38 @@ public sealed class ScreenshotTests
         static string[] TokenDirs() => Directory.GetDirectories(Path.GetTempPath(), "qm-shot-tokens-*");
     }
 
+    /// <summary>Stage 5d: the turn-file states render headless (as build/port-screenshots.ps1 runs them) in a temp layout root: no mailbox, no
+    /// network, and the replay-bar state's identity folder is gone afterwards.</summary>
+    [AvaloniaTheory]
+    [InlineData("send-turn")]
+    [InlineData("who-are-you")]
+    [InlineData("replay-bar")]
+    [InlineData("turn-notice")]
+    [InlineData("open-turn-choice")]
+    public void Turn_states_render(string state)
+    {
+        var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");
+        var layout = Path.Combine(Path.GetTempPath(), "qm-shot-layout-" + Guid.NewGuid().ToString("N"));
+        var previous = Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT");
+        var turnsBefore = TurnDirs();
+        try
+        {
+            Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", layout);
+            var code = Program.RunScreenshot(new[] { Demo("Riverland-Demo.vmod"), "--new", "--rules", Demo("Riverland-Demo.qrules"), "--screenshot-state", state, "--screenshot-main", png });
+            Assert.Equal(0, code);
+            Assert.True(new FileInfo(png).Length > 1000);
+            Assert.Empty(TurnDirs().Except(turnsBefore));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", previous);
+            try { File.Delete(png); } catch (IOException) { }
+            try { Directory.Delete(layout, true); } catch (IOException) { }
+        }
+
+        static string[] TurnDirs() => Directory.GetDirectories(Path.GetTempPath(), "qm-shot-turns-*");
+    }
+
     [AvaloniaFact]
     public void Apply_starts_without_previous_target()
     {

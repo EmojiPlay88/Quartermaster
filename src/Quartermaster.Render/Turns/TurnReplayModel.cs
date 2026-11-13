@@ -19,6 +19,9 @@ public sealed class TurnReplayModel
     /// <summary>Shown when the local player is not in the game's player list: only public information is shown.</summary>
     public const string NotAPlayerText = "You are not a player in this game; only public information is shown.";
 
+    /// <summary>The replay bar's line for a step whose log line the local view does not show (another side's hidden information).</summary>
+    public const string HiddenStepText = "(a step you cannot see)";
+
     /// <summary>Set when the turn file was made with another app version (a gentle warning); null otherwise.</summary>
     public string? VersionNotice => VersionCheck.TurnFileVersionWarning(AppVersion.Text, _t.AppVersion);
 
@@ -59,7 +62,10 @@ public sealed class TurnReplayModel
 
     public int Count => _t.Commands.Count;
 
-    /// <summary>The log line of the last step run (or its command's name when it logged nothing); null before the first step.</summary>
+    /// <summary>
+    /// The log line of the last step run as the local view shows it (redacted, or <see cref="HiddenStepText"/> when the view drops it),
+    /// or its command's name when it logged nothing; null before the first step.
+    /// </summary>
     public string? CurrentLine { get; private set; }
 
     /// <summary>True when every step ran, or the replay failed (<see cref="Error"/>) or was taken over by another game.</summary>
@@ -150,8 +156,21 @@ public sealed class TurnReplayModel
         }
         Step++;
         LastStepLogged = _game.State.Log.Count > logBefore;
-        CurrentLine = LastStepLogged ? _game.State.Log[^1].Text : c.GetType().Name;
+        CurrentLine = LastStepLogged ? ShownLine(_game.State.Log[^1].Seq) : c.GetType().Name;
         if (Step >= Count) Finish();
+    }
+
+    /// <summary>
+    /// The step's log line as the local viewer may see it (public-only while replaying): the line of the session's filtered view with
+    /// the same <see cref="LogEntry.Seq"/> (its redacted text when the view redacts it), else <see cref="HiddenStepText"/>.
+    /// </summary>
+    private string ShownLine(long seq)
+    {
+        var log = _s.View?.Log;
+        if (log != null)
+            for (var i = log.Count - 1; i >= 0; i--)
+                if (log[i] is { } l && l.Seq == seq) return l.Text;
+        return HiddenStepText;
     }
 
     private void Fail(string message)

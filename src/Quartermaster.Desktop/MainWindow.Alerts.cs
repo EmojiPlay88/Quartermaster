@@ -34,6 +34,7 @@ public partial class MainWindow
         AlertBarHost.ChipClicked += c => Guard(() => GoToAlert(c.Id));
         AlertBarHost.ChipContext += (c, at) => Guard(() => AlertMenuFor(c.Id).Open(at));
         AlertBarHost.OverflowClicked += (chips, at) => Guard(() => OverflowMenuFor(chips).Open(at));
+        AlertBarHost.NoticeClicked += () => RunAsync(OpenWaitingTurnAsync);   // "New turn waiting from {player}": opens that turn
     }
 
     void CreateAlerts(ModuleSession s)

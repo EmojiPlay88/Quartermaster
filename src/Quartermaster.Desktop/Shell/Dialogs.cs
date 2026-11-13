@@ -4,6 +4,7 @@ using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Online;
+using Quartermaster.Desktop.Turns;
 using Quartermaster.Render;
 using Quartermaster.Rules;
 using Quartermaster.Vassal;
@@ -138,6 +139,21 @@ public interface IDialogs
 
     /// <summary>The host's Players dialog (WinForms SeatsDialog); returns when it is closed.</summary>
     Task ShowSeatsAsync(Window owner, HostSession host, RulesPack? pack);
+
+    /// <summary>The Send Turn dialog (WinForms SendTurnDialog); null when cancelled.</summary>
+    Task<SendTurnChoice?> AskSendTurnAsync(Window owner, string fromName, IReadOnlyList<PlayerDef> players, string localPlayerId, RulesPack? pack, MailboxValues mailbox);
+
+    /// <summary>The "Who are you?" dialog (WinForms WhoAreYouDialog); the mailbox choice is hidden when <paramref name="mailbox"/> is null. Null when cancelled.</summary>
+    Task<WhoChoice?> AskWhoAreYouAsync(Window owner, string prompt, IReadOnlyList<PlayerDef> players, RulesPack? pack, string? preselect, MailboxValues? mailbox);
+
+    /// <summary>A message with named buttons (the WinForms TaskDialog questions): the index of the button clicked, -1 when the window was closed.</summary>
+    Task<int> ChooseAsync(Window owner, string message, string caption, IReadOnlyList<string> buttons, int defaultIndex);
+
+    /// <summary>A prompt with a masked text box and OK / Cancel; the entered text, or null when cancelled.</summary>
+    Task<string?> AskPasswordAsync(Window owner, string caption, string prompt);
+
+    /// <summary>The "Sending turn…" wait (WinForms SendWaitForm, caption "Send Turn"): true when <paramref name="work"/> ended within <paramref name="limit"/>.</summary>
+    Task<bool> WaitForAsync(Window owner, Task work, TimeSpan limit);
 }
 
 /// <summary>The real dialogs: the OS file pickers (Avalonia storage provider), small classic message boxes and the setup chooser.</summary>
@@ -318,6 +334,20 @@ public sealed class Dialogs : IDialogs
 
     public Task ShowSeatsAsync(Window owner, HostSession host, RulesPack? pack) =>
         new SeatsDialog(host, pack).ShowDialogTracked(owner);
+
+    public Task<SendTurnChoice?> AskSendTurnAsync(Window owner, string fromName, IReadOnlyList<PlayerDef> players, string localPlayerId, RulesPack? pack, MailboxValues mailbox) =>
+        new SendTurnDialog(fromName, players, localPlayerId, pack, mailbox).ShowDialogTracked<SendTurnChoice?>(owner);
+
+    public Task<WhoChoice?> AskWhoAreYouAsync(Window owner, string prompt, IReadOnlyList<PlayerDef> players, RulesPack? pack, string? preselect, MailboxValues? mailbox) =>
+        new WhoAreYouDialog(prompt, players, pack, preselect, mailbox).ShowDialogTracked<WhoChoice?>(owner);
+
+    public async Task<int> ChooseAsync(Window owner, string message, string caption, IReadOnlyList<string> buttons, int defaultIndex) =>
+        await new ChoiceDialog(message, caption, buttons, defaultIndex).ShowDialogTracked<int?>(owner) ?? -1;
+
+    public Task<string?> AskPasswordAsync(Window owner, string caption, string prompt) =>
+        new PasswordPrompt(caption, prompt).ShowDialogTracked<string?>(owner);
+
+    public Task<bool> WaitForAsync(Window owner, Task work, TimeSpan limit) => new SendWaitWindow(work, limit).RunAsync(owner);
 
     public void OpenInBrowser(TopLevel? owner, string path)
     {
