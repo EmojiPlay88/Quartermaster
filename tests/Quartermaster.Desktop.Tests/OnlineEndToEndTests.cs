@@ -256,6 +256,13 @@ public sealed class OnlineEndToEndTests : IAsyncLifetime
     {
         var t = await Seated();
         t.Blue.LauncherAvailable = true;   // started by the launcher loop: leaving goes back to it
+        // Review Focus 3: the guest has a formula window open when the host leaves.
+        var win = FormulaWindows.Show(t.Blue, t.Blue.Session!, "f-mix", PhaseFixture.BlueOne, null);
+        Assert.NotNull(win);
+        Pump();
+        Assert.True(win!.IsVisible);
+        var blueSession = t.Blue.Session!;
+
         await t.Host.LeaveOnlineGameAsync();
         Pump();
         Assert.Null(t.Host.HostOnline);
@@ -266,19 +273,72 @@ public sealed class OnlineEndToEndTests : IAsyncLifetime
         Assert.Null(t.Blue.GuestOnline);
         Assert.False(t.Blue.IsVisible);
         Assert.True(t.Blue.ReturnToLauncher);
+        // The formula window went with its game window (nothing left open over a closed game).
+        Pump();
+        Assert.False(win.IsVisible);
+        Assert.Empty(FormulaWindows.OpenFor(blueSession));
+    }
+
+    [AvaloniaFact]
+    public async Task Host_leaves_while_guest_side_choice_is_open()
+    {
+        var f = await _rig.ModuleAsync(Pack);
+        var host = await _rig.HostAsync(f, _hostDialogs, new[] { "green" });
+        // The guest's side question stays open (as a modal dialog would) while the host leaves.
+        var held = new TaskCompletionSource<IReadOnlyList<string>?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dialogs = new FakeDialogs { Answer = true, HoldSides = held };
+        var (guest, _) = await _rig.GuestAsync(f, dialogs, host.HostOnline!.Listing, "Cleo");
+        guest.LauncherAvailable = true;
+        PumpUntil(() => guest.SideQuestionsAsked == 1);
+        Assert.Equal(GuestState.ChoosingSide, guest.GuestOnline!.State);
+
+        await host.LeaveOnlineGameAsync();
+        PumpUntil(() => guest.ReturnToLauncher);
+        Assert.Contains(dialogs.Infos, i => i == (HostSession.HostEndedText, "Online game"));
+        Assert.Null(guest.GuestOnline);
+        Assert.False(guest.IsVisible);
+
+        // The question is answered only now, over a window that went back to the launcher: nothing happens, nothing throws.
+        held.SetResult(new[] { "blue" });
+        OnlineRig.PumpFor(300);
+        Assert.Null(guest.GuestOnline);
+        Assert.True(guest.ReturnToLauncher);
+        Assert.Equal(1, guest.SideQuestionsAsked);
+        Assert.Null(host.HostOnline);
     }
 
     [AvaloniaFact]
     public async Task Relay_stops_guest_shows_relay_lost_banner_without_crash()
     {
         var t = await Seated();
-        await _rig.Relay.DisposeAsync();
+        // Review Focus 3: the guest has a formula window open, with an Apply on its way to the host, when the relay goes away.
+        var win = FormulaWindows.Show(t.Blue, t.Blue.Session!, "f-mix", PhaseFixture.BlueOne, null);
+        Assert.NotNull(win);
+        var apply = ButtonOf(win!, "&Apply to ledger");
+        PumpUntil(() => apply.IsEnabled);
+        apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.False(apply.IsEnabled);   // the send is pending: no second Apply
+        // Stopped without running the UI thread: the host cannot have answered before the relay is gone, so no answer can ever come.
+        Assert.True(Task.Run(async () => await _rig.Relay.DisposeAsync()).Wait(TimeSpan.FromSeconds(60)), "the relay did not stop");
+        Assert.False(apply.IsEnabled);
+
         PumpUntil(() => t.Blue.OnlineBannerText == GuestSession.RelayLostText);
         PumpUntil(() => t.Host.OnlineBannerText == GuestSession.RelayLostText);
+        // The pending Apply ends as "no answer" (the guest fails what it waits for when it pauses); the window stays open with its boxes.
+        PumpUntil(() => win!.StatusText.Contains(GuestSession.NoAnswerText, StringComparison.Ordinal));
+        Assert.True(win!.IsVisible);
+        Assert.True(apply.IsEnabled);   // nothing pending any more: Apply may be tried again
+        // A second Apply while paused is refused at once, never sent, never left pending.
+        apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Pump();
+        Assert.True(apply.IsEnabled);
+        Assert.Contains(GuestSession.RelayLostText, win.StatusText, StringComparison.Ordinal);
+        Assert.Contains(win, FormulaWindows.OpenFor(t.Blue.Session!));
         OnlineRig.PumpFor(300);
         // Still open, still showing the last game; nothing threw on the UI thread.
         Assert.True(t.Blue.IsVisible);
         Assert.True(t.Host.IsVisible);
+        Assert.True(win.IsVisible);
         Assert.NotNull(t.Blue.Session!.Game);
         Assert.NotNull(t.Blue.GuestOnline);
         Assert.Equal(GuestState.Paused, t.Blue.GuestOnline!.State);

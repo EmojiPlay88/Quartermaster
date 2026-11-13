@@ -107,7 +107,13 @@ function Invoke-Stage5c([string[]]$States) {
     finally { if (Test-Path $layout5c) { Remove-Item $layout5c -Recurse -Force } }
 }
 $states5c = 'online-lobby', 'online-host', 'online-guest', 'seats', 'side-choice'
-if ($Only) { Invoke-Stage5c ($states5c | Where-Object { $Only -contains $_ }); return }
+if ($Only) {
+    # powershell -File passes "a,b" as one string: split it, so both call styles name the same states.
+    $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $unknown = @($Only | Where-Object { $states5c -notcontains $_ })
+    if ($unknown.Count -gt 0) { throw "-Only: not a stage 5c state: $($unknown -join ', ') (known: $($states5c -join ', '))" }
+    Invoke-Stage5c ($states5c | Where-Object { $Only -contains $_ }); return
+}
 
 # Desktop: headless, no window. The Riverland demo has no predefined setups, so --new.
 Invoke-Shot $deskExe @($vmod, '--new', '--screenshot-main', (Join-Path $out 'stage1-desktop.png')) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } (Join-Path $out 'stage1-desktop.png') 'desktop'

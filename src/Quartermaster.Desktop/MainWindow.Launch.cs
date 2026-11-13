@@ -117,6 +117,9 @@ public partial class MainWindow
                 break;
             case LaunchKind.JoinOnline when r.Online is { } guest:
                 await StartOnlineAsync(() => BeginGuestAsync(s, guest), guest: true);   // no game of our own: the host's snapshot becomes the game
+                // A failed join (OnlineError said why; the window is on its way back to the launcher) or a window closed meanwhile: the
+                // module was not played, and no tour may start over a window that is going away.
+                if (_guest == null || _closed) return;
                 break;
             default:
                 try { await ChooseAndStartAsync(preselectNew: false); }

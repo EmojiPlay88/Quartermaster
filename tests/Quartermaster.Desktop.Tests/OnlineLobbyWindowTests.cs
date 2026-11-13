@@ -182,6 +182,43 @@ public sealed class OnlineLobbyWindowTests : IAsyncLifetime
         await WaitFor(() => w.StateText.EndsWith("2 lobbies", StringComparison.Ordinal));
     }
 
+    /// <summary>Final review M1: the screenshot switch keeps the window off the network (no refresh on open from the saved address, no timer).</summary>
+    [AvaloniaFact]
+    public async Task No_auto_refresh_never_connects_to_saved_address()
+    {
+        var (row, lib, store, _) = await Module("Red", "Blue");
+        await TrustedClient();   // the relay's certificate is trusted: a refresh would connect without asking
+        store.Update(s => s with { RelayAddress = _relay.Address });
+        var quiet = new OnlineLobbyWindow(row, lib, store, _dialogs) { NoAutoRefresh = true };
+        _windows.Add(quiet);
+        quiet.Show();
+        var until = DateTime.UtcNow.AddMilliseconds(800);
+        while (DateTime.UtcNow < until) { Dispatcher.UIThread.RunJobs(); await Task.Delay(10); }
+        Assert.False(quiet.HasBrowser);
+        Assert.Equal("", quiet.StateText);
+        Assert.Empty(_dialogs.Infos);
+
+        // The same window without the switch connects on open (so the check above proves something).
+        var plain = Lobby(row, lib, store);
+        await WaitFor(() => plain.StateText.StartsWith("Connected", StringComparison.Ordinal));
+        Assert.True(plain.HasBrowser);
+        Assert.False(quiet.HasBrowser);
+    }
+
+    /// <summary>Final review M5: Create lobby refuses a missing module file before anything else (no relay address check, no pack read).</summary>
+    [AvaloniaFact]
+    public async Task Create_lobby_with_missing_module_refuses_first()
+    {
+        var (row, lib, store, _) = await Module("Red", "Blue");
+        var w = Lobby(row with { Missing = true }, lib, store);
+        w.RelayBox.Text = "";   // a bad address would be complained about first if the missing file were not
+        await w.CreateLobbyAsync();
+        Assert.Contains(_dialogs.Warnings, x => x.Message == "This module's file was not found.");
+        Assert.Empty(_dialogs.Infos);
+        Assert.Empty(_dialogs.OnlineSetups);
+        Assert.False(w.Result.IsCompleted);
+    }
+
     [AvaloniaFact]
     public async Task Bad_address_shows_message_and_does_not_connect()
     {

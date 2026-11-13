@@ -234,4 +234,24 @@ public sealed class MainWindowOnlineTests : IAsyncLifetime
         Pump();
         Assert.Null(guest.GuestOnline);
     }
+
+    /// <summary>Final review M7: a guest join that fails goes back to the launcher without marking the module played (nor a tour).</summary>
+    [AvaloniaFact]
+    public async Task Failed_guest_join_returns_to_launcher_without_marking_module_played()
+    {
+        var f = await Module();
+        var w = Window(_guestDialogs, "failed-guest");
+        w.LauncherAvailable = true;
+        w.AutoTour = true;
+        // A join request without the lobby's joined connection: the start fails at once.
+        await w.StartFromLaunchAsync(new LaunchRequest(f.ModulePath, f.PackPath, LaunchKind.JoinOnline, null, null,
+            new OnlineLaunch(_rig.Relay.Uri, "Cleo", "", Code: "abc-234")));
+        Assert.NotNull(w.OnlineError);
+        Assert.Null(w.GuestOnline);
+        Assert.NotEqual(f.ModulePath, w.SettingsStore.Current.LastModulePath);
+        PumpUntil(() => w.ReturnToLauncher);
+        Assert.Contains(_guestDialogs.Infos, i => i.Caption == "Online game" && i.Message.StartsWith("Could not join the online game:", StringComparison.Ordinal));
+        Assert.Null(w.Tour);
+        Assert.NotEqual(f.ModulePath, w.SettingsStore.Current.LastModulePath);
+    }
 }

@@ -119,6 +119,14 @@ public partial class MainWindow
         string? down = null;
         void OnDown(string r) => down = r;
         client.Disconnected += OnDown;
+        // The window moved on (closed, left, another start) while a step was in flight: unhook and drop this client if nobody holds it.
+        bool Stale()
+        {
+            if (StillCurrent(s, client)) return false;
+            client.Disconnected -= OnDown;
+            if (!ReferenceEquals(_relayClient, client)) _ = DisposeLater(client, TimeSpan.Zero);
+            return true;
+        }
         _relayClient = client;
         _online = o;
         _onlineStarting = true;
@@ -128,15 +136,15 @@ public partial class MainWindow
         {
             // Off the UI thread: the certificate question blocks its caller until it is answered here.
             await Task.Run(() => client.ConnectAsync(o.Relay, c => RelayTrust.Ask(this, _dialogs, c), CancellationToken.None));
-            if (!StillCurrent(s, client)) return;
+            if (Stale()) return;
             var code = await client.ReserveCodeAsync();
-            if (!StillCurrent(s, client)) return;
+            if (Stale()) return;
             var password = o.Password ?? "";
             var (verifier, key) = await Task.Run(() => (Secrets.AuthVerifier(password, code), Secrets.GameKey(password, code)));
-            if (!StillCurrent(s, client)) return;
+            if (Stale()) return;
             var draft = OnlineLobbyModel.Draft(code, o.LobbyName ?? "Lobby", o.PlayerName, s.Archive.Sha256, s.Model.Name, pack, hostSides, password.Length > 0);
             await client.CreateRoomAsync(code, verifier, draft);   // the relay keeps the host key for this room's life (rejoin)
-            if (!StillCurrent(s, client)) return;
+            if (Stale()) return;
             client.Disconnected -= OnDown;
             // Launcher spec 4a.8: the host's choice wins; every other side is an open seat, whoever held it in the save. Only now that
             // the room exists, so a failed start leaves the saved game's players untouched.

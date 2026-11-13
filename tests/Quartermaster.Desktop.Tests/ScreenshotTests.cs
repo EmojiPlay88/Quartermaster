@@ -89,6 +89,38 @@ public sealed class ScreenshotTests
         }
     }
 
+    /// <summary>Final review M2: the stage 5c online states render headless (as build/port-screenshots.ps1 runs them) in a temp layout root,
+    /// over a null transport: nothing reaches the network, and the online-guest rejoin token folder is gone afterwards.</summary>
+    [AvaloniaTheory]
+    [InlineData("online-lobby")]
+    [InlineData("online-host")]
+    [InlineData("online-guest")]
+    [InlineData("seats")]
+    [InlineData("side-choice")]
+    public void Online_states_render(string state)
+    {
+        var png = Path.Combine(Path.GetTempPath(), "qm-shot-state-" + Guid.NewGuid().ToString("N") + ".png");
+        var layout = Path.Combine(Path.GetTempPath(), "qm-shot-layout-" + Guid.NewGuid().ToString("N"));
+        var previous = Environment.GetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT");
+        var tokensBefore = TokenDirs();
+        try
+        {
+            Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", layout);
+            var code = Program.RunScreenshot(new[] { Demo("Riverland-Demo.vmod"), "--new", "--rules", Demo("Riverland-Demo.qrules"), "--screenshot-state", state, "--screenshot-main", png });
+            Assert.Equal(0, code);
+            Assert.True(new FileInfo(png).Length > 1000);
+            Assert.Empty(TokenDirs().Except(tokensBefore));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("QUARTERMASTER_LAYOUT_ROOT", previous);
+            try { File.Delete(png); } catch (IOException) { }
+            try { Directory.Delete(layout, true); } catch (IOException) { }
+        }
+
+        static string[] TokenDirs() => Directory.GetDirectories(Path.GetTempPath(), "qm-shot-tokens-*");
+    }
+
     [AvaloniaFact]
     public void Apply_starts_without_previous_target()
     {

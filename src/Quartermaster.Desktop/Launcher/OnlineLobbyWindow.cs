@@ -72,6 +72,10 @@ public sealed class OnlineLobbyWindow : Window
     /// <summary>The relay client of the last join attempt (tests check it was closed when the join did not hand it on).</summary>
     internal RelayClient? LastJoinClient { get; private set; }
 
+    /// <summary>Screenshots only (Shell/ScreenshotStates), set before Show: the window never refreshes on its own (no refresh on open, no 10 s
+    /// timer), so it never connects to the remembered relay address.</summary>
+    internal bool NoAutoRefresh { get; set; }
+
     internal bool RowLocked(int i) => _rowControls[i].Children.OfType<StackPanel>().First().Children[0].IsVisible;
 
     internal bool RowGreyed(int i) => _rowControls[i].Classes.Contains("grey");
@@ -143,12 +147,13 @@ public sealed class OnlineLobbyWindow : Window
         List.SelectionChanged += (_, _) => UpdateButtons();
         _timer.Tick += async (_, _) =>
         {
-            if (_lastOk && !_busy && IsVisible) await GuardedAsync(() => RefreshAsync(manual: false));
+            if (_lastOk && !_busy && IsVisible && !NoAutoRefresh) await GuardedAsync(() => RefreshAsync(manual: false));
         };
         Opened += async (_, _) =>
         {
-            _timer.Start();
             UpdateButtons();
+            if (NoAutoRefresh) return;
+            _timer.Start();
             if ((RelayBox.Text ?? "").Trim().Length > 0) await GuardedAsync(() => RefreshAsync(manual: true));
             else SetState(EnterAddressText);
         };
@@ -472,8 +477,11 @@ public sealed class OnlineLobbyWindow : Window
     /// <summary>Create lobby…: opens the module on a worker, then the setup chooser in Online mode; its answer is the hosting request.</summary>
     internal async Task CreateLobbyAsync()
     {
-        if (_busy || _closed || await RelayUri(true) is not { } uri || await HostPack() is not { } hp) return;
+        if (_busy || _closed) return;
+        // A missing module file is refused before anything else (WinForms checks it after the relay address and the pack; the launcher
+        // already disables Online… for a missing row, so this only guards a lobby window opened some other way).
         if (_row.Missing) { await Problem("This module's file was not found."); return; }
+        if (await RelayUri(true) is not { } uri || await HostPack() is not { } hp) return;
         SetBusy(true);
         ModuleSession? session;
         var modulePath = _row.Entry.Path;

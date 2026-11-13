@@ -31,8 +31,11 @@ sealed class FakeDialogs : IDialogs
     public Quartermaster.Desktop.Online.HostSavedChoice? HostSavedAnswer = null;
     public int SeatsShown;
 
+    /// <summary>When set, the side choice stays open until the test completes this source (its answer, null = cancelled).</summary>
+    public TaskCompletionSource<IReadOnlyList<string>?>? HoldSides;
+
     public Task<IReadOnlyList<string>?> ChooseSidesAsync(Window owner, string title, string prompt, IReadOnlyList<Quartermaster.Rules.SideDef> sides,
-        IReadOnlyCollection<string>? ticked = null, string? note = null) => Task.FromResult(SidesAnswer);
+        IReadOnlyCollection<string>? ticked = null, string? note = null) => HoldSides?.Task ?? Task.FromResult(SidesAnswer);
 
     public Task<Quartermaster.Desktop.Online.JoinChoice?> AskJoinAsync(Window owner, Quartermaster.Render.LobbyRow row, string playerName) =>
         Task.FromResult(JoinAnswer);

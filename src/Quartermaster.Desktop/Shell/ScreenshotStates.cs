@@ -40,7 +40,12 @@ static class ScreenshotStates
         // As WinForms SmokeTour: the tour state leaves TourShown as it found it (closing the balloon above marked it shown).
         if (_tourShown is { } shown && window.SettingsStore.Current.TourShown != shown) window.SettingsStore.Update(x => x with { TourShown = shown });
         _tourShown = null;
-        if (_scanDir != null) { try { Directory.Delete(_scanDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } _scanDir = null; }
+        foreach (var dir in new[] { _scanDir, _tokensDir })
+        {
+            if (dir == null) continue;
+            try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+        _scanDir = _tokensDir = null;
     }
 
     /// <summary>Anna holds the rules pack's first side, Ben the second (invented names); the first handover is continued, so Anna is at the screen.</summary>
@@ -83,7 +88,7 @@ static class ScreenshotStates
     }
 #pragma warning restore CS0067
 
-    static string? _scanDir;
+    static string? _scanDir, _tokensDir;
     static bool? _tourShown;
 
     static readonly string[] SettingsPages = { "general", "game", "display", "map", "dice", "toolbar", "keyboard", "folders", "ocr" };
@@ -409,7 +414,10 @@ static class ScreenshotStates
             {
                 // The Online lobby window with invented TEST lobbies; shown as if listed, no connection is ever made.
                 var entry = new ModuleEntry(Path.Combine(Path.GetTempPath(), "test-module.vmod"), s.Archive.Sha256, 0, DateTime.UtcNow, s.Model.Name, "1.0", null);
-                var lobby = new Quartermaster.Desktop.Launcher.OnlineLobbyWindow(new ModuleRow(entry, false), new ModuleLibrary(window.SettingsStore), window.SettingsStore, window.Dialogs);
+                var lobby = new Quartermaster.Desktop.Launcher.OnlineLobbyWindow(new ModuleRow(entry, false), new ModuleLibrary(window.SettingsStore), window.SettingsStore, window.Dialogs)
+                {
+                    NoAutoRefresh = true,   // never a refresh from the remembered relay address (Opened) or the 10 s timer: no connection, no DNS
+                };
                 lobby.Show(window);
                 Pump(200);
                 var sha = s.Archive.Sha256;
@@ -438,8 +446,9 @@ static class ScreenshotStates
             case "online-guest":
             {
                 // A guest still joining (left in Joining over a transport that never answers): banner and status bar text.
-                var guest = new GuestSession(s, new NullTransport(), "abc-234", "Ben", a => Dispatcher.UIThread.Post(a),
-                    new RejoinTokens(Path.Combine(Path.GetTempPath(), "qm-shot-tokens-" + Guid.NewGuid().ToString("N"))));
+                // Its rejoin tokens folder is a temp folder of its own that Cleanup deletes.
+                _tokensDir = Path.Combine(Path.GetTempPath(), "qm-shot-tokens-" + Guid.NewGuid().ToString("N"));
+                var guest = new GuestSession(s, new NullTransport(), "abc-234", "Ben", a => Dispatcher.UIThread.Post(a), new RejoinTokens(_tokensDir));
                 window.ShowOnlineForScreenshot(null, guest, "abc-234");
                 Pump(300);
                 return window.OnlineStatusText.Length > 0 ? null : "The online status text did not show.";
