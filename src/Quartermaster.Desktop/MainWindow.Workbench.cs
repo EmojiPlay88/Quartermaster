@@ -90,6 +90,18 @@ public partial class MainWindow
     /// <summary>What is being typed in the workbench reaches the pack (before saves, flows and close questions).</summary>
     void FlushWorkbench() => _workbenchWin?.CommitPending();
 
+    /// <summary>
+    /// Before a received turn replays (the rules stay as they are meanwhile): the unsaved-rules question first (Yes saves, No keeps the edits
+    /// in the session unsaved, Cancel keeps the workbench and cancels the open), then the workbench closes. True when none is open.
+    /// </summary>
+    internal async Task<bool> CloseWorkbenchForReplayAsync()
+    {
+        if (_workbenchWin == null) return true;
+        if (!await ConfirmRulesSavedAsync()) return false;
+        DestroyWorkbench();
+        return true;
+    }
+
     /// <summary>Before the session goes: the workbench closes.</summary>
     void DestroyWorkbench()
     {

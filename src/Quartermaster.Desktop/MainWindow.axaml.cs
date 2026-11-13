@@ -367,6 +367,7 @@ public partial class MainWindow : Window
         Item(file, "Load &Setup...", () => RunAsync(LoadSetupAsync), gate: "file.loadSetup");
         Item(file, "Open &Game...", () => { }, "file.openGame");
         Item(file, "Open Auto&save...", () => RunAsync(OpenAutosaveDialogAsync), gate: "file.openAutosave");
+        Item(file, "Open &Turn File…", () => RunAsync(OpenTurnFileDialogAsync), gate: "file.openTurn");
         file.Items.Add(new Separator());
         Item(file, "&Save Game", () => { }, "file.saveGame");
         Item(file, "Save Game &As...", () => { }, "file.saveGameAs");
@@ -850,6 +851,8 @@ public partial class MainWindow : Window
     void CloseSession()
     {
         EndOnline(notifyGuests: true);   // WinForms CloseSession: the guests are told first
+        EndReplayUi();
+        StopMailbox();
         _turnIdentity = null;
         _tour?.Close();   // WinForms CloseSession: the balloon never outlives its targets (ends as skipped)
         DestroyWorkbench();   // first: its pending edits still reach the session
@@ -982,7 +985,7 @@ public partial class MainWindow : Window
         UpdateOnlineUi();   // WinForms OnGameReplaced: a guest's first snapshot, a viewer copy's banner
         // WinForms OnTurnGameReplaced: a play-by-email game gets its player's view, any other local game hot-seat; a replay starting
         // changes nothing (its view stays public-only until it ends).
-        if (_session?.IsReplaying == true) UpdateTurnUi(); else FollowOpenGame();
+        OnTurnGameReplaced();
     });
 
     /// <summary>The player's view changed: maps another side owns lose their tab; the player switcher follows.</summary>

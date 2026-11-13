@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="using:Quartermaster.Desktop.Shell"
         xmlns:phases="using:Quartermaster.Desktop.Phases"
+        xmlns:turns="using:Quartermaster.Desktop.Turns"
         x:Class="Quartermaster.Desktop.MainWindow"
         Title="Quartermaster"
         Width="1024" Height="768">
@@ -10,6 +11,8 @@
     <shell:MainToolbar x:Name="ToolbarHost" DockPanel.Dock="Top" />
     <phases:PhaseStrip x:Name="StripHost" DockPanel.Dock="Top" />
     <shell:AlertBar x:Name="AlertBarHost" DockPanel.Dock="Top" />
+    <!-- The replay bar of a received turn (WinForms ReplayBar): hidden unless a replay is bound -->
+    <turns:ReplayBar x:Name="ReplayBarHost" DockPanel.Dock="Top" />
     <!-- The online banner (WinForms _onlineBanner): paused, relay lost or viewer copy; hidden otherwise -->
     <Border x:Name="OnlineBanner" DockPanel.Dock="Top" Height="26" Background="#FFF0C8" IsVisible="False">
       <TextBlock x:Name="OnlineBannerLabel" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis" />

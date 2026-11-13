@@ -10,7 +10,7 @@ namespace Quartermaster.Desktop.Launcher;
 
 /// <summary>
 /// "Play offline" for one module (WinForms PlayOfflineForm): Continue (newest autosave), recent saves, New game…, Open saved game… and
-/// Open turn file… (stage 5d). <see cref="Result"/> is the launch request, or null for Back (or the window closed).
+/// Open turn file…. <see cref="Result"/> is the launch request, or null for Back (or the window closed).
 /// </summary>
 public sealed class PlayOfflineWindow : Window
 {
@@ -36,7 +36,7 @@ public sealed class PlayOfflineWindow : Window
     internal Button ContinueButton { get; } = new() { Content = "Continue", MinWidth = 100 };
     internal Button NewGameButton { get; } = new() { Content = "New game…", MinWidth = 100 };
     internal Button OpenSavedButton { get; } = new() { Content = "Open saved game…", MinWidth = 120 };
-    internal Button OpenTurnButton { get; } = new() { Content = "Open turn file…", MinWidth = 110, IsEnabled = false };
+    internal Button OpenTurnButton { get; } = new() { Content = "Open turn file…", MinWidth = 110 };
     internal Button OpenSelectedButton { get; } = new() { Content = "Open selected", MinWidth = 100, IsEnabled = false };
     internal Button BackButton { get; } = new() { Content = "Back", MinWidth = 75, IsCancel = true };
     internal ListBox Recent { get; } = new() { SelectionMode = SelectionMode.Single };
@@ -87,8 +87,6 @@ public sealed class PlayOfflineWindow : Window
         listHost.Children.Add(header);
         listHost.Children.Add(Recent);
 
-        ToolTip.SetTip(OpenTurnButton, "Turn files come with stage 5d.");
-        ToolTip.SetShowOnDisabled(OpenTurnButton, true);
         var buttons = new WrapPanel { Margin = new Thickness(8), ItemSpacing = 6, LineSpacing = 6 };
         buttons.Children.Add(NewGameButton);
         buttons.Children.Add(OpenSavedButton);
@@ -107,6 +105,7 @@ public sealed class PlayOfflineWindow : Window
         ContinueButton.Click += async (_, _) => await Guarded(() => { if (_continue != null) Finish(LaunchKind.Continue, null, _continue.Path); return Task.CompletedTask; });
         NewGameButton.Click += async (_, _) => await Guarded(NewGameAsync);
         OpenSavedButton.Click += async (_, _) => await Guarded(OpenDialogAsync);
+        OpenTurnButton.Click += async (_, _) => await Guarded(OpenTurnDialogAsync);
         OpenSelectedButton.Click += async (_, _) => await Guarded(OpenSelectedAsync);
         BackButton.Click += (_, _) => Close();
         Recent.SelectionChanged += (_, _) => OpenSelectedButton.IsEnabled = !_busy && SelectedSave is { Missing: false };
@@ -175,11 +174,20 @@ public sealed class PlayOfflineWindow : Window
         if (path != null) Finish(LaunchKind.OpenSave, null, path);
     }
 
+    /// <summary>A received turn: the game window opens the module, asks who you are and replays it (launcher spec 3.2).</summary>
+    async Task OpenTurnDialogAsync()
+    {
+        if (_busy) return;
+        var path = await _dialogs.OpenFileAsync(this, "Open turn file",
+            new[] { new FileFilter("Quartermaster turns (*.qturn)", "*.qturn"), new FileFilter("All files (*.*)", "*.*") });
+        if (path != null) Finish(LaunchKind.OpenTurn, null, path);
+    }
+
     /// <summary>Disables the actions while the module loads or the setup chooser is open (no second click can start another run).</summary>
     void SetBusy(bool busy)
     {
         _busy = busy;
-        NewGameButton.IsEnabled = OpenSavedButton.IsEnabled = BackButton.IsEnabled = !busy;
+        NewGameButton.IsEnabled = OpenSavedButton.IsEnabled = OpenTurnButton.IsEnabled = BackButton.IsEnabled = !busy;
         ContinueButton.IsEnabled = !busy && _continue != null;
         OpenSelectedButton.IsEnabled = !busy && SelectedSave is { Missing: false };
         Cursor = busy ? new Cursor(StandardCursorType.Wait) : null;

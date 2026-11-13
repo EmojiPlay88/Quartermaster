@@ -342,6 +342,27 @@ public sealed class MainWindowTurnsSendTests : IAsyncLifetime
     }
 
     [AvaloniaFact]
+    public async Task Unreadable_password_of_unused_mailbox_is_never_asked()
+    {
+        var (w, d, _) = await Game();
+        var gameId = w.Session!.Game!.State.GameId;
+        // Protected bytes nothing reads, but the game does not use the mailbox: the password is never needed, so never asked for.
+        StoreIdentity(gameId, id =>
+        {
+            id.LocalPlayerId = Alice.Id;
+            id.UseMailbox = false;
+            id.ProtectedPassword = Encoding.UTF8.GetBytes("qm-secret:v1:" + Guid.NewGuid().ToString("N"));
+        });
+        d.PasswordAnswer = "TEST unused";
+        d.SendTurnAnswer = null;
+        await w.SendTurnAsync();
+        Assert.Empty(d.PasswordCalls);
+        var call = Assert.Single(d.SendTurnCalls);
+        Assert.False(call.Mailbox.Use);
+        Assert.Equal("", call.Mailbox.Password);
+    }
+
+    [AvaloniaFact]
     public async Task Guest_export_viewer_copy_writes_viewer_save()
     {
         var f = await _rig.ModuleAsync(Pack);

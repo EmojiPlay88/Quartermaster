@@ -115,6 +115,23 @@ public partial class MainWindow
                 });
                 await StartOnlineAsync(() => BeginHostingAsync(s, host), guest: false);
                 break;
+            case LaunchKind.OpenTurn when !string.IsNullOrEmpty(r.SavePath):
+                // No game yet: the turn's start becomes the game once the player says who they are. Cancelled or unreadable: back to
+                // the launcher (posted, after this open has finished), else the setup chooser; never an empty window.
+                bool opened;
+                try { opened = await OpenTurnFileAsync(r.SavePath); }
+                catch (Exception ex) when (IsUserError(ex)) { ShowError(ex.Message); opened = false; }
+                if (!opened && s.Game == null && !_closed)
+                {
+                    if (LauncherAvailable)
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (!_closed && _session?.Game == null) RunAsync(BackToLauncherAsync); });
+                        return;
+                    }
+                    try { await ChooseAndStartAsync(preselectNew: false); }
+                    catch (Exception ex) when (IsUserError(ex)) { ShowError(ex.Message); }
+                }
+                break;
             case LaunchKind.JoinOnline when r.Online is { } guest:
                 await StartOnlineAsync(() => BeginGuestAsync(s, guest), guest: true);   // no game of our own: the host's snapshot becomes the game
                 // A failed join (OnlineError said why; the window is on its way back to the launcher) or a window closed meanwhile: the
