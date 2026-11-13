@@ -168,10 +168,12 @@ public sealed class OnlineEndToEndTests : IAsyncLifetime
         PumpUntil(() => Settled(t.Host, t.Red, "red") && Settled(t.Host, t.Blue, "blue"));
 
         // Ledger: Red's own value reaches Red (so the check below proves something); none of Red's secrets reach Blue.
-        var redLedger = LedgerTexts(t.Red);
-        Assert.True(Has(redLedger, RedFuel.ToString()), "Red's own fuel is in Red's ledger");
-        var blueLedger = LedgerTexts(t.Blue);
-        Assert.Contains("Blue 1", blueLedger, StringComparison.Ordinal);
+        // The positive controls wait for the posted UI refresh (a window may still show the previous snapshot for a moment); the
+        // leak checks below then run on the refreshed texts.
+        var redLedger = "";
+        PumpUntil(() => Has(redLedger = LedgerTexts(t.Red), RedFuel.ToString()));
+        var blueLedger = "";
+        PumpUntil(() => (blueLedger = LedgerTexts(t.Blue)).Contains("Blue 1", StringComparison.Ordinal));
         foreach (var m in RedMarkers) Assert.False(Has(blueLedger, m), "Blue's ledger shows Red's " + m);
         Assert.DoesNotContain("31313", blueLedger, StringComparison.Ordinal);
 
@@ -186,12 +188,10 @@ public sealed class OnlineEndToEndTests : IAsyncLifetime
         Pump();
 
         // Log lines: Red's log holds the secret piece and the private roll (the host, holding only Green, sees neither); Blue's has none.
-        var redLog = LogTexts(t.Red);
-        Assert.Contains(SecretName, redLog, StringComparison.Ordinal);
-        Assert.True(Has(redLog, SecretRoll.ToString()), "Red's own private roll is in Red's log");
+        PumpUntil(() => LogTexts(t.Red) is var rl && rl.Contains(SecretName, StringComparison.Ordinal) && Has(rl, SecretRoll.ToString()));
         Assert.Contains(t.Host.Session!.Game!.State.Log, l => l.Text.Contains(SecretName, StringComparison.Ordinal));   // the full game has it
+        PumpUntil(() => t.Blue.Log!.Rows.Count > 0);
         var blueLog = LogTexts(t.Blue);
-        Assert.NotEmpty(t.Blue.Log!.Rows);
         foreach (var m in RedMarkers) Assert.False(Has(blueLog, m), "Blue's log shows Red's " + m);
 
         // Map pieces: Blue's maps draw its own and the public pieces, never the piece on Red's map.
