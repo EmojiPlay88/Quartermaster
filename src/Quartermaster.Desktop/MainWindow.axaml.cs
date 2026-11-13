@@ -257,7 +257,7 @@ public partial class MainWindow : Window
     public OrderedDictionary<string, IReadOnlyList<string>> MenuLabels()
     {
         var result = new OrderedDictionary<string, IReadOnlyList<string>>();
-        foreach (var top in MainMenu.Items.OfType<MenuItem>())
+        foreach (var top in MainMenu.Items.OfType<MenuItem>().Where(t => t.IsVisible))   // as the bar shows it (Game only while online)
             result[MenuText.ToWinForms((string)top.Header!)] = top.Items.OfType<MenuItem>().Select(i => MenuText.ToWinForms((string)i.Header!)).ToList();
         return result;
     }
@@ -324,7 +324,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Whether a gated command is available now (<see cref="CommandAvailability"/>, the WinForms rules).</summary>
-    bool Avail(string id) => CommandAvailability.For(_session).TryGetValue(id, out var a) && a.Enabled;
+    bool Avail(string id) => CommandAvailability.For(_session, IsOnline || _onlineStarting).TryGetValue(id, out var a) && a.Enabled;
 
     /// <summary>Runs <paramref name="act"/> when the command is available (its menu item enabled); otherwise lets the key press through.</summary>
     static bool Available(bool enabled, Action act)
@@ -440,6 +440,7 @@ public partial class MainWindow : Window
 
         MainMenu.Items.Add(file);
         MainMenu.Items.Add(edit);
+        MainMenu.Items.Add(BuildGameMenu());
         MainMenu.Items.Add(view);
         MainMenu.Items.Add(tools);
         MainMenu.Items.Add(help);
@@ -505,7 +506,7 @@ public partial class MainWindow : Window
     /// <summary>Enabled state and the reason tooltip of every gated menu item (WinForms ApplyGates); other tooltips are left alone.</summary>
     void ApplyGates()
     {
-        var av = CommandAvailability.For(_session);
+        var av = CommandAvailability.For(_session, IsOnline || _onlineStarting);
         foreach (var (id, mi) in _gated)
         {
             var (enabled, reason) = av[id];
@@ -819,7 +820,8 @@ public partial class MainWindow : Window
         _history = new HistoryController(s, c, (cmd, st) => CommandLog.Prepare(cmd, st, s));
         _history.Rewound += RequestHistoryRefresh;
         _history.Rewound += OnHistoryRewoundAnyThread;
-        _actions = new ActionPortSwitch(new LocalActions(s, c, _history));
+        _localActions = new LocalActions(s, c, _history);
+        _actions = new ActionPortSwitch(_localActions);
         HistoryCommands.Register(_router, s, _history, () => _actions, SetStatus);
         CreatePhaseUi(s, c);
         HistoryCommands.RegisterStepBack(_router, s, _history, () => _dispatch, RunAsync);
@@ -838,6 +840,7 @@ public partial class MainWindow : Window
 
     void CloseSession()
     {
+        EndOnline(notifyGuests: true);   // WinForms CloseSession: the guests are told first
         _tour?.Close();   // WinForms CloseSession: the balloon never outlives its targets (ends as skipped)
         DestroyWorkbench();   // first: its pending edits still reach the session
         DestroyExport();
@@ -857,6 +860,7 @@ public partial class MainWindow : Window
         _history = null;
         _phases = null;
         _actions = null;
+        _localActions = null;
         if (_session == null) return;
         FormulaWindows.CloseAllFor(_session);
         _session.GameReplaced -= OnGameReplacedAnyThread;
@@ -965,10 +969,17 @@ public partial class MainWindow : Window
         _recoveredAutosave = false;
         UpdateUi();
         UpdateTitle();
+        UpdateOnlineUi();   // WinForms OnGameReplaced: a guest's first snapshot, a viewer copy's banner
     });
 
     /// <summary>The player's view changed: maps another side owns lose their tab; the player switcher follows.</summary>
-    void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(() => { Maps.Rebuild(); ModuleTreeHost.RefreshVisibility(); UpdatePlayerButton(); }));
+    void OnViewChangedAnyThread() => Dispatcher.UIThread.Post(() => Guard(() =>
+    {
+        Maps.Rebuild();
+        ModuleTreeHost.RefreshVisibility();
+        UpdatePlayerButton();
+        if (IsOnline) UpdateOnlineUi();
+    }));
 
     void OnRulesChangedAnyThread() => OnUi(() => { UpdateUi(); UpdateTitle(); });
 

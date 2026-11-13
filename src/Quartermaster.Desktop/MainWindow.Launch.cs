@@ -80,7 +80,12 @@ public partial class MainWindow
     public async Task StartFromLaunchAsync(LaunchRequest r)
     {
         ArgumentNullException.ThrowIfNull(r);
-        if (!OpenModule(r.ModulePath) || _session is not { } s) return;
+        if (!OpenModule(r.ModulePath) || _session is not { } s)
+        {
+            // A joined relay connection handed over by the lobby window is ours to close when no game takes it.
+            if (r.Online?.Client is { } joined) _ = DisposeLater(joined, TimeSpan.Zero);
+            return;
+        }
         // Same guard as Play offline's New game: a remembered pack that moved (or is already loaded) is skipped silently.
         if (r.RulesPath is { Length: > 0 } rules && !string.Equals(s.RulesPath, rules, StringComparison.OrdinalIgnoreCase)
             && (File.Exists(rules) || Directory.Exists(rules)))
@@ -97,6 +102,21 @@ public partial class MainWindow
                 break;
             case LaunchKind.OpenSave or LaunchKind.Continue when !string.IsNullOrEmpty(r.SavePath):
                 Guard(() => { OpenGame(r.SavePath); NoteRecentSave(r.SavePath); });
+                break;
+            case LaunchKind.HostOnline when r.Online is { } host:
+                Guard(() =>
+                {
+                    if (!string.IsNullOrEmpty(r.SavePath)) { OpenGame(r.SavePath); NoteRecentSave(r.SavePath); }
+                    else
+                    {
+                        var diff = r.NewGame?.Difficulty ?? SettingsStore.Current.LastDifficulty;
+                        if (r.NewGame?.Setup is { } hostSetup) s.LoadSetup(hostSetup, diff); else s.StartNewGame(diff);
+                    }
+                });
+                await StartOnlineAsync(() => BeginHostingAsync(s, host), guest: false);
+                break;
+            case LaunchKind.JoinOnline when r.Online is { } guest:
+                await StartOnlineAsync(() => BeginGuestAsync(s, guest), guest: true);   // no game of our own: the host's snapshot becomes the game
                 break;
             default:
                 try { await ChooseAndStartAsync(preselectNew: false); }
