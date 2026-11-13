@@ -5,11 +5,14 @@ using System.Text.Json;
 
 namespace Quartermaster.Render;
 
-/// <summary>Protects the mailbox password at rest (per Windows user by default).</summary>
+/// <summary>Protects the mailbox password at rest (per Windows user with DPAPI; an OS secret store elsewhere).</summary>
 public interface IPasswordProtector
 {
     byte[] Protect(byte[] plain);
     byte[] Unprotect(byte[] protectedBytes);
+
+    /// <summary>Drops whatever is kept outside the protected bytes (a secret-store entry); nothing for DPAPI.</summary>
+    void Forget(byte[] blob) { }
 }
 
 /// <summary>
@@ -109,8 +112,12 @@ public sealed class TurnIdentity
     public string? Relay { get; set; }
     public bool UseMailbox { get; set; }
 
-    /// <summary>The mailbox password protected by the <see cref="IPasswordProtector"/> (DPAPI by default); null = none saved.</summary>
+    /// <summary>The mailbox password protected by the <see cref="IPasswordProtector"/> (DPAPI on Windows, a secret-store handle
+    /// elsewhere); null = none saved.</summary>
     public byte[]? ProtectedPassword { get; set; }
+
+    /// <summary>True when protected password bytes are kept (they may still not be readable here: see <see cref="GetPassword"/>).</summary>
+    public bool HasStoredPassword => ProtectedPassword is { Length: > 0 };
 
     /// <summary>Start hashes of turns already replayed here (newest last; capped at <see cref="MaxPlayed"/>).</summary>
     public IReadOnlySet<string> PlayedStartHashes => _playedSet;
@@ -165,12 +172,12 @@ public sealed class TurnIdentity
     public static TurnIdentity Load(string gameId) => Load(gameId, null, null);
 
     /// <param name="root">Folder of the identity files; null = <see cref="DefaultRoot"/>.</param>
-    /// <param name="protector">Password protector; null = DPAPI for the current user.</param>
+    /// <param name="protector">Password protector; null = <see cref="PasswordProtectors.ForThisOs"/>.</param>
     public static TurnIdentity Load(string gameId, string? root, IPasswordProtector? protector)
     {
         if (!IsValidGameId(gameId)) throw new InvalidDataException("This game has an invalid game id.");
         var id = new TurnIdentity(gameId, Path.Combine(root ?? DefaultRoot, gameId.ToLowerInvariant() + ".json"),
-            protector ?? DpapiProtector.Instance);
+            protector ?? PasswordProtectors.ForThisOs());
         if (ReadDto(id.FilePath) is not { } dto) return id;
         id.LocalPlayerId = dto.LocalPlayerId;
         id.Relay = dto.Relay;
@@ -229,20 +236,39 @@ public sealed class TurnIdentity
         Remember(_played, _playedSet, startHash);
     }
 
-    /// <summary>Saves a mailbox password (protected); null or empty clears it. False (nothing saved, never throws) when it cannot be protected.</summary>
+    /// <summary>
+    /// Saves a mailbox password (protected); null or empty clears it. False (never throws) when it cannot be stored: then nothing is
+    /// saved, or, with a session-only store, it is kept until the app closes. The previous password's store entry is forgotten.
+    /// </summary>
     public bool SetPassword(string? password)
     {
-        if (string.IsNullOrEmpty(password)) { ProtectedPassword = null; return true; }
-        try
+        var old = ProtectedPassword;
+        bool stored;
+        if (string.IsNullOrEmpty(password)) { ProtectedPassword = null; stored = true; }
+        else
         {
-            ProtectedPassword = _protector.Protect(Encoding.UTF8.GetBytes(password));
-            return true;
+            try
+            {
+                ProtectedPassword = _protector.Protect(Encoding.UTF8.GetBytes(password));
+                stored = true;
+            }
+            catch (KeptForSessionException session)
+            {
+                ProtectedPassword = session.Handle;
+                stored = false;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                ProtectedPassword = null;
+                stored = false;
+            }
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        if (old is { Length: > 0 } && (ProtectedPassword == null || !old.AsSpan().SequenceEqual(ProtectedPassword)))
         {
-            ProtectedPassword = null;
-            return false;
+            try { _protector.Forget(old); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { }
         }
+        return stored;
     }
 
     /// <summary>The saved mailbox password, or null when none is saved or it cannot be read back (another Windows user, damaged file).</summary>
