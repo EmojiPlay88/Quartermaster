@@ -452,6 +452,15 @@ public partial class MainWindow
         SbOnlineBox.IsVisible = true;
     }
 
+    /// <summary>Screenshots only (Shell/ScreenshotStates): shows the window as if it hosted or joined online, over a session that never touches the network.</summary>
+    internal void ShowOnlineForScreenshot(HostSession? host, GuestSession? guest, string code)
+    {
+        _host = host;
+        _guest = guest;
+        _onlineCode = code;
+        UpdateOnlineUi();
+    }
+
     void UpdateOnlineUi()
     {
         if (_closed) return;

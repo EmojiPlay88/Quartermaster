@@ -308,6 +308,14 @@ public sealed class OnlineLobbyWindow : Window
         finally { SetBusy(false); }
     }
 
+    /// <summary>Screenshots (build/port-screenshots.ps1): shows invented rows as if the relay had listed them; no connection is made.</summary>
+    internal void ShowRowsForScreenshot(IReadOnlyList<LobbyRow> rows)
+    {
+        RelayBox.Text = "relay.example.test:8443";
+        ShowRows(rows);
+        SetState($"Connected to relay.example.test:8443 — {rows.Count} {(rows.Count == 1 ? "lobby" : "lobbies")}");
+    }
+
     void ShowRows(IReadOnlyList<LobbyRow> rows)
     {
         if (_closed) return;

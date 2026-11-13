@@ -27,6 +27,9 @@
   Stage 5b adds stage5b-desktop-handover.png (the hot-seat handover screen for Ben, captured as its own window), stage5b-desktop-players-page.png (the new-game
   Players page), stage5b-desktop-settings-players.png (Settings > Game with the Players box) and stage5b-desktop-player-menu.png (the status-bar player menu
   open); all on the Riverland pack with invented players Anna and Ben, inside a temp QUARTERMASTER_LAYOUT_ROOT.
+  Stage 5c adds stage5c-desktop-<state>.png (online-lobby: the Online lobby window with invented TEST lobbies; online-host: a hosted game with its
+  status text, a guest seat and a chat line; online-guest: a guest still joining; seats: the host's Players dialog; side-choice: the guest's side
+  question). No network: the states use a null transport and invented rows, never Quartermaster.Relay. Temp QUARTERMASTER_LAYOUT_ROOT.
   Writes artifacts/port/stage1-desktop.png (Quartermaster.Desktop --screenshot-main, drawn headless with Avalonia.Headless: no window)
   and artifacts/port/stage1-winforms.png (Quartermaster.App --screenshot with QUARTERMASTER_SHOT_OFFSCREEN=1: windows are created far
   outside all screens and never activated). The WinForms run uses the same isolated profile folder as build/wiki-screenshots.ps1
@@ -35,11 +38,14 @@
   Per-run time limit; a run that hangs is killed and reported. Default 120.
 .PARAMETER SkipBuild
   Reuse the existing Release builds.
+.PARAMETER Only
+  Stage 5c state names (online-lobby, online-host, online-guest, seats, side-choice): run only those and stop (no WinForms, no other stage).
 #>
 [CmdletBinding()]
 param(
     [int]$TimeoutSeconds = 120,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string[]]$Only
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -86,6 +92,22 @@ function Invoke-Shot([string]$Exe, [string[]]$ArgList, [hashtable]$Env, [string]
     }
     finally { if ($ownLayout -and (Test-Path $ownLayout)) { Remove-Item $ownLayout -Recurse -Force -ErrorAction SilentlyContinue } }
 }
+
+# Stage 5c states, Desktop, headless: the online screens, with invented TEST lobbies and a transport that goes nowhere (no network, no relay).
+function Invoke-Stage5c([string[]]$States) {
+    $layout5c = Join-Path ([IO.Path]::GetTempPath()) ('qm-shot-layout5c-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Force $layout5c | Out-Null
+        $env5c = @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1'; QUARTERMASTER_LAYOUT_ROOT = $layout5c }
+        foreach ($state in $States) {
+            $png = Join-Path $out "stage5c-desktop-$state.png"
+            Invoke-Shot $deskExe @($vmod, '--new', '--rules', $rules, '--screenshot-state', $state, '--screenshot-main', $png) $env5c $png "desktop-$state"
+        }
+    }
+    finally { if (Test-Path $layout5c) { Remove-Item $layout5c -Recurse -Force } }
+}
+$states5c = 'online-lobby', 'online-host', 'online-guest', 'seats', 'side-choice'
+if ($Only) { Invoke-Stage5c ($states5c | Where-Object { $Only -contains $_ }); return }
 
 # Desktop: headless, no window. The Riverland demo has no predefined setups, so --new.
 Invoke-Shot $deskExe @($vmod, '--new', '--screenshot-main', (Join-Path $out 'stage1-desktop.png')) @{ DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = '1' } (Join-Path $out 'stage1-desktop.png') 'desktop'
@@ -238,6 +260,8 @@ try {
     }
 }
 finally { if (Test-Path $layout5b) { Remove-Item $layout5b -Recurse -Force } }
+
+Invoke-Stage5c $states5c
 
 # WinForms: off-screen, isolated profile (only ever deletes a folder this script family made).
 $demoRoot = Join-Path $env:ProgramData 'Quartermaster-Demo'
