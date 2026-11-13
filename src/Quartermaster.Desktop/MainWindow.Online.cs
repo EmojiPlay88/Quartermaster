@@ -52,14 +52,19 @@ public partial class MainWindow
 
     bool IsOnline => _host != null || _guest != null;
 
-    /// <summary>Game menu: Players… and Leave Online Game, shown only while online or starting (Send Turn… is stage 5d).</summary>
+    /// <summary>Game menu (shown while a game is open or online): Send Turn…; while online also Players… and Leave Online Game.</summary>
     MenuItem BuildGameMenu()
     {
         var game = _gameMenu = Top("&Game");
         game.IsVisible = false;
+        _sendTurn = Item(game, "Send &Turn…", () => RunAsync(SendTurnAsync));
+        _gameOnlineSep = new Separator { IsVisible = false };
+        game.Items.Add(_gameOnlineSep);
         _gamePlayers = Item(game, "&Players…", () => RunAsync(ShowPlayersDialogAsync));
         _gamePlayers.IsVisible = false;
-        game.Items.Add(new Separator());
+        // WinForms always shows this one; here it goes with the online items, so no separator dangles under Send Turn….
+        _gameLeaveSep = new Separator { IsVisible = false };
+        game.Items.Add(_gameLeaveSep);
         _gameLeave = Item(game, "&Leave Online Game", () => RunAsync(LeaveOnlineGameAsync));
         _gameLeave.IsVisible = false;
         return game;
@@ -476,7 +481,10 @@ public partial class MainWindow
         {
             var online = IsOnline;
             var live = online || _onlineStarting;
-            if (_gameMenu != null) _gameMenu.IsVisible = live;
+            if (_gameMenu != null) _gameMenu.IsVisible = live || _session?.Game != null;
+            // Players… and Leave Online Game belong to a live session; Send Turn… (first) to a local game.
+            if (_gameOnlineSep != null) _gameOnlineSep.IsVisible = live;
+            if (_gameLeaveSep != null) _gameLeaveSep.IsVisible = live;
             if (_gameLeave != null) { _gameLeave.IsVisible = live; _gameLeave.IsEnabled = live; }
             if (_gamePlayers != null)
             {
@@ -515,7 +523,7 @@ public partial class MainWindow
                 else if (!online && log.Chat != null) log.SetChat(null);
             }
             ApplyGuestLimits();
-            // 5d: UpdateMailboxWatch() (going online stops the turn mailbox; leaving brings it back for a play-by-email game).
+            UpdateMailboxWatch();   // going online stops the turn mailbox; leaving brings it back for a play-by-email game
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -524,14 +532,20 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Guest limits (spec 8a.3): no save, no new or loaded game, no rules editing, no undo. Runs after every UI refresh, so it always wins
-    /// over the plain enabling.
+    /// Guest limits (spec 8a.3): no save (Export Viewer Copy… instead), no new or loaded game, no rules editing, no undo. Runs after every
+    /// UI refresh, so it always wins over the plain enabling.
     /// </summary>
     void ApplyGuestLimits()
     {
+        var guest = _session?.IsGuest == true;
         ApplyGates();
         RefreshHistoryUi();
-        // 5d: File → Export Viewer Copy… (guests) and UpdateTurnUi().
+        if (_exportViewer != null)
+        {
+            _exportViewer.IsVisible = guest;
+            _exportViewer.IsEnabled = guest && _session?.Game != null;
+        }
+        UpdateTurnUi();
     }
 
     void ShowOnlineMessage(string text)
