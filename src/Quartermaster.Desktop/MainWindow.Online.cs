@@ -47,6 +47,9 @@ public partial class MainWindow
     internal MenuItem? GamePlayersItem => _gamePlayers;
     internal MenuItem? GameLeaveItem => _gameLeave;
 
+    /// <summary>How often the side choice was put to this guest (tests: a rejoining seat is never asked).</summary>
+    internal int SideQuestionsAsked { get; private set; }
+
     bool IsOnline => _host != null || _guest != null;
 
     /// <summary>Game menu: Players… and Leave Online Game, shown only while online or starting (Send Turn… is stage 5d).</summary>
@@ -211,7 +214,9 @@ public partial class MainWindow
             if (!StillCurrent(s, client)) return;
             _transport = new RelayTransport(client, key);
             _onlineCode = GameCode.Normalize(code);
-            var g = new GuestSession(s, _transport, code, o.PlayerName, PostToUi);
+            // The rejoin token lives under this window's layout root (AppDataRoot.Path unless a test gives its own), so two windows on two
+            // roots are two players: one never takes the other's seat with its token.
+            var g = new GuestSession(s, _transport, code, o.PlayerName, PostToUi, new RejoinTokens(_layoutRoot));
             _guest = g;
             _remote = new RemoteActions(g);
             _remote.Refused += OnGuestNotice;
@@ -269,9 +274,10 @@ public partial class MainWindow
                 System.Diagnostics.Trace.WriteLine("online: left the game: " + why);
                 Dispatcher.UIThread.Post(() => RunOnline(async () =>
                 {
-                    if (_closed) return;
+                    // A second Refused event or a Leave racing this one has already ended this guest: leave once only.
+                    if (_closed || _guest != g) return;
                     await _dialogs.ShowInfoAsync(this, why, "Online game");
-                    if (!_closed) LeaveAsGuest();
+                    if (!_closed && _guest == g) LeaveAsGuest();
                 }));
                 break;
         }
@@ -299,6 +305,7 @@ public partial class MainWindow
             ShowOnlineMessage(SideChoiceModel.NoFreeSideText);
             return;
         }
+        SideQuestionsAsked++;
         var chosen = await _dialogs.ChooseSidesAsync(this, SideChoiceModel.ChooseTitle, SideChoiceModel.ChoosePrompt, free, null, OnlineLobbyModel.JoinNote);
         if (chosen is { Count: > 0 } && _guest == g) g.ChooseSides(chosen);
         else _sideAsked = false;   // not chosen yet: Game → Players… offers it again

@@ -17,6 +17,7 @@ public sealed class InProcessRelay : IAsyncDisposable
     readonly WebApplication _app;
     readonly string _dir;
     readonly List<RelayClient> _clients = new();
+    bool _disposed;
 
     InProcessRelay(WebApplication app, string dir, Uri uri)
     {
@@ -63,8 +64,11 @@ public sealed class InProcessRelay : IAsyncDisposable
         return c;
     }
 
+    /// <summary>Stops the relay (a test may stop it while windows are still connected); a second call does nothing.</summary>
     public async ValueTask DisposeAsync()
     {
+        if (_disposed) return;
+        _disposed = true;
         RelayClient[] clients;
         lock (_clients) clients = _clients.ToArray();
         foreach (var c in clients) await c.DisposeAsync();

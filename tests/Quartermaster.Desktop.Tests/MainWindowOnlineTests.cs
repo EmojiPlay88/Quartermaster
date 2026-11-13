@@ -1,16 +1,12 @@
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
-using Avalonia.Threading;
 using Quartermaster.Core;
-using Quartermaster.Desktop.Formulas;
-using Quartermaster.Desktop.Launcher;
 using Quartermaster.Desktop.Online;
 using Quartermaster.Desktop.Preferences;
 using Quartermaster.Desktop.Input;
 using Quartermaster.Render;
 using Quartermaster.Rules;
 using Quartermaster.TestFixtures;
-using Quartermaster.Vassal;
 
 namespace Quartermaster.Desktop.Tests;
 
@@ -21,43 +17,16 @@ namespace Quartermaster.Desktop.Tests;
 /// </summary>
 public sealed class MainWindowOnlineTests : IAsyncLifetime
 {
-    readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-online-" + Guid.NewGuid().ToString("N"));
-    readonly List<IDisposable> _disposables = new();
-    readonly List<Window> _windows = new();
     readonly FakeDialogs _hostDialogs = new() { Answer = true };
     readonly FakeDialogs _guestDialogs = new() { Answer = true };
-    InProcessRelay _relay = null!;
+    OnlineRig _rig = null!;
 
     static readonly PlayerDef Anna = new("p1", "Anna", new[] { "red" });
     static readonly PlayerDef Ben = new("p2", "Ben", new[] { "blue" });
 
-    public async ValueTask InitializeAsync()
-    {
-        Directory.CreateDirectory(_tmp);
-        _relay = await InProcessRelay.StartAsync();
-        await _relay.ClientAsync(RelayTrust.Pins());   // pins the relay's certificate where the windows look: nobody is asked
-    }
+    public async ValueTask InitializeAsync() => _rig = await OnlineRig.StartAsync();
 
-    public async ValueTask DisposeAsync()
-    {
-        foreach (var w in _windows)
-        {
-            try
-            {
-                if (w is MainWindow m)
-                {
-                    if (m.Session is { } s) FormulaWindows.CloseAllFor(s);
-                    m.ForceClose();
-                }
-                else w.Close();
-            }
-            catch (InvalidOperationException) { }
-        }
-        Dispatcher.UIThread.RunJobs();
-        await _relay.DisposeAsync();
-        foreach (var d in _disposables) d.Dispose();
-        try { Directory.Delete(_tmp, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-    }
+    public async ValueTask DisposeAsync() => await _rig.DisposeAsync();
 
     // ---------- fixture ----------
 
@@ -73,83 +42,24 @@ public sealed class MainWindowOnlineTests : IAsyncLifetime
         Properties = new() { new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, SheetField = "Fuel" } },
     };
 
-    sealed record Fixture(ModuleRow Row, ModuleLibrary Library, SettingsStore Store, string ModulePath, string PackPath, SetupDef Setup);
+    Task<OnlineFixture> Module() => _rig.ModuleAsync(Pack);
 
-    async Task<Fixture> Module()
-    {
-        var fx = PhaseFixture.Module();
-        _disposables.Add(fx);
-        var path = fx.Build();
-        var store = new SettingsStore(Path.Combine(_tmp, "lobby-layout"));
-        store.Load(null);
-        var lib = new ModuleLibrary(store);
-        lib.Add(path);
-        await lib.RefreshAsync(null, CancellationToken.None);
-        var row = lib.Rows[0];
-        var packPath = Path.Combine(_tmp, "test-" + Guid.NewGuid().ToString("N") + ".qrules");
-        RulesPackIo.Save(Pack(row.Entry.Sha256!), packPath);
-        lib.SetRulesPack(row.Entry, packPath);
-        using var probe = ModuleSession.Open(path, Path.Combine(_tmp, "cache"), null);
-        return new Fixture(row, lib, store, path, packPath, probe.Model.Setups[0]);   // "Start": Red 1, Red 2, Blue 1
-    }
+    MainWindow Window(FakeDialogs dialogs, string name) => _rig.Window(dialogs, name);
 
-    MainWindow Window(FakeDialogs dialogs, string name)
-    {
-        var w = new MainWindow(dialogs, Path.Combine(_tmp, "cache"), null, Path.Combine(_tmp, "layout-" + name)) { Width = 1024, Height = 768 };
-        _windows.Add(w);
-        w.Show();
-        return w;
-    }
+    static void Pump() => OnlineRig.Pump();
 
-    static void Pump() => Dispatcher.UIThread.RunJobs();
+    static void PumpUntil(Func<bool> done, int seconds = 20) => OnlineRig.PumpUntil(done, seconds);
 
-    /// <summary>Runs the UI thread (jobs, timers, network continuations) until <paramref name="done"/>.</summary>
-    static void PumpUntil(Func<bool> done, int seconds = 20)
-    {
-        var until = DateTime.UtcNow.AddSeconds(seconds);
-        while (true)
-        {
-            Pump();
-            if (done()) return;
-            Assert.True(DateTime.UtcNow < until, "timed out");
-            using var slice = new CancellationTokenSource(10);
-            Dispatcher.UIThread.MainLoop(slice.Token);
-        }
-    }
+    LaunchRequest HostRequest(OnlineFixture f, string? savePath = null, Uri? relay = null) => _rig.HostRequest(f, new[] { "red" }, savePath, relay);
 
-    LaunchRequest HostRequest(Fixture f, string? savePath = null, Uri? relay = null) =>
-        new(f.ModulePath, f.PackPath, LaunchKind.HostOnline,
-            savePath == null ? new NewGameRequest(GameMode.Online, f.Setup, Difficulty.FullyAuto, null, "TEST lobby", null) : null, savePath,
-            new OnlineLaunch(relay ?? _relay.Uri, "Hosty", "", "TEST lobby", new[] { "red" }));
-
-    async Task<MainWindow> Host(Fixture f)
-    {
-        var w = Window(_hostDialogs, "host");
-        await w.StartFromLaunchAsync(HostRequest(f));
-        Assert.NotNull(w.HostOnline);
-        return w;
-    }
+    Task<MainWindow> Host(OnlineFixture f) => _rig.HostAsync(f, _hostDialogs, new[] { "red" });
 
     /// <summary>A second window joins the host's lobby through the lobby window (as the launcher would hand it over).</summary>
-    async Task<MainWindow> Guest(Fixture f, MainWindow host, string name = "Carol")
-    {
-        var lobby = new OnlineLobbyWindow(f.Row, f.Library, f.Store, _guestDialogs);
-        _windows.Add(lobby);
-        lobby.Show();
-        Pump();
-        lobby.RelayBox.Text = _relay.Address;
-        var req = await lobby.JoinAsync(host.HostOnline!.Listing, name, "");
-        Assert.NotNull(req);
-        lobby.Close();
-        Pump();
-        var g = Window(_guestDialogs, "guest-" + name);
-        await g.StartFromLaunchAsync(req!);
-        Assert.NotNull(g.GuestOnline);
-        return g;
-    }
+    async Task<MainWindow> Guest(OnlineFixture f, MainWindow host, string name = "Carol") =>
+        (await _rig.GuestAsync(f, _guestDialogs, host.HostOnline!.Listing, name)).Window;
 
     /// <summary>Host plus a guest that took Blue and has the host's game.</summary>
-    async Task<(MainWindow Host, MainWindow Guest)> Seated(Fixture f)
+    async Task<(MainWindow Host, MainWindow Guest)> Seated(OnlineFixture f)
     {
         var host = await Host(f);
         _guestDialogs.SidesAnswer = new[] { "blue" };
@@ -192,7 +102,7 @@ public sealed class MainWindowOnlineTests : IAsyncLifetime
         prep.Session!.OpenRules(f.PackPath);
         var g0 = prep.Session.Game!;
         g0.Execute(CommandLog.Prepare(new SetPlayers(new List<PlayerDef> { Anna, Ben }), g0.State, prep.Session));
-        var save = Path.Combine(_tmp, "two.qsave");
+        var save = Path.Combine(_rig.Tmp, "two.qsave");
         prep.SaveGame(save);
         prep.ForceClose();
         Pump();
