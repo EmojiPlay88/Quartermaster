@@ -64,18 +64,6 @@ sealed class WhoAreYouDialog : Form
     }
 }
 
-/// <summary>Starting values of the mailbox choice (the game's <see cref="TurnIdentity"/>, the relay from Settings).</summary>
-sealed record MailboxValues(bool Use, string? Relay, string? Password)
-{
-    /// <summary>ToString never shows the password (a record would print it into logs and debugger views).</summary>
-    bool PrintMembers(System.Text.StringBuilder b)
-    {
-        b.Append("Use = ").Append(Use).Append(", Relay = ").Append(Relay).Append(", Password = ")
-            .Append(string.IsNullOrEmpty(Password) ? "(none)" : "***");
-        return true;
-    }
-}
-
 /// <summary>The relay mailbox choice shared by the turn dialogs: a tick box, the relay address and the game's mailbox password.</summary>
 sealed class MailboxOptions : FlowLayoutPanel
 {
