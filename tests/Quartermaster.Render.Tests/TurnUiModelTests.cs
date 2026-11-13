@@ -65,7 +65,7 @@ public class TurnUiModelTests
     public void IsTurnGame_NeedsTwoPlayersAndAKnownLocalPlayer()
     {
         var root = Path.Combine(Path.GetTempPath(), "qm-turnui-" + Guid.NewGuid().ToString("N"));
-        var id = TurnIdentity.Load(Guid.NewGuid().ToString("N"), root, null);
+        var id = TurnIdentity.Load(Guid.NewGuid().ToString("N"), root, TestProtector.Create());
         var two = new GameState { Players = new List<PlayerDef> { Red, Blue } };
         Assert.False(TurnUiModel.IsTurnGame(two, id));
         Assert.False(TurnUiModel.IsTurnGame(two, null));

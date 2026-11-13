@@ -19,7 +19,8 @@ public static class PasswordProtectors
     /// </summary>
     public static IPasswordProtector ForThisOs() => _override ?? Default.Value;
 
-    private static IPasswordProtector Resolve()
+    /// <summary>The OS default, ignoring <see cref="Override"/> and uncached (tests call it only where it touches no store: Windows).</summary>
+    internal static IPasswordProtector Resolve()
     {
         if (OperatingSystem.IsWindows()) return DpapiProtector.Instance;
         if (OperatingSystem.IsMacOS()) return new SecretStoreProtector(new MacKeychainStore());

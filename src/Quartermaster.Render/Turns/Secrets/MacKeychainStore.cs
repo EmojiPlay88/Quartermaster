@@ -29,6 +29,11 @@ public sealed class MacKeychainStore : ISecretStore
     private static extern int SecKeychainFindGenericPassword(IntPtr keychainOrArray, uint serviceNameLength, byte[] serviceName,
         uint accountNameLength, byte[] accountName, out uint passwordLength, out IntPtr passwordData, out IntPtr itemRef);
 
+    // The same call for the item only: NULL passwordLength / passwordData, so the data is not decrypted (no Keychain access prompt).
+    [DllImport(Security, EntryPoint = "SecKeychainFindGenericPassword")]
+    private static extern int SecKeychainFindGenericPasswordItem(IntPtr keychainOrArray, uint serviceNameLength, byte[] serviceName,
+        uint accountNameLength, byte[] accountName, IntPtr passwordLength, IntPtr passwordData, out IntPtr itemRef);
+
     // OSStatus SecKeychainItemModifyAttributesAndData(SecKeychainItemRef itemRef, const SecKeychainAttributeList *attrList,
     //     UInt32 length, const void *data);
     [DllImport(Security)]
@@ -60,10 +65,7 @@ public sealed class MacKeychainStore : ISecretStore
             if (status != ErrSecDuplicateItem) return false;
             // Already there: replace its data.
             Release(ref item);
-            var data = IntPtr.Zero;
-            status = SecKeychainFindGenericPassword(IntPtr.Zero, (uint)ServiceBytes.Length, ServiceBytes, (uint)acc.Length, acc,
-                out _, out data, out item);
-            if (data != IntPtr.Zero) SecKeychainItemFreeContent(IntPtr.Zero, data);
+            status = FindItem(acc, out item);
             if (status != ErrSecSuccess || item == IntPtr.Zero) return false;
             return SecKeychainItemModifyAttributesAndData(item, IntPtr.Zero, (uint)pw.Length, pw) == ErrSecSuccess;
         }
@@ -111,22 +113,21 @@ public sealed class MacKeychainStore : ISecretStore
     {
         if (account == null || !OperatingSystem.IsMacOS()) return;
         var acc = Encoding.UTF8.GetBytes(account);
-        var data = IntPtr.Zero;
         var item = IntPtr.Zero;
         try
         {
-            int status = SecKeychainFindGenericPassword(IntPtr.Zero, (uint)ServiceBytes.Length, ServiceBytes, (uint)acc.Length, acc,
-                out _, out data, out item);
-            if (data != IntPtr.Zero) { SecKeychainItemFreeContent(IntPtr.Zero, data); data = IntPtr.Zero; }
-            if (status == ErrSecSuccess && item != IntPtr.Zero) SecKeychainItemDelete(item);
+            if (FindItem(acc, out item) == ErrSecSuccess && item != IntPtr.Zero) SecKeychainItemDelete(item);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { }
-        finally
-        {
-            try { if (data != IntPtr.Zero) SecKeychainItemFreeContent(IntPtr.Zero, data); }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { }
-            Release(ref item);
-        }
+        finally { Release(ref item); }
+    }
+
+    /// <summary>Finds the item of an account without reading its data (the caller releases <paramref name="item"/>).</summary>
+    private static int FindItem(byte[] account, out IntPtr item)
+    {
+        item = IntPtr.Zero;
+        return SecKeychainFindGenericPasswordItem(IntPtr.Zero, (uint)ServiceBytes.Length, ServiceBytes, (uint)account.Length, account,
+            IntPtr.Zero, IntPtr.Zero, out item);
     }
 
     private static void Release(ref IntPtr cf)

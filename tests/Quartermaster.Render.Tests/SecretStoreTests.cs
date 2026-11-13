@@ -76,27 +76,59 @@ public class SecretStoreTests : IDisposable
     }
 
     [Fact]
+    public void Refused_store_keeps_password_for_session()
+    {
+        var session = new SessionSecretStore();
+        var refusing = new FakeStore { Refuse = true };
+        var gameId = Guid.NewGuid().ToString("N");
+        var id = Load(gameId, new SecretStoreProtector(refusing, session));
+        Assert.False(id.SetPassword("hunter2"));   // not stored: the "kept until the window closes" status shows
+        Assert.True(id.HasStoredPassword);
+        Assert.StartsWith("qm-secret:v1:", Encoding.UTF8.GetString(id.ProtectedPassword!));
+        Assert.Equal("hunter2", id.GetPassword());
+        Assert.Empty(refusing.Entries);
+        id.Save();
+        Assert.DoesNotContain("hunter2", File.ReadAllText(id.FilePath));
+        Assert.Equal("hunter2", Load(gameId, new SecretStoreProtector(refusing, session)).GetPassword());   // same process
+
+        Assert.False(id.SetPassword("pw2"));   // replacing forgets the old session entry
+        Assert.Equal("pw2", id.GetPassword());
+        Assert.True(id.SetPassword(""));
+        Assert.Null(id.GetPassword());
+
+        var nextRun = Load(gameId, new SecretStoreProtector(refusing, new SessionSecretStore()));
+        Assert.True(nextRun.HasStoredPassword);
+        Assert.Null(nextRun.GetPassword());   // a new process: asked again
+    }
+
+    [Fact]
+    public void Refused_store_defaults_to_the_process_session_store()
+    {
+        var protector = new SecretStoreProtector(new FakeStore { Refuse = true });
+        var handle = Assert.Throws<KeptForSessionException>(() => protector.Protect(Encoding.UTF8.GetBytes("pw"))).Handle;
+        try { Assert.Equal("pw", Encoding.UTF8.GetString(new SecretStoreProtector(new FakeStore()).Unprotect(handle))); }
+        finally { protector.Forget(handle); }
+        Assert.Throws<System.Security.Cryptography.CryptographicException>(() => protector.Unprotect(handle));
+    }
+
+    [Fact]
     public void Missing_store_falls_back_to_session()
     {
-        var refusing = Load(Guid.NewGuid().ToString("N"), new SecretStoreProtector(new FakeStore { Refuse = true }));
-        Assert.False(refusing.SetPassword("pw"));
-        Assert.Null(refusing.ProtectedPassword);
-        Assert.Null(refusing.GetPassword());
-
         var session = new SessionSecretStore();
         Assert.False(session.TrySet("acct", "kept"));
         Assert.Equal("kept", session.Get("acct"));
 
         var gameId = Guid.NewGuid().ToString("N");
-        var id = Load(gameId, new SecretStoreProtector(session));
+        var id = Load(gameId, new SecretStoreProtector(session, session));
         Assert.False(id.SetPassword("hunter2"));   // not stored: only kept for this session
         Assert.True(id.HasStoredPassword);
         Assert.Equal("hunter2", id.GetPassword());
         id.Save();
         Assert.DoesNotContain("hunter2", File.ReadAllText(id.FilePath));
-        Assert.Equal("hunter2", Load(gameId, new SecretStoreProtector(session)).GetPassword());
+        Assert.Equal("hunter2", Load(gameId, new SecretStoreProtector(session, session)).GetPassword());
 
-        var nextRun = Load(gameId, new SecretStoreProtector(new SessionSecretStore()));
+        var fresh = new SessionSecretStore();
+        var nextRun = Load(gameId, new SecretStoreProtector(fresh, fresh));
         Assert.True(nextRun.HasStoredPassword);
         Assert.Null(nextRun.GetPassword());
         Assert.Same(SessionSecretStore.Instance, SessionSecretStore.Instance);
@@ -125,9 +157,8 @@ public class SecretStoreTests : IDisposable
     [WindowsFact]
     public void Windows_default_is_dpapi()
     {
-        Assert.Null(PasswordProtectors.Override);
-        Assert.Same(DpapiProtector.Instance, PasswordProtectors.ForThisOs());
-        var id = TurnIdentity.Load(Guid.NewGuid().ToString("N"), _tmp, null);
+        Assert.Same(DpapiProtector.Instance, PasswordProtectors.Resolve());   // Override (the test seam) ignored
+        var id = TurnIdentity.Load(Guid.NewGuid().ToString("N"), _tmp, PasswordProtectors.Resolve());
         Assert.True(id.SetPassword("secret"));
         Assert.False(id.ProtectedPassword!.AsSpan().StartsWith(Prefix));   // a DPAPI blob, not a store handle
         Assert.Equal("secret", id.GetPassword());
@@ -136,13 +167,18 @@ public class SecretStoreTests : IDisposable
     [Fact]
     public void Override_wins_while_set()
     {
+        var previous = PasswordProtectors.Override;
+        Assert.NotNull(previous);   // TestProtector's module initializer: no Render test reaches a real store
         var fake = new SecretStoreProtector(new FakeStore());
         try
         {
             PasswordProtectors.Override = fake;
             Assert.Same(fake, PasswordProtectors.ForThisOs());
+            var id = TurnIdentity.Load(Guid.NewGuid().ToString("N"), _tmp, null);
+            Assert.True(id.SetPassword("x"));
+            Assert.Equal("x", Encoding.UTF8.GetString(fake.Unprotect(id.ProtectedPassword!)));
         }
-        finally { PasswordProtectors.Override = null; }
+        finally { PasswordProtectors.Override = previous; }
     }
 
     [SecretStoreFact]

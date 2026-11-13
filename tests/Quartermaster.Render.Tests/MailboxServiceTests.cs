@@ -84,7 +84,7 @@ public sealed class MailboxServiceTests : IAsyncLifetime
 
     private TurnIdentity Identity(string who, string player)
     {
-        var id = TurnIdentity.Load(_gameId, Path.Combine(_dir, "turns-" + who), null);
+        var id = TurnIdentity.Load(_gameId, Path.Combine(_dir, "turns-" + who), TestProtector.Create());
         id.LocalPlayerId = player;
         id.Relay = RelayText;
         id.UseMailbox = true;
