@@ -8,7 +8,7 @@ using Quartermaster.Render;
 namespace Quartermaster.Desktop.Turns;
 
 /// <summary>
-/// The replay bar of a received turn, docked above the log (WinForms ReplayBar): Next, Play all, Stop, the step counter and the log line just
+/// The replay bar of a received turn, docked under the alert bar (WinForms ReplayBar): Next, Play all, Stop, the step counter and the log line just
 /// replayed. Play all steps on a timer so each line shows and Stop can pause it. Renders <see cref="TurnReplayModel"/>; owns no game logic.
 /// </summary>
 public sealed class ReplayBar : UserControl

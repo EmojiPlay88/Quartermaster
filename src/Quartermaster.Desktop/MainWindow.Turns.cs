@@ -56,6 +56,12 @@ public partial class MainWindow
     /// <summary>True while a close or discard waits for the send: the outcome is handled by the waiter, not by the continuation.</summary>
     bool _waitingForSend;
 
+    /// <summary>
+    /// Folder of this window's game identities and received turn copies; null = <see cref="TurnIdentity.DefaultRoot"/>. Tests set it so
+    /// two windows in one process act as two computers.
+    /// </summary>
+    internal string? TurnsRoot { get; set; }
+
     /// <summary>The open game's turn identity (tests).</summary>
     internal TurnIdentity? TurnIdentityForTests => _turnIdentity;
 
@@ -137,7 +143,7 @@ public partial class MainWindow
         TurnIdentity? id = null;
         if (g != null && s is { IsGuest: false, IsViewerCopy: false } && TurnIdentity.IsValidGameId(g.State.GameId))
         {
-            try { id = TurnIdentity.Load(g.State.GameId); }
+            try { id = TurnIdentity.Load(g.State.GameId, TurnsRoot, null); }
             catch (InvalidDataException) { }
         }
         if (s != null && g != null && TurnUiModel.IsTurnGame(g.State, id))
@@ -200,7 +206,7 @@ public partial class MainWindow
         if (s.IsReplaying) { ShowError(ModuleSession.ReplayingText); return; }
         var players = g.State.Players.Where(p => p != null).ToList();
         if (players.Count < 2) { ShowError(TurnUiModel.NeedPlayersText); return; }
-        var id = TurnIdentity.Load(g.State.GameId);   // InvalidDataException: shown
+        var id = TurnIdentity.Load(g.State.GameId, TurnsRoot, null);   // InvalidDataException: shown
         // The previous turn's mailbox send is seen through first (its failure would otherwise never be shown).
         if (!await ConfirmSendDoneAsync(SendAnotherText)) return;
         FlushNotes();   // pending note text becomes a command before the turn is built
@@ -252,7 +258,7 @@ public partial class MainWindow
         id.RecordSent(t.StartHash);   // this turn coming back here is an older position
         SaveIdentity(id);
         // The turns received for this one are part of what was just sent: their local copies go.
-        var pruned = ReceivedTurns.Prune(t.GameId);
+        var pruned = ReceivedTurns.Prune(t.GameId, TurnsRoot);
         if (pruned > 0) System.Diagnostics.Trace.WriteLine($"turns: removed {pruned} received turn cop{(pruned == 1 ? "y" : "ies")}");
         _turnIdentity = id;
         StopHotSeatForTurns();
@@ -380,7 +386,7 @@ public partial class MainWindow
     {
         try
         {
-            var saved = TurnIdentity.Load(id.GameId);
+            var saved = TurnIdentity.Load(id.GameId, TurnsRoot, null);
             if (!saved.SetPassword(password)) return;   // kept for this session only (in memory here)
             SaveIdentity(saved);
             id.ProtectedPassword = saved.ProtectedPassword;
@@ -447,7 +453,7 @@ public partial class MainWindow
         TurnCheck check;
         try
         {
-            id = TurnIdentity.Load(t.GameId);
+            id = TurnIdentity.Load(t.GameId, TurnsRoot, null);
             check = TurnOpener.Check(s, t, id);
         }
         catch (InvalidDataException ex)
@@ -634,16 +640,24 @@ public partial class MainWindow
         if (_closed || _session?.Game is not { } g) return;   // also mid-replay: the notice waits (opening it then says to finish first)
         if (!string.Equals(g.State.GameId, t.GameId, StringComparison.OrdinalIgnoreCase)) return;
         // A copy stays on this computer until the next turn is sent: the relay item goes once the replayed game is saved.
+        var root = TurnsRoot;
         _ = Task.Run(() =>
         {
             // Off the UI thread: a large turn takes a moment to compress and write.
-            if (ReceivedTurns.Keep(t, itemId, out var why) == null) System.Diagnostics.Trace.WriteLine("turns: could not keep a copy of the received turn: " + why);
+            if (ReceivedTurns.Keep(t, itemId, out var why, root) == null) System.Diagnostics.Trace.WriteLine("turns: could not keep a copy of the received turn: " + why);
         });
         _waiting = (t, itemId);
         var text = TurnUiModel.NewTurnWaitingText(t.FromName);
         AlertBarHost.SetNotice(text);
         UpdateAlertBarVisible();
         System.Diagnostics.Trace.WriteLine("turns: " + text);
+    }
+
+    /// <summary>Screenshot state "turn-notice": the chip as the mailbox watch raises it, without a watch or a turn (no network).</summary>
+    internal void ShowTurnNoticeForScreenshot(string fromName)
+    {
+        AlertBarHost.SetNotice(TurnUiModel.NewTurnWaitingText(fromName));
+        UpdateAlertBarVisible();
     }
 
     void OnMailboxStatus(string text)
