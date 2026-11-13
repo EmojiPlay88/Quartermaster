@@ -6,7 +6,7 @@ using Quartermaster.Desktop.Shell;
 namespace Quartermaster.Desktop.Turns;
 
 /// <summary>A small "Sending turn…" wait (WinForms MainForm.SendWaitForm) that closes when the send finishes or the time is up. The user
-/// cannot close it; it checks every 100 ms.</summary>
+/// cannot close it (an application or OS shutdown still can); it checks every 100 ms.</summary>
 sealed class SendWaitWindow : Window
 {
     readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(100) };
@@ -28,7 +28,8 @@ sealed class SendWaitWindow : Window
         Content = _label;
         _timer.Tick += (_, _) => { if (_work.IsCompleted || DateTime.UtcNow >= _end) Finish(); };
         Opened += (_, _) => _timer.Start();
-        Closing += (_, e) => { if (!_finished && !e.IsProgrammatic) e.Cancel = true; };
+        // Only the user's own close is refused: an application or OS shutdown goes through.
+        Closing += (_, e) => { if (!_finished && !e.IsProgrammatic && e.CloseReason == WindowCloseReason.WindowClosing) e.Cancel = true; };
         Closed += (_, _) => _timer.Stop();
     }
 

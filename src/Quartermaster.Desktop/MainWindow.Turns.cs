@@ -30,8 +30,15 @@ public partial class MainWindow
 
     /// <summary>Mailbox passwords typed this session (used when the protected copy cannot be stored or read back).</summary>
     readonly Dictionary<string, string> _mailboxPasswords = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// What each game's stored password reads as on this computer (null = none, or not readable here), as last read or stored this session:
+    /// the OS secret store is read at most once per game per session (it runs on the UI thread).
+    /// </summary>
+    readonly Dictionary<string, string?> _storedPasswords = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Games whose unreadable stored password was asked for this session (asked once per game per session).</summary>
     readonly HashSet<string> _passwordAsked = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The password questions still open (a second caller waits for the same answer).</summary>
+    readonly Dictionary<string, Task<string>> _passwordAsks = new(StringComparer.OrdinalIgnoreCase);
     MenuItem? _sendTurn, _exportViewer;
     Separator? _gameOnlineSep, _gameLeaveSep;
     MailboxService? _mailbox;
@@ -61,6 +68,9 @@ public partial class MainWindow
     /// two windows in one process act as two computers.
     /// </summary>
     internal string? TurnsRoot { get; set; }
+
+    /// <summary>The mailbox password protector of this window's identities; null = <see cref="PasswordProtectors.ForThisOs"/>. Tests count reads with it.</summary>
+    internal IPasswordProtector? TurnProtector { get; set; }
 
     /// <summary>The open game's turn identity (tests).</summary>
     internal TurnIdentity? TurnIdentityForTests => _turnIdentity;
@@ -143,7 +153,7 @@ public partial class MainWindow
         TurnIdentity? id = null;
         if (g != null && s is { IsGuest: false, IsViewerCopy: false } && TurnIdentity.IsValidGameId(g.State.GameId))
         {
-            try { id = TurnIdentity.Load(g.State.GameId, TurnsRoot, null); }
+            try { id = TurnIdentity.Load(g.State.GameId, TurnsRoot, TurnProtector); }
             catch (InvalidDataException) { }
         }
         if (s != null && g != null && TurnUiModel.IsTurnGame(g.State, id))
@@ -206,7 +216,7 @@ public partial class MainWindow
         if (s.IsReplaying) { ShowError(ModuleSession.ReplayingText); return; }
         var players = g.State.Players.Where(p => p != null).ToList();
         if (players.Count < 2) { ShowError(TurnUiModel.NeedPlayersText); return; }
-        var id = TurnIdentity.Load(g.State.GameId, TurnsRoot, null);   // InvalidDataException: shown
+        var id = TurnIdentity.Load(g.State.GameId, TurnsRoot, TurnProtector);   // InvalidDataException: shown
         // The previous turn's mailbox send is seen through first (its failure would otherwise never be shown).
         if (!await ConfirmSendDoneAsync(SendAnotherText)) return;
         FlushNotes();   // pending note text becomes a command before the turn is built
@@ -352,8 +362,16 @@ public partial class MainWindow
         id.UseMailbox = use;
         if (!use) return;
         id.Relay = (relay ?? "").Trim();
-        _mailboxPasswords[id.GameId] = password ?? "";
-        if (!id.SetPassword(password)) SetStatus("The mailbox password could not be stored on this computer; it is kept until the window closes.");
+        password ??= "";
+        _mailboxPasswords[id.GameId] = password;
+        // An unchanged password is not protected again (off Windows that would be a new keychain item and a delete every send).
+        var unchanged = password.Length == 0 ? !id.HasStoredPassword : id.HasStoredPassword && StoredPassword(id) == password;
+        if (!unchanged)
+        {
+            var stored = id.SetPassword(password);
+            _storedPasswords[id.GameId] = password.Length > 0 && id.HasStoredPassword ? password : null;   // a session-kept copy reads too
+            if (!stored) SetStatus("The mailbox password could not be stored on this computer; it is kept until the window closes.");
+        }
         if (string.IsNullOrWhiteSpace(SettingsStore.Current.RelayAddress) && id.Relay.Length > 0)
         {
             var r = id.Relay;
@@ -363,20 +381,48 @@ public partial class MainWindow
 
     /// <summary>The game's mailbox password as known now: typed this session, else the stored one, else "" (never asks).</summary>
     string PasswordFor(TurnIdentity id) =>
-        _mailboxPasswords.TryGetValue(id.GameId, out var pw) ? pw : id.GetPassword() ?? "";
+        _mailboxPasswords.TryGetValue(id.GameId, out var pw) ? pw : StoredPassword(id) ?? "";
+
+    /// <summary>The game's stored password as this computer reads it (null = none or unreadable); the store is read once per game per session.</summary>
+    string? StoredPassword(TurnIdentity id)
+    {
+        if (_storedPasswords.TryGetValue(id.GameId, out var known)) return known;
+        var read = id.GetPassword();
+        _storedPasswords[id.GameId] = read;
+        return read;
+    }
+
+    /// <summary>True when the game's mailbox password is stored but unreadable here and nobody has answered for it this session yet.</summary>
+    bool PasswordUnanswered(TurnIdentity id) =>
+        id.UseMailbox && id.HasStoredPassword && !_mailboxPasswords.ContainsKey(id.GameId) && StoredPassword(id) == null;
 
     /// <summary>
     /// As <see cref="PasswordFor"/>, but a stored password that cannot be read here (another computer, a store entry that is gone) is asked
-    /// for once per game per session. The answer is kept for the session and stored again (it may now succeed); Cancel means "".
+    /// for once per game per session (a caller arriving while the question is open gets the same answer). The answer is kept for the session
+    /// and stored again (it may now succeed); Cancel means "".
     /// </summary>
-    async Task<string> PasswordForAsync(TurnIdentity id)
+    Task<string> PasswordForAsync(TurnIdentity id)
     {
-        if (_mailboxPasswords.TryGetValue(id.GameId, out var known)) return known;
-        if (id.GetPassword() is { } stored) return stored;
+        if (_mailboxPasswords.TryGetValue(id.GameId, out var known)) return Task.FromResult(known);
+        if (StoredPassword(id) is { } stored) return Task.FromResult(stored);
         // Only a mailbox game needs its password: an unused one is never asked for.
-        if (!id.UseMailbox || !id.HasStoredPassword || !_passwordAsked.Add(id.GameId)) return "";
-        var typed = await _dialogs.AskPasswordAsync(this, PasswordCaption, PasswordPromptText) ?? "";
-        _mailboxPasswords[id.GameId] = typed;
+        if (!id.UseMailbox || !id.HasStoredPassword) return Task.FromResult("");
+        if (_passwordAsks.TryGetValue(id.GameId, out var open)) return open;
+        if (!_passwordAsked.Add(id.GameId)) return Task.FromResult("");
+        var ask = AskPasswordAgainAsync(id);
+        if (!ask.IsCompleted) _passwordAsks[id.GameId] = ask;
+        return ask;
+    }
+
+    async Task<string> AskPasswordAgainAsync(TurnIdentity id)
+    {
+        var typed = "";
+        try { typed = await _dialogs.AskPasswordAsync(this, PasswordCaption, PasswordPromptText) ?? ""; }
+        finally
+        {
+            _passwordAsks.Remove(id.GameId);
+            _mailboxPasswords[id.GameId] = typed;   // also when the question failed: never asked again, never waited for forever
+        }
         if (typed.Length > 0) StorePasswordAgain(id, typed);
         return typed;
     }
@@ -386,10 +432,11 @@ public partial class MainWindow
     {
         try
         {
-            var saved = TurnIdentity.Load(id.GameId, TurnsRoot, null);
+            var saved = TurnIdentity.Load(id.GameId, TurnsRoot, TurnProtector);
             if (!saved.SetPassword(password)) return;   // kept for this session only (in memory here)
             SaveIdentity(saved);
             id.ProtectedPassword = saved.ProtectedPassword;
+            _storedPasswords[id.GameId] = password;
         }
         catch (InvalidDataException ex) { System.Diagnostics.Trace.WriteLine("turns: " + ex.Message); }
     }
@@ -453,7 +500,7 @@ public partial class MainWindow
         TurnCheck check;
         try
         {
-            id = TurnIdentity.Load(t.GameId, TurnsRoot, null);
+            id = TurnIdentity.Load(t.GameId, TurnsRoot, TurnProtector);
             check = TurnOpener.Check(s, t, id);
         }
         catch (InvalidDataException ex)
@@ -474,7 +521,7 @@ public partial class MainWindow
         if (check != TurnCheck.Ok && (!await ConfirmDiscardAsync() || !Same())) return false;
         // The rules stay as they are while the turn replays: an open workbench closes (it reopens from Tools once the replay is over).
         if (!await CloseWorkbenchForReplayAsync() || !Same()) return false;
-        if (next.Step == TurnOpenStep.AskWhoAreYou && (!await AskWhoAreYouAsync(t, players, id) || !Same())) return false;
+        if (next.Step == TurnOpenStep.AskWhoAreYou && (!await AskWhoAreYouAsync(t, players, id, Same) || !Same())) return false;
         FormulaWindows.CloseAllFor(s);
         var local = id.LocalPlayerId ?? "";
         var ctx = new ReplayContext(id, itemId, _savePath, _dirty, _recoveredAutosave, s.Game?.State.GameId, _hotSeat?.Current);
@@ -505,13 +552,14 @@ public partial class MainWindow
     }
 
     /// <summary>"This turn is from {name}. Which player are you?" with the game's mailbox choice; the answer is remembered for the game.</summary>
-    async Task<bool> AskWhoAreYouAsync(TurnFile t, IReadOnlyList<PlayerDef> players, TurnIdentity id)
+    /// <param name="same">False once the game the question was for is gone (then nothing is saved).</param>
+    async Task<bool> AskWhoAreYouAsync(TurnFile t, IReadOnlyList<PlayerDef> players, TurnIdentity id, Func<bool> same)
     {
         var pre = TurnUiModel.DefaultLocalPlayer(players, id.LocalPlayerId, t.ToPlayerId);
         var password = await PasswordForAsync(id);
         var who = await _dialogs.AskWhoAreYouAsync(this, TurnDialogRules.FromPrompt(TurnUiModel.ShownName(t.FromName)), players, _session?.Rules, pre,
             new MailboxValues(id.UseMailbox, id.Relay ?? SettingsStore.Current.RelayAddress, password));
-        if (who == null || !TurnUiModel.KnowsLocalPlayer(players, who.LocalPlayerId)) return false;
+        if (who == null || !same() || !TurnUiModel.KnowsLocalPlayer(players, who.LocalPlayerId)) return false;
         id.LocalPlayerId = who.LocalPlayerId;
         ApplyMailbox(id, who.UseMailbox, who.Relay, who.Password);
         SaveIdentity(id);
@@ -593,7 +641,10 @@ public partial class MainWindow
 
     // ---------- mailbox watch ----------
 
-    /// <summary>Watches the open play-by-email game's mailbox when it uses one (no network otherwise); stops for any other game and online.</summary>
+    /// <summary>
+    /// Watches the open play-by-email game's mailbox when it uses one (no network otherwise); stops for any other game and online. A stored
+    /// password this computer cannot read is asked for first (once per game per session): the watch is held until it is answered.
+    /// </summary>
     void UpdateMailboxWatch()
     {
         if (_mailbox == null || _closed) return;
@@ -604,8 +655,16 @@ public partial class MainWindow
         if (g != null && id is { UseMailbox: true } && !string.IsNullOrWhiteSpace(id.Relay) && !IsOnline && !_onlineStarting
             && string.Equals(id.GameId, g.State.GameId, StringComparison.OrdinalIgnoreCase))
         {
-            password = PasswordFor(id);
-            key = string.Join("\n", g.State.GameId, id.Relay, id.LocalPlayerId, password);
+            if (PasswordUnanswered(id))
+            {
+                // Polling with "" would watch the wrong box (and "New turn waiting" would never come): ask first, then watch.
+                if (!_passwordAsked.Contains(id.GameId)) PostPasswordAsk(id);
+            }
+            else
+            {
+                password = PasswordFor(id);
+                key = string.Join("\n", g.State.GameId, id.Relay, id.LocalPlayerId, password);
+            }
         }
         if (key == _watchKey)
         {
@@ -618,6 +677,18 @@ public partial class MainWindow
         _mailbox.Watch(g!.State.GameId, id!, password);
         System.Diagnostics.Trace.WriteLine("turns: watching the turn mailbox on " + id!.Relay);
     }
+
+    /// <summary>Asks for the open game's unreadable mailbox password after the current event (not inside a game replacement), then watches.</summary>
+    void PostPasswordAsk(TurnIdentity id) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+    {
+        // Still this game's identity, no replay running (opening a turn asks for itself), not online.
+        if (_closed || !ReferenceEquals(_turnIdentity, id) || _session is not { IsReplaying: false } || IsOnline || _onlineStarting) return;
+        RunAsync(async () =>
+        {
+            await PasswordForAsync(id);
+            if (!_closed) OnlineGuard(UpdateMailboxWatch);
+        });
+    });
 
     async void DeleteThenWatch(string itemId)
     {

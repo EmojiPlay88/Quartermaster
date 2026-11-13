@@ -139,6 +139,7 @@ public interface IDialogs
 
     /// <summary>The host's Players dialog (WinForms SeatsDialog); returns when it is closed.</summary>
     Task ShowSeatsAsync(Window owner, HostSession host, RulesPack? pack);
+
     /// <summary>The Send Turn dialog (WinForms SendTurnDialog); null when cancelled.</summary>
     Task<SendTurnChoice?> AskSendTurnAsync(Window owner, string fromName, IReadOnlyList<PlayerDef> players, string localPlayerId, RulesPack? pack, MailboxValues mailbox);
 

@@ -342,6 +342,30 @@ public sealed class MainWindowTurnsSendTests : IAsyncLifetime
     }
 
     [AvaloniaFact]
+    public async Task Unreadable_password_prompt_cancelled_keeps_empty_for_the_session()
+    {
+        var (w, d, _) = await Game();
+        var gameId = w.Session!.Game!.State.GameId;
+        var handle = Encoding.UTF8.GetBytes("qm-secret:v1:" + Guid.NewGuid().ToString("N"));
+        StoreIdentity(gameId, id =>
+        {
+            id.LocalPlayerId = Alice.Id;
+            id.UseMailbox = true;
+            id.Relay = "127.0.0.1:1";
+            id.ProtectedPassword = handle;
+        });
+
+        d.PasswordAnswer = null;   // Cancel
+        d.SendTurnAnswer = null;
+        await w.SendTurnAsync();
+        await w.SendTurnAsync();
+        Assert.Single(d.PasswordCalls);   // never asked again this session
+        Assert.Equal(2, d.SendTurnCalls.Count);
+        Assert.All(d.SendTurnCalls, c => Assert.Equal("", c.Mailbox.Password));
+        Assert.Equal(handle, TurnIdentity.Load(gameId).ProtectedPassword);   // nothing typed: nothing stored again
+    }
+
+    [AvaloniaFact]
     public async Task Unreadable_password_of_unused_mailbox_is_never_asked()
     {
         var (w, d, _) = await Game();

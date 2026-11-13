@@ -22,6 +22,7 @@ public sealed record TurnOpenDecision(TurnOpenStep Step, string? Message)
     /// is the answer once asked). The who-are-you prompt shows for a game with two or more players when the turn starts a new game or
     /// the local player is not known.
     /// </summary>
+    /// <param name="players">The turn start's players with null entries already removed (callers filter them; a null entry here is not a player).</param>
     public static TurnOpenDecision Decide(TurnCheck check, IReadOnlyList<PlayerDef> players, TurnIdentity? identity, bool openAnywayChosen)
     {
         switch (check)

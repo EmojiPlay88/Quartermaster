@@ -75,6 +75,7 @@ public sealed class ReplayBar : UserControl
 
     public string StepText => _step.Text ?? "";
     public string LineText => _line.Text ?? "";
+    internal string LineTip => ToolTip.GetTip(_line) as string ?? "";
 
     internal Button NextButton => _next;
     internal Button PlayAllButton => _playAll;

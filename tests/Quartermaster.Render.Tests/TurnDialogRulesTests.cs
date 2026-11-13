@@ -21,9 +21,8 @@ public class TurnDialogRulesTests
     [Fact]
     public void Bad_relay_returns_parse_error()
     {
-        var expected = OnlineLobbyModel.ParseRelay("http://x y", out var err) == null ? err ?? MailboxService.NoRelayText : null;
-        Assert.NotNull(expected);
-        Assert.Equal(expected, TurnDialogRules.MailboxProblem(true, "http://x y"));
+        Assert.Equal("That is not a relay address. Use host, host:port or wss://host:port.", TurnDialogRules.MailboxProblem(true, "http://x y"));
+        Assert.Equal("The relay needs a secure address (wss://).", TurnDialogRules.MailboxProblem(true, "ws://relay.example"));
     }
 
     [Fact]
@@ -56,6 +55,12 @@ public class TurnDialogRulesTests
         Assert.Equal("Send Alice's turn. Next you choose where to save the turn file.", TurnDialogRules.SendPrompt("Alice"));
         Assert.Equal("This turn is from Bob. Which player are you?", TurnDialogRules.FromPrompt("Bob"));
         Assert.Equal("Who are you?", TurnDialogRules.WhoTitle);
+        Assert.Equal("Also send through my relay", TurnDialogRules.SendCaption);
+        Assert.Equal("Watch the turn mailbox on my relay", TurnDialogRules.WatchCaption);
+        Assert.Equal("Relay:", TurnDialogRules.RelayLabel);
+        Assert.Equal("Mailbox password (optional, the same for every player):", TurnDialogRules.PasswordLabel);
+        Assert.Equal("Which player are you? This computer remembers it for this game.", TurnDialogRules.WhoPrompt);
+        Assert.Equal("Choose which player you are.", TurnDialogRules.WhoMissingText);
     }
 
     [Fact]

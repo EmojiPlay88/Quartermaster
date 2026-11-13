@@ -145,11 +145,18 @@ public sealed class TurnsEndToEndTests : IAsyncLifetime
         lw.SelectTab(lw.TabKeys[0]);
         var cells = OutlinerCells(w);
         Assert.NotEmpty(cells);
-        foreach (var text in privateTexts) Assert.DoesNotContain(text, cells);
+        foreach (var text in privateTexts) Assert.DoesNotContain(cells, c => c.Contains(text, StringComparison.Ordinal));
         var log = w.Log!;
         log.Reload();
         Assert.DoesNotContain(log.Rows, l => (l.Text ?? "").Contains("secret", StringComparison.Ordinal));
         Assert.DoesNotContain("secret", log.CopyText(), StringComparison.Ordinal);
+        // The replay bar's line and its tooltip: the step as the public view shows it.
+        var bar = w.ReplayBarControl;
+        foreach (var shown in new[] { bar.LineText, bar.LineTip })
+        {
+            Assert.DoesNotContain("secret", shown, StringComparison.Ordinal);
+            foreach (var text in privateTexts) Assert.DoesNotContain(text, shown, StringComparison.Ordinal);
+        }
     }
 
     /// <summary>Every cell of the Outliner (all rows expanded), refreshed now.</summary>
@@ -373,7 +380,7 @@ public sealed class TurnsEndToEndTests : IAsyncLifetime
         Assert.Equal("40", FuelOf(lw, "Red 1"));
         Assert.Equal("", FuelOf(lw, "Blue 1"));
         Assert.Contains("40", OutlinerCells(aw));   // the checks above can see a value when one is shown
-        Assert.DoesNotContain(BlueValue, OutlinerCells(aw));
+        Assert.DoesNotContain(OutlinerCells(aw), c => c.Contains(BlueValue, StringComparison.Ordinal));
 
         // Alice's own value goes to Bob; Bob's next turn, replayed here, shows neither side's values while it runs.
         Play(aw.Session!.Game!, PhaseFixture.RedOne, "red", 1717, RedNote, 10);
@@ -398,7 +405,7 @@ public sealed class TurnsEndToEndTests : IAsyncLifetime
         Assert.Equal(RedValue, FuelOf(lw, "Red 1"));
         Assert.Equal("", FuelOf(lw, "Blue 1"));
         Assert.Contains(RedValue, OutlinerCells(aw));
-        Assert.DoesNotContain("4343", OutlinerCells(aw));
+        Assert.DoesNotContain(OutlinerCells(aw), c => c.Contains("4343", StringComparison.Ordinal));
         aw.Log!.Reload();
         Assert.Contains(aw.Log.Rows, l => (l.Text ?? "").Contains(RedNote, StringComparison.Ordinal));
         Assert.DoesNotContain(aw.Log.Rows, l => (l.Text ?? "").Contains(BlueNote, StringComparison.Ordinal));

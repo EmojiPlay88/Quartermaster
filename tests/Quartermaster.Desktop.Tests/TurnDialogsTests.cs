@@ -123,4 +123,57 @@ public sealed class TurnDialogsTests
         while (!s2.IsCompleted && DateTime.UtcNow < until) { Slice(); }
         Assert.True(await s2);
     }
+
+    static Window Owner()
+    {
+        var w = new Window { Width = 400, Height = 300 };
+        w.Show();   // headless: never on screen
+        return w;
+    }
+
+    [AvaloniaFact]
+    public void Send_dialog_mailbox_on_carries_relay_and_password()
+    {
+        var dlg = new SendTurnDialog("Alice", Players, "p1", Pack(), new MailboxValues(true, " relay.example:5000 ", "TEST pw"));
+        Assert.True(dlg.UseMailbox);
+        Assert.Null(dlg.TryOk());
+        Assert.Equal(new SendTurnChoice(Bob, true, "relay.example:5000", "TEST pw"), dlg.Choice);
+    }
+
+    [AvaloniaFact]
+    public async Task Real_choice_dialog_closed_without_a_choice_returns_minus_one()
+    {
+        IDialogs d = new Dialogs();
+        var owner = Owner();
+        var closed = d.ChooseAsync(owner, "Something failed.", "Send Turn", new[] { "Retry", "Close" }, 0);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(closed.IsCompleted);
+        owner.OwnedWindows.OfType<ChoiceDialog>().Single().Close();   // the title bar's close: no button clicked
+        Assert.Equal(-1, await closed);
+
+        var picked = d.ChooseAsync(owner, "Something failed.", "Send Turn", new[] { "Retry", "Close" }, 0);
+        Dispatcher.UIThread.RunJobs();
+        owner.OwnedWindows.OfType<ChoiceDialog>().Single().Pick(1);
+        Assert.Equal(1, await picked);
+        owner.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Wait_with_owner_is_modal_and_returns_when_work_ends()
+    {
+        IDialogs d = new Dialogs();
+        var owner = Owner();
+        var work = new TaskCompletionSource();
+        var shown = d.WaitForAsync(owner, work.Task, TimeSpan.FromSeconds(30));
+        Dispatcher.UIThread.RunJobs();
+        var wait = owner.OwnedWindows.OfType<SendWaitWindow>().Single();
+        Assert.Equal("Send Turn", wait.Title);
+        Assert.False(shown.IsCompleted);
+        work.SetResult();
+        var until = DateTime.UtcNow.AddSeconds(10);
+        while (!shown.IsCompleted && DateTime.UtcNow < until) { Slice(); }
+        Assert.True(await shown);
+        Assert.Empty(owner.OwnedWindows.OfType<SendWaitWindow>());
+        owner.Close();
+    }
 }
