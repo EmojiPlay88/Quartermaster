@@ -329,5 +329,12 @@ static class Program
         public Task<Quartermaster.Desktop.Online.HostSavedChoice?> AskHostSavedAsync(Avalonia.Controls.Window owner, Quartermaster.Rules.RulesPack pack, string playerName,
             string lobbyName, IReadOnlyCollection<string> hostSides) => Task.FromResult<Quartermaster.Desktop.Online.HostSavedChoice?>(null);
         public Task ShowSeatsAsync(Avalonia.Controls.Window owner, Quartermaster.Render.HostSession host, Quartermaster.Rules.RulesPack? pack) => Task.CompletedTask;
+        public Task<Quartermaster.Desktop.Turns.SendTurnChoice?> AskSendTurnAsync(Avalonia.Controls.Window owner, string fromName, IReadOnlyList<Quartermaster.Core.PlayerDef> players,
+            string localPlayerId, Quartermaster.Rules.RulesPack? pack, Quartermaster.Render.MailboxValues mailbox) => Task.FromResult<Quartermaster.Desktop.Turns.SendTurnChoice?>(null);
+        public Task<Quartermaster.Desktop.Turns.WhoChoice?> AskWhoAreYouAsync(Avalonia.Controls.Window owner, string prompt, IReadOnlyList<Quartermaster.Core.PlayerDef> players,
+            Quartermaster.Rules.RulesPack? pack, string? preselect, Quartermaster.Render.MailboxValues? mailbox) => Task.FromResult<Quartermaster.Desktop.Turns.WhoChoice?>(null);
+        public Task<int> ChooseAsync(Avalonia.Controls.Window owner, string message, string caption, IReadOnlyList<string> buttons, int defaultIndex) => Task.FromResult(-1);
+        public Task<string?> AskPasswordAsync(Avalonia.Controls.Window owner, string caption, string prompt) => Task.FromResult<string?>(null);
+        public Task<bool> WaitForAsync(Avalonia.Controls.Window owner, Task work, TimeSpan limit) => Task.FromResult(false);
     }
 }
