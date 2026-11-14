@@ -120,6 +120,13 @@ jobs:
           [ -x "$a/squashfs-root/AppRun" ] || { echo "AppRun not executable"; exit 1; }
           ( cd dist && sha256sum -c "Quartermaster-$VER-linux-x64.tar.gz.sha256" "Quartermaster-$VER-x86_64.AppImage.sha256" )
 
+      # Runs the tar.gz through the real updater staging code (safe extract, marker kind and version, file list, execute bits).
+      - name: Test tar.gz with the updater
+        if: runner.os == 'Linux'
+        run: |
+          export QM_LINUX_TAR="$PWD/dist/Quartermaster-$VER-linux-x64.tar.gz"
+          dotnet test tests/Quartermaster.Render.Tests -c Release --no-build --nologo --filter "FullyQualifiedName~PackageArchiveTests.Download_LinuxTar" -- RunConfiguration.TreatNoTestsAsError=true
+
       # Installs the real .deb on the runner (ubuntu) and the real .rpm in a Fedora container, runs --version and checks the marker kind.
       - name: Test Linux deb and rpm
         if: runner.os == 'Linux'
@@ -185,6 +192,15 @@ jobs:
             if ($p.ExitCode -ne 0 -or $text -ne "Quartermaster $env:VER") { throw "$exe --version gave exit $($p.ExitCode), '$text'" }
             Write-Host "$exe -> $text"
           }
+
+      # Runs the zip through the real updater staging code (safe extract, marker kind and version, app executables, file list).
+      - name: Test zip with the updater
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:QM_WIN_ZIP = (Resolve-Path "dist/Quartermaster-$env:VER-win-x64.zip").Path
+          dotnet test tests/Quartermaster.Render.Tests -c Release --no-build --nologo --filter "FullyQualifiedName~PackageArchiveTests.Download_WinZip" -- RunConfiguration.TreatNoTestsAsError=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # release.ps1's collect checks (asset list, .sha256, privacy) against a fake artifact, in pwsh 7 and Windows PowerShell 5.1.
       - name: Test release.ps1 collect
