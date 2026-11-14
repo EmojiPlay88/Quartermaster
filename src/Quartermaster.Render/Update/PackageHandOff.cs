@@ -9,15 +9,15 @@ public static class PackageHandOff
     /// <summary>Variables the AppImage runtime sets for its app; processes Quartermaster starts drop them so they are not taken for a running copy.</summary>
     public static readonly IReadOnlyList<string> AppImageVariables = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"];
 
-    /// <summary>How long <see cref="Open"/> waits for <c>xdg-open</c> to exit (a non-zero exit code within it is a failure).</summary>
+    /// <summary>How long <see cref="OpenAsync"/> waits for <c>xdg-open</c> to exit (a non-zero exit code within it is a failure).</summary>
     public static readonly TimeSpan ExitWait = TimeSpan.FromSeconds(3);
 
     /// <summary>
     /// Runs <c>xdg-open &lt;packagePath&gt;</c> (the path as one argument, no shell, without <see cref="AppImageVariables"/>) through
-    /// <paramref name="start"/> and waits up to <see cref="ExitWait"/> for it. False when it could not be started or exited with a non-zero
+    /// <paramref name="start"/> and waits (without blocking the caller) up to <see cref="ExitWait"/> for it. False when it could not be started or exited with a non-zero
     /// code in that time (no handler for the package); the reason is traced. Still running after the wait, or no process to wait for, is success.
     /// </summary>
-    public static bool Open(string packagePath, Func<ProcessStartInfo, Process?> start)
+    public static async Task<bool> OpenAsync(string packagePath, Func<ProcessStartInfo, Process?> start, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(packagePath);
         ArgumentNullException.ThrowIfNull(start);
@@ -36,7 +36,10 @@ public static class PackageHandOff
         {
             try
             {
-                if (!p.WaitForExit(ExitWait)) return true;
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(ExitWait);
+                try { await p.WaitForExitAsync(timeout.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return true; }   // still running after the wait
                 if (p.ExitCode == 0) return true;
                 Trace.WriteLine($"update: xdg-open exited with code {p.ExitCode}");
                 return false;

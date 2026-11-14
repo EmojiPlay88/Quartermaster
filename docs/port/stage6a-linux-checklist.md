@@ -43,7 +43,7 @@ The AppImage, .deb and .rpm packages are built in stage 6b. For now the **tar** 
 
 4. Start 0.0.1 with the feed and a scratch data folder (so the test stays off your real Quartermaster settings; the app hands both variables on to the updater helper, so every restart keeps them): `QUARTERMASTER_LAYOUT_ROOT=~/qm-test/data QUARTERMASTER_UPDATE_FEED=~/qm-test/feed ~/qm-test/app/Quartermaster`. Start the app this way every time below. Expected: the launcher with a pale-yellow bar naming 0.0.2 (**What's new**, **Update now**, **Later**, **Skip this version**); the bottom line shows 0.0.1.
 5. Click **Update now**. Expected: progress in the Update window, the app closes and starts again by itself within a few seconds.
-6. Expected: the launcher shows **Updated to 0.0.2.** once and the bottom line shows 0.0.2. `~/qm-test/Quartermaster.backup-0.0.1` holds the old files, and `~/qm-test/app` holds the new ones (the list in `quartermaster-files.txt`). Start the app again: the notice is gone. `ls ~/qm-test/data/Updates` shows `helper.log`, `state.json` and **no** `swap-journal.json` (the journal is deleted once the new version confirmed its start).
+6. Expected: the launcher shows **Updated to 0.0.2.** once and the bottom line shows 0.0.2. `~/qm-test/Quartermaster.backup-0.0.1` holds the old files, and `~/qm-test/app` holds the new ones (the list in `quartermaster-files.txt`). Start the app again: the notice is gone. `ls ~/qm-test/data/Updates` shows `helper.log`, `state.json`, `started-0.0.2` and the folder `0.0.2/` (holding only `helper/`, the running helper's copy) and **no** `swap-journal.json` (the journal is deleted once the new version confirmed its start).
 
 ## C. A broken 0.0.3 rolls back
 
