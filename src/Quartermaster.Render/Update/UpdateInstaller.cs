@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -20,7 +19,7 @@ public static class UpdateInstaller
     const long MaxUnpackedBytes = 4L * 1024 * 1024 * 1024;
 
     /// <summary>
-    /// Downloads the zip and its <c>.sha256</c>, checks the size and SHA-256 (first token of the <c>.sha256</c>, hex, any case) before
+    /// Downloads the asset (<see cref="UpdateInfo.Kind"/>; see <see cref="UpdateStaging"/>) and its <c>.sha256</c>, checks the size and SHA-256 (first token of the <c>.sha256</c>, hex, any case) before
     /// unpacking, unpacks into <c>&lt;root&gt;\staged</c> refusing absolute or <c>..</c> paths, and checks <c>Quartermaster.App.exe</c> is at the top
     /// with a FileVersion equal to the release version. Anything wrong throws <see cref="UpdateRefused"/>; on any failure or cancellation the
     /// whole version folder is deleted, so no partial download or stage is left.
@@ -39,16 +38,13 @@ public static class UpdateInstaller
         try
         {
             var expected = await ReadSha(f, u.ShaUrl, ct);
-            var zipPath = Path.Combine(root, UpdateChecker.ZipName(u.Version));
-            var part = zipPath + ".part";
+            var assetPath = UpdateStaging.DownloadPath(u, root, staged);
+            Directory.CreateDirectory(Path.GetDirectoryName(assetPath)!);
+            var part = assetPath + ".part";
             await Fetch(f, u.ZipUrl, part, u.ZipSize, expected, progress, ct);
-            File.Move(part, zipPath);
+            File.Move(part, assetPath);
             ct.ThrowIfCancellationRequested();
-            Extract(zipPath, staged);
-            CheckExe(staged, u.Version);
-            if (!File.Exists(Path.Combine(staged, ManifestName)))
-                throw new UpdateRefused($"The update has no file list ({ManifestName}); it was not installed.");
-            return new StagedUpdate(u.Version, staged, root);
+            return new StagedUpdate(u.Version, UpdateStaging.Stage(u, assetPath, staged), root);
         }
         catch
         {
@@ -107,51 +103,7 @@ public static class UpdateInstaller
     static UpdateRefused SizeMismatch(long expected, long got) =>
         new($"The download's size does not match the release ({got:N0} bytes{(got > expected ? " or more" : "")}, expected {expected:N0}); the update was not installed.");
 
-    static void Extract(string zipPath, string staged)
-    {
-        var stagedFull = Path.GetFullPath(staged);
-        try
-        {
-            using var zip = ZipFile.OpenRead(zipPath);
-            // Check every entry before writing anything.
-            var plan = new List<(ZipArchiveEntry Entry, string Target, bool IsDir)>();
-            long unpacked = 0;
-            foreach (var e in zip.Entries)
-            {
-                var target = SafeTarget(stagedFull, e.FullName);
-                var isDir = e.FullName.EndsWith('/') || e.FullName.EndsWith('\\');
-                unpacked += e.Length;
-                if (unpacked > MaxUnpackedBytes) throw new UpdateRefused("The update unpacks to more than 4 GB; it was not installed.");
-                plan.Add((e, target, isDir));
-            }
-            Directory.CreateDirectory(stagedFull);
-            foreach (var (e, target, isDir) in plan)
-            {
-                if (isDir) { Directory.CreateDirectory(target); continue; }
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                if (File.Exists(target)) throw new UpdateRefused($"The update lists '{e.FullName}' twice; it was not installed.");
-                e.ExtractToFile(target, overwrite: false);
-            }
-        }
-        catch (InvalidDataException ex)
-        {
-            throw new UpdateRefused("The download is not a valid zip file: " + ex.Message);
-        }
-    }
-
-    /// <summary>The full path for a zip entry inside <paramref name="stagedFull"/>; refuses absolute, drive, <c>..</c> and stream (<c>:</c>) paths.</summary>
-    static string SafeTarget(string stagedFull, string name)
-    {
-        UpdateRefused Unsafe() => new($"The update contains an unsafe file path ('{name}'); it was not installed.");
-        if (name.Length == 0 || name.Contains('\0') || name.Contains(':') || Path.IsPathRooted(name) || name[0] is '/' or '\\') throw Unsafe();
-        var parts = name.Split('/', '\\');
-        if (parts.Any(p => p == "..")) throw Unsafe();
-        var full = Path.GetFullPath(Path.Combine(stagedFull, name));
-        if (!full.StartsWith(stagedFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw Unsafe();
-        return full;
-    }
-
-    static void CheckExe(string staged, Version expected)
+    internal static void CheckExe(string staged, Version expected)
     {
         var exe = Path.Combine(staged, AppExe);
         if (!File.Exists(exe)) throw new UpdateRefused($"The update does not contain {AppExe}; it was not installed.");
@@ -251,10 +203,13 @@ public static class UpdateInstaller
     {
         CleanupOld(updatesRoot, current);
         var cur = Path.Combine(updatesRoot, AppVersion.Format(current));
-        var zip = Path.Combine(cur, UpdateChecker.ZipName(current));
         TryDelete(() => DeleteDir(Path.Combine(cur, "staged")));
-        TryDelete(() => File.Delete(zip));
-        TryDelete(() => File.Delete(zip + ".part"));
+        foreach (var kind in Enum.GetValues<PackageKind>())
+        {
+            var asset = Path.Combine(cur, UpdateChecker.AssetName(current, kind));
+            TryDelete(() => File.Delete(asset));
+            TryDelete(() => File.Delete(asset + ".part"));
+        }
         PruneBackups(updatesRoot, "backup-");
         if (appDir != null && Path.GetDirectoryName(Path.GetFullPath(Path.TrimEndingDirectorySeparator(appDir))) is { } parent)
             PruneBackups(parent, "Quartermaster.backup-");
