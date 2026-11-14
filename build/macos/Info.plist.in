@@ -2,6 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleIdentifier</key><string>io.github.emojiplay88.quartermaster</string>
   <key>CFBundleName</key><string>Quartermaster</string>
   <key>CFBundleDisplayName</key><string>Quartermaster</string>

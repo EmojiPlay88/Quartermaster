@@ -25,6 +25,7 @@ if [ -s "$plist" ]; then
       ok "plist $1"
     else fail "plist $1 should be '$3'"; fi
   }
+  expect CFBundleInfoDictionaryVersion string 6.0
   expect CFBundleIdentifier string io.github.emojiplay88.quartermaster
   expect CFBundleName string Quartermaster
   expect CFBundleDisplayName string Quartermaster
@@ -63,5 +64,11 @@ if [ "$nosign" = 0 ]; then
   while IFS= read -r d; do
     if codesign --verify --strict "$d" 2>/dev/null; then ok "codesign ${d#"$macos"/}"; else fail "codesign ${d#"$macos"/}"; fi
   done < <(find "$macos" -name '*.dylib' -type f)
+  # The signed helper must still run: with no arguments it prints its usage and exits 1 (ExitCodes.BadArgs in src/Quartermaster.Updater/Program.cs).
+  # Anything else (e.g. 137 = killed by the kernel over a bad signature) means it would not start during an update.
+  "$macos/Quartermaster.Updater" >/dev/null 2>&1
+  code=$?
+  if [ "$code" = 1 ]; then ok "Quartermaster.Updater runs (exit 1 without arguments)"
+  else fail "Quartermaster.Updater with no arguments exited $code, want 1 (usage); the signed helper does not run"; fi
 fi
 exit $bad
