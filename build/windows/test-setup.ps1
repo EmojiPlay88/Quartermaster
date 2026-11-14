@@ -1,6 +1,6 @@
 <#
  CI-only test of the per-user setup.exe: silent install, marker kind, --version, in-place reinstall (one uninstall key),
- silent uninstall (install dir gone, user data kept).
+ silent uninstall (install dir gone, user data kept), refusal of an unsafe /DIR= (non-empty foreign folder).
  It writes a sentinel into the real data folder (%LOCALAPPDATA%\Quartermaster), so it REFUSES to run unless $env:CI is 'true'.
  Usage: build/windows/test-setup.ps1 -Setup <Quartermaster-Setup-x.y.z.exe> -Version <x.y.z>
 #>
@@ -35,6 +35,17 @@ function Run-Setup {
 try {
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     Check (@(UninstKeys).Count -eq 0) "an uninstall key for $appId already exists before the test"
+
+    Write-Host '== refuses a non-empty folder that is not a Quartermaster install'
+    $unsafeDir = Join-Path $tmp 'unsafe'
+    New-Item -ItemType Directory -Force -Path $unsafeDir | Out-Null
+    $unsafeFile = Join-Path $unsafeDir 'precious.txt'
+    Set-Content -LiteralPath $unsafeFile -Value 'keep me' -Encoding ascii
+    $p = Start-Process -FilePath $Setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$unsafeDir`"") -Wait -PassThru
+    Check ($p.ExitCode -ne 0) 'setup into a non-empty foreign folder should have failed but exited 0'
+    Check ((Test-Path -LiteralPath $unsafeFile) -and ((Get-Content -LiteralPath $unsafeFile -Raw).Trim() -eq 'keep me')) 'refused install touched the foreign folder file'
+    Check (@(Get-ChildItem -LiteralPath $unsafeDir).Count -eq 1) 'refused install added files to the foreign folder'
+    Check (@(UninstKeys).Count -eq 0) 'refused install left an uninstall key'
 
     Write-Host '== silent install'
     Run-Setup
