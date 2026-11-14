@@ -9,7 +9,7 @@ pub="${1:?usage: make-app-bundle.sh <publish-dir> <version> <out-dir> [--no-sign
 version="${2:?usage: make-app-bundle.sh <publish-dir> <version> <out-dir> [--no-sign]}"
 out="${3:?usage: make-app-bundle.sh <publish-dir> <version> <out-dir> [--no-sign]}"
 nosign=0; [ "${4:-}" = "--no-sign" ] && nosign=1
-# Minimum macOS for .NET 10, per dotnet/core release-notes/10.0/supported-os.md; verify
+# Minimum macOS for .NET 10, per dotnet/core release-notes/10.0/supported-os.md
 minos="14.0"
 here="$(cd "$(dirname "$0")" && pwd)"
 
@@ -35,6 +35,7 @@ if [ "$nosign" = 0 ]; then
   plutil -lint "$app/Contents/Info.plist" >/dev/null || die "Info.plist failed plutil -lint"
   # codesign treats every file in Contents/MacOS as nested code, so sign them all (non-Mach-O files get xattr signatures).
   # The main executable is left out: signing the bundle below signs it.
+  # In-app updates re-sign with the same rule (src/Quartermaster.Render/Update/UpdateStaging.cs, SignBundle); keep the two in step.
   while IFS= read -r f; do
     codesign --force --sign - "$f" || die "codesign failed for $f"
   done < <(find "$app/Contents/MacOS" -type f ! -path "$app/Contents/MacOS/Quartermaster")

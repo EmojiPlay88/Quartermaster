@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -7,6 +8,7 @@ using Quartermaster.Render.Update;
 namespace Quartermaster.Render.Tests.Update;
 
 /// <summary>Staging per package kind from a local folder feed. Unix-only checks return early on Windows (the repo's skip pattern).</summary>
+[Collection(MacSigningSeam.Name)]
 public class UpdateStagingTests : IDisposable
 {
     readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-upd-stg-" + Guid.NewGuid().ToString("N"));
@@ -18,8 +20,21 @@ public class UpdateStagingTests : IDisposable
     const UnixFileMode Rwxr = (UnixFileMode)0x1ED; // 0755
     const UnixFileMode Rw = (UnixFileMode)0x1A4;   // 0644
 
-    public UpdateStagingTests() => Directory.CreateDirectory(Feed);
-    public void Dispose() { try { Directory.Delete(_tmp, true); } catch (Exception) { } }
+    public UpdateStagingTests()
+    {
+        Directory.CreateDirectory(Feed);
+        // The fake bundles here are not real apps; the signing tests below turn macOS signing on with a fake codesign.
+        UpdateStaging.IsMacOS = () => false;
+    }
+
+    public void Dispose()
+    {
+        UpdateStaging.IsMacOS = OperatingSystem.IsMacOS;
+        UpdateStaging.RunTool = _realRunTool;
+        try { Directory.Delete(_tmp, true); } catch (Exception) { }
+    }
+
+    readonly Func<ProcessStartInfo, (int ExitCode, string StdErr)> _realRunTool = UpdateStaging.RunTool;
 
     UpdateInfo PublishBytes(PackageKind kind, byte[] bytes, Version? version = null)
     {
@@ -258,4 +273,84 @@ public class UpdateStagingTests : IDisposable
         Assert.Contains("Quartermaster.App.exe in the update is version", ex.Message);
         await Run(PublishBytes(PackageKind.WinZip, zip, AppVersion.Current));
     }
+
+    /// <summary>Turns macOS signing on with a fake codesign; returns the recorded calls (file name + arguments).</summary>
+    List<string[]> FakeCodesign(Func<string[], (int, string)>? answer = null)
+    {
+        var calls = new List<string[]>();
+        UpdateStaging.IsMacOS = () => true;
+        UpdateStaging.RunTool = psi =>
+        {
+            var call = new[] { psi.FileName }.Concat(psi.ArgumentList).ToArray();
+            calls.Add(call);
+            Assert.False(psi.UseShellExecute);
+            return answer?.Invoke(call) ?? (0, "");
+        };
+        return calls;
+    }
+
+    static (string, byte[])[] MacBundleEntries() =>
+    [
+        .. MacEntries("mac-app"),
+        ("Quartermaster.app/Contents/Info.plist", [1]),
+        ("Quartermaster.app/Contents/MacOS/Quartermaster", [3]),
+        ("Quartermaster.app/Contents/MacOS/Quartermaster.Updater", [4]),
+        ("Quartermaster.app/Contents/MacOS/sub/libx.dylib", [5]),
+    ];
+
+    [Fact]
+    public async Task Download_MacApp_OnMac_SignsFilesThenBundleThenVerifies()
+    {
+        var calls = FakeCodesign();
+        var s = await Run(PublishBytes(PackageKind.MacApp, Zip(MacBundleEntries())));
+        var macos = Path.Combine(s.StagedDir, "Contents", "MacOS");
+        Assert.Equal(3, calls.Count);
+        Assert.All(calls, c => Assert.Equal("/usr/bin/codesign", c[0]));
+        Assert.Equal(["--force", "--sign", "-"], calls[0][1..4]);
+        var signed = calls[0][4..].Order(StringComparer.Ordinal).ToArray();
+        var want = new[] { "Quartermaster.App", "Quartermaster.Updater", "quartermaster-files.txt", "quartermaster-package.json", Path.Combine("sub", "libx.dylib") }
+            .Select(f => Path.Combine(macos, f)).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(want, signed);
+        Assert.DoesNotContain(Path.Combine(macos, "Quartermaster"), calls[0]);
+        Assert.DoesNotContain(Path.Combine(s.StagedDir, "Contents", "Info.plist"), calls[0]);
+        Assert.Equal(new[] { "/usr/bin/codesign", "--force", "--sign", "-", s.StagedDir }, calls[1]);
+        Assert.Equal(new[] { "/usr/bin/codesign", "--verify", "--strict", s.StagedDir }, calls[2]);
+    }
+
+    [Fact]
+    public async Task Download_MacApp_OnMac_VerifyFails_Refused()
+    {
+        var calls = FakeCodesign(c => c[1] == "--verify" ? (1, "Quartermaster.app: a sealed resource is missing or invalid\nmore detail\n") : (0, ""));
+        var u = PublishBytes(PackageKind.MacApp, Zip(MacBundleEntries()));
+        var ex = await Assert.ThrowsAsync<UpdateRefused>(() => Run(u));
+        Assert.Equal("Could not sign the update for this Mac (codesign: Quartermaster.app: a sealed resource is missing or invalid); it was not installed.", ex.Message);
+        Assert.Equal(3, calls.Count);
+        Assert.False(Directory.Exists(VersionDir));
+    }
+
+    [Fact]
+    public async Task Download_MacApp_OnMac_SignFailsWithoutMessage_StopsAndRefused()
+    {
+        var calls = FakeCodesign(_ => (137, ""));
+        var ex = await Assert.ThrowsAsync<UpdateRefused>(() => Run(PublishBytes(PackageKind.MacApp, Zip(MacBundleEntries()))));
+        Assert.Equal("Could not sign the update for this Mac (codesign: exit code 137); it was not installed.", ex.Message);
+        Assert.Single(calls);
+        Assert.False(Directory.Exists(VersionDir));
+    }
+
+    [Fact]
+    public async Task Download_MacApp_NotMac_NoCodesign()
+    {
+        var calls = FakeCodesign();
+        UpdateStaging.IsMacOS = () => false;
+        await Run(PublishBytes(PackageKind.MacApp, Zip(MacBundleEntries())));
+        Assert.Empty(calls);
+    }
+}
+
+/// <summary>Tests that swap the <see cref="UpdateStaging"/> signing seams (or need the real ones) run one at a time.</summary>
+[CollectionDefinition(Name)]
+public sealed class MacSigningSeam
+{
+    public const string Name = "Mac signing seam";
 }

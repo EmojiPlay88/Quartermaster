@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Formats.Tar;
 using System.IO.Compression;
 
@@ -36,7 +37,9 @@ internal static class UpdateStaging
                 var macos = Path.Combine(staged, MacBundle, "Contents", "MacOS");
                 CheckMarker(PackageFile.Read(macos), u);
                 RequireManifest(macos);
-                return Path.Combine(staged, MacBundle);
+                var bundle = Path.Combine(staged, MacBundle);
+                if (IsMacOS()) SignBundle(bundle);
+                return bundle;
             case PackageKind.LinuxTar:
                 ExtractTar(file, staged);
                 CheckMarker(PackageFile.Read(staged), u);
@@ -47,6 +50,67 @@ internal static class UpdateStaging
                 return file;
             default:
                 return file;
+        }
+    }
+
+    /// <summary>Test seam: whether this is macOS (only there is the staged bundle re-signed).</summary>
+    internal static Func<bool> IsMacOS = OperatingSystem.IsMacOS;
+
+    /// <summary>Test seam: runs a tool (no shell) and returns its exit code and standard error.</summary>
+    internal static Func<ProcessStartInfo, (int ExitCode, string StdErr)> RunTool = RunProcess;
+
+    const string Codesign = "/usr/bin/codesign";
+    static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>
+    /// Re-seals the staged bundle: the update zip has no extended attributes, so the xattr signatures of the non-Mach-O files in Contents/MacOS
+    /// are gone. Ad-hoc signs every regular file in Contents/MacOS except the main executable, then the bundle, then verifies it.
+    /// Same file rule as build/macos/make-app-bundle.sh; keep the two in step.
+    /// </summary>
+    static void SignBundle(string bundle)
+    {
+        var macos = Path.Combine(bundle, "Contents", "MacOS");
+        var mainExe = Path.Combine(macos, "Quartermaster");
+        var files = Directory.EnumerateFiles(macos, "*", SearchOption.AllDirectories)
+            .Where(f => !string.Equals(f, mainExe, StringComparison.Ordinal) && !File.GetAttributes(f).HasFlag(FileAttributes.ReparsePoint))
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
+        if (files.Count > 0) RunCodesign(["--force", "--sign", "-", .. files]);
+        RunCodesign(["--force", "--sign", "-", bundle]);
+        RunCodesign(["--verify", "--strict", bundle]);
+    }
+
+    static void RunCodesign(IEnumerable<string> args)
+    {
+        var psi = new ProcessStartInfo(Codesign) { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        var (code, err) = RunTool(psi);
+        if (code == 0) return;
+        var first = err.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? $"exit code {code}";
+        throw new UpdateRefused($"Could not sign the update for this Mac (codesign: {first}); it was not installed.");
+    }
+
+    /// <summary>Runs the tool with a timeout (killed when it runs over); a tool that cannot start counts as a failure.</summary>
+    static (int ExitCode, string StdErr) RunProcess(ProcessStartInfo psi)
+    {
+        try
+        {
+            using var p = Process.Start(psi);
+            if (p == null) return (-1, "could not start " + psi.FileName);
+            var stderr = p.StandardError.ReadToEndAsync();
+            var stdout = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(ToolTimeout))
+            {
+                try { p.Kill(entireProcessTree: true); } catch (Exception) { }
+                return (-1, $"timed out after {ToolTimeout.TotalSeconds:0} s");
+            }
+            p.WaitForExit();
+            Task.WaitAll(stderr, stdout);
+            return (p.ExitCode, stderr.Result);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return (-1, ex.Message);
         }
     }
 

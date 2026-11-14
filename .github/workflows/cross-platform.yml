@@ -67,7 +67,7 @@ jobs:
         run: |
           # Absolute: the test host does not run from the repo root.
           export QM_MAC_APP_ZIP="$PWD/dist/Quartermaster-$VER-osx-arm64.zip"
-          dotnet test tests/Quartermaster.Render.Tests -c Release --no-build --nologo --filter MacBundleZipTests
+          dotnet test tests/Quartermaster.Render.Tests -c Release --no-build --nologo --filter MacBundleZipTests -- RunConfiguration.TreatNoTestsAsError=true
 
       - name: Publish Linux (x64)
         if: runner.os == 'Linux'

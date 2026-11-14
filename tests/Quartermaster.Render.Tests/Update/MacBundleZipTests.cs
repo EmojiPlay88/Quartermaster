@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Quartermaster.Render.Update;
@@ -5,6 +6,7 @@ using Quartermaster.Render.Update;
 namespace Quartermaster.Render.Tests.Update;
 
 /// <summary>Feeds the zip that CI built (build/macos/make-dmg.sh) through the real updater staging code.</summary>
+[Collection(MacSigningSeam.Name)]
 public class MacBundleZipTests : IDisposable
 {
     readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-maczip-" + Guid.NewGuid().ToString("N"));
@@ -56,5 +58,26 @@ public class MacBundleZipTests : IDisposable
         Assert.NotNull(pkg);
         Assert.Equal(PackageKind.MacApp, pkg!.Kind);
         Assert.Equal(Version.Parse(version), pkg.Version);
+
+        if (!OperatingSystem.IsMacOS()) return;
+        // Staging re-signed the bundle (the zip drops the xattr signatures): the seal must hold and the app must still start.
+        var verify = RunTool("/usr/bin/codesign", "--verify", "--strict", staged.StagedDir);
+        Assert.True(verify.Code == 0, $"codesign --verify --strict exited {verify.Code}: {verify.StdErr}");
+        var run = RunTool(Path.Combine(macos, "Quartermaster"), "--version");
+        Assert.True(run.Code == 0, $"Quartermaster --version exited {run.Code}: {run.StdErr}");
+        Assert.Equal("Quartermaster " + version, run.StdOut.Trim());
+    }
+
+    /// <summary>Runs a tool with no shell (killed after 120 s).</summary>
+    static (int Code, string StdOut, string StdErr) RunTool(string exe, params string[] args)
+    {
+        var psi = new ProcessStartInfo(exe) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        var err = p.StandardError.ReadToEndAsync();
+        var output = p.StandardOutput.ReadToEnd();
+        if (!p.WaitForExit(TimeSpan.FromSeconds(120))) { p.Kill(true); return (-1, output, "timed out"); }
+        p.WaitForExit();
+        return (p.ExitCode, output, err.Result);
     }
 }
