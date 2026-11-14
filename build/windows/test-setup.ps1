@@ -1,6 +1,6 @@
 <#
  CI-only test of the per-user setup.exe: silent install, marker kind, --version, in-place reinstall (one uninstall key),
- silent uninstall (install dir gone, user data kept), refusal of an unsafe /DIR= (non-empty foreign folder, a folder inside the data folder),
+ silent uninstall (install dir gone, user data kept), refusal of an unsafe /DIR= (non-empty foreign folder, a folder inside the data folder, a folder under Program Files),
  a stale file listed in quartermaster-files.txt is removed by the upgrade.
  It writes a sentinel into the real data folder (%LOCALAPPDATA%\Quartermaster), so it REFUSES to run unless $env:CI is 'true'.
  Usage: build/windows/test-setup.ps1 -Setup <Quartermaster-Setup-x.y.z.exe> -Version <x.y.z>
@@ -55,6 +55,18 @@ try {
     Check ($p.ExitCode -eq 7) "setup into a folder inside the data folder should be refused with exit code 7 (PrepareToInstall), got $($p.ExitCode)"
     Check (-not (Test-Path -LiteralPath $subDir)) "refused install created $subDir"
     Check (@(UninstKeys).Count -eq 0) 'refused install (data subfolder) left an uninstall key'
+
+    Write-Host '== refuses a folder under Program Files'
+    $pfDir = Join-Path $env:ProgramFiles 'QmCiTest'
+    $p = Start-Process -FilePath $Setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$pfDir`"") -Wait -PassThru
+    if ($p.ExitCode -eq 0) {
+        # Should never happen: try to remove what was installed, then fail.
+        $u = Get-ChildItem -LiteralPath $pfDir -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($u) { Start-Process -FilePath $u.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait | Out-Null }
+    }
+    Check ($p.ExitCode -eq 7) "setup into Program Files should be refused with exit code 7 (PrepareToInstall), got $($p.ExitCode)"
+    Check (-not (Test-Path -LiteralPath $pfDir)) "refused install created $pfDir"
+    Check (@(UninstKeys).Count -eq 0) 'refused install (Program Files) left an uninstall key'
 
     Write-Host '== silent install'
     Run-Setup
