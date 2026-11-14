@@ -64,8 +64,23 @@ function New-FakeArtifact([string]$Dir) {
     } finally { Pop-Location }
     Move-Item -LiteralPath (Join-Path $stage 'linux.tar.gz') -Destination (Join-Path $Dir "Quartermaster-$v-linux-x64.tar.gz")
 
+    # The macOS zip: Quartermaster.app/Contents/Info.plist plus the whole publish folder (with its file list) in Contents/MacOS.
+    $mac = Join-Path $stage 'mac'
+    $macos = Join-Path $mac 'Quartermaster.app\Contents\MacOS'
+    New-FakePublish $macos @('Quartermaster', 'Quartermaster.Updater', 'LICENSE', 'THIRD-PARTY-NOTICES.md') 'mac-app'
+    Write-Utf8 (Join-Path $mac 'Quartermaster.app\Contents\Info.plist') '<plist version="1.0"><dict/></plist>'
+    # Entry names with forward slashes, as ditto writes them (CreateFromDirectory may write backslashes on Windows PowerShell 5.1).
+    $macZipPath = Join-Path $Dir "Quartermaster-$v-osx-arm64.zip"
+    $macRoot = (Resolve-Path -LiteralPath $mac).Path   # $stage contains '..', FullName does not
+    $za = [IO.Compression.ZipFile]::Open($macZipPath, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($f in @(Get-ChildItem -LiteralPath $mac -Recurse -File)) {
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($za, $f.FullName, $f.FullName.Substring($macRoot.Length + 1).Replace('\', '/'))
+        }
+    } finally { $za.Dispose() }
+
     foreach ($n in @("Quartermaster-Setup-$v.exe", "Quartermaster-$v-x86_64.AppImage", "quartermaster_${v}_amd64.deb",
-                     "quartermaster-$v-1.x86_64.rpm", "Quartermaster-$v-osx-arm64.dmg", "Quartermaster-$v-osx-arm64.zip")) {
+                     "quartermaster-$v-1.x86_64.rpm", "Quartermaster-$v-osx-arm64.dmg")) {
         Write-Utf8 (Join-Path $Dir $n) "fake $n"
     }
     foreach ($f in @(Get-ChildItem -LiteralPath $Dir -File)) { Write-Sha256 $f.FullName }
@@ -139,6 +154,33 @@ try {
         } finally { $z.Dispose() }
         Write-Sha256 (Join-Path $a $zipName)
     } $false @("$zipName entry name 'startapp.cmd'"))
+
+    # The same check on the macOS zip: startapp.cmd or a local path inside Quartermaster.app must fail, and the app layout is required.
+    $macName = "Quartermaster-$v-osx-arm64.zip"
+    [void](Test-Case 'startapp.cmd in the mac zip fails the privacy check' {
+        param($a)
+        $z = [IO.Compression.ZipFile]::Open((Join-Path $a $macName), [IO.Compression.ZipArchiveMode]::Update)
+        try {
+            $w = New-Object IO.StreamWriter($z.CreateEntry('Quartermaster.app/Contents/MacOS/startapp.cmd').Open())
+            try { $w.Write('@echo off') } finally { $w.Dispose() }
+        } finally { $z.Dispose() }
+        Write-Sha256 (Join-Path $a $macName)
+    } $false @("$macName entry name 'Quartermaster.app/Contents/MacOS/startapp.cmd'"))
+    [void](Test-Case 'local path in the mac zip fails the privacy check' {
+        param($a)
+        $z = [IO.Compression.ZipFile]::Open((Join-Path $a $macName), [IO.Compression.ZipArchiveMode]::Update)
+        try {
+            $w = New-Object IO.StreamWriter($z.CreateEntry('Quartermaster.app/Contents/Resources/notes.txt').Open())
+            try { $w.Write('built in C:\Users\someone\src') } finally { $w.Dispose() }
+        } finally { $z.Dispose() }
+        Write-Sha256 (Join-Path $a $macName)
+    } $false @("$macName file 'Quartermaster.app", "contains 'C:\Users\'"))
+    [void](Test-Case 'mac zip without Info.plist fails' {
+        param($a)
+        $z = [IO.Compression.ZipFile]::Open((Join-Path $a $macName), [IO.Compression.ZipArchiveMode]::Update)
+        try { $z.GetEntry('Quartermaster.app/Contents/Info.plist').Delete() } finally { $z.Dispose() }
+        Write-Sha256 (Join-Path $a $macName)
+    } $false @("$macName is missing required entry 'Quartermaster.app/Contents/Info.plist'"))
 
     # Run provenance (-FromRun): the pure checker, extracted from release.ps1 by AST (no network, no real run).
     $ast = [Management.Automation.Language.Parser]::ParseFile($releaseScript, [ref]$null, [ref]$null)
