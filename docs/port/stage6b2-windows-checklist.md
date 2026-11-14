@@ -15,17 +15,17 @@ This tests the **Windows installer**: a per-user setup program, an update instal
 
 ## B. Update the setup install from a test feed
 
-You need a version higher than the installed one. The update feed is a local folder, so nothing touches GitHub. In the project folder (with the .NET 10 SDK), using `0.0.2` as the update (use a number above your installed version):
+The update must be a version higher than the installed one (the CI build, for example 0.1.0), so every command below uses the made-up version `9.9.9`; it exists only in this local test feed. The update feed is a local folder, so nothing touches GitHub. In the project folder (with the .NET 10 SDK):
 
 9. Build the update and zip it as the release does:
 
    ```
-   dotnet publish src/Quartermaster.Desktop -c Release -r win-x64 --self-contained -p:Version=0.0.2 -o $env:TEMP\qm-test\pub-0.0.2
+   dotnet publish src/Quartermaster.Desktop -c Release -r win-x64 --self-contained -p:Version=9.9.9 -o $env:TEMP\qm-test\pub-9.9.9
    New-Item -ItemType Directory -Force $env:TEMP\qm-test\feed | Out-Null
-   Compress-Archive -Path $env:TEMP\qm-test\pub-0.0.2\* -DestinationPath $env:TEMP\qm-test\feed\Quartermaster-0.0.2-win-x64.zip
-   $h = (Get-FileHash $env:TEMP\qm-test\feed\Quartermaster-0.0.2-win-x64.zip -Algorithm SHA256).Hash.ToLower()
-   "$h  Quartermaster-0.0.2-win-x64.zip" | Set-Content -Encoding ascii $env:TEMP\qm-test\feed\Quartermaster-0.0.2-win-x64.zip.sha256
-   (Get-Item $env:TEMP\qm-test\feed\Quartermaster-0.0.2-win-x64.zip).Length
+   Compress-Archive -Path $env:TEMP\qm-test\pub-9.9.9\* -DestinationPath $env:TEMP\qm-test\feed\Quartermaster-9.9.9-win-x64.zip
+   $h = (Get-FileHash $env:TEMP\qm-test\feed\Quartermaster-9.9.9-win-x64.zip -Algorithm SHA256).Hash.ToLower()
+   "$h  Quartermaster-9.9.9-win-x64.zip" | Set-Content -Encoding ascii $env:TEMP\qm-test\feed\Quartermaster-9.9.9-win-x64.zip.sha256
+   (Get-Item $env:TEMP\qm-test\feed\Quartermaster-9.9.9-win-x64.zip).Length
    ```
 
    The last line prints the zip's size; you need it in the next step.
@@ -33,20 +33,20 @@ You need a version higher than the installed one. The update feed is a local fol
 
     ```
     {
-      "tag_name": "quartermaster-v0.0.2",
+      "tag_name": "quartermaster-v9.9.9",
       "draft": false,
       "prerelease": false,
-      "html_url": "https://example.invalid/releases/quartermaster-v0.0.2",
+      "html_url": "https://example.invalid/releases/quartermaster-v9.9.9",
       "body": "TEST notes\n- one",
       "assets": [
-        { "name": "Quartermaster-0.0.2-win-x64.zip", "size": ZIPSIZE, "browser_download_url": "https://example.invalid/Quartermaster-0.0.2-win-x64.zip" },
-        { "name": "Quartermaster-0.0.2-win-x64.zip.sha256", "size": 1, "browser_download_url": "https://example.invalid/Quartermaster-0.0.2-win-x64.zip.sha256" }
+        { "name": "Quartermaster-9.9.9-win-x64.zip", "size": ZIPSIZE, "browser_download_url": "https://example.invalid/Quartermaster-9.9.9-win-x64.zip" },
+        { "name": "Quartermaster-9.9.9-win-x64.zip.sha256", "size": 1, "browser_download_url": "https://example.invalid/Quartermaster-9.9.9-win-x64.zip.sha256" }
       ]
     }
     ```
 
-11. Start the installed app with the feed and a scratch data folder, from PowerShell: `$env:QUARTERMASTER_UPDATE_FEED="$env:TEMP\qm-test\feed"; $env:QUARTERMASTER_LAYOUT_ROOT="$env:TEMP\qm-test\data"; & "$env:LOCALAPPDATA\Programs\Quartermaster\Quartermaster.exe"`. Expected: the launcher shows the pale-yellow update bar naming 0.0.2.
-12. Click **Update now**. Expected: progress, the app closes and starts again by itself and shows **Updated to 0.0.2.**; the bottom line shows 0.0.2. `%LOCALAPPDATA%\Programs\Quartermaster.backup-<old version>` holds the old files.
+11. Start the installed app with the feed and a scratch data folder, from PowerShell: `$env:QUARTERMASTER_UPDATE_FEED="$env:TEMP\qm-test\feed"; $env:QUARTERMASTER_LAYOUT_ROOT="$env:TEMP\qm-test\data"; & "$env:LOCALAPPDATA\Programs\Quartermaster\Quartermaster.exe"`. Expected: the launcher shows the pale-yellow update bar naming 9.9.9.
+12. Click **Update now**. Expected: progress, the app closes and starts again by itself and shows **Updated to 9.9.9.**; the bottom line shows 9.9.9. `%LOCALAPPDATA%\Programs\Quartermaster.backup-<old version>` holds the old files. Two things are expected here: Settings > Apps still shows the **old** version number (the in-app update does not touch the installer's registry entry), and `quartermaster-package.json` now says `win-zip` (the update is the zip build).
 13. Quit the app. Expected: Settings > Apps still lists Quartermaster once.
 
 ## C. Uninstall keeps your data
