@@ -42,7 +42,7 @@ try {
     $unsafeFile = Join-Path $unsafeDir 'precious.txt'
     Set-Content -LiteralPath $unsafeFile -Value 'keep me' -Encoding ascii
     $p = Start-Process -FilePath $Setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$unsafeDir`"") -Wait -PassThru
-    Check ($p.ExitCode -ne 0) 'setup into a non-empty foreign folder should have failed but exited 0'
+    Check ($p.ExitCode -eq 7) "setup into a non-empty foreign folder should be refused with exit code 7 (PrepareToInstall), got $($p.ExitCode)"
     Check ((Test-Path -LiteralPath $unsafeFile) -and ((Get-Content -LiteralPath $unsafeFile -Raw).Trim() -eq 'keep me')) 'refused install touched the foreign folder file'
     Check (@(Get-ChildItem -LiteralPath $unsafeDir).Count -eq 1) 'refused install added files to the foreign folder'
     Check (@(UninstKeys).Count -eq 0) 'refused install left an uninstall key'

@@ -21,7 +21,7 @@ The update feed is a local folder, so nothing touches GitHub. How to write the f
 
 8. Build the update AppImage. The installed packages carry the CI version `<v>` (for example 0.1.0), so the update uses the made-up version `9.9.9`, which exists only in this local test feed. In the project folder: `dotnet publish src/Quartermaster.Desktop -c Release -r linux-x64 --self-contained -p:Version=9.9.9 -o ~/qm-test/pub-9.9.9`, then `mkdir -p ~/qm-test/feed && bash build/linux/make-appimage.sh ~/qm-test/pub-9.9.9 9.9.9 ~/qm-test/feed` (it downloads its pinned build tool and checks its hash; it needs network). That leaves `Quartermaster-9.9.9-x86_64.AppImage` and its `.sha256` in the feed. Write `~/qm-test/feed/release.json` listing both (tag `quartermaster-v9.9.9`; the AppImage's real byte size from `stat -c%s` in its `size`).
 9. Start the `<v>` AppImage from step 5 (the one you copied in step 3) with `QUARTERMASTER_UPDATE_FEED=~/qm-test/feed` added. Expected: the update bar names 9.9.9. Click **Update now**. Expected: the AppImage **file** is replaced, the app restarts (still as an AppImage) and shows **Updated to 9.9.9.**; the old file is the hidden `~/qm-test/.Quartermaster.AppImage.qm-backup-<v>`.
-10. Make a read-only folder: `mkdir ~/qm-test/ro && cp ~/qm-test/dl/Quartermaster-<v>-x86_64.AppImage ~/qm-test/ro/Quartermaster.AppImage && chmod a-w ~/qm-test/ro` (if you are root, `chmod` does not stop you; use a normal user). Run the AppImage from there with the feed (as in step 9). **Update now** must say "Quartermaster can't update itself in this folder. Open the download page?" and change nothing.
+10. Make a read-only folder: `mkdir ~/qm-test/ro && cp ~/qm-test/dl/Quartermaster-<v>-x86_64.AppImage ~/qm-test/ro/Quartermaster.AppImage && chmod +x ~/qm-test/ro/Quartermaster.AppImage && chmod a-w ~/qm-test/ro` (if you are root, `chmod` does not stop you; use a normal user). Run the AppImage from there with the feed (as in step 9). **Update now** must say "Quartermaster can't update itself in this folder. Open the download page?" and change nothing.
 
 ## D. .deb or .rpm: install, run, hand-off
 
@@ -39,4 +39,4 @@ Use the one for your distribution.
 
 ## Clean up
 
-17. Delete `~/qm-test`. Tell Claude what you saw in each step, especially steps 4, 6, 9, 11 and 14.
+17. Delete `~/qm-test` (first `chmod u+w ~/qm-test/ro`, or the read-only folder cannot be removed). Tell Claude what you saw in each step, especially steps 4, 6, 9, 11 and 14.
