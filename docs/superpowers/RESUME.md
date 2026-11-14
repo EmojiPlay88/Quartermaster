@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-13 (stage 5d was merged as PR #8, master b82a566, so stage 5 of the port is complete; stage 6a (installing updates) is complete on local branch port-stage6a, review pending; see CURRENT STATE below); earlier text: stage 5c (2026-11-13), stage 5b (2026-11-12); after piece 8 (ledger images and tabs, updater, release script) was built on branch `piece8` (merge into master pending; pieces through 7 and the launcher are pushed). A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-14 (stage 6b-2, Windows and Linux packages, built on branch port-stage6b2; see CURRENT STATE below; earlier: stage 5d was merged as PR #8, master b82a566, so stage 5 of the port is complete; stage 6a (installing updates) is complete on local branch port-stage6a, review pending; see CURRENT STATE below); earlier text: stage 5c (2026-11-13), stage 5b (2026-11-12); after piece 8 (ledger images and tabs, updater, release script) was built on branch `piece8` (merge into master pending; pieces through 7 and the launcher are pushed). A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -116,7 +116,13 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-14, stage 6b-1; read this first; older items below are history):**
+**CURRENT STATE (2026-11-14, stage 6b-2; read this first; older items below are history):**
+
+- **Stage 6b-2 (Windows setup.exe, Linux AppImage / .deb / .rpm / tar.gz, release workflow) is built on branch `port-stage6b2` (off master d05e139); all 7 tasks are done.** Windows: `build/windows/quartermaster.iss` (per-user Inno Setup installer, `%LOCALAPPDATA%\Programs\Quartermaster`, uninstall keeps the data folder), `make-windows-packages.ps1`, `test-setup.ps1`; the zip is the portable build. Linux: `build/linux/` (`make-tar.sh`, `make-appimage.sh`, `make-deb-rpm.sh` with `nfpm.yaml`), icon in `build/icon/`. CI (`cross-platform.yml` -> `package.yml`) builds and runs every package per push as artifacts `Quartermaster-Windows`, `Quartermaster-Linux`, `Quartermaster-macOS`. Release: run `release.yml` by hand (version = `Directory.Build.props`), then `build/release.ps1 -Version <v> -FromRun <run id>` checks the artifact and prints `gh release create`; nothing publishes by itself. `PackageHandOff` no longer blocks the UI. Docs: README Install / Update (Windows, Linux), `docs/port/stage6b2-windows-checklist.md`, `docs/port/stage6b2-linux-checklist.md` (includes the parked real-AppImage `APPIMAGE` / `/proc/<pid>/exe` check), parity "Stage-6b-2 notes".
+- **Next:** final whole-branch review and one fix wave, CI green, one `release.yml` proof run on the branch (artifacts only, no release), user picks merge / PR / keep (ask first). The user has not yet run the Mac (6a, 6b-1), Linux (6a, 6b-2) or Windows (6b-2) checklists. **Making the switch-over release is the user's decision**, after those checklists; ask before any push, merge or release.
+- **Flaky or relaxed tests:** the Core `PlayerViewTests` perf budget is relaxed on CI; Desktop `MainWindowTests.Status_bar_shows_map_location_and_zoom` failed once on Linux CI (known flaky).
+
+**Previous CURRENT STATE (2026-11-14, stage 6b-1; history):**
 
 - **Stage 6b-1 (macOS .dmg) built on branch `port-stage6b1`, not merged yet.** It adds the real `Quartermaster.app` bundle (Info.plist, ad-hoc codesign, `quartermaster-package.json` saying `mac-app`) and a `Quartermaster-<v>-osx-arm64.dmg` (drag-to-Applications window with background, built by dmgbuild) plus the `.zip` update asset and `.sha256` files, all produced by the cross-platform CI workflow as the artifact `Quartermaster-macOS`. Scripts in `build/macos/`. CI run 43590333853 (branch `port-stage6b1`) built the first dmg. Docs: README Install / Update (macOS), `docs/port/stage6b1-mac-checklist.md` (the user's hands-on run on the M1; includes installing an update into the dmg-installed app and recording `codesign --verify --strict`), a note in the 6a Mac checklist.
 - **Next:** final review and fix wave for 6b-1, CI green, user picks merge / PR / keep (ask first), user runs the 6b-1 Mac checklist. Then **6b-2**: Windows setup.exe, Linux AppImage / .deb / .rpm, `release.ps1` assets, the CI release job, README for Windows and Linux. Carry the 6a parked items: `PackageHandOff` blocks the UI for about 3 s, Linux checklist step 6 contents, verify the AppImage environment / exe handling on a real AppImage.
