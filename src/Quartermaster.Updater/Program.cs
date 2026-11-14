@@ -22,6 +22,10 @@ public sealed class UpdateOptions
     public string? BackupDir { get; init; }
     public string? JournalPath { get; init; }
     public string? LogPath { get; init; }
+    /// <summary>The exe to restart, relative to <see cref="AppDir"/>; the 0.1.0 contract (and WinForms) restarts Quartermaster.App.exe.</summary>
+    public string Exe { get; init; } = "Quartermaster.App.exe";
+    /// <summary>Optional unit path (whole-unit swaps); only parsed and stored here.</summary>
+    public string? Unit { get; init; }
 
     public string ResolvedLogPath => LogPath ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(MarkerPath))!, "helper.log");
 
@@ -45,6 +49,8 @@ public sealed class UpdateOptions
             AppDir = m["--app"], StagedDir = m["--staged"], Pid = pid, Version = m["--version"], OldVersion = m["--old"],
             MarkerPath = m["--marker"], MarkerTimeout = TimeSpan.FromSeconds(mt), ExitTimeout = TimeSpan.FromSeconds(et),
             JournalPath = Path.Combine(folder, "swap-journal.json"), LogPath = Path.Combine(folder, "helper.log"),
+            Exe = m.TryGetValue("--exe", out var exe) ? exe : "Quartermaster.App.exe",
+            Unit = m.TryGetValue("--unit", out var unit) ? unit : null,
         };
     }
 
@@ -124,7 +130,8 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         var markerFolder = Path.GetDirectoryName(Path.GetFullPath(o.MarkerPath))!;
         var journalPath = o.JournalPath ?? Path.Combine(markerFolder, "swap-journal.json");
         var backup = o.BackupDir ?? ChooseBackupDir(o.AppDir, o.OldVersion, markerFolder);
-        var appExe = Path.Combine(o.AppDir, "Quartermaster.App.exe");
+        var appExe = Path.Combine(o.AppDir, o.Exe);
+        string[] exePaths = [.. new[] { appExe, Path.Combine(o.AppDir, "Quartermaster.exe"), Path.Combine(o.AppDir, "Quartermaster.App.exe") }.Distinct()];
         var swapper = new Swapper(o.AppDir, o.StagedDir, backup, journalPath) { Version = o.Version };
 
         log($"Waiting up to {o.ExitTimeout.TotalSeconds:0}s for app pid {o.Pid} to exit");
@@ -137,7 +144,7 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
 
         try { File.Delete(o.MarkerPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
 
-        if (OtherCopiesRunning(host, appExe, o.Pid))
+        if (OtherCopiesRunning(host, exePaths, o.Pid))
         {
             log("Another Quartermaster runs from the app folder; refusing, nothing changed");
             return Refused(appExe);
@@ -201,12 +208,20 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         return ExitCodes.RolledBack;
     }
 
-    /// <summary>True when a process other than <paramref name="selfPid"/> runs from <paramref name="appExe"/> (paths compared case-insensitively; unreadable paths ignored).</summary>
-    public static bool OtherCopiesRunning(IProcessHost host, string appExe, int selfPid)
+    /// <summary>True when a process other than <paramref name="selfPid"/> runs from any of <paramref name="exePaths"/> (paths compared OrdinalIgnoreCase on Windows/macOS, Ordinal on Linux; unreadable paths ignored).</summary>
+    public static bool OtherCopiesRunning(IProcessHost host, IReadOnlyList<string> exePaths, int selfPid) =>
+        OtherCopiesRunning(host, exePaths, selfPid, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+
+    internal static bool OtherCopiesRunning(IProcessHost host, IReadOnlyList<string> exePaths, int selfPid, StringComparison comparison)
     {
-        var want = Path.GetFullPath(appExe);
-        return host.ProcessesNamed(Path.GetFileNameWithoutExtension(appExe))
-            .Any(p => p.Pid != selfPid && p.Path != null && string.Equals(Path.GetFullPath(p.Path), want, StringComparison.OrdinalIgnoreCase));
+        foreach (var exe in exePaths)
+        {
+            var want = Path.GetFullPath(exe);
+            if (host.ProcessesNamed(Path.GetFileNameWithoutExtension(exe))
+                .Any(p => p.Pid != selfPid && p.Path != null && string.Equals(Path.GetFullPath(p.Path), want, comparison)))
+                return true;
+        }
+        return false;
     }
 
     int Refused(string appExe)
@@ -229,7 +244,7 @@ public static class Program
         var o = UpdateOptions.Parse(args);
         if (o == null)
         {
-            Console.Error.WriteLine("Usage: Quartermaster.Updater.exe --app <dir> --staged <dir> --pid <n> --version <v> --old <v> --marker <path> [--marker-timeout <s>] [--exit-timeout <s>]");
+            Console.Error.WriteLine("Usage: Quartermaster.Updater --app <dir> --staged <dir> --pid <n> --version <v> --old <v> --marker <path> [--marker-timeout <s>] [--exit-timeout <s>] [--exe <rel>] [--unit <path>]");
             return ExitCodes.BadArgs;
         }
         var logPath = o.ResolvedLogPath;

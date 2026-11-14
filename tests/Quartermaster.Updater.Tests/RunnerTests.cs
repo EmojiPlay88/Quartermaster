@@ -121,6 +121,7 @@ public class RunnerTests
     [Fact]
     public void ParseArgs_RequiredAndDefaults()
     {
+        if (!OperatingSystem.IsWindows()) return; // literal C:\ paths
         var o = UpdateOptions.Parse(["--app", @"C:\a", "--staged", @"C:\s", "--pid", "7", "--version", "2.0.0", "--old", "1.0.0", "--marker", @"C:\d\started-2.0.0"]);
         Assert.NotNull(o);
         Assert.Equal(TimeSpan.FromSeconds(30), o!.MarkerTimeout);
@@ -158,6 +159,7 @@ public class RunnerTests
     [Fact]
     public void Main_OtherCopyRunningFromAppFolder_RefusedNothingChanged()
     {
+        if (OperatingSystem.IsLinux()) return; // the upper-case match relies on a case-insensitive file system rule
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         var oldSnap = TempArea.Snapshot(t.App); var stagedSnap = TempArea.Snapshot(t.Staged);
         var host = new FakeHost();
@@ -177,9 +179,65 @@ public class RunnerTests
         var exe = Path.Combine(t.App, "Quartermaster.App.exe");
         var host = new FakeHost();
         host.Running.AddRange([(1, exe), (2, null), (3, Path.Combine(t.Root, "elsewhere", "Quartermaster.App.exe"))]);
-        Assert.False(UpdateRunner.OtherCopiesRunning(host, exe, selfPid: 1));
+        Assert.False(UpdateRunner.OtherCopiesRunning(host, [exe], selfPid: 1));
         host.Running.Add((4, exe));
-        Assert.True(UpdateRunner.OtherCopiesRunning(host, exe, selfPid: 1));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, [exe], selfPid: 1));
+    }
+
+    [Fact]
+    public void OtherCopiesRunning_EitherExeName()
+    {
+        using var t = new TempArea();
+        var a = Path.Combine(t.App, "Quartermaster.App.exe");
+        var b = Path.Combine(t.App, "Quartermaster");
+        var host = new FakeHost();
+        host.Running.Add((5, b));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, [a, b], selfPid: 1));
+        host.Running.Clear();
+        host.Running.Add((6, a));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, [a, b], selfPid: 1));
+        host.Running.Clear();
+        Assert.False(UpdateRunner.OtherCopiesRunning(host, [a, b], selfPid: 1));
+    }
+
+    [Fact]
+    public void OtherCopiesRunning_CaseRulePerOs()
+    {
+        using var t = new TempArea();
+        var exe = Path.Combine(t.App, "Quartermaster");
+        var host = new FakeHost();
+        host.Running.Add((9, Path.Combine(t.App, "QUARTERMASTER")));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, [exe], 1, StringComparison.OrdinalIgnoreCase));
+        Assert.False(UpdateRunner.OtherCopiesRunning(host, [exe], 1, StringComparison.Ordinal));
+        Assert.Equal(!OperatingSystem.IsLinux(), UpdateRunner.OtherCopiesRunning(host, [exe], 1));
+    }
+
+    [Fact]
+    public void ParseArgs_ExeDefaultAndOverride()
+    {
+        string[] req = ["--app", "a", "--staged", "s", "--pid", "7", "--version", "2.0.0", "--old", "1.0.0", "--marker", Path.Combine("d", "started-2.0.0")];
+        var o = UpdateOptions.Parse(req)!;
+        Assert.Equal("Quartermaster.App.exe", o.Exe);
+        Assert.Null(o.Unit);
+        var p = UpdateOptions.Parse([.. req, "--exe", "Quartermaster", "--unit", "u"])!;
+        Assert.Equal("Quartermaster", p.Exe);
+        Assert.Equal("u", p.Unit);
+    }
+
+    [Fact]
+    public void Main_RestartsConfiguredExe()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        var host = new FakeHost();
+        host.OnStart = (s, _) => { if (s.Args.StartsWith("--updated-from")) File.WriteAllText(t.Marker, "ok"); };
+        var o = new UpdateOptions
+        {
+            AppDir = t.App, StagedDir = t.Staged, Pid = 1, Version = "2.0.0", OldVersion = "1.0.0", MarkerPath = t.Marker,
+            MarkerTimeout = TimeSpan.FromSeconds(2), ExitTimeout = TimeSpan.FromSeconds(5), BackupDir = t.Backup, JournalPath = t.Journal,
+            Exe = "Quartermaster.exe",
+        };
+        Assert.Equal(ExitCodes.Ok, new UpdateRunner(o, host, _ => { }).Run());
+        Assert.Equal(Path.Combine(t.App, "Quartermaster.exe"), Assert.Single(host.Started).Exe);
     }
 
     [Fact]

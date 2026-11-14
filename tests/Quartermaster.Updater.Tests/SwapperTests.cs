@@ -215,6 +215,7 @@ public class SwapperTests
     [Fact]
     public void Apply_FileLockedThenFreed_Retries()
     {
+        if (!OperatingSystem.IsWindows()) return; // FileShare.None blocks moves only on Windows
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         var fs = new FileStream(Path.Combine(t.App, "a.dll"), FileMode.Open, FileAccess.Read, FileShare.None);
         _ = Task.Run(async () => { await Task.Delay(1000); fs.Dispose(); });
@@ -226,6 +227,7 @@ public class SwapperTests
     [Fact]
     public void Apply_FileStaysLocked_ThrowsAfterRetryWindow()
     {
+        if (!OperatingSystem.IsWindows()) return; // FileShare.None blocks moves only on Windows
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         using var fs = new FileStream(Path.Combine(t.App, "a.dll"), FileMode.Open, FileAccess.Read, FileShare.None);
         var s = t.Swapper(); s.RetryWindow = TimeSpan.FromMilliseconds(500);
@@ -318,6 +320,7 @@ public class SwapperTests
     [Fact]
     public void Apply_StaleBackupLocked_AppUntouched()
     {
+        if (!OperatingSystem.IsWindows()) return; // FileShare.None blocks moves only on Windows
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         t.Put(t.Backup, "stale.dll", "stale");
         var before = TempArea.Snapshot(t.App);
