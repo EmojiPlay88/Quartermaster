@@ -85,4 +85,57 @@
     <Copy SourceFiles="@(_QmLicenceText)" DestinationFiles="@(_QmLicenceText->'$(_QmPubDir)LICENSES\%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
+  <!--
+    Self-update needs four more things in the publish folder (port stage 6a, Task 8), made in this order by QmFinishPublish:
+    the updater helper (published self-contained single-file by its own project, no ProjectReference so its runtime never enters the
+    app's deps.json), the package marker quartermaster-package.json, on Windows Quartermaster.App.exe (a copy of the app host: the
+    WinForms 0.1.0 updater restarts that name, so this is the switch-over path), and last the file list quartermaster-files.txt.
+    QmPackageKind overrides the marker's package kind (the installer/AppImage/deb/rpm packaging sets it); by default it follows the RID.
+  -->
+  <Target Name="QmFinishPublish" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''"
+          DependsOnTargets="CopyLicenceNotices;QmPublishUpdaterHelper;QmWritePackageMarker;QmCopyAppHost;QmWriteFileList" />
+
+  <Target Name="QmPublishUpdaterHelper">
+    <PropertyGroup>
+      <_QmHelperPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_QmHelperPublishDir>
+    </PropertyGroup>
+    <!-- Restore runs in its own evaluation (a fresh session id), as NuGet requires, then the publish. -->
+    <MSBuild Projects="..\Quartermaster.Updater\Quartermaster.Updater.csproj" Targets="Restore"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
+    <MSBuild Projects="..\Quartermaster.Updater\Quartermaster.Updater.csproj" Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishSingleFile=true;EnableCompressionInSingleFile=true;DebugType=none;PublishDir=$(_QmHelperPublishDir)" />
+  </Target>
+
+  <Target Name="QmWritePackageMarker">
+    <PropertyGroup>
+      <_QmPubDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_QmPubDir>
+      <_QmKind>$(QmPackageKind)</_QmKind>
+      <_QmKind Condition="'$(_QmKind)' == '' and $(RuntimeIdentifier.StartsWith('win'))">win-zip</_QmKind>
+      <_QmKind Condition="'$(_QmKind)' == '' and $(RuntimeIdentifier.StartsWith('osx'))">mac-app</_QmKind>
+      <_QmKind Condition="'$(_QmKind)' == ''">linux-tar</_QmKind>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_QmPubDir)quartermaster-package.json" Lines="{&quot;version&quot;:&quot;$(Version)&quot;,&quot;package&quot;:&quot;$(_QmKind)&quot;}" Overwrite="true" />
+  </Target>
+
+  <Target Name="QmCopyAppHost" Condition="$(RuntimeIdentifier.StartsWith('win'))">
+    <PropertyGroup>
+      <_QmPubDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_QmPubDir>
+    </PropertyGroup>
+    <Copy SourceFiles="$(_QmPubDir)$(AssemblyName).exe" DestinationFiles="$(_QmPubDir)Quartermaster.App.exe" />
+  </Target>
+
+  <!-- quartermaster-files.txt: every file of the publish folder (relative, forward slashes, the list itself included), written last. -->
+  <Target Name="QmWriteFileList">
+    <PropertyGroup>
+      <_QmPubDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_QmPubDir>
+      <_QmListName>quartermaster-files.txt</_QmListName>
+    </PropertyGroup>
+    <ItemGroup>
+      <_QmPubFile Include="$(_QmPubDir)**\*" Exclude="$(_QmPubDir)$(_QmListName)" />
+      <_QmPubLine Include="@(_QmPubFile->'%(RecursiveDir)%(Filename)%(Extension)'->Replace('\', '/'))" />
+      <_QmPubLine Include="$(_QmListName)" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_QmPubDir)$(_QmListName)" Lines="@(_QmPubLine)" Overwrite="true" WriteOnlyWhenDifferent="false" />
+  </Target>
+
 </Project>
