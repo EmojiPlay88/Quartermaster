@@ -46,6 +46,7 @@ public sealed class PublishFixture : IDisposable
 }
 
 [Trait("Category", "Publish")]
+[Collection("RealPublish")]   // never alongside UpdateEndToEndTests: both publish the updater for the same RID into its obj folder
 public class PublishLayoutTests : IClassFixture<PublishFixture>
 {
     private readonly PublishFixture _f;
