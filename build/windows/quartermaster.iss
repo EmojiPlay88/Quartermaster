@@ -256,17 +256,18 @@ begin
     RemoveStaleFiles;
 end;
 
+// True when D is under any Program Files folder.
+function UnderProgramFiles(const D: String): Boolean;
+begin
+  Result := IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf}'))) or
+            IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf32}'))) or
+            IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf64}')));
+end;
+
 // Empty when the folder is fine for a per-user install, else the message for the user.
 function FolderProblem(const Dir0: String): String;
 var
   Dir, DataDir, DirShort, DataShort: String;
-
-  function UnderProgramFiles(const D: String): Boolean;
-  begin
-    Result := IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf}'))) or
-              IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf32}'))) or
-              IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf64}')));
-  end;
 begin
   Result := '';
   Dir := TrimSlashes(ExpandFileName(Dir0));
