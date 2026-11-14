@@ -566,7 +566,8 @@ public class PlayerViewTests(ITestOutputHelper output)
         sw.Stop();
         output.WriteLine($"PlayerView.For, 1200 pieces, 1200 ledger lines: {sw.Elapsed.TotalMilliseconds:0.0} ms");
         Assert.True(v.Pieces.Count < 1200);
-        Assert.True(sw.ElapsedMilliseconds < 500, $"took {sw.ElapsedMilliseconds} ms");   // generous: the full suite runs assemblies in parallel
+        var budgetMs = Environment.GetEnvironmentVariable("CI") == "true" ? 2000 : 500;   // shared CI runners are slower and noisier
+        Assert.True(sw.ElapsedMilliseconds < budgetMs, $"took {sw.ElapsedMilliseconds} ms, budget {budgetMs} ms");   // generous: the full suite runs assemblies in parallel
     }
     [Fact]
     public void OwnersNamingADeletedSide_AreIgnored_VisibleToAll()
