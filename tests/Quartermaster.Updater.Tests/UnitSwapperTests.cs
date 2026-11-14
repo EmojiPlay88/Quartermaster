@@ -166,6 +166,106 @@ public class UnitSwapperTests
         Assert.Contains("\"done\"", File.ReadAllText(t.Journal));
     }
 
+    static void MoveAny(string src, string dest) { if (Directory.Exists(src)) Directory.Move(src, dest); else File.Move(src, dest); }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnitSwap_ResumeInstall_StagedRenamedToPartial_Completes(bool file)
+    {
+        // Crash after the first rename of the install (staged -> unit.qm-partial), before partial -> unit.
+        using var t = new UnitArea(file);
+        var oldSnap = UnitArea.Snapshot(t.Unit); var newSnap = UnitArea.Snapshot(t.Staged);
+        t.WriteJournal("install");
+        MoveAny(t.Unit, t.Backup);
+        MoveAny(t.Staged, t.Unit + ".qm-partial");
+        Assert.Equal(ResumeOutcome.Completed, t.Swapper().Resume());
+        Assert.Equal(newSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Backup));
+        Assert.Equal("", UnitArea.Snapshot(t.Unit + ".qm-partial"));
+    }
+
+    [Fact]
+    public void UnitSwap_ResumeInstall_TruncatedPartialCopy_KeepsStagedAndRecopies()
+    {
+        // Crash mid-copy of an AppImage to the partial name (what File.Move does across mounts on Unix): the unit is missing,
+        // the partial is truncated, the staged file is intact and must not be deleted before the unit is complete.
+        using var t = new UnitArea(file: true);
+        t.WriteJournal("install");
+        File.Move(t.Unit, t.Backup);
+        File.WriteAllText(t.Unit + ".qm-partial", "new-im");
+        Assert.Equal(ResumeOutcome.Completed, t.Swapper().Resume());
+        Assert.Equal("new-image", File.ReadAllText(t.Unit));
+        Assert.False(File.Exists(t.Unit + ".qm-partial"));
+        Assert.Equal("old-image", File.ReadAllText(t.Backup));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnitSwap_Rollback_TruncatedPartialInstall_RestoresOld(bool file)
+    {
+        using var t = new UnitArea(file);
+        var oldSnap = UnitArea.Snapshot(t.Unit);
+        t.WriteJournal("install");
+        MoveAny(t.Unit, t.Backup);
+        UnitArea.Put(Path.GetDirectoryName(t.Unit)!, Path.GetFileName(t.Unit) + ".qm-partial", "half");
+        t.Swapper().Rollback();
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal("", UnitArea.Snapshot(t.Unit + ".qm-partial"));
+        Assert.Equal("", UnitArea.Snapshot(t.Backup));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnitSwap_ResumeAfterBackupStep_UnitRenamedToPartial_RestoresOld(bool file)
+    {
+        // Crash after unit -> backup.qm-partial, before partial -> backup: the partial is the whole old unit.
+        using var t = new UnitArea(file);
+        var oldSnap = UnitArea.Snapshot(t.Unit);
+        t.WriteJournal("backup");
+        MoveAny(t.Unit, t.Backup + ".qm-partial");
+        Assert.Equal(ResumeOutcome.RolledBack, t.Swapper().Resume());
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal("", UnitArea.Snapshot(t.Backup + ".qm-partial"));
+        Assert.Equal("", UnitArea.Snapshot(t.Backup));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnitSwap_ResumeRollbackRestore_BackupRenamedToPartial_RestoresOld(bool file)
+    {
+        // Crash during a restore after backup -> unit.qm-partial, before partial -> unit.
+        using var t = new UnitArea(file);
+        var oldSnap = UnitArea.Snapshot(t.Unit);
+        t.WriteJournal("rollback-restore");
+        MoveAny(t.Unit, t.Unit + ".qm-partial");
+        Assert.Equal(ResumeOutcome.RolledBack, t.Swapper().Resume());
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal("", UnitArea.Snapshot(t.Unit + ".qm-partial"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnitSwap_SameVolumeMove_RenamesWithoutCopyOrLeftovers(bool file)
+    {
+        // Same volume: renames only (no copy), and no partial is left behind.
+        using var t = new UnitArea(file);
+        var oldSnap = UnitArea.Snapshot(t.Unit); var newSnap = UnitArea.Snapshot(t.Staged);
+        var s = t.Swapper();
+        var copied = new List<string>();
+        s.OnCopied = copied.Add;
+        s.Apply();
+        Assert.Empty(copied);
+        Assert.Equal(newSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Backup));
+        Assert.Equal("", UnitArea.Snapshot(t.Unit + ".qm-partial"));
+        Assert.Equal("", UnitArea.Snapshot(t.Backup + ".qm-partial"));
+    }
+
     [Fact]
     public void UnitSwap_ResumeInstallOther_RollsBackStale()
     {

@@ -64,6 +64,8 @@ public interface IProcessHost
     void Kill(int pid);
     /// <summary>Running processes with this name and their main module path (null when it cannot be read).</summary>
     IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName);
+    /// <summary>Running processes whose environment has <paramref name="name"/>=<paramref name="value"/> (Linux only; empty elsewhere and for unreadable processes).</summary>
+    IEnumerable<int> ProcessesWithEnv(string name, string value);
 }
 
 public sealed class RealProcessHost : IProcessHost
@@ -102,6 +104,25 @@ public sealed class RealProcessHost : IProcessHost
             catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException) { }
             list.Add((p.Id, path));
             p.Dispose();
+        }
+        return list;
+    }
+
+    public IEnumerable<int> ProcessesWithEnv(string name, string value)
+    {
+        if (!OperatingSystem.IsLinux()) return [];
+        string[] dirs;
+        try { dirs = Directory.GetDirectories("/proc"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+        var want = name + "=" + value;
+        var list = new List<int>();
+        foreach (var d in dirs)
+        {
+            if (!int.TryParse(Path.GetFileName(d), out var pid)) continue;
+            string environ;
+            try { environ = File.ReadAllText(Path.Combine(d, "environ")); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            if (environ.Split('\0').Contains(want, StringComparer.Ordinal)) list.Add(pid);
         }
         return list;
     }
@@ -237,23 +258,19 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
     }
 
     /// <summary>
-    /// Unit mode: true when another process (not <paramref name="selfPid"/>) runs this unit. A file unit (AppImage) matches any process
-    /// named after <paramref name="exe"/>'s file name (Linux process names are cut to 15 characters, so that prefix is looked up too);
-    /// a directory unit (.app) matches a process named after the exe whose path is inside the unit.
+    /// Unit mode: true when another process runs this unit. A file unit (AppImage) is running in any process, other than
+    /// <paramref name="selfPid"/> and this helper, whose environment has APPIMAGE=&lt;the unit's full path&gt; (the AppImage runtime sets it
+    /// for the app and its children, whatever their names). A directory unit (.app) matches a process named after <paramref name="exe"/>
+    /// whose path is inside the unit.
     /// </summary>
     public static bool OtherUnitCopiesRunning(IProcessHost host, string unit, string exe, int selfPid) =>
-        OtherUnitCopiesRunning(host, unit, exe, selfPid, OperatingSystem.IsLinux());
+        OtherUnitCopiesRunning(host, unit, exe, selfPid, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
 
-    internal static bool OtherUnitCopiesRunning(IProcessHost host, string unit, string exe, int selfPid, bool linux)
+    internal static bool OtherUnitCopiesRunning(IProcessHost host, string unit, string exe, int selfPid, StringComparison comparison)
     {
         var unitFull = Path.GetFullPath(unit).TrimEnd('\\', '/');
         if (File.Exists(unitFull))
-        {
-            var name = Path.GetFileName(exe);
-            string[] names = linux && name.Length > 15 ? [name, name[..15]] : [name];
-            return names.Any(n => host.ProcessesNamed(n).Any(p => p.Pid != selfPid));
-        }
-        var comparison = linux ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            return host.ProcessesWithEnv("APPIMAGE", unitFull).Any(pid => pid != selfPid && pid != Environment.ProcessId);
         var prefix = unitFull + Path.DirectorySeparatorChar;
         return host.ProcessesNamed(Path.GetFileNameWithoutExtension(exe))
             .Any(p => p.Pid != selfPid && p.Path != null && Path.GetFullPath(p.Path).StartsWith(prefix, comparison));

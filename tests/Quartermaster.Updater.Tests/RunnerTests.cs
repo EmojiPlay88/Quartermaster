@@ -26,6 +26,10 @@ sealed class FakeHost : IProcessHost
         Queried.Add(processName);
         return ByName == null ? Running : ByName.GetValueOrDefault(processName) ?? [];
     }
+    /// <summary>Per pid: its environment variables.</summary>
+    public Dictionary<int, Dictionary<string, string>> Env = [];
+    public IEnumerable<int> ProcessesWithEnv(string name, string value) =>
+        Env.Where(e => e.Value.TryGetValue(name, out var v) && v == value).Select(e => e.Key);
 }
 
 public class RunnerTests
@@ -346,21 +350,29 @@ public class RunnerTests
     public void Main_UnitMode_OtherAppImageRunning_RefusedNothingChanged()
     {
         using var t = new UnitArea(file: true);
-        var host = new FakeHost { ByName = new() { ["Quartermaster.AppImage"] = [(1, null), (77, null)] } };
+        var host = new FakeHost();
+        host.Env[77] = new() { ["APPIMAGE"] = Path.GetFullPath(t.Unit) }; // e.g. AppRun
         Assert.Equal(ExitCodes.Refused, new UpdateRunner(UnitOpts(t), host, _ => { }).Run());
         Assert.Equal("old-image", File.ReadAllText(t.Unit));
         Assert.False(File.Exists(t.Journal));
+        Assert.Equal("--update-refused 2.0.0", Assert.Single(host.Started).Args);
     }
 
     [Fact]
-    public void OtherUnitCopiesRunning_AppImage_ByNameTruncatedOnLinux()
+    public void OtherUnitCopiesRunning_AppImage_ByAppImageEnvironment()
     {
         using var t = new UnitArea(file: true);
-        var host = new FakeHost { ByName = new() { ["Quartermaster.A"] = [(77, null)] } };
-        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1, linux: false));
-        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1, linux: true));
-        host.ByName = new() { ["Quartermaster.AppImage"] = [(1, null)] };
-        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1, linux: false)); // only self
+        var full = Path.GetFullPath(t.Unit);
+        var host = new FakeHost();
+        // A FUSE-like process named after the AppImage file, without APPIMAGE, is not a running copy.
+        host.ByName = new() { ["Quartermaster.AppImage"] = [(50, t.Unit)] };
+        host.Env[50] = new() { ["PATH"] = "/usr/bin" };
+        host.Env[1] = new() { ["APPIMAGE"] = full };                                  // the exiting app (selfPid)
+        host.Env[Environment.ProcessId] = new() { ["APPIMAGE"] = full };              // the helper itself inherits it
+        host.Env[60] = new() { ["APPIMAGE"] = Path.Combine(t.Root, "Other.AppImage") }; // another AppImage
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+        host.Env[70] = new() { ["APPIMAGE"] = full };                                  // AppRun / Quartermaster from this unit
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
     }
 
     [Fact]
@@ -369,9 +381,9 @@ public class RunnerTests
         using var t = new UnitArea();
         var host = new FakeHost();
         host.Running.AddRange([(1, Path.Combine(t.Unit, UnitArea.Exe)), (2, null), (3, Path.Combine(t.Unit + "2", UnitArea.Exe)), (4, t.Unit)]);
-        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster", 1, linux: false));
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster", 1, StringComparison.OrdinalIgnoreCase));
         Assert.Equal(["Quartermaster"], host.Queried);
         host.Running.Add((5, Path.Combine(t.Unit, UnitArea.Exe)));
-        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster", 1, linux: false));
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster", 1, StringComparison.OrdinalIgnoreCase));
     }
 }

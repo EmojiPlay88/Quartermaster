@@ -70,13 +70,14 @@ public sealed class UnitSwapper(string unitPath, string stagedPath, string backu
         {
             case "rolledback": return;
             case "backup": // the staged unit never moved in
+                // A partial backup with the unit gone was reached by a rename, so it is complete; otherwise it is a copy in progress.
+                if (!Exists(j.Backup) && !Exists(j.Unit) && Exists(j.Backup + PartialSuffix)) Retry(() => Rename(j.Backup + PartialSuffix, j.Backup));
                 Retry(() => DeletePath(j.Backup + PartialSuffix));
-                if (Exists(j.Backup))
-                {
-                    // The backup is complete (renames are atomic); the unit is gone or a half-deleted cross-volume source.
-                    Retry(() => { DeletePath(j.Unit); DeletePath(j.Unit + PartialSuffix); });
-                    Move(j.Backup, j.Unit);
-                }
+                if (!Exists(j.Backup)) break; // the unit never left
+                // The backup is complete (it only gets its name by a rename); the unit is gone or a half-deleted cross-volume source.
+                Retry(() => { DeletePath(j.Unit); DeletePath(j.Unit + PartialSuffix); });
+                Write(j = j with { Step = "rollback-restore" });
+                Restore(j);
                 break;
             case "rollback-restore":
                 Restore(j);
@@ -122,46 +123,60 @@ public sealed class UnitSwapper(string unitPath, string stagedPath, string backu
 
     public void DeleteJournal() { try { File.Delete(journalPath); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
 
-    /// <summary>Moves the staged unit in; a unit already in place means an earlier move finished, so only staged leftovers go.</summary>
-    void Install(string unit, string staged)
+    /// <summary>Moves the staged unit in, finishing an interrupted move.</summary>
+    void Install(string unit, string staged) => CompleteMove(staged, unit, $"'{unit}' is neither staged nor installed.");
+
+    /// <summary>Moves the backup back after the unit was cleared, finishing an interrupted move.</summary>
+    void Restore(Journal j) => CompleteMove(j.Backup, j.Unit, $"No backup found at '{j.Backup}' to restore '{j.Unit}' from.");
+
+    /// <summary>
+    /// Brings a <see cref="Move"/> of <paramref name="src"/> to <paramref name="dest"/> to its end, whether or not it started.
+    /// <paramref name="dest"/> only ever gets its name by a rename of a complete partial, so its existence means the move finished
+    /// (the source is a leftover); a partial with the source gone was reached by a rename, so it is complete too.
+    /// </summary>
+    void CompleteMove(string src, string dest, string missing)
     {
-        Retry(() => DeletePath(unit + PartialSuffix));
-        if (Exists(unit)) { Retry(() => DeletePath(staged)); return; }
-        if (!Exists(staged)) throw new IOException($"'{unit}' is neither staged nor installed.");
-        Move(staged, unit);
+        var partial = dest + PartialSuffix;
+        if (Exists(dest)) { Retry(() => { DeletePath(partial); DeletePath(src); }); return; }
+        if (Exists(partial) && !Exists(src)) { Retry(() => Rename(partial, dest)); return; }
+        if (!Exists(src)) throw new IOException(missing);
+        Move(src, dest);
     }
 
-    /// <summary>Moves the backup back after the unit was cleared; a unit already in place means the restore finished.</summary>
-    void Restore(Journal j)
-    {
-        Retry(() => DeletePath(j.Unit + PartialSuffix));
-        if (Exists(j.Unit)) { Retry(() => { DeletePath(j.Backup); DeletePath(j.Backup + PartialSuffix); }); return; }
-        if (!Exists(j.Backup)) throw new InvalidOperationException($"No backup found at '{j.Backup}' to restore '{j.Unit}' from.");
-        Move(j.Backup, j.Unit);
-    }
-
-    /// <summary>Moves a file or directory to <paramref name="dest"/> (which must not exist). Across volumes: copy to the partial name, rename, delete the source.</summary>
+    /// <summary>
+    /// Moves a file or directory to <paramref name="dest"/> (which must not exist), always through "&lt;dest&gt;.qm-partial": a rename (or,
+    /// across volumes, a copy) to the partial name, then a same-folder rename to <paramref name="dest"/>, then the source is deleted if still there.
+    /// </summary>
     void Move(string src, string dest)
     {
-        var isDir = Directory.Exists(src);
-        if (SameVolume(src, dest))
-        {
-            if (!isDir) { Retry(() => File.Move(src, dest)); return; }
-            try { Retry(() => Directory.Move(src, dest)); return; }
-            catch (IOException) when (!OperatingSystem.IsWindows() && Directory.Exists(src) && !Exists(dest))
-            {
-                // Unix: a rename across mounts fails (EXDEV) even when the path roots match; fall back to copying.
-            }
-        }
         var partial = dest + PartialSuffix;
+        Retry(() => DeletePath(partial));
+        if (SameVolume(src, dest) && TryRename(src, partial)) { Retry(() => Rename(partial, dest)); return; }
+        var isDir = Directory.Exists(src);
         Retry(() =>
         {
             DeletePath(partial);
             if (isDir) CopyTree(src, partial); else File.Copy(src, partial, true);
         });
         OnCopied?.Invoke(partial);
-        if (isDir) Retry(() => Directory.Move(partial, dest)); else Retry(() => File.Move(partial, dest));
+        Retry(() => Rename(partial, dest));
         Retry(() => DeletePath(src));
+    }
+
+    /// <summary>
+    /// Renames, retrying on Windows (transient locks). Elsewhere one try: a failure with the source still there is a rename across
+    /// mounts (EXDEV, the path roots match on Unix) and returns false at once so the caller copies instead.
+    /// </summary>
+    bool TryRename(string src, string dest)
+    {
+        if (OperatingSystem.IsWindows()) { Retry(() => Rename(src, dest)); return true; }
+        try { Rename(src, dest); return true; }
+        catch (IOException) when (Exists(src)) { return false; }
+    }
+
+    static void Rename(string src, string dest)
+    {
+        if (Directory.Exists(src)) Directory.Move(src, dest); else File.Move(src, dest);
     }
 
     /// <summary>Copies a directory tree file by file (File.Copy keeps Unix modes); symbolic links are recreated, not followed.</summary>
