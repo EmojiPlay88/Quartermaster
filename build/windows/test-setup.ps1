@@ -1,6 +1,6 @@
 <#
  CI-only test of the per-user setup.exe: silent install, marker kind, --version, in-place reinstall (one uninstall key),
- silent uninstall (install dir gone, user data kept), refusal of an unsafe /DIR= (non-empty foreign folder),
+ silent uninstall (install dir gone, user data kept), refusal of an unsafe /DIR= (non-empty foreign folder, a folder inside the data folder),
  a stale file listed in quartermaster-files.txt is removed by the upgrade.
  It writes a sentinel into the real data folder (%LOCALAPPDATA%\Quartermaster), so it REFUSES to run unless $env:CI is 'true'.
  Usage: build/windows/test-setup.ps1 -Setup <Quartermaster-Setup-x.y.z.exe> -Version <x.y.z>
@@ -23,6 +23,7 @@ $installDir = Join-Path $tmp 'install'
 $dataDir = Join-Path $env:LOCALAPPDATA 'Quartermaster'
 $sentinel = Join-Path $dataDir 'ci-sentinel.txt'
 $sentinelDirCreated = $false
+$subDir = Join-Path $dataDir 'qm-ci-sub'
 $failed = $false
 
 function Check([bool]$ok, [string]$msg) { if (-not $ok) { throw "ASSERTION FAILED: $msg" } }
@@ -47,6 +48,12 @@ try {
     Check ((Test-Path -LiteralPath $unsafeFile) -and ((Get-Content -LiteralPath $unsafeFile -Raw).Trim() -eq 'keep me')) 'refused install touched the foreign folder file'
     Check (@(Get-ChildItem -LiteralPath $unsafeDir).Count -eq 1) 'refused install added files to the foreign folder'
     Check (@(UninstKeys).Count -eq 0) 'refused install left an uninstall key'
+
+    Write-Host '== refuses a folder inside the data folder'
+    $p = Start-Process -FilePath $Setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$subDir`"") -Wait -PassThru
+    Check ($p.ExitCode -eq 7) "setup into a folder inside the data folder should be refused with exit code 7 (PrepareToInstall), got $($p.ExitCode)"
+    Check (-not (Test-Path -LiteralPath $subDir)) "refused install created $subDir"
+    Check (@(UninstKeys).Count -eq 0) 'refused install (data subfolder) left an uninstall key'
 
     Write-Host '== silent install'
     Run-Setup
@@ -100,6 +107,7 @@ try {
     [Console]::Error.WriteLine("test-setup: $($_.Exception.Message)")
     $failed = $true
 } finally {
+    Remove-Item -LiteralPath $subDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $sentinel -Force -ErrorAction SilentlyContinue
     if ($sentinelDirCreated) { Remove-Item -LiteralPath $dataDir -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue

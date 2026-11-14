@@ -2,7 +2,8 @@
 ; Built by build/windows/make-windows-packages.ps1, which passes /DAppVersion=, /DSourceDir= and /DOutputDir=.
 ; The install folder (%LOCALAPPDATA%\Programs\Quartermaster) is NOT the data folder (%LOCALAPPDATA%\Quartermaster):
 ; uninstalling never touches user data. The folder page is disabled (uninstall removes {app} recursively) and
-; PrepareToInstall refuses unsafe /DIR= values, also in silent mode. An upgrade first deletes the files the old install
+; PrepareToInstall refuses unsafe /DIR= values (drive or share root, the data folder or anything inside it in long or
+; 8.3 spelling, a foreign non-empty folder), also in silent mode. An upgrade first deletes the files the old install
 ; listed in quartermaster-files.txt (CurStepChanged), so files the new version dropped do not stay behind.
 #ifndef AppVersion
   #error AppVersion not defined (pass /DAppVersion=x.y.z)
@@ -74,6 +75,55 @@ begin
   end;
 end;
 
+{ Removes trailing backslashes (also from a UNC share root such as \\server\share\). }
+function TrimSlashes(const S: String): String;
+begin
+  Result := S;
+  while (Length(Result) > 0) and (Result[Length(Result)] = '\') do
+    Delete(Result, Length(Result), 1);
+end;
+
+{ True for a drive root (C:\) and a UNC share root (\\server\share, with or without a trailing backslash). }
+function IsRootFolder(const Dir: String): Boolean;
+var
+  S: String;
+begin
+  S := TrimSlashes(Dir);
+  Result := (S = '') or (CompareText(S, ExtractFileDrive(S)) = 0) or
+            ((Copy(S, 1, 2) = '\\') and (ExtractFileDrive(S) = ''));
+end;
+
+{ The 8.3 spelling of Dir: the nearest existing ancestor is shortened, what does not exist yet is kept as written. }
+function ShortForm(const Dir: String): String;
+var
+  Existing, Rest, Parent: String;
+begin
+  Existing := TrimSlashes(Dir);
+  Rest := '';
+  while (Existing <> '') and (not DirExists(Existing)) do
+  begin
+    Parent := TrimSlashes(ExtractFilePath(Existing));
+    if (Parent = Existing) or (Parent = '') then
+    begin
+      Result := Dir;
+      Exit;
+    end;
+    Rest := Copy(Existing, Length(Parent) + 1, Length(Existing)) + Rest;
+    Existing := Parent;
+  end;
+  if Existing = '' then
+    Result := Dir
+  else
+    Result := GetShortName(Existing) + Rest;
+end;
+
+{ True when Dir is Base or lies below it (both without trailing backslash; case-insensitive). }
+function IsSameOrUnder(const Dir, Base: String): Boolean;
+begin
+  Result := (Base <> '') and (CompareText(Copy(Dir, 1, Length(Base)), Base) = 0) and
+            ((Length(Dir) = Length(Base)) or (Dir[Length(Base) + 1] = '\'));
+end;
+
 { True when a list entry is a plain relative path that may be deleted below {app}. }
 function SafeListEntry(const Rel: String): Boolean;
 var
@@ -131,15 +181,22 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Dir, DataDir: String;
+  Dir, DataDir, DirShort, DataShort: String;
 begin
   Result := '';
-  Dir := RemoveBackslashUnlessRoot(ExpandFileName(WizardDirValue));
-  DataDir := RemoveBackslashUnlessRoot(ExpandConstant('{localappdata}\Quartermaster'));
-  if CompareText(Dir, DataDir) = 0 then
-    Result := 'The install folder cannot be the Quartermaster data folder (' + DataDir + '). Choose another folder.'
-  else if CompareText(Dir, AddBackslash(ExtractFileDrive(Dir))) = 0 then
-    Result := 'The install folder cannot be a drive root (' + Dir + '). Choose another folder.'
+  Dir := TrimSlashes(ExpandFileName(WizardDirValue));
+  DataDir := TrimSlashes(ExpandConstant('{localappdata}\Quartermaster'));
+  if IsRootFolder(Dir) then
+  begin
+    Result := 'The install folder cannot be a drive or network share root (' + Dir + '). Choose another folder.';
+    Exit;
+  end;
+  { Short names are only worked out for folders that are not a root (a UNC root would touch the network). }
+  DirShort := ShortForm(Dir);
+  DataShort := ShortForm(DataDir);
+  if IsSameOrUnder(Dir, DataDir) or IsSameOrUnder(DirShort, DataDir) or
+     IsSameOrUnder(Dir, DataShort) or IsSameOrUnder(DirShort, DataShort) then
+    Result := 'The install folder cannot be the Quartermaster data folder or a folder inside it (' + DataDir + '). Choose another folder.'
   else if DirExists(Dir) and DirHasEntries(Dir) and (not FileExists(AddBackslash(Dir) + 'Quartermaster.exe')) then
     Result := 'The folder ' + Dir + ' is not empty and is not a Quartermaster install. Uninstalling removes the whole install folder, so choose an empty folder.';
 end;
