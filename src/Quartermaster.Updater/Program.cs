@@ -64,8 +64,8 @@ public interface IProcessHost
     void Kill(int pid);
     /// <summary>Running processes with this name and their main module path (null when it cannot be read).</summary>
     IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName);
-    /// <summary>Running processes whose environment has <paramref name="name"/>=<paramref name="value"/> (Linux only; empty elsewhere and for unreadable processes).</summary>
-    IEnumerable<int> ProcessesWithEnv(string name, string value);
+    /// <summary>Running processes whose environment has the variable <paramref name="name"/>, with its value (Linux only; empty elsewhere, unreadable processes skipped).</summary>
+    IEnumerable<(int Pid, string Value)> ProcessesWithEnv(string name);
 }
 
 public sealed class RealProcessHost : IProcessHost
@@ -79,7 +79,7 @@ public sealed class RealProcessHost : IProcessHost
 
     public int Start(string exe, string args, string workDir)
     {
-        var p = Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = false, WorkingDirectory = workDir })
+        var p = Process.Start(StartInfo(exe, args, workDir))
                 ?? throw new InvalidOperationException("Process.Start returned null");
         return p.Id;
     }
@@ -108,23 +108,35 @@ public sealed class RealProcessHost : IProcessHost
         return list;
     }
 
-    public IEnumerable<int> ProcessesWithEnv(string name, string value)
+    public IEnumerable<(int Pid, string Value)> ProcessesWithEnv(string name)
     {
         if (!OperatingSystem.IsLinux()) return [];
         string[] dirs;
         try { dirs = Directory.GetDirectories("/proc"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
-        var want = name + "=" + value;
-        var list = new List<int>();
+        var prefix = name + "=";
+        var list = new List<(int, string)>();
         foreach (var d in dirs)
         {
             if (!int.TryParse(Path.GetFileName(d), out var pid)) continue;
             string environ;
             try { environ = File.ReadAllText(Path.Combine(d, "environ")); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
-            if (environ.Split('\0').Contains(want, StringComparer.Ordinal)) list.Add(pid);
+            if (environ.Split('\0').FirstOrDefault(e => e.StartsWith(prefix, StringComparison.Ordinal)) is { } entry)
+                list.Add((pid, entry[prefix.Length..]));
         }
         return list;
+    }
+
+    /// <summary>Variables the AppImage runtime sets for the app; a relaunch drops them so it looks like a normal launch (and is not taken for a running copy).</summary>
+    internal static readonly string[] AppImageVariables = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"];
+
+    /// <summary>The start info for a restart: no shell, the given folder, the helper's environment minus <see cref="AppImageVariables"/>.</summary>
+    internal static ProcessStartInfo StartInfo(string exe, string args, string workDir)
+    {
+        var psi = new ProcessStartInfo(exe, args) { UseShellExecute = false, WorkingDirectory = workDir };
+        foreach (var v in AppImageVariables) psi.Environment.Remove(v);
+        return psi;
     }
 }
 
@@ -270,10 +282,36 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
     {
         var unitFull = Path.GetFullPath(unit).TrimEnd('\\', '/');
         if (File.Exists(unitFull))
-            return host.ProcessesWithEnv("APPIMAGE", unitFull).Any(pid => pid != selfPid && pid != Environment.ProcessId);
+        {
+            // The runtime sets APPIMAGE to the real path; compare both sides with links resolved.
+            var want = ResolveLinks(unitFull);
+            return host.ProcessesWithEnv("APPIMAGE")
+                .Any(p => p.Pid != selfPid && p.Pid != Environment.ProcessId && p.Value.Length > 0 && string.Equals(ResolveLinks(p.Value), want, StringComparison.Ordinal));
+        }
         var prefix = unitFull + Path.DirectorySeparatorChar;
         return host.ProcessesNamed(Path.GetFileNameWithoutExtension(exe))
             .Any(p => p.Pid != selfPid && p.Path != null && Path.GetFullPath(p.Path).StartsWith(prefix, comparison));
+    }
+
+    /// <summary>The full path with every existing symbolic-link component resolved (left as is where unreadable); on Windows just the full path.</summary>
+    internal static string ResolveLinks(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (OperatingSystem.IsWindows()) return full;
+        var root = Path.GetPathRoot(full) ?? "";
+        var current = root;
+        foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var next = Path.Combine(current, part);
+            try
+            {
+                FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
+                if (info.LinkTarget != null && info.ResolveLinkTarget(true) is { } target) next = Path.GetFullPath(target.FullName);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            current = next;
+        }
+        return current;
     }
 
     int Refused(string appExe)

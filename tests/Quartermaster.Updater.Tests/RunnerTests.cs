@@ -28,8 +28,8 @@ sealed class FakeHost : IProcessHost
     }
     /// <summary>Per pid: its environment variables.</summary>
     public Dictionary<int, Dictionary<string, string>> Env = [];
-    public IEnumerable<int> ProcessesWithEnv(string name, string value) =>
-        Env.Where(e => e.Value.TryGetValue(name, out var v) && v == value).Select(e => e.Key);
+    public IEnumerable<(int Pid, string Value)> ProcessesWithEnv(string name) =>
+        Env.Where(e => e.Value.ContainsKey(name)).Select(e => (e.Key, e.Value[name]));
 }
 
 public class RunnerTests
@@ -373,6 +373,50 @@ public class RunnerTests
         Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
         host.Env[70] = new() { ["APPIMAGE"] = full };                                  // AppRun / Quartermaster from this unit
         Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+    }
+
+    [Fact]
+    public void OtherUnitCopiesRunning_AppImage_SymlinkedFolderStillMatches()
+    {
+        if (OperatingSystem.IsWindows()) return; // links need privileges there; ResolveLinks is the full path on Windows
+        using var t = new UnitArea(file: true);
+        var link = Path.Combine(Path.GetTempPath(), "qmlink-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateSymbolicLink(link, t.Root);
+        try
+        {
+            var viaLink = Path.Combine(link, Path.GetFileName(t.Unit));
+            Assert.Equal(UpdateRunner.ResolveLinks(t.Unit), UpdateRunner.ResolveLinks(viaLink));
+            var host = new FakeHost();
+            host.Env[70] = new() { ["APPIMAGE"] = UpdateRunner.ResolveLinks(t.Unit) }; // the runtime's realpath
+            Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, viaLink, "Quartermaster.AppImage", 1));
+        }
+        finally { Directory.Delete(link); }
+    }
+
+    [Fact]
+    public void ResolveLinks_PlainPath_IsTheFullPath()
+    {
+        using var t = new UnitArea(file: true);
+        Assert.Equal(UpdateRunner.ResolveLinks(t.Unit), UpdateRunner.ResolveLinks(Path.Combine(t.Root, ".", Path.GetFileName(t.Unit))));
+        if (OperatingSystem.IsWindows()) Assert.Equal(Path.GetFullPath(t.Unit), UpdateRunner.ResolveLinks(t.Unit));
+    }
+
+    [Fact]
+    public void StartInfo_DropsAppImageVariablesKeepsOthers()
+    {
+        string[] vars = ["APPIMAGE", "APPDIR", "ARGV0", "OWD", "QM_TEST_KEEP"];
+        var saved = vars.ToDictionary(v => v, Environment.GetEnvironmentVariable);
+        try
+        {
+            foreach (var v in vars) Environment.SetEnvironmentVariable(v, "x");
+            var psi = RealProcessHost.StartInfo("app", "--updated-from 1.0.0", "dir");
+            foreach (var v in RealProcessHost.AppImageVariables) Assert.False(psi.Environment.ContainsKey(v), v);
+            Assert.Equal("x", psi.Environment["QM_TEST_KEEP"]);
+            Assert.False(psi.UseShellExecute);
+            Assert.Equal("dir", psi.WorkingDirectory);
+            Assert.Equal("--updated-from 1.0.0", psi.Arguments);
+        }
+        finally { foreach (var (k, v) in saved) Environment.SetEnvironmentVariable(k, v); }
     }
 
     [Fact]

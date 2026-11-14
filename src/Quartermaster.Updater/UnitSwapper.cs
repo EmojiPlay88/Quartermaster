@@ -20,8 +20,9 @@ public interface ISwap
 /// Journal steps: "backup" (moving the unit out), "install" (moving the staged unit in), "done",
 /// "rollback-clear" (removing the new unit), "rollback-restore" (moving the backup back), "rolledback".
 /// The journal records the paths it was written with; Resume and Rollback always use those. The unit is never deleted unless
-/// the backup exists. Cross-volume moves copy to "&lt;target&gt;.qm-partial", rename it to the target, then delete the source,
-/// so a crash never leaves a half-copied unit under the real name. <see cref="ResumeOutcome"/> means the same as for <see cref="Swapper"/>.
+/// the backup exists. Every move goes through "&lt;target&gt;.qm-partial": a rename to it on the same volume, a copy to it across
+/// volumes; then a same-folder rename to the target, then the source is deleted if still there. So the target only gets its real
+/// name complete, and a crash never leaves a half-moved or half-copied unit under the real name. <see cref="ResumeOutcome"/> means the same as for <see cref="Swapper"/>.
 /// </summary>
 public sealed class UnitSwapper(string unitPath, string stagedPath, string backupPath, string journalPath) : ISwap
 {
