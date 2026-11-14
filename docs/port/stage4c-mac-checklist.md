@@ -1,5 +1,7 @@
 # Stage 4c checklist for the M1 Mac
 
+> **Note (stage 6b-1):** the `Quartermaster-Desktop-osx-arm64` artifact named below no longer exists. Download the **Quartermaster-macOS** artifact instead and install the app from its `.dmg` (`docs/port/stage6b1-mac-checklist.md`, section A); where these steps use the `osx-arm64` folder, use `/Applications/Quartermaster.app` (the program is `/Applications/Quartermaster.app/Contents/MacOS/Quartermaster`).
+
 This is a test of the eighth cross-platform build of Quartermaster. On top of stage 4b it adds **OCR languages**: a new last page in Settings where you can download more languages for reading scanned pages, and a language list in the Workbench that shows readable names. Button and message wording below was written from the code: check it on a running build. You do not need to know anything technical. Follow the steps and write down what you see.
 
 The test needs about 20 minutes and an internet connection (you switch it off in step 9). Each language is a download of a few megabytes from github.com/tesseract-ocr/tessdata_fast (tag 4.1.0). You need a scan with a few lines of German text: any picture or PDF page of German text works, for example a screenshot of a German web page.

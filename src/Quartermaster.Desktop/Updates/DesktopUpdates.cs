@@ -409,7 +409,8 @@ public sealed class DesktopUpdates : IUpdateSlot
     }
 
     /// <summary>
-    /// Update now (WinForms AppUpdates.UpdateNow): refuses while a game is open or another copy runs; offers the release page when this copy
+    /// Update now (WinForms AppUpdates.UpdateNow): refuses while a game is open or another copy runs; asks a Mac app run
+    /// from the dmg (or translocated) to be moved to Applications first; offers the release page when this copy
     /// cannot update itself (no layout, folder not writable, helper or file list missing); else downloads with progress. A .deb or .rpm is
     /// then handed to the package installer and the app keeps running; otherwise the helper starts and the app exits so it can swap.
     /// Any problem leaves everything as it was and says so plainly.
@@ -417,6 +418,11 @@ public sealed class DesktopUpdates : IUpdateSlot
     async Task UpdateNowAsync(IUpdateFeed feed, LauncherUi ui, UpdateInfo info)
     {
         if (await RefusedWhileRunning(ui)) return;
+        if (RunsFromDmgOrTranslocated(Layout))
+        {
+            await ui.Window.Dialogs.ShowInfoAsync(ui.Window, MoveToApplicationsText, Caption);
+            return;
+        }
         if (Layout is not { } l)
         {
             await OfferPage(ui, info, UpdateInstaller.NoManifestText + " Open the download page?");
@@ -480,6 +486,16 @@ public sealed class DesktopUpdates : IUpdateSlot
         System.Diagnostics.Trace.WriteLine($"update: helper started for {AppVersion.Format(info.Version)}; closing so it can apply the update");
         RequestExit(ui.Window);
     }
+
+    const string MoveToApplicationsText = "Move Quartermaster to the Applications folder to install updates.";
+
+    /// <summary>
+    /// A <c>.app</c> started inside the mounted dmg (read-only <c>/Volumes/...</c>) or from macOS App Translocation (a random read-only copy of a
+    /// quarantined app that was not moved): an update could not replace it, so the user is asked to move the app first.
+    /// </summary>
+    static bool RunsFromDmgOrTranslocated(InstallLayout? l) =>
+        l is { Kind: PackageKind.MacApp, UnitPath: { } unit }
+        && (unit.StartsWith("/Volumes/", StringComparison.Ordinal) || unit.Contains("/AppTranslocation/", StringComparison.Ordinal));
 
     static string NotInstalled(string why) => string.Format(System.Globalization.CultureInfo.InvariantCulture, UpdateOffer.NotInstalledFormat, why);
 

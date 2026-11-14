@@ -4,6 +4,8 @@ This tests **installing updates** on macOS: Update now downloads a release, swap
 
 The finished `.app` bundle and its installer come in stage 6b. For now you build a **hand-made bundle** from the `osx-arm64` publish. Allow about 30 minutes. Everything happens in one scratch folder, `qm-test` in your home folder (`~/qm-test`; the test's data folder is `~/qm-test/data`); the update feed is a local folder, so nothing touches GitHub.
 
+> **Note (stage 6b-1):** a real `.dmg` now exists. If you installed Quartermaster from the dmg, use `docs/port/stage6b1-mac-checklist.md` instead: it runs these update steps against the dmg-installed app, so the hand-made bundle in section A is not needed. The steps below remain valid for testing without the dmg.
+
 ## A. Build two versions and a hand-made bundle
 
 1. In Terminal, in the project folder, publish version 0.0.1 and 0.0.2 (the `-p:QmPackageKind=mac-app` part makes the package marker say `mac-app`):

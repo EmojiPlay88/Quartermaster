@@ -91,6 +91,12 @@ The tests use small, invented modules and rules packs.
 4. **Updates:** the launcher checks GitHub for a newer release about once a day and shows an update bar. **Update now** downloads the zip, checks it against the release's `.sha256`, closes Quartermaster, swaps the files and starts the new version. If the new version does not start, the old one is put back. Only the files named in the release's `quartermaster-files.txt` are swapped, so anything else you keep in that folder is left alone; the previous version is kept as one `Quartermaster.backup-<version>` folder beside it (older backups are removed after a successful update). Updating never happens while a game is open, while another Quartermaster window is running, or without you clicking. The launcher's **Check for updates** link checks on demand, and **Skip this version** hides one release. Your modules, rules packs, saves and settings live outside the program folder and are not touched.
 5. To update by hand, unzip the new zip over the old folder, or into a new one.
 
+**macOS (Apple silicon, macOS 14 Sonoma or later):**
+
+1. Download `Quartermaster-<version>-osx-arm64.dmg`, open it and drag **Quartermaster** onto **Applications**. Eject the disk image afterwards.
+2. **First open:** the app is signed only ad hoc and is not notarised by Apple, so macOS shows a warning the first time. On macOS 15 or later, try to open it once, then go to **System Settings > Privacy & Security** and choose **Open Anyway**. On macOS 14, right-click > Open also works. Or run this once in Terminal (it also fixes a message saying the app "is damaged"): `xattr -dr com.apple.quarantine /Applications/Quartermaster.app`
+3. **Updates** install in place from the launcher, as on Windows: **Update now** replaces the app in `/Applications` and restarts it. Your settings and data live in `~/Library/Application Support/Quartermaster` and are not touched.
+
 The online-play relay is a separate download (`QuartermasterRelay-<version>-<platform>`), only needed by whoever hosts games; see [Hosting a Relay](https://github.com/EmojiPlay88/Quartermaster/wiki/Hosting-a-Relay).
 
 Maintainers: `build/release.ps1 -Version <version>` builds, checks and checksums the downloads into `artifacts/release/<version>/` and prints the `gh release create` command; it creates nothing itself.
