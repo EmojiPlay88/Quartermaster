@@ -149,7 +149,8 @@ public sealed class TreesAndFloatTests : IDisposable
         w.SetLeftSplit(0.3);
         Assert.Equal(0.3, w.LeftSplit, 3);
         w.SetLeftSplit(0.95);   // clamped
-        Assert.InRange(w.LeftSplit, 0.75, WindowLayoutStore.MaxLeftSplit);   // the tables tree keeps its minimum share
+        Assert.Equal((WindowLayoutStore.MaxSplitSum - WindowLayoutStore.DefaultPaletteFraction) / (1 - WindowLayoutStore.DefaultPaletteFraction), w.LeftSplit, 6);   // the tables tree keeps its minimum share
+        Assert.Equal(WindowLayoutStore.DefaultPaletteFraction, w.LeftSplits.Palette, 6);
         w.SetLeftSplit(0.3);
         var w2 = NewWindow();
         Assert.Equal(0.3, w2.LeftSplit, 3);
@@ -182,9 +183,9 @@ public sealed class TreesAndFloatTests : IDisposable
         var w = Game();   // not game master
         Assert.False(w.Palette.IsVisible);
         var r = Rows(w);
-        Assert.Equal(0, r[2]); Assert.Equal(0, r[3]);
-        Assert.Equal(4, r[1]);
-        Assert.True(r[0] > 0 && r[4] > 0);
+        Assert.Equal(4, r[1]); Assert.Equal(0, r[3]); Assert.Equal(0, r[4]);
+        Assert.Equal(2, Grid.GetRow(w.TablesTree));   // the tables tree sits under the visible splitter
+        Assert.True(r[0] > 0 && r[2] > 0);
 
         var gm = Game(); // fresh window, then switch the mode on and the toggle off
         gm.SettingsStore.Update(x => x with { GameMasterMode = true });
@@ -193,8 +194,47 @@ public sealed class TreesAndFloatTests : IDisposable
         gm.ClickMenu("Counter &Palette");
         Assert.False(gm.Palette.IsVisible);
         r = Rows(gm);
-        Assert.Equal(0, r[2]); Assert.Equal(0, r[3]);
-        Assert.True(r[0] > 0 && r[4] > 0);
+        Assert.Equal(0, r[3]); Assert.Equal(0, r[4]);
+        Assert.Equal(2, Grid.GetRow(gm.TablesTree));
+        Assert.True(r[0] > 0 && r[2] > 0);
+    }
+
+    static void Drag(GridSplitter sp, double dy)
+    {
+        sp.RaiseEvent(new Avalonia.Input.VectorEventArgs { RoutedEvent = Avalonia.Controls.Primitives.Thumb.DragStartedEvent, Vector = new Vector(0, 0) });
+        sp.RaiseEvent(new Avalonia.Input.VectorEventArgs { RoutedEvent = Avalonia.Controls.Primitives.Thumb.DragDeltaEvent, Vector = new Vector(0, dy) });
+        sp.RaiseEvent(new Avalonia.Input.VectorEventArgs { RoutedEvent = Avalonia.Controls.Primitives.Thumb.DragCompletedEvent, Vector = new Vector(0, dy) });
+        Pump();
+    }
+
+    [AvaloniaFact]
+    public void Visible_splitter_moves_the_tree_tables_boundary_while_the_palette_is_hidden()
+    {
+        var w = Game();   // not game master: palette hidden
+        w.LeftColumn.UpdateLayout();
+        var tablesBefore = w.TablesTree.Bounds.Height;
+        var treeBefore = w.ModuleTree.Bounds.Height;
+        Drag(w.LeftColumn.Children.OfType<GridSplitter>().First(x => x.IsVisible), 40);
+        Pump(); w.LeftColumn.UpdateLayout();
+        Assert.True(w.ModuleTree.Bounds.Height > treeBefore + 20, $"{treeBefore} -> {w.ModuleTree.Bounds.Height}");
+        Assert.True(w.TablesTree.Bounds.Height < tablesBefore - 20);
+        Assert.Equal(WindowLayoutStore.DefaultPaletteFraction, w.LeftSplits.Palette, 6);   // the hidden palette's share is untouched
+    }
+
+    [AvaloniaFact]
+    public void Splitters_border_the_right_rows_when_the_palette_shows()
+    {
+        GameMasterSettings();
+        var w = Game();
+        w.LeftColumn.UpdateLayout();
+        var visible = w.LeftColumn.Children.OfType<GridSplitter>().Where(x => x.IsVisible).Select(x => Grid.GetRow(x)).OrderBy(x => x).ToArray();
+        Assert.Equal(new[] { 1, 3 }, visible);   // tree | palette | tables
+        var treeBefore = w.ModuleTree.Bounds.Height; var palBefore = w.Palette.Bounds.Height; var tablesBefore = w.TablesTree.Bounds.Height;
+        Drag(w.LeftColumn.Children.OfType<GridSplitter>().First(x => Grid.GetRow(x) == 3), -30);
+        w.LeftColumn.UpdateLayout();
+        Assert.True(w.Palette.Bounds.Height < palBefore - 15);
+        Assert.True(w.TablesTree.Bounds.Height > tablesBefore + 15);
+        Assert.Equal(treeBefore, w.ModuleTree.Bounds.Height, 1);
     }
 
     [AvaloniaFact]

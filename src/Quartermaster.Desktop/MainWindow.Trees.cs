@@ -41,6 +41,9 @@ public partial class MainWindow
     /// <summary>The palette is switched on in View > Counter Palette (remembered in ui.json; default on). It still needs a game and game master mode to show.</summary>
     public bool PaletteOn => _viewPalette.IsChecked;
 
+    /// <summary>The tables tree's grid row: 4 under the palette, or 2 (right under the visible splitter) while the palette is hidden, so that splitter borders the two trees.</summary>
+    int TablesRow => Grid.GetRow(TablesTreeHost);
+
     bool PaletteShowing => _session?.Game != null && GameMaster && PaletteOn;
 
     /// <summary>Fractions of the left column's height the module tree and the palette take with the palette showing (the tables tree gets the rest).</summary>
@@ -52,7 +55,7 @@ public partial class MainWindow
         get
         {
             var rows = LeftColumnGrid.RowDefinitions;
-            double a = rows[0].Height.Value, b = rows[4].Height.Value;
+            double a = rows[0].Height.Value, b = rows[TablesRow].Height.Value;
             return a + b > 0 && double.IsFinite(a + b)
                 ? Math.Clamp(a / (a + b), WindowLayoutStore.MinLeftSplit, WindowLayoutStore.MaxLeftSplit)
                 : WindowLayoutStore.DefaultLeftSplit;
@@ -115,10 +118,11 @@ public partial class MainWindow
         _applyingSplit = true;
         try
         {
+            Grid.SetRow(TablesTreeHost, palette ? 4 : 2);
             rows[0].Height = new GridLength(_treeFraction, GridUnitType.Star);
-            rows[2].Height = palette ? new GridLength(_paletteFraction, GridUnitType.Star) : new GridLength(0);
+            rows[2].Height = new GridLength(palette ? _paletteFraction : 1 - _treeFraction - _paletteFraction, GridUnitType.Star);
             rows[3].Height = new GridLength(palette ? 4 : 0);
-            rows[4].Height = new GridLength(1 - _treeFraction - _paletteFraction, GridUnitType.Star);
+            rows[4].Height = palette ? new GridLength(1 - _treeFraction - _paletteFraction, GridUnitType.Star) : new GridLength(0);
         }
         finally { _applyingSplit = false; }
     }
@@ -127,19 +131,32 @@ public partial class MainWindow
     void RememberRows()
     {
         var rows = LeftColumnGrid.RowDefinitions;
-        double a = rows[0].Height.Value, p = rows[2].Height.Value, c = rows[4].Height.Value;
-        var total = a + p + c;
-        if (!(total > 0) || !double.IsFinite(total)) return;
-        if (PaletteShowing) (_treeFraction, _paletteFraction) = WindowLayoutStore.NormalizeSplits(a / total, p / total);
-        else _treeFraction = WindowLayoutStore.NormalizeSplits(a / (a + c) * (1 - _paletteFraction), _paletteFraction).Tree;
+        if (PaletteShowing)
+        {
+            double a = rows[0].Height.Value, p = rows[2].Height.Value, c = rows[4].Height.Value, total = a + p + c;
+            if (!(total > 0) || !double.IsFinite(total)) return;
+            (_treeFraction, _paletteFraction) = WindowLayoutStore.NormalizeSplits(a / total, p / total);
+        }
+        else
+        {
+            double a = rows[0].Height.Value, c = rows[2].Height.Value;
+            if (!(a + c > 0) || !double.IsFinite(a + c)) return;
+            _treeFraction = TreeForShare(a / (a + c));
+        }
         _layout.SaveLeftSplits(_treeFraction, _paletteFraction);
     }
+
+    /// <summary>The tree's fraction of the column for a share of the two trees; the palette's fraction stays as it is.</summary>
+    double TreeForShare(double share) =>
+        Math.Clamp(share * (1 - _paletteFraction), WindowLayoutStore.MinPartFraction, WindowLayoutStore.MaxSplitSum - _paletteFraction);
 
     /// <summary>Sets and remembers the module tree's share of the two trees (what dragging the splitter does with the palette hidden).</summary>
     internal void SetLeftSplit(double fraction)
     {
         var f = double.IsFinite(fraction) ? Math.Clamp(fraction, WindowLayoutStore.MinLeftSplit, WindowLayoutStore.MaxLeftSplit) : WindowLayoutStore.DefaultLeftSplit;
-        SetLeftSplits(f * (1 - _paletteFraction), _paletteFraction);
+        _treeFraction = TreeForShare(f);
+        SetRows();
+        _layout.SaveLeftSplits(_treeFraction, _paletteFraction);
     }
 
     /// <summary>Sets and remembers both fractions of the column height.</summary>
