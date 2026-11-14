@@ -63,7 +63,10 @@ attached=1
 [ -L "$mnt/Applications" ] || die "dmg lacks the Applications symlink"
 [ "$(readlink "$mnt/Applications")" = "/Applications" ] || die "Applications symlink does not point to /Applications"
 codesign --verify --strict "$mnt/Quartermaster.app" || die "app inside the dmg fails codesign verification"
-[ -d "$mnt/.background" ] || die "dmg lacks .background/"
+# dmgbuild writes the background as a hidden file .background.<ext> at the volume root (a .background/ folder is also accepted).
+bgfound=0
+for b in "$mnt"/.background.* "$mnt/.background"; do [ -e "$b" ] && bgfound=1; done
+[ "$bgfound" = 1 ] || die "dmg lacks a .background file"
 [ -f "$mnt/.DS_Store" ] || die "dmg lacks .DS_Store"
 got="$("$mnt/Quartermaster.app/Contents/MacOS/Quartermaster" --version)" || die "Quartermaster --version failed inside the dmg"
 [ "$got" = "Quartermaster $version" ] || die "--version printed '$got', expected 'Quartermaster $version'"
