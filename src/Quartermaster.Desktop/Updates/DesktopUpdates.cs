@@ -459,7 +459,7 @@ public sealed class DesktopUpdates : IUpdateSlot
         {
             if (PackageHandOff.Open(staged.StagedDir, StartProcess))
                 await ui.Window.Dialogs.ShowInfoAsync(ui.Window,
-                    $"Quartermaster {AppVersion.Format(info.Version)} was downloaded. Your system's package installer opens now to install it; when it is done, start Quartermaster again.",
+                    $"Quartermaster {AppVersion.Format(info.Version)} was downloaded. Your system's package installer opens now to install it; when it is done, start Quartermaster again.\n\nThe package is saved at:\n\n{staged.StagedDir}",
                     Caption);
             else
                 await ui.Window.Dialogs.ShowWarningAsync(ui.Window, "Could not open the package installer. The package is saved at:\n\n" + staged.StagedDir, Caption);

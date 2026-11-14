@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -535,7 +536,7 @@ public sealed class DesktopUpdatesTests : IDisposable
         var psi = Assert.Single(_started);
         Assert.Equal("xdg-open", psi.FileName);
         Assert.Equal(new[] { path }, psi.ArgumentList.ToArray());
-        Assert.Equal(new[] { ("Quartermaster 9.9.9 was downloaded. Your system's package installer opens now to install it; when it is done, start Quartermaster again.", "Quartermaster") },
+        Assert.Equal(new[] { ("Quartermaster 9.9.9 was downloaded. Your system's package installer opens now to install it; when it is done, start Quartermaster again.\n\nThe package is saved at:\n\n" + path, "Quartermaster") },
             _dialogs.Infos);
         Assert.Empty(_dialogs.Warnings);
         Assert.Empty(_exits);   // the app keeps running
@@ -552,6 +553,29 @@ public sealed class DesktopUpdatesTests : IDisposable
         WaitFor(() => updates.Updating != null && updates.UpdateNowTask.IsCompleted);
         var path = updates.Updating!.Staged!.StagedDir;
         Assert.Equal("quartermaster-9.9.9-1.x86_64.rpm", Path.GetFileName(path));
+        Assert.Equal(new[] { ("Could not open the package installer. The package is saved at:\n\n" + path, "Quartermaster") }, _dialogs.Warnings);
+        Assert.Empty(_dialogs.Infos);
+        Assert.Empty(_exits);
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_HandOffExitsNonZero_ShowsPath()
+    {
+        WriteTestFeed("9.9.9", "TEST deb"u8.ToArray(), kind: PackageKind.LinuxDeb);
+        var updates = Updates(layout: SystemLayout(PackageKind.LinuxDeb));
+        // xdg-open starts but finds no handler for the package: a real windowless process that exits with code 3 stands in for it.
+        updates.StartProcess = psi =>
+        {
+            _started.Add(psi);
+            return Process.Start(OperatingSystem.IsWindows()
+                ? new ProcessStartInfo("cmd.exe", "/c exit 3") { UseShellExecute = false, CreateNoWindow = true }
+                : new ProcessStartInfo("/bin/sh", ["-c", "exit 3"]) { UseShellExecute = false, CreateNoWindow = true });
+        };
+        Launcher(updates);
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.Updating != null && updates.UpdateNowTask.IsCompleted);
+        var path = updates.Updating!.Staged!.StagedDir;
+        Assert.Equal("xdg-open", Assert.Single(_started).FileName);
         Assert.Equal(new[] { ("Could not open the package installer. The package is saved at:\n\n" + path, "Quartermaster") }, _dialogs.Warnings);
         Assert.Empty(_dialogs.Infos);
         Assert.Empty(_exits);

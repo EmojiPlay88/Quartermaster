@@ -160,4 +160,32 @@ public class LaunchHelperTests : IDisposable
         Assert.Equal([path], seen.ArgumentList.ToArray());
         Assert.False(PackageHandOff.Open(path, _ => throw new Win32Exception(2, "TEST no xdg-open")));
     }
+
+    [Fact]
+    public void PackageHandOff_DropsAppImageVariables()
+    {
+        string[] vars = ["APPIMAGE", "APPDIR", "ARGV0", "OWD", "QM_TEST_KEEP"];
+        var saved = vars.ToDictionary(v => v, Environment.GetEnvironmentVariable);
+        try
+        {
+            foreach (var v in vars) Environment.SetEnvironmentVariable(v, "x");
+            ProcessStartInfo? seen = null;
+            Assert.True(PackageHandOff.Open("p.deb", psi => { seen = psi; return null; }));
+            foreach (var v in new[] { "APPIMAGE", "APPDIR", "ARGV0", "OWD" }) Assert.False(seen!.Environment.ContainsKey(v), v);
+            Assert.Equal("x", seen!.Environment["QM_TEST_KEEP"]);
+        }
+        finally { foreach (var (k, v) in saved) Environment.SetEnvironmentVariable(k, v); }
+    }
+
+    /// <summary>A real, windowless process that exits at once with <paramref name="code"/>.</summary>
+    internal static Process ExitWith(int code) => Process.Start(OperatingSystem.IsWindows()
+        ? new ProcessStartInfo("cmd.exe", $"/c exit {code}") { UseShellExecute = false, CreateNoWindow = true }
+        : new ProcessStartInfo("/bin/sh", ["-c", $"exit {code}"]) { UseShellExecute = false, CreateNoWindow = true })!;
+
+    [Fact]
+    public void PackageHandOff_NonZeroExit_IsFailure()
+    {
+        Assert.False(PackageHandOff.Open("p.deb", _ => ExitWith(3)));   // e.g. no handler for the package type
+        Assert.True(PackageHandOff.Open("p.deb", _ => ExitWith(0)));
+    }
 }

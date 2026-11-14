@@ -52,7 +52,7 @@ The AppImage, .deb and .rpm packages are built in stage 6b. For now the **tar** 
 
 ## D. Refusals
 
-9. Start the app as in step 4 in one terminal and, with it still open at the update bar, run the **same command again in a second terminal** (a second copy of the same install). Click **Update now** in the first. Expected: the app restarts with nothing changed and the launcher shows "The update to 0.0.2 was not installed; nothing was changed. Close every other Quartermaster window and try again, or download it from the release page."
+9. Start the app as in step 4 in one terminal and, with it still open at the update bar, run the **same command again in a second terminal** (a second copy of the same install). Click **Update now** in the first. Expected: before anything is downloaded the app says "Close every other Quartermaster window first." (a message with OK); no Update window opens, nothing is downloaded and the app does not restart. Close the second copy and Update now works again.
 
 ## E. AppImage (stage 6b build, or a hand-made one)
 
@@ -61,7 +61,7 @@ The AppImage, .deb and .rpm packages are built in stage 6b. For now the **tar** 
 
 ## F. .deb and .rpm hand-off (stage 6b packages)
 
-12. With a deb / rpm install, Update now downloads and checks `quartermaster_0.0.2_amd64.deb` (or `quartermaster-0.0.2-1.x86_64.rpm`) with its `.sha256`, then **opens the package installer** (`xdg-open <package>`, e.g. GNOME Software or Discover). Expected: the installer window shows the new package; Quartermaster itself does not install anything and does not restart. If no installer is registered the Update window says it could not open the package and names the file so you can install it by hand.
+12. With a deb / rpm install, Update now downloads and checks `quartermaster_0.0.2_amd64.deb` (or `quartermaster-0.0.2-1.x86_64.rpm`) with its `.sha256`, then **opens the package installer** (`xdg-open <package>`, e.g. GNOME Software or Discover). Expected: the installer window shows the new package; Quartermaster itself does not install anything and does not restart. The message after the download names the saved package file (`Updates/0.0.2/quartermaster_0.0.2_amd64.deb` in Quartermaster's data folder; `~/qm-test/data/Updates/0.0.2/...` with the test variables) so you can install it by hand if no installer appears. If `xdg-open` is missing or fails at once (exit code other than 0 within 3 seconds, e.g. no handler for the package type), the message is instead "Could not open the package installer. The package is saved at:" with the same path.
 
 ## Recovering by hand
 
