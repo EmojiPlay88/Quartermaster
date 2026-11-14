@@ -174,11 +174,12 @@ foreach ($u in @($env:USERNAME, $(if ($env:USERPROFILE) { Split-Path -Leaf $env:
     if ($u -and $u.Length -ge 3 -and -not ($script:UserNames -contains $u)) { $script:UserNames.Add($u) }
 }
 
-$script:TextExt = @('.json', '.xml', '.txt', '.config', '.md', '.manifest', '.props', '.targets', '.yml', '.yaml', '.cmd', '.ps1', '.sh', '.html', '.css', '.js')
+$script:TextExt = @('.json', '.xml', '.txt', '.config', '.md', '.manifest', '.props', '.targets', '.yml', '.yaml', '.cmd', '.ps1', '.sh', '.html', '.css', '.js', '.plist')
 
-# -CheckManifest: quartermaster-files.txt must list exactly the archive's files (the updater only moves listed files).
+# -CheckManifest: quartermaster-files.txt must list exactly the archive's files (the updater only moves listed files); with
+# -ManifestDir (e.g. the macOS zip's Quartermaster.app/Contents/MacOS) the list and the files are taken relative to that folder.
 # Returns the list of problems found in one archive ($Kind 'zip' or 'tar.gz'); empty list = clean.
-function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [string[]]$Required, [switch]$CheckManifest) {
+function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [string[]]$Required, [switch]$CheckManifest, [string]$ManifestDir = '') {
     $problems = New-Object System.Collections.Generic.List[string]
     $leaf = Split-Path -Leaf $Archive
     $needles = New-Object System.Collections.Generic.List[string]
@@ -216,9 +217,11 @@ function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [stri
             if ($LASTEXITCODE -ne 0) { throw "tar could not extract $leaf." }
         }
         if ($CheckManifest) {
-            $files = @(Get-ChildItem -LiteralPath $tmp -Recurse -File | ForEach-Object { $_.FullName.Substring($tmp.Length + 1).Replace('\', '/') })
-            $listFile = Join-Path $tmp 'quartermaster-files.txt'
-            if (-not (Test-Path -LiteralPath $listFile)) { $problems.Add("$leaf has no quartermaster-files.txt") }
+            $mroot = if ($ManifestDir) { Join-Path $tmp $ManifestDir } else { $tmp }
+            $files = @()
+            if (Test-Path -LiteralPath $mroot) { $files = @(Get-ChildItem -LiteralPath $mroot -Recurse -File | ForEach-Object { $_.FullName.Substring($mroot.Length + 1).Replace('\', '/') }) }
+            $listFile = Join-Path $mroot 'quartermaster-files.txt'
+            if (-not (Test-Path -LiteralPath $listFile)) { $problems.Add("$leaf has no quartermaster-files.txt" + $(if ($ManifestDir) { " in $ManifestDir" } else { '' })) }
             else {
                 $listed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
                 foreach ($line in ([System.IO.File]::ReadAllText($listFile) -split "`r?`n")) { $l = $line.Trim(); if ($l) { [void]$listed.Add($l) } }
@@ -377,13 +380,16 @@ Write-Step 'Check archives'
 $allProblems = New-Object System.Collections.Generic.List[string]
 $winZip = Join-Path $releaseDir "Quartermaster-$Version-win-x64.zip"
 $linuxTar = Join-Path $releaseDir "Quartermaster-$Version-linux-x64.tar.gz"
+$macZip = Join-Path $releaseDir "Quartermaster-$Version-osx-arm64.zip"
+$macDir = 'Quartermaster.app/Contents/MacOS'
 foreach ($p in (Test-Archive $winZip 'zip' 'Quartermaster.Relay*' @('Quartermaster.exe', 'Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'quartermaster-package.json', 'quartermaster-files.txt', 'LICENSE', 'THIRD-PARTY-NOTICES.md') -CheckManifest)) { $allProblems.Add($p) }
 foreach ($p in (Test-Archive $linuxTar 'tar.gz' 'Quartermaster.Relay*' @('Quartermaster', 'Quartermaster.Updater', 'quartermaster-package.json', 'quartermaster-files.txt', 'LICENSE', 'THIRD-PARTY-NOTICES.md') -CheckManifest)) { $allProblems.Add($p) }
+foreach ($p in (Test-Archive $macZip 'zip' 'Quartermaster.Relay*' @('Quartermaster.app/Contents/Info.plist', "$macDir/Quartermaster", "$macDir/Quartermaster.Updater", "$macDir/quartermaster-package.json", "$macDir/quartermaster-files.txt", "$macDir/LICENSE", "$macDir/THIRD-PARTY-NOTICES.md") -CheckManifest -ManifestDir $macDir)) { $allProblems.Add($p) }
 foreach ($r in $relayArchives) {
     foreach ($p in (Test-Archive $r.Path $r.Kind 'Quartermaster.App*' @())) { $allProblems.Add($p) }
 }
 Assert-NoProblems $allProblems 'Archive check'
-Write-Host 'Archive checks passed (no local paths, user or profile name, .vmod, .qrules or startapp.cmd; app and relay kept apart; quartermaster-files.txt lists exactly the zip and the tar.gz).' -ForegroundColor Green
+Write-Host 'Archive checks passed (no local paths, user or profile name, .vmod, .qrules or startapp.cmd; app and relay kept apart; quartermaster-files.txt lists exactly the files of the zip, the tar.gz and the macOS app).' -ForegroundColor Green
 
 # 7. Checksums of the relay archives (the app assets keep the .sha256 files CI wrote and this script verified).
 Write-Step 'Checksums'
