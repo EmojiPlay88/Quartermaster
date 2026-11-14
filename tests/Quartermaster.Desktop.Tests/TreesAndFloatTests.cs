@@ -131,8 +131,11 @@ public sealed class TreesAndFloatTests : IDisposable
         Assert.True(w.LeftColumnWidth > 0);
         w.ClickMenu("Module &Tree");
         Assert.False(w.ModuleTreeShown);
-        Assert.False(w.LeftColumn.IsVisible);
+        Assert.False(w.ModuleTree.IsVisible);
         Assert.False(item.IsChecked);
+        Assert.True(w.LeftColumn.IsVisible);   // the tables tree still shows (stage 6c: the parts toggle separately)
+        w.ClickMenu("&Charts && Tables");
+        Assert.False(w.LeftColumn.IsVisible);
         Assert.Equal(0, w.LeftColumnWidth);
         w.ClickMenu("Module &Tree");
         Assert.True(w.ModuleTreeShown);
@@ -268,7 +271,7 @@ public sealed class TreesAndFloatTests : IDisposable
         Assert.True(w.PaletteOn);
         w.ClickMenu("Counter &Palette");
         Assert.False(w.PaletteOn);
-        Assert.False(new WindowLayoutStore(LayoutRoot).LoadPaletteShown());
+        Assert.Contains("palette", new WindowLayoutStore(LayoutRoot).LoadHiddenParts());
         var w2 = Game();
         Assert.False(w2.PaletteOn);
         Assert.False(w2.Palette.IsVisible);
@@ -299,11 +302,11 @@ public sealed class TreesAndFloatTests : IDisposable
         var (tree, palette) = store.LoadLeftSplits();
         Assert.Equal(WindowLayoutStore.DefaultPaletteFraction, palette, 3);
         Assert.Equal(0.5 * (1 - WindowLayoutStore.DefaultPaletteFraction), tree, 3);
-        Assert.True(store.LoadPaletteShown());
+        Assert.Empty(store.LoadHiddenParts());
         // Saving the new fields keeps the old one (and WinForms still reads it).
-        store.SavePaletteShown(false);
+        store.SaveHiddenParts(new[] { "palette" });
         Assert.Equal(0.5, store.LoadLeftSplit(), 3);
-        Assert.False(store.LoadPaletteShown());
+        Assert.Contains("palette", store.LoadHiddenParts());
         // Corrupt or missing: defaults.
         File.WriteAllText(Path.Combine(LayoutRoot, "ui.json"), "{ nonsense");
         Assert.Equal((WindowLayoutStore.DefaultTreeFraction, WindowLayoutStore.DefaultPaletteFraction), store.LoadLeftSplits());

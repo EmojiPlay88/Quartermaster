@@ -92,7 +92,11 @@ public sealed class WindowLayoutStore(string root)
         public double LeftSplit { get; set; }
         public double TreeFraction { get; set; }
         public double PaletteFraction { get; set; }
+        /// <summary>Task 4's palette switch; read once into <see cref="Hidden"/> ("palette") and dropped when the set is saved.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public bool? PaletteShown { get; set; }
+        /// <summary>The Desktop's hidden screen parts (View > Show); missing = everything shows.</summary>
+        public List<string?>? Hidden { get; set; }
     }
 
     /// <summary>Defaults of the Desktop left column (fractions of its height): module tree, counter palette; the tables tree gets the rest.</summary>
@@ -141,10 +145,22 @@ public sealed class WindowLayoutStore(string root)
         UpdateUi(f => { f.TreeFraction = t; f.PaletteFraction = p; });
     }
 
-    /// <summary>Whether the counter palette is switched on (default true; it still needs game master mode to show).</summary>
-    public bool LoadPaletteShown() => ReadUi().PaletteShown ?? true;
+    /// <summary>The ids of the screen parts the user hid (View > Show; app-wide). Missing or unreadable: none. An older file whose counter
+    /// palette was switched off (<c>PaletteShown: false</c>) gives "palette".</summary>
+    public IReadOnlySet<string> LoadHiddenParts()
+    {
+        var f = ReadUi();
+        var set = new HashSet<string>(f.Hidden?.Where(id => !string.IsNullOrEmpty(id)).Select(id => id!) ?? [], StringComparer.Ordinal);
+        if (f.Hidden == null && f.PaletteShown == false) set.Add("palette");
+        return set;
+    }
 
-    public void SavePaletteShown(bool shown) => UpdateUi(f => f.PaletteShown = shown);
+    /// <summary>Remembers the hidden parts (the old palette switch is folded in and dropped); the file's other fields are kept.</summary>
+    public void SaveHiddenParts(IEnumerable<string> ids)
+    {
+        var list = ids.Where(id => !string.IsNullOrEmpty(id)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Select(id => (string?)id).ToList();
+        UpdateUi(f => { f.Hidden = list; f.PaletteShown = null; });
+    }
 
     /// <summary>Fraction of the left panel height given to the module tree (clamped 0.2-0.8; default 0.6 when missing or corrupt).</summary>
     public double LoadLeftSplit()

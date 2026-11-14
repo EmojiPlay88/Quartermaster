@@ -40,7 +40,8 @@ public partial class MainWindow : Window
     readonly MenuItem _showGrid;
     readonly MenuItem _viewLog;
     LogPanel? _log;
-    double _logHeight = 170;   // WinForms default; follows the splitter
+    const double DefaultLogHeight = 170;
+    double _logHeight = DefaultLogHeight;   // WinForms default; follows the splitter
     MenuItem? _editUndo, _editRedo, _editStepBack, _editStepBackTo;
     Button? _tbUndo, _tbRedo, _tbStepBack;
     readonly DiceTools _dice;
@@ -74,6 +75,7 @@ public partial class MainWindow : Window
         SettingsStore = new SettingsStore(_layoutRoot);
         LoadSettings();
         InitializeComponent();
+        InitViewParts();
         InitPhaseUi(layoutRoot);
         InitAlertUi();
         InitTools();
@@ -414,6 +416,7 @@ public partial class MainWindow : Window
         view.Items.Add(_viewPhases);
         view.Items.Add(_viewOutliner);
         view.Items.Add(_viewPalette);
+        BuildShowMenu(view);
         Item(view, "&Ledger", ShowLedger, "view.ledger");
         Item(view, "&Overview", ShowOverview, gate: "view.overview");
         view.Items.Add(new Separator());
@@ -511,8 +514,7 @@ public partial class MainWindow : Window
         _viewPalette.IsEnabled = GameMaster;
         ToolTip.SetTip(_viewPalette, GameMaster ? null : PaletteNeedsGameMaster);
         ToolTip.SetShowOnDisabled(_viewPalette, true);
-        PaletteHost.IsVisible = PaletteSplitter.IsVisible = PaletteShowing;
-        SetRows();
+        SetRows();   // the palette's row, its splitters and whether the left column shows at all
     }
 
     /// <summary>Enabled state and the reason tooltip of every gated menu item (WinForms ApplyGates); other tooltips are left alone.</summary>

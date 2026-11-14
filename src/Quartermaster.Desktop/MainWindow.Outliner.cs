@@ -19,7 +19,8 @@ public partial class MainWindow
     PanelFloat _outlinerFloat = null!;
     OutlinerPanel? _outlinerPanel;
     bool _outlinerFloated;       // the outliner window was shown for this module: its DPI is the current one
-    double _outlinerWidth = 440; // WinForms default of the docked outliner
+    const double DefaultOutlinerWidth = 440;
+    double _outlinerWidth = DefaultOutlinerWidth; // WinForms default of the docked outliner
 
     ColumnDefinition OutlinerCol => Body.ColumnDefinitions[Grid.GetColumn(OutlinerHost)];
     ColumnDefinition OutlinerSplitCol => Body.ColumnDefinitions[Grid.GetColumn(OutlinerSplitter)];

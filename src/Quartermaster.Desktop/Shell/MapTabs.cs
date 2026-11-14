@@ -371,10 +371,24 @@ public sealed class MapTabs : TabControl
     /// <summary>True while the view's tile preparation may still run (false once cancelled, e.g. its tab was removed).</summary>
     internal bool IsPreparingTiles(MapView v) => _tiling.TryGetValue(v, out var t) && !t.Cts.IsCancellationRequested && !t.Task.IsCompleted;
 
-    /// <summary>Tab content: the toolbar on top, the map filling the rest.</summary>
-    static DockPanel Host(MapView v)
+    /// <summary>Whether every tab shows its map toolbar (View > Show > Map Toolbar); tabs opened later follow it too.</summary>
+    public bool ToolbarsVisible
     {
-        var bar = new MapToolbar(v);
+        get => _toolbarsVisible;
+        set
+        {
+            _toolbarsVisible = value;
+            foreach (var bar in Items.OfType<TabItem>().Select(t => (t.Content as DockPanel)?.Children.OfType<MapToolbar>().FirstOrDefault()))
+                if (bar != null) bar.IsVisible = value;
+        }
+    }
+
+    bool _toolbarsVisible = true;
+
+    /// <summary>Tab content: the toolbar on top, the map filling the rest.</summary>
+    DockPanel Host(MapView v)
+    {
+        var bar = new MapToolbar(v) { IsVisible = _toolbarsVisible };
         DockPanel.SetDock(bar, Dock.Top);
         return new DockPanel { Children = { bar, v } };
     }

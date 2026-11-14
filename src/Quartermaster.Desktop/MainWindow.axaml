@@ -18,7 +18,7 @@
       <TextBlock x:Name="OnlineBannerLabel" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis" />
     </Border>
     <!-- Status bar as WinForms MainForm: module | message (springs) | tiling progress | online | player (hot-seat) | turn | location (170) | zoom (50) -->
-    <Border Classes="status" DockPanel.Dock="Bottom" BorderThickness="0,1,0,0">
+    <Border x:Name="StatusBarHost" Classes="status" DockPanel.Dock="Bottom" BorderThickness="0,1,0,0">
       <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,170,50" Height="22">
         <Border Grid.Column="0" BorderBrush="{DynamicResource Classic.BorderBrush}" BorderThickness="0,0,1,0" Padding="4,0">
           <TextBlock x:Name="SbModule" Text="No module" VerticalAlignment="Center" />
@@ -49,7 +49,7 @@
         <Grid x:Name="LeftColumnGrid" RowDefinitions="0.4*,4,0.35*,4,0.25*">
           <shell:ModuleTree x:Name="ModuleTreeHost" />
           <GridSplitter x:Name="LeftSplitter" Grid.Row="1" ResizeDirection="Rows" HorizontalAlignment="Stretch" />
-          <!-- The counter palette sits between the trees (game master mode and View > Counter Palette; rows 2 and 3 are 0 while hidden) -->
+          <!-- The rows are laid out in MainWindow.Trees (SetRows): the parts that show take rows 0, 2, 4 in this order, the rest and their splitters are 0 -->
           <shell:PaletteDock x:Name="PaletteHost" Grid.Row="2" IsVisible="False" />
           <GridSplitter x:Name="PaletteSplitter" Grid.Row="3" ResizeDirection="Rows" HorizontalAlignment="Stretch" IsVisible="False" />
           <shell:TablesTree x:Name="TablesTreeHost" Grid.Row="4" />
