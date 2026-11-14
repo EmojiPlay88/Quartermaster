@@ -21,10 +21,13 @@ public static class UpdateInstaller
     const long MaxUnpackedBytes = 4L * 1024 * 1024 * 1024;
 
     /// <summary>
-    /// Downloads the asset (<see cref="UpdateInfo.Kind"/>; see <see cref="UpdateStaging"/>) and its <c>.sha256</c>, checks the size and SHA-256 (first token of the <c>.sha256</c>, hex, any case) before
-    /// unpacking, unpacks into <c>&lt;root&gt;\staged</c> refusing absolute or <c>..</c> paths, and checks <c>Quartermaster.App.exe</c> is at the top
-    /// with a FileVersion equal to the release version. Anything wrong throws <see cref="UpdateRefused"/>; on any failure or cancellation the
-    /// whole version folder is deleted, so no partial download or stage is left.
+    /// Downloads the asset for <see cref="UpdateInfo.Kind"/> and its <c>.sha256</c> into <c>&lt;updatesRoot&gt;\&lt;version&gt;</c>, checks the size and
+    /// SHA-256 (first token of the <c>.sha256</c>, hex, any case), then stages it per kind (<see cref="UpdateStaging.Stage"/>): a Windows zip is
+    /// unpacked into <c>staged</c> and needs <c>Quartermaster.App.exe</c> plus either the package marker of the release version or (a 0.1.0-style
+    /// zip without marker) a FileVersion equal to it; a macOS zip or Linux tar.gz is unpacked and needs the marker of the release version and kind;
+    /// unpacking refuses absolute, <c>..</c> and (tar) link entries, and each unpacked kind needs <see cref="ManifestName"/>. An AppImage is only made executable; a
+    /// .deb or .rpm is kept as downloaded. Anything wrong throws <see cref="UpdateRefused"/>; on any failure or cancellation the whole version
+    /// folder is deleted, so no partial download or stage is left.
     /// </summary>
     public static async Task<StagedUpdate> Download(IUpdateFeed f, UpdateInfo u, string updatesRoot, IProgress<double>? progress, CancellationToken ct)
     {
@@ -105,10 +108,16 @@ public static class UpdateInstaller
     static UpdateRefused SizeMismatch(long expected, long got) =>
         new($"The download's size does not match the release ({got:N0} bytes{(got > expected ? " or more" : "")}, expected {expected:N0}); the update was not installed.");
 
+    /// <summary>Refuses a staged Windows update without <see cref="AppExe"/> at the top (the 0.1.0 switch-over and the WinForms restart start it).</summary>
+    internal static void RequireAppExe(string staged)
+    {
+        if (!File.Exists(Path.Combine(staged, AppExe))) throw new UpdateRefused($"The update does not contain {AppExe}; it was not installed.");
+    }
+
     internal static void CheckExe(string staged, Version expected)
     {
+        RequireAppExe(staged);
         var exe = Path.Combine(staged, AppExe);
-        if (!File.Exists(exe)) throw new UpdateRefused($"The update does not contain {AppExe}; it was not installed.");
         var got = FileVersion(exe);
         var want = AppVersion.Format(expected);
         if (got == null)

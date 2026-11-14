@@ -31,11 +31,14 @@ public static class UpdateChecker
 
     /// <summary>
     /// The release as an update, or null when it does not count: tag not <c>quartermaster-v&lt;major.minor.patch&gt;</c>, draft or
-    /// pre-release, either the app zip or its <c>.sha256</c> missing, or the JSON is not a release object.
+    /// pre-release, the Windows asset (<c>Quartermaster-&lt;v&gt;-win-x64.zip</c>) or its <c>.sha256</c> missing, or the JSON is not a release object.
     /// </summary>
     public static UpdateInfo? Parse(string releaseJson) => Parse(releaseJson, PackageKind.WinZip);
 
-    /// <summary>As <see cref="Parse(string)"/>, but for the asset of the given package kind.</summary>
+    /// <summary>
+    /// As <see cref="Parse(string)"/>, but for the asset of <paramref name="kind"/> (named by <see cref="AssetName"/>: the Windows or macOS zip,
+    /// the Linux tar.gz, AppImage, .deb or .rpm): null when that asset or its <c>.sha256</c> is missing.
+    /// </summary>
     public static UpdateInfo? Parse(string releaseJson, PackageKind kind)
     {
         try

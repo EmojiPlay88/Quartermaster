@@ -27,7 +27,7 @@ internal static class UpdateStaging
         {
             case PackageKind.WinZip or PackageKind.WinSetup:
                 ExtractZip(file, staged);
-                if (PackageFile.Read(staged) is { } marker) CheckMarker(marker, u);
+                if (PackageFile.Read(staged) is { } marker) { CheckMarker(marker, u); UpdateInstaller.RequireAppExe(staged); }
                 else UpdateInstaller.CheckExe(staged, u.Version);
                 RequireManifest(staged);
                 return staged;

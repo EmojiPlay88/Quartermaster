@@ -119,6 +119,43 @@ public class UpdateStagingTests : IDisposable
     }
 
     [Fact]
+    public async Task Extract_TarGz_HardLinkEntry_Refused()
+    {
+        var u = PublishBytes(PackageKind.LinuxTar, Tar(tw =>
+        {
+            AddFile(tw, "quartermaster-package.json", Marker("0.2.0", "linux-tar"));
+            tw.WriteEntry(new PaxTarEntry(TarEntryType.HardLink, "hard") { LinkName = "quartermaster-package.json" });
+        }));
+        var ex = await Assert.ThrowsAsync<UpdateRefused>(() => Run(u));
+        Assert.Equal("The update contains a link or special file ('hard'); it was not installed.", ex.Message);
+        Assert.False(Directory.Exists(VersionDir));
+    }
+
+    [Fact]
+    public async Task Extract_TarGz_AbsolutePath_Refused()
+    {
+        var u = PublishBytes(PackageKind.LinuxTar, Tar(tw => AddFile(tw, "/etc/evil.txt", [1])));
+        var ex = await Assert.ThrowsAsync<UpdateRefused>(() => Run(u));
+        Assert.Equal("The update contains an unsafe file path ('/etc/evil.txt'); it was not installed.", ex.Message);
+        Assert.False(Directory.Exists(VersionDir));
+    }
+
+    [Fact]
+    public async Task Extract_TarGz_DuplicateEntry_Refused()
+    {
+        var u = PublishBytes(PackageKind.LinuxTar, Tar(tw =>
+        {
+            AddFile(tw, "quartermaster-package.json", Marker("0.2.0", "linux-tar"));
+            AddFile(tw, "quartermaster-files.txt", Manifest);
+            AddFile(tw, "Quartermaster.App", [1]);
+            AddFile(tw, "Quartermaster.App", [2]);
+        }));
+        var ex = await Assert.ThrowsAsync<UpdateRefused>(() => Run(u));
+        Assert.Equal("The update lists 'Quartermaster.App' twice; it was not installed.", ex.Message);
+        Assert.False(Directory.Exists(VersionDir));
+    }
+
+    [Fact]
     public async Task Extract_TarGz_KeepsExecutableMode()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -190,6 +227,21 @@ public class UpdateStagingTests : IDisposable
         Assert.Equal(Path.Combine(VersionDir, "staged"), s.StagedDir);
         var ex = await Assert.ThrowsAsync<UpdateRefused>(() => Run(PublishBytes(PackageKind.WinZip, Zip(Entries("0.1.0")))));
         Assert.Contains("is version 0.1.0, but the release is 0.2.0", ex.Message);
+    }
+
+    [Fact]
+    public async Task Download_WinZip_MarkerWithoutAppExe_Refused()
+    {
+        // The 0.1.0 switch-over and the WinForms restart need Quartermaster.App.exe even when the marker is fine.
+        var zip = Zip(
+        [
+            ("Quartermaster.exe", [1, 2, 3]),
+            ("quartermaster-package.json", Marker("0.2.0", "win-zip")),
+            ("quartermaster-files.txt", Manifest),
+        ]);
+        var ex = await Assert.ThrowsAsync<UpdateRefused>(() => Run(PublishBytes(PackageKind.WinZip, zip)));
+        Assert.Equal("The update does not contain Quartermaster.App.exe; it was not installed.", ex.Message);
+        Assert.False(Directory.Exists(VersionDir));
     }
 
     [Fact]
