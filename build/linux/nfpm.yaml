@@ -1,0 +1,40 @@
+# nfpm config for the .deb and .rpm. make-deb-rpm.sh exports QM_VERSION, QM_STAGE (publish copy with the right package kind),
+# QM_DESKTOP and QM_ICON; nfpm expands ${VAR} in this file.
+name: quartermaster
+arch: amd64
+platform: linux
+version: ${QM_VERSION}
+release: "1"
+section: games
+priority: optional
+maintainer: Quartermaster contributors
+description: Tabletop board game engine
+homepage: https://github.com/EmojiPlay88/Quartermaster
+license: LGPL-2.1
+contents:
+  # File modes (exec bits on Quartermaster and the helper) come from the staged files.
+  - src: ${QM_STAGE}
+    dst: /opt/quartermaster
+    type: tree
+  - src: /opt/quartermaster/Quartermaster
+    dst: /usr/bin/quartermaster
+    type: symlink
+  - src: ${QM_DESKTOP}
+    dst: /usr/share/applications/quartermaster.desktop
+    file_info:
+      mode: 0644
+  - src: ${QM_ICON}
+    dst: /usr/share/icons/hicolor/256x256/apps/quartermaster.png
+    file_info:
+      mode: 0644
+overrides:
+  deb:
+    depends:
+      - libfontconfig1
+      - libfreetype6
+      - libgl1
+  rpm:
+    depends:
+      - fontconfig
+      - freetype
+      - mesa-libGL

@@ -84,6 +84,7 @@ jobs:
           desktop-file-validate build/linux/quartermaster.desktop
           bash build/linux/make-tar.sh publish/linux-x64 "$VER" dist
           bash build/linux/make-appimage.sh publish/linux-x64 "$VER" dist
+          bash build/linux/make-deb-rpm.sh publish/linux-x64 "$VER" dist
 
       # Runs the real tar and AppImage: marker kinds, --version, exec bits and checksums.
       - name: Test Linux tar.gz and AppImage
@@ -107,6 +108,32 @@ jobs:
           [ "$(marker_kind "$a/squashfs-root/usr/bin/quartermaster-package.json")" = linux-appimage ] || { echo "AppImage marker kind wrong"; exit 1; }
           [ -x "$a/squashfs-root/AppRun" ] || { echo "AppRun not executable"; exit 1; }
           ( cd dist && sha256sum -c "Quartermaster-$VER-linux-x64.tar.gz.sha256" "Quartermaster-$VER-x86_64.AppImage.sha256" )
+
+      # Installs the real .deb on the runner (ubuntu) and the real .rpm in a Fedora container, runs --version and checks the marker kind.
+      - name: Test Linux deb and rpm
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          ( cd dist && sha256sum -c "quartermaster_${VER}_amd64.deb.sha256" "quartermaster-${VER}-1.x86_64.rpm.sha256" )
+          sudo apt-get install -y "./dist/quartermaster_${VER}_amd64.deb"
+          out=$(quartermaster --version)
+          echo "deb -> $out"
+          [ "$out" = "Quartermaster $VER" ] || { echo "deb --version gave '$out'"; exit 1; }
+          python3 -I -c 'import json; d=json.load(open("/opt/quartermaster/quartermaster-package.json")); assert d["package"]=="linux-deb", d' || { echo "deb marker kind wrong"; exit 1; }
+          [ -x /opt/quartermaster/Quartermaster ] || { echo "Quartermaster not executable"; exit 1; }
+          sudo apt-get remove -y quartermaster
+          [ ! -e /opt/quartermaster ] || { echo "/opt/quartermaster still present after remove"; ls -la /opt/quartermaster; exit 1; }
+          [ ! -e /usr/bin/quartermaster ] || { echo "/usr/bin/quartermaster still present after remove"; exit 1; }
+
+          docker run --rm -v "$PWD/dist:/dist:ro" -e VER="$VER" fedora:42 bash -c '
+            set -eu
+            dnf install -y "/dist/quartermaster-${VER}-1.x86_64.rpm"
+            out=$(quartermaster --version)
+            echo "rpm -> $out"
+            [ "$out" = "Quartermaster $VER" ]
+            grep -q linux-rpm /opt/quartermaster/quartermaster-package.json
+            dnf remove -y quartermaster
+            [ ! -e /opt/quartermaster ]'
 
       - name: Publish Windows (x64)
         if: runner.os == 'Windows'
