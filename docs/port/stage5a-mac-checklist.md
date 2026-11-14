@@ -1,5 +1,7 @@
 # Stage 5a checklist for the M1 Mac
 
+> **Note (stage 6b-1):** the `Quartermaster-Desktop-osx-arm64` artifact named below no longer exists. Download the **Quartermaster-macOS** artifact instead and install the app from its `.dmg` (`docs/port/stage6b1-mac-checklist.md`, section A); where these steps use the `osx-arm64` folder, use `/Applications/Quartermaster.app` (the program is `/Applications/Quartermaster.app/Contents/MacOS/Quartermaster`).
+
 This is a test of the ninth cross-platform build of Quartermaster. On top of stage 4c it adds the **app lifecycle**: the app now starts with a **launcher** (your modules, Play offline), **File > Back to launcher** returns there from a game, **Help > Interface Tour** walks through the main window, **Help > About**, and the **update screens** (only with a test feed, see part F; since stage 6a Update now really installs, which `docs/port/stage6a-mac-checklist.md` tests). Button and message wording below was written from the code: check it on a running build. You do not need to know anything technical. Follow the steps and write down what you see.
 
 The test needs about 25 minutes. Use the Riverland demo module and its rules pack (`Riverland-Demo.vmod` and `Riverland-Demo.qrules` in `docs/wiki/demo` of the project; copy both to the Desktop). Part F uses Terminal for two lines.

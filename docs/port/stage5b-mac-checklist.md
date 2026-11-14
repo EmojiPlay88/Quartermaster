@@ -1,5 +1,7 @@
 # Stage 5b checklist for the M1 Mac
 
+> **Note (stage 6b-1):** the `Quartermaster-Desktop-osx-arm64` artifact named below no longer exists. Download the **Quartermaster-macOS** artifact instead and install the app from its `.dmg` (`docs/port/stage6b1-mac-checklist.md`, section A); where these steps use the `osx-arm64` folder, use `/Applications/Quartermaster.app` (the program is `/Applications/Quartermaster.app/Contents/MacOS/Quartermaster`).
+
 This is a test of the tenth cross-platform build of Quartermaster. On top of stage 5a it adds **hot-seat play**: two or more people share one computer. The new game dialog has a **Players page**, **Settings > Game > Players** edits the list in a running game, a **handover screen** ("Pass to Anna (Northern League)") hides every window between players, and a **Player** item in the status bar shows and switches who is at the screen. Button and message wording below was written from the code: check it on a running build. You do not need to know anything technical. Follow the steps and write down what you see.
 
 The test needs about 20 minutes. Use the Riverland demo module and its rules pack (`Riverland-Demo.vmod` and `Riverland-Demo.qrules` in `docs/wiki/demo` of the project; copy both to the Desktop). The pack has two sides, Northern League and Southern Compact; the players below are Anna and Ben.
