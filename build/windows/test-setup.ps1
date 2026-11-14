@@ -1,6 +1,7 @@
 <#
  CI-only test of the per-user setup.exe: silent install, marker kind, --version, in-place reinstall (one uninstall key),
- silent uninstall (install dir gone, user data kept), refusal of an unsafe /DIR= (non-empty foreign folder).
+ silent uninstall (install dir gone, user data kept), refusal of an unsafe /DIR= (non-empty foreign folder),
+ a stale file listed in quartermaster-files.txt is removed by the upgrade.
  It writes a sentinel into the real data folder (%LOCALAPPDATA%\Quartermaster), so it REFUSES to run unless $env:CI is 'true'.
  Usage: build/windows/test-setup.ps1 -Setup <Quartermaster-Setup-x.y.z.exe> -Version <x.y.z>
 #>
@@ -69,11 +70,18 @@ try {
     Set-Content -LiteralPath $sentinel -Value 'ci sentinel' -Encoding ascii
     Check (Test-Path -LiteralPath $sentinel) 'could not write the sentinel'
 
+    Write-Host '== a file the old version had and the new one lacks'
+    $stale = Join-Path $installDir 'stale-test.dll'
+    Set-Content -LiteralPath $stale -Value 'stale' -Encoding ascii
+    Add-Content -LiteralPath (Join-Path $installDir 'quartermaster-files.txt') -Value 'stale-test.dll' -Encoding ascii
+    Check (Test-Path -LiteralPath $stale) 'could not create the stale test file'
+
     Write-Host '== reinstall over the existing install'
     Run-Setup
     $keys = @(UninstKeys)
     Check ($keys.Count -eq 1) "expected exactly one HKCU uninstall key for $appId after reinstall, found $($keys.Count)"
     Check (Test-Path -LiteralPath $exe) 'Quartermaster.exe missing after reinstall'
+    Check (-not (Test-Path -LiteralPath $stale)) 'the stale file listed in quartermaster-files.txt survived the reinstall'
 
     Write-Host '== silent uninstall'
     $unins = Get-ChildItem -LiteralPath $installDir -Filter 'unins*.exe' | Select-Object -First 1

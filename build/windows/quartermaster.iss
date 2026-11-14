@@ -2,7 +2,8 @@
 ; Built by build/windows/make-windows-packages.ps1, which passes /DAppVersion=, /DSourceDir= and /DOutputDir=.
 ; The install folder (%LOCALAPPDATA%\Programs\Quartermaster) is NOT the data folder (%LOCALAPPDATA%\Quartermaster):
 ; uninstalling never touches user data. The folder page is disabled (uninstall removes {app} recursively) and
-; PrepareToInstall refuses unsafe /DIR= values, also in silent mode.
+; PrepareToInstall refuses unsafe /DIR= values, also in silent mode. An upgrade first deletes the files the old install
+; listed in quartermaster-files.txt (CurStepChanged), so files the new version dropped do not stay behind.
 #ifndef AppVersion
   #error AppVersion not defined (pass /DAppVersion=x.y.z)
 #endif
@@ -71,6 +72,61 @@ begin
       FindClose(FindRec);
     end;
   end;
+end;
+
+{ True when a list entry is a plain relative path that may be deleted below {app}. }
+function SafeListEntry(const Rel: String): Boolean;
+var
+  Padded, Base: String;
+begin
+  Result := False;
+  if Rel = '' then Exit;
+  if Rel[1] = '\' then Exit;
+  if (Pos(':', Rel) > 0) or (Pos('*', Rel) > 0) or (Pos('?', Rel) > 0) or (Pos('"', Rel) > 0) or
+     (Pos('<', Rel) > 0) or (Pos('>', Rel) > 0) or (Pos('|', Rel) > 0) then Exit;
+  Padded := '\' + Rel + '\';
+  if Pos('\..\', Padded) > 0 then Exit;
+  Base := LowerCase(ExtractFileName(Rel));
+  if (Base = '') or (Copy(Base, 1, 5) = 'unins') or (Base = 'quartermaster-files.txt') then Exit;
+  Result := True;
+end;
+
+{ An upgrade over an existing install: delete the files the old version listed in quartermaster-files.txt
+  (the new version's files are installed right after), then the folders that became empty. Never outside {app}. }
+procedure RemoveStaleFiles;
+var
+  AppDir, ListFile, Rel, Full, Dir: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  AppDir := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
+  ListFile := AddBackslash(AppDir) + 'quartermaster-files.txt';
+  if not FileExists(ListFile) then Exit;
+  if not LoadStringsFromFile(ListFile, Lines) then Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Rel := Trim(Lines[I]);
+    StringChangeEx(Rel, '/', '\', True);
+    if not SafeListEntry(Rel) then Continue;
+    Full := AddBackslash(AppDir) + Rel;
+    if FileExists(Full) then
+    begin
+      DeleteFile(Full);
+      { Remove folders that are now empty, up to (never including) the install folder. }
+      Dir := TrimSlashes(ExtractFilePath(Full));
+      while IsSameOrUnder(Dir, AppDir) and (CompareText(Dir, AppDir) <> 0) do
+      begin
+        if not RemoveDir(Dir) then Break;
+        Dir := TrimSlashes(ExtractFilePath(Dir));
+      end;
+    end;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    RemoveStaleFiles;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
