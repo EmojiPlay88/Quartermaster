@@ -23,6 +23,7 @@ $installDir = Join-Path $tmp 'install'
 $dataDir = Join-Path $env:LOCALAPPDATA 'Quartermaster'
 $sentinel = Join-Path $dataDir 'ci-sentinel.txt'
 $sentinelDirCreated = $false
+$outside = Join-Path $tmp 'outside.txt'
 $subDir = Join-Path $dataDir 'qm-ci-sub'
 $failed = $false
 
@@ -80,7 +81,9 @@ try {
     Write-Host '== a file the old version had and the new one lacks'
     $stale = Join-Path $installDir 'stale-test.dll'
     Set-Content -LiteralPath $stale -Value 'stale' -Encoding ascii
-    Add-Content -LiteralPath (Join-Path $installDir 'quartermaster-files.txt') -Value 'stale-test.dll' -Encoding ascii
+    # Hostile list lines: the uninstaller and a path outside the install folder must survive.
+    Set-Content -LiteralPath $outside -Value 'outside' -Encoding ascii
+    Add-Content -LiteralPath (Join-Path $installDir 'quartermaster-files.txt') -Value @('stale-test.dll', 'unins000.dat', '..\outside.txt') -Encoding ascii
     Check (Test-Path -LiteralPath $stale) 'could not create the stale test file'
 
     Write-Host '== reinstall over the existing install'
@@ -88,6 +91,8 @@ try {
     $keys = @(UninstKeys)
     Check ($keys.Count -eq 1) "expected exactly one HKCU uninstall key for $appId after reinstall, found $($keys.Count)"
     Check (Test-Path -LiteralPath $exe) 'Quartermaster.exe missing after reinstall'
+    Check (Test-Path -LiteralPath (Join-Path $installDir 'unins000.dat')) 'the upgrade deleted unins000.dat (the uninstaller must never be deleted)'
+    Check (Test-Path -LiteralPath $outside) 'the upgrade deleted a file outside the install folder (..\outside.txt)'
     Check (-not (Test-Path -LiteralPath $stale)) 'the stale file listed in quartermaster-files.txt survived the reinstall'
 
     Write-Host '== silent uninstall'
@@ -108,6 +113,7 @@ try {
     $failed = $true
 } finally {
     Remove-Item -LiteralPath $subDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $outside -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $sentinel -Force -ErrorAction SilentlyContinue
     if ($sentinelDirCreated) { Remove-Item -LiteralPath $dataDir -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue

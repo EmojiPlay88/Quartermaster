@@ -3,8 +3,8 @@
 ; The install folder (%LOCALAPPDATA%\Programs\Quartermaster) is NOT the data folder (%LOCALAPPDATA%\Quartermaster):
 ; uninstalling never touches user data. The folder page is disabled (uninstall removes {app} recursively) and
 ; PrepareToInstall refuses unsafe /DIR= values (drive or share root, the data folder or anything inside it in long or
-; 8.3 spelling, a foreign non-empty folder), also in silent mode. An upgrade first deletes the files the old install
-; listed in quartermaster-files.txt (CurStepChanged), so files the new version dropped do not stay behind.
+; 8.3 spelling, a foreign non-empty folder), also in silent mode. After a successful upgrade, files the old install
+; listed in quartermaster-files.txt that the new list lacks are deleted (CurStepChanged, ssPostInstall).
 #ifndef AppVersion
   #error AppVersion not defined (pass /DAppVersion=x.y.z)
 #endif
@@ -141,41 +141,116 @@ begin
   Result := True;
 end;
 
-{ An upgrade over an existing install: delete the files the old version listed in quartermaster-files.txt
-  (the new version's files are installed right after), then the folders that became empty. Never outside {app}. }
+var
+  OldList: TArrayOfString;
+
+{ A list line as a comparable relative path: trimmed, backslashes, lower case. }
+function NormEntry(const Line: String): String;
+begin
+  Result := Trim(Line);
+  StringChangeEx(Result, '/', '\', True);
+  Result := LowerCase(Result);
+end;
+
+{ True when the folder is a reparse point (junction or symlink): deleting through it could leave {app}. }
+function IsReparseFolder(const Dir: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := False;
+  if FindFirst(Dir, FindRec) then
+  begin
+    try
+      Result := (FindRec.Attributes and $400) <> 0;
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+{ True when a folder between AppDir (excluded) and the file is a reparse point. }
+function PathCrossesReparse(const AppDir, Full: String): Boolean;
+var
+  Dir: String;
+begin
+  Result := False;
+  Dir := TrimSlashes(ExtractFilePath(Full));
+  while IsSameOrUnder(Dir, AppDir) and (CompareText(Dir, AppDir) <> 0) do
+  begin
+    if IsReparseFolder(Dir) then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Dir := TrimSlashes(ExtractFilePath(Dir));
+  end;
+end;
+
+{ At the start of an upgrade: remember the file list of the install that is being replaced. Deletes nothing,
+  so a failed or cancelled install (Inno rolls back only what it copied) never leaves a gutted install. }
+procedure LoadOldList;
+var
+  ListFile: String;
+begin
+  SetArrayLength(OldList, 0);
+  ListFile := AddBackslash(RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) + 'quartermaster-files.txt';
+  if FileExists(ListFile) then
+    { LoadStringsFromFile may read the UTF-8 list as ANSI: a non-ASCII name then simply does not match and is left alone (fails safe). }
+    if not LoadStringsFromFile(ListFile, OldList) then
+      SetArrayLength(OldList, 0);
+end;
+
+{ After a successful install: delete the files the old list had and the new list lacks, then the folders that became
+  empty. Never outside {app}, never through a junction. }
 procedure RemoveStaleFiles;
 var
   AppDir, ListFile, Rel, Full, Dir: String;
-  Lines: TArrayOfString;
+  NewList: TArrayOfString;
+  Keep: TStringList;
   I: Integer;
 begin
+  if GetArrayLength(OldList) = 0 then Exit;
   AppDir := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
   ListFile := AddBackslash(AppDir) + 'quartermaster-files.txt';
+  { Without a readable new list nothing is known to be stale. }
   if not FileExists(ListFile) then Exit;
-  if not LoadStringsFromFile(ListFile, Lines) then Exit;
-  for I := 0 to GetArrayLength(Lines) - 1 do
-  begin
-    Rel := Trim(Lines[I]);
-    StringChangeEx(Rel, '/', '\', True);
-    if not SafeListEntry(Rel) then Continue;
-    Full := AddBackslash(AppDir) + Rel;
-    if FileExists(Full) then
+  if not LoadStringsFromFile(ListFile, NewList) then Exit;
+  if GetArrayLength(NewList) = 0 then Exit;
+  Keep := TStringList.Create;
+  try
+    for I := 0 to GetArrayLength(NewList) - 1 do
+      Keep.Add(NormEntry(NewList[I]));
+    for I := 0 to GetArrayLength(OldList) - 1 do
     begin
-      DeleteFile(Full);
-      { Remove folders that are now empty, up to (never including) the install folder. }
-      Dir := TrimSlashes(ExtractFilePath(Full));
-      while IsSameOrUnder(Dir, AppDir) and (CompareText(Dir, AppDir) <> 0) do
+      Rel := Trim(OldList[I]);
+      StringChangeEx(Rel, '/', '\', True);
+      if not SafeListEntry(Rel) then Continue;
+      if Keep.IndexOf(LowerCase(Rel)) >= 0 then Continue;
+      Full := ExpandFileName(AddBackslash(AppDir) + Rel);
+      if not IsSameOrUnder(Full, AppDir) then Continue;
+      if PathCrossesReparse(AppDir, Full) then Continue;
+      if FileExists(Full) then
       begin
-        if not RemoveDir(Dir) then Break;
-        Dir := TrimSlashes(ExtractFilePath(Dir));
+        DeleteFile(Full);
+        { Remove folders that are now empty, up to (never including) the install folder. }
+        Dir := TrimSlashes(ExtractFilePath(Full));
+        while IsSameOrUnder(Dir, AppDir) and (CompareText(Dir, AppDir) <> 0) do
+        begin
+          if not RemoveDir(Dir) then Break;
+          Dir := TrimSlashes(ExtractFilePath(Dir));
+        end;
       end;
     end;
+  finally
+    Keep.Free;
   end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
+    LoadOldList
+  else if CurStep = ssPostInstall then
     RemoveStaleFiles;
 end;
 
