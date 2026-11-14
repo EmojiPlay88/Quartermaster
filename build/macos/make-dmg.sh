@@ -23,40 +23,45 @@ dmg="$out/$base.dmg"
 zip="$out/$base.zip"
 rm -f "$dmg" "$zip" "$dmg.sha256" "$zip.sha256"
 
+# Temp dirs are removed (and the dmg detached) on every exit, including a failed dmgbuild or ditto.
+bgtmp=""
+mnt=""
+attached=0
+cleanup() {
+  [ -n "$bgtmp" ] && rm -rf "$bgtmp"
+  if [ "$attached" = 1 ]; then hdiutil detach "$mnt" -force >/dev/null 2>&1; fi
+  [ -n "$mnt" ] && rmdir "$mnt" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
+
 # Retina background: one multi-resolution tiff when tiffutil exists, else the 1x png.
 tmpbase="${TMPDIR:-/tmp}"
 tmpbase="${tmpbase%/}"
 bg="$here/dmg-background.png"
 if command -v tiffutil >/dev/null 2>&1 && [ -f "$here/dmg-background@2x.png" ]; then
   bgtmp="$(mktemp -d "$tmpbase/qm-dmgbg.XXXXXX")" || die "cannot create background dir"
-  tiffutil -cathidpicheck "$here/dmg-background.png" "$here/dmg-background@2x.png" -out "$bgtmp/dmg-background.tiff" >/dev/null 2>&1     && [ -f "$bgtmp/dmg-background.tiff" ] && bg="$bgtmp/dmg-background.tiff"
+  tiffutil -cathidpicheck "$here/dmg-background.png" "$here/dmg-background@2x.png" -out "$bgtmp/dmg-background.tiff" >/dev/null 2>&1 \
+    && [ -f "$bgtmp/dmg-background.tiff" ] && bg="$bgtmp/dmg-background.tiff"
 fi
 
 dmgbuild -s "$here/dmg-settings.py" -D app="$app" -D background="$bg" "Quartermaster $version" "$dmg" || die "dmgbuild failed"
 # --norsrc --noextattr: no ._ AppleDouble entries (the updater's extractor would write them as real files). The managed files'
-# xattr signatures are therefore not in the update zip; the updated app is not quarantined and the kernel only enforces the
-# Mach-O signatures, which are embedded.
+# xattr signatures are therefore not in the update zip; the in-app updater re-signs the staged bundle with the make-app-bundle.sh
+# file rule (src/Quartermaster.Render/Update/UpdateStaging.cs) so the bundle seal holds again after an update.
 ditto -c -k --norsrc --noextattr --keepParent "$app" "$zip" || die "ditto zip failed"
 [ -f "$dmg" ] || die "dmgbuild produced no $dmg"
 [ -f "$zip" ] || die "ditto produced no $zip"
 
 for f in "$dmg" "$zip"; do
   sum=$(shasum -a 256 "$f") || die "shasum failed for $f"
-  digest=$(printf '%s
-' "$sum" | awk '{print $1}')
+  digest=$(printf '%s\n' "$sum" | awk '{print $1}')
   [ -n "$digest" ] || die "empty sha256 for $f"
   echo "$digest  $(basename "$f")" > "$f.sha256"
 done
 
 # Mount check; always detach.
 mnt="$(mktemp -d "$tmpbase/qm-dmg.XXXXXX")" || die "cannot create mount dir"
-attached=0
-cleanup() {
-  [ -n "${bgtmp:-}" ] && rm -rf "$bgtmp"
-  if [ "$attached" = 1 ]; then hdiutil detach "$mnt" -force >/dev/null 2>&1; fi
-  rmdir "$mnt" 2>/dev/null
-}
-trap cleanup EXIT
 hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg" >/dev/null || die "cannot mount $dmg"
 attached=1
 [ -d "$mnt/Quartermaster.app" ] || die "dmg lacks Quartermaster.app"
