@@ -30,8 +30,8 @@ public partial class App : Application
         {
             // Command line [<vmod>] [--setup <index>|--new]; applied once the window is up, so its dialogs have an owner.
             var args = StartupArgs.Parse(desktop.Args ?? Array.Empty<string>(), m => System.Diagnostics.Trace.WriteLine(m));
-            if (UsesLauncher(args)) StartLoop(desktop, null);
-            else if (args.ScreenshotPath == null) StartLoop(desktop, args);   // WinForms: LauncherHook ??= ShowLauncher, so a direct start loops too
+            if (UsesLauncher(args)) StartLoop(desktop, null, args);
+            else if (args.ScreenshotPath == null) StartLoop(desktop, args, args);   // WinForms: LauncherHook ??= ShowLauncher, so a direct start loops too
             else StartPlain(desktop);   // screenshot args (normally taken by Program.RunScreenshot first): no loop, no launcher
         }
         base.OnFrameworkInitializationCompleted();
@@ -45,11 +45,12 @@ public partial class App : Application
     /// as WinForms ShowLauncher. With <paramref name="direct"/> (a module on the command line) the game window comes first and gets the
     /// command line once it is open; Back to launcher then shows the launcher with that module selected.
     /// </summary>
-    static void StartLoop(IClassicDesktopStyleApplicationLifetime desktop, StartupArgs? direct)
+    static void StartLoop(IClassicDesktopStyleApplicationLifetime desktop, StartupArgs? direct, StartupArgs startup)
     {
         desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;   // the loop decides when the app ends, not the last window closing
-        // One instance for the run (Offered / Later / checked-this-run carry across launchers); no feed unless the test feed is set.
+        // One instance for the run (Offered / Later / checked-this-run carry across launchers); no feed for a dev build without the test feed.
         var updates = DesktopUpdates.FromEnvironment();
+        updates.OnStart(startup);   // the notice after an update; the start marker follows once the launcher is shown
         var loop = new LaunchLoop(
             justPlayed =>
             {

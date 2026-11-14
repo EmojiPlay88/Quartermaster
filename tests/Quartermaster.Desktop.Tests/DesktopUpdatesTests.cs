@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -6,6 +7,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Quartermaster.Desktop.Launcher;
+using Quartermaster.Desktop.Shell;
 using Quartermaster.Desktop.Updates;
 using Quartermaster.Render;
 using Quartermaster.Render.Update;
@@ -26,10 +28,14 @@ public sealed class DesktopUpdatesTests : IDisposable
     readonly FakeDialogs _dialogs = new();
     readonly List<Window> _windows = new();
     readonly List<Uri> _pages = new();
+    readonly List<System.Diagnostics.ProcessStartInfo> _started = new();
+    readonly List<LauncherWindow> _exits = new();
+    readonly string _app;
 
     public DesktopUpdatesTests()
     {
         _layout = Path.Combine(_tmp, "layout");
+        _app = AppFolder(Path.Combine(_tmp, "app"));
         _feedDir = Path.Combine(_tmp, "feed");
         _updatesRoot = Path.Combine(_layout, DesktopUpdates.FolderName);
         Directory.CreateDirectory(_layout);
@@ -79,9 +85,28 @@ public sealed class DesktopUpdatesTests : IDisposable
         return s;
     }
 
-    DesktopUpdates Updates(IUpdateFeed? feed = null, Version? current = null)
+    /// <summary>An app folder that can update itself: the helper (TEST bytes, never run) and the release's file list.</summary>
+    static string AppFolder(string dir)
     {
-        var u = new DesktopUpdates(feed ?? new FolderFeed(_feedDir), _updatesRoot) { OpenPage = (_, uri) => _pages.Add(uri) };
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, UpdateInstaller.HelperName), "TEST helper"u8.ToArray());
+        File.WriteAllText(Path.Combine(dir, UpdateInstaller.ManifestName), "TEST\n");
+        return Path.GetFullPath(dir);
+    }
+
+    /// <summary>The updater for a test: the given layout (default a win-zip install in <see cref="_app"/>; none with <paramref name="noLayout"/>),
+    /// processes recorded instead of started, exit recorded instead of closing, no game window and no other copy.</summary>
+    DesktopUpdates Updates(IUpdateFeed? feed = null, Version? current = null, InstallLayout? layout = null, bool noLayout = false)
+    {
+        layout ??= noLayout ? null : new InstallLayout(PackageKind.WinZip, new Version(0, 0, 1), _app, null, Path.Combine(_app, "Quartermaster.exe"));
+        var u = new DesktopUpdates(feed ?? new FolderFeed(_feedDir), _updatesRoot, layout)
+        {
+            OpenPage = (_, uri) => _pages.Add(uri),
+            StartProcess = psi => { _started.Add(psi); return null; },
+            RequestExit = w => _exits.Add(w),
+            GameOpen = () => false,
+            OthersRunning = _ => false,
+        };
         if (current != null) u.Current = current;
         return u;
     }
@@ -100,9 +125,9 @@ public sealed class DesktopUpdatesTests : IDisposable
 
     /// <summary>As WinForms LauncherShots.WriteTestFeed: release.json in the GitHub API shape plus the zip and its .sha256 (TEST content).
     /// Without <paramref name="zip"/> the zip is a dummy text file, not a Quartermaster build.</summary>
-    void WriteTestFeed(string version, byte[]? zip = null, string body = Notes)
+    void WriteTestFeed(string version, byte[]? zip = null, string body = Notes, PackageKind kind = PackageKind.WinZip)
     {
-        var zipName = $"Quartermaster-{version}-win-x64.zip";
+        var zipName = UpdateChecker.AssetName(new Version(version), kind);
         zip ??= System.Text.Encoding.UTF8.GetBytes("TEST dummy update asset - not a Quartermaster build");
         File.WriteAllBytes(Path.Combine(_feedDir, zipName), zip);
         File.WriteAllText(Path.Combine(_feedDir, zipName + ".sha256"), Convert.ToHexStringLower(SHA256.HashData(zip)) + "  " + zipName + "\n");
@@ -126,6 +151,23 @@ public sealed class DesktopUpdatesTests : IDisposable
     }
 
     /// <summary>A zip the installer stages: the "app exe" is a copy of Quartermaster.Render.dll, whose FileVersion is the solution version.</summary>
+    /// <summary>A zip with a package marker for 9.9.9 of <paramref name="kind"/> and the file list, both under <paramref name="prefix"/>.</summary>
+    static byte[] PackageZip(string prefix, string kind)
+    {
+        var ms = new MemoryStream();
+        using (var z = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            void Add(string name, byte[] data)
+            {
+                using var s = z.CreateEntry(prefix + name).Open();
+                s.Write(data);
+            }
+            Add(PackageFile.FileName, System.Text.Encoding.UTF8.GetBytes($"{{\"version\":\"9.9.9\",\"package\":\"{kind}\"}}"));
+            Add(UpdateInstaller.ManifestName, "quartermaster-files.txt\n"u8.ToArray());
+        }
+        return ms.ToArray();
+    }
+
     static byte[] StageableZip()
     {
         var ms = new MemoryStream();
@@ -169,16 +211,16 @@ public sealed class DesktopUpdatesTests : IDisposable
     // ---------- tests ----------
 
     [AvaloniaFact]
-    public void No_feed_means_no_update_ui_and_no_check()
+    public void FromEnvironment_NoFeedNoLayout_NoUi()
     {
-        // Without the feed variable the Desktop app has no feed at all (never GitHub). The environment is read through a lookup, so the
-        // test does not depend on the machine's own QUARTERMASTER_UPDATE_FEED.
+        // Without the feed variable and without a package marker beside the exe (a dev build) the Desktop app has no feed at all (never
+        // GitHub). The environment is read through a lookup, so the test does not depend on the machine's own QUARTERMASTER_UPDATE_FEED.
         var asked = new List<string>();
-        var fromEnv = DesktopUpdates.FromEnvironment(_layout, n => { asked.Add(n); return null; });
+        var fromEnv = DesktopUpdates.FromEnvironment(_layout, n => { asked.Add(n); return null; }, Directory.CreateDirectory(Path.Combine(_tmp, "dev-build")).FullName);
         Assert.Equal(new[] { UpdateFeeds.EnvVar }, asked);
         Assert.Null(fromEnv.Feed);
-        Assert.Equal(Path.Combine(_layout, "Updates-desktop"), fromEnv.UpdatesRoot);
-        Assert.Equal("Installing updates comes with the packaged release (stage 6).", DesktopUpdates.InstallLaterText);
+        Assert.Null(fromEnv.Layout);
+        Assert.Equal(Path.Combine(_layout, "Updates"), fromEnv.UpdatesRoot);
 
         WriteTestFeed("9.9.9");   // a release is there, but nothing may look
         var w = new LauncherWindow(Store(), _layout, _dialogs, null, fromEnv);
@@ -331,14 +373,17 @@ public sealed class DesktopUpdatesTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void Update_now_downloads_then_says_install_later_and_starts_nothing()
+    public void UpdateNow_FolderLayout_StartsHelperAndExits()
     {
         // A release of this build's version (the stand-in exe carries its FileVersion), offered to an older "current".
         var ver = AppVersion.Text;
         WriteTestFeed(ver, StageableZip());
         var updates = Updates(current: new Version(0, 0, 1));
-        Launcher(updates);
+        var w = Launcher(updates);
         Assert.Equal($"Quartermaster {ver} is available.", updates.Bar!.Message);
+        var marker = UpdateInstaller.MarkerPath(_updatesRoot, new Version(ver));
+        Directory.CreateDirectory(_updatesRoot);
+        File.WriteAllText(marker, "stale");
         Click(updates.Bar.ActionButton("Update now")!);
         WaitFor(() => updates.Updating != null);
         var dlg = updates.Updating!;
@@ -350,10 +395,224 @@ public sealed class DesktopUpdatesTests : IDisposable
         Assert.True(File.Exists(Path.Combine(staged.StagedDir, UpdateInstaller.AppExe)));
         Assert.StartsWith(Path.GetFullPath(_updatesRoot), staged.Root, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1.0, dlg.ProgressFraction);
-        Assert.Equal(new[] { ("Installing updates comes with the packaged release (stage 6).", "Quartermaster") }, _dialogs.Infos);
+        Assert.Empty(_dialogs.Infos);
         Assert.Empty(_dialogs.Warnings);
-        Assert.False(Directory.Exists(Path.Combine(staged.Root, "helper")));   // the helper is never copied or started
-        Assert.False(File.Exists(UpdateInstaller.MarkerPath(_updatesRoot, new Version(ver))));
+        Assert.Empty(_dialogs.Questions);
+
+        // The helper was copied out of the app folder and started for the folder swap; then the app asked to exit (through the launcher).
+        var psi = Assert.Single(_started);
+        var helper = Path.Combine(staged.Root, "helper", UpdateInstaller.HelperName);
+        Assert.Equal(helper, psi.FileName);
+        Assert.True(File.Exists(helper));
+        const string exe = "Quartermaster.exe";   // a win-zip layout names the Windows exe on every OS
+        Assert.Equal(new[]
+        {
+            "--app", _app, "--staged", staged.StagedDir, "--pid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "--version", ver, "--old", AppVersion.Text, "--marker", marker, "--exe", exe,
+        }, psi.ArgumentList.ToArray());
+        Assert.False(File.Exists(marker));
+        Assert.Equal(new[] { w }, _exits);
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_MacLayout_PassesUnit()
+    {
+        WriteTestFeed("9.9.9", PackageZip("Quartermaster.app/Contents/MacOS/", "mac-app"), kind: PackageKind.MacApp);
+        var apps = Path.Combine(_tmp, "Applications");
+        var bundle = Path.Combine(apps, "Quartermaster.app");
+        var macos = AppFolder(Path.Combine(bundle, "Contents", "MacOS"));
+        var updates = Updates(layout: new InstallLayout(PackageKind.MacApp, new Version(0, 0, 1), macos, bundle, Path.Combine(macos, "Quartermaster")));
+        var w = Launcher(updates);
+        Assert.Equal("Quartermaster 9.9.9 is available.", updates.Bar!.Message);
+        Click(updates.Bar.ActionButton("Update now")!);
+        WaitFor(() => updates.Updating != null && updates.UpdateNowTask.IsCompleted);
+        Assert.Empty(_dialogs.Warnings);
+        var staged = updates.Updating!.Staged!;
+        Assert.Equal("Quartermaster.app", Path.GetFileName(staged.StagedDir));
+        var args = Assert.Single(_started).ArgumentList.ToArray();
+        Assert.Equal(apps, args[1]);
+        Assert.Equal(staged.StagedDir, args[3]);
+        Assert.Equal(new[] { "--exe", "Quartermaster.app/Contents/MacOS/Quartermaster", "--unit", bundle }, args[^4..]);
+        Assert.Equal(new[] { w }, _exits);
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_NoLayout_OffersPage()
+    {
+        // A dev build on the test feed: the check works as in 5a (win-zip asset), but there is nothing to update in place.
+        WriteTestFeed("9.9.9");
+        var updates = Updates(noLayout: true);
+        Launcher(updates);
+        _dialogs.Answer = true;
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.UpdateNowTask.IsCompleted);
+        Assert.Equal(("This copy of Quartermaster can't update itself; download the new version from the release page. Open the download page?", "Quartermaster"),
+            Assert.Single(_dialogs.Questions));
+        Assert.Equal(new Uri("https://github.com/EmojiPlay88/Quartermaster/releases/tag/quartermaster-v9.9.9"), Assert.Single(_pages));
+        Assert.Null(updates.Updating);
+        Assert.Empty(_started);
+        Assert.Empty(_exits);
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_FolderNotWritable_OffersPage()
+    {
+        WriteTestFeed("9.9.9");
+        var missing = Path.Combine(_tmp, "not-there");   // a folder that cannot take a probe file
+        var updates = Updates(layout: new InstallLayout(PackageKind.WinZip, new Version(0, 0, 1), missing, null, Path.Combine(missing, "Quartermaster.exe")));
+        Launcher(updates);
+        _dialogs.Answer = false;
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.UpdateNowTask.IsCompleted);
+        Assert.Equal(("Quartermaster can't update itself in this folder. Open the download page?", "Quartermaster"), Assert.Single(_dialogs.Questions));
+        Assert.Empty(_pages);
+        Assert.Null(updates.Updating);
+        Assert.Empty(_started);
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_HelperMissing_OffersPage()
+    {
+        WriteTestFeed("9.9.9");
+        var app = Directory.CreateDirectory(Path.Combine(_tmp, "no-helper")).FullName;
+        File.WriteAllText(Path.Combine(app, UpdateInstaller.ManifestName), "TEST\n");
+        var updates = Updates(layout: new InstallLayout(PackageKind.WinZip, new Version(0, 0, 1), app, null, Path.Combine(app, "Quartermaster.exe")));
+        Launcher(updates);
+        _dialogs.Answer = false;
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.UpdateNowTask.IsCompleted);
+        Assert.Equal(($"Quartermaster can't update itself: {UpdateInstaller.HelperName} is missing from its folder. Open the download page?", "Quartermaster"),
+            Assert.Single(_dialogs.Questions));
+        Assert.Null(updates.Updating);
+
+        // With the helper but without the release's file list: the NoManifest offer.
+        File.Delete(Path.Combine(app, UpdateInstaller.ManifestName));
+        File.WriteAllBytes(Path.Combine(app, UpdateInstaller.HelperName), [7]);
+        _dialogs.Questions.Clear();
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.UpdateNowTask.IsCompleted);
+        Assert.Equal(UpdateInstaller.NoManifestText + " Open the download page?", Assert.Single(_dialogs.Questions).Message);
+        Assert.Null(updates.Updating);
+        Assert.Empty(_started);
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_OtherCopy_Refuses()
+    {
+        WriteTestFeed("9.9.9");
+        var updates = Updates();
+        var seen = new List<IReadOnlyList<string>>();
+        updates.OthersRunning = list => { seen.Add(list); return true; };
+        Launcher(updates);
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.UpdateNowTask.IsCompleted);
+        Assert.Equal(new[] { ("Close every other Quartermaster window first.", "Quartermaster") }, _dialogs.Infos);
+        // Either exe name of the folder counts (the Desktop app and the classic one).
+        Assert.Equal(new[] { Path.Combine(_app, "Quartermaster.exe"), Path.Combine(_app, "Quartermaster.App.exe") }, Assert.Single(seen));
+        Assert.Null(updates.Updating);
+
+        // A game window open: refused first.
+        _dialogs.Infos.Clear();
+        updates.GameOpen = () => true;
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.UpdateNowTask.IsCompleted);
+        Assert.Equal(new[] { ("Close the game and use the launcher to update.", "Quartermaster") }, _dialogs.Infos);
+        Assert.Single(seen);
+        Assert.Empty(_started);
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_Deb_HandsOffAndKeepsRunning()
+    {
+        var deb = "TEST deb package - not a Quartermaster build"u8.ToArray();
+        WriteTestFeed("9.9.9", deb, kind: PackageKind.LinuxDeb);
+        var updates = Updates(layout: SystemLayout(PackageKind.LinuxDeb));
+        Launcher(updates);
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.Updating != null && updates.UpdateNowTask.IsCompleted);
+        var path = updates.Updating!.Staged!.StagedDir;
+        Assert.Equal("quartermaster_9.9.9_amd64.deb", Path.GetFileName(path));
+        Assert.Equal(deb, File.ReadAllBytes(path));
+        var psi = Assert.Single(_started);
+        Assert.Equal("xdg-open", psi.FileName);
+        Assert.Equal(new[] { path }, psi.ArgumentList.ToArray());
+        Assert.Equal(new[] { ("Quartermaster 9.9.9 was downloaded. Your system's package installer opens now to install it; when it is done, start Quartermaster again.\n\nThe package is saved at:\n\n" + path, "Quartermaster") },
+            _dialogs.Infos);
+        Assert.Empty(_dialogs.Warnings);
+        Assert.Empty(_exits);   // the app keeps running
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_HandOffFails_ShowsPath()
+    {
+        WriteTestFeed("9.9.9", "TEST rpm"u8.ToArray(), kind: PackageKind.LinuxRpm);
+        var updates = Updates(layout: SystemLayout(PackageKind.LinuxRpm));
+        updates.StartProcess = _ => throw new System.ComponentModel.Win32Exception(2, "TEST no xdg-open");
+        Launcher(updates);
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.Updating != null && updates.UpdateNowTask.IsCompleted);
+        var path = updates.Updating!.Staged!.StagedDir;
+        Assert.Equal("quartermaster-9.9.9-1.x86_64.rpm", Path.GetFileName(path));
+        Assert.Equal(new[] { ("Could not open the package installer. The package is saved at:\n\n" + path, "Quartermaster") }, _dialogs.Warnings);
+        Assert.Empty(_dialogs.Infos);
+        Assert.Empty(_exits);
+    }
+
+    [AvaloniaFact]
+    public void UpdateNow_HandOffExitsNonZero_ShowsPath()
+    {
+        WriteTestFeed("9.9.9", "TEST deb"u8.ToArray(), kind: PackageKind.LinuxDeb);
+        var updates = Updates(layout: SystemLayout(PackageKind.LinuxDeb));
+        // xdg-open starts but finds no handler for the package: a real windowless process that exits with code 3 stands in for it.
+        updates.StartProcess = psi =>
+        {
+            _started.Add(psi);
+            return Process.Start(OperatingSystem.IsWindows()
+                ? new ProcessStartInfo("cmd.exe", "/c exit 3") { UseShellExecute = false, CreateNoWindow = true }
+                : new ProcessStartInfo("/bin/sh", ["-c", "exit 3"]) { UseShellExecute = false, CreateNoWindow = true });
+        };
+        Launcher(updates);
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.Updating != null && updates.UpdateNowTask.IsCompleted);
+        var path = updates.Updating!.Staged!.StagedDir;
+        Assert.Equal("xdg-open", Assert.Single(_started).FileName);
+        Assert.Equal(new[] { ("Could not open the package installer. The package is saved at:\n\n" + path, "Quartermaster") }, _dialogs.Warnings);
+        Assert.Empty(_dialogs.Infos);
+        Assert.Empty(_exits);
+    }
+
+    InstallLayout SystemLayout(PackageKind kind)
+    {
+        var app = Directory.CreateDirectory(Path.Combine(_tmp, "usr-lib")).FullName;   // not checked: the package manager owns it
+        return new InstallLayout(kind, new Version(0, 0, 1), app, null, Path.Combine(app, "Quartermaster"));
+    }
+
+    [AvaloniaFact]
+    public void FromEnvironment_LayoutNoTestFeed_UsesGitHubFeedType()
+    {
+        // A packaged copy (marker beside the exe) without the test feed variable: the real feed. Only its type is checked; nothing is fetched.
+        var baseDir = Directory.CreateDirectory(Path.Combine(_tmp, "packaged")).FullName;
+        PackageFile.Write(baseDir, new PackageInfo(new Version(0, 2, 0), PackageKind.LinuxTar));
+        var u = DesktopUpdates.FromEnvironment(_layout, _ => null, baseDir);
+        Assert.IsType<GitHubFeed>(u.Feed);
+        Assert.Equal(PackageKind.LinuxTar, u.Layout!.Kind);
+        Assert.Equal(baseDir, u.Layout.AppDir);
+
+        // With the test feed set, the folder feed wins even for a packaged copy.
+        var t = DesktopUpdates.FromEnvironment(_layout, n => n == UpdateFeeds.EnvVar ? _feedDir : null, baseDir);
+        Assert.Equal(_feedDir, Assert.IsType<FolderFeed>(t.Feed).Folder);
+        Assert.NotNull(t.Layout);
+    }
+
+    [AvaloniaFact]
+    public void FromEnvironment_RemovesOldUpdatesDesktopFolder()
+    {
+        var old = Path.Combine(_layout, "Updates-desktop");
+        Directory.CreateDirectory(Path.Combine(old, "9.9.9", "staged"));
+        File.WriteAllText(Path.Combine(old, "state.json"), "{}");
+        var u = DesktopUpdates.FromEnvironment(_layout, _ => null, Directory.CreateDirectory(Path.Combine(_tmp, "dev")).FullName);
+        Assert.False(Directory.Exists(old));
+        Assert.Null(u.Feed);
     }
 
     [AvaloniaFact]
@@ -534,5 +793,147 @@ public sealed class DesktopUpdatesTests : IDisposable
         Launcher(due);
         Assert.True(due.Bar!.IsVisible);
         Assert.Null(due.LastCheckUtc);
+    }
+
+    // ---------- start-up after an update (stage 6a task 7) ----------
+
+    static StartupArgs Args(params string[] a) => StartupArgs.Parse(a, _ => { });
+
+    string Marker(DesktopUpdates u) => UpdateInstaller.MarkerPath(_updatesRoot, u.Current);
+
+    static UpdateBar NoticeBar(LauncherWindow w) => w.UpdateBarHost.Children.OfType<UpdateBar>().First(b => b.IsVisible);
+
+    [AvaloniaFact]
+    public void UpdatedFrom_WritesMarkerInUpdatesRoot()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--updated-from", "0.1.0"));
+        Assert.False(File.Exists(Marker(updates)));   // not before the launcher is shown
+        var w = new LauncherWindow(Store(checkOnStart: false), _layout, _dialogs, null, updates);
+        _windows.Add(w);
+        Assert.False(File.Exists(Marker(updates)));
+        w.Show();
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(File.Exists(Marker(updates)));
+        Assert.Equal(_updatesRoot, Path.GetDirectoryName(Marker(updates)));
+    }
+
+    [AvaloniaFact]
+    public void NoUpdateArgs_WritesNoMarker()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args());
+        var w = Launcher(updates, Store(checkOnStart: false));
+        Assert.False(File.Exists(Marker(updates)));
+        Assert.All(w.UpdateBarHost.Children.OfType<UpdateBar>(), b => Assert.False(b.IsVisible));
+    }
+
+    [AvaloniaFact]
+    public void UpdatedFrom_ShowsUpdatedNotice()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--updated-from", "0.1.0"));
+        var w = Launcher(updates, Store(checkOnStart: false));
+        var bar = NoticeBar(w);
+        Assert.Equal(UpdateStartup.Updated(updates.Current).Text, bar.Message);
+        Assert.Equal(new[] { "Close" }, bar.Actions);
+        Click(bar.ActionButton("Close")!);
+        Assert.False(bar.IsVisible);
+        // Shown once: the next launcher has no notice.
+        var second = Launcher(updates, Store(checkOnStart: false));
+        Assert.All(second.UpdateBarHost.Children.OfType<UpdateBar>(), b => Assert.False(b.IsVisible));
+    }
+
+    [AvaloniaFact]
+    public void UpdateFailed_JournalLeft_ShowsReleaseLink()
+    {
+        Directory.CreateDirectory(_updatesRoot);
+        File.WriteAllText(Path.Combine(_updatesRoot, UpdateStartup.JournalName), "{}");
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--update-failed", "9.9.9"));
+        var w = Launcher(updates, Store(checkOnStart: false));
+        var bar = NoticeBar(w);
+        var expected = UpdateStartup.Failed(_updatesRoot, "9.9.9", updates.Current);
+        Assert.Equal(expected.Text, bar.Message);
+        Assert.Equal(new[] { "Release page", "Close" }, bar.Actions);
+        Click(bar.ActionButton("Release page")!);
+        Assert.Equal(new[] { expected.Link! }, _pages);
+        Assert.False(File.Exists(Marker(updates)));   // --update-failed is not a confirmed update
+    }
+
+    [AvaloniaFact]
+    public void UpdateFailed_JournalGone_NoLink()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--update-failed", "9.9.9"));
+        var bar = NoticeBar(Launcher(updates, Store(checkOnStart: false)));
+        Assert.Equal(new[] { "Close" }, bar.Actions);
+    }
+
+    [AvaloniaFact]
+    public void UpdateRefused_ShowsNotice()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--update-refused", "9.9.9"));
+        var bar = NoticeBar(Launcher(updates, Store(checkOnStart: false)));
+        Assert.Equal(UpdateStartup.Refused("9.9.9").Text, bar.Message);
+        Assert.Equal(new[] { "Release page", "Close" }, bar.Actions);
+    }
+
+    [AvaloniaFact]
+    public void AutoCheck_OnStartSetting_RunsAgainstFeed()
+    {
+        WriteTestFeed("9.9.9");
+        var updates = Updates();
+        updates.OnStart(Args("--updated-from", "0.1.0"));
+        var w = Launcher(updates, Store(checkOnStart: true));
+        Assert.True(updates.CheckedThisRun);
+        var bars = w.UpdateBarHost.Children.OfType<UpdateBar>().Where(b => b.IsVisible).Select(b => b.Message).ToList();
+        Assert.Contains("Quartermaster 9.9.9 is available.", bars);
+        Assert.Contains(UpdateStartup.Updated(updates.Current).Text, bars);
+    }
+
+    [AvaloniaFact]
+    public void ConfirmedStart_PrunesOldUnitBackups_KeepsHighestAndOthers()
+    {
+        var parent = Path.Combine(_tmp, "unit");
+        Directory.CreateDirectory(parent);
+        var bundle = Path.Combine(parent, "Quartermaster.app");
+        Directory.CreateDirectory(bundle);
+        string B(string v) => Path.Combine(parent, ".Quartermaster.app.qm-backup-" + v);
+        Directory.CreateDirectory(B("0.1.0"));
+        Directory.CreateDirectory(B("0.2.0"));
+        File.WriteAllText(B("0.1.5"), "x");                                       // a file (AppImage style)
+        var other = Path.Combine(parent, ".Other.app.qm-backup-0.0.1");           // another unit's backup
+        var odd = Path.Combine(parent, ".Quartermaster.app.qm-backup-notes");     // not a version
+        var plain = Path.Combine(parent, "Quartermaster.app.qm-backup-0.0.1");    // not hidden: not ours
+        Directory.CreateDirectory(other);
+        Directory.CreateDirectory(odd);
+        Directory.CreateDirectory(plain);
+        DesktopUpdates.PruneUnitBackups(bundle);
+        Assert.True(Directory.Exists(B("0.2.0")));
+        Assert.False(Directory.Exists(B("0.1.0")));
+        Assert.False(File.Exists(B("0.1.5")));
+        Assert.True(Directory.Exists(other));
+        Assert.True(Directory.Exists(odd));
+        Assert.True(Directory.Exists(plain));
+        Assert.True(Directory.Exists(bundle));
+    }
+
+    [AvaloniaFact]
+    public void UpdatedFrom_MacLayout_PrunesUnitBackupsAfterMarker()
+    {
+        var parent = Path.Combine(_tmp, "mac");
+        var bundle = Path.Combine(parent, "Quartermaster.app");
+        var macos = Path.Combine(bundle, "Contents", "MacOS");
+        AppFolder(macos);
+        Directory.CreateDirectory(Path.Combine(parent, ".Quartermaster.app.qm-backup-0.1.0"));
+        Directory.CreateDirectory(Path.Combine(parent, ".Quartermaster.app.qm-backup-0.1.1"));
+        var updates = Updates(feed: new BrokenFeed(), layout: new InstallLayout(PackageKind.MacApp, new Version(0, 0, 1), macos, bundle, Path.Combine(macos, "Quartermaster")));
+        updates.OnStart(Args("--updated-from", "0.1.0"));
+        Launcher(updates, Store(checkOnStart: false));
+        Assert.True(File.Exists(Marker(updates)));
+        Assert.False(Directory.Exists(Path.Combine(parent, ".Quartermaster.app.qm-backup-0.1.0")));
+        Assert.True(Directory.Exists(Path.Combine(parent, ".Quartermaster.app.qm-backup-0.1.1")));
     }
 }

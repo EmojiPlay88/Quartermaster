@@ -53,7 +53,7 @@ public sealed class UpdateWindow : Window
         ShowInTaskbar = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
-        _status.Text = UpdateOffer.DownloadStatus(UpdateChecker.ZipName(info.Version), info.ZipSize);
+        _status.Text = UpdateOffer.DownloadStatus(info.AssetName.Length > 0 ? info.AssetName : UpdateChecker.ZipName(info.Version), info.ZipSize);
         var body = new StackPanel { Margin = new Thickness(10, 10, 10, 0) };
         body.Children.Add(_status);
         body.Children.Add(_bar);

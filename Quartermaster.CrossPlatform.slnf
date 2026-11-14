@@ -9,6 +9,7 @@
       "src/Quartermaster.Relay/Quartermaster.Relay.csproj",
       "src/Quartermaster.Render/Quartermaster.Render.csproj",
       "src/Quartermaster.Rules/Quartermaster.Rules.csproj",
+      "src/Quartermaster.Updater/Quartermaster.Updater.csproj",
       "src/Quartermaster.Vassal/Quartermaster.Vassal.csproj",
       "tests/Quartermaster.Core.Tests/Quartermaster.Core.Tests.csproj",
       "tests/Quartermaster.Desktop.Tests/Quartermaster.Desktop.Tests.csproj",
@@ -19,6 +20,7 @@
       "tests/Quartermaster.Render.Tests/Quartermaster.Render.Tests.csproj",
       "tests/Quartermaster.Rules.Tests/Quartermaster.Rules.Tests.csproj",
       "tests/Quartermaster.TestFixtures/Quartermaster.TestFixtures.csproj",
+      "tests/Quartermaster.Updater.Tests/Quartermaster.Updater.Tests.csproj",
       "tests/Quartermaster.Vassal.Tests/Quartermaster.Vassal.Tests.csproj",
       "tools/Quartermaster.DemoModule/Quartermaster.DemoModule.csproj"
     ]

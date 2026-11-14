@@ -72,8 +72,8 @@ public class SwapperTests
     {
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         t.Swapper().Apply();
-        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=new", "a.dll=new-a", "sub\\c.dll=new-c", TempArea.ManifestName + "=" + TempArea.NewList), TempArea.Snapshot(t.App));
-        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=old", "a.dll=old-a", "sub\\b.dll=old-b", TempArea.ManifestName + "=" + TempArea.OldList), TempArea.Snapshot(t.Backup));
+        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=new", "a.dll=new-a", Path.Combine("sub", "c.dll") + "=new-c", TempArea.ManifestName + "=" + TempArea.NewList), TempArea.Snapshot(t.App));
+        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=old", "a.dll=old-a", Path.Combine("sub", "b.dll") + "=old-b", TempArea.ManifestName + "=" + TempArea.OldList), TempArea.Snapshot(t.Backup));
         Assert.Contains("\"done\"", File.ReadAllText(t.Journal));
     }
 
@@ -215,6 +215,7 @@ public class SwapperTests
     [Fact]
     public void Apply_FileLockedThenFreed_Retries()
     {
+        if (!OperatingSystem.IsWindows()) return; // FileShare.None blocks moves only on Windows
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         var fs = new FileStream(Path.Combine(t.App, "a.dll"), FileMode.Open, FileAccess.Read, FileShare.None);
         _ = Task.Run(async () => { await Task.Delay(1000); fs.Dispose(); });
@@ -226,6 +227,7 @@ public class SwapperTests
     [Fact]
     public void Apply_FileStaysLocked_ThrowsAfterRetryWindow()
     {
+        if (!OperatingSystem.IsWindows()) return; // FileShare.None blocks moves only on Windows
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         using var fs = new FileStream(Path.Combine(t.App, "a.dll"), FileMode.Open, FileAccess.Read, FileShare.None);
         var s = t.Swapper(); s.RetryWindow = TimeSpan.FromMilliseconds(500);
@@ -318,6 +320,7 @@ public class SwapperTests
     [Fact]
     public void Apply_StaleBackupLocked_AppUntouched()
     {
+        if (!OperatingSystem.IsWindows()) return; // FileShare.None blocks moves only on Windows
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         t.Put(t.Backup, "stale.dll", "stale");
         var before = TempArea.Snapshot(t.App);

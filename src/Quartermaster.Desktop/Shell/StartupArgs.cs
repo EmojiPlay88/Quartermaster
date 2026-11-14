@@ -6,14 +6,15 @@ namespace Quartermaster.Desktop.Shell;
 /// The Desktop command line: <c>[&lt;vmod&gt;] [--setup &lt;index&gt;|--new] [--rules &lt;path&gt;|--new-rules &lt;name&gt;]</c>, parsed with the WinForms StartupOptions rules and warning
 /// texts (unknown options and extra arguments are ignored with a warning). Later stages add their options here.
 /// </summary>
-public sealed record StartupArgs(string? ModulePath, int? SetupIndex, bool NewGame, string? ScreenshotPath = null, string? RulesPath = null, string? NewRulesName = null, string? ScreenshotState = null)
+public sealed record StartupArgs(string? ModulePath, int? SetupIndex, bool NewGame, string? ScreenshotPath = null, string? RulesPath = null, string? NewRulesName = null, string? ScreenshotState = null,
+    string? UpdatedFrom = null, string? UpdateFailed = null, string? UpdateRefused = null)
 {
     public static StartupArgs Parse(IReadOnlyList<string> args, Action<string> warn)
     {
         string? path = null;
         int? setup = null;
         var newGame = false;
-        string? shot = null, rules = null, newRules = null, state = null;
+        string? shot = null, rules = null, newRules = null, state = null, updatedFrom = null, updateFailed = null, updateRefused = null;
         for (var i = 0; i < args.Count; i++)
         {
             var a = args[i];
@@ -27,6 +28,18 @@ public sealed record StartupArgs(string? ModulePath, int? SetupIndex, bool NewGa
                 case "--screenshot-state":
                     if (i + 1 < args.Count) state = args[++i];
                     else warn("--screenshot-state needs a state name; ignored.");
+                    break;
+                case "--updated-from":
+                    if (i + 1 < args.Count) updatedFrom = args[++i];
+                    else warn("--updated-from needs a version; ignored.");
+                    break;
+                case "--update-failed":
+                    if (i + 1 < args.Count) updateFailed = args[++i];
+                    else warn("--update-failed needs a version; ignored.");
+                    break;
+                case "--update-refused":
+                    if (i + 1 < args.Count) updateRefused = args[++i];
+                    else warn("--update-refused needs a version; ignored.");
                     break;
                 case "--rules":
                     if (i + 1 < args.Count) rules = args[++i];
@@ -47,6 +60,6 @@ public sealed record StartupArgs(string? ModulePath, int? SetupIndex, bool NewGa
                     break;
             }
         }
-        return new StartupArgs(path, setup, newGame, shot, rules, newRules, state);
+        return new StartupArgs(path, setup, newGame, shot, rules, newRules, state, updatedFrom, updateFailed, updateRefused);
     }
 }

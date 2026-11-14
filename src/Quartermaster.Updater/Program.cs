@@ -22,6 +22,11 @@ public sealed class UpdateOptions
     public string? BackupDir { get; init; }
     public string? JournalPath { get; init; }
     public string? LogPath { get; init; }
+    /// <summary>The exe to restart, relative to <see cref="AppDir"/>; the 0.1.0 contract (and WinForms) restarts Quartermaster.App.exe.</summary>
+    public string Exe { get; init; } = "Quartermaster.App.exe";
+    /// <summary>Optional unit path: when set, the whole unit (a macOS .app bundle or a Linux AppImage) is swapped by <see cref="UnitSwapper"/>
+    /// and <see cref="StagedDir"/> is the staged unit; <see cref="AppDir"/> is then the folder <see cref="Exe"/> is relative to.</summary>
+    public string? Unit { get; init; }
 
     public string ResolvedLogPath => LogPath ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(MarkerPath))!, "helper.log");
 
@@ -45,6 +50,8 @@ public sealed class UpdateOptions
             AppDir = m["--app"], StagedDir = m["--staged"], Pid = pid, Version = m["--version"], OldVersion = m["--old"],
             MarkerPath = m["--marker"], MarkerTimeout = TimeSpan.FromSeconds(mt), ExitTimeout = TimeSpan.FromSeconds(et),
             JournalPath = Path.Combine(folder, "swap-journal.json"), LogPath = Path.Combine(folder, "helper.log"),
+            Exe = m.TryGetValue("--exe", out var exe) ? exe : "Quartermaster.App.exe",
+            Unit = m.TryGetValue("--unit", out var unit) ? unit : null,
         };
     }
 
@@ -57,7 +64,15 @@ public interface IProcessHost
     void Kill(int pid);
     /// <summary>Running processes with this name and their main module path (null when it cannot be read).</summary>
     IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName);
+    /// <summary>
+    /// Running processes whose environment has APPIMAGE, with its value, their APPDIR value (null when unset) and their executable
+    /// (the <c>/proc/&lt;pid&gt;/exe</c> link target; null when unreadable). Linux only; empty elsewhere, unreadable processes skipped.
+    /// </summary>
+    IEnumerable<AppImageProcess> AppImageProcesses();
 }
+
+/// <summary>A process started from an AppImage (or inheriting its environment): its pid, APPIMAGE and APPDIR values and its executable.</summary>
+public readonly record struct AppImageProcess(int Pid, string AppImage, string? AppDir, string? Exe);
 
 public sealed class RealProcessHost : IProcessHost
 {
@@ -70,7 +85,7 @@ public sealed class RealProcessHost : IProcessHost
 
     public int Start(string exe, string args, string workDir)
     {
-        var p = Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = false, WorkingDirectory = workDir })
+        var p = Process.Start(StartInfo(exe, args, workDir))
                 ?? throw new InvalidOperationException("Process.Start returned null");
         return p.Id;
     }
@@ -98,6 +113,40 @@ public sealed class RealProcessHost : IProcessHost
         }
         return list;
     }
+
+    public IEnumerable<AppImageProcess> AppImageProcesses()
+    {
+        if (!OperatingSystem.IsLinux()) return [];
+        string[] dirs;
+        try { dirs = Directory.GetDirectories("/proc"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+        var list = new List<AppImageProcess>();
+        foreach (var d in dirs)
+        {
+            if (!int.TryParse(Path.GetFileName(d), out var pid)) continue;
+            string[] environ;
+            try { environ = File.ReadAllText(Path.Combine(d, "environ")).Split('\0'); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            string? Var(string name) => environ.FirstOrDefault(v => v.StartsWith(name + "=", StringComparison.Ordinal)) is { } entry ? entry[(name.Length + 1)..] : null;
+            if (Var("APPIMAGE") is not { } image) continue;
+            string? exe = null;
+            try { exe = new FileInfo(Path.Combine(d, "exe")).LinkTarget; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            list.Add(new AppImageProcess(pid, image, Var("APPDIR"), exe));
+        }
+        return list;
+    }
+
+    /// <summary>Variables the AppImage runtime sets for the app; a relaunch drops them so it looks like a normal launch (and is not taken for a running copy).</summary>
+    internal static readonly string[] AppImageVariables = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"];
+
+    /// <summary>The start info for a restart: no shell, the given folder, the helper's environment minus <see cref="AppImageVariables"/>.</summary>
+    internal static ProcessStartInfo StartInfo(string exe, string args, string workDir)
+    {
+        var psi = new ProcessStartInfo(exe, args) { UseShellExecute = false, WorkingDirectory = workDir };
+        foreach (var v in AppImageVariables) psi.Environment.Remove(v);
+        return psi;
+    }
 }
 
 public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<string> log)
@@ -123,9 +172,21 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
     {
         var markerFolder = Path.GetDirectoryName(Path.GetFullPath(o.MarkerPath))!;
         var journalPath = o.JournalPath ?? Path.Combine(markerFolder, "swap-journal.json");
-        var backup = o.BackupDir ?? ChooseBackupDir(o.AppDir, o.OldVersion, markerFolder);
-        var appExe = Path.Combine(o.AppDir, "Quartermaster.App.exe");
-        var swapper = new Swapper(o.AppDir, o.StagedDir, backup, journalPath) { Version = o.Version };
+        var appExe = Path.Combine(o.AppDir, o.Exe);
+        ISwap swapper;
+        Func<bool> otherCopies;
+        if (o.Unit is { } unit)
+        {
+            swapper = new UnitSwapper(unit, o.StagedDir, UnitSwapper.BackupPathFor(unit, o.OldVersion), journalPath) { Version = o.Version };
+            otherCopies = () => OtherUnitCopiesRunning(host, unit, o.Exe, o.Pid);
+        }
+        else
+        {
+            var backup = o.BackupDir ?? ChooseBackupDir(o.AppDir, o.OldVersion, markerFolder);
+            string[] exePaths = [.. new[] { appExe, Path.Combine(o.AppDir, "Quartermaster.exe"), Path.Combine(o.AppDir, "Quartermaster.App.exe") }.Distinct()];
+            swapper = new Swapper(o.AppDir, o.StagedDir, backup, journalPath) { Version = o.Version };
+            otherCopies = () => OtherCopiesRunning(host, exePaths, o.Pid);
+        }
 
         log($"Waiting up to {o.ExitTimeout.TotalSeconds:0}s for app pid {o.Pid} to exit");
         var deadline = DateTime.UtcNow + o.ExitTimeout;
@@ -137,7 +198,7 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
 
         try { File.Delete(o.MarkerPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
 
-        if (OtherCopiesRunning(host, appExe, o.Pid))
+        if (otherCopies())
         {
             log("Another Quartermaster runs from the app folder; refusing, nothing changed");
             return Refused(appExe);
@@ -150,7 +211,7 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
             if (outcome == ResumeOutcome.RolledBack) return Failed(swapper, appExe, rollback: false);
             if (outcome is ResumeOutcome.None or ResumeOutcome.Stale) { log("Applying update"); swapper.Apply(); }
         }
-        catch (ManifestMissingException ex)
+        catch (Exception ex) when (ex is ManifestMissingException or UnitMissingException)
         {
             log("Refusing, nothing changed: " + ex.Message);
             return Refused(appExe);
@@ -184,7 +245,7 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         return Failed(swapper, appExe, rollback: true);
     }
 
-    int Failed(Swapper swapper, string appExe, bool rollback)
+    int Failed(ISwap swapper, string appExe, bool rollback)
     {
         if (rollback)
         {
@@ -201,12 +262,88 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         return ExitCodes.RolledBack;
     }
 
-    /// <summary>True when a process other than <paramref name="selfPid"/> runs from <paramref name="appExe"/> (paths compared case-insensitively; unreadable paths ignored).</summary>
-    public static bool OtherCopiesRunning(IProcessHost host, string appExe, int selfPid)
+    /// <summary>True when a process other than <paramref name="selfPid"/> runs from any of <paramref name="exePaths"/> (paths compared OrdinalIgnoreCase on Windows/macOS, Ordinal on Linux; unreadable paths ignored).</summary>
+    public static bool OtherCopiesRunning(IProcessHost host, IReadOnlyList<string> exePaths, int selfPid) =>
+        OtherCopiesRunning(host, exePaths, selfPid, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+
+    internal static bool OtherCopiesRunning(IProcessHost host, IReadOnlyList<string> exePaths, int selfPid, StringComparison comparison)
     {
-        var want = Path.GetFullPath(appExe);
-        return host.ProcessesNamed(Path.GetFileNameWithoutExtension(appExe))
-            .Any(p => p.Pid != selfPid && p.Path != null && string.Equals(Path.GetFullPath(p.Path), want, StringComparison.OrdinalIgnoreCase));
+        foreach (var exe in exePaths)
+        {
+            var want = Path.GetFullPath(exe);
+            if (host.ProcessesNamed(Path.GetFileNameWithoutExtension(exe))
+                .Any(p => p.Pid != selfPid && p.Path != null && string.Equals(Path.GetFullPath(p.Path), want, comparison)))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Unit mode: true when another process runs this unit. A file unit (AppImage) is running in a process, other than
+    /// <paramref name="selfPid"/> and this helper, whose environment has APPIMAGE=&lt;the unit's full path&gt; and whose executable is
+    /// either the unit itself (the AppImage runtime) or lies under that process's own APPDIR (the mounted app). Other children inherit
+    /// APPIMAGE too (a browser opened from the app's links), and do not count. A directory unit (.app) matches a process named after
+    /// <paramref name="exe"/> whose path is inside the unit.
+    /// </summary>
+    public static bool OtherUnitCopiesRunning(IProcessHost host, string unit, string exe, int selfPid) =>
+        OtherUnitCopiesRunning(host, unit, exe, selfPid, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+
+    internal static bool OtherUnitCopiesRunning(IProcessHost host, string unit, string exe, int selfPid, StringComparison comparison)
+    {
+        var unitFull = Path.GetFullPath(unit).TrimEnd('\\', '/');
+        if (File.Exists(unitFull))
+        {
+            // The runtime sets APPIMAGE to the real path; compare both sides with links resolved.
+            var want = ResolveLinks(unitFull);
+            return host.AppImageProcesses().Any(p => p.Pid != selfPid && p.Pid != Environment.ProcessId && p.AppImage.Length > 0 && p.Exe is { Length: > 0 } &&
+                string.Equals(ResolveLinks(p.AppImage), want, StringComparison.Ordinal) && IsAppImageApp(p.Exe, p.AppDir, want));
+        }
+        var prefix = unitFull + Path.DirectorySeparatorChar;
+        return host.ProcessesNamed(Path.GetFileNameWithoutExtension(exe))
+            .Any(p => p.Pid != selfPid && p.Path != null && Path.GetFullPath(p.Path).StartsWith(prefix, comparison));
+    }
+
+    /// <summary>True when <paramref name="exe"/> is the AppImage <paramref name="unit"/> itself (its runtime) or lies under <paramref name="appDir"/> (the mounted app).</summary>
+    static bool IsAppImageApp(string exe, string? appDir, string unit)
+    {
+        var exeFull = ResolveLinks(exe);
+        if (string.Equals(exeFull, unit, StringComparison.Ordinal)) return true;
+        if (string.IsNullOrEmpty(appDir)) return false;
+        var dir = ResolveLinks(appDir).TrimEnd('\\', '/');
+        return dir.Length > 0 && exeFull.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    /// <summary>The full path with every existing symbolic-link component resolved (left as is where unreadable); on Windows just the full path.</summary>
+    internal static string ResolveLinks(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (OperatingSystem.IsWindows()) return full;
+        for (var hops = 0; hops < 40; hops++)
+        {
+            var root = Path.GetPathRoot(full) ?? "";
+            var parts = full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+            var current = root;
+            var restarted = false;
+            for (var i = 0; i < parts.Length && !restarted; i++)
+            {
+                var next = Path.Combine(current, parts[i]);
+                try
+                {
+                    FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
+                    if (info.LinkTarget != null && info.ResolveLinkTarget(true) is { } target)
+                    {
+                        // The target's own path may contain links (e.g. /var -> /private/var): walk the new full path again.
+                        full = Path.GetFullPath(Path.Combine([target.FullName, .. parts[(i + 1)..]]));
+                        restarted = true;
+                        continue;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                current = next;
+            }
+            if (!restarted) return current;
+        }
+        return full;
     }
 
     int Refused(string appExe)
@@ -229,7 +366,7 @@ public static class Program
         var o = UpdateOptions.Parse(args);
         if (o == null)
         {
-            Console.Error.WriteLine("Usage: Quartermaster.Updater.exe --app <dir> --staged <dir> --pid <n> --version <v> --old <v> --marker <path> [--marker-timeout <s>] [--exit-timeout <s>]");
+            Console.Error.WriteLine("Usage: Quartermaster.Updater --app <dir> --staged <dir> --pid <n> --version <v> --old <v> --marker <path> [--marker-timeout <s>] [--exit-timeout <s>] [--exe <rel>] [--unit <path>]");
             return ExitCodes.BadArgs;
         }
         var logPath = o.ResolvedLogPath;

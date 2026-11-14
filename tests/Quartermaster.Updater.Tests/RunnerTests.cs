@@ -18,7 +18,21 @@ sealed class FakeHost : IProcessHost
     }
     public void Kill(int pid) => Killed.Add(pid);
     public List<(int Pid, string? Path)> Running = [];
-    public IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName) => Running;
+    /// <summary>When set, processes are looked up by exact name here instead of <see cref="Running"/>.</summary>
+    public Dictionary<string, List<(int Pid, string? Path)>>? ByName;
+    public List<string> Queried = [];
+    public IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName)
+    {
+        Queried.Add(processName);
+        return ByName == null ? Running : ByName.GetValueOrDefault(processName) ?? [];
+    }
+    /// <summary>Per pid: its environment variables.</summary>
+    public Dictionary<int, Dictionary<string, string>> Env = [];
+    /// <summary>Per pid: its executable (the /proc/&lt;pid&gt;/exe target).</summary>
+    public Dictionary<int, string> Exe = [];
+    public IEnumerable<AppImageProcess> AppImageProcesses() =>
+        Env.Where(e => e.Value.ContainsKey("APPIMAGE"))
+            .Select(e => new AppImageProcess(e.Key, e.Value["APPIMAGE"], e.Value.GetValueOrDefault("APPDIR"), Exe.GetValueOrDefault(e.Key)));
 }
 
 public class RunnerTests
@@ -121,6 +135,7 @@ public class RunnerTests
     [Fact]
     public void ParseArgs_RequiredAndDefaults()
     {
+        if (!OperatingSystem.IsWindows()) return; // literal C:\ paths
         var o = UpdateOptions.Parse(["--app", @"C:\a", "--staged", @"C:\s", "--pid", "7", "--version", "2.0.0", "--old", "1.0.0", "--marker", @"C:\d\started-2.0.0"]);
         Assert.NotNull(o);
         Assert.Equal(TimeSpan.FromSeconds(30), o!.MarkerTimeout);
@@ -158,6 +173,7 @@ public class RunnerTests
     [Fact]
     public void Main_OtherCopyRunningFromAppFolder_RefusedNothingChanged()
     {
+        if (OperatingSystem.IsLinux()) return; // the upper-case match relies on a case-insensitive file system rule
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         var oldSnap = TempArea.Snapshot(t.App); var stagedSnap = TempArea.Snapshot(t.Staged);
         var host = new FakeHost();
@@ -177,9 +193,65 @@ public class RunnerTests
         var exe = Path.Combine(t.App, "Quartermaster.App.exe");
         var host = new FakeHost();
         host.Running.AddRange([(1, exe), (2, null), (3, Path.Combine(t.Root, "elsewhere", "Quartermaster.App.exe"))]);
-        Assert.False(UpdateRunner.OtherCopiesRunning(host, exe, selfPid: 1));
+        Assert.False(UpdateRunner.OtherCopiesRunning(host, [exe], selfPid: 1));
         host.Running.Add((4, exe));
-        Assert.True(UpdateRunner.OtherCopiesRunning(host, exe, selfPid: 1));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, [exe], selfPid: 1));
+    }
+
+    [Fact]
+    public void OtherCopiesRunning_EitherExeName()
+    {
+        using var t = new TempArea();
+        var a = Path.Combine(t.App, "Quartermaster.App.exe");
+        var b = Path.Combine(t.App, "Quartermaster");
+        var host = new FakeHost();
+        host.Running.Add((5, b));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, [a, b], selfPid: 1));
+        host.Running.Clear();
+        host.Running.Add((6, a));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, [a, b], selfPid: 1));
+        host.Running.Clear();
+        Assert.False(UpdateRunner.OtherCopiesRunning(host, [a, b], selfPid: 1));
+    }
+
+    [Fact]
+    public void OtherCopiesRunning_CaseRulePerOs()
+    {
+        using var t = new TempArea();
+        var exe = Path.Combine(t.App, "Quartermaster");
+        var host = new FakeHost();
+        host.Running.Add((9, Path.Combine(t.App, "QUARTERMASTER")));
+        Assert.True(UpdateRunner.OtherCopiesRunning(host, [exe], 1, StringComparison.OrdinalIgnoreCase));
+        Assert.False(UpdateRunner.OtherCopiesRunning(host, [exe], 1, StringComparison.Ordinal));
+        Assert.Equal(!OperatingSystem.IsLinux(), UpdateRunner.OtherCopiesRunning(host, [exe], 1));
+    }
+
+    [Fact]
+    public void ParseArgs_ExeDefaultAndOverride()
+    {
+        string[] req = ["--app", "a", "--staged", "s", "--pid", "7", "--version", "2.0.0", "--old", "1.0.0", "--marker", Path.Combine("d", "started-2.0.0")];
+        var o = UpdateOptions.Parse(req)!;
+        Assert.Equal("Quartermaster.App.exe", o.Exe);
+        Assert.Null(o.Unit);
+        var p = UpdateOptions.Parse([.. req, "--exe", "Quartermaster", "--unit", "u"])!;
+        Assert.Equal("Quartermaster", p.Exe);
+        Assert.Equal("u", p.Unit);
+    }
+
+    [Fact]
+    public void Main_RestartsConfiguredExe()
+    {
+        using var t = new TempArea(); t.SeedOld(); t.SeedNew();
+        var host = new FakeHost();
+        host.OnStart = (s, _) => { if (s.Args.StartsWith("--updated-from")) File.WriteAllText(t.Marker, "ok"); };
+        var o = new UpdateOptions
+        {
+            AppDir = t.App, StagedDir = t.Staged, Pid = 1, Version = "2.0.0", OldVersion = "1.0.0", MarkerPath = t.Marker,
+            MarkerTimeout = TimeSpan.FromSeconds(2), ExitTimeout = TimeSpan.FromSeconds(5), BackupDir = t.Backup, JournalPath = t.Journal,
+            Exe = "Quartermaster.exe",
+        };
+        Assert.Equal(ExitCodes.Ok, new UpdateRunner(o, host, _ => { }).Run());
+        Assert.Equal(Path.Combine(t.App, "Quartermaster.exe"), Assert.Single(host.Started).Exe);
     }
 
     [Fact]
@@ -216,5 +288,196 @@ public class RunnerTests
         var code = new UpdateRunner(Opts(t), host, _ => { }).Run();
         Assert.Equal(ExitCodes.Ok, code);
         Assert.Equal("new", File.ReadAllText(Path.Combine(t.App, "Quartermaster.App.exe")));
+    }
+
+    // ---------- unit mode (.app bundle / AppImage) ----------
+
+    static UpdateOptions UnitOpts(UnitArea t, int markerSec = 2) => new()
+    {
+        AppDir = t.Root, // the bundle's parent, or the AppImage's folder
+        Exe = t.IsFile ? Path.GetFileName(t.Unit) : Path.Combine(Path.GetFileName(t.Unit), UnitArea.Exe),
+        Unit = t.Unit, StagedDir = t.Staged, Pid = 1, Version = "2.0.0", OldVersion = "1.0.0", MarkerPath = t.Marker,
+        MarkerTimeout = TimeSpan.FromSeconds(markerSec), ExitTimeout = TimeSpan.FromSeconds(5), JournalPath = t.Journal,
+    };
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Main_UnitMode_NoMarker_RollsBack(bool file)
+    {
+        using var t = new UnitArea(file);
+        var oldSnap = UnitArea.Snapshot(t.Unit);
+        var host = new FakeHost();
+        var code = new UpdateRunner(UnitOpts(t, markerSec: 1), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.RolledBack, code);
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal("", UnitArea.Snapshot(t.Backup));
+        Assert.Equal(2, host.Started.Count);
+        Assert.Equal("--update-failed 2.0.0", host.Started[1].Args);
+        Assert.Contains(1000, host.Killed);
+        Assert.False(File.Exists(t.Journal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Main_UnitMode_MarkerAppears_KeepsNewAndRestartsInsideUnit(bool file)
+    {
+        using var t = new UnitArea(file);
+        var newSnap = UnitArea.Snapshot(t.Staged); var oldSnap = UnitArea.Snapshot(t.Unit);
+        var host = new FakeHost();
+        host.OnStart = (s, _) => { if (s.Args.StartsWith("--updated-from")) File.WriteAllText(t.Marker, "ok"); };
+        var code = new UpdateRunner(UnitOpts(t), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.Ok, code);
+        Assert.Equal(newSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Backup));
+        var s = Assert.Single(host.Started);
+        Assert.Equal(file ? t.Unit : Path.Combine(t.Unit, UnitArea.Exe), s.Exe);
+        Assert.Equal("--updated-from 1.0.0", s.Args);
+        Assert.False(File.Exists(t.Journal));
+    }
+
+    [Fact]
+    public void Main_UnitMode_StagedMissing_RefusedNothingChanged()
+    {
+        using var t = new UnitArea();
+        var oldSnap = UnitArea.Snapshot(t.Unit);
+        Directory.Delete(t.Staged, true);
+        var host = new FakeHost();
+        Assert.Equal(ExitCodes.Refused, new UpdateRunner(UnitOpts(t), host, _ => { }).Run());
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal("--update-refused 2.0.0", Assert.Single(host.Started).Args);
+    }
+
+    [Fact]
+    public void Main_UnitMode_OtherAppImageRunning_RefusedNothingChanged()
+    {
+        using var t = new UnitArea(file: true);
+        var host = new FakeHost();
+        host.Env[77] = new() { ["APPIMAGE"] = Path.GetFullPath(t.Unit) }; // the AppImage runtime
+        host.Exe[77] = Path.GetFullPath(t.Unit);
+        Assert.Equal(ExitCodes.Refused, new UpdateRunner(UnitOpts(t), host, _ => { }).Run());
+        Assert.Equal("old-image", File.ReadAllText(t.Unit));
+        Assert.False(File.Exists(t.Journal));
+        Assert.Equal("--update-refused 2.0.0", Assert.Single(host.Started).Args);
+    }
+
+    [Fact]
+    public void OtherUnitCopiesRunning_AppImage_ByAppImageEnvironment()
+    {
+        using var t = new UnitArea(file: true);
+        var full = Path.GetFullPath(t.Unit);
+        var host = new FakeHost();
+        // A FUSE-like process named after the AppImage file, without APPIMAGE, is not a running copy.
+        host.ByName = new() { ["Quartermaster.AppImage"] = [(50, t.Unit)] };
+        host.Env[50] = new() { ["PATH"] = "/usr/bin" };
+        host.Env[1] = new() { ["APPIMAGE"] = full };                                  // the exiting app (selfPid)
+        host.Exe[1] = full;
+        host.Env[Environment.ProcessId] = new() { ["APPIMAGE"] = full };              // the helper itself inherits it
+        host.Exe[Environment.ProcessId] = full;
+        host.Env[60] = new() { ["APPIMAGE"] = Path.Combine(t.Root, "Other.AppImage") }; // another AppImage
+        host.Exe[60] = Path.Combine(t.Root, "Other.AppImage");
+        host.Env[65] = new() { ["APPIMAGE"] = full };                                  // exe unreadable
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+        host.Env[70] = new() { ["APPIMAGE"] = full };                                  // the runtime of this unit
+        host.Exe[70] = full;
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+    }
+
+    [Fact]
+    public void OtherUnitCopiesRunning_AppImage_OnlyTheRuntimeOrTheMountedApp()
+    {
+        using var t = new UnitArea(file: true);
+        var full = Path.GetFullPath(t.Unit);
+        var mount = Path.GetFullPath("/tmp/.mount_x");
+        var host = new FakeHost();
+        // A browser opened from the app's links inherits APPIMAGE and APPDIR but runs from outside the mount: not a copy.
+        host.Env[80] = new() { ["APPIMAGE"] = full, ["APPDIR"] = mount };
+        host.Exe[80] = Path.GetFullPath("/usr/bin/firefox");
+        // A process whose exe merely shares the mount's name prefix is not under it either.
+        host.Env[81] = new() { ["APPIMAGE"] = full, ["APPDIR"] = mount };
+        host.Exe[81] = mount + "2" + Path.DirectorySeparatorChar + "Quartermaster";
+        // Without APPDIR only the runtime itself counts.
+        host.Env[82] = new() { ["APPIMAGE"] = full };
+        host.Exe[82] = Path.Combine(mount, "usr", "bin", "Quartermaster");
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+
+        host.Env[90] = new() { ["APPIMAGE"] = full, ["APPDIR"] = mount };              // the mounted app
+        host.Exe[90] = Path.Combine(mount, "usr", "bin", "Quartermaster");
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+
+        host.Env.Remove(90);
+        host.Env[91] = new() { ["APPIMAGE"] = full, ["APPDIR"] = mount };              // the runtime (exe == the unit)
+        host.Exe[91] = full;
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+    }
+
+    [Fact]
+    public void OtherUnitCopiesRunning_AppImage_SymlinkedFolderStillMatches()
+    {
+        if (OperatingSystem.IsWindows()) return; // links need privileges there; ResolveLinks is the full path on Windows
+        using var t = new UnitArea(file: true);
+        var link = Path.Combine(Path.GetTempPath(), "qmlink-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateSymbolicLink(link, t.Root);
+        try
+        {
+            var viaLink = Path.Combine(link, Path.GetFileName(t.Unit));
+            Assert.Equal(UpdateRunner.ResolveLinks(t.Unit), UpdateRunner.ResolveLinks(viaLink));
+            var host = new FakeHost();
+            host.Env[70] = new() { ["APPIMAGE"] = UpdateRunner.ResolveLinks(t.Unit) }; // the runtime's realpath
+            host.Exe[70] = UpdateRunner.ResolveLinks(t.Unit);
+            Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, viaLink, "Quartermaster.AppImage", 1));
+        }
+        finally { Directory.Delete(link); }
+    }
+
+    [Fact]
+    public void ResolveLinks_ChainedLinks_BothRoutesResolveToTheSameString()
+    {
+        if (OperatingSystem.IsWindows()) return; // links need privileges there
+        using var t = new UnitArea(file: true);
+        var a = Path.Combine(t.Root, "real-a"); Directory.CreateDirectory(Path.Combine(a, "nested"));
+        var l1 = Path.Combine(t.Root, "l1"); Directory.CreateSymbolicLink(l1, a);
+        var l2 = Path.Combine(t.Root, "l2"); Directory.CreateSymbolicLink(l2, Path.Combine(l1, "nested"));
+        Assert.Equal(UpdateRunner.ResolveLinks(Path.Combine(a, "nested", "x")), UpdateRunner.ResolveLinks(Path.Combine(l2, "x")));
+        Assert.Equal(UpdateRunner.ResolveLinks(Path.Combine(a, "nested")), UpdateRunner.ResolveLinks(l2));
+    }
+
+    [Fact]
+    public void ResolveLinks_PlainPath_IsTheFullPath()
+    {
+        using var t = new UnitArea(file: true);
+        Assert.Equal(UpdateRunner.ResolveLinks(t.Unit), UpdateRunner.ResolveLinks(Path.Combine(t.Root, ".", Path.GetFileName(t.Unit))));
+        if (OperatingSystem.IsWindows()) Assert.Equal(Path.GetFullPath(t.Unit), UpdateRunner.ResolveLinks(t.Unit));
+    }
+
+    [Fact]
+    public void StartInfo_DropsAppImageVariablesKeepsOthers()
+    {
+        string[] vars = ["APPIMAGE", "APPDIR", "ARGV0", "OWD", "QM_TEST_KEEP"];
+        var saved = vars.ToDictionary(v => v, Environment.GetEnvironmentVariable);
+        try
+        {
+            foreach (var v in vars) Environment.SetEnvironmentVariable(v, "x");
+            var psi = RealProcessHost.StartInfo("app", "--updated-from 1.0.0", "dir");
+            foreach (var v in RealProcessHost.AppImageVariables) Assert.False(psi.Environment.ContainsKey(v), v);
+            Assert.Equal("x", psi.Environment["QM_TEST_KEEP"]);
+            Assert.False(psi.UseShellExecute);
+            Assert.Equal("dir", psi.WorkingDirectory);
+            Assert.Equal("--updated-from 1.0.0", psi.Arguments);
+        }
+        finally { foreach (var (k, v) in saved) Environment.SetEnvironmentVariable(k, v); }
+    }
+
+    [Fact]
+    public void OtherUnitCopiesRunning_AppBundle_OnlyPathsUnderTheUnit()
+    {
+        using var t = new UnitArea();
+        var host = new FakeHost();
+        host.Running.AddRange([(1, Path.Combine(t.Unit, UnitArea.Exe)), (2, null), (3, Path.Combine(t.Unit + "2", UnitArea.Exe)), (4, t.Unit)]);
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster", 1, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(["Quartermaster"], host.Queried);
+        host.Running.Add((5, Path.Combine(t.Unit, UnitArea.Exe)));
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster", 1, StringComparison.OrdinalIgnoreCase));
     }
 }

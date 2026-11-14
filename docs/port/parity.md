@@ -120,7 +120,7 @@ Stage 4b = Tools > Settings (General, Game, Display, Map, Dice & Log, Toolbar, K
 - The counter palette is shown only in game master mode, as WinForms. Desktop has no `--gm` option: game master mode comes from the Settings > General checkbox only.
 - The counter menu's Delete counter follows Settings > General game master mode and asks first per "Ask before deleting pieces", as WinForms.
 - Toolbar tooltips show the shortcut, e.g. "1d6 (F5)", "LOS (L)"; WinForms toolbar tips have no key.
-- General > "Check for updates on start" is shown and stored, but stays inactive until installing updates comes with stage 6 (5a uses it only with the test feed, see the Stage-5a deviations). "Select the last module in the launcher" is live since 5a: every module opened in a game window the launcher loop started is remembered (`LastModulePath`, as WinForms), and a fresh launcher selects it.
+- General > "Check for updates on start" is live: with it on, the launcher checks for updates when it opens (and never installs without a click). "Select the last module in the launcher" is live since 5a: every module opened in a game window the launcher loop started is remembered (`LastModulePath`, as WinForms), and a fresh launcher selects it.
 - Colours are chosen in a small own dialog (48 basic swatches like the WinForms colour dialog plus a #RRGGBB box), not the system colour dialog.
 - On macOS a physical Control key (without Cmd) is not a shortcut modifier (Ctrl maps to Cmd); the capture dialog swallows it.
 - The settings window is a modal Avalonia window with the same eight tabs as WinForms.
@@ -138,12 +138,12 @@ Stage 4c = OCR language downloads: Settings > OCR languages (last page), a catal
 
 ## Stage-5a deviations from the WinForms app (deliberate or known)
 
-Stage 5a = app lifecycle: the launcher and Play offline windows, the launcher ↔ game loop with File > Back to launcher, Help > Interface Tour (and the automatic first tour), Help > About, and the update *screens* on a test feed. Formats are unchanged (rules pack 4, save 7, `settings.json` has no new field).
+Stage 5a = app lifecycle: the launcher and Play offline windows, the launcher ↔ game loop with File > Back to launcher, Help > Interface Tour (and the automatic first tour), Help > About, and the update *screens* (installing came with 6a, see the Stage-6a notes). Formats are unchanged (rules pack 4, save 7, `settings.json` has no new field).
 
 - (Done in 5c: **Online lobby ▶** is enabled; done in 5d: Play offline's **Open turn file…** picks a turn file and opens it in a game window.)
-- No update notices after an update (`--updated-from`, `--update-failed`, `--update-refused`, `UpdateStartup`): they belong to installing, which is stage 6. There is no `--smoke-launcher`; headless tests cover the launcher ↔ game loop instead.
-- The update UI exists only while `QUARTERMASTER_UPDATE_FEED` points at a folder feed (tests and screenshots): without it there is no update bar, no "Check for updates" link and no Help > Check for updates…, so nothing can reach GitHub. Update now shows the Update window and stops with "Installing updates comes with the packaged release (stage 6).".
-- Desktop update state (last check, skipped version) lives in `Updates-desktop/state.json` under the app data folder, not in the shared `settings.json`; `LastUpdateCheckUtc` and `SkippedVersion` there stay WinForms-only. "Check for updates on start" is read from `settings.json` as WinForms.
+- Update notices after an update (`--updated-from`, `--update-failed`, `--update-refused`, `UpdateStartup`) came with stage 6a. There is no `--smoke-launcher`; headless tests cover the launcher ↔ game loop instead.
+- The update UI shows when `QUARTERMASTER_UPDATE_FEED` points at a folder feed (tests, screenshots, hands-on checks) or when this copy is packaged (a `quartermaster-package.json` beside the exe, from 6a); an unpackaged build without the variable has no update bar, no "Check for updates" link and no Help > Check for updates…, so it cannot reach GitHub. Update now downloads, checks and installs (see the Stage-6a notes).
+- Desktop update state (last check, skipped version) lives in `Updates/state.json` under the app data folder, not in the shared `settings.json`; `LastUpdateCheckUtc` and `SkippedVersion` there stay WinForms-only. "Check for updates on start" is read from `settings.json` as WinForms.
 - **Play offline ▶** is disabled, with the "not ready" text as tooltip, while the selected module is still being checked (hashed); WinForms enables it and shows that text in a message box on click.
 - The tour shows only the steps whose target is on screen, so the count is smaller when panels are hidden (for example "(1 of 7)" with the Outliner hidden, "(1 of 4)" without a rules pack).
 - The automatic first tour starts 500 ms after the game opens (after the alert bar's 250 ms debounce, so the bar is on screen when the steps are chosen); WinForms starts it at once. As WinForms it may start after any module open (from the launcher, a module on the command line, or File > Open Module…), but only in a window the launcher loop opened, never in tests or screenshot runs.
@@ -197,6 +197,13 @@ Stage 5b = hot-seat: the Players page of the new-game dialog, Settings > Game > 
 - The editor and the handover screen live in `Quartermaster.Desktop.Shell` (files under `Players/`), the models in `Quartermaster.Render` (a `.Players` namespace would shadow Core `Players`). WinForms is unchanged (the optional refactor onto the shared models was skipped).
 - Real macOS behaviour (nothing but the handover screen visible in Mission Control and Cmd+Tab, Cmd+Q on the screen) is only checked by `docs/port/stage5b-mac-checklist.md`.
 
+## Stage-6a notes (installing updates; deliberate or known)
+
+- Stage 6a = installing updates for every package kind (zip, tar, .app bundle, AppImage, deb, rpm) through the `Quartermaster.Updater` helper. The installers, the .app bundle, the AppImage / deb / rpm packages and the release script are stage 6b; until then macOS and Linux are tested with hand-made packages (see the 6a checklists).
+- A game opened straight from the command line delays the start marker until the launcher is first shown (as WinForms), so the helper waits for that first launcher before it confirms the new version.
+- The update backup of a folder install sits beside it (`Quartermaster.backup-<old>`); of a unit install (.app, AppImage) it is the hidden `.<name>.qm-backup-<old>`. A machine that lost power mid-update is recovered by hand as in the checklists ("Recovering by hand").
+- A deb / rpm update is handed to the system's package installer (`xdg-open <package>`); Quartermaster does not install it itself and does not confirm the restart.
+
 ## Before the stage release
 
 Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the real rendering paths. Before stage 1 is released:
@@ -248,7 +255,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Tools > Turn (Next, Previous, Set) | 2a | ✔ |  |  | Ctrl+Right (Cmd+Right on macOS) steps the turn; with a phased rules pack it is Next Phase, as WinForms (2b). Turn label in the status bar |
 | Tools > Settings... | 4b | ✔ |  |  | Ctrl+, (Cmd+, on macOS); opens the Settings window over the shared SettingsStore; a failed save is shown |
 | Window > Cascade, Tile, Close All, Pop Out, floating list | - |  |  |  | Desktop uses tabs, not MDI; not ported in 2b (only the log and phase panel pop out) |
-| Help > Interface Tour, Check for updates, About | 5a | ✔ |  |  | Interface Tour needs a game; Check for updates… is shown only with the test feed (`QUARTERMASTER_UPDATE_FEED`) and, in a game, offers to go back to the launcher (WinForms text); About shows "Quartermaster <version>" and "A VASSAL module reader and engine." |
+| Help > Interface Tour, Check for updates, About | 5a | ✔ |  |  | Interface Tour needs a game; Check for updates… is shown for a packaged copy or with the test feed (`QUARTERMASTER_UPDATE_FEED`) and, in a game, offers to go back to the launcher (WinForms text); About shows "Quartermaster <version>" and "A VASSAL module reader and engine." |
 
 ## Main window and shell
 
@@ -271,7 +278,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | NextPhaseDialog | 2b | ✔ |  |  | Continue anyway / Go back (Enter goes back); double-click jumps to the decision. Phase-boundary autosave interval comes from Settings > General (autosave minutes) |
 | StepBackDialog | 2b | ✔ |  |  | "Step Back to Start of Phase" (confirm text and summary) / "Step Back To" (Turn, Stage, Side, Phase, Reached, Actions; newest first, summary follows the selection, double-click picks); Step Back / Cancel |
 | ReplayBar | 5d | ✔ |  |  | docked under the alert bar while a received turn replays: Next, Play all (timed, one logged line at a time; Finish at the end), Stop, the step counter and the line just replayed (as the public view shows it: redacted, or "(a step you cannot see)"); a failed step brings the previous game back. stage5d-desktop-replay-bar.png |
-| UpdateBar, UpdateDialog, WhatsNewDialog, AppUpdates | 5a | ✔ |  |  | screens only; installing is stage 6. Only with the test feed (`QUARTERMASTER_UPDATE_FEED`): the launcher's bar (What's new / Update now / Later / Skip this version), Check for updates link, What's new window, Update window; Update now stops with "Installing updates comes with the packaged release (stage 6)." |
+| UpdateBar, UpdateDialog, WhatsNewDialog, AppUpdates | 5a, 6a | ✔ |  |  | the launcher's bar (What's new / Update now / Later / Skip this version), Check for updates link, What's new window, Update window; shown for a packaged copy or with `QUARTERMASTER_UPDATE_FEED`. Update now downloads, checks SHA-256, stages and hands over to the helper; the app restarts and the launcher says "Updated to X." (or "The update to X didn't start, so Quartermaster went back to Y."). A game opened straight from the command line delays the start marker until the launcher is first shown (as WinForms) |
+| Installing updates (Quartermaster.Updater helper, swap and rollback, `--updated-from` / `--update-failed` / `--update-refused`) | 6a | ✔ |  |  | folder swap for the zip / tar, whole-unit swap for a .app bundle or AppImage, deb / rpm hand-off through `xdg-open`; journalled, rolls back when the new version does not confirm its start. Windows tested end to end with the real published helper (`UpdateEndToEndTests`); macOS and Linux by `docs/port/stage6a-mac-checklist.md` and `stage6a-linux-checklist.md` |
 
 ## Map and pieces
 

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -13,6 +12,8 @@ public static class UpdateInstaller
 {
     public const string AppExe = "Quartermaster.App.exe";
     public const string HelperExe = "Quartermaster.Updater.exe";
+    /// <summary>The updater helper's file name on this OS (beside the app executable).</summary>
+    public static string HelperName => OperatingSystem.IsWindows() ? HelperExe : "Quartermaster.Updater";
     /// <summary>The release's file list (written at publish time). The helper only moves files it names; a folder without one can't self-update.</summary>
     public const string ManifestName = "quartermaster-files.txt";
     public const string NoManifestText = "This copy of Quartermaster can't update itself; download the new version from the release page.";
@@ -20,10 +21,13 @@ public static class UpdateInstaller
     const long MaxUnpackedBytes = 4L * 1024 * 1024 * 1024;
 
     /// <summary>
-    /// Downloads the zip and its <c>.sha256</c>, checks the size and SHA-256 (first token of the <c>.sha256</c>, hex, any case) before
-    /// unpacking, unpacks into <c>&lt;root&gt;\staged</c> refusing absolute or <c>..</c> paths, and checks <c>Quartermaster.App.exe</c> is at the top
-    /// with a FileVersion equal to the release version. Anything wrong throws <see cref="UpdateRefused"/>; on any failure or cancellation the
-    /// whole version folder is deleted, so no partial download or stage is left.
+    /// Downloads the asset for <see cref="UpdateInfo.Kind"/> and its <c>.sha256</c> into <c>&lt;updatesRoot&gt;\&lt;version&gt;</c>, checks the size and
+    /// SHA-256 (first token of the <c>.sha256</c>, hex, any case), then stages it per kind (<see cref="UpdateStaging.Stage"/>): a Windows zip is
+    /// unpacked into <c>staged</c> and needs <c>Quartermaster.App.exe</c> plus either the package marker of the release version or (a 0.1.0-style
+    /// zip without marker) a FileVersion equal to it; a macOS zip or Linux tar.gz is unpacked and needs the marker of the release version and kind;
+    /// unpacking refuses absolute, <c>..</c> and (tar) link entries, and each unpacked kind needs <see cref="ManifestName"/>. An AppImage is only made executable; a
+    /// .deb or .rpm is kept as downloaded. Anything wrong throws <see cref="UpdateRefused"/>; on any failure or cancellation the whole version
+    /// folder is deleted, so no partial download or stage is left.
     /// </summary>
     public static async Task<StagedUpdate> Download(IUpdateFeed f, UpdateInfo u, string updatesRoot, IProgress<double>? progress, CancellationToken ct)
     {
@@ -39,16 +43,13 @@ public static class UpdateInstaller
         try
         {
             var expected = await ReadSha(f, u.ShaUrl, ct);
-            var zipPath = Path.Combine(root, UpdateChecker.ZipName(u.Version));
-            var part = zipPath + ".part";
+            var assetPath = UpdateStaging.DownloadPath(u, root, staged);
+            Directory.CreateDirectory(Path.GetDirectoryName(assetPath)!);
+            var part = assetPath + ".part";
             await Fetch(f, u.ZipUrl, part, u.ZipSize, expected, progress, ct);
-            File.Move(part, zipPath);
+            File.Move(part, assetPath);
             ct.ThrowIfCancellationRequested();
-            Extract(zipPath, staged);
-            CheckExe(staged, u.Version);
-            if (!File.Exists(Path.Combine(staged, ManifestName)))
-                throw new UpdateRefused($"The update has no file list ({ManifestName}); it was not installed.");
-            return new StagedUpdate(u.Version, staged, root);
+            return new StagedUpdate(u.Version, UpdateStaging.Stage(u, assetPath, staged), root);
         }
         catch
         {
@@ -107,54 +108,16 @@ public static class UpdateInstaller
     static UpdateRefused SizeMismatch(long expected, long got) =>
         new($"The download's size does not match the release ({got:N0} bytes{(got > expected ? " or more" : "")}, expected {expected:N0}); the update was not installed.");
 
-    static void Extract(string zipPath, string staged)
+    /// <summary>Refuses a staged Windows update without <see cref="AppExe"/> at the top (the 0.1.0 switch-over and the WinForms restart start it).</summary>
+    internal static void RequireAppExe(string staged)
     {
-        var stagedFull = Path.GetFullPath(staged);
-        try
-        {
-            using var zip = ZipFile.OpenRead(zipPath);
-            // Check every entry before writing anything.
-            var plan = new List<(ZipArchiveEntry Entry, string Target, bool IsDir)>();
-            long unpacked = 0;
-            foreach (var e in zip.Entries)
-            {
-                var target = SafeTarget(stagedFull, e.FullName);
-                var isDir = e.FullName.EndsWith('/') || e.FullName.EndsWith('\\');
-                unpacked += e.Length;
-                if (unpacked > MaxUnpackedBytes) throw new UpdateRefused("The update unpacks to more than 4 GB; it was not installed.");
-                plan.Add((e, target, isDir));
-            }
-            Directory.CreateDirectory(stagedFull);
-            foreach (var (e, target, isDir) in plan)
-            {
-                if (isDir) { Directory.CreateDirectory(target); continue; }
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                if (File.Exists(target)) throw new UpdateRefused($"The update lists '{e.FullName}' twice; it was not installed.");
-                e.ExtractToFile(target, overwrite: false);
-            }
-        }
-        catch (InvalidDataException ex)
-        {
-            throw new UpdateRefused("The download is not a valid zip file: " + ex.Message);
-        }
+        if (!File.Exists(Path.Combine(staged, AppExe))) throw new UpdateRefused($"The update does not contain {AppExe}; it was not installed.");
     }
 
-    /// <summary>The full path for a zip entry inside <paramref name="stagedFull"/>; refuses absolute, drive, <c>..</c> and stream (<c>:</c>) paths.</summary>
-    static string SafeTarget(string stagedFull, string name)
+    internal static void CheckExe(string staged, Version expected)
     {
-        UpdateRefused Unsafe() => new($"The update contains an unsafe file path ('{name}'); it was not installed.");
-        if (name.Length == 0 || name.Contains('\0') || name.Contains(':') || Path.IsPathRooted(name) || name[0] is '/' or '\\') throw Unsafe();
-        var parts = name.Split('/', '\\');
-        if (parts.Any(p => p == "..")) throw Unsafe();
-        var full = Path.GetFullPath(Path.Combine(stagedFull, name));
-        if (!full.StartsWith(stagedFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw Unsafe();
-        return full;
-    }
-
-    static void CheckExe(string staged, Version expected)
-    {
+        RequireAppExe(staged);
         var exe = Path.Combine(staged, AppExe);
-        if (!File.Exists(exe)) throw new UpdateRefused($"The update does not contain {AppExe}; it was not installed.");
         var got = FileVersion(exe);
         var want = AppVersion.Format(expected);
         if (got == null)
@@ -238,6 +201,60 @@ public static class UpdateInstaller
         start(psi)?.Dispose();
     }
 
+    /// <summary>
+    /// The Desktop app's hand-over for an install <paramref name="l"/>: copies <see cref="HelperName"/> from <c>l.AppDir</c> to
+    /// <c>&lt;s.Root&gt;/helper/</c> (executable on Unix) and starts it with the WinForms arguments plus <c>--exe</c> (the executable relative to
+    /// <c>--app</c>) and, for the kinds swapped as one unit (<c>.app</c>, AppImage), <c>--unit</c>; <c>--app</c> is then the unit's folder.
+    /// System packages (deb, rpm) are refused: the package manager installs those. A stale start marker is deleted first.
+    /// </summary>
+    public static void LaunchHelper(StagedUpdate s, InstallLayout l, int pid, Func<ProcessStartInfo, Process?> start)
+    {
+        ArgumentNullException.ThrowIfNull(l);
+        if (!l.SelfUpdates) throw new UpdateRefused(NoManifestText);
+        var source = Path.Combine(l.AppDir, HelperName);
+        if (!File.Exists(source)) throw new UpdateRefused("The updater helper is missing; download the new version from the release page.");
+        if (l.Kind != PackageKind.LinuxAppImage && !CanSelfUpdate(l.AppDir)) throw new UpdateRefused(NoManifestText);
+        string app, exe;
+        string? unit = null;
+        switch (l.Kind)
+        {
+            case PackageKind.MacApp:
+                unit = Path.GetFullPath(l.UnitPath ?? throw new UpdateRefused(NoManifestText));
+                app = Path.GetDirectoryName(unit)!;
+                exe = Path.GetFileName(unit) + "/Contents/MacOS/Quartermaster";
+                break;
+            case PackageKind.LinuxAppImage:
+                unit = Path.GetFullPath(l.UnitPath ?? throw new UpdateRefused(NoManifestText));
+                app = Path.GetDirectoryName(unit)!;
+                exe = Path.GetFileName(unit);
+                break;
+            default:
+                app = l.AppDir;
+                exe = l.Kind is PackageKind.WinZip or PackageKind.WinSetup ? "Quartermaster.exe" : "Quartermaster";
+                break;
+        }
+
+        var root = Path.GetFullPath(s.Root);
+        var helperDir = Path.Combine(root, "helper");
+        Directory.CreateDirectory(helperDir);
+        var helper = Path.Combine(helperDir, HelperName);
+        File.Copy(source, helper, overwrite: true);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(helper, (UnixFileMode)0x1ED);   // 0755
+
+        var marker = MarkerPath(Path.GetDirectoryName(root)!, s.Version);
+        if (File.Exists(marker)) File.Delete(marker);
+
+        var psi = new ProcessStartInfo(helper) { UseShellExecute = false, WorkingDirectory = helperDir };
+        var args = new List<string>
+        {
+            "--app", app, "--staged", s.StagedDir, "--pid", pid.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "--version", AppVersion.Format(s.Version), "--old", AppVersion.Text, "--marker", marker, "--exe", exe,
+        };
+        if (unit != null) args.AddRange(["--unit", unit]);
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        start(psi)?.Dispose();
+    }
+
     /// <summary>True when the app folder carries the release's file list (<see cref="ManifestName"/>), so the helper knows which files are Quartermaster's.</summary>
     public static bool CanSelfUpdate(string appDir) => File.Exists(Path.Combine(appDir, ManifestName));
 
@@ -251,10 +268,13 @@ public static class UpdateInstaller
     {
         CleanupOld(updatesRoot, current);
         var cur = Path.Combine(updatesRoot, AppVersion.Format(current));
-        var zip = Path.Combine(cur, UpdateChecker.ZipName(current));
         TryDelete(() => DeleteDir(Path.Combine(cur, "staged")));
-        TryDelete(() => File.Delete(zip));
-        TryDelete(() => File.Delete(zip + ".part"));
+        foreach (var kind in Enum.GetValues<PackageKind>())
+        {
+            var asset = Path.Combine(cur, UpdateChecker.AssetName(current, kind));
+            TryDelete(() => File.Delete(asset));
+            TryDelete(() => File.Delete(asset + ".part"));
+        }
         PruneBackups(updatesRoot, "backup-");
         if (appDir != null && Path.GetDirectoryName(Path.GetFullPath(Path.TrimEndingDirectorySeparator(appDir))) is { } parent)
             PruneBackups(parent, "Quartermaster.backup-");
