@@ -38,19 +38,28 @@ mkdir -p "$work/tool"
 tar -xzf "$cache/nfpm-$NFPM_VERSION-linux-x86_64.tar.gz" -C "$work/tool" nfpm
 nfpm="$work/tool/nfpm"
 
-export QM_VERSION="$version"
-export QM_DESKTOP="$here/quartermaster.desktop"
-export QM_ICON="$here/../icon/quartermaster.png"
+icon="$(cd "$here/../icon" && pwd)/quartermaster.png"
 
 # <packager> <kind> <file name>
 build_one() {
   local packager="$1" kind="$2" name="$3"
   rm -f "$out/$name" "$out/$name.sha256"
-  export QM_STAGE="$work/stage-$packager"
-  mkdir -p "$QM_STAGE"
-  cp -a "$publish/." "$QM_STAGE/"
-  bash "$here/../set-package-kind.sh" "$QM_STAGE" "$kind"
-  "$nfpm" package --config "$here/nfpm.yaml" --packager "$packager" --target "$out/$name"
+  local stage="$work/stage-$packager" cfg="$work/nfpm-$packager.yaml"
+  mkdir -p "$stage"
+  cp -a "$publish/." "$stage/"
+  bash "$here/../set-package-kind.sh" "$stage" "$kind"
+  # nfpm v2.48.0 does not expand env vars in contents[].src, so render real paths into the config.
+  python3 -I - "$here/nfpm.yaml" "$cfg" "$version" "$stage" "$here/quartermaster.desktop" "$icon" <<'PY'
+import sys
+src, dst, version, stage, desktop, icon = sys.argv[1:]
+t = open(src).read()
+for k, v in (("QM_VERSION", version), ("QM_STAGE", stage), ("QM_DESKTOP", desktop), ("QM_ICON", icon)):
+    t = t.replace("${" + k + "}", v)
+if "${" in t:
+    sys.exit("unsubstituted placeholder left in nfpm.yaml")
+open(dst, "w").write(t)
+PY
+  "$nfpm" package --config "$cfg" --packager "$packager" --target "$out/$name"
   [ -f "$out/$name" ] || die "nfpm did not produce $out/$name"
   ( cd "$out" && printf '%s  %s\n' "$(sha256sum "$name" | cut -d' ' -f1)" "$name" > "$name.sha256" )
   echo "built $out/$name"

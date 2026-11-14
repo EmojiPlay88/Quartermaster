@@ -1,5 +1,5 @@
-# nfpm config for the .deb and .rpm. make-deb-rpm.sh exports QM_VERSION, QM_STAGE (publish copy with the right package kind),
-# QM_DESKTOP and QM_ICON; nfpm expands ${VAR} in this file.
+# nfpm config for the .deb and .rpm. make-deb-rpm.sh renders it first (nfpm does not expand env vars in src paths),
+# substituting the QM_VERSION, QM_STAGE, QM_DESKTOP and QM_ICON placeholders below with real values.
 name: quartermaster
 arch: amd64
 platform: linux
