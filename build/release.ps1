@@ -11,6 +11,11 @@
 
 .PARAMETER FromRun
   The id of a successful release.yml run; its artifact Quartermaster-release-<Version> is downloaded with gh.
+  The run is checked first: workflow 'release', conclusion 'success', and built from the current HEAD commit.
+
+.PARAMETER AllowOtherCommit
+  With -FromRun: a run built from a commit other than HEAD only warns (for example the proof run of a branch).
+  The workflow and conclusion checks stay mandatory.
 
 .PARAMETER ArtifactDir
   A folder that already holds the artifact's files (skips the download; used by build/test-release-collect.ps1).
@@ -29,6 +34,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$FromRun,
     [string]$ArtifactDir,
+    [switch]$AllowOtherCommit,
     [switch]$SkipRelay,
     [string]$OutRoot
 )
@@ -114,6 +120,20 @@ public static class QmBinScan
     }
 }
 '@
+}
+
+# Checks the `gh run view --json headSha,headBranch,workflowName,conclusion,event` result of a -FromRun run.
+# Returns @{ Errors = <string[]>; Warnings = <string[]> }; any error means the run must not be released from.
+function Test-RunProvenance($Info, [string]$HeadSha, [bool]$AllowOther) {
+    $errors = New-Object System.Collections.Generic.List[string]
+    $warnings = New-Object System.Collections.Generic.List[string]
+    if ($Info.workflowName -cne 'release') { $errors.Add("the run belongs to workflow '$($Info.workflowName)', not 'release' (a release needs a release.yml run; the per-push cross-platform run is not one).") }
+    if ($Info.conclusion -cne 'success') { $errors.Add("the run's conclusion is '$($Info.conclusion)', not 'success'.") }
+    if ($Info.headSha -cne $HeadSha) {
+        $m = "the run was built from commit $($Info.headSha) (branch $($Info.headBranch)) but HEAD is $HeadSha. The tag would not match the binaries."
+        if ($AllowOther) { $warnings.Add($m) } else { $errors.Add("$m Check out that commit, or pass -AllowOtherCommit for a proof run.") }
+    }
+    return @{ Errors = @($errors); Warnings = @($warnings) }
 }
 
 function Write-Step([string]$m) { Write-Host "==> $m" -ForegroundColor Cyan }
@@ -260,12 +280,32 @@ New-Item -ItemType Directory -Path $releaseDir | Out-Null
 New-Item -ItemType Directory -Path $workDir | Out-Null
 
 # 2. The CI artifact.
+$releaseSha = $null
 if ($FromRun) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'gh (GitHub CLI) was not found on PATH; it is needed for -FromRun.' }
+    Write-Step "Check run $FromRun"
+    $headSha = (& git -C $repo rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $headSha -notmatch '^[0-9a-f]{40}$') { throw 'git rev-parse HEAD failed; run release.ps1 from a git checkout.' }
+    $runJson = & gh run view $FromRun --repo $repoSlug --json headSha,headBranch,workflowName,conclusion,event
+    if ($LASTEXITCODE -ne 0) { throw "gh run view $FromRun failed (exit code $LASTEXITCODE)." }
+    $runInfo = ($runJson -join "`n") | ConvertFrom-Json
+    $prov = Test-RunProvenance $runInfo $headSha ([bool]$AllowOtherCommit)
+    foreach ($w in $prov.Warnings) { Write-Warning $w }
+    if ($prov.Errors.Count -gt 0) {
+        foreach ($e in $prov.Errors) { Write-Host "  FAIL: $e" -ForegroundColor Red }
+        throw "Run $FromRun cannot be released from ($($prov.Errors.Count) problem(s))."
+    }
+    $releaseSha = $runInfo.headSha
+    Write-Host "Run ${FromRun}: workflow release, success, commit $releaseSha (branch $($runInfo.headBranch))." -ForegroundColor Green
     $ArtifactDir = Join-Path $workDir 'ci-artifact'
     Write-Step "Download $artifactName from run $FromRun"
     & gh run download $FromRun -n $artifactName -D $ArtifactDir --repo $repoSlug
     if ($LASTEXITCODE -ne 0) { throw "gh run download $FromRun -n $artifactName failed (exit code $LASTEXITCODE). Did that release.yml run finish green?" }
+}
+if (-not $releaseSha) {
+    # -ArtifactDir: no run to ask; the tag target is the current commit (the caller vouches for the folder).
+    $releaseSha = (& git -C $repo rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $releaseSha -notmatch '^[0-9a-f]{40}$') { throw 'git rev-parse HEAD failed; run release.ps1 from a git checkout.' }
 }
 if (-not (Test-Path -LiteralPath $ArtifactDir -PathType Container)) { throw "Artifact folder '$ArtifactDir' does not exist." }
 $ArtifactDir = (Resolve-Path -LiteralPath $ArtifactDir).Path.TrimEnd('\', '/')
@@ -337,8 +377,8 @@ Write-Step 'Check archives'
 $allProblems = New-Object System.Collections.Generic.List[string]
 $winZip = Join-Path $releaseDir "Quartermaster-$Version-win-x64.zip"
 $linuxTar = Join-Path $releaseDir "Quartermaster-$Version-linux-x64.tar.gz"
-foreach ($p in (Test-Archive $winZip 'zip' 'Quartermaster.Relay*' @('Quartermaster.exe', 'Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'quartermaster-package.json', 'quartermaster-files.txt') -CheckManifest)) { $allProblems.Add($p) }
-foreach ($p in (Test-Archive $linuxTar 'tar.gz' 'Quartermaster.Relay*' @('Quartermaster', 'Quartermaster.Updater', 'quartermaster-package.json', 'quartermaster-files.txt') -CheckManifest)) { $allProblems.Add($p) }
+foreach ($p in (Test-Archive $winZip 'zip' 'Quartermaster.Relay*' @('Quartermaster.exe', 'Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'quartermaster-package.json', 'quartermaster-files.txt', 'LICENSE', 'THIRD-PARTY-NOTICES.md') -CheckManifest)) { $allProblems.Add($p) }
+foreach ($p in (Test-Archive $linuxTar 'tar.gz' 'Quartermaster.Relay*' @('Quartermaster', 'Quartermaster.Updater', 'quartermaster-package.json', 'quartermaster-files.txt', 'LICENSE', 'THIRD-PARTY-NOTICES.md') -CheckManifest)) { $allProblems.Add($p) }
 foreach ($r in $relayArchives) {
     foreach ($p in (Test-Archive $r.Path $r.Kind 'Quartermaster.App*' @())) { $allProblems.Add($p) }
 }
@@ -372,6 +412,8 @@ $files = @($assets | ForEach-Object { $_; "$_.sha256" })
 Write-Step 'Done. Files are in:'
 Write-Host "  $releaseDir"
 Write-Host ''
+Write-Host 'WARNING: the first release from this pipeline moves every WinForms user to the Avalonia app on their next update. Publish it only after feature parity and the Mac, Linux and Windows checklists pass. The WinForms release path lives at commit d05e139 if a WinForms hotfix is needed.' -ForegroundColor Yellow
+Write-Host ''
 Write-Host 'NOT RUN. To publish, after the user says OK (run from the repo, with gh logged in):' -ForegroundColor Yellow
 $q = ($files | ForEach-Object { '"' + $_ + '"' }) -join ' '
-Write-Host "gh release create $tag $q --title `"Quartermaster $Version`" --notes-file `"$notes`" --repo $repoSlug"
+Write-Host "gh release create $tag $q --target $releaseSha --title `"Quartermaster $Version`" --notes-file `"$notes`" --repo $repoSlug"

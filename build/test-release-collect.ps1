@@ -51,11 +51,11 @@ function New-FakeArtifact([string]$Dir) {
     New-Item -ItemType Directory -Path $stage | Out-Null
 
     $win = Join-Path $stage 'win'
-    New-FakePublish $win @('Quartermaster.exe', 'Quartermaster.App.exe', 'Quartermaster.Updater.exe') 'win-zip'
+    New-FakePublish $win @('Quartermaster.exe', 'Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'LICENSE', 'THIRD-PARTY-NOTICES.md') 'win-zip'
     [IO.Compression.ZipFile]::CreateFromDirectory($win, (Join-Path $Dir "Quartermaster-$v-win-x64.zip"))
 
     $lin = Join-Path $stage 'linux'
-    New-FakePublish $lin @('Quartermaster', 'Quartermaster.Updater') 'linux-tar'
+    New-FakePublish $lin @('Quartermaster', 'Quartermaster.Updater', 'LICENSE', 'THIRD-PARTY-NOTICES.md') 'linux-tar'
     # Relative paths, so no tar flavour ever sees a drive letter.
     Push-Location $stage
     try {
@@ -108,7 +108,8 @@ function Test-Case([string]$Name, [scriptblock]$Mutate, [bool]$ExpectSuccess, [s
 try {
     Write-Host "release.ps1 collect self-test, version $v, host $hostExe"
 
-    $case = Test-Case 'complete set succeeds' $null $true @("gh release create quartermaster-v$v", "--title `"Quartermaster $v`"", 'release-notes.md')
+    $head = (& git -C $repo rev-parse HEAD).Trim()
+    $case = Test-Case 'complete set succeeds' $null $true @("gh release create quartermaster-v$v", "--target $head", 'first release from this pipeline', "--title `"Quartermaster $v`"", 'release-notes.md')
     $rel = Join-Path $case "out\release\$v"
     $got = @(Get-ChildItem -LiteralPath $rel -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
     Check 'release folder holds 8 assets + 8 .sha256 + notes' ($got.Count -eq 17 -and ($got -contains 'release-notes.md')) ("files: " + ($got -join ', '))
@@ -138,6 +139,25 @@ try {
         } finally { $z.Dispose() }
         Write-Sha256 (Join-Path $a $zipName)
     } $false @("$zipName entry name 'startapp.cmd'"))
+
+    # Run provenance (-FromRun): the pure checker, extracted from release.ps1 by AST (no network, no real run).
+    $ast = [Management.Automation.Language.Parser]::ParseFile($releaseScript, [ref]$null, [ref]$null)
+    $fn = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-RunProvenance' }, $true)
+    . ([scriptblock]::Create($fn.Extent.Text))
+    function Info($wf, $concl, $sha) { [pscustomobject]@{ workflowName = $wf; conclusion = $concl; headSha = $sha; headBranch = 'b'; event = 'workflow_dispatch' } }
+    $r1 = Test-RunProvenance (Info 'release' 'success' $head) $head $false
+    Check 'provenance: matching release run passes' ($r1.Errors.Count -eq 0 -and $r1.Warnings.Count -eq 0) ($r1.Errors -join '; ')
+    $r2 = Test-RunProvenance (Info 'cross-platform' 'success' $head) $head $false
+    Check 'provenance: wrong workflow refused' ($r2.Errors.Count -eq 1 -and $r2.Errors[0] -like "*workflow 'cross-platform'*") ($r2.Errors -join '; ')
+    $r3 = Test-RunProvenance (Info 'release' 'failure' $head) $head $false
+    Check 'provenance: failed run refused' ($r3.Errors.Count -eq 1 -and $r3.Errors[0] -like "*'failure'*") ($r3.Errors -join '; ')
+    $other = ('0' * 40)
+    $r4 = Test-RunProvenance (Info 'release' 'success' $other) $head $false
+    Check 'provenance: other commit refused' ($r4.Errors.Count -eq 1 -and $r4.Errors[0] -like "*$other*") ($r4.Errors -join '; ')
+    $r5 = Test-RunProvenance (Info 'release' 'success' $other) $head $true
+    Check 'provenance: other commit only warns with -AllowOtherCommit' ($r5.Errors.Count -eq 0 -and $r5.Warnings.Count -eq 1) ($r5.Errors -join '; ')
+    $r6 = Test-RunProvenance (Info 'cross-platform' 'success' $other) $head $true
+    Check 'provenance: -AllowOtherCommit keeps the workflow check' ($r6.Errors.Count -eq 1) ($r6.Errors -join '; ')
 
     $r = Invoke-Release @('-Version', $v, '-SkipRelay', '-OutRoot', (Join-Path $root 'none'))
     Check 'no -FromRun/-ArtifactDir refuses, pointing at release.yml' ($r.Code -ne 0 -and $r.Output.Contains('.github/workflows/release.yml')) ("exit $($r.Code)`n" + $r.Output)
