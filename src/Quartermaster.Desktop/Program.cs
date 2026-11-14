@@ -13,6 +13,11 @@ static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args.Contains("--version", StringComparer.Ordinal))   // before anything Avalonia starts
+        {
+            Console.Out.WriteLine("Quartermaster " + AppVersion.Text);
+            return 0;
+        }
         if (args.Contains("--screenshot-main", StringComparer.Ordinal)) return RunScreenshot(args);
         if (args.Any(a => LauncherShotFlags.Contains(a, StringComparer.Ordinal))) return RunLauncherScreenshot(args);
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);

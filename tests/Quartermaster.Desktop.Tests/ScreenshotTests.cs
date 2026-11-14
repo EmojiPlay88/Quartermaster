@@ -199,4 +199,18 @@ public sealed class ScreenshotTests
     {
         Assert.Equal(1, Program.RunScreenshot(new[] { "--screenshot-main", "x.png" }));
     }
+
+    [Fact]
+    public void VersionFlag_PrintsAndExits()
+    {
+        var old = Console.Out;
+        var sw = new StringWriter();
+        Console.SetOut(sw);
+        try
+        {
+            Assert.Equal(0, Program.Main(new[] { "--version" }));
+        }
+        finally { Console.SetOut(old); }
+        Assert.Equal("Quartermaster " + Quartermaster.Render.AppVersion.Text + Environment.NewLine, sw.ToString());
+    }
 }

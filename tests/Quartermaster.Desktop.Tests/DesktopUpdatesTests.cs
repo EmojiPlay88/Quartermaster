@@ -6,6 +6,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Quartermaster.Desktop.Launcher;
+using Quartermaster.Desktop.Shell;
 using Quartermaster.Desktop.Updates;
 using Quartermaster.Render;
 using Quartermaster.Render.Update;
@@ -768,5 +769,147 @@ public sealed class DesktopUpdatesTests : IDisposable
         Launcher(due);
         Assert.True(due.Bar!.IsVisible);
         Assert.Null(due.LastCheckUtc);
+    }
+
+    // ---------- start-up after an update (stage 6a task 7) ----------
+
+    static StartupArgs Args(params string[] a) => StartupArgs.Parse(a, _ => { });
+
+    string Marker(DesktopUpdates u) => UpdateInstaller.MarkerPath(_updatesRoot, u.Current);
+
+    static UpdateBar NoticeBar(LauncherWindow w) => w.UpdateBarHost.Children.OfType<UpdateBar>().First(b => b.IsVisible);
+
+    [AvaloniaFact]
+    public void UpdatedFrom_WritesMarkerInUpdatesRoot()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--updated-from", "0.1.0"));
+        Assert.False(File.Exists(Marker(updates)));   // not before the launcher is shown
+        var w = new LauncherWindow(Store(checkOnStart: false), _layout, _dialogs, null, updates);
+        _windows.Add(w);
+        Assert.False(File.Exists(Marker(updates)));
+        w.Show();
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(File.Exists(Marker(updates)));
+        Assert.Equal(_updatesRoot, Path.GetDirectoryName(Marker(updates)));
+    }
+
+    [AvaloniaFact]
+    public void NoUpdateArgs_WritesNoMarker()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args());
+        var w = Launcher(updates, Store(checkOnStart: false));
+        Assert.False(File.Exists(Marker(updates)));
+        Assert.All(w.UpdateBarHost.Children.OfType<UpdateBar>(), b => Assert.False(b.IsVisible));
+    }
+
+    [AvaloniaFact]
+    public void UpdatedFrom_ShowsUpdatedNotice()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--updated-from", "0.1.0"));
+        var w = Launcher(updates, Store(checkOnStart: false));
+        var bar = NoticeBar(w);
+        Assert.Equal(UpdateStartup.Updated(updates.Current).Text, bar.Message);
+        Assert.Equal(new[] { "Close" }, bar.Actions);
+        Click(bar.ActionButton("Close")!);
+        Assert.False(bar.IsVisible);
+        // Shown once: the next launcher has no notice.
+        var second = Launcher(updates, Store(checkOnStart: false));
+        Assert.All(second.UpdateBarHost.Children.OfType<UpdateBar>(), b => Assert.False(b.IsVisible));
+    }
+
+    [AvaloniaFact]
+    public void UpdateFailed_JournalLeft_ShowsReleaseLink()
+    {
+        Directory.CreateDirectory(_updatesRoot);
+        File.WriteAllText(Path.Combine(_updatesRoot, UpdateStartup.JournalName), "{}");
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--update-failed", "9.9.9"));
+        var w = Launcher(updates, Store(checkOnStart: false));
+        var bar = NoticeBar(w);
+        var expected = UpdateStartup.Failed(_updatesRoot, "9.9.9", updates.Current);
+        Assert.Equal(expected.Text, bar.Message);
+        Assert.Equal(new[] { "Release page", "Close" }, bar.Actions);
+        Click(bar.ActionButton("Release page")!);
+        Assert.Equal(new[] { expected.Link! }, _pages);
+        Assert.False(File.Exists(Marker(updates)));   // --update-failed is not a confirmed update
+    }
+
+    [AvaloniaFact]
+    public void UpdateFailed_JournalGone_NoLink()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--update-failed", "9.9.9"));
+        var bar = NoticeBar(Launcher(updates, Store(checkOnStart: false)));
+        Assert.Equal(new[] { "Close" }, bar.Actions);
+    }
+
+    [AvaloniaFact]
+    public void UpdateRefused_ShowsNotice()
+    {
+        var updates = Updates(feed: new BrokenFeed());
+        updates.OnStart(Args("--update-refused", "9.9.9"));
+        var bar = NoticeBar(Launcher(updates, Store(checkOnStart: false)));
+        Assert.Equal(UpdateStartup.Refused("9.9.9").Text, bar.Message);
+        Assert.Equal(new[] { "Release page", "Close" }, bar.Actions);
+    }
+
+    [AvaloniaFact]
+    public void AutoCheck_OnStartSetting_RunsAgainstFeed()
+    {
+        WriteTestFeed("9.9.9");
+        var updates = Updates();
+        updates.OnStart(Args("--updated-from", "0.1.0"));
+        var w = Launcher(updates, Store(checkOnStart: true));
+        Assert.True(updates.CheckedThisRun);
+        var bars = w.UpdateBarHost.Children.OfType<UpdateBar>().Where(b => b.IsVisible).Select(b => b.Message).ToList();
+        Assert.Contains("Quartermaster 9.9.9 is available.", bars);
+        Assert.Contains(UpdateStartup.Updated(updates.Current).Text, bars);
+    }
+
+    [Fact]
+    public void ConfirmedStart_PrunesOldUnitBackups_KeepsHighestAndOthers()
+    {
+        var parent = Path.Combine(_tmp, "unit");
+        Directory.CreateDirectory(parent);
+        var bundle = Path.Combine(parent, "Quartermaster.app");
+        Directory.CreateDirectory(bundle);
+        string B(string v) => Path.Combine(parent, ".Quartermaster.app.qm-backup-" + v);
+        Directory.CreateDirectory(B("0.1.0"));
+        Directory.CreateDirectory(B("0.2.0"));
+        File.WriteAllText(B("0.1.5"), "x");                                       // a file (AppImage style)
+        var other = Path.Combine(parent, ".Other.app.qm-backup-0.0.1");           // another unit's backup
+        var odd = Path.Combine(parent, ".Quartermaster.app.qm-backup-notes");     // not a version
+        var plain = Path.Combine(parent, "Quartermaster.app.qm-backup-0.0.1");    // not hidden: not ours
+        Directory.CreateDirectory(other);
+        Directory.CreateDirectory(odd);
+        Directory.CreateDirectory(plain);
+        DesktopUpdates.PruneUnitBackups(bundle);
+        Assert.True(Directory.Exists(B("0.2.0")));
+        Assert.False(Directory.Exists(B("0.1.0")));
+        Assert.False(File.Exists(B("0.1.5")));
+        Assert.True(Directory.Exists(other));
+        Assert.True(Directory.Exists(odd));
+        Assert.True(Directory.Exists(plain));
+        Assert.True(Directory.Exists(bundle));
+    }
+
+    [AvaloniaFact]
+    public void UpdatedFrom_MacLayout_PrunesUnitBackupsAfterMarker()
+    {
+        var parent = Path.Combine(_tmp, "mac");
+        var bundle = Path.Combine(parent, "Quartermaster.app");
+        var macos = Path.Combine(bundle, "Contents", "MacOS");
+        AppFolder(macos);
+        Directory.CreateDirectory(Path.Combine(parent, ".Quartermaster.app.qm-backup-0.1.0"));
+        Directory.CreateDirectory(Path.Combine(parent, ".Quartermaster.app.qm-backup-0.1.1"));
+        var updates = Updates(feed: new BrokenFeed(), layout: new InstallLayout(PackageKind.MacApp, new Version(0, 0, 1), macos, bundle, Path.Combine(macos, "Quartermaster")));
+        updates.OnStart(Args("--updated-from", "0.1.0"));
+        Launcher(updates, Store(checkOnStart: false));
+        Assert.True(File.Exists(Marker(updates)));
+        Assert.False(Directory.Exists(Path.Combine(parent, ".Quartermaster.app.qm-backup-0.1.0")));
+        Assert.True(Directory.Exists(Path.Combine(parent, ".Quartermaster.app.qm-backup-0.1.1")));
     }
 }

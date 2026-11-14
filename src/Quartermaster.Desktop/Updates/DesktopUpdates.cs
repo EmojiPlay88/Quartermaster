@@ -101,6 +101,90 @@ public sealed class DesktopUpdates : IUpdateSlot
     /// <summary>True when another process runs from one of the given executables (it may hold a game the swap would break).</summary>
     internal Func<IReadOnlyList<string>, bool> OthersRunning { get; set; } = exes => RunningCopies.OthersRunning(exes, Environment.ProcessId);
 
+    /// <summary>"Updated to 0.2.0." / "The update to 0.2.0 didn't start…": shown once by the first launcher.</summary>
+    internal UpdateNotice? Notice { get; private set; }
+
+    string? _updatedFrom;
+    bool _confirmed;
+
+    /// <summary>
+    /// Run at start with the command line: sets the notice the launcher shows after the updater helper restarted the app
+    /// (<c>--updated-from</c> / <c>--update-refused</c> / <c>--update-failed</c>; WinForms AppUpdates.OnStart). The start marker the helper waits for
+    /// is NOT written here but by <see cref="OnLauncherShown"/>, so a version that fails while starting up is still rolled back.
+    /// </summary>
+    public void OnStart(StartupArgs args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        if (args.UpdatedFrom != null)
+        {
+            _updatedFrom = args.UpdatedFrom;
+            Notice = UpdateStartup.Updated(Current);
+            System.Diagnostics.Trace.WriteLine($"update: started {AppVersion.Format(Current)} after updating from {_updatedFrom}");
+        }
+        else if (args.UpdateRefused != null)
+        {
+            Notice = UpdateStartup.Refused(args.UpdateRefused);
+            System.Diagnostics.Trace.WriteLine("update: " + Notice.Text);
+        }
+        else if (args.UpdateFailed != null)
+        {
+            // The helper deletes its journal right after starting us when the rollback went fine: give it a moment.
+            var journal = Path.Combine(UpdatesRoot, UpdateStartup.JournalName);
+            for (var i = 0; i < 20 && File.Exists(journal); i++) Thread.Sleep(100);
+            Notice = UpdateStartup.Failed(UpdatesRoot, args.UpdateFailed, Current);
+            System.Diagnostics.Trace.WriteLine("update: " + Notice.Text);
+        }
+    }
+
+    /// <summary>
+    /// The launcher is open: the first time after <c>--updated-from</c>, writes the start marker (the app really is up), removes older
+    /// downloads and backups, and for a whole-unit install (.app, AppImage) the older unit backups beside the unit.
+    /// </summary>
+    public void OnLauncherShown(string appDir)
+    {
+        if (_updatedFrom == null || _confirmed) return;
+        _confirmed = true;
+        UpdateStartup.ConfirmStarted(UpdatesRoot, appDir, Current, m => System.Diagnostics.Trace.WriteLine(m));
+        if (Layout?.UnitPath is { } unit) PruneUnitBackups(unit);
+        System.Diagnostics.Trace.WriteLine($"update: start of {AppVersion.Format(Current)} confirmed");
+    }
+
+    /// <summary>
+    /// Best effort: deletes the folders or files named exactly <c>.&lt;unitName&gt;.qm-backup-&lt;version&gt;</c> beside the unit (the helper's
+    /// whole-unit backups) except the one with the highest version; nothing else is touched.
+    /// </summary>
+    internal static void PruneUnitBackups(string unitPath)
+    {
+        try
+        {
+            var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(unitPath));
+            if (Path.GetDirectoryName(full) is not { } parent || !Directory.Exists(parent)) return;
+            var prefix = "." + Path.GetFileName(full) + ".qm-backup-";
+            var found = new List<(string Path, Version V)>();
+            foreach (var e in Directory.GetFileSystemEntries(parent))
+            {
+                var name = Path.GetFileName(e);
+                if (name.StartsWith(prefix, StringComparison.Ordinal) && Version.TryParse(name[prefix.Length..], out var v) && v.Build >= 0 && v.Revision < 0)
+                    found.Add((e, v));
+            }
+            foreach (var (path, _) in found.OrderByDescending(x => x.V).Skip(1))
+            {
+                try
+                {
+                    if (Directory.Exists(path)) Directory.Delete(path, recursive: true); else File.Delete(path);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    System.Diagnostics.Trace.WriteLine("update: could not remove " + path + ": " + ex.Message);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            System.Diagnostics.Trace.WriteLine("update: could not prune the unit backups: " + ex.Message);
+        }
+    }
+
     internal DesktopUpdates(IUpdateFeed? feed, string updatesRoot, InstallLayout? layout = null)
     {
         Feed = feed;
@@ -195,6 +279,8 @@ public sealed class DesktopUpdates : IUpdateSlot
     public void Attach(LauncherWindow w)
     {
         ArgumentNullException.ThrowIfNull(w);
+        ShowNotice(w);
+        OnLauncherShown(Layout?.AppDir ?? Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory));
         if (Feed is not { } feed) return;
         var bar = new UpdateBar();
         Bar = bar;
@@ -223,6 +309,19 @@ public sealed class DesktopUpdates : IUpdateSlot
         }
         if (UpdateOffer.AutoCheckDue(w.Store.Current.CheckUpdatesOnStart, CheckedThisRun, LastCheckUtc, DateTime.UtcNow))
             StartCheck(feed, ui, manual: false);
+    }
+
+    /// <summary>The one-off line after an update ran (WinForms LauncherForm.StartUpdateUi): its own bar above the update bar, with the release link when there is one.</summary>
+    void ShowNotice(LauncherWindow w)
+    {
+        if (Notice is not { } n) return;
+        Notice = null;
+        var bar = new UpdateBar();
+        w.UpdateBarHost.Children.Add(bar);
+        var actions = new List<(string, Action)>();
+        if (n.Link is { } link) actions.Add((n.LinkText ?? "Release page", () => OpenPage(w, link)));
+        actions.Add(("Close", () => bar.Clear()));
+        bar.Show(n.Text, actions.ToArray());
     }
 
     sealed class LauncherUi(LauncherWindow w, UpdateBar bar, Button link, CancellationToken ct)
