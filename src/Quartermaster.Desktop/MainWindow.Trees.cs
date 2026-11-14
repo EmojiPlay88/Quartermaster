@@ -163,6 +163,9 @@ public partial class MainWindow
         _logFloated = false;
         _logState.FloatBounds = null;
         _logState.Load(_layout.LoadModule(s.Archive.Sha256).TryGetValue("log", out var saved) ? saved : null);
+        // The saved entry (possibly written by WinForms with Floating=true) is for the float bounds only: the log always opens docked and shown.
+        _logState.DockBack();
+        _logState.Wanted = true;
         log.PopToggleRequested += () => Guard(_logFloat.Toggle);
         log.SetFloating(_logState.Floating);
         _logFloat.Attach(log);

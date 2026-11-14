@@ -248,6 +248,40 @@ public sealed class TreesAndFloatTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Log_starts_docked_even_if_it_was_floating_when_the_module_closed()
+    {
+        var w0 = NewWindow();
+        Assert.True(w0.OpenModule(Demo()));
+        var sha = w0.Session!.Archive.Sha256;
+        new WindowLayoutStore(LayoutRoot).SaveModule(sha, new Dictionary<string, SavedWindow>
+        {
+            ["log"] = new SavedWindow(true, new Rectangle(200, 150, 640, 280), false, 96),
+        });
+        var w = NewWindow();
+        Assert.True(w.OpenModule(Demo()));
+        Pump();
+        Assert.True(w.LogShown);
+        Assert.Null(w.LogFloat);
+        Assert.Same(w.Log, w.LogHostChild);
+    }
+
+    [AvaloniaFact]
+    public void Log_float_position_is_remembered()
+    {
+        var w = Game();
+        w.Log!.PopButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Pump();
+        w.LogFloat!.PixelBounds = new RectangleI(200, 150, 640, 280);
+        Assert.True(w.OpenModule(Demo()));
+        Pump();
+        Assert.Null(w.LogFloat);
+        Assert.True(w.LogShown);
+        w.Log!.PopButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Pump();
+        Assert.Equal(new RectangleI(200, 150, 640, 280), w.LogFloat!.PixelBounds);
+    }
+
+    [AvaloniaFact]
     public void Saved_float_bounds_off_screen_are_clamped()
     {
         var w0 = NewWindow();
