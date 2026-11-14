@@ -39,6 +39,7 @@ public sealed class UpdaterPublishFixture : IDisposable
 
 /// <summary>The real published helper swaps fake app folders / units and confirms the restart through the marker file.</summary>
 [Trait("Category", "Publish")]
+[Collection("RealPublish")]   // never alongside PublishLayoutTests: both publish the updater for the same RID into its obj folder
 public class UpdateEndToEndTests : IClassFixture<UpdaterPublishFixture>, IDisposable
 {
     const string MarkerVar = "QM_TEST_MARKER";

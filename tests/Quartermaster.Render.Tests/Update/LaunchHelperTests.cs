@@ -194,10 +194,10 @@ public class LaunchHelperTests : IDisposable
     {
         var sw = Stopwatch.StartNew();
         var task = PackageHandOff.OpenAsync("p.deb", _ => Process.Start(OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("powershell", "-NoProfile -Command Start-Sleep 2") { UseShellExecute = false, CreateNoWindow = true }
+            ? new ProcessStartInfo("ping", "-n 3 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true }
             : new ProcessStartInfo("/bin/sleep", "2") { UseShellExecute = false, CreateNoWindow = true }), CancellationToken.None);
         Assert.False(task.IsCompleted);   // the call returned while the process still runs
         Assert.True(await task);
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
+        Assert.True(sw.Elapsed >= TimeSpan.FromSeconds(1), $"returned after {sw.Elapsed}, before the process could have exited");   // it really waited
     }
 }
