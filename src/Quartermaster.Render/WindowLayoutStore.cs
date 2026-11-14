@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace Quartermaster.Render;
@@ -17,6 +18,7 @@ public sealed class WindowLayoutStore(string root)
 {
     sealed class Dto { public int X { get; set; } public int Y { get; set; } public int W { get; set; } public int H { get; set; } public bool Floating { get; set; } public bool Maximized { get; set; } public int Dpi { get; set; } }
     sealed class ModuleFile { public Dictionary<string, Dto>? Windows { get; set; } }
+    sealed class OpenMapsFile { public List<string?>? OpenMaps { get; set; } public string? SelectedMap { get; set; } }
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
@@ -37,8 +39,38 @@ public sealed class WindowLayoutStore(string root)
         return result;
     }
 
+    /// <summary>Saves the window entries; the module file's other fields (the open maps) are kept.</summary>
     public void SaveModule(string moduleKey, IReadOnlyDictionary<string, SavedWindow> windows)
-        => Write(ModulePath(moduleKey), new ModuleFile { Windows = windows.ToDictionary(p => p.Key, p => To(p.Value)) });
+        => Update(ModulePath(moduleKey), o => o["Windows"] = JsonSerializer.SerializeToNode(windows.ToDictionary(p => p.Key, p => To(p.Value))));
+
+    /// <summary>The map ids whose tabs were open, in tab order (null when never saved or unreadable). Stored in the module file next to
+    /// the window entries, so readers of the old shape (<see cref="LoadModule"/>, WinForms) are unaffected.</summary>
+    public IReadOnlyList<string>? LoadOpenMaps(string moduleKey)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<OpenMapsFile>(File.ReadAllText(ModulePath(moduleKey)))?.OpenMaps?.OfType<string>().ToList();
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>The map id whose tab was selected when the open maps were saved (null when none or unknown).</summary>
+    public string? LoadSelectedMap(string moduleKey)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<OpenMapsFile>(File.ReadAllText(ModulePath(moduleKey)))?.SelectedMap;
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>Remembers the open map tabs (and the selected one); the window entries are kept.</summary>
+    public void SaveOpenMaps(string moduleKey, IReadOnlyList<string> ids, string? selected = null)
+        => Update(ModulePath(moduleKey), o =>
+        {
+            o["OpenMaps"] = JsonSerializer.SerializeToNode(ids.ToList());
+            o["SelectedMap"] = selected;
+        });
 
     public SavedWindow? LoadMain()
     {
@@ -83,6 +115,16 @@ public sealed class WindowLayoutStore(string root)
 
     static SavedWindow From(Dto d) => new(d.Floating, new Rectangle(d.X, d.Y, d.W, d.H), d.Maximized, d.Dpi);
     static Dto To(SavedWindow w) => new() { X = w.Bounds.X, Y = w.Bounds.Y, W = w.Bounds.Width, H = w.Bounds.Height, Floating = w.Floating, Maximized = w.Maximized, Dpi = w.Dpi };
+
+    /// <summary>Read-modify-write of a JSON object file: an unreadable or non-object file starts empty.</summary>
+    static void Update(string path, Action<JsonObject> change)
+    {
+        JsonObject o;
+        try { o = JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? new JsonObject(); }
+        catch (Exception) { o = new JsonObject(); }
+        change(o);
+        Write(path, o);
+    }
 
     static void Write(string path, object value)
     {

@@ -76,8 +76,7 @@ public partial class MainWindow
 
     void OpenOutlinerMap(MapDef map)
     {
-        var view = Maps.Views.FirstOrDefault(v => v.Map.Id == map.Id);
-        if (view != null) Maps.Activate(view);
+        Maps.Open(map.Id);
     }
 
     /// <summary>Docks the panel back (the game is closing), remembers where its window was per module and lets the panel go.</summary>

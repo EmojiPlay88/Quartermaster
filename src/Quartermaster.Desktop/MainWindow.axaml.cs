@@ -106,7 +106,12 @@ public partial class MainWindow : Window
             ShowInLedger = ShowInLedger,
         };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
-        Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
+        Maps.ActiveViewChanged += () =>
+        {
+            SetTilingProgress(Maps.ActiveView?.Preparing);
+            if (Maps.ActiveView == null) SbLocation.Text = SbZoom.Text = "-";   // no tab open
+        };
+        Maps.OpenMapsChanged += SaveOpenMaps;
         StartSettings();
         UpdateUi();
         UpdateTitle();
@@ -181,7 +186,7 @@ public partial class MainWindow : Window
         next.ViewChanged += OnViewChangedAnyThread;
         next.RulesChanged += OnRulesChangedAnyThread;
         CreatePhases(next);
-        Maps.Bind(next, () => _actions);
+        Maps.Bind(next, () => _actions, _layout.LoadOpenMaps(next.Archive.Sha256), _layout.LoadSelectedMap(next.Archive.Sha256));
         PaletteHost.Bind(next);
         LoadTrees(next);
         CreateLog(next);
@@ -861,6 +866,7 @@ public partial class MainWindow : Window
         DestroyTools();
         DestroyCharts();
         DestroyDocuments();
+        SaveOpenMaps();
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
         DestroyOutliner();
@@ -937,11 +943,17 @@ public partial class MainWindow : Window
     public void CentreOnPiece(string pieceId)
     {
         if (_session?.View is not { } seen || !seen.Pieces.TryGetValue(pieceId, out var piece)) return;
-        var view = Maps.Views.FirstOrDefault(v => v.Map.Id == piece.MapId) ?? Maps.Views.FirstOrDefault(v => v.Map.Name == piece.MapId);
-        if (view == null) return;
-        Maps.Activate(view);
+        // WinForms MainForm.CentreOnPiece opens the piece's map when it is closed.
+        var map = _session.Model.Maps.FirstOrDefault(m => m.Id == piece.MapId) ?? _session.Model.Maps.FirstOrDefault(m => m.Name == piece.MapId);
+        if (map == null || Maps.Open(map.Id) is not { } view) return;
         view.CentreOn(piece.Pos);
         view.SelectOnly(pieceId);
+    }
+
+    /// <summary>Remembers the open map tabs and the selected one for the module (layout memory, next to its floating windows).</summary>
+    void SaveOpenMaps()
+    {
+        if (_session is { } s) _layout.SaveOpenMaps(s.Archive.Sha256, Maps.OpenMapIds, Maps.ActiveView?.Map.Id);
     }
 
     void HookGame()

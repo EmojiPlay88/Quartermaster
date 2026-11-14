@@ -143,8 +143,7 @@ public partial class MainWindow
         }
         if (n.Kind is WindowNodeKind.Map or WindowNodeKind.OrgDisplay && n.Ref is MapDef map)
         {
-            var view = Maps.Views.FirstOrDefault(v => v.Map.Id == map.Id);
-            if (view != null) Maps.Activate(view);
+            Maps.Open(map.Id);   // a closed map's tab opens again (WinForms OpenMap)
             return;
         }
         if (n.Kind == WindowNodeKind.Chart && n.Ref is ChartDef chart)
