@@ -33,7 +33,10 @@ if command -v tiffutil >/dev/null 2>&1 && [ -f "$here/dmg-background@2x.png" ]; 
 fi
 
 dmgbuild -s "$here/dmg-settings.py" -D app="$app" -D background="$bg" "Quartermaster $version" "$dmg" || die "dmgbuild failed"
-ditto -c -k --keepParent "$app" "$zip" || die "ditto zip failed"
+# --norsrc --noextattr: no ._ AppleDouble entries (the updater's extractor would write them as real files). The managed files'
+# xattr signatures are therefore not in the update zip; the updated app is not quarantined and the kernel only enforces the
+# Mach-O signatures, which are embedded.
+ditto -c -k --norsrc --noextattr --keepParent "$app" "$zip" || die "ditto zip failed"
 [ -f "$dmg" ] || die "dmgbuild produced no $dmg"
 [ -f "$zip" ] || die "ditto produced no $zip"
 
