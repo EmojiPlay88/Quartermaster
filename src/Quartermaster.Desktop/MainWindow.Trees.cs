@@ -14,6 +14,9 @@ public partial class MainWindow
 {
     WindowLayoutStore _layout = null!;
     MenuItem _viewTree = null!;
+    MenuItem _viewPalette = null!;
+    double _treeFraction = WindowLayoutStore.DefaultTreeFraction, _paletteFraction = WindowLayoutStore.DefaultPaletteFraction;   // of the column height, palette showing
+    const string PaletteNeedsGameMaster = "Turn on game master mode in Settings > General to place counters";
     PanelDockState _logState = null!;
     PanelFloat _logFloat = null!;
     double _leftWidth = 220;       // follows the column splitter
@@ -35,13 +38,21 @@ public partial class MainWindow
     internal Grid LeftColumn => LeftColumnGrid;
     internal double LeftColumnWidth => BodyWithTree.ColumnDefinitions[0].Width.Value;
 
-    /// <summary>Fraction of the left column's height the module tree takes (0.2 - 0.8).</summary>
+    /// <summary>The palette is switched on in View > Counter Palette (remembered in ui.json; default on). It still needs a game and game master mode to show.</summary>
+    public bool PaletteOn => _viewPalette.IsChecked;
+
+    bool PaletteShowing => _session?.Game != null && GameMaster && PaletteOn;
+
+    /// <summary>Fractions of the left column's height the module tree and the palette take with the palette showing (the tables tree gets the rest).</summary>
+    public (double Tree, double Palette) LeftSplits => (_treeFraction, _paletteFraction);
+
+    /// <summary>The module tree's share of module tree + tables tree (0.2 - 0.8), whether or not the palette shows.</summary>
     public double LeftSplit
     {
         get
         {
             var rows = LeftColumnGrid.RowDefinitions;
-            double a = rows[0].Height.Value, b = rows[2].Height.Value;
+            double a = rows[0].Height.Value, b = rows[4].Height.Value;
             return a + b > 0 && double.IsFinite(a + b)
                 ? Math.Clamp(a / (a + b), WindowLayoutStore.MinLeftSplit, WindowLayoutStore.MaxLeftSplit)
                 : WindowLayoutStore.DefaultLeftSplit;
@@ -61,11 +72,19 @@ public partial class MainWindow
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _viewTree.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) ApplyLeftColumn(); };
 
-        SetRows(_layout.LoadLeftSplit());
-        foreach (var i in new[] { 0, 2 })
+        _viewPalette = new MenuItem { Header = MenuText.FromWinForms("Counter &Palette"), ToggleType = MenuItemToggleType.CheckBox, IsEnabled = false, IsChecked = _layout.LoadPaletteShown() };
+        _viewPalette.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != MenuItem.IsCheckedProperty) return;
+            _layout.SavePaletteShown(_viewPalette.IsChecked);
+            UpdatePaletteUi();
+        };
+        (_treeFraction, _paletteFraction) = _layout.LoadLeftSplits();
+        SetRows();
+        foreach (var i in new[] { 0, 2, 4 })
             LeftColumnGrid.RowDefinitions[i].PropertyChanged += (_, e) =>
             {
-                if (!_applyingSplit && e.Property == RowDefinition.HeightProperty) _layout.SaveLeftSplit(LeftSplit);
+                if (!_applyingSplit && e.Property == RowDefinition.HeightProperty) RememberRows();
             };
         ModuleTreeHost.NodeActivated += n => Guard(() => OnTreeNodeActivated(n));
         // WinForms MainForm: activating a table or formula opens the workbench at it.
@@ -88,24 +107,47 @@ public partial class MainWindow
         return new RectangleI(Position.X, Position.Y, (int)Math.Round(Bounds.Width * s), (int)Math.Round(Bounds.Height * s));
     }
 
-    void SetRows(double fraction)
+    /// <summary>Lays the rows out from the remembered fractions: palette showing = tree / palette / tables; hidden = its rows are 0 and the trees split as before.</summary>
+    void SetRows()
     {
-        var f = double.IsFinite(fraction) ? Math.Clamp(fraction, WindowLayoutStore.MinLeftSplit, WindowLayoutStore.MaxLeftSplit) : WindowLayoutStore.DefaultLeftSplit;
         var rows = LeftColumnGrid.RowDefinitions;
+        var palette = PaletteShowing;
         _applyingSplit = true;
         try
         {
-            rows[0].Height = new GridLength(f, GridUnitType.Star);
-            rows[2].Height = new GridLength(1 - f, GridUnitType.Star);
+            rows[0].Height = new GridLength(_treeFraction, GridUnitType.Star);
+            rows[2].Height = palette ? new GridLength(_paletteFraction, GridUnitType.Star) : new GridLength(0);
+            rows[3].Height = new GridLength(palette ? 4 : 0);
+            rows[4].Height = new GridLength(1 - _treeFraction - _paletteFraction, GridUnitType.Star);
         }
         finally { _applyingSplit = false; }
     }
 
-    /// <summary>Sets and remembers the split (what dragging the splitter does).</summary>
+    /// <summary>A splitter was dragged: read the rows back into the fractions and remember them (palette hidden: its share is kept, the trees share the rest).</summary>
+    void RememberRows()
+    {
+        var rows = LeftColumnGrid.RowDefinitions;
+        double a = rows[0].Height.Value, p = rows[2].Height.Value, c = rows[4].Height.Value;
+        var total = a + p + c;
+        if (!(total > 0) || !double.IsFinite(total)) return;
+        if (PaletteShowing) (_treeFraction, _paletteFraction) = WindowLayoutStore.NormalizeSplits(a / total, p / total);
+        else _treeFraction = WindowLayoutStore.NormalizeSplits(a / (a + c) * (1 - _paletteFraction), _paletteFraction).Tree;
+        _layout.SaveLeftSplits(_treeFraction, _paletteFraction);
+    }
+
+    /// <summary>Sets and remembers the module tree's share of the two trees (what dragging the splitter does with the palette hidden).</summary>
     internal void SetLeftSplit(double fraction)
     {
-        SetRows(fraction);
-        _layout.SaveLeftSplit(LeftSplit);
+        var f = double.IsFinite(fraction) ? Math.Clamp(fraction, WindowLayoutStore.MinLeftSplit, WindowLayoutStore.MaxLeftSplit) : WindowLayoutStore.DefaultLeftSplit;
+        SetLeftSplits(f * (1 - _paletteFraction), _paletteFraction);
+    }
+
+    /// <summary>Sets and remembers both fractions of the column height.</summary>
+    internal void SetLeftSplits(double tree, double palette)
+    {
+        (_treeFraction, _paletteFraction) = WindowLayoutStore.NormalizeSplits(tree, palette);
+        SetRows();
+        _layout.SaveLeftSplits(_treeFraction, _paletteFraction);
     }
 
     void ApplyLeftColumn()

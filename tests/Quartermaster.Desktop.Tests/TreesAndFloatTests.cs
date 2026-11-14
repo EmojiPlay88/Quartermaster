@@ -145,14 +145,128 @@ public sealed class TreesAndFloatTests : IDisposable
     public void Left_split_fraction_persists()
     {
         var w = NewWindow();
-        Assert.Equal(WindowLayoutStore.DefaultLeftSplit, w.LeftSplit, 3);
+        Assert.Equal(WindowLayoutStore.DefaultLeftSplit, w.LeftSplit, 1);   // no palette: as before, ~0.6 / 0.4
         w.SetLeftSplit(0.3);
-        Assert.Equal(0.3, new WindowLayoutStore(LayoutRoot).LoadLeftSplit(), 3);
-        w.SetLeftSplit(0.95);   // clamped like the store
-        Assert.Equal(WindowLayoutStore.MaxLeftSplit, w.LeftSplit, 3);
+        Assert.Equal(0.3, w.LeftSplit, 3);
+        w.SetLeftSplit(0.95);   // clamped
+        Assert.InRange(w.LeftSplit, 0.75, WindowLayoutStore.MaxLeftSplit);   // the tables tree keeps its minimum share
         w.SetLeftSplit(0.3);
         var w2 = NewWindow();
         Assert.Equal(0.3, w2.LeftSplit, 3);
+    }
+
+    void GameMasterSettings() { Directory.CreateDirectory(LayoutRoot); File.WriteAllText(Path.Combine(LayoutRoot, "settings.json"), """{ "GameMasterMode": true }"""); }
+
+    static double[] Rows(MainWindow w) => w.LeftColumn.RowDefinitions.Select(r => r.Height.Value).ToArray();
+
+    [AvaloniaFact]
+    public void Palette_is_between_module_tree_and_tables_tree()
+    {
+        GameMasterSettings();
+        var w = Game();
+        var g = w.LeftColumn;
+        Assert.Equal(5, g.RowDefinitions.Count);
+        Assert.Equal(new[] { 0, 2, 4 }, new[] { Grid.GetRow(w.ModuleTree), Grid.GetRow(w.Palette), Grid.GetRow(w.TablesTree) });
+        Assert.Same(g, w.Palette.Parent);
+        Assert.True(w.Palette.IsVisible);
+        var r = Rows(w);
+        Assert.True(r[0] > 0 && r[2] > 0 && r[4] > 0);
+        Assert.Equal(4, r[1]); Assert.Equal(4, r[3]);
+        Assert.Equal(WindowLayoutStore.DefaultTreeFraction, w.LeftSplits.Tree, 2);
+        Assert.Equal(WindowLayoutStore.DefaultPaletteFraction, w.LeftSplits.Palette, 2);
+    }
+
+    [AvaloniaFact]
+    public void Hidden_palette_leaves_no_gap()
+    {
+        var w = Game();   // not game master
+        Assert.False(w.Palette.IsVisible);
+        var r = Rows(w);
+        Assert.Equal(0, r[2]); Assert.Equal(0, r[3]);
+        Assert.Equal(4, r[1]);
+        Assert.True(r[0] > 0 && r[4] > 0);
+
+        var gm = Game(); // fresh window, then switch the mode on and the toggle off
+        gm.SettingsStore.Update(x => x with { GameMasterMode = true });
+        Pump();
+        Assert.True(gm.Palette.IsVisible);
+        gm.ClickMenu("Counter &Palette");
+        Assert.False(gm.Palette.IsVisible);
+        r = Rows(gm);
+        Assert.Equal(0, r[2]); Assert.Equal(0, r[3]);
+        Assert.True(r[0] > 0 && r[4] > 0);
+    }
+
+    [AvaloniaFact]
+    public void View_menu_toggles_the_palette()
+    {
+        var w = NewWindow();
+        var item = w.FindMenuItem("Counter &Palette")!;
+        Assert.NotNull(item);
+        Assert.False(item.IsEnabled);   // not game master
+        Assert.Equal("Turn on game master mode in Settings > General to place counters", ToolTip.GetTip(item));
+
+        GameMasterSettings();
+        var g = Game();
+        item = g.FindMenuItem("Counter &Palette")!;
+        Assert.True(item.IsEnabled);
+        Assert.True(item.IsChecked);
+        Assert.True(g.Palette.IsVisible);
+        g.ClickMenu("Counter &Palette");
+        Assert.False(item.IsChecked);
+        Assert.False(g.Palette.IsVisible);
+        g.ClickMenu("Counter &Palette");
+        Assert.True(item.IsChecked);
+        Assert.True(g.Palette.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void Palette_toggle_is_remembered()
+    {
+        GameMasterSettings();
+        var w = Game();
+        Assert.True(w.PaletteOn);
+        w.ClickMenu("Counter &Palette");
+        Assert.False(w.PaletteOn);
+        Assert.False(new WindowLayoutStore(LayoutRoot).LoadPaletteShown());
+        var w2 = Game();
+        Assert.False(w2.PaletteOn);
+        Assert.False(w2.Palette.IsVisible);
+        Assert.False(w2.FindMenuItem("Counter &Palette")!.IsChecked);
+    }
+
+    [AvaloniaFact]
+    public void Palette_split_is_remembered()
+    {
+        GameMasterSettings();
+        var w = Game();
+        w.SetLeftSplits(0.3, 0.45);
+        Assert.Equal((0.3, 0.45), new WindowLayoutStore(LayoutRoot).LoadLeftSplits());
+        var w2 = Game();
+        Assert.Equal(0.3, w2.LeftSplits.Tree, 3);
+        Assert.Equal(0.45, w2.LeftSplits.Palette, 3);
+        var r = Rows(w2);
+        Assert.Equal(0.3, r[0] / (r[0] + r[2] + r[4]), 3);
+        Assert.Equal(0.45, r[2] / (r[0] + r[2] + r[4]), 3);
+    }
+
+    [Fact]
+    public void Old_ui_json_with_one_split_still_loads()
+    {
+        Directory.CreateDirectory(LayoutRoot);
+        File.WriteAllText(Path.Combine(LayoutRoot, "ui.json"), """{ "LeftSplit": 0.5 }""");
+        var store = new WindowLayoutStore(LayoutRoot);
+        var (tree, palette) = store.LoadLeftSplits();
+        Assert.Equal(WindowLayoutStore.DefaultPaletteFraction, palette, 3);
+        Assert.Equal(0.5 * (1 - WindowLayoutStore.DefaultPaletteFraction), tree, 3);
+        Assert.True(store.LoadPaletteShown());
+        // Saving the new fields keeps the old one (and WinForms still reads it).
+        store.SavePaletteShown(false);
+        Assert.Equal(0.5, store.LoadLeftSplit(), 3);
+        Assert.False(store.LoadPaletteShown());
+        // Corrupt or missing: defaults.
+        File.WriteAllText(Path.Combine(LayoutRoot, "ui.json"), "{ nonsense");
+        Assert.Equal((WindowLayoutStore.DefaultTreeFraction, WindowLayoutStore.DefaultPaletteFraction), store.LoadLeftSplits());
     }
 
     [AvaloniaFact]

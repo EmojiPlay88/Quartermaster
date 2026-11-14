@@ -76,8 +76,10 @@ public sealed class PaletteDock : DockPanel
         SetDock(bar, Dock.Top);
         Children.Add(bar);
 
-        var split = new Grid { RowDefinitions = new RowDefinitions("140,4,*") };
+        var split = new Grid { RowDefinitions = new RowDefinitions("2*,4,3*") { } };
         Grid.SetRow(_tree, 0);
+        split.RowDefinitions[0].MinHeight = 40;   // the column is narrow: folders and counters share what is left
+        split.RowDefinitions[2].MinHeight = 40;
         var splitter = new GridSplitter { ResizeDirection = GridResizeDirection.Rows };
         Grid.SetRow(splitter, 1);
         _list.ItemsPanel = new Avalonia.Controls.Templates.FuncTemplate<Panel?>(() => new WrapPanel());

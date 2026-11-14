@@ -413,6 +413,7 @@ public partial class MainWindow : Window
         view.Items.Add(_viewLog);
         view.Items.Add(_viewPhases);
         view.Items.Add(_viewOutliner);
+        view.Items.Add(_viewPalette);
         Item(view, "&Ledger", ShowLedger, "view.ledger");
         Item(view, "&Overview", ShowOverview, gate: "view.overview");
         view.Items.Add(new Separator());
@@ -504,13 +505,14 @@ public partial class MainWindow : Window
         UpdateTurnUi();
     }
 
-    /// <summary>The counter palette shows only with a game in game master mode (WinForms MainForm.SetGameMaster).</summary>
+    /// <summary>The counter palette shows only with a game in game master mode and View > Counter Palette on (WinForms MainForm.SetGameMaster).</summary>
     void UpdatePaletteUi()
     {
-        var palette = _session?.Game != null && GameMaster;
-        PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
-        Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
-        Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
+        _viewPalette.IsEnabled = GameMaster;
+        ToolTip.SetTip(_viewPalette, GameMaster ? null : PaletteNeedsGameMaster);
+        ToolTip.SetShowOnDisabled(_viewPalette, true);
+        PaletteHost.IsVisible = PaletteSplitter.IsVisible = PaletteShowing;
+        SetRows();
     }
 
     /// <summary>Enabled state and the reason tooltip of every gated menu item (WinForms ApplyGates); other tooltips are left alone.</summary>

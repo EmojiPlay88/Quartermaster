@@ -44,12 +44,15 @@
     </Border>
     <!-- The log docks under the maps and palette, like the WinForms default layout (170 high, 4 splitter) -->
     <Grid x:Name="BodyAndLog" RowDefinitions="*,0,0">
-      <!-- Left column (WinForms: module tree over tables tree, 220 wide, split 0.6 / 0.4 by default) beside the maps and palette -->
+      <!-- Left column (WinForms: module tree, counter palette, tables tree, 220 wide) beside the maps -->
       <Grid x:Name="BodyWithTree" ColumnDefinitions="220,4,*">
-        <Grid x:Name="LeftColumnGrid" RowDefinitions="0.6*,4,0.4*">
+        <Grid x:Name="LeftColumnGrid" RowDefinitions="0.4*,4,0.35*,4,0.25*">
           <shell:ModuleTree x:Name="ModuleTreeHost" />
           <GridSplitter x:Name="LeftSplitter" Grid.Row="1" ResizeDirection="Rows" HorizontalAlignment="Stretch" />
-          <shell:TablesTree x:Name="TablesTreeHost" Grid.Row="2" />
+          <!-- The counter palette sits between the trees (game master mode and View > Counter Palette; rows 2 and 3 are 0 while hidden) -->
+          <shell:PaletteDock x:Name="PaletteHost" Grid.Row="2" IsVisible="False" />
+          <GridSplitter x:Name="PaletteSplitter" Grid.Row="3" ResizeDirection="Rows" HorizontalAlignment="Stretch" IsVisible="False" />
+          <shell:TablesTree x:Name="TablesTreeHost" Grid.Row="4" />
         </Grid>
         <GridSplitter x:Name="LeftColumnSplitter" Grid.Column="1" ResizeDirection="Columns" />
       <Grid x:Name="Body" Grid.Column="2">
@@ -59,19 +62,15 @@
           <ColumnDefinition Width="0" />
           <ColumnDefinition Width="0" />
           <ColumnDefinition Width="0" />
-          <ColumnDefinition Width="0" />
-          <ColumnDefinition Width="0" />
         </Grid.ColumnDefinitions>
         <!-- Classic control colour behind the tab strip (WinForms DocumentTabStrip); the AppWorkspace grey is the MapView's own "no game" backdrop -->
         <Border Background="{DynamicResource Classic.FaceBrush}">
           <shell:MapTabs x:Name="Maps" />
         </Border>
-        <GridSplitter x:Name="PaletteSplitter" Grid.Column="1" ResizeDirection="Columns" IsVisible="False" />
-        <shell:PaletteDock x:Name="PaletteHost" Grid.Column="2" IsVisible="False" />
-        <GridSplitter x:Name="PhaseSplitter" Grid.Column="3" ResizeDirection="Columns" IsVisible="False" />
-        <Border x:Name="PhaseHost" Grid.Column="4" IsVisible="False" />
-        <GridSplitter x:Name="OutlinerSplitter" Grid.Column="5" ResizeDirection="Columns" IsVisible="False" />
-        <Border x:Name="OutlinerHost" Grid.Column="6" IsVisible="False" />
+        <GridSplitter x:Name="PhaseSplitter" Grid.Column="1" ResizeDirection="Columns" IsVisible="False" />
+        <Border x:Name="PhaseHost" Grid.Column="2" IsVisible="False" />
+        <GridSplitter x:Name="OutlinerSplitter" Grid.Column="3" ResizeDirection="Columns" IsVisible="False" />
+        <Border x:Name="OutlinerHost" Grid.Column="4" IsVisible="False" />
       </Grid>
       </Grid>
       <GridSplitter x:Name="LogSplitter" Grid.Row="1" ResizeDirection="Rows" HorizontalAlignment="Stretch" IsVisible="False" />

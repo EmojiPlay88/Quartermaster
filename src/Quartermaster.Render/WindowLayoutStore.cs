@@ -86,21 +86,75 @@ public sealed class WindowLayoutStore(string root)
 
     public const double DefaultLeftSplit = 0.6, MinLeftSplit = 0.2, MaxLeftSplit = 0.8;
 
-    sealed class UiFile { public double LeftSplit { get; set; } }
+    /// <summary>ui.json. <c>LeftSplit</c> is the WinForms/old value (module tree share of tree + tables); the others are the Desktop left column.</summary>
+    sealed class UiFile
+    {
+        public double LeftSplit { get; set; }
+        public double TreeFraction { get; set; }
+        public double PaletteFraction { get; set; }
+        public bool? PaletteShown { get; set; }
+    }
+
+    /// <summary>Defaults of the Desktop left column (fractions of its height): module tree, counter palette; the tables tree gets the rest.</summary>
+    public const double DefaultTreeFraction = 0.4, DefaultPaletteFraction = 0.35, MinPartFraction = 0.15, MaxSplitSum = 0.85;
+
+    string UiPath => Path.Combine(root, "ui.json");
+
+    UiFile ReadUi()
+    {
+        try { return JsonSerializer.Deserialize<UiFile>(File.ReadAllText(UiPath)) ?? new UiFile(); }
+        catch (Exception) { return new UiFile(); }
+    }
+
+    void UpdateUi(Action<UiFile> change)
+    {
+        var f = ReadUi();
+        change(f);
+        Write(UiPath, f);
+    }
+
+    /// <summary>Clamps both fractions to a sensible range and leaves the tables tree at least <c>1 - MaxSplitSum</c> of the column.</summary>
+    public static (double Tree, double Palette) NormalizeSplits(double tree, double palette)
+    {
+        tree = double.IsFinite(tree) ? Math.Clamp(tree, MinPartFraction, MaxSplitSum - MinPartFraction) : DefaultTreeFraction;
+        palette = double.IsFinite(palette) ? Math.Clamp(palette, MinPartFraction, MaxSplitSum - MinPartFraction) : DefaultPaletteFraction;
+        var sum = tree + palette;
+        if (sum > MaxSplitSum) { tree *= MaxSplitSum / sum; palette *= MaxSplitSum / sum; }
+        return (tree, palette);
+    }
+
+    /// <summary>The Desktop left column's split as fractions of its height (module tree, counter palette). An old file with only
+    /// <c>LeftSplit</c> keeps the tree share it had (scaled into the room the default palette leaves); missing or corrupt gives the defaults.</summary>
+    public (double Tree, double Palette) LoadLeftSplits()
+    {
+        var f = ReadUi();
+        var palette = double.IsFinite(f.PaletteFraction) && f.PaletteFraction > 0 ? f.PaletteFraction : DefaultPaletteFraction;
+        if (double.IsFinite(f.TreeFraction) && f.TreeFraction > 0) return NormalizeSplits(f.TreeFraction, palette);
+        if (double.IsFinite(f.LeftSplit) && f.LeftSplit > 0)
+            return NormalizeSplits(Math.Clamp(f.LeftSplit, MinLeftSplit, MaxLeftSplit) * (1 - palette), palette);
+        return NormalizeSplits(DefaultTreeFraction, palette);
+    }
+
+    public void SaveLeftSplits(double tree, double palette)
+    {
+        var (t, p) = NormalizeSplits(tree, palette);
+        UpdateUi(f => { f.TreeFraction = t; f.PaletteFraction = p; });
+    }
+
+    /// <summary>Whether the counter palette is switched on (default true; it still needs game master mode to show).</summary>
+    public bool LoadPaletteShown() => ReadUi().PaletteShown ?? true;
+
+    public void SavePaletteShown(bool shown) => UpdateUi(f => f.PaletteShown = shown);
 
     /// <summary>Fraction of the left panel height given to the module tree (clamped 0.2-0.8; default 0.6 when missing or corrupt).</summary>
     public double LoadLeftSplit()
     {
-        try
-        {
-            var f = JsonSerializer.Deserialize<UiFile>(File.ReadAllText(Path.Combine(root, "ui.json")));
-            return f != null && double.IsFinite(f.LeftSplit) && f.LeftSplit > 0 ? Math.Clamp(f.LeftSplit, MinLeftSplit, MaxLeftSplit) : DefaultLeftSplit;
-        }
-        catch (Exception) { return DefaultLeftSplit; }
+        var f = ReadUi();
+        return double.IsFinite(f.LeftSplit) && f.LeftSplit > 0 ? Math.Clamp(f.LeftSplit, MinLeftSplit, MaxLeftSplit) : DefaultLeftSplit;
     }
 
     public void SaveLeftSplit(double fraction)
-        => Write(Path.Combine(root, "ui.json"), new UiFile { LeftSplit = double.IsFinite(fraction) ? Math.Clamp(fraction, MinLeftSplit, MaxLeftSplit) : DefaultLeftSplit });
+        => UpdateUi(f => f.LeftSplit = double.IsFinite(fraction) ? Math.Clamp(fraction, MinLeftSplit, MaxLeftSplit) : DefaultLeftSplit);
 
     /// <summary>Lower-case hex SHA-256 of the file, or null when it cannot be read.</summary>
     public static string? HashFile(string path)
