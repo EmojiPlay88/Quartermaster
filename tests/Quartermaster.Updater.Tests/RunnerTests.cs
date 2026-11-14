@@ -28,8 +28,11 @@ sealed class FakeHost : IProcessHost
     }
     /// <summary>Per pid: its environment variables.</summary>
     public Dictionary<int, Dictionary<string, string>> Env = [];
-    public IEnumerable<(int Pid, string Value)> ProcessesWithEnv(string name) =>
-        Env.Where(e => e.Value.ContainsKey(name)).Select(e => (e.Key, e.Value[name]));
+    /// <summary>Per pid: its executable (the /proc/&lt;pid&gt;/exe target).</summary>
+    public Dictionary<int, string> Exe = [];
+    public IEnumerable<AppImageProcess> AppImageProcesses() =>
+        Env.Where(e => e.Value.ContainsKey("APPIMAGE"))
+            .Select(e => new AppImageProcess(e.Key, e.Value["APPIMAGE"], e.Value.GetValueOrDefault("APPDIR"), Exe.GetValueOrDefault(e.Key)));
 }
 
 public class RunnerTests
@@ -351,7 +354,8 @@ public class RunnerTests
     {
         using var t = new UnitArea(file: true);
         var host = new FakeHost();
-        host.Env[77] = new() { ["APPIMAGE"] = Path.GetFullPath(t.Unit) }; // e.g. AppRun
+        host.Env[77] = new() { ["APPIMAGE"] = Path.GetFullPath(t.Unit) }; // the AppImage runtime
+        host.Exe[77] = Path.GetFullPath(t.Unit);
         Assert.Equal(ExitCodes.Refused, new UpdateRunner(UnitOpts(t), host, _ => { }).Run());
         Assert.Equal("old-image", File.ReadAllText(t.Unit));
         Assert.False(File.Exists(t.Journal));
@@ -368,10 +372,43 @@ public class RunnerTests
         host.ByName = new() { ["Quartermaster.AppImage"] = [(50, t.Unit)] };
         host.Env[50] = new() { ["PATH"] = "/usr/bin" };
         host.Env[1] = new() { ["APPIMAGE"] = full };                                  // the exiting app (selfPid)
+        host.Exe[1] = full;
         host.Env[Environment.ProcessId] = new() { ["APPIMAGE"] = full };              // the helper itself inherits it
+        host.Exe[Environment.ProcessId] = full;
         host.Env[60] = new() { ["APPIMAGE"] = Path.Combine(t.Root, "Other.AppImage") }; // another AppImage
+        host.Exe[60] = Path.Combine(t.Root, "Other.AppImage");
+        host.Env[65] = new() { ["APPIMAGE"] = full };                                  // exe unreadable
         Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
-        host.Env[70] = new() { ["APPIMAGE"] = full };                                  // AppRun / Quartermaster from this unit
+        host.Env[70] = new() { ["APPIMAGE"] = full };                                  // the runtime of this unit
+        host.Exe[70] = full;
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+    }
+
+    [Fact]
+    public void OtherUnitCopiesRunning_AppImage_OnlyTheRuntimeOrTheMountedApp()
+    {
+        using var t = new UnitArea(file: true);
+        var full = Path.GetFullPath(t.Unit);
+        var mount = Path.GetFullPath("/tmp/.mount_x");
+        var host = new FakeHost();
+        // A browser opened from the app's links inherits APPIMAGE and APPDIR but runs from outside the mount: not a copy.
+        host.Env[80] = new() { ["APPIMAGE"] = full, ["APPDIR"] = mount };
+        host.Exe[80] = Path.GetFullPath("/usr/bin/firefox");
+        // A process whose exe merely shares the mount's name prefix is not under it either.
+        host.Env[81] = new() { ["APPIMAGE"] = full, ["APPDIR"] = mount };
+        host.Exe[81] = mount + "2" + Path.DirectorySeparatorChar + "Quartermaster";
+        // Without APPDIR only the runtime itself counts.
+        host.Env[82] = new() { ["APPIMAGE"] = full };
+        host.Exe[82] = Path.Combine(mount, "usr", "bin", "Quartermaster");
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+
+        host.Env[90] = new() { ["APPIMAGE"] = full, ["APPDIR"] = mount };              // the mounted app
+        host.Exe[90] = Path.Combine(mount, "usr", "bin", "Quartermaster");
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
+
+        host.Env.Remove(90);
+        host.Env[91] = new() { ["APPIMAGE"] = full, ["APPDIR"] = mount };              // the runtime (exe == the unit)
+        host.Exe[91] = full;
         Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1));
     }
 
@@ -388,6 +425,7 @@ public class RunnerTests
             Assert.Equal(UpdateRunner.ResolveLinks(t.Unit), UpdateRunner.ResolveLinks(viaLink));
             var host = new FakeHost();
             host.Env[70] = new() { ["APPIMAGE"] = UpdateRunner.ResolveLinks(t.Unit) }; // the runtime's realpath
+            host.Exe[70] = UpdateRunner.ResolveLinks(t.Unit);
             Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, viaLink, "Quartermaster.AppImage", 1));
         }
         finally { Directory.Delete(link); }

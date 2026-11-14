@@ -64,9 +64,15 @@ public interface IProcessHost
     void Kill(int pid);
     /// <summary>Running processes with this name and their main module path (null when it cannot be read).</summary>
     IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName);
-    /// <summary>Running processes whose environment has the variable <paramref name="name"/>, with its value (Linux only; empty elsewhere, unreadable processes skipped).</summary>
-    IEnumerable<(int Pid, string Value)> ProcessesWithEnv(string name);
+    /// <summary>
+    /// Running processes whose environment has APPIMAGE, with its value, their APPDIR value (null when unset) and their executable
+    /// (the <c>/proc/&lt;pid&gt;/exe</c> link target; null when unreadable). Linux only; empty elsewhere, unreadable processes skipped.
+    /// </summary>
+    IEnumerable<AppImageProcess> AppImageProcesses();
 }
+
+/// <summary>A process started from an AppImage (or inheriting its environment): its pid, APPIMAGE and APPDIR values and its executable.</summary>
+public readonly record struct AppImageProcess(int Pid, string AppImage, string? AppDir, string? Exe);
 
 public sealed class RealProcessHost : IProcessHost
 {
@@ -108,22 +114,25 @@ public sealed class RealProcessHost : IProcessHost
         return list;
     }
 
-    public IEnumerable<(int Pid, string Value)> ProcessesWithEnv(string name)
+    public IEnumerable<AppImageProcess> AppImageProcesses()
     {
         if (!OperatingSystem.IsLinux()) return [];
         string[] dirs;
         try { dirs = Directory.GetDirectories("/proc"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
-        var prefix = name + "=";
-        var list = new List<(int, string)>();
+        var list = new List<AppImageProcess>();
         foreach (var d in dirs)
         {
             if (!int.TryParse(Path.GetFileName(d), out var pid)) continue;
-            string environ;
-            try { environ = File.ReadAllText(Path.Combine(d, "environ")); }
+            string[] environ;
+            try { environ = File.ReadAllText(Path.Combine(d, "environ")).Split('\0'); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
-            if (environ.Split('\0').FirstOrDefault(e => e.StartsWith(prefix, StringComparison.Ordinal)) is { } entry)
-                list.Add((pid, entry[prefix.Length..]));
+            string? Var(string name) => environ.FirstOrDefault(v => v.StartsWith(name + "=", StringComparison.Ordinal)) is { } entry ? entry[(name.Length + 1)..] : null;
+            if (Var("APPIMAGE") is not { } image) continue;
+            string? exe = null;
+            try { exe = new FileInfo(Path.Combine(d, "exe")).LinkTarget; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            list.Add(new AppImageProcess(pid, image, Var("APPDIR"), exe));
         }
         return list;
     }
@@ -270,10 +279,11 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
     }
 
     /// <summary>
-    /// Unit mode: true when another process runs this unit. A file unit (AppImage) is running in any process, other than
-    /// <paramref name="selfPid"/> and this helper, whose environment has APPIMAGE=&lt;the unit's full path&gt; (the AppImage runtime sets it
-    /// for the app and its children, whatever their names). A directory unit (.app) matches a process named after <paramref name="exe"/>
-    /// whose path is inside the unit.
+    /// Unit mode: true when another process runs this unit. A file unit (AppImage) is running in a process, other than
+    /// <paramref name="selfPid"/> and this helper, whose environment has APPIMAGE=&lt;the unit's full path&gt; and whose executable is
+    /// either the unit itself (the AppImage runtime) or lies under that process's own APPDIR (the mounted app). Other children inherit
+    /// APPIMAGE too (a browser opened from the app's links), and do not count. A directory unit (.app) matches a process named after
+    /// <paramref name="exe"/> whose path is inside the unit.
     /// </summary>
     public static bool OtherUnitCopiesRunning(IProcessHost host, string unit, string exe, int selfPid) =>
         OtherUnitCopiesRunning(host, unit, exe, selfPid, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
@@ -285,12 +295,22 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         {
             // The runtime sets APPIMAGE to the real path; compare both sides with links resolved.
             var want = ResolveLinks(unitFull);
-            return host.ProcessesWithEnv("APPIMAGE")
-                .Any(p => p.Pid != selfPid && p.Pid != Environment.ProcessId && p.Value.Length > 0 && string.Equals(ResolveLinks(p.Value), want, StringComparison.Ordinal));
+            return host.AppImageProcesses().Any(p => p.Pid != selfPid && p.Pid != Environment.ProcessId && p.AppImage.Length > 0 && p.Exe is { Length: > 0 } &&
+                string.Equals(ResolveLinks(p.AppImage), want, StringComparison.Ordinal) && IsAppImageApp(p.Exe, p.AppDir, want));
         }
         var prefix = unitFull + Path.DirectorySeparatorChar;
         return host.ProcessesNamed(Path.GetFileNameWithoutExtension(exe))
             .Any(p => p.Pid != selfPid && p.Path != null && Path.GetFullPath(p.Path).StartsWith(prefix, comparison));
+    }
+
+    /// <summary>True when <paramref name="exe"/> is the AppImage <paramref name="unit"/> itself (its runtime) or lies under <paramref name="appDir"/> (the mounted app).</summary>
+    static bool IsAppImageApp(string exe, string? appDir, string unit)
+    {
+        var exeFull = ResolveLinks(exe);
+        if (string.Equals(exeFull, unit, StringComparison.Ordinal)) return true;
+        if (string.IsNullOrEmpty(appDir)) return false;
+        var dir = ResolveLinks(appDir).TrimEnd('\\', '/');
+        return dir.Length > 0 && exeFull.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     /// <summary>The full path with every existing symbolic-link component resolved (left as is where unreadable); on Windows just the full path.</summary>
