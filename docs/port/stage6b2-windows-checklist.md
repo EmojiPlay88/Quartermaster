@@ -9,7 +9,7 @@ This tests the **Windows installer**: a per-user setup program, an update instal
 3. Double-click the setup. Expected: **SmartScreen** may say "Windows protected your PC" (the setup is unsigned). Choose **More info**, then **Run anyway**. Write down anything else.
 4. Expected: no administrator (UAC) prompt; a wizard with a "Create a desktop shortcut" box (unticked) and, at the end, "Launch Quartermaster" (unticked). Finish the install.
 5. Expected: the Start menu has **Quartermaster**; the program is in `%LOCALAPPDATA%\Programs\Quartermaster` (it holds `Quartermaster.exe` and `quartermaster-package.json`). Windows Settings > Apps lists **Quartermaster** once.
-6. Check the marker and version from PowerShell (no window opens): `Get-Content "$env:LOCALAPPDATA\Programs\Quartermaster\quartermaster-package.json"` should say `"package":"win-setup"`, and `& "$env:LOCALAPPDATA\Programs\Quartermaster\Quartermaster.exe" --version` prints `Quartermaster <v>`.
+6. Check the marker and version from PowerShell (no window opens; the `| Out-String` is needed, because the program has no console and PowerShell would otherwise show nothing): `Get-Content "$env:LOCALAPPDATA\Programs\Quartermaster\quartermaster-package.json"` should say `"package":"win-setup"`, and `& "$env:LOCALAPPDATA\Programs\Quartermaster\Quartermaster.exe" --version | Out-String` prints `Quartermaster <v>`.
 7. Start **Quartermaster** from the Start menu. Expected: the launcher opens. **Help > About** shows the version. Close it.
 8. Run the same setup again. Expected: it upgrades in place, and Settings > Apps still lists Quartermaster **once**.
 
