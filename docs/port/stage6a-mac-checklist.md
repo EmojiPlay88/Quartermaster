@@ -48,10 +48,10 @@ The finished `.app` bundle and its installer come in stage 6b. For now you build
 
 ## B. Update to 0.0.2
 
-6. Start the 0.0.1 app **with the feed**: `QUARTERMASTER_UPDATE_FEED=~/Desktop/qm-test/feed ~/Desktop/qm-test/Quartermaster.app/Contents/MacOS/Quartermaster` (use the full path if `~` is not expanded). Expected: the launcher with a pale-yellow bar naming 0.0.2 and the buttons **What's new**, **Update now**, **Later**, **Skip this version**; the bottom line shows 0.0.1.
+6. Start the 0.0.1 app **with the feed and a scratch data folder** (so the test stays off your real Quartermaster settings; the app hands both variables on to the updater helper, so every restart keeps them): `QUARTERMASTER_LAYOUT_ROOT=~/qm-test/data QUARTERMASTER_UPDATE_FEED=~/Desktop/qm-test/feed ~/Desktop/qm-test/Quartermaster.app/Contents/MacOS/Quartermaster` (use the full path if `~` is not expanded). Start the app this way every time below. Expected: the launcher with a pale-yellow bar naming 0.0.2 and the buttons **What's new**, **Update now**, **Later**, **Skip this version**; the bottom line shows 0.0.1.
 7. Click **Update now**. Expected: the Update window shows progress (download, check, install), the app closes and, after a few seconds, starts again by itself.
 8. Expected: the launcher shows **Updated to 0.0.2.** once (and the bottom line shows 0.0.2). In `~/Desktop/qm-test` there is now a hidden `.Quartermaster.app.qm-backup-0.0.1` beside `Quartermaster.app` (`ls -a`). Restart the app: the notice is gone.
-9. `ls ~/.local/share/Quartermaster/Updates` shows no leftover swap journal (`swap-journal.json`) and no old download folders. (If that folder does not exist on your Mac, look for a `Quartermaster` folder under `~/.local/share` or `~/Library/Application Support`.)
+9. `ls ~/qm-test/data/Updates` shows `helper.log` and `state.json` and **no** `swap-journal.json` (the journal is deleted once the new version confirmed its start); the download folder of 0.0.2 is gone.
 
 ## C. A broken 0.0.3 rolls back
 
@@ -61,7 +61,11 @@ The finished `.app` bundle and its installer come in stage 6b. For now you build
     printf '#!/bin/sh\nexit 1\n' > app-0.0.3/Quartermaster.app/Contents/MacOS/Quartermaster && chmod +x app-0.0.3/Quartermaster.app/Contents/MacOS/Quartermaster
     ```
 
-11. Start the 0.0.2 app with the feed again and click **Update now**. Expected: the app closes, the new version does not start, and after up to about 30 seconds the old 0.0.2 starts again with the notice **The update to 0.0.3 didn't start, so Quartermaster went back to 0.0.2.** The bundle is 0.0.2 (the bottom line says so) and no `.Quartermaster.app.qm-backup-0.0.2` stays behind except the one the successful swap needs; the helper's log is `helper.log` in the same Updates data folder as in step 9. Write down anything that looks different.
+11. Start the 0.0.2 app as in step 6 (feed and data folder) and click **Update now**. Expected: the app closes, the new version does not start, and after up to about 30 seconds the old 0.0.2 starts again with the notice **The update to 0.0.3 didn't start, so Quartermaster went back to 0.0.2.** After it: `Quartermaster.app` is 0.0.2 again (the bottom line says so). `ls -a ~/Desktop/qm-test` shows only `.Quartermaster.app.qm-backup-0.0.1`, left from step 8 (the app keeps the newest backup and deletes older ones only after a *successful* update starts). There is no `.Quartermaster.app.qm-backup-0.0.2`: the helper moved the 0.0.2 bundle into that name for the swap and moved it back on the rollback. `~/qm-test/data/Updates/swap-journal.json` is gone and `helper.log` there tells the story ("New version did not confirm startup; rolling back"). Write down anything that looks different.
+
+## Starting a second copy (for a refusal)
+
+To see the refusal "The update to X was not installed; nothing was changed. Close every other Quartermaster window and try again, or download it from the release page.": with the first copy open at the update bar, open a second Terminal window and run the same command as in step 6 again (`.../Quartermaster.app/Contents/MacOS/Quartermaster` directly; a second copy started with `open -n` also counts). Click **Update now** in the first copy. Expected: the app restarts, nothing is swapped, and the launcher shows that text. Close the second copy afterwards.
 
 ## Recovering by hand
 
