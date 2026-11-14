@@ -212,6 +212,17 @@ Stage 5b = hot-seat: the Players page of the new-game dialog, Settings > Game > 
 - Updates: setup, zip, tar and AppImage update in place through the updater (the setup install takes the same `win-x64.zip` asset as the zip); deb and rpm hand the downloaded package to the system installer.
 - The release is built by the `release.yml` workflow (run by hand, version = `Directory.Build.props`) and collected with `build/release.ps1 -Version <v> -FromRun <run id>`; the script checks the asset list and checksums and prints `gh release create` but never publishes. Hands-on checks: `docs/port/stage6b2-windows-checklist.md`, `docs/port/stage6b2-linux-checklist.md` (the real-AppImage `APPIMAGE` / `/proc/<pid>/exe` check from 6a is step 6 there).
 
+## Stage-6c deviations and notes (Windows feedback; deliberate or known)
+
+- Setup asks where to install again. It refuses the data folder (and anything inside it), drive or share roots, Program Files (the install is per user; administrator folders are not supported) and non-empty folders that do not already hold Quartermaster.exe. Silent installs never show a message box.
+- The log always starts docked at the bottom. The old WinForms app could save it as floating in the shared layout file; the floating position is still remembered for when you pop it out.
+- Map tabs follow WinForms (see the DocumentTabStrip row). Closing the main map leaves the map area empty until you open it again from the tree.
+- The counter palette moved from its own dock into the left column (see the PaletteDock row).
+- **Deviation:** View > Module Tree hides only the module tree; WinForms hides the whole left panel. Charts & Tables and the palette have their own toggles under View.
+- Known limit: with the status bar hidden, the hot-seat player switcher (which lives there) is not reachable; show the status bar again to switch.
+- Known limit: "Last moved" is only on the map toolbar, so hiding the map toolbar hides it.
+- The alert bar still shows a pending notice even when it is switched off in View > Show (as WinForms).
+
 ## Before the stage release
 
 Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the real rendering paths. Before stage 1 is released:
@@ -246,7 +257,8 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Edit > Step Back to Start of Phase / Step Back To... | 2b | ✔ |  |  | after Redo, as WinForms; Ctrl+Left (Cmd+Left on macOS) steps back to the start of the phase after the confirm dialog; Step Back To... lists the checkpoints; off with the WinForms reason tooltip (guest, replay, turn already sent, old save without history); autosaves first, closes the formula windows and batch grids, status "Stepped back — reopen from the phase panel"; Redo works afterwards |
 | View > Show Grid | 1 | ✔ | ✔ | ✔ |  |
 | View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
-| View > Module Tree | 2b | ✔ |  |  | checked by default; hides the left column (tree over tables tree) |
+| View > Module Tree | 6c | ✔ |  |  | checked by default; hides only the module tree (WinForms hides the whole left panel; see the Stage-6c deviations) |
+| View > Show (Main Toolbar, Phase Strip, Alert Bar, Status Bar, Map Toolbar, Charts & Tables), Show Everything | 6c | ✔ |  |  | choices remembered app-wide (`ui.json` Hidden; alert bar and outliner through settings); Show Everything also resets splits and dock sizes |
 | View > Diagnostics | 3a | ✔ |  |  | Ctrl/Cmd+D; needs a module; opens the one Diagnostics window (also from the toolbar button and the status-bar link) |
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
 | View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown or floating; while floating it docks the panel back |
@@ -278,7 +290,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | keys are user-editable in Settings > Keyboard and apply at once to the key dispatch, menu gestures and toolbar tooltips; unknown override ids in `settings.json` are kept on save |
 | ModuleTreePanel | 2b | ✔ |  |  | map nodes activate the tab; setup nodes open the setup chooser (no preselect yet); chart nodes open their chart window (3b); document nodes open their document window, one per document; rebuilds when the viewer changes |
 | TablesTreePanel | 2b | ✔ |  |  | Tables and Formulas folders, refreshed 200 ms after rules changes; double-click opens the Workbench on that table or formula (4a); split with the module tree remembered (ui.json) |
-| DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
+| DocumentTabStrip (map tabs) | 6c | ✔ |  |  | as WinForms: only the main map opens with a module; other maps open from the module tree's Maps folder (double-click) or by jumping to a piece; × or middle-click closes a tab, right-click gives Close / Close Others / Close All; one scrolling row; open tabs and the selected tab are remembered per module. A map the current player cannot see never gets a tab |
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (5d: "New turn waiting from {player}" from the turn mailbox watch, shown also with the alert bar switched off; a click opens and replays the turn; stage5d-desktop-turn-notice.png); holder matches open the Ledger and select the holder's row (Depots & Global tab, filter cleared when it hides it; never the counters selected on the map); shown when a game is open and Settings > Display "Alert bar" is on (applies live) |
 | TourOverlay | 5a | ✔ |  |  | classic tooltip-yellow balloon with an arrow toward the step's target; Back / Next / Skip tour, Esc skips; steps whose target is hidden are left out; starts once by itself on the first game opened in a launcher-loop window (from the launcher, the command line or File > Open Module…; `TourShown`); without a compositor the arrow strip and corners take the control colour instead of black; closes when the game is replaced or the module closes |
@@ -303,7 +315,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MapCanvas: view refresh, selection prune and drag cancel on game change or rewind | 1 | ✔ | ✔ | ✔ |  |
 | MapCanvas: cursor location and zoom text in the status bar | 1 | ✔ | ✔ | ✔ |  |
 | Grid overlay and grid location names | 1 | ✔ | ✔ | ✔ |  |
-| PaletteDock / PalettePanel: search, folder tree, counter thumbnails | 1 | ✔ | ✔ | ✔ |  |
+| PaletteDock / PalettePanel: search, folder tree, counter thumbnails | 6c | ✔ | ✔ | ✔ | since 6c in the left column between the module tree and Charts & Tables (only in game master mode); View > Counter Palette shows and hides it |
 | PaletteDrop: drag a counter onto a map | 1 | ✔ | ✔ | ✔ |  |
 | MapCanvas: hover stack popup (CounterDetailPopup) | 2a | ✔ |  |  | same layout and pixels as WinForms (shared `CounterPopupLayout`); shown in the window overlay, so it stays inside the map window rather than the screen; hover delay from Settings > Map (applies live to every map tab) |
 | MapCanvas: hover-stack highlight | 2a | ✔ |  |  |  |

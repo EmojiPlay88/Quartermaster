@@ -11,6 +11,13 @@ This tests the **Windows installer**: a per-user setup program, an update instal
 5. Expected: the Start menu has **Quartermaster**; the program is in `%LOCALAPPDATA%\Programs\Quartermaster` (it holds `Quartermaster.exe` and `quartermaster-package.json`). Windows Settings > Apps lists **Quartermaster** once.
 6. Check the marker and version from PowerShell (no window opens; the `| Out-String` is needed, because the program has no console and PowerShell would otherwise show nothing): `Get-Content "$env:LOCALAPPDATA\Programs\Quartermaster\quartermaster-package.json"` should say `"package":"win-setup"`, and `& "$env:LOCALAPPDATA\Programs\Quartermaster\Quartermaster.exe" --version | Out-String` prints `Quartermaster <v>`.
 7. Start **Quartermaster** from the Start menu. Expected: the launcher opens. **Help > About** shows the version. Close it.
+
+   Stage 6c checks (use a module with several maps; open it from the launcher):
+   - 7a. In setup, on the folder page, type your data folder (`%LOCALAPPDATA%\Quartermaster`) or a drive root such as `C:\` and press Next. Expected: a message says why, and you stay on the page. A folder under Program Files is refused too.
+   - 7b. Open the module. Expected: the log is docked at the bottom, not floating, and only the main map has a tab.
+   - 7c. Open another map by double-clicking it in the module tree's Maps folder. Close a tab with its x, with middle-click, and with right-click > Close, Close Others and Close All. Reopen a closed map from the tree. Close the app and reopen the module: the same tabs are open.
+   - 7d. With game master mode on (Settings > General), the counter palette sits in the left column between the module tree and Charts & Tables. **View > Counter Palette** hides and shows it, with no empty gap.
+   - 7e. Try each item under **View > Show** (Main Toolbar, Phase Strip, Alert Bar, Status Bar, Map Toolbar, Charts & Tables), then **View > Show Everything**. Expected: everything is back after the last one, and your choices are still there after a restart.
 8. Run the same setup again. Expected: it upgrades in place, and Settings > Apps still lists Quartermaster **once**.
 
 ## B. Update the setup install from a test feed
