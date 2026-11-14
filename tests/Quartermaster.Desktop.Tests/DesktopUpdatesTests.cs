@@ -40,10 +40,13 @@ public sealed class DesktopUpdatesTests : IDisposable
         _updatesRoot = Path.Combine(_layout, DesktopUpdates.FolderName);
         Directory.CreateDirectory(_layout);
         Directory.CreateDirectory(_feedDir);
+        // The mac-app zips here are fake bundles: never run the real codesign on them (the staging tests cover signing).
+        UpdateStaging.IsMacOS = () => false;
     }
 
     public void Dispose()
     {
+        UpdateStaging.IsMacOS = OperatingSystem.IsMacOS;
         foreach (var w in _windows.AsEnumerable().Reverse())
         {
             try
@@ -434,6 +437,26 @@ public sealed class DesktopUpdatesTests : IDisposable
         Assert.Equal(staged.StagedDir, args[3]);
         Assert.Equal(new[] { "--exe", "Quartermaster.app/Contents/MacOS/Quartermaster", "--unit", bundle }, args[^4..]);
         Assert.Equal(new[] { w }, _exits);
+    }
+
+    [AvaloniaTheory]
+    [InlineData("/Volumes/Quartermaster 0.0.1/Quartermaster.app")]                                // double-clicked inside the mounted dmg
+    [InlineData("/private/var/folders/xy/T/AppTranslocation/ABCD/d/Quartermaster.app")]          // App Translocation (not moved)
+    public void UpdateNow_MacRunFromDmgOrTranslocated_AsksToMove(string bundle)
+    {
+        WriteTestFeed("9.9.9", PackageZip("Quartermaster.app/Contents/MacOS/", "mac-app"), kind: PackageKind.MacApp);
+        var macos = bundle + "/Contents/MacOS";
+        var updates = Updates(layout: new InstallLayout(PackageKind.MacApp, new Version(0, 0, 1), macos, bundle, macos + "/Quartermaster"));
+        Launcher(updates);
+        Click(updates.Bar!.ActionButton("Update now")!);
+        WaitFor(() => updates.UpdateNowTask.IsCompleted);
+        Assert.Equal(new[] { ("Move Quartermaster to the Applications folder to install updates.", "Quartermaster") }, _dialogs.Infos);
+        Assert.Empty(_dialogs.Questions);
+        Assert.Empty(_dialogs.Warnings);
+        Assert.Null(updates.Updating);
+        Assert.False(Directory.Exists(Path.Combine(_updatesRoot, "9.9.9")));
+        Assert.Empty(_started);
+        Assert.Empty(_exits);
     }
 
     [AvaloniaFact]
