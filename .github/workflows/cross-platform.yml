@@ -115,6 +115,7 @@ jobs:
         run: |
           set -eu
           ( cd dist && sha256sum -c "quartermaster_${VER}_amd64.deb.sha256" "quartermaster-${VER}-1.x86_64.rpm.sha256" )
+          dpkg-deb -f "dist/quartermaster_${VER}_amd64.deb" Depends | tee /dev/stderr | grep -q libicu || { echo "deb Depends lacks libicu"; exit 1; }
           sudo apt-get install -y "./dist/quartermaster_${VER}_amd64.deb"
           out=$(quartermaster --version)
           echo "deb -> $out"
@@ -127,6 +128,7 @@ jobs:
 
           docker run --rm -v "$PWD/dist:/dist:ro" -e VER="$VER" fedora:42 bash -c '
             set -eu
+            rpm -qpR "/dist/quartermaster-${VER}-1.x86_64.rpm" | tee /dev/stderr | grep -q libicu
             dnf install -y "/dist/quartermaster-${VER}-1.x86_64.rpm"
             out=$(quartermaster --version)
             echo "rpm -> $out"

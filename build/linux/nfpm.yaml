@@ -33,8 +33,13 @@ overrides:
       - libfontconfig1
       - libfreetype6
       - libgl1
+      # Self-contained .NET still needs ICU and OpenSSL from the system; the ICU soname changes per release.
+      - libicu78 | libicu76 | libicu74 | libicu72 | libicu70
+      - libssl3t64 | libssl3
   rpm:
     depends:
       - fontconfig
       - freetype
       - mesa-libGL
+      - libicu
+      - openssl-libs
