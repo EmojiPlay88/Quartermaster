@@ -12,6 +12,8 @@ public static class UpdateInstaller
 {
     public const string AppExe = "Quartermaster.App.exe";
     public const string HelperExe = "Quartermaster.Updater.exe";
+    /// <summary>The updater helper's file name on this OS (beside the app executable).</summary>
+    public static string HelperName => OperatingSystem.IsWindows() ? HelperExe : "Quartermaster.Updater";
     /// <summary>The release's file list (written at publish time). The helper only moves files it names; a folder without one can't self-update.</summary>
     public const string ManifestName = "quartermaster-files.txt";
     public const string NoManifestText = "This copy of Quartermaster can't update itself; download the new version from the release page.";
@@ -187,6 +189,60 @@ public static class UpdateInstaller
                      "--version", AppVersion.Format(s.Version), "--old", AppVersion.Text, "--marker", marker,
                  })
             psi.ArgumentList.Add(a);
+        start(psi)?.Dispose();
+    }
+
+    /// <summary>
+    /// The Desktop app's hand-over for an install <paramref name="l"/>: copies <see cref="HelperName"/> from <c>l.AppDir</c> to
+    /// <c>&lt;s.Root&gt;/helper/</c> (executable on Unix) and starts it with the WinForms arguments plus <c>--exe</c> (the executable relative to
+    /// <c>--app</c>) and, for the kinds swapped as one unit (<c>.app</c>, AppImage), <c>--unit</c>; <c>--app</c> is then the unit's folder.
+    /// System packages (deb, rpm) are refused: the package manager installs those. A stale start marker is deleted first.
+    /// </summary>
+    public static void LaunchHelper(StagedUpdate s, InstallLayout l, int pid, Func<ProcessStartInfo, Process?> start)
+    {
+        ArgumentNullException.ThrowIfNull(l);
+        if (!l.SelfUpdates) throw new UpdateRefused(NoManifestText);
+        var source = Path.Combine(l.AppDir, HelperName);
+        if (!File.Exists(source)) throw new UpdateRefused("The updater helper is missing; download the new version from the release page.");
+        if (l.Kind != PackageKind.LinuxAppImage && !CanSelfUpdate(l.AppDir)) throw new UpdateRefused(NoManifestText);
+        string app, exe;
+        string? unit = null;
+        switch (l.Kind)
+        {
+            case PackageKind.MacApp:
+                unit = Path.GetFullPath(l.UnitPath ?? throw new UpdateRefused(NoManifestText));
+                app = Path.GetDirectoryName(unit)!;
+                exe = Path.GetFileName(unit) + "/Contents/MacOS/Quartermaster";
+                break;
+            case PackageKind.LinuxAppImage:
+                unit = Path.GetFullPath(l.UnitPath ?? throw new UpdateRefused(NoManifestText));
+                app = Path.GetDirectoryName(unit)!;
+                exe = Path.GetFileName(unit);
+                break;
+            default:
+                app = l.AppDir;
+                exe = l.Kind is PackageKind.WinZip or PackageKind.WinSetup ? "Quartermaster.exe" : "Quartermaster";
+                break;
+        }
+
+        var root = Path.GetFullPath(s.Root);
+        var helperDir = Path.Combine(root, "helper");
+        Directory.CreateDirectory(helperDir);
+        var helper = Path.Combine(helperDir, HelperName);
+        File.Copy(source, helper, overwrite: true);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(helper, (UnixFileMode)0x1ED);   // 0755
+
+        var marker = MarkerPath(Path.GetDirectoryName(root)!, s.Version);
+        if (File.Exists(marker)) File.Delete(marker);
+
+        var psi = new ProcessStartInfo(helper) { UseShellExecute = false, WorkingDirectory = helperDir };
+        var args = new List<string>
+        {
+            "--app", app, "--staged", s.StagedDir, "--pid", pid.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "--version", AppVersion.Format(s.Version), "--old", AppVersion.Text, "--marker", marker, "--exe", exe,
+        };
+        if (unit != null) args.AddRange(["--unit", unit]);
+        foreach (var a in args) psi.ArgumentList.Add(a);
         start(psi)?.Dispose();
     }
 

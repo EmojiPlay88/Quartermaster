@@ -48,7 +48,7 @@ public partial class App : Application
     static void StartLoop(IClassicDesktopStyleApplicationLifetime desktop, StartupArgs? direct)
     {
         desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;   // the loop decides when the app ends, not the last window closing
-        // One instance for the run (Offered / Later / checked-this-run carry across launchers); no feed unless the test feed is set.
+        // One instance for the run (Offered / Later / checked-this-run carry across launchers); no feed for a dev build without the test feed.
         var updates = DesktopUpdates.FromEnvironment();
         var loop = new LaunchLoop(
             justPlayed =>

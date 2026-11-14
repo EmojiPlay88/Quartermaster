@@ -13,16 +13,25 @@ public static class RunningCopies
     /// case-insensitively). <paramref name="lister"/> yields (pid, main module path or null when it cannot be read); the default lists the
     /// processes named like the exe and ignores access errors.
     /// </summary>
-    public static bool OthersRunning(string exePath, int selfPid, Func<string, IEnumerable<(int Pid, string? Path)>>? lister = null)
+    public static bool OthersRunning(string exePath, int selfPid, Func<string, IEnumerable<(int Pid, string? Path)>>? lister = null) =>
+        OthersRunning(new[] { exePath }, selfPid, lister);
+
+    /// <summary>
+    /// As <see cref="OthersRunning(string, int, Func{string, IEnumerable{ValueTuple{int, string}}}?)"/> for any of several exe paths (an app
+    /// folder may hold the Desktop app and the classic one): each distinct process name is listed once.
+    /// </summary>
+    public static bool OthersRunning(IReadOnlyList<string> exePaths, int selfPid, Func<string, IEnumerable<(int Pid, string? Path)>>? lister = null)
     {
-        var want = Path.GetFullPath(exePath);
-        foreach (var (pid, path) in (lister ?? List)(Path.GetFileNameWithoutExtension(exePath)))
+        ArgumentNullException.ThrowIfNull(exePaths);
+        var want = new HashSet<string>(exePaths.Select(p => Path.GetFullPath(p)), StringComparer.OrdinalIgnoreCase);
+        foreach (var name in exePaths.Select(Path.GetFileNameWithoutExtension).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var (pid, path) in (lister ?? List)(name!))
         {
             if (pid == selfPid || string.IsNullOrEmpty(path)) continue;
             string full;
             try { full = Path.GetFullPath(path); }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
-            if (string.Equals(full, want, StringComparison.OrdinalIgnoreCase)) return true;
+            if (want.Contains(full)) return true;
         }
         return false;
     }

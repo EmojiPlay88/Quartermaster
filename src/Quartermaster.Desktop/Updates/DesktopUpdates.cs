@@ -1,6 +1,9 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Quartermaster.Desktop.Launcher;
 using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
@@ -9,16 +12,18 @@ using Quartermaster.Render.Update;
 namespace Quartermaster.Desktop.Updates;
 
 /// <summary>
-/// The update screens of the Desktop app (WinForms AppUpdates and the launcher's update part) for this run. Port stage 5a: they work only
-/// against the test feed (<see cref="UpdateFeeds.EnvVar"/>); without it <see cref="Feed"/> is null and nothing is shown, checked or
-/// downloaded. This class never builds a GitHub feed or an HttpClient. Installing is stage 6: Update now stops after the verified download
-/// with <see cref="InstallLaterText"/>. The state (last check, skipped version) lives in <c>&lt;UpdatesRoot&gt;/state.json</c>, not in
-/// the shared settings.json, so the WinForms updater's state is untouched.
+/// The update screens of the Desktop app (WinForms AppUpdates and the launcher's update part) for this run. The feed is the test feed when
+/// <see cref="UpdateFeeds.EnvVar"/> is set, GitHub when this copy is a packaged one (<see cref="InstallLayout.Detect"/> found its marker),
+/// and none otherwise (a dev build: nothing is shown, checked or downloaded). Update now installs: the helper swaps the app folder (zip, tar)
+/// or the whole unit (<c>.app</c>, AppImage) after the app exits; a .deb or .rpm is handed to the system's package installer. The state
+/// (last check, skipped version) lives in <c>&lt;UpdatesRoot&gt;/state.json</c>, not in the shared settings.json.
 /// </summary>
 public sealed class DesktopUpdates : IUpdateSlot
 {
-    public const string FolderName = "Updates-desktop";
-    public const string InstallLaterText = "Installing updates comes with the packaged release (stage 6).";
+    public const string FolderName = "Updates";
+    /// <summary>The stage-5a folder, removed on start.</summary>
+    const string OldFolderName = "Updates-desktop";
+    const string GameOpenText = "Close the game and use the launcher to update.";
     /// <summary>Help → Check for updates… with a game open (WinForms MainForm.CheckForUpdates).</summary>
     public const string InGameText = "Close the game and use the launcher to update.\n\nGo back to the launcher now (File → Back to launcher)?";
     public const string InGameCaption = "Check for updates";
@@ -30,10 +35,13 @@ public sealed class DesktopUpdates : IUpdateSlot
     DateTime? _lastCheckUtc;
     string? _skippedVersion;
 
-    /// <summary>The test feed, or null (the normal case in stage 5a: no update UI at all).</summary>
+    /// <summary>The test feed, GitHub for a packaged copy, or null (a dev build: no update UI at all).</summary>
     public IUpdateFeed? Feed { get; }
 
-    /// <summary><c>AppDataRoot.Sub("Updates-desktop")</c>: downloads and state.json.</summary>
+    /// <summary>How this copy is installed (null for a dev build: Update now then only offers the release page).</summary>
+    public InstallLayout? Layout { get; }
+
+    /// <summary><c>AppDataRoot.Sub("Updates")</c>: downloads, the helper's journal and markers, state.json.</summary>
     public string UpdatesRoot { get; }
 
     /// <summary>The automatic check already ran this run (a failed one is not retried until the next start).</summary>
@@ -80,30 +88,64 @@ public sealed class DesktopUpdates : IUpdateSlot
     internal WhatsNewWindow? WhatsNew { get; private set; }
     internal UpdateWindow? Updating { get; private set; }
 
-    internal DesktopUpdates(IUpdateFeed? feed, string updatesRoot)
+    /// <summary>Starts a process: the updater helper, or <c>xdg-open</c> for a package (tests record it instead).</summary>
+    internal Func<ProcessStartInfo, Process?> StartProcess { get; set; } = psi => Process.Start(psi);
+
+    /// <summary>Ends the app once the helper runs: closes the launcher, which ends the launch loop and so the app (tests record it instead).</summary>
+    internal Action<LauncherWindow> RequestExit { get; set; } = w => w.Close();
+
+    /// <summary>True while a game window is open (the launcher never updates then).</summary>
+    internal Func<bool> GameOpen { get; set; } = () =>
+        Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime d && d.Windows.OfType<MainWindow>().Any(w => w.IsVisible);
+
+    /// <summary>True when another process runs from one of the given executables (it may hold a game the swap would break).</summary>
+    internal Func<IReadOnlyList<string>, bool> OthersRunning { get; set; } = exes => RunningCopies.OthersRunning(exes, Environment.ProcessId);
+
+    internal DesktopUpdates(IUpdateFeed? feed, string updatesRoot, InstallLayout? layout = null)
     {
         Feed = feed;
+        Layout = layout;
         UpdatesRoot = updatesRoot ?? throw new ArgumentNullException(nameof(updatesRoot));
         if (feed != null) LoadState();
     }
 
     /// <summary>
-    /// The app's instance: a <see cref="FolderFeed"/> when <see cref="UpdateFeeds.EnvVar"/> is set, otherwise no feed (never GitHub).
-    /// With a feed, downloads of other versions left in the updates folder are removed (best effort).
+    /// The app's instance: a <see cref="FolderFeed"/> when <see cref="UpdateFeeds.EnvVar"/> is set, else GitHub when this copy is packaged
+    /// (a marker beside the exe), else no feed. With a feed, downloads of other versions left in the updates folder are removed; the old
+    /// stage-5a <c>Updates-desktop</c> folder is always removed (both best effort).
     /// </summary>
-    public static DesktopUpdates FromEnvironment(string? appDataRoot = null) => FromEnvironment(appDataRoot, Environment.GetEnvironmentVariable);
+    public static DesktopUpdates FromEnvironment(string? appDataRoot = null) =>
+        FromEnvironment(appDataRoot, Environment.GetEnvironmentVariable, AppContext.BaseDirectory);
 
-    /// <summary>As <see cref="FromEnvironment(string?)"/>, reading the environment through <paramref name="env"/> (tests pass their own, so
-    /// they never depend on, or change, the process environment).</summary>
-    internal static DesktopUpdates FromEnvironment(string? appDataRoot, Func<string, string?> env)
+    /// <summary>As <see cref="FromEnvironment(string?)"/>, reading the environment through <paramref name="env"/> and the marker in
+    /// <paramref name="baseDir"/> (tests pass their own, so they never depend on, or change, the process environment or the build folder).</summary>
+    internal static DesktopUpdates FromEnvironment(string? appDataRoot, Func<string, string?> env, string baseDir)
     {
         ArgumentNullException.ThrowIfNull(env);
-        var root = Path.Combine(appDataRoot ?? AppDataRoot.Path, FolderName);
+        ArgumentNullException.ThrowIfNull(baseDir);
+        var data = appDataRoot ?? AppDataRoot.Path;
+        var root = Path.Combine(data, FolderName);
+        RemoveOldFolder(Path.Combine(data, OldFolderName));
         var dir = env(UpdateFeeds.EnvVar);
-        var feed = string.IsNullOrWhiteSpace(dir) ? null : new FolderFeed(dir);
-        var u = new DesktopUpdates(feed, root);
+        var layout = InstallLayout.Detect(baseDir, env);
+        IUpdateFeed? feed = !string.IsNullOrWhiteSpace(dir) ? new FolderFeed(dir)
+            : layout != null ? new GitHubFeed(GitHubFeed.CreateClient())
+            : null;
+        var u = new DesktopUpdates(feed, root, layout);
         if (feed != null) UpdateInstaller.CleanupOld(root, AppVersion.Current);
         return u;
+    }
+
+    static void RemoveOldFolder(string dir)
+    {
+        try
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.WriteLine("update: could not remove " + dir + ": " + ex.Message);
+        }
     }
 
     // ---------- state.json ----------
@@ -204,7 +246,8 @@ public sealed class DesktopUpdates : IUpdateSlot
     {
         CheckResult r;
         var current = Current;
-        try { r = await Task.Run(() => UpdateChecker.Check(feed, current, skipped, ui.Token)); }
+        var kind = Layout?.Kind ?? PackageKind.WinZip;   // no layout (test feed on a dev build): the win zip, as stage 5a
+        try { r = await Task.Run(() => UpdateChecker.Check(feed, current, skipped, ui.Token, kind)); }
         catch (OperationCanceledException) { return; }
         CheckedThisRun = true;
         if (r.Outcome != CheckOutcome.Failed) LastCheckUtc = DateTime.UtcNow;
@@ -267,20 +310,102 @@ public sealed class DesktopUpdates : IUpdateSlot
     }
 
     /// <summary>
-    /// Update now on the test feed: the download with progress, then a plain message. Unlike WinForms it never starts the helper (stage 6),
-    /// so the running-copies and app-folder checks that guard the swap are not needed yet.
+    /// Update now (WinForms AppUpdates.UpdateNow): refuses while a game is open or another copy runs; offers the release page when this copy
+    /// cannot update itself (no layout, folder not writable, helper or file list missing); else downloads with progress. A .deb or .rpm is
+    /// then handed to the package installer and the app keeps running; otherwise the helper starts and the app exits so it can swap.
+    /// Any problem leaves everything as it was and says so plainly.
     /// </summary>
     async Task UpdateNowAsync(IUpdateFeed feed, LauncherUi ui, UpdateInfo info)
     {
+        if (await RefusedWhileRunning(ui)) return;
+        if (Layout is not { } l)
+        {
+            await OfferPage(ui, info, UpdateInstaller.NoManifestText + " Open the download page?");
+            return;
+        }
+        if (l.SelfUpdates)
+        {
+            var unit = l.Kind is PackageKind.MacApp or PackageKind.LinuxAppImage;
+            var swapDir = unit ? Path.GetDirectoryName(Path.GetFullPath(l.UnitPath!))! : l.AppDir;
+            if (!UpdateInstaller.AppFolderWritable(swapDir))
+            {
+                await OfferPage(ui, info, "Quartermaster can't update itself in this folder. Open the download page?");
+                return;
+            }
+            if (!File.Exists(Path.Combine(l.AppDir, UpdateInstaller.HelperName)))
+            {
+                await OfferPage(ui, info, $"Quartermaster can't update itself: {UpdateInstaller.HelperName} is missing from its folder. Open the download page?");
+                return;
+            }
+            if (l.Kind != PackageKind.LinuxAppImage && !UpdateInstaller.CanSelfUpdate(l.AppDir))
+            {
+                await OfferPage(ui, info, UpdateInstaller.NoManifestText + " Open the download page?");
+                return;
+            }
+        }
+
         var dlg = new UpdateWindow(feed, info, UpdatesRoot);
         Updating = dlg;
         _ = dlg.ShowDialogTracked(ui.Window);
         await dlg.Done;
         if (ui.Closed) return;
         if (dlg.Error is { } error)
-            await ui.Window.Dialogs.ShowWarningAsync(ui.Window, string.Format(System.Globalization.CultureInfo.InvariantCulture, UpdateOffer.NotInstalledFormat, error), Caption);
-        else if (dlg.Staged != null)
-            await ui.Window.Dialogs.ShowInfoAsync(ui.Window, InstallLaterText, Caption);
+        {
+            await ui.Window.Dialogs.ShowWarningAsync(ui.Window, NotInstalled(error), Caption);
+            return;
+        }
+        if (dlg.Staged is not { } staged) return;   // cancelled
+
+        if (!l.SelfUpdates)
+        {
+            if (PackageHandOff.Open(staged.StagedDir, StartProcess))
+                await ui.Window.Dialogs.ShowInfoAsync(ui.Window,
+                    $"Quartermaster {AppVersion.Format(info.Version)} was downloaded. Your system's package installer opens now to install it; when it is done, start Quartermaster again.",
+                    Caption);
+            else
+                await ui.Window.Dialogs.ShowWarningAsync(ui.Window, "Could not open the package installer. The package is saved at:\n\n" + staged.StagedDir, Caption);
+            return;
+        }
+
+        if (await RefusedWhileRunning(ui)) return;   // the download took a while: check again right before handing over
+        try
+        {
+            UpdateInstaller.LaunchHelper(staged, l, Environment.ProcessId, StartProcess);
+        }
+        catch (Exception ex) when (ex is UpdateRefused or IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException)
+        {
+            System.Diagnostics.Trace.WriteLine("update: could not start the helper: " + ex.Message);
+            await ui.Window.Dialogs.ShowWarningAsync(ui.Window, NotInstalled(ex.Message), Caption);
+            return;
+        }
+        System.Diagnostics.Trace.WriteLine($"update: helper started for {AppVersion.Format(info.Version)}; closing so it can apply the update");
+        RequestExit(ui.Window);
+    }
+
+    static string NotInstalled(string why) => string.Format(System.Globalization.CultureInfo.InvariantCulture, UpdateOffer.NotInstalledFormat, why);
+
+    /// <summary>A game window or another copy of Quartermaster is open: says so and returns true.</summary>
+    async Task<bool> RefusedWhileRunning(LauncherUi ui)
+    {
+        var text = GameOpen() ? GameOpenText : OthersRunning(RunningExes()) ? RunningCopies.CloseOthersText : null;
+        if (text == null) return false;
+        await ui.Window.Dialogs.ShowInfoAsync(ui.Window, text, Caption);
+        return true;
+    }
+
+    /// <summary>The executables another copy may run from: the unit's for <c>.app</c> and AppImage, else either exe name of the app folder.</summary>
+    IReadOnlyList<string> RunningExes()
+    {
+        if (Layout is not { } l) return Environment.ProcessPath is { } p ? [p] : [];
+        if (l.Kind is PackageKind.MacApp or PackageKind.LinuxAppImage) return [l.ExePath];
+        return new[] { l.ExePath, Path.Combine(l.AppDir, "Quartermaster.exe"), Path.Combine(l.AppDir, UpdateInstaller.AppExe) }
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    async Task OfferPage(LauncherUi ui, UpdateInfo info, string question)
+    {
+        if (await ui.Window.Dialogs.AskYesNoAsync(ui.Window, question, Caption, defaultNo: false) && !ui.Closed)
+            OpenPage(ui.Window, info.PageUrl);
     }
 
     /// <summary>Runs a launcher handler so that nothing it throws reaches the dispatcher: it is traced and shown as a warning.</summary>
