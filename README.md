@@ -94,7 +94,7 @@ The tests use small, invented modules and rules packs.
 **macOS (Apple silicon, macOS 14 Sonoma or later):**
 
 1. Download `Quartermaster-<version>-osx-arm64.dmg`, open it and drag **Quartermaster** onto **Applications**. Eject the disk image afterwards.
-2. **First open:** the app is signed only ad hoc and is not notarised by Apple, so macOS shows a warning the first time. On macOS 15 or later, try to open it once, then go to **System Settings > Privacy & Security** and choose **Open Anyway**. On macOS 14, right-click the app and choose **Open**. Or run this once in Terminal (it also fixes a message saying the app "is damaged"): `xattr -dr com.apple.quarantine /Applications/Quartermaster.app`
+2. **First open:** the app is signed only ad hoc and is not notarised by Apple, so macOS shows a warning the first time. On macOS 15 or later, try to open it once, then go to **System Settings > Privacy & Security** and choose **Open Anyway**. On macOS 14, right-click > Open also works. Or run this once in Terminal (it also fixes a message saying the app "is damaged"): `xattr -dr com.apple.quarantine /Applications/Quartermaster.app`
 3. **Updates** install in place from the launcher, as on Windows: **Update now** replaces the app in `/Applications` and restarts it. Your settings and data live in `~/Library/Application Support/Quartermaster` and are not touched.
 
 The online-play relay is a separate download (`QuartermasterRelay-<version>-<platform>`), only needed by whoever hosts games; see [Hosting a Relay](https://github.com/EmojiPlay88/Quartermaster/wiki/Hosting-a-Relay).
