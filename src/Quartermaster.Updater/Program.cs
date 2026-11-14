@@ -318,20 +318,32 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
     {
         var full = Path.GetFullPath(path);
         if (OperatingSystem.IsWindows()) return full;
-        var root = Path.GetPathRoot(full) ?? "";
-        var current = root;
-        foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        for (var hops = 0; hops < 40; hops++)
         {
-            var next = Path.Combine(current, part);
-            try
+            var root = Path.GetPathRoot(full) ?? "";
+            var parts = full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+            var current = root;
+            var restarted = false;
+            for (var i = 0; i < parts.Length && !restarted; i++)
             {
-                FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
-                if (info.LinkTarget != null && info.ResolveLinkTarget(true) is { } target) next = Path.GetFullPath(target.FullName);
+                var next = Path.Combine(current, parts[i]);
+                try
+                {
+                    FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
+                    if (info.LinkTarget != null && info.ResolveLinkTarget(true) is { } target)
+                    {
+                        // The target's own path may contain links (e.g. /var -> /private/var): walk the new full path again.
+                        full = Path.GetFullPath(Path.Combine([target.FullName, .. parts[(i + 1)..]]));
+                        restarted = true;
+                        continue;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                current = next;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            current = next;
+            if (!restarted) return current;
         }
-        return current;
+        return full;
     }
 
     int Refused(string appExe)

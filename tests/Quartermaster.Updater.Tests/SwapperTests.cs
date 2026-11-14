@@ -72,8 +72,8 @@ public class SwapperTests
     {
         using var t = new TempArea(); t.SeedOld(); t.SeedNew();
         t.Swapper().Apply();
-        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=new", "a.dll=new-a", "sub\\c.dll=new-c", TempArea.ManifestName + "=" + TempArea.NewList), TempArea.Snapshot(t.App));
-        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=old", "a.dll=old-a", "sub\\b.dll=old-b", TempArea.ManifestName + "=" + TempArea.OldList), TempArea.Snapshot(t.Backup));
+        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=new", "a.dll=new-a", Path.Combine("sub", "c.dll") + "=new-c", TempArea.ManifestName + "=" + TempArea.NewList), TempArea.Snapshot(t.App));
+        Assert.Equal(TempArea.Expected("Quartermaster.App.exe=old", "a.dll=old-a", Path.Combine("sub", "b.dll") + "=old-b", TempArea.ManifestName + "=" + TempArea.OldList), TempArea.Snapshot(t.Backup));
         Assert.Contains("\"done\"", File.ReadAllText(t.Journal));
     }
 

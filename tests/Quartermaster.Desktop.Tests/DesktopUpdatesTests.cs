@@ -893,7 +893,7 @@ public sealed class DesktopUpdatesTests : IDisposable
         Assert.Contains(UpdateStartup.Updated(updates.Current).Text, bars);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void ConfirmedStart_PrunesOldUnitBackups_KeepsHighestAndOthers()
     {
         var parent = Path.Combine(_tmp, "unit");

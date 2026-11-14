@@ -432,6 +432,18 @@ public class RunnerTests
     }
 
     [Fact]
+    public void ResolveLinks_ChainedLinks_BothRoutesResolveToTheSameString()
+    {
+        if (OperatingSystem.IsWindows()) return; // links need privileges there
+        using var t = new UnitArea(file: true);
+        var a = Path.Combine(t.Root, "real-a"); Directory.CreateDirectory(Path.Combine(a, "nested"));
+        var l1 = Path.Combine(t.Root, "l1"); Directory.CreateSymbolicLink(l1, a);
+        var l2 = Path.Combine(t.Root, "l2"); Directory.CreateSymbolicLink(l2, Path.Combine(l1, "nested"));
+        Assert.Equal(UpdateRunner.ResolveLinks(Path.Combine(a, "nested", "x")), UpdateRunner.ResolveLinks(Path.Combine(l2, "x")));
+        Assert.Equal(UpdateRunner.ResolveLinks(Path.Combine(a, "nested")), UpdateRunner.ResolveLinks(l2));
+    }
+
+    [Fact]
     public void ResolveLinks_PlainPath_IsTheFullPath()
     {
         using var t = new UnitArea(file: true);
