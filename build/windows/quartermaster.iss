@@ -124,7 +124,7 @@ begin
             ((Length(Dir) = Length(Base)) or (Dir[Length(Base) + 1] = '\'));
 end;
 
-{ True when a list entry is a plain relative path that may be deleted below {app}. }
+{ True when a list entry is a plain relative path that may be deleted below the app folder. }
 function SafeListEntry(const Rel: String): Boolean;
 var
   Padded, Base: String;
@@ -152,7 +152,7 @@ begin
   Result := LowerCase(Result);
 end;
 
-{ True when the folder is a reparse point (junction or symlink): deleting through it could leave {app}. }
+{ True when the folder is a reparse point (junction or symlink): deleting through it could leave the app folder. }
 function IsReparseFolder(const Dir: String): Boolean;
 var
   FindRec: TFindRec;
@@ -201,7 +201,7 @@ begin
 end;
 
 { After a successful install: delete the files the old list had and the new list lacks, then the folders that became
-  empty. Never outside {app}, never through a junction. }
+  empty. Never outside the app folder, never through a junction. }
 procedure RemoveStaleFiles;
 var
   AppDir, ListFile, Rel, Full, Dir: String;
