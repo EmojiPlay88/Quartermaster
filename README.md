@@ -85,11 +85,18 @@ The tests use small, invented modules and rules packs.
 
 ## Install / Update
 
-1. Download `Quartermaster-<version>-win-x64.zip` from the [Releases page](https://github.com/EmojiPlay88/Quartermaster/releases) and unzip it into a folder you can write to, for example `%USERPROFILE%\Quartermaster`. Not inside `Program Files`: the updater needs to replace the files in that folder.
-2. Run `Quartermaster.App.exe`.
-3. **SmartScreen:** Windows may say "Windows protected your PC" because the program is new and unsigned. Choose **More info**, then **Run anyway**. There is no code signing. The `.sha256` file next to each download only guards against a corrupt download; it does not prove who made it. If you want to be sure, build from source (below).
-4. **Updates:** the launcher checks GitHub for a newer release about once a day and shows an update bar. **Update now** downloads the zip, checks it against the release's `.sha256`, closes Quartermaster, swaps the files and starts the new version. If the new version does not start, the old one is put back. Only the files named in the release's `quartermaster-files.txt` are swapped, so anything else you keep in that folder is left alone; the previous version is kept as one `Quartermaster.backup-<version>` folder beside it (older backups are removed after a successful update). Updating never happens while a game is open, while another Quartermaster window is running, or without you clicking. The launcher's **Check for updates** link checks on demand, and **Skip this version** hides one release. Your modules, rules packs, saves and settings live outside the program folder and are not touched.
-5. To update by hand, unzip the new zip over the old folder, or into a new one.
+**Windows, installer (recommended):**
+
+1. Download `Quartermaster-Setup-<version>.exe` from the [Releases page](https://github.com/EmojiPlay88/Quartermaster/releases) and run it. It installs for your user only (no administrator prompt) into `%LOCALAPPDATA%\Programs\Quartermaster`, adds a **Quartermaster** entry to the Start menu and, if you tick the box, a desktop shortcut. Running a newer setup over an old install upgrades it in place.
+2. **SmartScreen:** Windows may say "Windows protected your PC" because the program is new and unsigned. Choose **More info**, then **Run anyway**. There is no code signing. The `.sha256` file next to each download only guards against a corrupt download; it does not prove who made it. If you want to be sure, build from source (below).
+3. **Updates:** the launcher checks GitHub for a newer release about once a day and shows an update bar. **Update now** downloads the new version, checks it against the release's `.sha256`, closes Quartermaster, swaps the files and starts the new version. If the new version does not start, the old one is put back. Updating never happens while a game is open, while another Quartermaster window is running, or without you clicking. The launcher's **Check for updates** link checks on demand, and **Skip this version** hides one release.
+4. **Uninstall** from Windows Settings > Apps. Your modules, rules packs, saves and settings live in `%LOCALAPPDATA%\Quartermaster`, outside the program folder, and are kept.
+
+**Windows, portable zip:**
+
+1. Download `Quartermaster-<version>-win-x64.zip` and unzip it into a folder you can write to, for example `%USERPROFILE%\Quartermaster`. Not inside `Program Files`: the updater needs to replace the files in that folder.
+2. Run `Quartermaster.App.exe`. The SmartScreen note above applies.
+3. Updates work as above; the previous version is kept as one `Quartermaster.backup-<version>` folder beside it (older backups are removed after a successful update), and only the files named in the release's `quartermaster-files.txt` are swapped, so anything else you keep in that folder is left alone. To update by hand, unzip the new zip over the old folder, or into a new one.
 
 **macOS (Apple silicon, macOS 14 Sonoma or later):**
 
@@ -97,9 +104,17 @@ The tests use small, invented modules and rules packs.
 2. **First open:** the app is signed only ad hoc and is not notarised by Apple, so macOS shows a warning the first time. On macOS 15 or later, try to open it once, then go to **System Settings > Privacy & Security** and choose **Open Anyway**. On macOS 14, right-click > Open also works. Or run this once in Terminal (it also fixes a message saying the app "is damaged"): `xattr -dr com.apple.quarantine /Applications/Quartermaster.app`
 3. **Updates** install in place from the launcher, as on Windows: **Update now** replaces the app in `/Applications` and restarts it. Your settings and data live in `~/Library/Application Support/Quartermaster` and are not touched.
 
+**Linux (x86-64):** pick one download from the Releases page.
+
+- `Quartermaster-<version>-x86_64.AppImage`: one file. Make it executable (`chmod +x Quartermaster-<version>-x86_64.AppImage`, or tick "Allow executing as program" in the file's properties) and run it. If it will not start, run it once with `--appimage-extract-and-run`. Updates replace the AppImage file in place, so keep it in a folder you can write to.
+- `quartermaster_<version>_amd64.deb` (Debian, Ubuntu and relatives) or `quartermaster-<version>-1.x86_64.rpm` (Fedora and relatives): install it with your software centre or `sudo apt install ./quartermaster_<version>_amd64.deb` / `sudo dnf install ./quartermaster-<version>-1.x86_64.rpm`. It installs to `/opt/quartermaster`, adds a `quartermaster` command and a menu entry, and pulls in the libraries it needs. Updates: the update bar downloads the new package and opens it in your system's package installer (the message names the saved file); Quartermaster does not install it by itself.
+- `Quartermaster-<version>-linux-x64.tar.gz`: create a new folder, unpack into it (the archive has no top-level folder) and run `./Quartermaster`. Updates replace the files in that folder.
+
+The AppImage and the tar.gz do not install libraries for you. Minimal distributions may need the ICU library (`libicu`), OpenSSL, fontconfig and FreeType installed. The .deb and .rpm declare these. Your settings and data live under your home folder (`~/.local/share/Quartermaster` by default) and are not touched by updates or uninstalling.
+
 The online-play relay is a separate download (`QuartermasterRelay-<version>-<platform>`), only needed by whoever hosts games; see [Hosting a Relay](https://github.com/EmojiPlay88/Quartermaster/wiki/Hosting-a-Relay).
 
-Maintainers: `build/release.ps1 -Version <version>` builds, checks and checksums the downloads into `artifacts/release/<version>/` and prints the `gh release create` command; it creates nothing itself.
+Maintainers: every push builds all packages as the CI artifacts `Quartermaster-Windows`, `Quartermaster-Linux` and `Quartermaster-macOS` (workflow `cross-platform.yml`). To make a release, run `release.yml` by hand (Actions > release > Run workflow; the version must equal the one in `Directory.Build.props`), then `build/release.ps1 -Version <version> -FromRun <run id>` downloads its combined artifact, checks the asset list, checksums and archive contents, builds the relay downloads into `artifacts/release/<version>/` and prints the `gh release create` command. `-FromRun` refuses a run that is not a successful `release` run of the current commit (`-AllowOtherCommit` only downgrades the commit check, for a proof run), and the printed command carries `--target <commit>`. Neither step creates a tag or a release; you run the printed command yourself. **Warning:** the first release from this pipeline moves every WinForms user to the Avalonia app on their next update, so publish it only after feature parity and the Mac, Linux and Windows checklists pass; the WinForms release path lives at commit d05e139 if a WinForms hotfix is needed.
 
 ## Getting started
 

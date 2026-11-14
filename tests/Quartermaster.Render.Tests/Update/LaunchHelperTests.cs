@@ -150,19 +150,19 @@ public class LaunchHelperTests : IDisposable
     }
 
     [Fact]
-    public void PackageHandOff_RunsXdgOpenWithThePath()
+    public async Task PackageHandOff_RunsXdgOpenWithThePath()
     {
         var path = Path.Combine(_tmp, "a b", "quartermaster_0.2.0_amd64.deb");
         ProcessStartInfo? seen = null;
-        Assert.True(PackageHandOff.Open(path, psi => { seen = psi; return null; }));
+        Assert.True(await PackageHandOff.OpenAsync(path, psi => { seen = psi; return null; }, CancellationToken.None));
         Assert.Equal("xdg-open", seen!.FileName);
         Assert.False(seen.UseShellExecute);
         Assert.Equal([path], seen.ArgumentList.ToArray());
-        Assert.False(PackageHandOff.Open(path, _ => throw new Win32Exception(2, "TEST no xdg-open")));
+        Assert.False(await PackageHandOff.OpenAsync(path, _ => throw new Win32Exception(2, "TEST no xdg-open"), CancellationToken.None));
     }
 
     [Fact]
-    public void PackageHandOff_DropsAppImageVariables()
+    public async Task PackageHandOff_DropsAppImageVariables()
     {
         string[] vars = ["APPIMAGE", "APPDIR", "ARGV0", "OWD", "QM_TEST_KEEP"];
         var saved = vars.ToDictionary(v => v, Environment.GetEnvironmentVariable);
@@ -170,7 +170,7 @@ public class LaunchHelperTests : IDisposable
         {
             foreach (var v in vars) Environment.SetEnvironmentVariable(v, "x");
             ProcessStartInfo? seen = null;
-            Assert.True(PackageHandOff.Open("p.deb", psi => { seen = psi; return null; }));
+            Assert.True(await PackageHandOff.OpenAsync("p.deb", psi => { seen = psi; return null; }, CancellationToken.None));
             foreach (var v in new[] { "APPIMAGE", "APPDIR", "ARGV0", "OWD" }) Assert.False(seen!.Environment.ContainsKey(v), v);
             Assert.Equal("x", seen!.Environment["QM_TEST_KEEP"]);
         }
@@ -183,9 +183,21 @@ public class LaunchHelperTests : IDisposable
         : new ProcessStartInfo("/bin/sh", ["-c", $"exit {code}"]) { UseShellExecute = false, CreateNoWindow = true })!;
 
     [Fact]
-    public void PackageHandOff_NonZeroExit_IsFailure()
+    public async Task PackageHandOff_NonZeroExit_IsFailure()
     {
-        Assert.False(PackageHandOff.Open("p.deb", _ => ExitWith(3)));   // e.g. no handler for the package type
-        Assert.True(PackageHandOff.Open("p.deb", _ => ExitWith(0)));
+        Assert.False(await PackageHandOff.OpenAsync("p.deb", _ => ExitWith(3), CancellationToken.None));   // e.g. no handler for the package type
+        Assert.True(await PackageHandOff.OpenAsync("p.deb", _ => ExitWith(0), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PackageHandOff_DoesNotBlockCaller()
+    {
+        var sw = Stopwatch.StartNew();
+        var task = PackageHandOff.OpenAsync("p.deb", _ => Process.Start(OperatingSystem.IsWindows()
+            ? new ProcessStartInfo("powershell", "-NoProfile -Command Start-Sleep 2") { UseShellExecute = false, CreateNoWindow = true }
+            : new ProcessStartInfo("/bin/sleep", "2") { UseShellExecute = false, CreateNoWindow = true }), CancellationToken.None);
+        Assert.False(task.IsCompleted);   // the call returned while the process still runs
+        Assert.True(await task);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
     }
 }

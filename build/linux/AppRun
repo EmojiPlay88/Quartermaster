@@ -1,0 +1,6 @@
+#!/bin/sh
+# AppImage entry point: runs the app from usr/bin inside the mounted image.
+if [ -z "${APPDIR:-}" ]; then
+  APPDIR="$(dirname "$(readlink -f "$0")")"
+fi
+exec "$APPDIR/usr/bin/Quartermaster" "$@"

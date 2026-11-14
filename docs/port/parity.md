@@ -204,6 +204,14 @@ Stage 5b = hot-seat: the Players page of the new-game dialog, Settings > Game > 
 - The update backup of a folder install sits beside it (`Quartermaster.backup-<old>`); of a unit install (.app, AppImage) it is the hidden `.<name>.qm-backup-<old>`. A machine that lost power mid-update is recovered by hand as in the checklists ("Recovering by hand").
 - A deb / rpm update is handed to the system's package installer (`xdg-open <package>`); Quartermaster does not install it itself and does not confirm the restart.
 
+## Stage-6b-2 notes (Windows and Linux packages; deliberate or known)
+
+- Packages: Windows `Quartermaster-Setup-<v>.exe` (Inno Setup, per user, installs to `%LOCALAPPDATA%\Programs\Quartermaster`, uninstall keeps the data folder `%LOCALAPPDATA%\Quartermaster`) and `Quartermaster-<v>-win-x64.zip` (portable); Linux `.AppImage`, `.deb`, `.rpm` and `.tar.gz`; macOS `.dmg` and `.zip` (6b-1). Scripts in `build/windows/` and `build/linux/`; the Windows installer and every Linux package are built and run (`--version`, marker kind, install and uninstall) by CI; a plain 256x256 icon (`build/icon/quartermaster.png`) is used for the AppImage, deb and rpm. The Windows exe and the macOS bundle keep their default icons.
+- Nothing is code-signed: Windows shows SmartScreen once ("More info", "Run anyway"); the `.sha256` files only guard against corrupt downloads.
+- The AppImage and tar.gz need ICU (`libicu`) and OpenSSL from the system (Fedora proved ICU is required); the deb and rpm declare their dependencies.
+- Updates: setup, zip, tar and AppImage update in place through the updater (the setup install takes the same `win-x64.zip` asset as the zip); deb and rpm hand the downloaded package to the system installer.
+- The release is built by the `release.yml` workflow (run by hand, version = `Directory.Build.props`) and collected with `build/release.ps1 -Version <v> -FromRun <run id>`; the script checks the asset list and checksums and prints `gh release create` but never publishes. Hands-on checks: `docs/port/stage6b2-windows-checklist.md`, `docs/port/stage6b2-linux-checklist.md` (the real-AppImage `APPIMAGE` / `/proc/<pid>/exe` check from 6a is step 6 there).
+
 ## Before the stage release
 
 Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the real rendering paths. Before stage 1 is released:
