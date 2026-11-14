@@ -63,7 +63,7 @@ jobs:
       - name: Publish macOS (Apple silicon)
         if: runner.os == 'macOS'
         run: |
-          dotnet publish src/Quartermaster.Desktop -c Release -r osx-arm64 --self-contained -o publish/osx-arm64
+          dotnet publish src/Quartermaster.Desktop -c Release -r osx-arm64 --self-contained -o publish/osx-arm64 -p:DebugType=none -p:DebugSymbols=false
           # The document viewer needs PDFium and the OCR needs Tesseract, Leptonica and tessdata: fail now when a publish lacks them.
           bash build/check-publish-natives.sh publish/osx-arm64 osx-arm64
 
@@ -86,7 +86,7 @@ jobs:
       - name: Publish Linux (x64)
         if: runner.os == 'Linux'
         run: |
-          dotnet publish src/Quartermaster.Desktop -c Release -r linux-x64 --self-contained -o publish/linux-x64
+          dotnet publish src/Quartermaster.Desktop -c Release -r linux-x64 --self-contained -o publish/linux-x64 -p:DebugType=none -p:DebugSymbols=false
           bash build/check-publish-natives.sh publish/linux-x64 linux-x64
 
       - name: Build Linux tar.gz and AppImage
@@ -152,7 +152,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          dotnet publish src/Quartermaster.Desktop -c Release -r win-x64 --self-contained -o publish/win-x64
+          dotnet publish src/Quartermaster.Desktop -c Release -r win-x64 --self-contained -o publish/win-x64 -p:DebugType=none -p:DebugSymbols=false
           bash build/check-publish-natives.sh publish/win-x64 win-x64
 
       - name: Build Windows setup and zip

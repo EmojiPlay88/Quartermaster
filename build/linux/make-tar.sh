@@ -18,6 +18,8 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 cp -a "$publish/." "$stage/"
 bash "$here/../set-package-kind.sh" "$stage" linux-tar
+# mktemp -d makes the root 0700, and tar stores "." with that mode.
+chmod 755 "$stage"
 
 # Fixed owner keeps the build machine's user names out of the archive; modes (exec bits) are kept.
 tar --owner=0 --group=0 --numeric-owner -czf "$out/$name" -C "$stage" .

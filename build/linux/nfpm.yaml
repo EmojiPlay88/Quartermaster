@@ -34,6 +34,7 @@ overrides:
       - libfreetype6
       - libgl1
       # Self-contained .NET still needs ICU and OpenSSL from the system; the ICU soname changes per release.
+      # This alternatives list must grow when distros ship a newer libicu (add the new libicuNN in front).
       - libicu78 | libicu76 | libicu74 | libicu72 | libicu70
       - libssl3t64 | libssl3
   rpm:
