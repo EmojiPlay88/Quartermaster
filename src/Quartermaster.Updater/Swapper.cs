@@ -76,7 +76,7 @@ public static class Manifest
 /// always use those, not the constructor's. Cross-volume moves copy to "&lt;name&gt;.qm-partial", rename, then delete the source,
 /// so a crash never leaves a half-copied file that looks complete.
 /// </summary>
-public sealed class Swapper(string appDir, string stagedDir, string backupDir, string journalPath)
+public sealed class Swapper(string appDir, string stagedDir, string backupDir, string journalPath) : ISwap
 {
     const string PartialSuffix = ".qm-partial";
 

@@ -24,7 +24,8 @@ public sealed class UpdateOptions
     public string? LogPath { get; init; }
     /// <summary>The exe to restart, relative to <see cref="AppDir"/>; the 0.1.0 contract (and WinForms) restarts Quartermaster.App.exe.</summary>
     public string Exe { get; init; } = "Quartermaster.App.exe";
-    /// <summary>Optional unit path (whole-unit swaps); only parsed and stored here.</summary>
+    /// <summary>Optional unit path: when set, the whole unit (a macOS .app bundle or a Linux AppImage) is swapped by <see cref="UnitSwapper"/>
+    /// and <see cref="StagedDir"/> is the staged unit; <see cref="AppDir"/> is then the folder <see cref="Exe"/> is relative to.</summary>
     public string? Unit { get; init; }
 
     public string ResolvedLogPath => LogPath ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(MarkerPath))!, "helper.log");
@@ -129,10 +130,21 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
     {
         var markerFolder = Path.GetDirectoryName(Path.GetFullPath(o.MarkerPath))!;
         var journalPath = o.JournalPath ?? Path.Combine(markerFolder, "swap-journal.json");
-        var backup = o.BackupDir ?? ChooseBackupDir(o.AppDir, o.OldVersion, markerFolder);
         var appExe = Path.Combine(o.AppDir, o.Exe);
-        string[] exePaths = [.. new[] { appExe, Path.Combine(o.AppDir, "Quartermaster.exe"), Path.Combine(o.AppDir, "Quartermaster.App.exe") }.Distinct()];
-        var swapper = new Swapper(o.AppDir, o.StagedDir, backup, journalPath) { Version = o.Version };
+        ISwap swapper;
+        Func<bool> otherCopies;
+        if (o.Unit is { } unit)
+        {
+            swapper = new UnitSwapper(unit, o.StagedDir, UnitSwapper.BackupPathFor(unit, o.OldVersion), journalPath) { Version = o.Version };
+            otherCopies = () => OtherUnitCopiesRunning(host, unit, o.Exe, o.Pid);
+        }
+        else
+        {
+            var backup = o.BackupDir ?? ChooseBackupDir(o.AppDir, o.OldVersion, markerFolder);
+            string[] exePaths = [.. new[] { appExe, Path.Combine(o.AppDir, "Quartermaster.exe"), Path.Combine(o.AppDir, "Quartermaster.App.exe") }.Distinct()];
+            swapper = new Swapper(o.AppDir, o.StagedDir, backup, journalPath) { Version = o.Version };
+            otherCopies = () => OtherCopiesRunning(host, exePaths, o.Pid);
+        }
 
         log($"Waiting up to {o.ExitTimeout.TotalSeconds:0}s for app pid {o.Pid} to exit");
         var deadline = DateTime.UtcNow + o.ExitTimeout;
@@ -144,7 +156,7 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
 
         try { File.Delete(o.MarkerPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
 
-        if (OtherCopiesRunning(host, exePaths, o.Pid))
+        if (otherCopies())
         {
             log("Another Quartermaster runs from the app folder; refusing, nothing changed");
             return Refused(appExe);
@@ -157,7 +169,7 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
             if (outcome == ResumeOutcome.RolledBack) return Failed(swapper, appExe, rollback: false);
             if (outcome is ResumeOutcome.None or ResumeOutcome.Stale) { log("Applying update"); swapper.Apply(); }
         }
-        catch (ManifestMissingException ex)
+        catch (Exception ex) when (ex is ManifestMissingException or UnitMissingException)
         {
             log("Refusing, nothing changed: " + ex.Message);
             return Refused(appExe);
@@ -191,7 +203,7 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
         return Failed(swapper, appExe, rollback: true);
     }
 
-    int Failed(Swapper swapper, string appExe, bool rollback)
+    int Failed(ISwap swapper, string appExe, bool rollback)
     {
         if (rollback)
         {
@@ -222,6 +234,29 @@ public sealed class UpdateRunner(UpdateOptions o, IProcessHost host, Action<stri
                 return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Unit mode: true when another process (not <paramref name="selfPid"/>) runs this unit. A file unit (AppImage) matches any process
+    /// named after <paramref name="exe"/>'s file name (Linux process names are cut to 15 characters, so that prefix is looked up too);
+    /// a directory unit (.app) matches a process named after the exe whose path is inside the unit.
+    /// </summary>
+    public static bool OtherUnitCopiesRunning(IProcessHost host, string unit, string exe, int selfPid) =>
+        OtherUnitCopiesRunning(host, unit, exe, selfPid, OperatingSystem.IsLinux());
+
+    internal static bool OtherUnitCopiesRunning(IProcessHost host, string unit, string exe, int selfPid, bool linux)
+    {
+        var unitFull = Path.GetFullPath(unit).TrimEnd('\\', '/');
+        if (File.Exists(unitFull))
+        {
+            var name = Path.GetFileName(exe);
+            string[] names = linux && name.Length > 15 ? [name, name[..15]] : [name];
+            return names.Any(n => host.ProcessesNamed(n).Any(p => p.Pid != selfPid));
+        }
+        var comparison = linux ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var prefix = unitFull + Path.DirectorySeparatorChar;
+        return host.ProcessesNamed(Path.GetFileNameWithoutExtension(exe))
+            .Any(p => p.Pid != selfPid && p.Path != null && Path.GetFullPath(p.Path).StartsWith(prefix, comparison));
     }
 
     int Refused(string appExe)

@@ -18,7 +18,14 @@ sealed class FakeHost : IProcessHost
     }
     public void Kill(int pid) => Killed.Add(pid);
     public List<(int Pid, string? Path)> Running = [];
-    public IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName) => Running;
+    /// <summary>When set, processes are looked up by exact name here instead of <see cref="Running"/>.</summary>
+    public Dictionary<string, List<(int Pid, string? Path)>>? ByName;
+    public List<string> Queried = [];
+    public IEnumerable<(int Pid, string? Path)> ProcessesNamed(string processName)
+    {
+        Queried.Add(processName);
+        return ByName == null ? Running : ByName.GetValueOrDefault(processName) ?? [];
+    }
 }
 
 public class RunnerTests
@@ -274,5 +281,97 @@ public class RunnerTests
         var code = new UpdateRunner(Opts(t), host, _ => { }).Run();
         Assert.Equal(ExitCodes.Ok, code);
         Assert.Equal("new", File.ReadAllText(Path.Combine(t.App, "Quartermaster.App.exe")));
+    }
+
+    // ---------- unit mode (.app bundle / AppImage) ----------
+
+    static UpdateOptions UnitOpts(UnitArea t, int markerSec = 2) => new()
+    {
+        AppDir = t.Root, // the bundle's parent, or the AppImage's folder
+        Exe = t.IsFile ? Path.GetFileName(t.Unit) : Path.Combine(Path.GetFileName(t.Unit), UnitArea.Exe),
+        Unit = t.Unit, StagedDir = t.Staged, Pid = 1, Version = "2.0.0", OldVersion = "1.0.0", MarkerPath = t.Marker,
+        MarkerTimeout = TimeSpan.FromSeconds(markerSec), ExitTimeout = TimeSpan.FromSeconds(5), JournalPath = t.Journal,
+    };
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Main_UnitMode_NoMarker_RollsBack(bool file)
+    {
+        using var t = new UnitArea(file);
+        var oldSnap = UnitArea.Snapshot(t.Unit);
+        var host = new FakeHost();
+        var code = new UpdateRunner(UnitOpts(t, markerSec: 1), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.RolledBack, code);
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal("", UnitArea.Snapshot(t.Backup));
+        Assert.Equal(2, host.Started.Count);
+        Assert.Equal("--update-failed 2.0.0", host.Started[1].Args);
+        Assert.Contains(1000, host.Killed);
+        Assert.False(File.Exists(t.Journal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Main_UnitMode_MarkerAppears_KeepsNewAndRestartsInsideUnit(bool file)
+    {
+        using var t = new UnitArea(file);
+        var newSnap = UnitArea.Snapshot(t.Staged); var oldSnap = UnitArea.Snapshot(t.Unit);
+        var host = new FakeHost();
+        host.OnStart = (s, _) => { if (s.Args.StartsWith("--updated-from")) File.WriteAllText(t.Marker, "ok"); };
+        var code = new UpdateRunner(UnitOpts(t), host, _ => { }).Run();
+        Assert.Equal(ExitCodes.Ok, code);
+        Assert.Equal(newSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Backup));
+        var s = Assert.Single(host.Started);
+        Assert.Equal(file ? t.Unit : Path.Combine(t.Unit, UnitArea.Exe), s.Exe);
+        Assert.Equal("--updated-from 1.0.0", s.Args);
+        Assert.False(File.Exists(t.Journal));
+    }
+
+    [Fact]
+    public void Main_UnitMode_StagedMissing_RefusedNothingChanged()
+    {
+        using var t = new UnitArea();
+        var oldSnap = UnitArea.Snapshot(t.Unit);
+        Directory.Delete(t.Staged, true);
+        var host = new FakeHost();
+        Assert.Equal(ExitCodes.Refused, new UpdateRunner(UnitOpts(t), host, _ => { }).Run());
+        Assert.Equal(oldSnap, UnitArea.Snapshot(t.Unit));
+        Assert.Equal("--update-refused 2.0.0", Assert.Single(host.Started).Args);
+    }
+
+    [Fact]
+    public void Main_UnitMode_OtherAppImageRunning_RefusedNothingChanged()
+    {
+        using var t = new UnitArea(file: true);
+        var host = new FakeHost { ByName = new() { ["Quartermaster.AppImage"] = [(1, null), (77, null)] } };
+        Assert.Equal(ExitCodes.Refused, new UpdateRunner(UnitOpts(t), host, _ => { }).Run());
+        Assert.Equal("old-image", File.ReadAllText(t.Unit));
+        Assert.False(File.Exists(t.Journal));
+    }
+
+    [Fact]
+    public void OtherUnitCopiesRunning_AppImage_ByNameTruncatedOnLinux()
+    {
+        using var t = new UnitArea(file: true);
+        var host = new FakeHost { ByName = new() { ["Quartermaster.A"] = [(77, null)] } };
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1, linux: false));
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1, linux: true));
+        host.ByName = new() { ["Quartermaster.AppImage"] = [(1, null)] };
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster.AppImage", 1, linux: false)); // only self
+    }
+
+    [Fact]
+    public void OtherUnitCopiesRunning_AppBundle_OnlyPathsUnderTheUnit()
+    {
+        using var t = new UnitArea();
+        var host = new FakeHost();
+        host.Running.AddRange([(1, Path.Combine(t.Unit, UnitArea.Exe)), (2, null), (3, Path.Combine(t.Unit + "2", UnitArea.Exe)), (4, t.Unit)]);
+        Assert.False(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster", 1, linux: false));
+        Assert.Equal(["Quartermaster"], host.Queried);
+        host.Running.Add((5, Path.Combine(t.Unit, UnitArea.Exe)));
+        Assert.True(UpdateRunner.OtherUnitCopiesRunning(host, t.Unit, "Quartermaster", 1, linux: false));
     }
 }
