@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Quartermaster
+Comment=Tabletop board game engine
+Exec=quartermaster
+Icon=quartermaster
+Terminal=false
+Categories=Game;BoardGame;

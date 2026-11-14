@@ -33,7 +33,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfontconfig1 libfreetype6 libharfbuzz0b libgl1 fonts-dejavu-core
+          sudo apt-get install -y libfontconfig1 libfreetype6 libharfbuzz0b libgl1 fonts-dejavu-core desktop-file-utils
 
       # Headless UI tests only: Avalonia.Headless never opens a window on any OS.
       - name: Test
@@ -74,7 +74,39 @@ jobs:
         run: |
           dotnet publish src/Quartermaster.Desktop -c Release -r linux-x64 --self-contained -o publish/linux-x64
           bash build/check-publish-natives.sh publish/linux-x64 linux-x64
-          tar -czf Quartermaster-Desktop-linux-x64.tar.gz -C publish linux-x64
+
+      - name: Build Linux tar.gz and AppImage
+        if: runner.os == 'Linux'
+        run: |
+          VER=$(dotnet msbuild src/Quartermaster.Desktop -getProperty:Version | tr -d '[:space:]')
+          echo "version: $VER"
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          desktop-file-validate build/linux/quartermaster.desktop
+          bash build/linux/make-tar.sh publish/linux-x64 "$VER" dist
+          bash build/linux/make-appimage.sh publish/linux-x64 "$VER" dist
+
+      # Runs the real tar and AppImage: marker kinds, --version, exec bits and checksums.
+      - name: Test Linux tar.gz and AppImage
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          marker_kind() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["package"])' "$1"; }
+          t="$RUNNER_TEMP/qm-tar-test"; rm -rf "$t"; mkdir -p "$t"
+          tar -xzf "dist/Quartermaster-$VER-linux-x64.tar.gz" -C "$t"
+          [ "$(marker_kind "$t/quartermaster-package.json")" = linux-tar ] || { echo "tar marker kind wrong"; exit 1; }
+          out=$("$t/Quartermaster" --version)
+          echo "tar -> $out"
+          [ "$out" = "Quartermaster $VER" ] || { echo "tar --version gave '$out'"; exit 1; }
+
+          img="$PWD/dist/Quartermaster-$VER-x86_64.AppImage"
+          out=$("$img" --appimage-extract-and-run --version)
+          echo "AppImage -> $out"
+          [ "$out" = "Quartermaster $VER" ] || { echo "AppImage --version gave '$out'"; exit 1; }
+          a="$RUNNER_TEMP/qm-appimage-test"; rm -rf "$a"; mkdir -p "$a"
+          ( cd "$a" && "$img" --appimage-extract >/dev/null )
+          [ "$(marker_kind "$a/squashfs-root/usr/bin/quartermaster-package.json")" = linux-appimage ] || { echo "AppImage marker kind wrong"; exit 1; }
+          [ -x "$a/squashfs-root/AppRun" ] || { echo "AppRun not executable"; exit 1; }
+          ( cd dist && sha256sum -c "Quartermaster-$VER-linux-x64.tar.gz.sha256" "Quartermaster-$VER-x86_64.AppImage.sha256" )
 
       - name: Publish Windows (x64)
         if: runner.os == 'Windows'
@@ -137,6 +169,6 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: Quartermaster-Desktop-linux-x64
-          path: Quartermaster-Desktop-linux-x64.tar.gz
+          name: Quartermaster-Linux
+          path: dist/*
           if-no-files-found: error
