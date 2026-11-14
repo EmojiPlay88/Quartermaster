@@ -11,13 +11,32 @@ public static class UpdateChecker
 
     public static readonly TimeSpan Interval = TimeSpan.FromHours(24);
 
-    public static string ZipName(Version v) => $"Quartermaster-{AppVersion.Format(v)}-win-x64.zip";
+    public static string ZipName(Version v) => AssetName(v, PackageKind.WinZip);
+
+    /// <summary>The release asset that updates an install of the given package kind.</summary>
+    public static string AssetName(Version v, PackageKind k)
+    {
+        var f = AppVersion.Format(v);
+        return k switch
+        {
+            PackageKind.WinZip or PackageKind.WinSetup => $"Quartermaster-{f}-win-x64.zip",
+            PackageKind.MacApp => $"Quartermaster-{f}-osx-arm64.zip",
+            PackageKind.LinuxTar => $"Quartermaster-{f}-linux-x64.tar.gz",
+            PackageKind.LinuxAppImage => $"Quartermaster-{f}-x86_64.AppImage",
+            PackageKind.LinuxDeb => $"quartermaster_{f}_amd64.deb",
+            PackageKind.LinuxRpm => $"quartermaster-{f}-1.x86_64.rpm",
+            _ => throw new ArgumentOutOfRangeException(nameof(k)),
+        };
+    }
 
     /// <summary>
     /// The release as an update, or null when it does not count: tag not <c>quartermaster-v&lt;major.minor.patch&gt;</c>, draft or
     /// pre-release, either the app zip or its <c>.sha256</c> missing, or the JSON is not a release object.
     /// </summary>
-    public static UpdateInfo? Parse(string releaseJson)
+    public static UpdateInfo? Parse(string releaseJson) => Parse(releaseJson, PackageKind.WinZip);
+
+    /// <summary>As <see cref="Parse(string)"/>, but for the asset of the given package kind.</summary>
+    public static UpdateInfo? Parse(string releaseJson, PackageKind kind)
     {
         try
         {
@@ -33,7 +52,7 @@ public static class UpdateChecker
             if (Bool(o, "draft") || Bool(o, "prerelease")) return null;
             var version = new Version(major, minor, patch);
 
-            var zipName = ZipName(version);
+            var zipName = AssetName(version, kind);
             var shaName = zipName + ".sha256";
             (Uri Url, long Size)? zip = null, sha = null;
             if (o.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
@@ -49,7 +68,7 @@ public static class UpdateChecker
 
             var page = Str(o, "html_url") is { } h && Uri.TryCreate(h, UriKind.Absolute, out var hu) && hu.Scheme == Uri.UriSchemeHttps
                 ? hu : new Uri($"https://github.com/{GitHubFeed.Repo}/releases/tag/{tag}");
-            return new UpdateInfo(version, tag, Str(o, "body") ?? "", z.Url, s.Url, z.Size, page);
+            return new UpdateInfo(version, tag, Str(o, "body") ?? "", z.Url, s.Url, z.Size, page, kind, zipName);
         }
         catch (JsonException) { return null; }
     }
@@ -63,7 +82,7 @@ public static class UpdateChecker
         lastUtc is not { } last || nowUtc - last >= Interval || last > nowUtc;
 
     /// <summary>Asks the feed for the latest release. Never throws except on cancellation of <paramref name="ct"/>; problems come back as Failed with a plain message.</summary>
-    public static async Task<CheckResult> Check(IUpdateFeed feed, Version current, string? skipped, CancellationToken ct)
+    public static async Task<CheckResult> Check(IUpdateFeed feed, Version current, string? skipped, CancellationToken ct, PackageKind kind = PackageKind.WinZip)
     {
         string? json;
         try
@@ -75,7 +94,7 @@ public static class UpdateChecker
         {
             return new CheckResult(CheckOutcome.Failed, null, Describe(ex));
         }
-        if (json == null || Parse(json) is not { } info || info.Version <= Normalize(current))
+        if (json == null || Parse(json, kind) is not { } info || info.Version <= Normalize(current))
             return new CheckResult(CheckOutcome.UpToDate, null, null);
         if (skipped != null && Version.TryParse(skipped, out var sv) && Normalize(sv) == info.Version)
             return new CheckResult(CheckOutcome.Skipped, info, null);

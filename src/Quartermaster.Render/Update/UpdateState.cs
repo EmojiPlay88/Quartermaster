@@ -1,7 +1,8 @@
 namespace Quartermaster.Render.Update;
 
-/// <summary>A usable app release: version, tag, notes (Markdown as text), the app zip and its <c>.sha256</c>, the zip's size and the release page.</summary>
-public sealed record UpdateInfo(Version Version, string Tag, string Notes, Uri ZipUrl, Uri ShaUrl, long ZipSize, Uri PageUrl);
+/// <summary>A usable app release: version, tag, notes (Markdown as text), the app zip and its <c>.sha256</c>, the zip's size and the release page. ZipUrl/ZipSize mean "the asset" for <see cref="Kind"/>, named <see cref="AssetName"/>.</summary>
+public sealed record UpdateInfo(Version Version, string Tag, string Notes, Uri ZipUrl, Uri ShaUrl, long ZipSize, Uri PageUrl,
+    PackageKind Kind = PackageKind.WinZip, string AssetName = "");
 
 public enum CheckOutcome { UpToDate, Available, Skipped, Failed }
 
