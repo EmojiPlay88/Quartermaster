@@ -1,0 +1,91 @@
+# Release build: the same steps as every push (package.yml: unit tests, packages, smoke tests), then one artifact
+# Quartermaster-release-<version> with exactly the 8 app packages and their .sha256 files.
+# It creates no tag and no GitHub Release; build/release.ps1 -FromRun <run id> collects the artifact and prints the gh command.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version x.y.z; must equal <Version> in Directory.Build.props'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version input
+        env:
+          WANT: ${{ inputs.version }}
+        run: |
+          set -eu
+          if ! [[ "$WANT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "version must be x.y.z, got '$WANT'"; exit 1; fi
+          HAVE=$(python3 -I -c 'import sys, xml.etree.ElementTree as E; print(next(e.text for e in E.parse(sys.argv[1]).iter("Version")).strip())' Directory.Build.props)
+          if [ "$WANT" != "$HAVE" ]; then echo "version input $WANT differs from Directory.Build.props $HAVE"; exit 1; fi
+          echo "version $WANT"
+
+  build:
+    needs: check-version
+    uses: ./.github/workflows/package.yml
+    with:
+      version: ${{ inputs.version }}
+
+  collect:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Quartermaster-Windows
+          path: release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Quartermaster-macOS
+          path: release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Quartermaster-Linux
+          path: release
+
+      # Exactly the 8 assets and their 8 .sha256 files, each naming its own asset and matching it.
+      - name: Check assets
+        env:
+          V: ${{ inputs.version }}
+        run: |
+          set -eu
+          cd release
+          assets="Quartermaster-Setup-$V.exe Quartermaster-$V-win-x64.zip Quartermaster-$V-osx-arm64.dmg Quartermaster-$V-osx-arm64.zip Quartermaster-$V-x86_64.AppImage quartermaster_${V}_amd64.deb quartermaster-$V-1.x86_64.rpm Quartermaster-$V-linux-x64.tar.gz"
+          want=$(for a in $assets; do echo "$a"; echo "$a.sha256"; done | LC_ALL=C sort)
+          have=$(find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort)
+          if [ "$want" != "$have" ]; then
+            echo "asset list differs (< expected, > present):"
+            diff <(echo "$want") <(echo "$have") || true
+            exit 1
+          fi
+          [ "$(echo "$have" | wc -l)" -eq 16 ] || { echo "expected 16 files"; exit 1; }
+          for a in $assets; do
+            read -r h n < "$a.sha256"
+            [ "$n" = "$a" ] || { echo "$a.sha256 names '$n'"; exit 1; }
+            echo "$h" | grep -Eq '^[0-9a-f]{64}$' || { echo "$a.sha256 has a malformed hash"; exit 1; }
+          done
+          sha256sum --strict -c *.sha256
+          ls -l
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quartermaster-release-${{ inputs.version }}
+          path: release/*
+          if-no-files-found: error

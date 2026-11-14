@@ -99,7 +99,7 @@ The tests use small, invented modules and rules packs.
 
 The online-play relay is a separate download (`QuartermasterRelay-<version>-<platform>`), only needed by whoever hosts games; see [Hosting a Relay](https://github.com/EmojiPlay88/Quartermaster/wiki/Hosting-a-Relay).
 
-Maintainers: `build/release.ps1 -Version <version>` builds, checks and checksums the downloads into `artifacts/release/<version>/` and prints the `gh release create` command; it creates nothing itself.
+Maintainers: run the `release` workflow (`.github/workflows/release.yml`, input the version), then `build/release.ps1 -Version <version> -FromRun <run id>` downloads its packages, checks the asset list, checksums and archive contents, builds the relay downloads into `artifacts/release/<version>/` and prints the `gh release create` command; neither creates a release itself.
 
 ## Getting started
 

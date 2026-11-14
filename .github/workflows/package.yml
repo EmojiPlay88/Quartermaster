@@ -1,0 +1,221 @@
+# Reusable: unit tests, then per OS the publish, every package and its smoke tests, uploaded as
+# Quartermaster-Windows, Quartermaster-macOS and Quartermaster-Linux. Called by cross-platform.yml (every push)
+# and release.yml (release build), so both run the very same steps.
+name: package
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'When set, every job fails unless the build version (Directory.Build.props) equals it.'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is Apple silicon (arm64) on GitHub, so the osx-arm64 build below runs natively there.
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          # The repo targets net10.0 (released SDK, no global.json, no preview quality needed).
+          dotnet-version: '10.0.x'
+
+      # One version for every package step below (VER), checked against the caller's input when it gives one.
+      - name: Read version
+        shell: bash
+        env:
+          WANT: ${{ inputs.version }}
+        run: |
+          set -eu
+          VER=$(dotnet msbuild src/Quartermaster.Desktop -getProperty:Version | tr -d '[:space:]')
+          echo "version: $VER"
+          if [ -n "$WANT" ] && [ "$WANT" != "$VER" ]; then echo "requested version '$WANT' but the build is $VER"; exit 1; fi
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      # Skia needs fontconfig and a GL library at load time; the classic theme falls back to DejaVu Sans when Tahoma is missing.
+      - name: Install Linux libraries and fonts
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1 libfreetype6 libharfbuzz0b libgl1 fonts-dejavu-core desktop-file-utils
+
+      # Headless UI tests only: Avalonia.Headless never opens a window on any OS.
+      - name: Test
+        run: dotnet test Quartermaster.CrossPlatform.slnf -c Release --nologo
+
+      # dmgbuild (build tool only, never shipped) makes the dmg. pipx is preinstalled on GitHub macOS images and sidesteps PEP 668.
+      - name: Install dmgbuild
+        if: runner.os == 'macOS'
+        run: pipx install dmgbuild==1.6.5
+
+      - name: Publish macOS (Apple silicon)
+        if: runner.os == 'macOS'
+        run: |
+          dotnet publish src/Quartermaster.Desktop -c Release -r osx-arm64 --self-contained -o publish/osx-arm64
+          # The document viewer needs PDFium and the OCR needs Tesseract, Leptonica and tessdata: fail now when a publish lacks them.
+          bash build/check-publish-natives.sh publish/osx-arm64 osx-arm64
+
+      - name: Build macOS app bundle, dmg and update zip
+        if: runner.os == 'macOS'
+        run: |
+          bash build/macos/make-app-bundle.sh publish/osx-arm64 "$VER" out
+          bash build/macos/test-app-bundle.sh out/Quartermaster.app "$VER"
+          bash build/macos/make-dmg.sh out/Quartermaster.app "$VER" dist
+          ( cd dist && shasum -a 256 -c "Quartermaster-$VER-osx-arm64.dmg.sha256" "Quartermaster-$VER-osx-arm64.zip.sha256" )
+
+      # Runs the update zip through the real updater staging code (extract, marker, execute bits).
+      - name: Test update zip with the updater
+        if: runner.os == 'macOS'
+        run: |
+          # Absolute: the test host does not run from the repo root.
+          export QM_MAC_APP_ZIP="$PWD/dist/Quartermaster-$VER-osx-arm64.zip"
+          dotnet test tests/Quartermaster.Render.Tests -c Release --no-build --nologo --filter MacBundleZipTests -- RunConfiguration.TreatNoTestsAsError=true
+
+      - name: Publish Linux (x64)
+        if: runner.os == 'Linux'
+        run: |
+          dotnet publish src/Quartermaster.Desktop -c Release -r linux-x64 --self-contained -o publish/linux-x64
+          bash build/check-publish-natives.sh publish/linux-x64 linux-x64
+
+      - name: Build Linux tar.gz and AppImage
+        if: runner.os == 'Linux'
+        run: |
+          desktop-file-validate build/linux/quartermaster.desktop
+          bash build/linux/make-tar.sh publish/linux-x64 "$VER" dist
+          bash build/linux/make-appimage.sh publish/linux-x64 "$VER" dist
+          bash build/linux/make-deb-rpm.sh publish/linux-x64 "$VER" dist
+
+      # Runs the real tar and AppImage: marker kinds, --version, exec bits and checksums.
+      - name: Test Linux tar.gz and AppImage
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          marker_kind() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["package"])' "$1"; }
+          t="$RUNNER_TEMP/qm-tar-test"; rm -rf "$t"; mkdir -p "$t"
+          tar -xzf "dist/Quartermaster-$VER-linux-x64.tar.gz" -C "$t"
+          [ "$(marker_kind "$t/quartermaster-package.json")" = linux-tar ] || { echo "tar marker kind wrong"; exit 1; }
+          out=$("$t/Quartermaster" --version)
+          echo "tar -> $out"
+          [ "$out" = "Quartermaster $VER" ] || { echo "tar --version gave '$out'"; exit 1; }
+
+          img="$PWD/dist/Quartermaster-$VER-x86_64.AppImage"
+          out=$("$img" --appimage-extract-and-run --version)
+          echo "AppImage -> $out"
+          [ "$out" = "Quartermaster $VER" ] || { echo "AppImage --version gave '$out'"; exit 1; }
+          a="$RUNNER_TEMP/qm-appimage-test"; rm -rf "$a"; mkdir -p "$a"
+          ( cd "$a" && "$img" --appimage-extract >/dev/null )
+          [ "$(marker_kind "$a/squashfs-root/usr/bin/quartermaster-package.json")" = linux-appimage ] || { echo "AppImage marker kind wrong"; exit 1; }
+          [ -x "$a/squashfs-root/AppRun" ] || { echo "AppRun not executable"; exit 1; }
+          ( cd dist && sha256sum -c "Quartermaster-$VER-linux-x64.tar.gz.sha256" "Quartermaster-$VER-x86_64.AppImage.sha256" )
+
+      # Installs the real .deb on the runner (ubuntu) and the real .rpm in a Fedora container, runs --version and checks the marker kind.
+      - name: Test Linux deb and rpm
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          ( cd dist && sha256sum -c "quartermaster_${VER}_amd64.deb.sha256" "quartermaster-${VER}-1.x86_64.rpm.sha256" )
+          dpkg-deb -f "dist/quartermaster_${VER}_amd64.deb" Depends | tee /dev/stderr | grep -q libicu || { echo "deb Depends lacks libicu"; exit 1; }
+          sudo apt-get install -y "./dist/quartermaster_${VER}_amd64.deb"
+          out=$(quartermaster --version)
+          echo "deb -> $out"
+          [ "$out" = "Quartermaster $VER" ] || { echo "deb --version gave '$out'"; exit 1; }
+          python3 -I -c 'import json; d=json.load(open("/opt/quartermaster/quartermaster-package.json")); assert d["package"]=="linux-deb", d' || { echo "deb marker kind wrong"; exit 1; }
+          [ -x /opt/quartermaster/Quartermaster ] || { echo "Quartermaster not executable"; exit 1; }
+          sudo apt-get remove -y quartermaster
+          [ ! -e /opt/quartermaster ] || { echo "/opt/quartermaster still present after remove"; ls -la /opt/quartermaster; exit 1; }
+          [ ! -e /usr/bin/quartermaster ] || { echo "/usr/bin/quartermaster still present after remove"; exit 1; }
+
+          docker run --rm -v "$PWD/dist:/dist:ro" -e VER="$VER" fedora:42 bash -c '
+            set -eu
+            rpm -qpR "/dist/quartermaster-${VER}-1.x86_64.rpm" | tee /dev/stderr | grep -q libicu
+            dnf install -y "/dist/quartermaster-${VER}-1.x86_64.rpm"
+            out=$(quartermaster --version)
+            echo "rpm -> $out"
+            [ "$out" = "Quartermaster $VER" ]
+            grep -q linux-rpm /opt/quartermaster/quartermaster-package.json
+            dnf remove -y quartermaster
+            [ ! -e /opt/quartermaster ]'
+
+      - name: Publish Windows (x64)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          dotnet publish src/Quartermaster.Desktop -c Release -r win-x64 --self-contained -o publish/win-x64
+          bash build/check-publish-natives.sh publish/win-x64 win-x64
+
+      - name: Build Windows setup and zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./build/windows/make-windows-packages.ps1 -Publish publish/win-x64 -Version $env:VER -Out dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Installs the real setup.exe per-user to a temp folder, upgrades it in place, uninstalls it and checks user data survives.
+      - name: Test Windows setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./build/windows/test-setup.ps1 -Setup "dist/Quartermaster-Setup-$env:VER.exe" -Version $env:VER
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test Windows zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'qm-zip-test'
+          Expand-Archive -LiteralPath "dist/Quartermaster-$env:VER-win-x64.zip" -DestinationPath $dir -Force
+          $marker = Get-Content -LiteralPath (Join-Path $dir 'quartermaster-package.json') -Raw | ConvertFrom-Json
+          if ($marker.package -ne 'win-zip') { throw "marker kind is $($marker.package), expected win-zip" }
+          foreach ($exe in 'Quartermaster.exe', 'Quartermaster.App.exe') {
+            $out = Join-Path $env:RUNNER_TEMP "$exe.txt"
+            $p = Start-Process -FilePath (Join-Path $dir $exe) -ArgumentList '--version' -Wait -PassThru -RedirectStandardOutput $out
+            $text = (Get-Content -LiteralPath $out -Raw).Trim()
+            if ($p.ExitCode -ne 0 -or $text -ne "Quartermaster $env:VER") { throw "$exe --version gave exit $($p.ExitCode), '$text'" }
+            Write-Host "$exe -> $text"
+          }
+
+      # release.ps1's collect checks (asset list, .sha256, privacy) against a fake artifact, in pwsh 7 and Windows PowerShell 5.1.
+      - name: Test release.ps1 collect
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./build/test-release-collect.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File ./build/test-release-collect.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows build
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quartermaster-Windows
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Upload macOS build
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quartermaster-macOS
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Upload Linux build
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quartermaster-Linux
+          path: dist/*
+          if-no-files-found: error

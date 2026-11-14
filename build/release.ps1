@@ -1,46 +1,72 @@
 <#
 .SYNOPSIS
-  Builds the Quartermaster release downloads: the app zip (with the update helper inside) and the relay
-  server archives as SEPARATE downloads. Checks every archive, writes the .sha256 files and PRINTS the
-  gh command. It never creates a release, pushes or tags anything.
+  Collects a Quartermaster release from CI: takes the combined artifact Quartermaster-release-<v> of a
+  .github/workflows/release.yml run (8 app packages built and tested on Windows, macOS and Linux, each with a
+  .sha256), checks the exact asset list and every checksum, re-runs the archive privacy checks on the Windows zip
+  and the Linux tar.gz, builds the relay server archives as SEPARATE downloads, writes the release notes and
+  PRINTS the gh command. It never creates a release, pushes or tags anything.
 
 .PARAMETER Version
   The release version (for example 0.1.0). Must equal <Version> in Directory.Build.props.
 
-.PARAMETER SkipTests
-  Skip `dotnet test`.
+.PARAMETER FromRun
+  The id of a successful release.yml run; its artifact Quartermaster-release-<Version> is downloaded with gh.
 
-.PARAMETER AllowVersionMismatch
-  For the hands-on update test only (build a 0.1.1 zip from a 0.1.0 tree): do not insist that
-  Directory.Build.props already says -Version. The build is still stamped with -p:Version=<Version>.
+.PARAMETER ArtifactDir
+  A folder that already holds the artifact's files (skips the download; used by build/test-release-collect.ps1).
+
+.PARAMETER SkipRelay
+  Do not build the relay archives (tests only; a real release needs them).
 
 .PARAMETER OutRoot
   Where artifacts go (default <repo>\artifacts). Output: <OutRoot>\release\<Version>\ (downloads),
-  <OutRoot>\work\<Version>\ (publish folders). Both are git-ignored.
+  <OutRoot>\work\<Version>\ (relay publish folders, the downloaded artifact). Both are git-ignored.
 
 Runs on Windows PowerShell 5.1 and pwsh 7.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Version,
-    [switch]$SkipTests,
-    [switch]$AllowVersionMismatch,
+    [string]$FromRun,
+    [string]$ArtifactDir,
+    [switch]$SkipRelay,
     [string]$OutRoot
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
+$repoSlug = 'EmojiPlay88/Quartermaster'
 if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "-Version must be a plain semantic version x.y.z (for example 0.1.0), not '$Version'." }
-# The linux relay downloads must be .tar.gz (their names are fixed); there is no zip fallback.
-if (-not (Get-Command tar -ErrorAction SilentlyContinue)) { throw 'tar was not found on PATH (Windows 10 1803+ ships it as tar.exe); it is needed for the linux relay .tar.gz downloads.' }
+if (-not $FromRun -and -not $ArtifactDir) {
+    # Also on stdout: error records can be wrapped mid-word when redirected.
+    $msg = "release.ps1 no longer builds the app itself. Run the release workflow (.github/workflows/release.yml: Actions > release > Run workflow, version $Version), then pass its run id: build/release.ps1 -Version $Version -FromRun <run id>"
+    Write-Host $msg -ForegroundColor Red
+    throw $msg
+}
+if ($FromRun -and $ArtifactDir) { throw 'Pass either -FromRun or -ArtifactDir, not both.' }
+if ($FromRun -and $FromRun -notmatch '^\d+$') { throw "-FromRun must be a numeric workflow run id, not '$FromRun'." }
+# The Linux tar.gz is checked with tar, and the linux relay downloads must be .tar.gz (their names are fixed).
+if (-not (Get-Command tar -ErrorAction SilentlyContinue)) { throw 'tar was not found on PATH (Windows 10 1803+ ships it as tar.exe); it is needed for the .tar.gz checks and the linux relay downloads.' }
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $OutRoot) { $OutRoot = Join-Path $repo 'artifacts' }
 $releaseDir = Join-Path $OutRoot "release\$Version"
 $workDir = Join-Path $OutRoot "work\$Version"
 $tag = "quartermaster-v$Version"
-$appZipName = "Quartermaster-$Version-win-x64.zip"
+$artifactName = "Quartermaster-release-$Version"
+
+# The 8 app assets (names fixed by the 6a updater), each with its one plain release-notes line.
+$appAssets = [ordered]@{
+    "Quartermaster-Setup-$Version.exe"        = 'Windows installer (per-user, no admin rights needed).'
+    "Quartermaster-$Version-win-x64.zip"      = 'Windows portable zip: unzip anywhere and run Quartermaster.exe.'
+    "Quartermaster-$Version-osx-arm64.dmg"    = 'macOS (Apple silicon) disk image: drag Quartermaster to Applications.'
+    "Quartermaster-$Version-osx-arm64.zip"    = 'macOS (Apple silicon) app as a zip (also used by the in-app updater).'
+    "Quartermaster-$Version-x86_64.AppImage"  = 'Linux AppImage (x86_64): make it executable and run it.'
+    "quartermaster_${Version}_amd64.deb"      = 'Linux .deb package for Debian and Ubuntu (amd64).'
+    "quartermaster-$Version-1.x86_64.rpm"     = 'Linux .rpm package for Fedora and similar (x86_64).'
+    "Quartermaster-$Version-linux-x64.tar.gz" = 'Linux portable tar.gz (x64): extract anywhere and run Quartermaster.'
+}
 
 # Relay targets: rid -> archive kind.
 $relayTargets = @(
@@ -128,31 +154,11 @@ foreach ($u in @($env:USERNAME, $(if ($env:USERPROFILE) { Split-Path -Leaf $env:
     if ($u -and $u.Length -ge 3 -and -not ($script:UserNames -contains $u)) { $script:UserNames.Add($u) }
 }
 
-# The app zip's quartermaster-files.txt must list exactly the zip's files (the updater only moves listed files).
-function Test-AppManifest([string]$Archive) {
-    $problems = New-Object System.Collections.Generic.List[string]
-    $leaf = Split-Path -Leaf $Archive
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
-    try {
-        $files = @($zip.Entries | Where-Object { -not $_.FullName.EndsWith('/') } | ForEach-Object { $_.FullName })
-        $entry = $zip.GetEntry('quartermaster-files.txt')
-        if (-not $entry) { $problems.Add("$leaf has no quartermaster-files.txt"); return , $problems }
-        $reader = New-Object System.IO.StreamReader($entry.Open())
-        try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
-    } finally { $zip.Dispose() }
-    $listed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    foreach ($line in ($text -split "`r?`n")) { $l = $line.Trim(); if ($l) { [void]$listed.Add($l) } }
-    foreach ($f in $files) { if (-not $listed.Contains($f)) { $problems.Add("$leaf entry '$f' is not in quartermaster-files.txt") } }
-    $inZip = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    foreach ($f in $files) { [void]$inZip.Add($f) }
-    foreach ($l in $listed) { if (-not $inZip.Contains($l)) { $problems.Add("$leaf quartermaster-files.txt lists '$l', which is not in the zip") } }
-    return , $problems
-}
-
 $script:TextExt = @('.json', '.xml', '.txt', '.config', '.md', '.manifest', '.props', '.targets', '.yml', '.yaml', '.cmd', '.ps1', '.sh', '.html', '.css', '.js')
 
+# -CheckManifest: quartermaster-files.txt must list exactly the archive's files (the updater only moves listed files).
 # Returns the list of problems found in one archive ($Kind 'zip' or 'tar.gz'); empty list = clean.
-function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [string[]]$Required) {
+function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [string[]]$Required, [switch]$CheckManifest) {
     $problems = New-Object System.Collections.Generic.List[string]
     $leaf = Split-Path -Leaf $Archive
     $needles = New-Object System.Collections.Generic.List[string]
@@ -189,6 +195,21 @@ function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [stri
             & tar -xzf $Archive -C $tmp
             if ($LASTEXITCODE -ne 0) { throw "tar could not extract $leaf." }
         }
+        if ($CheckManifest) {
+            $files = @(Get-ChildItem -LiteralPath $tmp -Recurse -File | ForEach-Object { $_.FullName.Substring($tmp.Length + 1).Replace('\', '/') })
+            $listFile = Join-Path $tmp 'quartermaster-files.txt'
+            if (-not (Test-Path -LiteralPath $listFile)) { $problems.Add("$leaf has no quartermaster-files.txt") }
+            else {
+                $listed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+                foreach ($line in ([System.IO.File]::ReadAllText($listFile) -split "`r?`n")) { $l = $line.Trim(); if ($l) { [void]$listed.Add($l) } }
+                $inArchive = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+                foreach ($f in $files) {
+                    [void]$inArchive.Add($f)
+                    if (-not $listed.Contains($f)) { $problems.Add("$leaf entry '$f' is not in quartermaster-files.txt") }
+                }
+                foreach ($l in $listed) { if (-not $inArchive.Contains($l)) { $problems.Add("$leaf quartermaster-files.txt lists '$l', which is not in the archive") } }
+            }
+        }
         $binPatterns = @()
         foreach ($u in $script:UserNames) {
             $p = ('C:\Users\' + $u).ToLowerInvariant()
@@ -217,6 +238,13 @@ function Test-Archive([string]$Archive, [string]$Kind, [string]$Forbidden, [stri
     return , $problems
 }
 
+# Throws when $Problems is not empty, after listing each one on its own line (Write-Host, so long names are never wrapped).
+function Assert-NoProblems($Problems, [string]$What) {
+    if ($Problems.Count -eq 0) { return }
+    $Problems | ForEach-Object { Write-Host "  FAIL: $_" -ForegroundColor Red }
+    throw "$What failed with $($Problems.Count) problem(s). Nothing should be released."
+}
+
 # ---------------------------------------------------------------------------------------------------
 Write-Step "Quartermaster release $Version (tag $tag)"
 
@@ -224,98 +252,121 @@ Write-Step "Quartermaster release $Version (tag $tag)"
 $propsPath = Join-Path $repo 'Directory.Build.props'
 [xml]$props = Get-Content -LiteralPath $propsPath -Raw
 $propsVersion = ($props.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
-if ($propsVersion -ne $Version) {
-    if ($AllowVersionMismatch) {
-        Write-Warning "Directory.Build.props says $propsVersion but -Version is $Version (-AllowVersionMismatch: test builds only, do not release this)."
-    } else {
-        throw "Directory.Build.props has Version $propsVersion but -Version is $Version. Bump the props file first."
-    }
-}
-
-# 2. Tests.
-if ($SkipTests) { Write-Warning 'Skipping tests (-SkipTests).' }
-else {
-    Write-Step 'dotnet test'
-    Push-Location $repo
-    try { Invoke-Dotnet @('test', 'Quartermaster.slnx', '-c', 'Release') } finally { Pop-Location }
-}
+if ($propsVersion -ne $Version) { throw "Directory.Build.props has Version $propsVersion but -Version is $Version. Bump the props file first." }
 
 if (Test-Path -LiteralPath $releaseDir) { Remove-Item -LiteralPath $releaseDir -Recurse -Force }
 if (Test-Path -LiteralPath $workDir) { Remove-Item -LiteralPath $workDir -Recurse -Force }
 New-Item -ItemType Directory -Path $releaseDir | Out-Null
 New-Item -ItemType Directory -Path $workDir | Out-Null
 
+# 2. The CI artifact.
+if ($FromRun) {
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'gh (GitHub CLI) was not found on PATH; it is needed for -FromRun.' }
+    $ArtifactDir = Join-Path $workDir 'ci-artifact'
+    Write-Step "Download $artifactName from run $FromRun"
+    & gh run download $FromRun -n $artifactName -D $ArtifactDir --repo $repoSlug
+    if ($LASTEXITCODE -ne 0) { throw "gh run download $FromRun -n $artifactName failed (exit code $LASTEXITCODE). Did that release.yml run finish green?" }
+}
+if (-not (Test-Path -LiteralPath $ArtifactDir -PathType Container)) { throw "Artifact folder '$ArtifactDir' does not exist." }
+$ArtifactDir = (Resolve-Path -LiteralPath $ArtifactDir).Path.TrimEnd('\', '/')
+
+# 3. Exact file list: the 8 assets and their .sha256; nothing missing, nothing extra (sub-folders count as extra).
+Write-Step 'Check asset list and checksums'
+$expected = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+foreach ($n in $appAssets.Keys) { [void]$expected.Add($n); [void]$expected.Add("$n.sha256") }
+$present = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+foreach ($i in @(Get-ChildItem -LiteralPath $ArtifactDir -Recurse -Force)) {
+    $rel = $i.FullName.Substring($ArtifactDir.Length + 1).Replace('\', '/')
+    if ($i.PSIsContainer) { $rel += '/' }
+    [void]$present.Add($rel)
+}
+$listProblems = New-Object System.Collections.Generic.List[string]
+foreach ($n in ($expected | Sort-Object)) { if (-not $present.Contains($n)) { $listProblems.Add("missing from the artifact: $n") } }
+foreach ($n in ($present | Sort-Object)) { if (-not $expected.Contains($n)) { $listProblems.Add("unexpected file in the artifact: $n") } }
+Assert-NoProblems $listProblems 'Asset list check'
+
+# 4. Every .sha256 is exactly "<64 lower-case hex>  <asset name>" (one line feed allowed) and matches its asset.
+$hashProblems = New-Object System.Collections.Generic.List[string]
+$hashes = @{}
+foreach ($n in $appAssets.Keys) {
+    $text = [System.IO.File]::ReadAllText((Join-Path $ArtifactDir "$n.sha256"))
+    $m = [regex]::Match($text, '\A([0-9a-f]{64})  ([^\r\n]+)\n?\z')
+    if (-not $m.Success) { $hashProblems.Add("$n.sha256 is not in the form '<64 lower-case hex>  <name>'"); continue }
+    if ($m.Groups[2].Value -cne $n) { $hashProblems.Add("$n.sha256 names '$($m.Groups[2].Value)' instead of $n"); continue }
+    $actual = (Get-FileHash -LiteralPath (Join-Path $ArtifactDir $n) -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $m.Groups[1].Value) { $hashProblems.Add("$n does not match its SHA-256 file (file $actual, .sha256 $($m.Groups[1].Value))"); continue }
+    $hashes[$n] = $actual
+}
+Assert-NoProblems $hashProblems 'Checksum check'
+foreach ($n in $appAssets.Keys) {
+    Copy-Item -LiteralPath (Join-Path $ArtifactDir $n), (Join-Path $ArtifactDir "$n.sha256") -Destination $releaseDir
+}
+Write-Host "All $($appAssets.Count) assets present, nothing extra, every .sha256 matches." -ForegroundColor Green
+
 # Release builds carry no debug info (DebugType=none): nothing from this machine's paths ends up in the binaries.
 # PathMap also rewrites the repo folder in compiler-embedded paths (for example caller-file-path attributes).
 $common = @('-c', 'Release', "-p:Version=$Version", '-p:DebugType=none', '-p:DebugSymbols=false', "-p:PathMap=$repo=.")
 
-# 3. App (publishes Quartermaster.Updater.exe next to the app through the App project's after-publish target).
-Write-Step 'Publish app (win-x64, self-contained)'
-$appDir = Join-Path $workDir 'app'
-Invoke-Dotnet (@('publish', (Join-Path $repo 'src\Quartermaster.App\Quartermaster.App.csproj'), '-r', 'win-x64', '--self-contained', '-o', $appDir) + $common)
-# The App project's publish also copies LICENSE and THIRD-PARTY-NOTICES.md and writes quartermaster-files.txt (the release file list).
-foreach ($must in @('Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'quartermaster-files.txt')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $appDir $must))) { throw "Publish output has no $must." }
-}
-$appZip = Join-Path $releaseDir $appZipName
-New-ZipFromFolder $appDir $appZip
-
-# 4. Relay, one archive per platform.
+# 5. Relay, one archive per platform.
 $relayArchives = @()
-foreach ($t in $relayTargets) {
-    $rid = $t.Rid
-    Write-Step "Publish relay ($rid)"
-    $dir = Join-Path $workDir "relay-$rid"
-    Invoke-Dotnet (@('publish', (Join-Path $repo 'src\Quartermaster.Relay\Quartermaster.Relay.csproj'), '-r', $rid, '--self-contained', '-p:PublishSingleFile=true', '-o', $dir) + $common)
-    $kind = $t.Kind
-    $name = "QuartermasterRelay-$Version-$rid.$kind"
-    $out = Join-Path $releaseDir $name
-    if ($kind -eq 'zip') { New-ZipFromFolder $dir $out }
-    else {
-        # Relative paths from the work folder, so tar never sees a drive letter.
-        Push-Location $workDir
-        try {
-            & tar -czf "../../release/$Version/$name" -C "relay-$rid" .
-            if ($LASTEXITCODE -ne 0) { throw "tar failed for $name." }
-        } finally { Pop-Location }
+if ($SkipRelay) { Write-Warning 'Skipping the relay archives (-SkipRelay): tests only, do not release this.' }
+else {
+    foreach ($t in $relayTargets) {
+        $rid = $t.Rid
+        Write-Step "Publish relay ($rid)"
+        $dir = Join-Path $workDir "relay-$rid"
+        Invoke-Dotnet (@('publish', (Join-Path $repo 'src\Quartermaster.Relay\Quartermaster.Relay.csproj'), '-r', $rid, '--self-contained', '-p:PublishSingleFile=true', '-o', $dir) + $common)
+        $kind = $t.Kind
+        $name = "QuartermasterRelay-$Version-$rid.$kind"
+        $out = Join-Path $releaseDir $name
+        if ($kind -eq 'zip') { New-ZipFromFolder $dir $out }
+        else {
+            # Relative paths from the work folder, so tar never sees a drive letter.
+            Push-Location $workDir
+            try {
+                & tar -czf "../../release/$Version/$name" -C "relay-$rid" .
+                if ($LASTEXITCODE -ne 0) { throw "tar failed for $name." }
+            } finally { Pop-Location }
+        }
+        $relayArchives += @{ Path = $out; Kind = $kind }
     }
-    $relayArchives += @{ Path = $out; Kind = $kind }
 }
 
-# 5. Archive checks.
+# 6. Archive checks: the app zip and tar.gz (the archives the updater unpacks) and every relay archive.
 Write-Step 'Check archives'
 $allProblems = New-Object System.Collections.Generic.List[string]
-foreach ($p in (Test-Archive $appZip 'zip' 'Quartermaster.Relay*' @('Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'quartermaster-files.txt'))) { $allProblems.Add($p) }
-foreach ($p in (Test-AppManifest $appZip)) { $allProblems.Add($p) }
+$winZip = Join-Path $releaseDir "Quartermaster-$Version-win-x64.zip"
+$linuxTar = Join-Path $releaseDir "Quartermaster-$Version-linux-x64.tar.gz"
+foreach ($p in (Test-Archive $winZip 'zip' 'Quartermaster.Relay*' @('Quartermaster.exe', 'Quartermaster.App.exe', 'Quartermaster.Updater.exe', 'quartermaster-package.json', 'quartermaster-files.txt') -CheckManifest)) { $allProblems.Add($p) }
+foreach ($p in (Test-Archive $linuxTar 'tar.gz' 'Quartermaster.Relay*' @('Quartermaster', 'Quartermaster.Updater', 'quartermaster-package.json', 'quartermaster-files.txt') -CheckManifest)) { $allProblems.Add($p) }
 foreach ($r in $relayArchives) {
     foreach ($p in (Test-Archive $r.Path $r.Kind 'Quartermaster.App*' @())) { $allProblems.Add($p) }
 }
-if ($allProblems.Count -gt 0) {
-    $allProblems | ForEach-Object { Write-Host "  FAIL: $_" -ForegroundColor Red }
-    throw "Archive check failed with $($allProblems.Count) problem(s). Nothing should be released."
-}
-Write-Host 'Archive checks passed (no local paths, user or profile name, .vmod, .qrules or startapp.cmd; app and relay kept apart; quartermaster-files.txt lists exactly the app zip).' -ForegroundColor Green
+Assert-NoProblems $allProblems 'Archive check'
+Write-Host 'Archive checks passed (no local paths, user or profile name, .vmod, .qrules or startapp.cmd; app and relay kept apart; quartermaster-files.txt lists exactly the zip and the tar.gz).' -ForegroundColor Green
 
-# 6. Checksums.
+# 7. Checksums of the relay archives (the app assets keep the .sha256 files CI wrote and this script verified).
 Write-Step 'Checksums'
-$assets = @($appZip) + @($relayArchives | ForEach-Object { $_.Path })
+foreach ($r in $relayArchives) { $hashes[(Split-Path -Leaf $r.Path)] = Write-Sha256 $r.Path }
+$assets = @($appAssets.Keys | ForEach-Object { Join-Path $releaseDir $_ }) + @($relayArchives | ForEach-Object { $_.Path })
 foreach ($a in $assets) {
-    $h = Write-Sha256 $a
+    $leaf = Split-Path -Leaf $a
     $size = '{0:N1} MB' -f ((Get-Item -LiteralPath $a).Length / 1MB)
-    Write-Host ("  {0}  {1}  {2}" -f $h, (Split-Path -Leaf $a), $size)
+    Write-Host ("  {0}  {1}  {2}" -f $hashes[$leaf], $leaf, $size)
 }
 
-# 7. Release notes + the command to run later (printed, never executed).
+# 8. Release notes (one plain line per asset) + the command to run later (printed, never executed).
 $notes = Join-Path $releaseDir 'release-notes.md'
-$notesText = @"
-Quartermaster $Version
-
-**Quartermaster-$Version-win-x64.zip** is the Windows app: unzip it anywhere and run Quartermaster.App.exe (see the README, Install / Update).
-**QuartermasterRelay-$Version-<platform>** is the online-play relay server, a separate download for the person who hosts games (see https://github.com/EmojiPlay88/Quartermaster/wiki/Hosting-a-Relay).
-
-The builds are not code-signed. Windows SmartScreen may warn on first start. The .sha256 files only guard against a corrupt download, they do not prove who made it.
-"@
-[System.IO.File]::WriteAllText($notes, $notesText.Replace("`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
+$lines = New-Object System.Collections.Generic.List[string]
+$lines.Add("Quartermaster $Version")
+$lines.Add('')
+foreach ($n in $appAssets.Keys) { $lines.Add("$n - $($appAssets[$n])") }
+foreach ($r in $relayArchives) {
+    $lines.Add("$(Split-Path -Leaf $r.Path) - online-play relay server, a separate download for the person who hosts games (see https://github.com/$repoSlug/wiki/Hosting-a-Relay).")
+}
+$lines.Add('')
+$lines.Add('The builds are not code-signed: Windows SmartScreen and macOS Gatekeeper may warn on first start (see the README, Install). The .sha256 files only guard against a corrupt download, they do not prove who made it.')
+[System.IO.File]::WriteAllText($notes, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
 $files = @($assets | ForEach-Object { $_; "$_.sha256" })
 Write-Step 'Done. Files are in:'
@@ -323,4 +374,4 @@ Write-Host "  $releaseDir"
 Write-Host ''
 Write-Host 'NOT RUN. To publish, after the user says OK (run from the repo, with gh logged in):' -ForegroundColor Yellow
 $q = ($files | ForEach-Object { '"' + $_ + '"' }) -join ' '
-Write-Host "gh release create $tag $q --title `"Quartermaster $Version`" --notes-file `"$notes`" --repo EmojiPlay88/Quartermaster"
+Write-Host "gh release create $tag $q --title `"Quartermaster $Version`" --notes-file `"$notes`" --repo $repoSlug"
