@@ -302,6 +302,8 @@ begin
   Result := True;
   if CurPageID = wpSelectDir then
   begin
+    // A silent install skips this page but may still call here: never show a box, PrepareToInstall refuses instead.
+    if WizardSilent then Exit;
     Problem := FolderProblem(WizardDirValue);
     if Problem <> '' then
     begin
