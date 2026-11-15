@@ -189,14 +189,15 @@ public sealed class MapTabs : TabControl
 
     /// <summary>Shows the session's maps (none for null). <paramref name="actions"/> is the main window's action port. The remembered open
     /// maps (layout memory; ids no longer in the module are ignored) open with the remembered one selected; with none left, only the main
-    /// map (the first map that is not an org display, as WinForms MainForm.OpenMainMap).</summary>
+    /// map (the first map that is not an org display, as WinForms MainForm.OpenMainMap). The main map also opens when none of the remembered
+    /// maps is visible to the player now.</summary>
     public void Bind(ModuleSession? s, Func<IActionPort?>? actions, IReadOnlyList<string>? remembered = null, string? selected = null)
     {
         Clear();
         _s = s;
         _actions = actions;
         if (s == null) return;
-        var main = s.Model.Maps.FirstOrDefault(m => !m.IsOrgDisplay) ?? s.Model.Maps.FirstOrDefault();
+        var main = MainOf(s);
         foreach (var id in remembered ?? Array.Empty<string>())
             if (!_open.Contains(id) && s.Model.Maps.Any(m => m.Id == id)) _open.Add(id);
         if (_open.Count == 0 && main != null) _open.Add(main.Id);
@@ -204,6 +205,7 @@ public sealed class MapTabs : TabControl
         try
         {
             Sync(null);
+            MainIfNoneVisible(main);
             var tabs = Items.OfType<TabItem>().ToList();
             var tab = tabs.FirstOrDefault(t => ViewOf(t)?.Map.Id == selected) ?? tabs.FirstOrDefault(t => ViewOf(t)?.Map == main) ?? tabs.FirstOrDefault();
             if (tab != null) SelectedItem = tab;
@@ -228,20 +230,29 @@ public sealed class MapTabs : TabControl
         Change(null, true);
     }
 
-    /// <summary>Closes every tab but the view's (open maps hidden from the player now are forgotten too).</summary>
+    /// <summary>Closes every tab but the view's. Open maps the player may not see now have no tab, so they stay open (another hot-seat
+    /// player's maps come back for them).</summary>
     public void CloseOthers(MapView v)
     {
-        if (!_views.Contains(v)) return;
-        _open.RemoveAll(id => id != v.Map.Id);
+        if (_s is not { } s || !_views.Contains(v)) return;
+        _open.RemoveAll(id => id != v.Map.Id && s.CanSeeMap(id));
         Change(v.Map, true);
     }
 
-    /// <summary>Closes every tab.</summary>
+    /// <summary>Closes every tab (open maps the player may not see now stay open, as in <see cref="CloseOthers"/>).</summary>
     public void CloseAll()
     {
-        if (_open.Count == 0) return;
-        _open.Clear();
+        if (_s is not { } s || _open.RemoveAll(s.CanSeeMap) == 0) return;
         Change(null, true);
+    }
+
+    /// <summary>The main map's tab when no open map is visible to the player but the main map is: a player never inherits an empty map
+    /// area from maps that are not theirs. Not reported as a change of the open maps.</summary>
+    void MainIfNoneVisible(MapDef? main)
+    {
+        if (_s is not { } s || _views.Count > 0 || main == null || !s.CanSeeMap(main.Id)) return;
+        if (!_open.Contains(main.Id)) _open.Add(main.Id);
+        Sync(null);
     }
 
     void Change(MapDef? select, bool openChanged)
@@ -254,13 +265,22 @@ public sealed class MapTabs : TabControl
     }
 
     /// <summary>Brings the tabs in line with the maps the player may see now (hot-seat viewers can hide maps): the user's open maps that
-    /// are visible. Kept views stay as they are.</summary>
+    /// are visible. Kept views stay as they are. When maps are open but none is visible to this player, the main map opens for them (an
+    /// empty open set, the user's Close All, stays empty).</summary>
     public void Rebuild()
     {
         _quiet++;
-        try { Sync(null); }
+        try
+        {
+            Sync(null);
+            // Not while the view is blank (a hot-seat handover: nobody's sides are on screen yet).
+            if (_open.Count > 0 && _s is { ViewSides: not { Count: 0 } } s) MainIfNoneVisible(MainOf(s));
+        }
         finally { _quiet--; }
     }
+
+    /// <summary>The main map: the first map that is not an org display (WinForms MainForm.OpenMainMap).</summary>
+    static MapDef? MainOf(ModuleSession s) => s.Model.Maps.FirstOrDefault(m => !m.IsOrgDisplay) ?? s.Model.Maps.FirstOrDefault();
 
     /// <summary>Tabs = open maps the player may see, in open order; <paramref name="select"/> (else the selected map, else the tab now at
     /// its place) is selected.</summary>

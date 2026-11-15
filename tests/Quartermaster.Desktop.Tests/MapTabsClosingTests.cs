@@ -248,6 +248,52 @@ public sealed class MapTabsClosingTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Close_others_and_close_all_keep_maps_the_player_cannot_see()
+    {
+        using var games = new HotSeatGames("qm-maptabs-hs-");
+        var w = games.Game();   // Anna
+        w.MapTabs.Open("Red Map");
+        HotSeatGames.SwitchTo(w, HotSeatGames.Ben);
+        w.MapTabs.Open("Blue Map");
+        Assert.Equal(new[] { "Main Map", "Blue Map" }, Names(w));
+        Click(MenuItemOf(w.MapTabs, View(w, "Blue Map"), "Close Others"));
+        Assert.Equal(new[] { "Blue Map" }, Names(w));
+        Assert.Equal(new[] { "Red Map", "Blue Map" }, w.MapTabs.OpenMapIds);   // Anna's map stays hers
+        HotSeatGames.SwitchTo(w, HotSeatGames.Anna);
+        Assert.Equal(new[] { "Red Map" }, Names(w));
+
+        Click(MenuItemOf(w.MapTabs, View(w, "Red Map"), "Close All"));
+        Assert.Empty(w.MapTabs.Views);
+        Assert.Equal(new[] { "Blue Map" }, w.MapTabs.OpenMapIds);
+        HotSeatGames.SwitchTo(w, HotSeatGames.Ben);
+        Assert.Equal(new[] { "Blue Map" }, Names(w));
+    }
+
+    [AvaloniaFact]
+    public void Player_whose_open_maps_are_all_hidden_gets_the_main_map()
+    {
+        using var games = new HotSeatGames("qm-maptabs-hs-");
+        var w = games.Game();   // Anna
+        HotSeatGames.SwitchTo(w, HotSeatGames.Ben);
+        w.MapTabs.Open("Blue Map");
+        Click(MenuItemOf(w.MapTabs, View(w, "Blue Map"), "Close Others"));
+        Assert.Equal(new[] { "Blue Map" }, w.MapTabs.OpenMapIds);
+        // Anna closed nothing: she gets the main map, not an empty map area.
+        HotSeatGames.SwitchTo(w, HotSeatGames.Anna);
+        Assert.Equal(new[] { "Main Map" }, Names(w));
+        Assert.False(w.MapTabs.ShowsBackdrop);
+
+        // Bound while Anna is at the screen with only Ben's map remembered: the main map too.
+        w.MapTabs.Bind(w.Session, null, new[] { "Blue Map" }, "Blue Map");
+        Assert.Equal(new[] { "Main Map" }, Names(w));
+        Assert.Equal("Main Map", w.MapTabs.ActiveView!.Map.Name);
+
+        // A second game of the same module (Ben's map remembered) opens with Anna at the screen.
+        var second = games.Game();
+        Assert.Equal(new[] { "Main Map" }, Names(second));
+    }
+
+    [AvaloniaFact]
     public void Tab_strip_is_one_row()
     {
         var w = Open();
