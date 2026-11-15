@@ -1,10 +1,13 @@
 ; Inno Setup 6 script for the per-user Quartermaster installer (unsigned; Windows SmartScreen may warn).
 ; Built by build/windows/make-windows-packages.ps1, which passes /DAppVersion=, /DSourceDir= and /DOutputDir=.
 ; The install folder (%LOCALAPPDATA%\Programs\Quartermaster by default) is NOT the data folder (%LOCALAPPDATA%\Quartermaster):
-; uninstalling never touches user data. The folder page is enabled, but uninstall removes {app} recursively, so
-; FolderProblem refuses unsafe folders (drive or share root, the data folder or anything inside it in long or
-; 8.3 spelling, Program Files, a foreign non-empty folder): NextButtonClick on the folder page shows the reason and
-; PrepareToInstall refuses the same folders for a silent /DIR= (exit code 7). After a successful upgrade, files the old install
+; uninstalling never touches user data. The folder page shows on a first install only (DisableDirPage=auto: an upgrade
+; stays in the folder of the previous install, so no old copy is left behind without an uninstaller; /DIR= still
+; overrides it). Uninstall removes {app} recursively, so FolderProblem refuses unsafe folders (drive or share root, the
+; data folder or anything inside it in long or 8.3 spelling, Program Files, a foreign non-empty folder): NextButtonClick
+; on the folder page shows the reason and PrepareToInstall refuses the same folders for a silent /DIR= (exit code 7;
+; Inno reports that failure with a message box that /SUPPRESSMSGBOXES suppresses). DirExistsWarning=no: FolderProblem
+; already refuses non-empty foreign folders, so Inno's own "folder exists, install anyway?" question would only come first. After a successful upgrade, files the old install
 ; listed in quartermaster-files.txt that the new list lacks are deleted (CurStepChanged, ssPostInstall).
 #ifndef AppVersion
   #error AppVersion not defined (pass /DAppVersion=x.y.z)
@@ -24,7 +27,8 @@ AppPublisher=Quartermaster contributors
 PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\Quartermaster
 DefaultGroupName=Quartermaster
-DisableDirPage=no
+DisableDirPage=auto
+DirExistsWarning=no
 UsePreviousAppDir=yes
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\Quartermaster.exe
