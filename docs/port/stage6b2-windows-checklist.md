@@ -7,18 +7,20 @@ This tests the **Windows installer**: a per-user setup program, an update instal
 1. Sign in to GitHub in your browser (downloading artifacts needs an account). Open the repository's **Actions** tab, open the latest green **cross-platform** run for the branch or pull request being tested, scroll to **Artifacts** and download **Quartermaster-Windows**. GitHub wraps it in a zip; unzip it. It holds `Quartermaster-Setup-<v>.exe`, `Quartermaster-<v>-win-x64.zip` and a `.sha256` file for each.
 2. Optional: in PowerShell, `(Get-FileHash .\Quartermaster-Setup-<v>.exe -Algorithm SHA256).Hash` should match the start of the `.sha256` file (case aside).
 3. Double-click the setup. Expected: **SmartScreen** may say "Windows protected your PC" (the setup is unsigned). Choose **More info**, then **Run anyway**. Write down anything else.
-4. Expected: no administrator (UAC) prompt; a wizard that asks where to install (the default folder is fine; try a folder under Program Files once and expect a refusal message), with a "Create a desktop shortcut" box (unticked) and, at the end, "Launch Quartermaster" (unticked). Finish the install.
+4. Expected: no administrator (UAC) prompt; a wizard that asks where to install, with a "Create a desktop shortcut" box (unticked) and, at the end, "Launch Quartermaster" (unticked). The folder question appears only when Quartermaster is not installed yet: if an earlier setup install is there, uninstall it first in Settings > Apps (your data folder stays).
+   - 4a. On the folder page, try these one at a time and press **Next** after each: your data folder (`%LOCALAPPDATA%\Quartermaster`), a drive root such as `C:\`, and a folder under `C:\Program Files`. Expected each time: a message says why the folder can't be used (for the drive root the message may come from the setup program itself rather than from Quartermaster), and you stay on the folder page.
+   - 4b. Put the default folder back and finish the install.
 5. Expected: the Start menu has **Quartermaster**; the program is in `%LOCALAPPDATA%\Programs\Quartermaster` (it holds `Quartermaster.exe` and `quartermaster-package.json`). Windows Settings > Apps lists **Quartermaster** once.
 6. Check the marker and version from PowerShell (no window opens; the `| Out-String` is needed, because the program has no console and PowerShell would otherwise show nothing): `Get-Content "$env:LOCALAPPDATA\Programs\Quartermaster\quartermaster-package.json"` should say `"package":"win-setup"`, and `& "$env:LOCALAPPDATA\Programs\Quartermaster\Quartermaster.exe" --version | Out-String` prints `Quartermaster <v>`.
 7. Start **Quartermaster** from the Start menu. Expected: the launcher opens. **Help > About** shows the version. Close it.
 
-   Stage 6c checks (use a module with several maps; open it from the launcher):
-   - 7a. In setup, on the folder page, type your data folder (`%LOCALAPPDATA%\Quartermaster`) or a drive root such as `C:\` and press Next. Expected: a message says why, and you stay on the page. A folder under Program Files is refused too.
-   - 7b. Open the module. Expected: the log is docked at the bottom, not floating, and only the main map has a tab.
-   - 7c. Open another map by double-clicking it in the module tree's Maps folder. Close a tab with its x, with middle-click, and with right-click > Close, Close Others and Close All. Reopen a closed map from the tree. Close the app and reopen the module: the same tabs are open.
-   - 7d. With game master mode on (Settings > General), the counter palette sits in the left column between the module tree and Charts & Tables. **View > Counter Palette** hides and shows it, with no empty gap.
-   - 7e. Try each item under **View > Show** (Main Toolbar, Phase Strip, Alert Bar, Status Bar, Map Toolbar, Charts & Tables), then **View > Show Everything**. Expected: everything is back after the last one, and your choices are still there after a restart.
-8. Run the same setup again. Expected: it upgrades in place, and Settings > Apps still lists Quartermaster **once**.
+   Stage 6c checks (use a module with several maps; open it from the launcher; the setup folder checks are step 4a):
+   - 7a. Open the module. Expected: the log is docked at the bottom, not floating, and only the main map has a tab.
+   - 7b. Open another map by double-clicking it in the module tree's Maps folder. Close a tab with its x, with middle-click, and with right-click > Close, Close Others and Close All. Reopen a closed map from the tree. Close the app and reopen the module: the same tabs are open.
+   - 7c. With game master mode on (Settings > General), the counter palette sits in the left column between the module tree and Charts & Tables. **View > Counter Palette** hides and shows it, with no empty gap.
+   - 7d. Try each item under **View > Show** (Main Toolbar, Phase Strip, Alert Bar, Status Bar, Map Toolbar, Charts & Tables), then **View > Show Everything**. Expected: everything is back after the last one, and your choices are still there after a restart. **View > Charts & Tables** (right under Module Tree) does the same as the one under Show, and the two stay ticked or unticked together.
+   - 7e. Hide the status bar and the map toolbar, then start a game with two players. Expected: **Game > Current Player** lists the players and switching works as from the status bar (the "pass to" screen comes first); **Game > Last Moved** outlines the counters that moved last. In a one-player game Current Player is greyed out. Use **View > Show Everything** afterwards.
+8. Run the same setup again. Expected: it does not ask for a folder this time; it upgrades in place, and Settings > Apps still lists Quartermaster **once**.
 
 ## B. Update the setup install from a test feed
 

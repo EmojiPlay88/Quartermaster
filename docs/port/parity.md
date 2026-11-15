@@ -214,13 +214,12 @@ Stage 5b = hot-seat: the Players page of the new-game dialog, Settings > Game > 
 
 ## Stage-6c deviations and notes (Windows feedback; deliberate or known)
 
-- Setup asks where to install again. It refuses the data folder (and anything inside it), drive or share roots, Program Files (the install is per user; administrator folders are not supported) and non-empty folders that do not already hold Quartermaster.exe. Silent installs never show a message box.
+- Setup asks where to install again. It refuses the data folder (and anything inside it), drive or share roots, Program Files (the install is per user; administrator folders are not supported) and non-empty folders that do not already hold Quartermaster.exe. It asks only on a first install: an upgrade stays in the folder of the installed copy (a `/DIR=` on the command line still chooses another). In a silent install the folder page shows no message; an unsafe `/DIR=` ends setup with exit code 7, and setup reports that with its own message box unless `/SUPPRESSMSGBOXES` is passed (the CI setup test always passes it).
 - The log always starts docked at the bottom. The old WinForms app could save it as floating in the shared layout file; the floating position is still remembered for when you pop it out.
-- Map tabs follow WinForms (see the DocumentTabStrip row). Closing the main map leaves the map area empty until you open it again from the tree.
+- Map tabs follow WinForms (see the DocumentTabStrip row). Closing the main map leaves the map area empty until you open it again from the tree. In a hot-seat game, Close Others and Close All leave the other player's maps open for them, and a player whose open maps are all someone else's gets the main map instead of an empty area.
 - The counter palette moved from its own dock into the left column (see the PaletteDock row).
-- **Deviation:** View > Module Tree hides only the module tree; WinForms hides the whole left panel. Charts & Tables and the palette have their own toggles under View.
-- Known limit: with the status bar hidden, the hot-seat player switcher (which lives there) is not reachable; show the status bar again to switch.
-- Known limit: "Last moved" is only on the map toolbar, so hiding the map toolbar hides it.
+- **Deviation:** View > Module Tree hides only the module tree; WinForms hides the whole left panel. Charts & Tables (right under Module Tree, and again in View > Show) and the palette have their own toggles under View.
+- The hot-seat player switcher (status bar) and Last moved (map toolbar) are also in the Game menu (Game > Current Player, Game > Last Moved), so they work with every bar hidden.
 - The alert bar still shows a pending notice even when it is switched off in View > Show (as WinForms).
 
 ## Before the stage release
@@ -258,6 +257,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Show Grid | 1 | ✔ | ✔ | ✔ |  |
 | View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
 | View > Module Tree | 6c | ✔ |  |  | checked by default; hides only the module tree (WinForms hides the whole left panel; see the Stage-6c deviations) |
+| View > Charts & Tables | 6c | ✔ |  |  | right under Module Tree; the same switch as View > Show > Charts & Tables (both items always agree) |
 | View > Show (Main Toolbar, Phase Strip, Alert Bar, Status Bar, Map Toolbar, Charts & Tables), Show Everything | 6c | ✔ |  |  | choices remembered app-wide (`ui.json` Hidden; alert bar and outliner through settings); Show Everything also resets splits and dock sizes |
 | View > Diagnostics | 3a | ✔ |  |  | Ctrl/Cmd+D; needs a module; opens the one Diagnostics window (also from the toolbar button and the status-bar link) |
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
@@ -266,8 +266,10 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Ledger | 3a | ✔ |  |  | Ctrl/Cmd+L; needs a rules pack; opens the one Ledger window (owned, not modal, bounds under "doc:ledger"); with counters selected on the active map it is Show in Ledger |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3a | ✔ |  |  | counter menu "Show in Ledger" (after a separator; disabled with "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)." without one) and View > Ledger / Ctrl/Cmd+L with counters selected on the active map: opens the Ledger, moves to the tab that shows them (clearing the filter when it hides them, shared `LedgerJump`), selects their rows and scrolls to the first; status "Shown in the Ledger." / "{n} counters shown in the Ledger." or the reason some have no row (hidden counters never get one) |
 | View > Overview | 3a | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
-| View > Counter palette (GM only) | 1 | ✔ |  |  | shown only when a game is open and game master mode is on (Settings > General, as WinForms); game master mode only since 4b — re-check on macOS and Linux |
+| View > Counter Palette | 6c | ✔ |  |  | always listed (since 6c); greyed out with the tip "Turn on game master mode in Settings > General to place counters" when you are not game master; the palette shows in the left column only with a game in game master mode; shown/hidden remembered app-wide (`ui.json` Hidden "palette") — re-check on macOS and Linux |
 | Game > Players..., Leave Online Game | 5c | ✔ |  |  | the Game menu is visible only while online or starting; Players… is the host's seats dialog (a guest choosing a side gets the side question; a guest holding sides: disabled with the "sides are fixed" tip); Leave Online Game asks, then the host tells its guests / a guest leaves (launcher when it came from one, else the window closes); offline the list is edited in Settings > Game > Players (5b) |
+| Game > Current Player | 6c | ✔ |  |  | the status-bar player switcher's list (one item per player, the one at the screen ticked; choosing one shows the pass-to screen first); hot-seat games only, greyed out otherwise; works with the status bar hidden |
+| Game > Last Moved | 6c | ✔ |  |  | the selected map's Last moved outline (the map toolbar button; the two follow each other); greyed out with no map tab; works with the map toolbar hidden |
 | Game > Send Turn... | 5d | ✔ |  |  | first in the Game menu, which shows with any game (as WinForms); off with the WinForms tooltip online, in a viewer copy and while a turn replays; needs two players; who-are-you when this computer does not know its player, the send dialog, the picker ("Save Turn", default name from `TurnUiModel.DefaultFileName`), then the file is written (an empty turn logs "{name} passed."), the game becomes a turn game (no hot-seat, the player's view, undo stops at the sent turn) and the mailbox send runs with Retry / Close on failure. stage5d-desktop-send-turn.png |
 | Tools > Rules Workbench | 4a | ✔ |  |  | Cmd/Ctrl+Shift+W; one floating window per session (bounds under `bench:workbench`), refused while a received turn replays |
 | Tools > Inventory, Notes | 3a | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
