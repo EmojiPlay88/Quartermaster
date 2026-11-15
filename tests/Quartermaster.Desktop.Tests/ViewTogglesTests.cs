@@ -181,6 +181,14 @@ public sealed class ViewTogglesTests : IDisposable
 
     static IEnumerable<MenuItem> AllItems(ItemsControl c) => c.Items.OfType<MenuItem>().SelectMany(i => new[] { i }.Concat(AllItems(i)));
 
+    [Fact]
+    public void Split_clamp_never_throws_when_rounding_crosses_the_bounds()
+    {
+        Assert.Equal(0.15, MainWindow.SafeClamp(0.5, 0.15, 0.1499999999999999));
+        Assert.Equal(0.3, MainWindow.SafeClamp(0.3, 0.15, 0.7));
+        Assert.Equal(0.7, MainWindow.SafeClamp(0.9, 0.15, 0.7));
+    }
+
     [AvaloniaFact]
     public void Map_toolbar_hides_in_every_tab_including_later_ones()
     {

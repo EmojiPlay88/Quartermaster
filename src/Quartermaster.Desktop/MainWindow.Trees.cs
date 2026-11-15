@@ -93,7 +93,7 @@ public partial class MainWindow
         foreach (var i in new[] { 0, 2, 4 })
             LeftColumnGrid.RowDefinitions[i].PropertyChanged += (_, e) =>
             {
-                if (!_applyingSplit && e.Property == RowDefinition.HeightProperty) RememberRows();
+                if (!_applyingSplit && e.Property == RowDefinition.HeightProperty) Guard(RememberRows);
             };
         ModuleTreeHost.NodeActivated += n => Guard(() => OnTreeNodeActivated(n));
         // WinForms MainForm: activating a table or formula opens the workbench at it.
@@ -166,11 +166,11 @@ public partial class MainWindow
                     break;
                 case (LeftPart.Tree, LeftPart.Palette):   // the tables tree's share is kept
                     var sum = _treeFraction + _paletteFraction;
-                    var tree = Math.Clamp(share * sum, WindowLayoutStore.MinPartFraction, sum - WindowLayoutStore.MinPartFraction);
+                    var tree = SafeClamp(share * sum, WindowLayoutStore.MinPartFraction, sum - WindowLayoutStore.MinPartFraction);
                     (_treeFraction, _paletteFraction) = (tree, sum - tree);
                     break;
                 default:   // palette over tables: the module tree's share is kept
-                    _paletteFraction = Math.Clamp(share * (1 - _treeFraction), WindowLayoutStore.MinPartFraction, WindowLayoutStore.MaxSplitSum - _treeFraction);
+                    _paletteFraction = SafeClamp(share * (1 - _treeFraction), WindowLayoutStore.MinPartFraction, WindowLayoutStore.MaxSplitSum - _treeFraction);
                     break;
             }
         }
@@ -179,7 +179,11 @@ public partial class MainWindow
 
     /// <summary>The tree's fraction of the column for a share of the two trees; the palette's fraction stays as it is.</summary>
     double TreeForShare(double share) =>
-        Math.Clamp(share * (1 - _paletteFraction), WindowLayoutStore.MinPartFraction, WindowLayoutStore.MaxSplitSum - _paletteFraction);
+        SafeClamp(share * (1 - _paletteFraction), WindowLayoutStore.MinPartFraction, WindowLayoutStore.MaxSplitSum - _paletteFraction);
+
+    /// <summary><see cref="Math.Clamp(double, double, double)"/> that never throws: when rounding leaves <paramref name="hi"/> a hair below
+    /// <paramref name="lo"/> (the fractions at their extremes), the result is <paramref name="lo"/>.</summary>
+    internal static double SafeClamp(double v, double lo, double hi) => hi < lo ? lo : Math.Clamp(v, lo, hi);
 
     /// <summary>Sets and remembers the module tree's share of the two trees (what dragging the splitter does with the palette hidden).</summary>
     internal void SetLeftSplit(double fraction)
