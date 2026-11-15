@@ -52,12 +52,17 @@ public partial class MainWindow
 
     bool IsOnline => _host != null || _guest != null;
 
-    /// <summary>Game menu (shown while a game is open or online): Send Turn…; while online also Players… and Leave Online Game.</summary>
+    /// <summary>Game menu (shown while a game is open or online): Send Turn…, Current Player (hot-seat), Last Moved; while online also
+    /// Players… and Leave Online Game.</summary>
     MenuItem BuildGameMenu()
     {
         var game = _gameMenu = Top("&Game");
         game.IsVisible = false;
         _sendTurn = Item(game, "Send &Turn…", () => RunAsync(SendTurnAsync));
+        // Reachable with every bar hidden: the status bar's player switcher and the map toolbar's Last moved (port stage 6c).
+        game.Items.Add(new Separator());
+        game.Items.Add(_gameCurrentPlayer);
+        game.Items.Add(BuildLastMovedItem());
         _gameOnlineSep = new Separator { IsVisible = false };
         game.Items.Add(_gameOnlineSep);
         _gamePlayers = Item(game, "&Players…", () => RunAsync(ShowPlayersDialogAsync));

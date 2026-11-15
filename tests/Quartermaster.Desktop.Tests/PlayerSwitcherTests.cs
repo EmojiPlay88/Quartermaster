@@ -3,6 +3,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Formulas;
+using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.TestFixtures;
 
@@ -121,6 +122,39 @@ public sealed class PlayerSwitcherTests : IDisposable
         HotSeatGames.Pump();
         Assert.Equal("Player: Annie", w.PlayerButtonText);
         Assert.Equal("Annie (Red)", (string)w.PlayerMenuItems()[0].Header!);
+    }
+
+    [AvaloniaFact]
+    public void Game_menu_current_player_switches_with_the_status_bar_hidden()
+    {
+        var solo = _games.Game(players: false);
+        Assert.False(solo.CurrentPlayerItem.IsEnabled);   // not a hot-seat game
+        Assert.Equal(MainWindow.CurrentPlayerNeedsHotSeat, ToolTip.GetTip(solo.CurrentPlayerItem));
+
+        var w = _games.Game();
+        w.ClickMenu("Stat&us Bar");
+        w.ClickMenu("Main &Toolbar");
+        HotSeatGames.Pump();
+        Assert.False(w.StatusBarHost.IsVisible);
+        var item = w.FindMenuItem("&Current Player")!;
+        Assert.Same(w.CurrentPlayerItem, item);
+        Assert.Equal("&Game", MenuText.ToWinForms((string)((MenuItem)item.Parent!).Header!));
+        Assert.True(item.IsEnabled);
+        var players = item.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(new[] { "Anna (Red)", "Ben (Blue)" }, players.Select(i => (string)i.Header!));
+        Assert.Equal(new[] { true, false }, players.Select(i => i.IsChecked));
+
+        Click(players[1]);   // Ben: the handover screen first, as from the status bar
+        Assert.True(w.HandoverShowing);
+        Assert.Equal("Pass to Ben (Blue)", w.Handover!.Message);
+        HotSeatGames.Continue(w);
+        Assert.Equal(PlayersOf(w).Ben.Id, w.HotSeat!.Current?.Id);
+        Assert.Equal(new[] { false, true }, w.CurrentPlayerItem.Items.OfType<MenuItem>().Select(i => i.IsChecked));
+
+        // Back to solo: off again.
+        w.Session!.Game!.Execute(new SetPlayers(Array.Empty<PlayerDef>()));
+        HotSeatGames.Pump();
+        Assert.False(w.CurrentPlayerItem.IsEnabled);
     }
 
     static (PlayerDef Anna, PlayerDef Ben) PlayersOf(MainWindow _) => (HotSeatGames.Anna, HotSeatGames.Ben);

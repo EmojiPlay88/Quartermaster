@@ -174,12 +174,32 @@ public sealed class ViewTogglesTests : IDisposable
         Assert.Equal(new[] { "&Show", "Show &Everything" }, view.SkipWhile(l => l != "&Show").Take(2));
         Assert.Equal(ShowLabels, Item(w, "&Show").Items.OfType<MenuItem>().Select(i => MenuText.ToWinForms((string)i.Header!)));
         Assert.All(ShowLabels, l => Assert.True(Item(w, l).IsChecked));
-        // No duplicates: each part has exactly one item.
-        foreach (var label in All.Select(r => r.Label))
+        // No duplicates: each part has exactly one item, but Charts & Tables, which is also next to Module Tree.
+        foreach (var label in All.Select(r => r.Label).Where(l => l != "&Charts && Tables"))
             Assert.Single(AllItems(w.MainMenu), i => MenuText.ToWinForms((string)i.Header!) == label);
+        Assert.Equal(2, AllItems(w.MainMenu).Count(i => MenuText.ToWinForms((string)i.Header!) == "&Charts && Tables"));
     }
 
-    static IEnumerable<MenuItem> AllItems(ItemsControl c) => c.Items.OfType<MenuItem>().SelectMany(i => new[] { i }.Concat(AllItems(i)));
+    [AvaloniaFact]
+    public void Charts_and_tables_sits_next_to_module_tree_with_one_state()
+    {
+        var w = Game();
+        var view = w.MenuLabels()["&View"];
+        Assert.Equal(new[] { "Module &Tree", "&Charts && Tables" }, view.Take(2));
+        var items = AllItems(w.MainMenu).Where(i => MenuText.ToWinForms((string)i.Header!) == "&Charts && Tables").ToList();
+        var top = items.Single(i => i.Parent == Item(w, "&View"));
+        var inShow = items.Single(i => i.Parent == Item(w, "&Show"));
+        top.IsChecked = false;   // as a click on View > Charts & Tables
+        Pump(); w.UpdateLayout();
+        Assert.False(w.TablesTreeHost.IsVisible);
+        Assert.False(inShow.IsChecked);
+        Assert.Contains("tablesTree", new WindowLayoutStore(LayoutRoot).LoadHiddenParts());
+        inShow.IsChecked = true;   // and back from View > Show
+        Pump(); w.UpdateLayout();
+        Assert.True(w.TablesTreeHost.IsVisible);
+        Assert.True(top.IsChecked);
+        Assert.DoesNotContain("tablesTree", new WindowLayoutStore(LayoutRoot).LoadHiddenParts());
+    }
 
     [Fact]
     public void Split_clamp_never_throws_when_rounding_crosses_the_bounds()
@@ -188,6 +208,35 @@ public sealed class ViewTogglesTests : IDisposable
         Assert.Equal(0.3, MainWindow.SafeClamp(0.3, 0.15, 0.7));
         Assert.Equal(0.7, MainWindow.SafeClamp(0.9, 0.15, 0.7));
     }
+
+    [AvaloniaFact]
+    public void Game_menu_last_moved_works_with_the_map_toolbar_hidden()
+    {
+        var w = Game();
+        Click(w, "&Map Toolbar");
+        Click(w, "Main &Toolbar");
+        Click(w, "Stat&us Bar");
+        var item = Item(w, "Last &Moved");
+        Assert.Equal("&Game", MenuText.ToWinForms((string)((MenuItem)item.Parent!).Header!));
+        Assert.True(item.IsEnabled);
+        Assert.False(item.IsChecked);
+        var v = w.MapTabs.ActiveView!;
+        Click(w, "Last &Moved");
+        Assert.True(v.HighlightLastMoved);
+        Assert.True(item.IsChecked);
+        Assert.True(w.MapTabs.ToolbarOf(v)!.LastMovedButton.IsChecked);   // the toolbar button follows
+        // The toolbar button switches it off: the menu item follows.
+        w.MapTabs.ToolbarOf(v)!.LastMovedButton.IsChecked = false;
+        Assert.False(v.HighlightLastMoved);
+        Assert.False(item.IsChecked);
+        // No map tab: nothing to outline.
+        w.MapTabs.CloseAll();
+        Pump();
+        Assert.False(item.IsEnabled);
+        Assert.False(item.IsChecked);
+    }
+
+    static IEnumerable<MenuItem> AllItems(ItemsControl c) => c.Items.OfType<MenuItem>().SelectMany(i => new[] { i }.Concat(AllItems(i)));
 
     [AvaloniaFact]
     public void Map_toolbar_hides_in_every_tab_including_later_ones()

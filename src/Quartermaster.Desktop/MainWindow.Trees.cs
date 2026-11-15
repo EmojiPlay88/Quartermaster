@@ -14,6 +14,7 @@ public partial class MainWindow
 {
     WindowLayoutStore _layout = null!;
     MenuItem _viewTree = null!;
+    MenuItem _viewTables = null!;   // View > Charts & Tables, next to Module Tree (the View > Show item is its twin)
     MenuItem _viewPalette = null!;
     double _treeFraction = WindowLayoutStore.DefaultTreeFraction, _paletteFraction = WindowLayoutStore.DefaultPaletteFraction;   // of the column height, palette showing
     const string PaletteNeedsGameMaster = "Turn on game master mode in Settings > General to place counters";
@@ -86,6 +87,7 @@ public partial class MainWindow
     {
         // View > Module Tree and View > Counter Palette are the "moduleTree" and "palette" parts (MainWindow.ViewParts); the tables tree's is in View > Show.
         _viewTree = PartItem("moduleTree", "Module &Tree", SetRows);
+        _viewTables = PartItem("tablesTree", "&Charts && Tables", SetRows);
         _viewPalette = PartItem("palette", "Counter &Palette", UpdatePaletteUi);
         _viewPalette.IsEnabled = false;
         (_treeFraction, _paletteFraction) = _layout.LoadLeftSplits();

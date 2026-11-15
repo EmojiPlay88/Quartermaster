@@ -34,6 +34,8 @@ public partial class MainWindow
     };
     readonly TextBlock _sbPlayerText = new() { Text = "Player:", VerticalAlignment = VerticalAlignment.Center };
     readonly MenuFlyout _playerMenu = new();
+    // Game > Current Player: the same players as the switcher, so switching works with the status bar hidden (port stage 6c).
+    readonly MenuItem _gameCurrentPlayer = new() { Header = MenuText.FromWinForms("&Current Player"), IsEnabled = false, Items = { NoPlayersItem() } };
 
     /// <summary>The hot-seat controller of the open module (null without one).</summary>
     public HotSeat? HotSeat => _hotSeat;
@@ -61,6 +63,7 @@ public partial class MainWindow
         _playerMenu.Opening += (_, _) => Guard(FillPlayerMenu);
         _playerMenu.Items.Add(NoPlayersItem());   // as WinForms: the menu is never empty before its first open
         _sbPlayer.Flyout = _playerMenu;
+        _gameCurrentPlayer.SubmenuOpened += (_, e) => { if (e.Source == _gameCurrentPlayer) Guard(FillCurrentPlayerMenu); };
         SbPlayerBox.Child = _sbPlayer;
     }
 
@@ -328,6 +331,10 @@ public partial class MainWindow
         var active = _hotSeat?.Active == true;
         _sbPlayer.IsVisible = active;
         SbPlayerBox.IsVisible = active;
+        _gameCurrentPlayer.IsEnabled = active;
+        ToolTip.SetTip(_gameCurrentPlayer, active ? null : CurrentPlayerNeedsHotSeat);
+        ToolTip.SetShowOnDisabled(_gameCurrentPlayer, true);
+        FillCurrentPlayerMenu();
         if (!active) return;
         _sbPlayerText.Text = HandoverText.StatusText(_hotSeat!.Current);
     }
@@ -361,6 +368,19 @@ public partial class MainWindow
     {
         _playerMenu.Items.Clear();
         foreach (var mi in BuildPlayerMenu()) _playerMenu.Items.Add(mi);
+    }
+
+    /// <summary>Game > Current Player's tooltip while it is off.</summary>
+    internal const string CurrentPlayerNeedsHotSeat = "Only in a hot-seat game: two or more players taking turns on this computer";
+
+    /// <summary>Game > Current Player (tests).</summary>
+    internal MenuItem CurrentPlayerItem => _gameCurrentPlayer;
+
+    /// <summary>Game > Current Player lists the players as the status-bar switcher does (one item per player, the one at the screen checked).</summary>
+    void FillCurrentPlayerMenu()
+    {
+        _gameCurrentPlayer.Items.Clear();
+        foreach (var mi in BuildPlayerMenu()) _gameCurrentPlayer.Items.Add(mi);
     }
 
     /// <summary>A deliberate swap: the handover screen comes first, for the chosen player too (spec 4).</summary>

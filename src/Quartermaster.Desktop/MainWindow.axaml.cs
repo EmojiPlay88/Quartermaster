@@ -405,6 +405,7 @@ public partial class MainWindow : Window
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _showGrid.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) Maps.ShowGrid = _showGrid.IsChecked; };
         view.Items.Add(_viewTree);
+        view.Items.Add(_viewTables);
         Item(view, "&Diagnostics", ShowDiagnostics, "view.diagnostics");
         view.Items.Add(_showGrid);
         // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.

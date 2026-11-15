@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 
@@ -6,8 +7,8 @@ namespace Quartermaster.Desktop;
 
 /// <summary>
 /// Every part of the screen can be shown or hidden (port stage 6c, the user's "as customizable as possible"). One check item per part:
-/// View > Module Tree / Log / Phase panel / Outliner / Counter Palette where they always were, the bars and the tables tree in View > Show,
-/// and View > Show Everything to reset (every part shown, splits and dock sizes back to the defaults). Remembered app-wide: the hidden part
+/// View > Module Tree / Log / Phase panel / Outliner / Counter Palette where they always were, View > Charts & Tables next to Module Tree,
+/// the bars (and Charts & Tables again, the same state) in View > Show, and View > Show Everything to reset (every part shown, splits and dock sizes back to the defaults). Remembered app-wide: the hidden part
 /// ids in ui.json (<see cref="WindowLayoutStore.LoadHiddenParts"/>), except the alert bar and the outliner, whose switches were already in
 /// the settings (AlertBarVisible, OutlinerVisible; shared with WinForms and the Settings window). The replay bar and the online banner stay
 /// automatic. Hidden parts take no space; keyboard shortcuts and menu commands work whatever is hidden.
@@ -21,6 +22,11 @@ public partial class MainWindow
     HashSet<string> _hidden = null!;
     MenuItem? _showAlertBar;
     readonly List<MenuItem> _partItems = new();   // the ui.json-backed check items, re-synced by Show Everything
+    readonly Dictionary<string, List<MenuItem>> _partTwins = new();   // a part with two items (Charts & Tables): both show one state
+    bool _syncingTwins;
+    MenuItem _gameLastMoved = null!;
+    MapView? _lastMovedView;
+    bool _syncingLastMoved;
 
     /// <summary>Loads the hidden set (before the panels and menus that read it are made).</summary>
     void InitViewParts()
@@ -48,14 +54,58 @@ public partial class MainWindow
     MenuItem PartItem(string id, string label, Action apply)
     {
         var mi = new MenuItem { Header = MenuText.FromWinForms(label), ToggleType = MenuItemToggleType.CheckBox, IsChecked = PartShown(id) };
+        if (!_partTwins.TryGetValue(id, out var twins)) _partTwins[id] = twins = new();
+        twins.Add(mi);
         mi.PropertyChanged += (_, e) =>
         {
-            if (e.Property != MenuItem.IsCheckedProperty) return;
+            if (e.Property != MenuItem.IsCheckedProperty || _syncingTwins) return;
             SetPartHidden(id, !mi.IsChecked);
+            _syncingTwins = true;
+            try { foreach (var t in twins) t.IsChecked = mi.IsChecked; }
+            finally { _syncingTwins = false; }
             Guard(apply);
         };
         _partItems.Add(mi);
         return mi;
+    }
+
+    /// <summary>Game > Last Moved: the selected map's last-moved outline (the map toolbar's Last moved), so it works with the toolbar hidden.
+    /// Checked while the selected map outlines; off without a map tab.</summary>
+    MenuItem BuildLastMovedItem()
+    {
+        _gameLastMoved = new MenuItem { Header = MenuText.FromWinForms("Last &Moved"), ToggleType = MenuItemToggleType.CheckBox };
+        ToolTip.SetTip(_gameLastMoved, MapToolbar.LastMovedTip);
+        _gameLastMoved.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != MenuItem.IsCheckedProperty || _syncingLastMoved) return;
+            if (Maps.ActiveView is { } v) Guard(() => v.HighlightLastMoved = _gameLastMoved.IsChecked);
+            SyncLastMovedItem();
+        };
+        Maps.ActiveViewChanged += FollowActiveViewLastMoved;
+        SyncLastMovedItem();
+        return _gameLastMoved;
+    }
+
+    /// <summary>Game > Last Moved follows the selected tab's view (the toolbar button or another tab can change it).</summary>
+    void FollowActiveViewLastMoved()
+    {
+        if (_lastMovedView != null) _lastMovedView.HighlightLastMovedChanged -= OnLastMovedChanged;
+        _lastMovedView = Maps.ActiveView;
+        if (_lastMovedView != null) _lastMovedView.HighlightLastMovedChanged += OnLastMovedChanged;
+        SyncLastMovedItem();
+    }
+
+    void OnLastMovedChanged(bool _) => SyncLastMovedItem();
+
+    void SyncLastMovedItem()
+    {
+        _syncingLastMoved = true;
+        try
+        {
+            _gameLastMoved.IsEnabled = Maps.ActiveView != null;
+            _gameLastMoved.IsChecked = Maps.ActiveView?.HighlightLastMoved == true;
+        }
+        finally { _syncingLastMoved = false; }
     }
 
     /// <summary>View > Show (the bars and the tables tree) and View > Show Everything.</summary>
@@ -75,7 +125,7 @@ public partial class MainWindow
         show.Items.Add(_showAlertBar);
         show.Items.Add(PartItem("statusBar", "Stat&us Bar", ApplyBars));
         show.Items.Add(PartItem("mapToolbar", "&Map Toolbar", ApplyBars));
-        show.Items.Add(PartItem("tablesTree", "&Charts && Tables", SetRows));
+        show.Items.Add(PartItem("tablesTree", "&Charts && Tables", SetRows));   // also View > Charts & Tables, one state
         view.Items.Add(show);
         var all = new MenuItem { Header = MenuText.FromWinForms("Show &Everything") };
         all.Click += (_, _) => Guard(ShowEverything);

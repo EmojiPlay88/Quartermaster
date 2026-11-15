@@ -438,7 +438,7 @@ public sealed class MainWindowTurnsSendTests : IAsyncLifetime
         w.Session.LoadSetup(f.Setup, Difficulty.FullyAuto, new[] { Alice, Bob });
         Pump();
         Assert.True(menu.IsVisible);
-        Assert.Equal(new[] { "Send &Turn…", "&Players…", "&Leave Online Game" }, w.MenuLabels()["&Game"]);
+        Assert.Equal(new[] { "Send &Turn…", "&Current Player", "Last &Moved", "&Players…", "&Leave Online Game" }, w.MenuLabels()["&Game"]);
         Assert.False(w.FindMenuItem("&Players…")!.IsVisible);
         Assert.False(w.FindMenuItem("&Leave Online Game")!.IsVisible);
         Assert.True(item.IsEnabled);

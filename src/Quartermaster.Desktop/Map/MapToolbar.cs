@@ -53,7 +53,8 @@ public sealed class MapToolbar : Border
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0 };
         foreach (var c in new Control[] { _los, _last, _hide, _centre, _zoom, _save }) bar.Children.Add(c);
         _view.LosChanged += Sync;
-        _view.HideCountersChanged += SyncHide;
+        _view.HideCountersChanged += SyncFlag;
+        _view.HighlightLastMovedChanged += SyncFlag;
         Child = bar;
         Padding = new Thickness(0, 1);
         BorderThickness = new Thickness(0, 0, 0, 1);
@@ -71,7 +72,7 @@ public sealed class MapToolbar : Border
     internal Button SaveButton => _save;
     internal IReadOnlyList<MenuItem> ZoomItems => _zoomItems;
 
-    void SyncHide(bool _) => Sync();
+    void SyncFlag(bool _) => Sync();
 
     void Sync()
     {
