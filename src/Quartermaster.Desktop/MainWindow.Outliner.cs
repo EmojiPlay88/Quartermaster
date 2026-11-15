@@ -19,7 +19,8 @@ public partial class MainWindow
     PanelFloat _outlinerFloat = null!;
     OutlinerPanel? _outlinerPanel;
     bool _outlinerFloated;       // the outliner window was shown for this module: its DPI is the current one
-    double _outlinerWidth = 440; // WinForms default of the docked outliner
+    const double DefaultOutlinerWidth = 440;
+    double _outlinerWidth = DefaultOutlinerWidth; // WinForms default of the docked outliner
 
     ColumnDefinition OutlinerCol => Body.ColumnDefinitions[Grid.GetColumn(OutlinerHost)];
     ColumnDefinition OutlinerSplitCol => Body.ColumnDefinitions[Grid.GetColumn(OutlinerSplitter)];
@@ -76,8 +77,7 @@ public partial class MainWindow
 
     void OpenOutlinerMap(MapDef map)
     {
-        var view = Maps.Views.FirstOrDefault(v => v.Map.Id == map.Id);
-        if (view != null) Maps.Activate(view);
+        Maps.Open(map.Id);
     }
 
     /// <summary>Docks the panel back (the game is closing), remembers where its window was per module and lets the panel go.</summary>

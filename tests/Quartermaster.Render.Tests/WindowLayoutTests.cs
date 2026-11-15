@@ -99,6 +99,83 @@ public class WindowLayoutStoreTests : IDisposable
     }
 
     [Fact]
+    public void Open_maps_round_trip_next_to_the_windows()
+    {
+        var s = new WindowLayoutStore(_root);
+        Assert.Null(s.LoadOpenMaps("abc"));   // never saved
+        Assert.Null(s.LoadSelectedMap("abc"));
+        var log = new SavedWindow(true, new Rectangle(10, 20, 300, 400), false);
+        s.SaveModule("abc", new Dictionary<string, SavedWindow> { ["log"] = log });
+        s.SaveOpenMaps("abc", new[] { "Main Map", "Chart A" }, "Chart A");
+        var back = new WindowLayoutStore(_root);
+        Assert.Equal(new[] { "Main Map", "Chart A" }, back.LoadOpenMaps("abc"));
+        Assert.Equal("Chart A", back.LoadSelectedMap("abc"));
+        Assert.Equal(log, back.LoadModule("abc")["log"]);   // the windows stay
+        // Saving the windows keeps the open maps; an empty list is remembered as empty (not "never saved").
+        s.SaveModule("abc", new Dictionary<string, SavedWindow> { ["outliner"] = log });
+        Assert.Equal(new[] { "Main Map", "Chart A" }, back.LoadOpenMaps("abc"));
+        s.SaveOpenMaps("abc", Array.Empty<string>());
+        Assert.Empty(back.LoadOpenMaps("abc")!);
+        Assert.Null(back.LoadSelectedMap("abc"));
+        Assert.Equal(log, back.LoadModule("abc")["outliner"]);
+    }
+
+    [Fact]
+    public void Old_module_file_without_open_maps_still_loads()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "layout"));
+        File.WriteAllText(Path.Combine(_root, "layout", "old.json"),
+            """{ "Windows": { "log": { "X": 1, "Y": 2, "W": 30, "H": 40, "Floating": true, "Maximized": false, "Dpi": 96 } } }""");
+        var s = new WindowLayoutStore(_root);
+        Assert.Null(s.LoadOpenMaps("old"));
+        Assert.Equal(new SavedWindow(true, new Rectangle(1, 2, 30, 40), false, 96), s.LoadModule("old")["log"]);
+        // A file with the new field reads in the old shape too (WinForms reads the same file through LoadModule).
+        s.SaveOpenMaps("old", new[] { "Main Map" });
+        Assert.Equal(new SavedWindow(true, new Rectangle(1, 2, 30, 40), false, 96), s.LoadModule("old")["log"]);
+        File.WriteAllText(Path.Combine(_root, "layout", "bad.json"), """{ "Windows": {}, "OpenMaps": 5 }""");
+        Assert.Null(s.LoadOpenMaps("bad"));
+    }
+
+    [Fact]
+    public void Hidden_parts_round_trip_and_keep_the_splits()
+    {
+        var s = new WindowLayoutStore(_root);
+        Assert.Empty(s.LoadHiddenParts());   // never saved: everything shows
+        s.SaveLeftSplit(0.5);
+        s.SaveLeftSplits(0.3, 0.4);
+        s.SaveHiddenParts(new[] { "toolbar", "log", "toolbar" });
+        var back = new WindowLayoutStore(_root);
+        Assert.Equal(new[] { "log", "toolbar" }, back.LoadHiddenParts().Order());
+        Assert.Equal(0.5, back.LoadLeftSplit(), 3);   // WinForms' field stays
+        Assert.Equal((0.3, 0.4), back.LoadLeftSplits());
+        s.SaveLeftSplit(0.6);   // and writing it (WinForms) keeps the set
+        Assert.Equal(new[] { "log", "toolbar" }, back.LoadHiddenParts().Order());
+        s.SaveHiddenParts(Array.Empty<string>());
+        Assert.Empty(back.LoadHiddenParts());
+    }
+
+    [Fact]
+    public void Old_ui_json_without_hidden_parts_still_loads()
+    {
+        Directory.CreateDirectory(_root);
+        var ui = Path.Combine(_root, "ui.json");
+        File.WriteAllText(ui, """{ "LeftSplit": 0.5 }""");
+        var s = new WindowLayoutStore(_root);
+        Assert.Empty(s.LoadHiddenParts());
+        // Task 4's switched-off palette becomes the "palette" part; saving the set leaves one source of truth.
+        File.WriteAllText(ui, """{ "LeftSplit": 0.5, "PaletteShown": false }""");
+        Assert.Equal(new[] { "palette" }, s.LoadHiddenParts());
+        s.SaveHiddenParts(new[] { "toolbar" });
+        Assert.Equal(new[] { "toolbar" }, s.LoadHiddenParts());
+        Assert.DoesNotContain("PaletteShown", File.ReadAllText(ui));
+        Assert.Equal(0.5, s.LoadLeftSplit(), 3);
+        File.WriteAllText(ui, """{ "Hidden": 5 }""");
+        Assert.Empty(s.LoadHiddenParts());
+        File.WriteAllText(ui, """{ "Hidden": ["log", null, ""] }""");
+        Assert.Equal(new[] { "log" }, s.LoadHiddenParts());
+    }
+
+    [Fact]
     public void RoundTrip_Main()
     {
         var s = new WindowLayoutStore(_root);

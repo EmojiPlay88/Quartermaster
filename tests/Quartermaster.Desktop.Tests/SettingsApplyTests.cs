@@ -194,10 +194,17 @@ public sealed class SettingsApplyTests : IDisposable
 
     // ---------- maps ----------
 
+    /// <summary>Only the main map opens with a module: opens the others too.</summary>
+    static void OpenEveryMap(MainWindow w)
+    {
+        foreach (var m in w.Session!.Model.Maps) w.MapTabs.Open(m.Id);
+    }
+
     [AvaloniaFact]
     public void Apply_reaches_every_open_map_view()
     {
         var w = Game();
+        OpenEveryMap(w);
         Assert.Equal(2, w.MapTabs.Views.Count);
         Save(w, s => s with
         {
@@ -219,6 +226,7 @@ public sealed class SettingsApplyTests : IDisposable
         // Views opened later (another module) take the settings too.
         Assert.True(w.OpenModule(TwoMaps()));
         w.StartSetup(null);
+        OpenEveryMap(w);
         Pump();
         Assert.Equal(2, w.MapTabs.Views.Count);
         Assert.All(w.MapTabs.Views, Check);

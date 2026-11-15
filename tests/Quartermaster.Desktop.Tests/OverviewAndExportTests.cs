@@ -106,6 +106,9 @@ public sealed class OverviewAndExportTests : IDisposable
         var w = NewWindow();
         Assert.True(w.OpenModule(fx.Build()));
         w.StartSetup(null);
+        Assert.Single(w.MapTabs.Views);   // only the main map opens with the module
+        w.MapTabs.Open("Second Map");
+        w.MapTabs.Activate(w.MapTabs.Views[0]);
         Assert.True(WaitFor(() => w.MapTabs.WhenTiled().IsCompleted));
         Assert.Equal(2, w.MapTabs.Views.Count);
         w.ClickMenu("&Overview");

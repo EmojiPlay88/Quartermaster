@@ -58,8 +58,11 @@ public partial class MainWindow
 
     /// <summary>Shown whenever a game is open (Settings permitting), also without a rules pack: the banner then says it is free play.
     /// A notice (a waiting turn) shows even when the alert bar is switched off in Settings.</summary>
-    void UpdateAlertBarVisible() =>
+    void UpdateAlertBarVisible()
+    {
+        if (_showAlertBar is { } item && item.IsChecked != SettingsStore.Current.AlertBarVisible) item.IsChecked = SettingsStore.Current.AlertBarVisible;   // View > Show > Alert Bar is the same switch
         AlertBarHost.IsVisible = _session?.Game != null && _phases != null && (SettingsStore.Current.AlertBarVisible || AlertBarHost.NoticeText != null);
+    }
 
     void RecomputeAlerts()
     {

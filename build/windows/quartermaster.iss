@@ -1,9 +1,13 @@
 ; Inno Setup 6 script for the per-user Quartermaster installer (unsigned; Windows SmartScreen may warn).
 ; Built by build/windows/make-windows-packages.ps1, which passes /DAppVersion=, /DSourceDir= and /DOutputDir=.
-; The install folder (%LOCALAPPDATA%\Programs\Quartermaster) is NOT the data folder (%LOCALAPPDATA%\Quartermaster):
-; uninstalling never touches user data. The folder page is disabled (uninstall removes {app} recursively) and
-; PrepareToInstall refuses unsafe /DIR= values (drive or share root, the data folder or anything inside it in long or
-; 8.3 spelling, a foreign non-empty folder), also in silent mode. After a successful upgrade, files the old install
+; The install folder (%LOCALAPPDATA%\Programs\Quartermaster by default) is NOT the data folder (%LOCALAPPDATA%\Quartermaster):
+; uninstalling never touches user data. The folder page shows on a first install only (DisableDirPage=auto: an upgrade
+; stays in the folder of the previous install, so no old copy is left behind without an uninstaller; /DIR= still
+; overrides it). Uninstall removes {app} recursively, so FolderProblem refuses unsafe folders (drive or share root, the
+; data folder or anything inside it in long or 8.3 spelling, Program Files, a foreign non-empty folder): NextButtonClick
+; on the folder page shows the reason and PrepareToInstall refuses the same folders for a silent /DIR= (exit code 7;
+; Inno reports that failure with a message box that /SUPPRESSMSGBOXES suppresses). DirExistsWarning=no: FolderProblem
+; already refuses non-empty foreign folders, so Inno's own "folder exists, install anyway?" question would only come first. After a successful upgrade, files the old install
 ; listed in quartermaster-files.txt that the new list lacks are deleted (CurStepChanged, ssPostInstall).
 #ifndef AppVersion
   #error AppVersion not defined (pass /DAppVersion=x.y.z)
@@ -23,7 +27,9 @@ AppPublisher=Quartermaster contributors
 PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\Quartermaster
 DefaultGroupName=Quartermaster
-DisableDirPage=yes
+DisableDirPage=auto
+DirExistsWarning=no
+UsePreviousAppDir=yes
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\Quartermaster.exe
 OutputDir={#OutputDir}
@@ -254,24 +260,64 @@ begin
     RemoveStaleFiles;
 end;
 
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+// True when D is under any Program Files folder.
+function UnderProgramFiles(const D: String): Boolean;
+begin
+  Result := IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf}'))) or
+            IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf32}'))) or
+            IsSameOrUnder(D, TrimSlashes(ExpandConstant('{commonpf64}')));
+end;
+
+// Empty when the folder is fine for a per-user install, else the message for the user.
+function FolderProblem(const Dir0: String): String;
 var
   Dir, DataDir, DirShort, DataShort: String;
 begin
   Result := '';
-  Dir := TrimSlashes(ExpandFileName(WizardDirValue));
+  Dir := TrimSlashes(ExpandFileName(Dir0));
   DataDir := TrimSlashes(ExpandConstant('{localappdata}\Quartermaster'));
   if IsRootFolder(Dir) then
   begin
-    Result := 'The install folder cannot be a drive or network share root (' + Dir + '). Choose another folder.';
+    Result := 'Choose a folder, not a whole drive.';
     Exit;
   end;
-  { Short names are only worked out for folders that are not a root (a UNC root would touch the network). }
+  // Short names are only worked out for folders that are not a root (a UNC root would touch the network).
   DirShort := ShortForm(Dir);
   DataShort := ShortForm(DataDir);
   if IsSameOrUnder(Dir, DataDir) or IsSameOrUnder(DirShort, DataDir) or
      IsSameOrUnder(Dir, DataShort) or IsSameOrUnder(DirShort, DataShort) then
-    Result := 'The install folder cannot be the Quartermaster data folder or a folder inside it (' + DataDir + '). Choose another folder.'
+    Result := 'This is Quartermaster''s data folder (your games and settings). Choose another folder.'
+  else if UnderProgramFiles(Dir) or UnderProgramFiles(DirShort) then
+    Result := 'Quartermaster installs just for you. Folders such as Program Files need administrator rights and are not supported.'
   else if DirExists(Dir) and DirHasEntries(Dir) and (not FileExists(AddBackslash(Dir) + 'Quartermaster.exe')) then
-    Result := 'The folder ' + Dir + ' is not empty and is not a Quartermaster install. Uninstalling removes the whole install folder, so choose an empty folder.';
+    Result := 'This folder already has other files in it. Choose an empty folder or a new one.';
+end;
+
+procedure InitializeWizard;
+begin
+  WizardForm.SelectDirBrowseLabel.Caption := WizardForm.SelectDirBrowseLabel.Caption + #13#10 +
+    'Quartermaster installs just for you. Folders such as Program Files need administrator rights and are not supported.';
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Problem: String;
+begin
+  Result := True;
+  if CurPageID = wpSelectDir then
+  begin
+    // A silent install skips this page but may still call here: never show a box, PrepareToInstall refuses instead.
+    if WizardSilent then Exit;
+    Problem := FolderProblem(WizardDirValue);
+    if Problem <> '' then
+    begin
+      MsgBox(Problem, mbError, MB_OK);
+      Result := False;
+    end;
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := FolderProblem(WizardDirValue);
 end;

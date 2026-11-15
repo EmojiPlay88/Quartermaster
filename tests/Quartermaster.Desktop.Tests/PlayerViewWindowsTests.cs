@@ -191,13 +191,17 @@ public sealed class PlayerViewWindowsTests : IDisposable
     public void Map_tabs_and_module_tree_follow_current_player()
     {
         var w = _games.Game();
+        // Only the main map opens with the module; the side maps open from the tree (a hidden one does not).
+        w.MapTabs.Open("Red Map");
+        w.MapTabs.Open("Blue Map");   // Ben's: refused
         Assert.Contains("Red Map", MapNames(w));
         Assert.DoesNotContain("Blue Map", MapNames(w));
         Assert.Contains("Red Map", TreeMapNames(w));
         Assert.DoesNotContain("Blue Map", TreeMapNames(w));
         HotSeatGames.SwitchTo(w, HotSeatGames.Ben);
-        Assert.Contains("Blue Map", MapNames(w));
         Assert.DoesNotContain("Red Map", MapNames(w));
+        w.MapTabs.Open("Blue Map");
+        Assert.Contains("Blue Map", MapNames(w));
         Assert.Contains("Blue Map", TreeMapNames(w));
         Assert.DoesNotContain("Red Map", TreeMapNames(w));
         Assert.Contains("Main Map", MapNames(w));

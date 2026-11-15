@@ -40,7 +40,8 @@ public partial class MainWindow : Window
     readonly MenuItem _showGrid;
     readonly MenuItem _viewLog;
     LogPanel? _log;
-    double _logHeight = 170;   // WinForms default; follows the splitter
+    const double DefaultLogHeight = 170;
+    double _logHeight = DefaultLogHeight;   // WinForms default; follows the splitter
     MenuItem? _editUndo, _editRedo, _editStepBack, _editStepBackTo;
     Button? _tbUndo, _tbRedo, _tbStepBack;
     readonly DiceTools _dice;
@@ -74,6 +75,7 @@ public partial class MainWindow : Window
         SettingsStore = new SettingsStore(_layoutRoot);
         LoadSettings();
         InitializeComponent();
+        InitViewParts();
         InitPhaseUi(layoutRoot);
         InitAlertUi();
         InitTools();
@@ -106,7 +108,12 @@ public partial class MainWindow : Window
             ShowInLedger = ShowInLedger,
         };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };
-        Maps.ActiveViewChanged += () => SetTilingProgress(Maps.ActiveView?.Preparing);
+        Maps.ActiveViewChanged += () =>
+        {
+            SetTilingProgress(Maps.ActiveView?.Preparing);
+            if (Maps.ActiveView == null) SbLocation.Text = SbZoom.Text = "-";   // no tab open
+        };
+        Maps.OpenMapsChanged += SaveOpenMaps;
         StartSettings();
         UpdateUi();
         UpdateTitle();
@@ -181,7 +188,7 @@ public partial class MainWindow : Window
         next.ViewChanged += OnViewChangedAnyThread;
         next.RulesChanged += OnRulesChangedAnyThread;
         CreatePhases(next);
-        Maps.Bind(next, () => _actions);
+        Maps.Bind(next, () => _actions, _layout.LoadOpenMaps(next.Archive.Sha256), _layout.LoadSelectedMap(next.Archive.Sha256));
         PaletteHost.Bind(next);
         LoadTrees(next);
         CreateLog(next);
@@ -398,6 +405,7 @@ public partial class MainWindow : Window
         // Avalonia's menu flips a CheckBox item's IsChecked itself on click (WinForms CheckOnClick); follow the flag.
         _showGrid.PropertyChanged += (_, e) => { if (e.Property == MenuItem.IsCheckedProperty) Maps.ShowGrid = _showGrid.IsChecked; };
         view.Items.Add(_viewTree);
+        view.Items.Add(_viewTables);
         Item(view, "&Diagnostics", ShowDiagnostics, "view.diagnostics");
         view.Items.Add(_showGrid);
         // WinForms View > Log: checked while the panel is shown; Ctrl+Shift+L (Cmd on macOS) from the shared command table.
@@ -408,6 +416,8 @@ public partial class MainWindow : Window
         view.Items.Add(_viewLog);
         view.Items.Add(_viewPhases);
         view.Items.Add(_viewOutliner);
+        view.Items.Add(_viewPalette);
+        BuildShowMenu(view);
         Item(view, "&Ledger", ShowLedger, "view.ledger");
         Item(view, "&Overview", ShowOverview, gate: "view.overview");
         view.Items.Add(new Separator());
@@ -499,13 +509,13 @@ public partial class MainWindow : Window
         UpdateTurnUi();
     }
 
-    /// <summary>The counter palette shows only with a game in game master mode (WinForms MainForm.SetGameMaster).</summary>
+    /// <summary>The counter palette shows only with a game in game master mode and View > Counter Palette on (WinForms MainForm.SetGameMaster).</summary>
     void UpdatePaletteUi()
     {
-        var palette = _session?.Game != null && GameMaster;
-        PaletteHost.IsVisible = PaletteSplitter.IsVisible = palette;
-        Body.ColumnDefinitions[1].Width = new GridLength(palette ? 4 : 0);
-        Body.ColumnDefinitions[2].Width = new GridLength(palette ? 220 : 0);
+        _viewPalette.IsEnabled = GameMaster;
+        ToolTip.SetTip(_viewPalette, GameMaster ? null : PaletteNeedsGameMaster);
+        ToolTip.SetShowOnDisabled(_viewPalette, true);
+        SetRows();   // the palette's row, its splitters and whether the left column shows at all
     }
 
     /// <summary>Enabled state and the reason tooltip of every gated menu item (WinForms ApplyGates); other tooltips are left alone.</summary>
@@ -861,6 +871,7 @@ public partial class MainWindow : Window
         DestroyTools();
         DestroyCharts();
         DestroyDocuments();
+        SaveOpenMaps();
         Maps.Bind(null, null);
         PaletteHost.Bind(null);
         DestroyOutliner();
@@ -937,11 +948,17 @@ public partial class MainWindow : Window
     public void CentreOnPiece(string pieceId)
     {
         if (_session?.View is not { } seen || !seen.Pieces.TryGetValue(pieceId, out var piece)) return;
-        var view = Maps.Views.FirstOrDefault(v => v.Map.Id == piece.MapId) ?? Maps.Views.FirstOrDefault(v => v.Map.Name == piece.MapId);
-        if (view == null) return;
-        Maps.Activate(view);
+        // WinForms MainForm.CentreOnPiece opens the piece's map when it is closed.
+        var map = _session.Model.Maps.FirstOrDefault(m => m.Id == piece.MapId) ?? _session.Model.Maps.FirstOrDefault(m => m.Name == piece.MapId);
+        if (map == null || Maps.Open(map.Id) is not { } view) return;
         view.CentreOn(piece.Pos);
         view.SelectOnly(pieceId);
+    }
+
+    /// <summary>Remembers the open map tabs and the selected one for the module (layout memory, next to its floating windows).</summary>
+    void SaveOpenMaps()
+    {
+        if (_session is { } s) _layout.SaveOpenMaps(s.Archive.Sha256, Maps.OpenMapIds, Maps.ActiveView?.Map.Id);
     }
 
     void HookGame()

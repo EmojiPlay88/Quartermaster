@@ -212,6 +212,16 @@ Stage 5b = hot-seat: the Players page of the new-game dialog, Settings > Game > 
 - Updates: setup, zip, tar and AppImage update in place through the updater (the setup install takes the same `win-x64.zip` asset as the zip); deb and rpm hand the downloaded package to the system installer.
 - The release is built by the `release.yml` workflow (run by hand, version = `Directory.Build.props`) and collected with `build/release.ps1 -Version <v> -FromRun <run id>`; the script checks the asset list and checksums and prints `gh release create` but never publishes. Hands-on checks: `docs/port/stage6b2-windows-checklist.md`, `docs/port/stage6b2-linux-checklist.md` (the real-AppImage `APPIMAGE` / `/proc/<pid>/exe` check from 6a is step 6 there).
 
+## Stage-6c deviations and notes (Windows feedback; deliberate or known)
+
+- Setup asks where to install again. It refuses the data folder (and anything inside it), drive or share roots, Program Files (the install is per user; administrator folders are not supported) and non-empty folders that do not already hold Quartermaster.exe. It asks only on a first install: an upgrade stays in the folder of the installed copy (a `/DIR=` on the command line still chooses another). In a silent install the folder page shows no message; an unsafe `/DIR=` ends setup with exit code 7, and setup reports that with its own message box unless `/SUPPRESSMSGBOXES` is passed (the CI setup test always passes it).
+- The log always starts docked at the bottom. The old WinForms app could save it as floating in the shared layout file; the floating position is still remembered for when you pop it out.
+- Map tabs follow WinForms (see the DocumentTabStrip row). Closing the main map leaves the map area empty until you open it again from the tree. In a hot-seat game, Close Others and Close All leave the other player's maps open for them, and a player whose open maps are all someone else's gets the main map instead of an empty area.
+- The counter palette moved from its own dock into the left column (see the PaletteDock row).
+- **Deviation:** View > Module Tree hides only the module tree; WinForms hides the whole left panel. Charts & Tables (right under Module Tree, and again in View > Show) and the palette have their own toggles under View.
+- The hot-seat player switcher (status bar) and Last moved (map toolbar) are also in the Game menu (Game > Current Player, Game > Last Moved), so they work with every bar hidden.
+- The alert bar still shows a pending notice even when it is switched off in View > Show (as WinForms).
+
 ## Before the stage release
 
 Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the real rendering paths. Before stage 1 is released:
@@ -246,7 +256,9 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | Edit > Step Back to Start of Phase / Step Back To... | 2b | ✔ |  |  | after Redo, as WinForms; Ctrl+Left (Cmd+Left on macOS) steps back to the start of the phase after the confirm dialog; Step Back To... lists the checkpoints; off with the WinForms reason tooltip (guest, replay, turn already sent, old save without history); autosaves first, closes the formula windows and batch grids, status "Stepped back — reopen from the phase panel"; Redo works afterwards |
 | View > Show Grid | 1 | ✔ | ✔ | ✔ |  |
 | View > Zoom to Fit, Zoom 100%, Zoom > 25%, 50%, 100%, 200%, Fit | 1 | ✔ | ✔ | ✔ | labels from the map context menu and toolbar |
-| View > Module Tree | 2b | ✔ |  |  | checked by default; hides the left column (tree over tables tree) |
+| View > Module Tree | 6c | ✔ |  |  | checked by default; hides only the module tree (WinForms hides the whole left panel; see the Stage-6c deviations) |
+| View > Charts & Tables | 6c | ✔ |  |  | right under Module Tree; the same switch as View > Show > Charts & Tables (both items always agree) |
+| View > Show (Main Toolbar, Phase Strip, Alert Bar, Status Bar, Map Toolbar, Charts & Tables), Show Everything | 6c | ✔ |  |  | choices remembered app-wide (`ui.json` Hidden; alert bar and outliner through settings); Show Everything also resets splits and dock sizes |
 | View > Diagnostics | 3a | ✔ |  |  | Ctrl/Cmd+D; needs a module; opens the one Diagnostics window (also from the toolbar button and the status-bar link) |
 | View > Log | 2a | ✔ |  |  | Ctrl+Shift+L; docked at the bottom (170 high, resizable) or floating (Pop out / Dock); while floating it docks back |
 | View > Phase panel | 2b | ✔ |  |  | Docked at the right (320 wide, resizable), checked while shown or floating; while floating it docks the panel back |
@@ -254,8 +266,10 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | View > Ledger | 3a | ✔ |  |  | Ctrl/Cmd+L; needs a rules pack; opens the one Ledger window (owned, not modal, bounds under "doc:ledger"); with counters selected on the active map it is Show in Ledger |
 | Show in Ledger (map → ledger row, Ctrl/Cmd+L) | 3a | ✔ |  |  | counter menu "Show in Ledger" (after a separator; disabled with "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…)." without one) and View > Ledger / Ctrl/Cmd+L with counters selected on the active map: opens the Ledger, moves to the tab that shows them (clearing the filter when it hides them, shared `LedgerJump`), selects their rows and scrolls to the first; status "Shown in the Ledger." / "{n} counters shown in the Ledger." or the reason some have no row (hidden counters never get one) |
 | View > Overview | 3a | ✔ |  |  | needs a game; opens the one Overview window (also from the toolbar button between Notes and Inventory) |
-| View > Counter palette (GM only) | 1 | ✔ |  |  | shown only when a game is open and game master mode is on (Settings > General, as WinForms); game master mode only since 4b — re-check on macOS and Linux |
+| View > Counter Palette | 6c | ✔ |  |  | always listed (since 6c); greyed out with the tip "Turn on game master mode in Settings > General to place counters" when you are not game master; the palette shows in the left column only with a game in game master mode; shown/hidden remembered app-wide (`ui.json` Hidden "palette") — re-check on macOS and Linux |
 | Game > Players..., Leave Online Game | 5c | ✔ |  |  | the Game menu is visible only while online or starting; Players… is the host's seats dialog (a guest choosing a side gets the side question; a guest holding sides: disabled with the "sides are fixed" tip); Leave Online Game asks, then the host tells its guests / a guest leaves (launcher when it came from one, else the window closes); offline the list is edited in Settings > Game > Players (5b) |
+| Game > Current Player | 6c | ✔ |  |  | the status-bar player switcher's list (one item per player, the one at the screen ticked; choosing one shows the pass-to screen first); hot-seat games only, greyed out otherwise; works with the status bar hidden |
+| Game > Last Moved | 6c | ✔ |  |  | the selected map's Last moved outline (the map toolbar button; the two follow each other); greyed out with no map tab; works with the map toolbar hidden |
 | Game > Send Turn... | 5d | ✔ |  |  | first in the Game menu, which shows with any game (as WinForms); off with the WinForms tooltip online, in a viewer copy and while a turn replays; needs two players; who-are-you when this computer does not know its player, the send dialog, the picker ("Save Turn", default name from `TurnUiModel.DefaultFileName`), then the file is written (an empty turn logs "{name} passed."), the game becomes a turn game (no hot-seat, the player's view, undo stops at the sent turn) and the mailbox send runs with Retry / Close on failure. stage5d-desktop-send-turn.png |
 | Tools > Rules Workbench | 4a | ✔ |  |  | Cmd/Ctrl+Shift+W; one floating window per session (bounds under `bench:workbench`), refused while a received turn replays |
 | Tools > Inventory, Notes | 3a | ✔ |  |  | need a game; one window each, owned by the main window, not modal |
@@ -278,7 +292,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MainForm: shortcut router (Cmd on macOS) | 1 | ✔ | ✔ | ✔ | keys are user-editable in Settings > Keyboard and apply at once to the key dispatch, menu gestures and toolbar tooltips; unknown override ids in `settings.json` are kept on save |
 | ModuleTreePanel | 2b | ✔ |  |  | map nodes activate the tab; setup nodes open the setup chooser (no preselect yet); chart nodes open their chart window (3b); document nodes open their document window, one per document; rebuilds when the viewer changes |
 | TablesTreePanel | 2b | ✔ |  |  | Tables and Formulas folders, refreshed 200 ms after rules changes; double-click opens the Workbench on that table or formula (4a); split with the module tree remembered (ui.json) |
-| DocumentTabStrip (map tabs) | 1 | ✔ | ✔ | ✔ | one tab per visible map |
+| DocumentTabStrip (map tabs) | 6c | ✔ |  |  | as WinForms: only the main map opens with a module; other maps open from the module tree's Maps folder (double-click) or by jumping to a piece; × or middle-click closes a tab, right-click gives Close / Close Others / Close All; one scrolling row; open tabs and the selected tab are remembered per module. A map the current player cannot see never gets a tab |
 | WindowManager (floating windows) | - |  |  |  |  |
 | AlertBar | 2b | ✔ |  |  | "What now" banner (click reveals the phase panel), severity chips with the "+N" overflow menu, chip menu (matches, Hide until next turn), notice chip (5d: "New turn waiting from {player}" from the turn mailbox watch, shown also with the alert bar switched off; a click opens and replays the turn; stage5d-desktop-turn-notice.png); holder matches open the Ledger and select the holder's row (Depots & Global tab, filter cleared when it hides it; never the counters selected on the map); shown when a game is open and Settings > Display "Alert bar" is on (applies live) |
 | TourOverlay | 5a | ✔ |  |  | classic tooltip-yellow balloon with an arrow toward the step's target; Back / Next / Skip tour, Esc skips; steps whose target is hidden are left out; starts once by itself on the first game opened in a launcher-loop window (from the launcher, the command line or File > Open Module…; `TourShown`); without a compositor the arrow strip and corners take the control colour instead of black; closes when the game is replaced or the module closes |
@@ -303,7 +317,7 @@ Headless tests (Avalonia.Headless) draw without a GPU, so they do not cover the 
 | MapCanvas: view refresh, selection prune and drag cancel on game change or rewind | 1 | ✔ | ✔ | ✔ |  |
 | MapCanvas: cursor location and zoom text in the status bar | 1 | ✔ | ✔ | ✔ |  |
 | Grid overlay and grid location names | 1 | ✔ | ✔ | ✔ |  |
-| PaletteDock / PalettePanel: search, folder tree, counter thumbnails | 1 | ✔ | ✔ | ✔ |  |
+| PaletteDock / PalettePanel: search, folder tree, counter thumbnails | 6c | ✔ | ✔ | ✔ | since 6c in the left column between the module tree and Charts & Tables (only in game master mode); View > Counter Palette shows and hides it |
 | PaletteDrop: drag a counter onto a map | 1 | ✔ | ✔ | ✔ |  |
 | MapCanvas: hover stack popup (CounterDetailPopup) | 2a | ✔ |  |  | same layout and pixels as WinForms (shared `CounterPopupLayout`); shown in the window overlay, so it stays inside the map window rather than the screen; hover delay from Settings > Map (applies live to every map tab) |
 | MapCanvas: hover-stack highlight | 2a | ✔ |  |  |  |

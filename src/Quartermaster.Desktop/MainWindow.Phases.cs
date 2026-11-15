@@ -21,7 +21,8 @@ public partial class MainWindow
     PhaseRunDispatch? _dispatch;
     Autosaver? _autosaver;
     string _dataRoot = "";   // app data root (layout memory, autosaves)
-    double _phaseWidth = 320;   // WinForms default; follows the splitter
+    const double DefaultPhaseWidth = 320;
+    double _phaseWidth = DefaultPhaseWidth;   // WinForms default; follows the splitter
 
     // Looked up by the controls' columns, so other docks may add columns around these.
     ColumnDefinition PhaseCol => Body.ColumnDefinitions[Grid.GetColumn(PhaseHost)];
@@ -46,8 +47,10 @@ public partial class MainWindow
         _phaseDock = new PanelDockState("phases", () => PanelDockState.PhasesDefault(MainRect()));
         _phaseFloat = new PanelFloat(_phaseDock, "Phases", PhaseHost, () => this, () => ScreensProvider?.Invoke() ?? PanelFloat.ScreensOf(this));
         _viewPhases.Click += (_, _) => Guard(_phaseDock.Toggle);
+        _phaseDock.Wanted = PartShown("phases");   // View > Phase panel is remembered app-wide (ui.json)
         _phaseDock.Changed += () =>
         {
+            SetPartHidden("phases", !_phaseDock.Wanted);
             if (_phaseDock.Floating) _phaseFloated = true;
             _phasePanel?.SetFloating(_phaseDock.Floating);
             UpdatePhaseUi();
@@ -212,7 +215,7 @@ public partial class MainWindow
     /// <summary>Shows the strip while a game and a rules pack exist and the docked panel when the pack has phases and the user wants it.</summary>
     void UpdatePhaseUi()
     {
-        StripHost.IsVisible = _session?.Game != null && _session.Rules != null;
+        StripHost.IsVisible = _session?.Game != null && _session.Rules != null && PartShown("phaseStrip");
         var has = _phasePanel != null && _session?.Game != null && _session.Rules is { Phases.Count: > 0 };
         if (!has && _phaseDock.Floating) { _phaseDock.DockBack(); return; }   // no phases any more: no floating window either (Changed re-runs this)
         var shown = has && _phaseDock.Wanted && !_phaseDock.Floating;

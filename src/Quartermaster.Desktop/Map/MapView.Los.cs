@@ -25,6 +25,9 @@ public sealed partial class MapView
     /// <summary>Raised when counters are hidden or shown.</summary>
     public event Action<bool>? HideCountersChanged;
 
+    /// <summary>Raised when the last-moved outline is switched on or off (the map toolbar and Game > Last Moved follow it).</summary>
+    public event Action<bool>? HighlightLastMovedChanged;
+
     /// <summary>Line-of-sight mode: left-drag measures between two grid locations, Esc or right-click cancels the line.</summary>
     public bool LosEnabled
     {
@@ -75,8 +78,10 @@ public sealed partial class MapView
         get => _highlightLast;
         set
         {
+            var changed = _highlightLast != value;
             _highlightLast = value;
             RefreshLastMoved();
+            if (changed) HighlightLastMovedChanged?.Invoke(value);
         }
     }
 
