@@ -267,3 +267,67 @@ public class FormulaEditAutoTests
         Assert.True(FormulaEdit.IsConfigured(new VariableBinding { Variable = "x", Kind = BindingKind.Input, AutoValue = "3" }));
     }
 }
+
+public class FormulaEditQuotedChoiceTests
+{
+    private static VariableBinding Input() => new() { Variable = "Area", Kind = BindingKind.Input };
+    private static readonly string[] Five = ["North, coast", "Inland", "Say \"hi\", then go", "a|b", "1..2"];
+    private const string FiveText = "\"North, coast\", Inland, \"Say \"\"hi\"\", then go\", \"a|b\", \"1..2\"";
+
+    [Fact]
+    public void Choices_with_commas_round_trip()
+    {
+        var b = Input() with { Choices = Five.ToList() };
+        Assert.Equal(FiveText, FormulaEdit.FormatDetails(b));
+        var (p, err) = FormulaEdit.ParseDetails(Input(), FiveText);
+        Assert.Null(err);
+        Assert.Equal(Five, p.Choices);
+        Assert.Null(p.Min);
+        Assert.Null(p.Max);
+    }
+
+    [Fact]
+    public void Choices_with_commas_and_auto_value()
+    {
+        var b = Input() with { Choices = Five.ToList(), AutoValue = "\"Inland\"" };
+        var text = FormulaEdit.FormatDetails(b);
+        Assert.Equal(FiveText + " | auto: \"Inland\"", text);
+        var (p, err) = FormulaEdit.ParseDetails(Input(), text);
+        Assert.Null(err);
+        Assert.Equal(Five, p.Choices);
+        Assert.Equal("\"Inland\"", p.AutoValue);
+    }
+
+    [Fact]
+    public void Old_details_text_parses_as_before()
+    {
+        Assert.Equal(["low", "mid", "high"], FormulaEdit.ParseDetails(Input(), "low, mid, high").Binding.Choices);
+        var (r, _) = FormulaEdit.ParseDetails(Input(), "0..20 | auto: 2");
+        Assert.Equal(0, r.Min);
+        Assert.Equal(20, r.Max);
+        Assert.Equal("2", r.AutoValue);
+        Assert.Equal(["say \"hi\"", "bye"], FormulaEdit.ParseDetails(Input(), "say \"hi\", bye").Binding.Choices);
+    }
+
+    [Fact]
+    public void Unclosed_quote_is_an_error()
+    {
+        var b = Input();
+        var (same, err) = FormulaEdit.ParseDetails(b, "\"North, coast");
+        Assert.Equal("A choice has an opening quote but no closing quote.", err);
+        Assert.Equal(b, same);
+    }
+
+    [Fact]
+    public void Text_after_closing_quote_is_an_error()
+    {
+        Assert.Equal("Put the whole choice inside the quotes.", FormulaEdit.ParseDetails(Input(), "\"a\"b, c").Error);
+    }
+
+    [Fact]
+    public void Split_outside_quotes_is_generic_over_the_separator()
+    {
+        Assert.Equal(["\"a|b\"", "auto: 1"], FormulaEdit.SplitOutsideQuotes("\"a|b\" | auto: 1", '|'));
+        Assert.Equal("\"always ask\"", FormulaEdit.QuoteChoice("always ask"));
+    }
+}

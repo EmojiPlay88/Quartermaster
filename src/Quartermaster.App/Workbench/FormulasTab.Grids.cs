@@ -54,7 +54,7 @@ sealed partial class FormulasTab
 
     static string DetailsHint(BindingKind k) => k switch
     {
-        BindingKind.Input => "A range such as 0..20, or a comma-separated list of choices.",
+        BindingKind.Input => "A range such as 0..20, or choices separated by commas (put a choice that holds a comma in \"double quotes\"); add | auto: expression for the automatic value.",
         BindingKind.Roll => "Dice, such as 2d6.",
         BindingKind.Table => "row: expression | col: expression (the expressions may use other variables).",
         _ => "",

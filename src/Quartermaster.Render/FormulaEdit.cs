@@ -119,7 +119,7 @@ public static class FormulaEdit
         {
             case BindingKind.Input:
                 string basic;
-                if (b.Choices is { Count: > 0 }) basic = string.Join(", ", b.Choices);
+                if (b.Choices is { Count: > 0 }) basic = string.Join(", ", b.Choices.Select(QuoteChoice));
                 else if (b.Min == null && b.Max == null) basic = "";
                 else basic = (b.Min is { } lo ? Num(lo) : "") + ".." + (b.Max is { } hi ? Num(hi) : "");
                 if (string.IsNullOrWhiteSpace(b.AutoValue)) return basic;
@@ -153,11 +153,12 @@ public static class FormulaEdit
                     else if (SyntaxProblem(auto) is { } autoErr) return (b, "Auto value: " + autoErr);
                 }
                 if (text.Length == 0) return (b with { Min = null, Max = null, Choices = null, AutoValue = auto }, null);
-                var dots = text.IndexOf("..", StringComparison.Ordinal);
+                var dots = DotsOutsideQuotes(text);
                 if (dots < 0)
                 {
-                    var choices = text.Split(',').Select(c => c.Trim()).Where(c => c.Length > 0).ToList();
-                    return (b with { Min = null, Max = null, Choices = choices.Count == 0 ? null : choices, AutoValue = auto }, null);
+                    var (choices, choiceErr) = ParseChoices(text);
+                    if (choiceErr != null) return (b, choiceErr);
+                    return (b with { Min = null, Max = null, Choices = choices, AutoValue = auto }, null);
                 }
                 if (!TryNum(text[..dots], out var lo) || !TryNum(text[(dots + 2)..], out var hi))
                     return (b, "Use a range like 0..20, or a comma-separated list of choices; add | auto: expression for the automatic value.");
@@ -184,11 +185,101 @@ public static class FormulaEdit
         }
     }
 
-    /// <summary>Index of the '|' that starts an "auto:" part, else -1.</summary>
+    /// <summary>Index of the '|' (outside quotes) that starts an "auto:" part, else -1.</summary>
     private static int AutoBar(string text)
     {
-        for (var i = text.IndexOf('|'); i >= 0; i = text.IndexOf('|', i + 1))
-            if (text[(i + 1)..].TrimStart().StartsWith("auto:", StringComparison.OrdinalIgnoreCase)) return i;
+        foreach (var t in Tokenize(text, '|'))
+        {
+            var end = t.End;
+            if (end < text.Length && text[(end + 1)..].TrimStart().StartsWith("auto:", StringComparison.OrdinalIgnoreCase)) return end;
+        }
+        return -1;
+    }
+
+    /// <summary>One piece of a text split at a separator: its range, and whether it is a quoted token.</summary>
+    private readonly record struct Token(int Start, int End, bool Quoted, bool Closed, int QuoteEnd);
+
+    /// <summary>
+    /// Splits at the separator, but not inside a double-quoted token. Only a token whose trimmed text starts with a
+    /// double quote is quoted; a doubled quote inside it is one quote. A quote in the middle of a token is plain text.
+    /// An unclosed quoted token runs to the end of the text.
+    /// </summary>
+    private static List<Token> Tokenize(string text, char separator)
+    {
+        var tokens = new List<Token>();
+        var start = 0;
+        while (true)
+        {
+            var i = start;
+            while (i < text.Length && char.IsWhiteSpace(text[i]) && text[i] != separator) i++;
+            var quoted = i < text.Length && text[i] == '"';
+            var closed = false;
+            var quoteEnd = -1;
+            if (quoted)
+            {
+                var j = i + 1;
+                while (j < text.Length)
+                {
+                    if (text[j] == '"')
+                    {
+                        if (j + 1 < text.Length && text[j + 1] == '"') { j += 2; continue; }
+                        closed = true; quoteEnd = j;
+                        break;
+                    }
+                    j++;
+                }
+                i = closed ? j + 1 : text.Length;
+            }
+            var end = text.IndexOf(separator, i);
+            if (end < 0) end = text.Length;
+            tokens.Add(new Token(start, end, quoted, closed, quoteEnd));
+            if (end >= text.Length) return tokens;
+            start = end + 1;
+        }
+    }
+
+    /// <summary>Splits at the separator outside double quotes. Each part is trimmed; quotes are kept as written.</summary>
+    internal static IReadOnlyList<string> SplitOutsideQuotes(string text, char separator) =>
+        Tokenize(text, separator).Select(t => text[t.Start..t.End].Trim()).ToList();
+
+    /// <summary>Writes a choice so ParseDetails reads it back: in double quotes (quotes doubled) when it would otherwise be misread.</summary>
+    internal static string QuoteChoice(string choice)
+    {
+        var plain = choice.Length > 0 && choice == choice.Trim() && choice[0] != '"'
+            && choice.IndexOfAny([',', '|']) < 0 && !choice.Contains("..", StringComparison.Ordinal)
+            && !choice.Equals("always ask", StringComparison.OrdinalIgnoreCase);
+        return plain ? choice : "\"" + choice.Replace("\"", "\"\"") + "\"";
+    }
+
+    private static (List<string>? Choices, string? Error) ParseChoices(string text)
+    {
+        var choices = new List<string>();
+        foreach (var t in Tokenize(text, ','))
+        {
+            if (!t.Quoted)
+            {
+                var c = text[t.Start..t.End].Trim();
+                if (c.Length > 0) choices.Add(c);
+                continue;
+            }
+            if (!t.Closed) return (null, "A choice has an opening quote but no closing quote.");
+            if (text[(t.QuoteEnd + 1)..t.End].Trim().Length > 0) return (null, "Put the whole choice inside the quotes.");
+            var open = text.IndexOf('"', t.Start);
+            var c2 = text[(open + 1)..t.QuoteEnd].Replace("\"\"", "\"");
+            if (c2.Length > 0) choices.Add(c2);
+        }
+        return (choices.Count == 0 ? null : choices, null);
+    }
+
+    /// <summary>Index of the first ".." that is not inside a quoted choice, else -1.</summary>
+    private static int DotsOutsideQuotes(string text)
+    {
+        foreach (var t in Tokenize(text, ','))
+        {
+            if (t.Quoted) continue;
+            var d = text.IndexOf("..", t.Start, t.End - t.Start, StringComparison.Ordinal);
+            if (d >= 0) return d;
+        }
         return -1;
     }
 
