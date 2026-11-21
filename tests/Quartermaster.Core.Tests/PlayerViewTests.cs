@@ -249,6 +249,29 @@ public class PlayerViewTests(ITestOutputHelper output)
         Assert.Equal("g1", v.GameId);
     }
 
+    [Fact]
+    public void Filtered_view_is_marked_and_full_state_is_not()
+    {
+        var pack = Pack();
+        var full = NewState();
+        Assert.True(PlayerView.For(full, pack, Model, Red).IsPlayerView);
+        Assert.False(PlayerView.For(full, pack, Model, Both).IsPlayerView);
+        Assert.False(full.IsPlayerView);
+        PlayerView.FailForTest = true;
+        try { Assert.True(PlayerView.For(full, pack, Model, Red).IsPlayerView); }
+        finally { PlayerView.FailForTest = false; }
+    }
+
+    [Fact]
+    public void Player_view_flag_is_written_only_when_set()
+    {
+        var full = NewState();
+        Assert.DoesNotContain("\"isPlayerView\"", Json(full));
+        var json = Json(PlayerView.For(full, Pack(), Model, Red));
+        Assert.Contains("\"isPlayerView\"", json);
+        Assert.True(JsonSerializer.Deserialize<GameState>(json, QuartermasterJson.Options)!.IsPlayerView);
+    }
+
     private static string Json(GameState s) => JsonSerializer.Serialize(s, QuartermasterJson.Options);
 
     [Fact]

@@ -56,6 +56,9 @@ public sealed class GameState
     public List<PendingRun> Pending { get; set; } = new();
     /// <summary>Alert ids hidden until the turn number changes.</summary>
     public List<string> HiddenAlerts { get; set; } = new();
+    /// <summary>True for a player's filtered view (PlayerView.For); a missing Private value there may be hidden, so filters do not read its Default.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsPlayerView { get; set; }
 
     public IEnumerable<StackInstance> StacksOn(string mapId) =>
         Stacks.Values.Where(s => s.MapId == mapId);

@@ -63,13 +63,45 @@ public static class PieceFilter
         return TableLookup.Lookup(t, row, col);
     }
 
+    /// <summary>Parsed applies-to per property record (records are replaced on edit, so this never goes stale); null = does not parse.</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PropertyDef, ParsedAppliesTo> AppliesToCache = new();
+
+    private sealed class ParsedAppliesTo(Quartermaster.Rules.Expr.Expr? expr) { public Quartermaster.Rules.Expr.Expr? Expr { get; } = expr; }
+
     private sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack) : IEvalContext
     {
+        private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, bool> _declared = new(StringComparer.Ordinal);
+
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
-            var v = Ledger.Get(s, LedgerKey.Piece(p.Id), def.Id) ?? throw new EvalError($"{name} has no value on this piece");
-            return Value.Of(v);
+            var v = Ledger.Get(s, LedgerKey.Piece(p.Id), def.Id);
+            if (v != null) return Value.Of(v.Value);
+            if (!(s.IsPlayerView && def.Visibility == Visibility.Private) && Declared(def)) return Value.Of(def.Default);
+            throw new EvalError($"{name} has no value on this piece");
+        }
+
+        /// <summary>True when the property is declared on this piece: not Holders-scoped, and its applies-to is empty or matches. Re-entry counts as not declared.</summary>
+        private bool Declared(PropertyDef def)
+        {
+            if (def.Scope == PropertyScope.Holders) return false;
+            if (string.IsNullOrWhiteSpace(def.AppliesTo)) return true;
+            if (_declared.TryGetValue(def.Id, out var known)) return known;
+            if (!_checking.Add(def.Id)) return false;
+            try
+            {
+                var e = AppliesToCache.GetValue(def, d => new ParsedAppliesTo(TryParse(d.AppliesTo!))).Expr;
+                var result = false;
+                if (e != null)
+                {
+                    try { result = Evaluator.Evaluate(e, this).IsTruthy; }
+                    catch (Exception) { result = false; }
+                }
+                _declared[def.Id] = result;
+                return result;
+            }
+            finally { _checking.Remove(def.Id); }
         }
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);

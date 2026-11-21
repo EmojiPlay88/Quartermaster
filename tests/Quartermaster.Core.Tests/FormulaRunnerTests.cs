@@ -314,6 +314,16 @@ public class FormulaRunnerTests
         };
 
     [Fact]
+    public void Unit_binding_reads_Default_on_untouched_piece()
+    {
+        var pack = PackWith("Fu", new VariableBinding { Variable = "Fu", Kind = BindingKind.Unit, Property = "fuel" });
+        pack.Properties[0] = pack.Properties[0] with { Default = 4 };
+        var t = RunnerFx.Runner(pack).Run(RunnerFx.State(fuel: null), RunnerFx.Req("f"));
+        Assert.Null(t.Error);
+        Assert.Equal(4, t.Result!.Value.Number);
+    }
+
+    [Fact]
     public void Moved_FromRequest_Auto()
     {
         var pack = PackWith("M * 2", new VariableBinding { Variable = "M", Kind = BindingKind.Moved });

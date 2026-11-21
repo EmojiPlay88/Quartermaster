@@ -53,6 +53,7 @@ public static class PlayerView
         {
             if (FailForTest) throw new InvalidOperationException("test fault");
             new Filter(full, pack, model, held).Apply(view);
+            view.IsPlayerView = true;
             return view;
         }
         catch (Exception)
@@ -66,6 +67,7 @@ public static class PlayerView
     {
         s.Pieces = new(); s.Stacks = new(); s.Ledgers = new(); s.LedgerHistory = new(); s.DiceHistory = new();
         s.Pending = new(); s.MapOrder = new();
+        s.IsPlayerView = true;
         s.Log = new() { new LogEntry(1, LogKind.System, FilterErrorText, null, null, null, DateTimeOffset.UnixEpoch, s.Position?.Turn,
             s.Position == null ? null : s.Turn.Phase) };
         return s;
