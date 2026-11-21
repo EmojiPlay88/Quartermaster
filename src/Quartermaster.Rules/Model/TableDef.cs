@@ -2,7 +2,8 @@ namespace Quartermaster.Rules;
 
 public enum TableKind { OneD, TwoD, Dice }
 
-/// <summary>User-authored lookup table. Cells[r][c] holds raw text; OneD and Dice tables have a single column headed "Value".</summary>
+/// <summary>User-authored lookup table. Cells[r][c] holds raw text; OneD and Dice tables have a single column headed "Value".
+/// RowKeys and ColumnKeys are replaced, never edited in place (TableLookup caches parsed keys per list).</summary>
 public sealed record TableDef
 {
     public string Id { get; init; } = "";
