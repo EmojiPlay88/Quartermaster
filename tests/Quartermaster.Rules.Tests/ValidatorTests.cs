@@ -279,6 +279,48 @@ public class ValidatorTests
         Assert.Contains(msgs, m => m.StartsWith("Side \"Red\": unit filter "));
     }
 
+    private static AlertDef A(string id, string name, string cond, string? side = null) =>
+        new() { Id = id, Name = name, Condition = cond, Message = "m", SideId = side };
+
+    [Fact]
+    public void Validator_LookupTableInFilters_IsNotAProperty()
+    {
+        const string f = "lookup(Rates, Steps) > 1";
+        var ph = Ph("a", "Alpha") with
+        {
+            Warnings = new() { new PhaseWarning { Condition = f, Message = "m" } },
+            OnStart = new() { new StartEntry { FormulaId = "f1", UnitFilter = f } },
+            OnMove = new() { new MoveEntry { FormulaId = "f1", UnitFilter = f } },
+        };
+        var fx = Clean().Formulas[0] with { AppliesTo = f };
+        var pack = Clean() with
+        {
+            Phases = new() { ph },
+            Alerts = new() { A("a1", "Low", f) },
+            Sides = new() { new SideDef { Id = "s", Name = "Red", UnitFilter = f } },
+            Formulas = new() { fx },
+        };
+        pack = pack with { Properties = pack.Properties.Select(x => x.Name == "Fuel" ? x with { AppliesTo = f } : x).ToList() };
+        var msgs = V(pack).Select(i => i.Message).ToList();
+        Assert.DoesNotContain(msgs, m => m.Contains("Rates"));
+    }
+
+    [Fact]
+    public void Validator_LookupUnknownTableInFilter_Error()
+    {
+        var ph = Ph("a", "Alpha") with { Warnings = new() { new PhaseWarning { Condition = "lookup(Nope, Steps) > 1", Message = "m" } } };
+        var msgs = V(Clean() with { Phases = new() { ph } }).Select(i => i.Message).ToList();
+        Assert.Contains("Phase \"Alpha\": warning condition refers to unknown table \"Nope\"", msgs);
+        Assert.DoesNotContain(msgs, m => m.Contains("unknown property \"Nope\""));
+    }
+
+    [Fact]
+    public void Validator_LookupRowArgumentStillChecked()
+    {
+        var msgs = V(Clean() with { Alerts = new() { A("a1", "Low", "lookup(Rates, Ghost) > 1") } }).Select(i => i.Message).ToList();
+        Assert.Contains("Alert \"Low\": condition refers to unknown property \"Ghost\"", msgs);
+    }
+
     [Fact]
     public void Validator_EmptySideFilter_WarnsWhenSeveralSides()
     {
