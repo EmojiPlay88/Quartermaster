@@ -95,16 +95,19 @@ public static class PieceFilter
         p == null ? throw new EvalError("This formula needs a unit") : Value.Of(p.MapId ?? "");
 
     /// <summary>
-    /// holder(Holder, Property): the holder's value, else the property's Default. In a player's view a missing Private value of a holder
-    /// owned by a side may be hidden rather than unset, so it does not fall back to the Default (as for pieces).
+    /// holder(Holder, Property): the holder's value, else the property's Default. A player's view removes every value (and the ledger
+    /// key) of a holder owned by a side the viewer does not hold, so in a view a sided holder with no ledger key is hidden, not unset, and
+    /// does not fall back to the Default. A present key belongs to a holder the viewer may see.
     /// </summary>
     internal static Value HolderRead(GameState s, RulesPack pack, string holder, string property)
     {
         var h = pack.HolderByName(holder) ?? throw new EvalError($"No holder named '{holder}'");
         var def = pack.PropertyByName(property) ?? throw new EvalError($"Unknown property '{property}'");
-        var v = Ledger.Get(s, LedgerKey.Holder(h.Id), def.Id);
+        if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{def.Name} is not a holder property");
+        var key = LedgerKey.Holder(h.Id);
+        var v = Ledger.Get(s, key, def.Id);
         if (v != null) return Value.Of(v.Value);
-        if (s.IsPlayerView && def.Visibility == Visibility.Private && Ownership.SideOfHolder(h.Id, pack) != null)
+        if (s.IsPlayerView && Ownership.SideOfHolder(h.Id, pack) != null && !s.Ledgers.ContainsKey(key))
             throw new EvalError($"{def.Name} has no value on {h.Name}");
         return Value.Of(def.Default);
     }

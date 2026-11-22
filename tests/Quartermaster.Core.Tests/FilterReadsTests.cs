@@ -184,6 +184,39 @@ public class FilterReadsTests
     }
 
     [Fact]
+    public void Other_sides_stripped_holder_is_not_defaulted_in_player_view()
+    {
+        var pub = new PropertyDef { Id = "pub", Name = "Pub", Scope = PropertyScope.Holders, Default = 2, Visibility = Visibility.Public };
+        var pack = Pack(extra: pub);
+        pack.Holders.Add(new HolderDef { Id = "camp", Name = "Camp", SideId = "south" });
+        var p = Marked("b", "Blue");
+        var s = State(p);
+        s.Ledgers[LedgerKey.Holder("rail")] = new() { ["pub"] = 9 };
+        s.Ledgers[LedgerKey.Holder("camp")] = new() { ["tonnage"] = 5 };
+        var south = PlayerView.For(s, pack, RunnerFx.Model, new HashSet<string> { "south" });
+        var vp = south.Pieces["b"];
+        Assert.False(M("holder(Rail, Pub) == 2", vp, south, pack));
+        Assert.False(M("holder(Rail, Pub) != 2", vp, south, pack));
+        Assert.True(M("holder(Camp, Tonnage) == 5", vp, south, pack));
+        Assert.True(M("holder(Camp, Pub) == 2", vp, south, pack));
+        var north = PlayerView.For(s, pack, RunnerFx.Model, new HashSet<string> { "north" });
+        Assert.True(M("holder(Rail, Pub) == 9", vp, north, pack));
+    }
+
+    [Fact]
+    public void Holder_rejects_piece_property()
+    {
+        var pack = Pack();
+        var p = Marked();
+        var s = State(p);
+        Assert.False(M("holder(Rail, Grit) == 5", p, s, pack));
+        Assert.False(M("holder(Rail, Grit) != 5", p, s, pack));
+        Assert.True(M("holder(Rail, Morale) == 3", p, s, pack));
+        pack.Formulas.Add(new FormulaDef { Id = "f1", Name = "Bad", Text = "holder(Rail, Grit)" });
+        Assert.Equal("Grit is not a holder property", RunnerFx.Runner(pack).Run(s, RunnerFx.Req("f1", "m1")).Error);
+    }
+
+    [Fact]
     public void Condition_phaseside_is_candidate_phase()
     {
         var pack = Pack();
