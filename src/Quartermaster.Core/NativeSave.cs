@@ -73,6 +73,7 @@ public static class NativeSave
         snap.Acknowledged ??= new();
         snap.HiddenAlerts = (snap.HiddenAlerts ?? new()).Where(a => a != null).ToList();
         snap.Pending = (snap.Pending ?? new()).Where(r => r != null && r.Units != null).ToList();
+        snap.SkippedPhases = snap.SkippedPhases?.Where(k => k != null && k.PhaseId != null && k.Name != null).ToList() is { Count: > 0 } sk ? sk : null;
         snap.Turn ??= new TurnState(1, null);
         snap.Players = Core.Players.Clean(snap.Players);
         snap.GameId ??= "";

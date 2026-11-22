@@ -75,6 +75,43 @@ public class RulesPackIoTests : IDisposable
         Assert.DoesNotContain("alwaysAsk", J(RulesPackIo.Load(a)), StringComparison.OrdinalIgnoreCase);
     }
 
+    private static RulesPack PhasedPack() => new()
+    {
+        Format = RulesPackIo.CurrentFormat, Id = "fixed-pack", Name = "Phased", ModuleSha256 = "abc123",
+        Phases = new()
+        {
+            new PhaseDef { Id = "a", Name = "Alpha" },
+            new PhaseDef { Id = "b", Name = "Beta", Warnings = new() { new PhaseWarning { Condition = "true", Message = "m" } } },
+        },
+    };
+
+    [Fact]
+    public void Condition_unset_keeps_pack_hash()
+    {
+        var p = PhasedPack();
+        // Pinned before PhaseDef.Condition existed: a pack without conditions hashes exactly as it did.
+        Assert.Equal("a8c3ea882b4b8db72be9a6b462c31fc9f8afd697561b592ce773dfac7b72a4d6", RulesPackIo.ComputeSha256(p));
+        var a = Path.Combine(_dir, "c1.qrules");
+        RulesPackIo.Save(p, a);
+        var l = RulesPackIo.Load(a);
+        Assert.Equal(RulesPackIo.ComputeSha256(p), RulesPackIo.ComputeSha256(l));
+        Assert.DoesNotContain("condition", JsonSerializer.Serialize(l.Phases[0], RulesPackIo.JsonOptions), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Condition_round_trips()
+    {
+        var p = PhasedPack();
+        p = p with { Phases = new() { p.Phases[0] with { Condition = "mod(turn(), 2) == 1" }, p.Phases[1] } };
+        var a = Path.Combine(_dir, "c2.qrules");
+        RulesPackIo.Save(p, a);
+        var l = RulesPackIo.Load(a);
+        Assert.Equal("mod(turn(), 2) == 1", l.Phases[0].Condition);
+        Assert.Null(l.Phases[1].Condition);
+        Assert.Equal(RulesPackIo.ComputeSha256(p), RulesPackIo.ComputeSha256(l));
+        Assert.NotEqual(RulesPackIo.ComputeSha256(PhasedPack()), RulesPackIo.ComputeSha256(l));
+    }
+
     [Fact]
     public void Load_Folder_SameAsZip()
     {

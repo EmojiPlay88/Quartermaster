@@ -19,6 +19,9 @@ public static class DifficultyText
 /// <summary>Where the game is in the turn sequence. Repeat is 1-based and is 1 outside blocks.</summary>
 public sealed record PhasePosition(int Turn, int Repeat, string PhaseId, int PhaseIndex);
 
+/// <summary>A phase passed over by Next Phase because its condition was false, at the position it would have had.</summary>
+public sealed record SkippedPhase(string PhaseId, string Name, int Turn, int Repeat);
+
 public sealed record PendingUnit(string? PieceId, string Label, double? Moved, bool Applied);
 
 /// <summary>A queued formula run awaiting the player. Trigger is "start" or "move".</summary>

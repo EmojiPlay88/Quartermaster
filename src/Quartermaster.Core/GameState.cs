@@ -56,6 +56,9 @@ public sealed class GameState
     public List<PendingRun> Pending { get; set; } = new();
     /// <summary>Alert ids hidden until the turn number changes.</summary>
     public List<string> HiddenAlerts { get; set; } = new();
+    /// <summary>Phases skipped (condition false) since the current turn began; null when none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<SkippedPhase>? SkippedPhases { get; set; }
     /// <summary>True for a player's filtered view (PlayerView.For); a missing Private value there may be hidden, so filters do not read its Default.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsPlayerView { get; set; }
@@ -115,7 +118,7 @@ public sealed class GameState
                 Log.Add(LogBuilder.Notes(this, sn));
                 break;
             case SetTurn st:
-                if (st.Turn != Turn.Turn) HiddenAlerts = new();
+                if (st.Turn != Turn.Turn) { HiddenAlerts = new(); SkippedPhases = null; }
                 Turn = new TurnState(st.Turn, st.Phase);
                 Log.Add(LogBuilder.Turn(this, st));
                 break;
@@ -186,10 +189,16 @@ public sealed class GameState
             }
             BatchSummary(r, r.Units, a.Who, a.At);
         }
-        if (a.To.Turn != Turn.Turn) HiddenAlerts = new();
+        var sameTurn = a.To.Turn == Turn.Turn;
+        if (!sameTurn) HiddenAlerts = new();
+        var skipped = (sameTurn ? SkippedPhases ?? new() : new()).ToList();
+        skipped.AddRange((a.Skipped ?? Array.Empty<SkippedPhase>()).Where(k => k != null && k.Turn == a.To.Turn));
+        SkippedPhases = skipped.Count == 0 ? null : skipped;
         Position = a.To;
         Turn = new TurnState(a.To.Turn, a.ToName);
         Ticked = new(); Acknowledged = new(); Pending = new();
+        foreach (var k in a.Skipped ?? Array.Empty<SkippedPhase>())
+            if (k != null) Log.Add(LogBuilder.Line(this, LogKind.Turn, $"Skipped {k.Name} (condition false)", a.Who, a.At));
         if (!string.IsNullOrEmpty(a.Reason))
             Log.Add(LogBuilder.Line(this, LogKind.System, a.Reason, a.Who, a.At));
         else

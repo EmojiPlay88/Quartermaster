@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Quartermaster.Rules;
 
 public sealed record SideDef
@@ -42,6 +44,9 @@ public sealed record PhaseDef
     public List<MoveEntry> OnMove { get; init; } = new();
     public List<PhaseWarning> Warnings { get; init; } = new();
     public string? Notes { get; init; }
+    /// <summary>Boolean expression over global properties, turn() and stage(); when false the phase is skipped. Null or empty = always runs.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public string? Condition { get; init; }
 }
 
 public sealed record PhaseBlock
