@@ -25,6 +25,19 @@ public static class PieceFilter
         };
     }
 
+    /// <summary>
+    /// Like <see cref="Matches"/>, with values about to be seeded on this piece (property id -> value) read as if already in its ledger
+    /// (a ledger value still wins). Used by seeding, so an applies-to sees a sibling's sheet value rather than its Default.
+    /// </summary>
+    internal static bool MatchesWithPending(string? appliesTo, PieceInstance p, GameState s, RulesPack pack, IReadOnlyDictionary<string, double> pending)
+    {
+        if (string.IsNullOrWhiteSpace(appliesTo)) return true;
+        var e = TryParse(appliesTo);
+        if (e == null) return false;
+        try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, pending)).IsTruthy; }
+        catch (Exception) { return false; }
+    }
+
     private static Quartermaster.Rules.Expr.Expr? TryParse(string text)
     {
         try { return Parser.Parse(text); }
@@ -68,15 +81,19 @@ public static class PieceFilter
 
     private sealed class ParsedAppliesTo(Quartermaster.Rules.Expr.Expr? expr) { public Quartermaster.Rules.Expr.Expr? Expr { get; } = expr; }
 
-    private sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack) : IEvalContext
+    private sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack, IReadOnlyDictionary<string, double>? pending = null) : IEvalContext
     {
         private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
         private readonly Dictionary<string, bool> _declared = new(StringComparer.Ordinal);
 
+        /// <summary>The piece's ledger value, else a value about to be seeded, else null.</summary>
+        private double? Stored(PropertyDef def) =>
+            Ledger.Get(s, LedgerKey.Piece(p.Id), def.Id) ?? (pending != null && pending.TryGetValue(def.Id, out var v) ? v : null);
+
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
-            var v = Ledger.Get(s, LedgerKey.Piece(p.Id), def.Id);
+            var v = Stored(def);
             if (v != null) return Value.Of(v.Value);
             if (!HiddenInView(def) && Declared(def)) return Value.Of(def.Default);
             throw new EvalError($"{name} has no value on this piece");
@@ -113,7 +130,7 @@ public static class PieceFilter
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
-        public bool Has(string property) => HasProperty(s, pack, p, property);
+        public bool Has(string property) => pack.PropertyByName(property) is { } def && Stored(def) != null;
         public Value PieceName() => NameValue(p);
         public Value Marker(string key) => MarkerValue(p, key);
     }

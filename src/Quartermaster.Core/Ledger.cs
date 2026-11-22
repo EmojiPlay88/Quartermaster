@@ -86,37 +86,51 @@ public static class LedgerSeeder
         return seeds.Count == 0 ? null : new SeedLedger(seeds);
     }
 
+    /// <summary>
+    /// Seeds one piece. Sheet values are read first; properties without an applies-to are accepted, then each applies-to is checked in
+    /// pack order against the piece's ledger plus the values accepted so far, so it reads a sibling's sheet value, not its Default.
+    /// Seeds keep pack order.
+    /// </summary>
     private static void SeedPiece(GameState s, RulesPack pack, PieceInstance piece, ModuleModel? model, List<LedgerSeed> seeds, DiagnosticLog? log)
     {
         var key = LedgerKey.Piece(piece.Id);
         var traits = PieceInfo.TypeOf(piece).Traits;
-        var local = new List<LedgerSeed>();
+        var candidates = new List<(PropertyDef Prop, double? Value)>();
         foreach (var prop in pack.Properties)
         {
             if (prop.Scope == PropertyScope.Holders || string.IsNullOrWhiteSpace(prop.SheetField)) continue;
             if (Ledger.Get(s, key, prop.Id) != null) continue;
-            if (!string.IsNullOrWhiteSpace(prop.AppliesTo))
+            if (!string.IsNullOrWhiteSpace(prop.AppliesTo) && model == null)
             {
-                if (model == null)
-                {
-                    log?.AddOnce("seed-nomodel:" + prop.Id, DiagnosticSeverity.Warning, "rules",
-                        $"Property '{prop.Name}' has an 'applies to' filter that cannot be checked here; it was not seeded.");
-                    continue;
-                }
-                if (!PieceFilter.Matches(prop.AppliesTo, piece, s, model, pack)) continue;
+                log?.AddOnce("seed-nomodel:" + prop.Id, DiagnosticSeverity.Warning, "rules",
+                    $"Property '{prop.Name}' has an 'applies to' filter that cannot be checked here; it was not seeded.");
+                continue;
             }
-            for (var i = 0; i < traits.Count; i++)
-            {
-                if (traits[i] is not PropertySheetDef def
-                    || !def.Rows.Any(r => string.Equals(r.Name, prop.SheetField, StringComparison.OrdinalIgnoreCase))) continue;
-                var row = PieceActions.ReadSheet(piece, i)
-                    .FirstOrDefault(r => string.Equals(r.Name, prop.SheetField, StringComparison.OrdinalIgnoreCase));
-                if (row.Name == null) break;
-                if (double.TryParse(row.Value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v))
-                    local.Add(new LedgerSeed(key, prop.Id, v));
-                break; // first sheet having the row wins
-            }
+            candidates.Add((prop, SheetValue(piece, traits, prop.SheetField!)));
         }
-        seeds.AddRange(local); // a piece that fails midway contributes nothing
+        var accepted = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var (prop, v) in candidates)
+            if (v != null && string.IsNullOrWhiteSpace(prop.AppliesTo)) accepted[prop.Id] = v.Value;
+        foreach (var (prop, v) in candidates)
+            if (v != null && !string.IsNullOrWhiteSpace(prop.AppliesTo)
+                && PieceFilter.MatchesWithPending(prop.AppliesTo, piece, s, pack, accepted)) accepted[prop.Id] = v.Value;
+        foreach (var (prop, _) in candidates)
+            if (accepted.TryGetValue(prop.Id, out var v)) seeds.Add(new LedgerSeed(key, prop.Id, v));
+        // a piece that fails midway contributes nothing (nothing is added before the last loop)
+    }
+
+    /// <summary>The finite number in the first property sheet having this row, else null.</summary>
+    private static double? SheetValue(PieceInstance piece, IReadOnlyList<TraitDef> traits, string field)
+    {
+        for (var i = 0; i < traits.Count; i++)
+        {
+            if (traits[i] is not PropertySheetDef def
+                || !def.Rows.Any(r => string.Equals(r.Name, field, StringComparison.OrdinalIgnoreCase))) continue;
+            var row = PieceActions.ReadSheet(piece, i)
+                .FirstOrDefault(r => string.Equals(r.Name, field, StringComparison.OrdinalIgnoreCase));
+            if (row.Name == null) return null;
+            return double.TryParse(row.Value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v) ? v : null;
+        }
+        return null;
     }
 }
