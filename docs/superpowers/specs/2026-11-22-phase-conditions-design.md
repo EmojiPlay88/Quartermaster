@@ -98,7 +98,7 @@ would reveal them).
   a broken condition can never make play stall silently.
 - Loading a game or reconciling after a rules edit never moves the game because of a condition; a
   condition is tested only when the game advances into a phase.
-- Online: the host advances; guests see the result in the snapshot (no guest-side evaluation needed).
+- Online: the host advances; guests see the result in the snapshot (advancing needs no guest-side evaluation; the strip's will-skip preview does run on guests, safely, because globals are never hidden except under Lockdown, where previews show defaults).
   Hot-seat: same as offline.
 
 ### Phase strip

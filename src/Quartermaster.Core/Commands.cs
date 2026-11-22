@@ -47,9 +47,11 @@ public sealed record RollDice(string Purpose, int Count, int Sides, IReadOnlyLis
 public sealed record SetNotes(string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetTurn(int Turn, string? Phase, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetPlayers(IReadOnlyList<PlayerDef> Players, DateTimeOffset? At = null, string? Who = null) : GameCommand;
-/// <summary>Skipped: the phases passed over on the way to To (conditions false), in order. Replay applies To and Skipped as recorded.</summary>
+/// <summary>Skipped: the phases passed over on the way to To (conditions false), in order. Replay applies To and Skipped as recorded.
+/// Notice: a condition-error or guard notice from the step, logged as a system line so guests and later readers see it.</summary>
 public sealed record AdvancePhase(PhasePosition? From, PhasePosition To, string FromName, string ToName, string? Reason = null, DateTimeOffset? At = null, string? Who = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SkippedPhase>? Skipped = null) : GameCommand;
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SkippedPhase>? Skipped = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Notice = null) : GameCommand;
 public sealed record SetDifficulty(Difficulty Difficulty, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record AcknowledgeWarning(int Index, string Message, DateTimeOffset? At = null, string? Who = null) : GameCommand;

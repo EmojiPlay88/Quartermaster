@@ -272,11 +272,11 @@ A phase can run only some of the time. In the **Runs only if** field, write a fo
 
 Recipes:
 
-- **Two copies of a side's turn.** Add a global property `Flag` (Default 0). Make two copies of North Movement, one with `Flag == 1` and one with `Flag == 0`. Only one of them runs, depending on the flag.
+- **Two copies of a side's turn.** Add a global property `Flag` (Default 0). Make two copies of North Movement. Put one copy before South Supply (the other side's turn) and one after it, and give the first the condition `Flag == 1` and the second `Flag == 0`. Only one of them runs, depending on the flag.
 - **Only at the start of the game.** A phase with `turn() == 1` runs on the first turn only.
 - **Every fourth turn.** A phase with `mod(turn(), 4) == 1` runs on turns 1, 5, 9 and so on.
 
-If a condition is always false, the Workbench warns that the phase never runs. If every phase is skipped, Quartermaster stops after one full turn and says so.
+If a condition is always false, the Workbench warns that the phase never runs. If every phase is skipped, Quartermaster checks one full turn, then stops at the very next phase and shows a notice saying so.
 
 ## Step 6: An alert
 

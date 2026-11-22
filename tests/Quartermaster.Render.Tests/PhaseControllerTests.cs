@@ -945,6 +945,10 @@ public class PhaseControllerTests : IDisposable
         Assert.Equal("Pass to Red player", c.Advance());
         Assert.Equal("ph-supply", s.Game!.State.Position!.PhaseId);   // fail-open: not skipped
         Assert.Equal("Condition of Supply failed: mod: division by zero; phase not skipped. Pass to Red player", c.View().Notice);
+        Assert.Contains(s.Game.State.Log, l => l.Kind == LogKind.System && l.Text == "Condition of Supply failed: mod: division by zero; phase not skipped");
+        s.Game.Undo();   // one undo step takes the move, its log lines and the strip notice back
+        Assert.DoesNotContain(s.Game.State.Log, l => l.Text.StartsWith("Condition of Supply failed"));
+        Assert.Null(c.View().Notice);
     }
 
     [Fact]

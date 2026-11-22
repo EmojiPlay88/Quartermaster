@@ -198,7 +198,9 @@ public sealed class GameState
         Turn = new TurnState(a.To.Turn, a.ToName);
         Ticked = new(); Acknowledged = new(); Pending = new();
         foreach (var k in a.Skipped ?? Array.Empty<SkippedPhase>())
-            if (k != null) Log.Add(LogBuilder.Line(this, LogKind.Turn, $"Skipped {k.Name} (condition false)", a.Who, a.At));
+            if (k != null) Log.Add(LogBuilder.LineAt(this, LogKind.Turn, $"Skipped {k.Name} (condition false)", a.Who, a.At, k.Turn, k.Name));
+        if (!string.IsNullOrEmpty(a.Notice))
+            Log.Add(LogBuilder.Line(this, LogKind.System, a.Notice, a.Who, a.At));
         if (!string.IsNullOrEmpty(a.Reason))
             Log.Add(LogBuilder.Line(this, LogKind.System, a.Reason, a.Who, a.At));
         else

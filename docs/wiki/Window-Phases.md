@@ -35,7 +35,9 @@ Four notices tell you what happened:
 - If every phase was skipped: `Every phase was skipped; check the phase conditions`.
 - If a condition cannot be worked out: `Condition of {phase name} failed: {message}; phase not skipped`. A condition that fails never skips its phase.
 
-Loading a game or changing the rules never moves the game on its own. Online, the host presses Next Phase and the guests follow.
+The two notices about a problem (every phase skipped, a condition that failed) are also written to the log, so everyone in an online game can read them.
+
+Loading a game or changing the rules never moves the game because of a condition. (If the rules no longer have the phase the game was in, the game is still moved to the phase now in that place.) Online, a guest may press Next Phase in their own phase; the host works out the conditions and everyone gets the result.
 
 ## Phase panel
 

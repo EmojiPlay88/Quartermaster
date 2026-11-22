@@ -242,7 +242,7 @@ True on the second pass through a block.
 
 ### mod(a, b)
 
-The remainder after dividing `a` by `b`, rounded down the way `floor` rounds, so the result is never negative when `b` is positive. If `b` is 0 it is an error ("mod: division by zero").
+The remainder after dividing `a` by `b`, floored: the result has the sign of `b`, so it is never negative when `b` is positive. If `b` is 0 it is an error ("mod: division by zero").
 
 ```formula
 mod(turn(), 4) == 1

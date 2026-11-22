@@ -120,10 +120,10 @@ How the formula window behaves:
 
 - **Branch `phase-conditions`, not pushed; next: final review, user review, merge/PR (ask).**
   - `turn()`, `stage()` and `mod(a, b)` (floored, "mod: division by zero") in formulas.
-  - `PhaseDef.Condition` ("Runs only if"): Next Phase and Start skip phases whose condition is false; skipped phases run nothing; blocks still count repeats; one press = one undo step; load/reconcile never moves the game; online the host advances.
+  - `PhaseDef.Condition` ("Runs only if"): Next Phase and Start skip phases whose condition is false; skipped phases run nothing; blocks still count repeats; one press = one undo step; load/reconcile never moves the game because of a condition; online the host evaluates (guests may press Next Phase in their own phase); error/guard notices are also logged (system line, `AdvancePhase.Notice`).
   - Phase strip: skipped chips greyed and struck through, will-skip chips faded, next-phase label names the real destination; log line, strip notice, loop-guard notice and error notice.
   - Validator: disallowed functions, non-global names, warning for an always-false condition.
-  - New Workbench Phases tab: `Runs only if` field with hint and problems.
+  - Workbench Phases tab: new `Runs only if` field with hint and problems.
 - **Decisions:** conditions read only globals (Default when unset), tables, turn()/stage(), constants and pure functions; fail-open on errors (never skip); loop guard after one full turn; no Once flag (use `turn() == 1`); wishlist #21 HookOnly dropped; the old WinForms Workbench is not edited.
 - **Tests (full runs, Release, one project at a time):** Rules 217, Core 319, Render 1333 (+1 skipped), Desktop 1060, Docs 20, all passed.
 - **Wiki updated:** Formula-Reference, Making-a-Rules-Pack, Window-Rules-Workbench, Window-Phases.

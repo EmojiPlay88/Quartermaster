@@ -255,6 +255,35 @@ public class PhaseConditionTests
     }
 
     [Fact]
+    public void Skip_lines_are_stamped_with_the_skipped_phases_own_turn_and_phase()
+    {
+        var pk = Pack(c4: "false");
+        var s = new GameState();
+        s.Apply(new AdvancePhase(P(pk, 1, 1, "P3"), P(pk, 2, 1, "P1"), "Phase Three", "Phase One", Skipped: new[] { Sk("P4", "Phase Four", 1, 1) }));
+        var skip = s.Log.Single(l => l.Text == "Skipped Phase Four (condition false)");
+        Assert.Equal(1, skip.Turn);
+        Assert.Equal("Phase Four", skip.Phase);
+        var arrive = s.Log.Last();
+        Assert.Equal(2, arrive.Turn);
+        Assert.Equal("Phase One", arrive.Phase);
+    }
+
+    [Fact]
+    public void Step_notice_is_logged_as_a_system_line_and_round_trips()
+    {
+        var pk = Pack();
+        var s = new GameState();
+        s.Apply(new AdvancePhase(P(pk, 1, 1, "P1"), P(pk, 1, 1, "P2"), "Phase One", "Phase Two", Notice: Guard));
+        var line = s.Log.Single(l => l.Text == Guard);
+        Assert.Equal(LogKind.System, line.Kind);
+        var o = QuartermasterJson.Options;
+        GameCommand cmd = new AdvancePhase(null, P(pk, 1, 1, "P1"), "", "Phase One", Notice: Guard);
+        Assert.Equal(Guard, ((AdvancePhase)JsonSerializer.Deserialize<GameCommand>(JsonSerializer.Serialize(cmd, o), o)!).Notice);
+        GameCommand plain = new AdvancePhase(null, P(pk, 1, 1, "P1"), "", "Phase One");
+        Assert.DoesNotContain("notice", JsonSerializer.Serialize(plain, o), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Save_round_trip_keeps_skips_and_omits_them_when_absent()
     {
         var o = QuartermasterJson.Options;
