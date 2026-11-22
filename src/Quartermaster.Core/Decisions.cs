@@ -26,8 +26,15 @@ public static class Decisions
         {
             var w = warnings[i];
             if (w == null || string.IsNullOrWhiteSpace(w.Condition)) continue;   // blank condition: no hits
-            var match = PieceFilter.Compile(w.Condition, s, pack);
             var msg = w.Message ?? "";
+            if (PieceFilter.ParseGameLevel(w.Condition, pack) is { } game)
+            {
+                // Reads nothing about a piece: true or false once, never once per unit.
+                if (PieceFilter.EvaluateGameLevel(game, s, pack))
+                    res.Add(new WarningHit(i, msg, Array.Empty<string>(), new[] { msg.Replace(Token, "").Trim() }, w.IsDecision, s.Acknowledged?.Contains(i) == true));
+                continue;
+            }
+            var match = PieceFilter.Compile(w.Condition, s, pack);
             var ids = new List<string>();
             var texts = new List<string>();
             foreach (var p in units)

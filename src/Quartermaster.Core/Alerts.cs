@@ -141,9 +141,17 @@ public static class AlertEngine
             if (pack.Phases.Count > 0 && actingSideId != a.SideId) return null;
             sideFilter = side.UnitFilter;
         }
+        var msg = a.Message ?? "";
+        if (PieceFilter.ParseGameLevel(a.Condition, pack) is { } game)
+        {
+            // Reads nothing about a piece: one match for the whole game; the side's unit filter does not apply.
+            var one = PieceFilter.EvaluateGameLevel(game, s, pack)
+                ? new List<AlertMatch> { new(null, HolderDef.GlobalId, msg.Replace(Token, "").Trim() is { Length: > 0 } txt ? txt : a.Name) }
+                : new List<AlertMatch>();
+            return new AlertHit(a.Id, a.Name, a.Severity, msg.Contains(Token) ? a.Name : msg, one, a.Notes);
+        }
         var inSide = PieceFilter.Compile(sideFilter, s, pack);
         var cond = PieceFilter.Compile(a.Condition, s, pack);
-        var msg = a.Message ?? "";
         var matches = new List<AlertMatch>();
         foreach (var p in s.Pieces.Values)
         {

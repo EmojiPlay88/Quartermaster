@@ -39,6 +39,25 @@ public static class PieceFilter
         catch (Exception) { return false; }
     }
 
+    /// <summary>The parsed expression when it parses and reads nothing about a piece (<see cref="ExprFacts.IsGameLevel"/>); else null.</summary>
+    internal static Quartermaster.Rules.Expr.Expr? ParseGameLevel(string? text, RulesPack pack)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var e = TryParse(text);
+        return e != null && ExprFacts.IsGameLevel(e, pack) ? e : null;
+    }
+
+    /// <summary>Evaluates a game-level expression with no piece: piece functions throw, so an error (or a hidden value in a player view) gives false.</summary>
+    internal static bool EvaluateGameLevel(Quartermaster.Rules.Expr.Expr e, GameState s, RulesPack pack)
+    {
+        try { return Evaluator.Evaluate(e, new GameContext(s, pack)).IsTruthy; }
+        catch (Exception) { return false; }
+    }
+
+    /// <summary>Parses and evaluates an expression that reads no piece, once. A parse or evaluation error gives false.</summary>
+    public static bool EvaluateGameLevel(string expr, GameState s, RulesPack pack) =>
+        TryParse(expr) is { } e && EvaluateGameLevel(e, s, pack);
+
     private static Quartermaster.Rules.Expr.Expr? TryParse(string text)
     {
         try { return Parser.Parse(text); }
@@ -182,6 +201,29 @@ public static class PieceFilter
         public Value Side() => SideValue(p, pack, sides);
         public Value PhaseSide() => PhaseSideValue(pack, Sequencer.Current(pack, s));
         public Value MapName() => MapValue(p);
+        public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property);
+    }
+
+    /// <summary>The context of an expression read once for the whole game: globals, holder(), turn, stage and phaseside; nothing of a piece.</summary>
+    private sealed class GameContext(GameState s, RulesPack pack) : IEvalContext
+    {
+        public Value GetVariable(string name)
+        {
+            var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
+            if (def.Scope == PropertyScope.Holders) return Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), def));
+            throw new EvalError("This formula needs a unit");
+        }
+
+        public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
+        public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
+        public bool Has(string property) => false;
+        public Value PieceName() => NameValue(null);
+        public Value Marker(string key) => MarkerValue(null, key);
+        public double Turn() => s.Position?.Turn ?? s.Turn.Turn;
+        public double Stage() => s.Position?.Repeat ?? 1;
+        public Value Side() => SideValue(null, pack, SideMap(s, pack));
+        public Value PhaseSide() => PhaseSideValue(pack, Sequencer.Current(pack, s));
+        public Value MapName() => MapValue(null);
         public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property);
     }
 }
