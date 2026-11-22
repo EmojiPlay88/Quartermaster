@@ -153,6 +153,9 @@ public static class FormulaLayout
                     SubRows.Add(new SubRow(label, sub.Done()));
                     break;
                 }
+                case Call c when c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]:
+                    em.Text("holder(" + hn.Name + ", " + hp.Name + ")");
+                    break;
                 case Call c when c.Function == "if":
                 {
                     em.Text("if(…)");

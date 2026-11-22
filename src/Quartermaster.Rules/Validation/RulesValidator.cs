@@ -188,7 +188,7 @@ public static class RulesValidator
                         if (pack.TableByName(tv.Name) is null) unknownTables.Add(tv.Name);
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
-                    else foreach (var a in c.Args) Walk(a);
+                    else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
         }

@@ -484,6 +484,12 @@ public class ValidatorTests
     }
 
     [Fact]
+    public void Validator_PhaseCondition_Holder_NamesAreNotVariables()
+    {
+        Assert.Equal(new[] { "Phase \"Alpha\": condition may not use holder()" }, CondMsgs("holder(H, X) > 1"));
+    }
+
+    [Fact]
     public void Validator_PhaseCondition_Phaseside_Clean()
     {
         Assert.Empty(CondMsgs("phaseside() == \"North\""));
