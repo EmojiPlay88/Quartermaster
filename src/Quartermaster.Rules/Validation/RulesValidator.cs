@@ -71,10 +71,32 @@ public static class RulesValidator
                         if (pack.TableByName(tv.Name) is null) found.Add($"refers to unknown table \"{tv.Name}\"");
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
+                    else if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp])
+                    {
+                        if (pack.HolderByName(hn.Name) is null) found.Add($"refers to unknown holder \"{hn.Name}\"");
+                        var prop = pack.PropertyByName(hp.Name);
+                        if (prop is null) Prop(hp.Name);
+                        else if (prop.Scope == PropertyScope.Pieces) found.Add($"refers to \"{prop.Name}\", which is not a holder property");
+                    }
                     else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
         }
+    }
+
+    /// <summary>True when the expression text parses and contains a side() call.</summary>
+    private static bool UsesSide(string text)
+    {
+        try { return Has(Parser.Parse(text)); }
+        catch (ParseError) { return false; }
+
+        static bool Has(AstExpr e) => e switch
+        {
+            Unary u => Has(u.Operand),
+            Binary b => Has(b.Left) || Has(b.Right),
+            Call c => c.Function == "side" || c.Args.Any(Has),
+            _ => false,
+        };
     }
 
     private static void Guarded(List<RulesIssue> issues, string id, string name, Action check)
@@ -100,6 +122,9 @@ public static class RulesValidator
             Add(issues, RulesIssueSeverity.Warning, s.Id, s.Name, $"Side \"{s.Name}\": unit filter is empty, so it matches every unit");
         CheckPhaseExpr(pack, s.UnitFilter, $"Side \"{s.Name}\"", "unit filter",
             m => Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, m));
+        // A side's filter decides who owns a piece, so it cannot depend on the owning side.
+        if (!string.IsNullOrWhiteSpace(s.UnitFilter) && UsesSide(s.UnitFilter!))
+            Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": unit filter may not use side()");
     }
 
     private static void CheckPhase(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)

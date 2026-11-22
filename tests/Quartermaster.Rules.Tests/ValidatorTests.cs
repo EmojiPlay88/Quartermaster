@@ -314,6 +314,56 @@ public class ValidatorTests
         Assert.DoesNotContain(msgs, m => m.Contains("unknown property \"Nope\""));
     }
 
+    private static List<string> AlertMsgs(string filter) =>
+        V(Clean() with { Alerts = new() { A("a1", "Low", filter) } }).Select(i => i.Message).ToList();
+
+    [Fact]
+    public void Validator_filter_holder_unknown_holder()
+    {
+        var msgs = AlertMsgs("holder(Ghost, Fuel) > 1");
+        Assert.Contains("Alert \"Low\": condition refers to unknown holder \"Ghost\"", msgs);
+        Assert.DoesNotContain(msgs, m => m.Contains("unknown property"));
+    }
+
+    [Fact]
+    public void Validator_filter_holder_unknown_property()
+    {
+        var msgs = AlertMsgs("holder(Depot, Ghost) > 1");
+        Assert.Contains("Alert \"Low\": condition refers to unknown property \"Ghost\"", msgs);
+        Assert.DoesNotContain(msgs, m => m.Contains("unknown holder"));
+    }
+
+    [Fact]
+    public void Validator_filter_holder_pieces_property_is_not_a_holder_property()
+    {
+        var msgs = AlertMsgs("holder(Depot, Steps) > 1");
+        Assert.Contains("Alert \"Low\": condition refers to \"Steps\", which is not a holder property", msgs);
+    }
+
+    [Fact]
+    public void Validator_filter_holder_clean()
+    {
+        Assert.Empty(V(Clean() with { Alerts = new() { A("a1", "Low", "holder(Depot, Fuel) > 1") } }));
+    }
+
+    [Fact]
+    public void Validator_side_filter_uses_side()
+    {
+        var side = new SideDef { Id = "s", Name = "Red", UnitFilter = "side() == \"Red\"" };
+        var issue = Assert.Single(V(Clean() with { Sides = new() { side } }));
+        Assert.Equal(RulesIssueSeverity.Error, issue.Severity);
+        Assert.Equal("s", issue.EntityId);
+        Assert.Equal("Side \"Red\": unit filter may not use side()", issue.Message);
+    }
+
+    [Fact]
+    public void Validator_filter_new_functions_clean()
+    {
+        var f = "side() == \"North\" and map() == \"Main\" and phaseside() == \"\"";
+        var fx = Clean().Formulas[0] with { AppliesTo = f };
+        Assert.Empty(V(Clean() with { Formulas = new() { fx } }));
+    }
+
     [Fact]
     public void Validator_LookupRowArgumentStillChecked()
     {
