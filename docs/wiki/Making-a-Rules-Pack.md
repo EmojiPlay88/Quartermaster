@@ -104,6 +104,8 @@ has(Fuel)
 
 - A **Unit** binding reads a property of the counter the formula runs on.
 - An **Input** binding is a number the player types in the formula dialog. `0..20` limits it; `auto: 2` is the value used when the game fills things in by itself (Fully automatic). The caption is shown under the box.
+- Choices instead of a range are separated by commas: `Coast, Inland`. If a choice itself holds a comma, put it in double quotes: `"North, coast", Inland` (write a quote inside a quoted choice twice).
+- Add `| always ask` (for example `0..20 | always ask`) when the player must answer every time. Fully automatic then never uses the `auto:` value for this input and asks instead.
 - `SupplyByDistance` inside `lookup(...)` is the table's name, so it needs no binding.
 
 **Outputs:** choose **Add output** and set Target **Unit**, Property **Fuel**, Op **Set**. (A new output starts as Subtract; change it.)

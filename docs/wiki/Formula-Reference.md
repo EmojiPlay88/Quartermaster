@@ -237,9 +237,9 @@ A bare name in a formula (`Fuel`, `Hexes`, `Weather`) is a **variable**. How it 
 | Roll | a dice roll such as 1d6 | Die |
 | Moved | the distance the counter just moved, in hexes (known only when it is moved) | Moved |
 
-Every name used in the formula needs a binding, and every binding should be used; the Workbench's Problems list tells you when they do not match. The longer explanation, with pictures of each case, is in [Making a Rules Pack](Making-a-Rules-Pack#step-4-formulas). How the answers are shown and applied is in the [Formula dialog](Window-Formula-Dialog).
+Every name used in the formula needs a binding, and every binding should be used. A name that appears in another binding's automatic value (for example `Hexes` in `auto: Hexes + 1`) counts as used when that other binding is itself used, but a binding's own name does not count as using itself; the Workbench's Problems list tells you when they do not match. The longer explanation, with pictures of each case, is in [Making a Rules Pack](Making-a-Rules-Pack#step-4-formulas). How the answers are shown and applied is in the [Formula dialog](Window-Formula-Dialog).
 
-**In a filter** (a formula's Applies to, a property's AppliesTo, a side's unit filter, an alert's condition, or a Ledger tab's filter), there are no bindings. A bare name means the **property of that name on the unit being tested**. If the unit has no value for it, that is an error, so guard with `has(...)`. The functions `name()` and `marker("...")` read the unit too. `lookup` works in filters; `dice` does not.
+**In a filter** (a formula's Applies to, a property's AppliesTo, a side's unit filter, an alert's condition, or a Ledger tab's filter), there are no bindings. A bare name means the **property of that name on the unit being tested**. If the unit has no value for it yet, the property's **default** is used, as long as the property applies to that unit (its scope includes units, and its own Applies to, if it has one, matches). `has(Readiness)` still means "this unit has a value in the ledger", so it stays false until a value is set. If the property does not apply to the unit, that is an error, so guard with `has(...)`. In a player's own view of the game, another side's private values are hidden, so they do not fall back to the default there. The functions `name()` and `marker("...")` read the unit too. `lookup` works in filters; `dice` does not.
 
 ```formula
 has(Readiness) and Readiness >= 3
@@ -294,7 +294,7 @@ Most of these end with "at position N", where N counts characters from the start
 | No marker 'x' | The counter has no marker with that key. | Check the key. Riverland's keys are Side, Kind and Type. |
 | Dice are not allowed here | `dice` was used in a filter. | Roll with a Roll binding in a formula instead. |
 | Unknown property 'x' | In a filter, a name is not a property in the pack. | Fix the name, or add the property. |
-| x has no value on this piece | In a filter, the unit does not have that property. | Check with `has(x)` first. |
+| x has no value on this piece | In a filter, the property does not apply to this unit, or its value is another side's hidden value. | Check with `has(x)` first, or check the property's scope and Applies to. |
 
 ### Messages about the formula's setup
 
@@ -309,5 +309,6 @@ These come from the bindings and outputs rather than the formula text.
 | Variable x depends on itself | Variables refer to each other in a circle. | Break the circle. |
 | variable "x" has no binding | The Workbench: the formula uses a name that has no row under Bindings. | Add the binding. |
 | variable "x" is bound but not used in the formula | A warning: a binding is not used. | Remove the binding or use it. |
+| refers to unknown table "x" | The Workbench: `lookup` in a filter or condition names a table that is not in the pack. | Fix the name. |
 | refers to unknown property "x" | The Workbench: an applies-to, filter or condition names a property that is not in the pack. | Fix the name. |
 | The result is not a number, so it cannot change Fuel | An output writes into a property, but the formula gave text or true/false. | Make the formula give a number. |
