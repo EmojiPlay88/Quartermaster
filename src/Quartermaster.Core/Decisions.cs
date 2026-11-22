@@ -16,16 +16,26 @@ public static class Decisions
 {
     private const string Token = "{unit}";
 
-    /// <summary>Leading characters left behind when {unit} is removed from the start of a message ("{unit}: set up" reads "set up").</summary>
-    private const string Leftover = ":,-—";
+    /// <summary>Separators that may follow a leading {unit} ("{unit}: set up" reads "set up").</summary>
+    private const string Separators = ":,-—";
 
-    /// <summary>A game-level message: {unit} removed, then leftover leading punctuation and surrounding whitespace trimmed.</summary>
+    /// <summary>
+    /// A game-level message with {unit} removed. Only when the message starts with {unit} is the separator run right after it dropped, and
+    /// only when that run stands alone (followed by whitespace or the end), so a sign stays: "{unit} -1 MP" reads "-1 MP", and
+    /// "-1 MP to all units" is unchanged.
+    /// </summary>
     internal static string WithoutUnit(string? message)
     {
-        var t = (message ?? "").Replace(Token, "");
+        var m = message ?? "";
+        var lead = m.TrimStart();
+        if (!lead.StartsWith(Token, StringComparison.Ordinal)) return m.Replace(Token, "").Trim();
+        var rest = lead[Token.Length..];
         var i = 0;
-        while (i < t.Length && (char.IsWhiteSpace(t[i]) || Leftover.Contains(t[i]))) i++;
-        return t[i..].Trim();
+        while (i < rest.Length && char.IsWhiteSpace(rest[i])) i++;
+        var j = i;
+        while (j < rest.Length && Separators.Contains(rest[j])) j++;
+        if (j > i && (j == rest.Length || char.IsWhiteSpace(rest[j]))) rest = rest[j..];
+        return rest.Replace(Token, "").Trim();
     }
 
     public static IReadOnlyList<WarningHit> Warnings(RulesPack pack, GameState s, PhaseDef phase)
@@ -90,7 +100,8 @@ public static class Decisions
         {
             if (!w.IsDecision || w.Acknowledged) continue;
             var n = w.PieceIds.Count;
-            var head = WithoutUnit(w.Message);
+            // Per unit: as before this branch. Game-level (no units): the message reads without {unit}.
+            var head = n == 0 ? WithoutUnit(w.Message) : w.Message.Replace(Token, "").Trim();
             if (n == 0 && head.Length == 0) head = w.UnitTexts.FirstOrDefault() ?? "";
             res.Add(new Decision(DecisionKind.Warning, n == 0 ? head : $"{head} — {n} {(n == 1 ? "unit" : "units")}", w.Index, null, w.PieceIds));
         }

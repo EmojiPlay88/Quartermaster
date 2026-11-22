@@ -354,6 +354,15 @@ public class ValidatorTests
     }
 
     [Fact]
+    public void Validator_repeated_holder_call_is_reported_once()
+    {
+        var b = new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "holder(Ghost, Fuel) + holder(Ghost, Fuel)" };
+        var msgs = V(WithFormula(Fx("X + holder(Ghost, Fuel) * holder(Ghost, Fuel)", b))).Select(i => i.Message).ToList();
+        // Once for the text and once for the auto value, never once per call.
+        Assert.Equal(2, msgs.Count(m => m == "Formula \"Fuel Use\": refers to unknown holder \"Ghost\""));
+    }
+
+    [Fact]
     public void Validator_auto_value_holder_problems_and_clean_call()
     {
         var b = new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "holder(Ghost, Steps)" };

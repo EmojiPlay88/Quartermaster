@@ -410,7 +410,7 @@ public static class RulesValidator
 
         if (ast is not null)
         {
-            CheckLookups(ast, pack, Err);
+            CheckLookups(ast, pack, Once(Err));
         }
 
         if (!string.IsNullOrWhiteSpace(f.AppliesTo))
@@ -431,7 +431,7 @@ public static class RulesValidator
                 if (ParseProblem(b.AutoValue!) is { } ae) Err($"variable \"{b.Variable}\" auto value {ae}");
                 else
                 {
-                    CheckLookups(Parser.Parse(b.AutoValue!), pack, Err);
+                    CheckLookups(Parser.Parse(b.AutoValue!), pack, Once(Err));
                 }
             }
         }
@@ -447,6 +447,13 @@ public static class RulesValidator
             if (!used.Contains(b.Variable)) Warn($"variable \"{b.Variable}\" is bound but not used in the formula");
 
         foreach (var o in f.Outputs) CheckOutput(pack, o, Err);
+    }
+
+    /// <summary>Reports each distinct message once (as <see cref="FilterRefProblems"/> does), so a repeated call is one issue.</summary>
+    private static Action<string> Once(Action<string> err)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        return m => { if (seen.Add(m)) err(m); };
     }
 
     private static void CheckLookups(AstExpr e, RulesPack pack, Action<string> err)

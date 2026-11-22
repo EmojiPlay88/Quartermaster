@@ -175,6 +175,10 @@ public class GameLevelAlertTests
     [InlineData("{unit} - flag up", "flag up")]
     [InlineData("{unit} — flag up", "flag up")]
     [InlineData("Flag up for {unit}", "Flag up for")]
+    [InlineData("-1 MP to all units", "-1 MP to all units")]   // a sign is never a separator
+    [InlineData("{unit} -1 MP", "-1 MP")]
+    [InlineData("  {unit}: set up", "set up")]
+    [InlineData("Set up: {unit}", "Set up:")]
     public void Game_level_texts_drop_leftover_punctuation(string message, string expected)
     {
         var phase = Phase("Flag == 1", message, decision: true);
@@ -184,6 +188,17 @@ public class GameLevelAlertTests
         Assert.Equal(expected, Assert.Single(Assert.Single(Decisions.Warnings(pk, s, phase)).UnitTexts));
         Assert.Equal(expected, Assert.Single(Decisions.Compute(pk, s), x => x.Kind == DecisionKind.Warning).Text);
         Assert.Equal(expected, Assert.Single(Assert.Single(AlertEngine.Evaluate(s, pk, null, null, null), h => h.Id == "f").Matches).Text);
+    }
+
+    [Theory]
+    [InlineData("-1 MP for {unit}", "-1 MP for — 3 units")]
+    [InlineData("{unit}: set up", ": set up — 3 units")]   // per unit: exactly as before this branch
+    public void Per_unit_decision_head_is_unchanged(string message, string expected)
+    {
+        var phase = Phase("Grit == 1", message, decision: true);
+        var s = State(0);
+        s.Position = new PhasePosition(1, 1, "P", 0);
+        Assert.Equal(expected, Assert.Single(Decisions.Compute(Pack(phase), s), x => x.Kind == DecisionKind.Warning).Text);
     }
 
     [Fact]
