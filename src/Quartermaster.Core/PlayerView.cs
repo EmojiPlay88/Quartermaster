@@ -62,6 +62,16 @@ public static class PlayerView
         }
     }
 
+    /// <summary>Trait states <see cref="For"/> gives the nameless placeholder of a masked piece (mask trait, then the basic piece).</summary>
+    private static readonly string[] PlaceholderStates = { "masked", "" };
+
+    /// <summary>
+    /// True for the nameless placeholder <see cref="For"/> leaves for another side's masked piece: its ledger values were all removed,
+    /// so a missing value there is hidden, not unset. Only meaningful in a player view.
+    /// </summary>
+    public static bool IsPlaceholder(PieceInstance p) =>
+        p.TraitStates is { Count: 2 } t && t[0] == PlaceholderStates[0] && t[1] == PlaceholderStates[1];
+
     /// <summary>Everything that could hold another side's data removed, with one log line saying why.</summary>
     private static GameState Lockdown(GameState s)
     {
@@ -270,7 +280,7 @@ public static class PlayerView
             {
                 if (!v.Pieces.TryGetValue(id, out var p)) continue;
                 p.TypeString = PieceTypeParser.EncodeState(new[] { mask.RawType, "piece;;;;" });
-                p.TraitStates = new() { "masked", "" };
+                p.TraitStates = new(PlaceholderStates);
                 p.Trail = new();
                 p.TrailVisible = false;
             }

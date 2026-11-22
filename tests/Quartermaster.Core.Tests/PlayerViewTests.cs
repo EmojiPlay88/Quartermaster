@@ -426,6 +426,23 @@ public class PlayerViewTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Masked_placeholder_does_not_default_public_values()
+    {
+        var pack = Pack();
+        var i = pack.Properties.FindIndex(x => x.Id == "morale");
+        pack.Properties[i] = pack.Properties[i] with { Default = 4 };
+        var s = NewState();
+        Add(s, "r1", "RedMaskedUnit", "Red", traits: new[] { ObsTrait }, states: new[] { "red" });
+        Add(s, "b1", "BlueMaskedUnit", "Blue", traits: new[] { ObsTrait }, states: new[] { "blue" });
+        var v = PlayerView.For(s, pack, Model, Blue);
+        Assert.True(PlayerView.IsPlaceholder(v.Pieces["r1"]));
+        Assert.False(PlayerView.IsPlaceholder(v.Pieces["b1"]));
+        Assert.False(PieceFilter.Matches("Morale == 4", v.Pieces["r1"], v, Model, pack));
+        Assert.True(PieceFilter.Matches("Morale == 4", v.Pieces["b1"], v, Model, pack));
+        Assert.True(PieceFilter.Matches("Morale == 4", s.Pieces["r1"], s, Model, pack));   // the full state still defaults
+    }
+
+    [Fact]
     public void Hide_Removed()
     {
         var pack = Pack();

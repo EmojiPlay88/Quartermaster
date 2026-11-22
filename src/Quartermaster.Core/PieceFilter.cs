@@ -78,9 +78,16 @@ public static class PieceFilter
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
             var v = Ledger.Get(s, LedgerKey.Piece(p.Id), def.Id);
             if (v != null) return Value.Of(v.Value);
-            if (!(s.IsPlayerView && def.Visibility == Visibility.Private) && Declared(def)) return Value.Of(def.Default);
+            if (!HiddenInView(def) && Declared(def)) return Value.Of(def.Default);
             throw new EvalError($"{name} has no value on this piece");
         }
+
+        /// <summary>
+        /// In a player's view a missing value may be hidden rather than unset: a Private value, or any value of the placeholder left for
+        /// another side's masked piece (its whole ledger was removed). Those do not fall back to the Default.
+        /// </summary>
+        private bool HiddenInView(PropertyDef def) =>
+            s.IsPlayerView && (def.Visibility == Visibility.Private || PlayerView.IsPlaceholder(p));
 
         /// <summary>True when the property is declared on this piece: not Holders-scoped, and its applies-to is empty or matches. Re-entry counts as not declared.</summary>
         private bool Declared(PropertyDef def)
@@ -96,7 +103,7 @@ public static class PieceFilter
                 if (e != null)
                 {
                     try { result = Evaluator.Evaluate(e, this).IsTruthy; }
-                    catch (Exception) { result = false; }
+                    catch (Exception ex) when (ex is EvalError or ParseError) { result = false; }
                 }
                 _declared[def.Id] = result;
                 return result;
