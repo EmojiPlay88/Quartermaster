@@ -118,7 +118,7 @@ How the formula window behaves:
 
 **CURRENT STATE (2026-11-22, engine wishlist quick wins; read this first):**
 
-- **Branch `wishlist-quick-wins` (cut from master cb65458), not pushed; next: final whole-branch review, then user review, then merge/PR.** Seven small features, plus an adjustment found in review:
+- **Branch `wishlist-quick-wins` (cut from master cb65458), not pushed; next: user review, then merge/PR (ask).** Seven small features, plus an adjustment found in review:
   - Filters read a declared property's Default when the unit has no ledger value (`has(x)` still means "has a ledger value"; not for Private values in a player's view, flag `GameState.IsPlayerView`).
   - Table lookups index their keys once per table (first matching key still wins; edits make new key lists).
   - The validator accepts table names in filter lookups, and warns `refers to unknown table "x"`.
@@ -126,8 +126,9 @@ How the formula window behaves:
   - A ledger-managed property-sheet row is read-only with a tooltip saying where to change it.
   - The on-move warning appears only when there is no Moved, Input, Unit, Global or Holder binding; variables named in a used binding's automatic value count as used (one shared rule, `Rules/Validation/FormulaVariables.cs`, for the validator and the Workbench).
   - `| always ask` inputs: Fully automatic never fills them from the auto value and the missing-input dialog asks; the Formula dialog adds " (always asked)".
-- **Decisions:** read-only sheet rows instead of re-seeding the ledger from the sheet (the ledger is the record after the first seed); no `intable(...)` function (the index makes `lookup` fast and it now validates); no Private default in player views. An unchanged pack keeps its SHA-256, format stays 4.
-- **Tests (final full runs, Release, one project at a time):** Rules 202, Core 295, Render 1317 (+1 skipped), Docs 20, all passed. Desktop: 1056 passed, 1 failed (`FormulasTabTests.Binding_kind_and_target_commit` still expects the old Input tooltip without the "Add | always ask" sentence; see the task 8 report).
+- **Decisions:** read-only sheet rows instead of re-seeding the ledger from the sheet (the ledger is the record after the first seed); no `intable(...)` function (the index makes `lookup` fast and it now validates); no Private (or masked-placeholder) default in player views. An unchanged pack keeps its SHA-256, format stays 4.
+- **Final fix wave (after the whole-branch review):** a masked unit's placeholder in a player's view reads no defaults either; ledger seeding checks a property's applies-to against the sheet values being seeded (not their defaults); `| auto: x | always ask` parses in either order; a guest marks every host snapshot as a player view.
+- **Tests (final full runs, Release, one project at a time):** Rules 202, Core 298, Render 1324 (+1 skipped), Desktop 1057, Docs 20, all passed.
 - **Wiki updated:** Formula-Reference, Making-a-Rules-Pack, Window-Rules-Workbench, Window-Formula-Dialog, Window-Map.
 
 **Previous CURRENT STATE (2026-11-14, stage 6c; history):**
