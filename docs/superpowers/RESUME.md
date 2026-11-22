@@ -116,7 +116,21 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-22, phase conditions; read this first):**
+**CURRENT STATE (2026-11-22, formula reads; read this first):**
+
+- **Branch `formula-reads`, not pushed; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-22-formula-reads-design.md`.
+  - New functions in every expression: `side()` (owning side name, `""` when none), `phaseside()` (the current phase's side name, `""` when none), `map()` (the piece's map name), `holder(Holder, Property)` (bare names; falls back to the Default when unset).
+  - Errors: `side()` in a side's unit filter gives "side() is not available in a side's unit filter" and the filter is false; a piece-only property inside `holder()` is an error; in a player's view another side's holder record is hidden, so `holder()` on it is false (never a made-up Default).
+  - **Intended behaviour change:** in filters (applies-to, side unit filters, entry filters, warnings, alerts) a bare Holders-scope property name now reads the game-level (global) value. Such a filter used to always be false. Pieces/Both names still read the piece.
+  - A warning or alert whose condition never reads the piece (no Pieces/Both property, none of name/marker/has/side/map) shows once. Game-level warning row: no pieces, text is the message (or the condition text if empty). Game-level alert: one match on the global holder, text is the message (or the alert's Name). A game-level decision reads just its text, no "— 0 units" (fixed in `PhaseTexts.WarningText`, found by the Desktop test).
+  - Phase conditions may not use `side()`, `map()` or `holder()`; they may use `phaseside()`.
+  - Validator: `refers to unknown holder "H"`, `refers to "P", which is not a holder property`, `Side "{name}": unit filter may not use side()`.
+  - Desktop: phase panel and alert bar already tolerated a null PieceId and empty PieceIds; two headless tests pin it (`PhasePanel_game_level_warning_row`, `AlertBar_game_level_match`). Go-to on a global match opens the Ledger's global holder (existing behaviour); no new navigation.
+- **Decisions:** names not ids; `phaseside()` instead of a seat concept (`side() == phaseside()` = the acting side is phasing); no Seat; reading other pieces (#45) and sums (#17) are not built.
+- **Wiki updated:** Formula-Reference (four functions, bare names in filters, game-level rule, errors), Making-a-Rules-Pack (More recipes), Window-Phases.
+- **Tests (full runs, Release, one project at a time):** Rules 251, Core 345, Render 1334 (+1 skipped), Desktop 1062, Docs 20, all passed first time (no flaky reruns needed); `src/Quartermaster.App` builds in Release.
+
+**Previous CURRENT STATE (2026-11-22, phase conditions; history):**
 
 - **Branch `phase-conditions`, not pushed; next: final review, user review, merge/PR (ask).**
   - `turn()`, `stage()` and `mod(a, b)` (floored, "mod: division by zero") in formulas.

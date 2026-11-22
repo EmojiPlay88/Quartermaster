@@ -52,7 +52,7 @@ From top to bottom:
 | Title | The phase and the side that plays it. Hover it to see the phase's notes |
 | Instructions | What the phase asks of you, as written in the rules pack |
 | **Rule:** link | Shown when the phase has a rule reference: opens the rulebook at that page |
-| **Warnings** | Units that match one of the phase's warnings, for example "has no fuel and cannot move — 2 units". Double-click a unit to find it on the map |
+| **Warnings** | Units that match one of the phase's warnings, for example "has no fuel and cannot move — 2 units". Double-click a unit to find it on the map. A warning that never reads a unit (for example `Weather == 2`) shows as a single line with no units under it |
 | **Acknowledge** | Marks the selected decision warning as dealt with |
 | **Decisions left**, checklist | The phase's checklist. Tick each item when it is done |
 | **Decisions left**, open list | Calculations that are still waiting, for example "Fuel supply — 0 of 7 applied". Double-click one to open it |

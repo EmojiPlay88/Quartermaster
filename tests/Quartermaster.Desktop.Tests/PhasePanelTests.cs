@@ -182,6 +182,30 @@ public sealed class PhasePanelTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void PhasePanel_game_level_warning_row()
+    {
+        // A warning that never reads a piece shows once, as its message, with no units under it.
+        var w = PhaseGame(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef { Id = "fog", Name = "Fog", Scope = PropertyScope.Holders, Default = 1, Visibility = Visibility.Public }).ToList(),
+            Phases = p.Phases.Select(ph => ph.Id != "ph-combat" ? ph : ph with
+            {
+                Warnings = new() { new PhaseWarning { Condition = "Fog == 1", Message = "Fog over the map", IsDecision = true } },
+            }).ToList(),
+        });
+        ToCombat(w);
+        Assert.Equal("Fog over the map (decision)", Assert.Single(w.Phases.WarningTexts));
+        w.Phases.SelectWarning(0);   // no pieces under it: selecting must not throw
+        Pump();
+        Assert.True(w.Phases.AckEnabled);
+        w.Phases.ClickAcknowledge();
+        Pump();
+        Flush(w);
+        Assert.Equal("Fog over the map (acknowledged)", Assert.Single(w.Phases.WarningTexts));
+        Assert.Equal("1 decision left", w.Phases.CountText);
+    }
+
+    [AvaloniaFact]
     public void Checklist_tick_records()
     {
         var w = PhaseGame();
