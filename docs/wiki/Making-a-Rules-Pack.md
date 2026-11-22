@@ -266,6 +266,18 @@ Select North Supply and choose **Duplicate**. Change the copy's **Name:** to `So
 
 **Test it:** in the main window choose **Start game**. The phase strip shows North Supply, and the phase panel shows your instructions and the formulas waiting to run. See [Phases](Window-Phases).
 
+### Phase conditions
+
+A phase can run only some of the time. In the **Runs only if** field, write a formula that must be true for the phase to run. Leave it empty and the phase always runs. When the condition is false, Next Phase (and Start game) skip the phase without running anything in it: no start formulas, no warnings, no checklist. A condition may read only global properties, tables, `turn()` and `stage()` (see [What a phase condition may read](Formula-Reference#what-a-phase-condition-may-read)).
+
+Recipes:
+
+- **Two copies of a side's turn.** Add a global property `Flag` (Default 0). Make two copies of North Movement, one with `Flag == 1` and one with `Flag == 0`. Only one of them runs, depending on the flag.
+- **Only at the start of the game.** A phase with `turn() == 1` runs on the first turn only.
+- **Every fourth turn.** A phase with `mod(turn(), 4) == 1` runs on turns 1, 5, 9 and so on.
+
+If a condition is always false, the Workbench warns that the phase never runs. If every phase is skipped, Quartermaster stops after one full turn and says so.
+
 ## Step 6: An alert
 
 Open the **Alerts** tab and choose **Add**. Set **Name:** to `Low fuel`, the **Condition** to

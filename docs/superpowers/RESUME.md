@@ -116,7 +116,19 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-22, engine wishlist quick wins; read this first):**
+**CURRENT STATE (2026-11-22, phase conditions; read this first):**
+
+- **Branch `phase-conditions`, not pushed; next: final review, user review, merge/PR (ask).**
+  - `turn()`, `stage()` and `mod(a, b)` (floored, "mod: division by zero") in formulas.
+  - `PhaseDef.Condition` ("Runs only if"): Next Phase and Start skip phases whose condition is false; skipped phases run nothing; blocks still count repeats; one press = one undo step; load/reconcile never moves the game; online the host advances.
+  - Phase strip: skipped chips greyed and struck through, will-skip chips faded, next-phase label names the real destination; log line, strip notice, loop-guard notice and error notice.
+  - Validator: disallowed functions, non-global names, warning for an always-false condition.
+  - New Workbench Phases tab: `Runs only if` field with hint and problems.
+- **Decisions:** conditions read only globals (Default when unset), tables, turn()/stage(), constants and pure functions; fail-open on errors (never skip); loop guard after one full turn; no Once flag (use `turn() == 1`); wishlist #21 HookOnly dropped; the old WinForms Workbench is not edited.
+- **Tests (full runs, Release, one project at a time):** Rules 217, Core 319, Render 1333 (+1 skipped), Desktop 1060, Docs 20, all passed.
+- **Wiki updated:** Formula-Reference, Making-a-Rules-Pack, Window-Rules-Workbench, Window-Phases.
+
+**Previous CURRENT STATE (2026-11-22, engine wishlist quick wins; history):**
 
 - **Branch `wishlist-quick-wins` (cut from master cb65458), not pushed; next: user review, then merge/PR (ask).** Seven small features, plus an adjustment found in review:
   - Filters read a declared property's Default when the unit has no ledger value (`has(x)` still means "has a ledger value"; not for Private values in a player's view, flag `GameState.IsPlayerView`).
