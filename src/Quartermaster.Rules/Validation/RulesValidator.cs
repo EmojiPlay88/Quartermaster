@@ -71,7 +71,7 @@ public static class RulesValidator
                         if (pack.TableByName(tv.Name) is null) found.Add($"refers to unknown table \"{tv.Name}\"");
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
-                    else foreach (var a in c.Args) Walk(a);
+                    else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
         }
@@ -134,7 +134,7 @@ public static class RulesValidator
         }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice" };
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)

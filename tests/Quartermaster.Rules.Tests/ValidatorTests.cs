@@ -474,6 +474,21 @@ public class ValidatorTests
         Assert.Contains($"Phase \"Alpha\": condition may not use {fn}()", msgs);
     }
 
+    [Theory]
+    [InlineData("side() == \"x\"", "side")]
+    [InlineData("map() == \"x\"", "map")]
+    [InlineData("holder(H, X) > 1", "holder")]
+    public void Validator_PhaseCondition_ReadFunctionsForbidden(string cond, string fn)
+    {
+        Assert.Contains($"Phase \"Alpha\": condition may not use {fn}()", CondMsgs(cond));
+    }
+
+    [Fact]
+    public void Validator_PhaseCondition_Phaseside_Clean()
+    {
+        Assert.Empty(CondMsgs("phaseside() == \"North\""));
+    }
+
     [Fact]
     public void Validator_PhaseCondition_ConstantFalse_Warning()
     {

@@ -23,6 +23,14 @@ public interface IEvalContext
     double Turn() => 1;
     /// <summary>The current stage: how many times the turn's phase span has repeated (1 when unknown).</summary>
     double Stage() => 1;
+    /// <summary>The side of the piece being evaluated.</summary>
+    Value Side() => throw new EvalError("side() is not available here");
+    /// <summary>The side the current phase belongs to.</summary>
+    Value PhaseSide() => throw new EvalError("phaseside() is not available here");
+    /// <summary>The name of the map the piece being evaluated is on.</summary>
+    Value MapName() => throw new EvalError("map() is not available here");
+    /// <summary>A holder's property value, addressed by holder name and property name.</summary>
+    Value HolderValue(string holder, string property) => throw new EvalError("holder() is not available here");
 }
 
 public static class Evaluator
@@ -152,6 +160,7 @@ public static class Evaluator
     {
         "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup",
         "dice", "has", "startswith", "contains", "name", "marker", "turn", "stage", "mod",
+        "side", "phaseside", "map", "holder",
     };
 
     /// <summary>Every binary and unary operator the formula language accepts ('-' is both binary and unary).</summary>
@@ -224,6 +233,14 @@ public static class Evaluator
             case "name": return ctx.PieceName();
             case "turn": return Num(ctx.Turn(), c);
             case "stage": return Num(ctx.Stage(), c);
+            case "side": return ctx.Side();
+            case "phaseside": return ctx.PhaseSide();
+            case "map": return ctx.MapName();
+            case "holder":
+            {
+                if (a[0] is not VarRef h || a[1] is not VarRef hp) throw new EvalError("holder needs a holder name and a property name", c);
+                return ctx.HolderValue(h.Name, hp.Name);
+            }
             case "mod":
             {
                 double x = NumArg(a[0], ctx, "mod"), y = NumArg(a[1], ctx, "mod");
