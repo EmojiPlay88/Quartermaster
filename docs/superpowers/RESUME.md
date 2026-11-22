@@ -116,7 +116,22 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-14, stage 6c; read this first):**
+**CURRENT STATE (2026-11-22, engine wishlist quick wins; read this first):**
+
+- **Branch `wishlist-quick-wins` (cut from master cb65458), not pushed; next: user review, then merge/PR (ask).** Seven small features, plus an adjustment found in review:
+  - Filters read a declared property's Default when the unit has no ledger value (`has(x)` still means "has a ledger value"; not for Private values in a player's view, flag `GameState.IsPlayerView`).
+  - Table lookups index their keys once per table (first matching key still wins; edits make new key lists).
+  - The validator accepts table names in filter lookups, and warns `refers to unknown table "x"`.
+  - Input choices may contain commas (double quotes, `"` doubled; old Details text parses as before).
+  - A ledger-managed property-sheet row is read-only with a tooltip saying where to change it.
+  - The on-move warning appears only when there is no Moved, Input, Unit, Global or Holder binding; variables named in a used binding's automatic value count as used (one shared rule, `Rules/Validation/FormulaVariables.cs`, for the validator and the Workbench).
+  - `| always ask` inputs: Fully automatic never fills them from the auto value and the missing-input dialog asks; the Formula dialog adds " (always asked)".
+- **Decisions:** read-only sheet rows instead of re-seeding the ledger from the sheet (the ledger is the record after the first seed); no `intable(...)` function (the index makes `lookup` fast and it now validates); no Private (or masked-placeholder) default in player views. An unchanged pack keeps its SHA-256, format stays 4.
+- **Final fix wave (after the whole-branch review):** a masked unit's placeholder in a player's view reads no defaults either; ledger seeding checks a property's applies-to against the sheet values being seeded (not their defaults); `| auto: x | always ask` parses in either order; a guest marks every host snapshot as a player view.
+- **Tests (final full runs, Release, one project at a time):** Rules 202, Core 298, Render 1324 (+1 skipped), Desktop 1057, Docs 20, all passed.
+- **Wiki updated:** Formula-Reference, Making-a-Rules-Pack, Window-Rules-Workbench, Window-Formula-Dialog, Window-Map.
+
+**Previous CURRENT STATE (2026-11-14, stage 6c; history):**
 
 - **Stage 6c (Windows feedback) is built on branch `port-stage6c-ui` (worktree `.worktrees/s6c`, cut from master dede0b5), pushed, not merged.** All five tasks are done: setup asks for the install folder again on a first install (upgrades stay in place; refuses the data folder, drive roots, Program Files, foreign non-empty folders; in a silent install the folder page shows no message, and an unsafe `/DIR=` ends with exit code 7, with no box when `/SUPPRESSMSGBOXES` is passed); the log always starts docked; only the main map opens and map tabs close (x, middle-click, right-click Close / Close Others / Close All) and reopen from the module tree, remembered per module; the counter palette sits in the left column between the module tree and Charts & Tables; View > Show submenu and Show Everything. Fix wave after the final review: hot-seat map tabs never leave a player with an empty map area, the left column splitter clamp cannot throw, Game > Current Player and Game > Last Moved (reachable with every bar hidden), View > Charts & Tables next to Module Tree, setup `DisableDirPage=auto` and `DirExistsWarning=no` (report: `.superpowers/sdd/2026-11-14-port-stage6c-windows-feedback/fix-wave-report.md`). Docs: parity.md "Stage-6c deviations", new steps in `docs/port/stage6b2-windows-checklist.md`.
 - **Known limits (also in parity.md):** the alert bar shows a pending notice even when switched off (as WinForms); View > Module Tree hides only the tree, not the whole left panel (WinForms differs).

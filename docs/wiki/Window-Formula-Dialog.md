@@ -32,6 +32,8 @@ What you type depends on the difficulty:
 - **Hardcore** and **Semi-automatic**: you type each value. Quartermaster checks it against its own value. A wrong value turns red, the status line says "Doesn't match: Moved", and **Apply to ledger** stays greyed out until it is right. **Calculate** fills in the right values.
 - **Fully automatic**: the game fills everything in. You can still change a value before you apply.
 
+An input marked **(always asked)** after its caption (shown in every mode) is never filled in from its automatic value: Fully automatic asks you for it, and **Calculate** leaves it as you typed it (empty if you have not).
+
 ![A wrong value: the Moved box is red and Apply is greyed out](images/phases-formula-wrong.png)
 
 In the [Rules Workbench](Window-Rules-Workbench#formulas-tab) the same dialog appears as a preview, with no Apply button:
@@ -84,7 +86,7 @@ There is no screenshot of the batch grid yet.
 
 ## Missing values
 
-In **Fully automatic** mode the game calculates everything itself. When a formula needs a value it cannot work out (an input such as Riverland's "Hexes from this unit to its depot"), a small dialog named after the formula asks for it once, with one box per missing value. The answer is used for every unit of that run.
+In **Fully automatic** mode the game calculates everything itself. When a formula needs a value it cannot work out (an input such as Riverland's "Hexes from this unit to its depot"), a small dialog named after the formula asks for it once, with one box per missing value. The answer is used for every unit of that run. Inputs marked "(always asked)" open this dialog every time, even though they have an automatic value.
 
 - **OK** applies the run with your answers, and the dialog reports how many units were applied.
 - **Per unit…** opens the batch grid (or the formula dialog for a single unit) so you can give each unit its own value.

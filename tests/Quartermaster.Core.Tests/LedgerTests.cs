@@ -168,6 +168,32 @@ public class LedgerTests
         Assert.Equal(["p:a"], LedgerSeeder.BuildSeeds(s, any, _ => true, RunnerFx.Model, new DiagnosticLog())!.Seeds.Select(x => x.Key).ToArray());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Seeder_AppliesTo_reads_sibling_sheet_values_not_defaults(bool kindLast)
+    {
+        var s = S();
+        var sheet = PieceTypeParser.EncodeState(new[] { "propertysheet;0Kind~0Ammo~0Load;Sheet;", "piece;;;unit.svg;Unit" });
+        s.Apply(new AddPiece("a", sheet, "", "m1", new PointD(0, 0), null));
+        s.Apply(new SetTraitState("a", 0, "3~5~7"));
+        var kind = new PropertyDef { Id = "kind", Name = "Kind", Scope = PropertyScope.Pieces, SheetField = "Kind", Default = 2 };
+        var props = new List<PropertyDef>
+        {
+            new() { Id = "ammo", Name = "Ammo", Scope = PropertyScope.Pieces, SheetField = "Ammo", AppliesTo = "Kind == 2" },
+            new() { Id = "load", Name = "Load", Scope = PropertyScope.Pieces, SheetField = "Load", AppliesTo = "Kind == 3" },
+        };
+        props.Insert(kindLast ? 2 : 0, kind);
+        var pack = new RulesPack { Properties = props };
+        var seed = LedgerSeeder.BuildSeeds(s, pack, _ => true, RunnerFx.Model, new DiagnosticLog())!;
+        var expected = kindLast
+            ? new[] { ("p:a", "load", 7.0), ("p:a", "kind", 3.0) }
+            : new[] { ("p:a", "kind", 3.0), ("p:a", "load", 7.0) };
+        Assert.Equal(expected, seed.Seeds.Select(x => (x.Key, x.PropertyId, x.Value)).ToArray());
+        s.Apply(seed);
+        Assert.Null(LedgerSeeder.BuildSeeds(s, pack, _ => true, RunnerFx.Model, new DiagnosticLog()));
+    }
+
     [Fact]
     public void NativeSave_LedgerAndRulesHash_RoundTrip()
     {

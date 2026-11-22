@@ -249,6 +249,29 @@ public class PlayerViewTests(ITestOutputHelper output)
         Assert.Equal("g1", v.GameId);
     }
 
+    [Fact]
+    public void Filtered_view_is_marked_and_full_state_is_not()
+    {
+        var pack = Pack();
+        var full = NewState();
+        Assert.True(PlayerView.For(full, pack, Model, Red).IsPlayerView);
+        Assert.False(PlayerView.For(full, pack, Model, Both).IsPlayerView);
+        Assert.False(full.IsPlayerView);
+        PlayerView.FailForTest = true;
+        try { Assert.True(PlayerView.For(full, pack, Model, Red).IsPlayerView); }
+        finally { PlayerView.FailForTest = false; }
+    }
+
+    [Fact]
+    public void Player_view_flag_is_written_only_when_set()
+    {
+        var full = NewState();
+        Assert.DoesNotContain("\"isPlayerView\"", Json(full));
+        var json = Json(PlayerView.For(full, Pack(), Model, Red));
+        Assert.Contains("\"isPlayerView\"", json);
+        Assert.True(JsonSerializer.Deserialize<GameState>(json, QuartermasterJson.Options)!.IsPlayerView);
+    }
+
     private static string Json(GameState s) => JsonSerializer.Serialize(s, QuartermasterJson.Options);
 
     [Fact]
@@ -400,6 +423,23 @@ public class PlayerViewTests(ITestOutputHelper output)
         Assert.Equal("BlueMaskedUnit", PieceInfo.Name(v.Pieces["b1"]));
         Assert.Equal("RedBareUnit", PieceInfo.Name(v.Pieces["r2"]));
         Assert.Equal("RedMaskedUnit", PieceInfo.Name(PlayerView.For(s, pack, Model, Red).Pieces["r1"]));
+    }
+
+    [Fact]
+    public void Masked_placeholder_does_not_default_public_values()
+    {
+        var pack = Pack();
+        var i = pack.Properties.FindIndex(x => x.Id == "morale");
+        pack.Properties[i] = pack.Properties[i] with { Default = 4 };
+        var s = NewState();
+        Add(s, "r1", "RedMaskedUnit", "Red", traits: new[] { ObsTrait }, states: new[] { "red" });
+        Add(s, "b1", "BlueMaskedUnit", "Blue", traits: new[] { ObsTrait }, states: new[] { "blue" });
+        var v = PlayerView.For(s, pack, Model, Blue);
+        Assert.True(PlayerView.IsPlaceholder(v.Pieces["r1"]));
+        Assert.False(PlayerView.IsPlaceholder(v.Pieces["b1"]));
+        Assert.False(PieceFilter.Matches("Morale == 4", v.Pieces["r1"], v, Model, pack));
+        Assert.True(PieceFilter.Matches("Morale == 4", v.Pieces["b1"], v, Model, pack));
+        Assert.True(PieceFilter.Matches("Morale == 4", s.Pieces["r1"], s, Model, pack));   // the full state still defaults
     }
 
     [Fact]

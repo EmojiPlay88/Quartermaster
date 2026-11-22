@@ -535,6 +535,7 @@ public sealed class ModuleSession : IDisposable
     {
         ArgumentNullException.ThrowIfNull(filtered);
         if (!IsGuest) throw new InvalidOperationException("Not an online guest.");
+        filtered.IsPlayerView = true;   // a host's snapshot is always a view, even from an older host that does not set the flag
         GuestSides = sides == null ? null : new HashSet<string>(sides);
         if (Game is { } g)
         {

@@ -46,7 +46,7 @@ public static class FormulaEdit
     /// <summary>True when the binding holds anything beyond a default, unconfigured Input.</summary>
     public static bool IsConfigured(VariableBinding b) =>
         b.Kind != BindingKind.Input || b.Property != null || b.HolderId != null || b.TableId != null || b.RowExpr != null || b.ColExpr != null
-        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null;
+        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null || b.AlwaysAsk;
 
     /// <summary>Bindings whose variable no longer appears in the text.</summary>
     public static IReadOnlyList<VariableBinding> Stale(FormulaDef f, IReadOnlyList<string> variables) =>
@@ -56,25 +56,7 @@ public static class FormulaEdit
     /// The variables of the text, then any used only inside a Table binding's row or column expression (in text order, nested tables
     /// included), the same set the formula runner resolves and the validator counts as used. Empty when the text does not parse.
     /// </summary>
-    public static IReadOnlyList<string> UsedVariables(FormulaDef f)
-    {
-        var a = Analyze(f.Text);
-        if (a.Error != null) return Array.Empty<string>();
-        var names = new List<string>(a.Variables);
-        for (var i = 0; i < names.Count; i++)
-        {
-            var b = f.Bindings.FirstOrDefault(x => x.Variable == names[i]);
-            if (b is not { Kind: BindingKind.Table }) continue;
-            foreach (var src in new[] { b.RowExpr, b.ColExpr })
-            {
-                if (string.IsNullOrWhiteSpace(src)) continue;
-                var sub = Analyze(src);
-                foreach (var v in sub.Variables)
-                    if (!names.Contains(v)) names.Add(v);
-            }
-        }
-        return names;
-    }
+    public static IReadOnlyList<string> UsedVariables(FormulaDef f) => FormulaVariables.Used(f);
 
     /// <summary>Bindings whose variable is neither in the formula's current text nor in a table binding's row/column expression.</summary>
     public static IReadOnlyList<VariableBinding> Unused(FormulaDef f) =>
@@ -119,11 +101,15 @@ public static class FormulaEdit
         {
             case BindingKind.Input:
                 string basic;
-                if (b.Choices is { Count: > 0 }) basic = string.Join(", ", b.Choices);
+                if (b.Choices is { Count: > 0 }) basic = string.Join(", ", b.Choices.Select(QuoteChoice));
                 else if (b.Min == null && b.Max == null) basic = "";
                 else basic = (b.Min is { } lo ? Num(lo) : "") + ".." + (b.Max is { } hi ? Num(hi) : "");
-                if (string.IsNullOrWhiteSpace(b.AutoValue)) return basic;
-                return (basic.Length == 0 ? "" : basic + " ") + "| auto: " + b.AutoValue;
+                var inputParts = new List<string>();
+                if (basic.Length > 0) inputParts.Add(basic);
+                if (b.AlwaysAsk) inputParts.Add("always ask");
+                if (!string.IsNullOrWhiteSpace(b.AutoValue)) inputParts.Add("auto: " + b.AutoValue);
+                // An auto part alone keeps its leading bar: the bar is what marks it (without it the text would read as a choice).
+                return (inputParts.Count == 1 && inputParts[0].StartsWith("auto: ", StringComparison.Ordinal) ? "| " : "") + string.Join(" | ", inputParts);
             case BindingKind.Roll:
                 return b.DiceCount is { } n && b.DiceSides is { } s ? $"{n}d{s}" : "";
             case BindingKind.Table:
@@ -144,24 +130,37 @@ public static class FormulaEdit
         {
             case BindingKind.Input:
                 string? auto = null;
+                var alwaysAsk = false;
                 var bar = AutoBar(text);
                 if (bar >= 0)
                 {
                     auto = text[(bar + 1)..].Trim()[5..].Trim();
                     text = text[..bar].Trim();
+                    (auto, alwaysAsk) = SplitAlwaysAskAfterAuto(auto);
                     if (auto.Length == 0) auto = null;
                     else if (SyntaxProblem(auto) is { } autoErr) return (b, "Auto value: " + autoErr);
                 }
-                if (text.Length == 0) return (b with { Min = null, Max = null, Choices = null, AutoValue = auto }, null);
-                var dots = text.IndexOf("..", StringComparison.Ordinal);
+                const string inputError = "Use a range like 0..20, or choices separated by commas; add | always ask and/or | auto: expression.";
+                string? basicPart = null;
+                foreach (var part in SplitAtBars(text))
+                {
+                    if (part.Equals("always ask", StringComparison.OrdinalIgnoreCase)) alwaysAsk = true;
+                    else if (part.Length == 0) continue;
+                    else if (basicPart == null) basicPart = part;
+                    else return (b, inputError);
+                }
+                text = basicPart ?? "";
+                if (text.Length == 0) return (b with { Min = null, Max = null, Choices = null, AutoValue = auto, AlwaysAsk = alwaysAsk }, null);
+                var dots = DotsOutsideQuotes(text);
                 if (dots < 0)
                 {
-                    var choices = text.Split(',').Select(c => c.Trim()).Where(c => c.Length > 0).ToList();
-                    return (b with { Min = null, Max = null, Choices = choices.Count == 0 ? null : choices, AutoValue = auto }, null);
+                    var (choices, choiceErr) = ParseChoices(text);
+                    if (choiceErr != null) return (b, choiceErr);
+                    return (b with { Min = null, Max = null, Choices = choices, AutoValue = auto, AlwaysAsk = alwaysAsk }, null);
                 }
                 if (!TryNum(text[..dots], out var lo) || !TryNum(text[(dots + 2)..], out var hi))
-                    return (b, "Use a range like 0..20, or a comma-separated list of choices; add | auto: expression for the automatic value.");
-                return (b with { Min = lo, Max = hi, Choices = null, AutoValue = auto }, null);
+                    return (b, inputError);
+                return (b with { Min = lo, Max = hi, Choices = null, AutoValue = auto, AlwaysAsk = alwaysAsk }, null);
             case BindingKind.Roll:
                 if (text.Length == 0) return (b with { DiceCount = null, DiceSides = null }, null);
                 var d = text.ToLowerInvariant().Split('d');
@@ -184,11 +183,152 @@ public static class FormulaEdit
         }
     }
 
-    /// <summary>Index of the '|' that starts an "auto:" part, else -1.</summary>
+    /// <summary>
+    /// Index of the '|' (outside quotes) that starts an "auto:" part, else -1. Scans the comma-level tokens, so a quote only
+    /// protects a bar when it opens its own choice; in a quoted token the search starts after the closing quote.
+    /// </summary>
     private static int AutoBar(string text)
     {
-        for (var i = text.IndexOf('|'); i >= 0; i = text.IndexOf('|', i + 1))
-            if (text[(i + 1)..].TrimStart().StartsWith("auto:", StringComparison.OrdinalIgnoreCase)) return i;
+        foreach (var t in Tokenize(text, ','))
+        {
+            int from;
+            if (!t.Quoted) from = t.Start;
+            else if (t.Closed) from = t.QuoteEnd + 1;
+            else continue;
+            for (var i = text.IndexOf('|', from, Math.Max(0, t.End - from)); i >= 0 && i < t.End; i = text.IndexOf('|', i + 1, Math.Max(0, t.End - i - 1)))
+                if (text[(i + 1)..].TrimStart().StartsWith("auto:", StringComparison.OrdinalIgnoreCase)) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// An expression has no '|' outside its text literals, so a bar there ends the auto value: when every part after it reads
+    /// "always ask" (any case), the parts are the flag. Otherwise the text is returned whole, so the auto value reports its own error.
+    /// </summary>
+    private static (string Auto, bool AlwaysAsk) SplitAlwaysAskAfterAuto(string auto)
+    {
+        var cuts = new List<int>();
+        var inText = false;
+        for (var i = 0; i < auto.Length; i++)
+        {
+            var c = auto[i];
+            if (inText && c == '\\') { i++; continue; }   // the expression lexer's \" and \\ escapes
+            if (c == '"') inText = !inText;
+            else if (c == '|' && !inText) cuts.Add(i);
+        }
+        if (cuts.Count == 0) return (auto, false);
+        for (var k = 0; k < cuts.Count; k++)
+        {
+            var end = k + 1 < cuts.Count ? cuts[k + 1] : auto.Length;
+            if (!auto[(cuts[k] + 1)..end].Trim().Equals("always ask", StringComparison.OrdinalIgnoreCase)) return (auto, false);
+        }
+        return (auto[..cuts[0]].Trim(), true);
+    }
+
+    /// <summary>Splits at every '|' outside quotes (same scan as <see cref="AutoBar"/>); parts are trimmed.</summary>
+    private static List<string> SplitAtBars(string text)
+    {
+        var cuts = new List<int>();
+        foreach (var t in Tokenize(text, ','))
+        {
+            int from;
+            if (!t.Quoted) from = t.Start;
+            else if (t.Closed) from = t.QuoteEnd + 1;
+            else continue;
+            for (var i = text.IndexOf('|', from, Math.Max(0, t.End - from)); i >= 0 && i < t.End; i = text.IndexOf('|', i + 1, Math.Max(0, t.End - i - 1)))
+                cuts.Add(i);
+        }
+        var parts = new List<string>();
+        var start = 0;
+        foreach (var c in cuts) { parts.Add(text[start..c].Trim()); start = c + 1; }
+        parts.Add(text[start..].Trim());
+        return parts;
+    }
+
+    /// <summary>One piece of a text split at a separator: its range, and whether it is a quoted token.</summary>
+    private readonly record struct Token(int Start, int End, bool Quoted, bool Closed, int QuoteEnd);
+
+    /// <summary>
+    /// Splits at the separator, but not inside a double-quoted token. Only a token whose trimmed text starts with a
+    /// double quote is quoted; a doubled quote inside it is one quote. A quote in the middle of a token is plain text.
+    /// An unclosed quoted token runs to the end of the text.
+    /// </summary>
+    private static List<Token> Tokenize(string text, char separator)
+    {
+        var tokens = new List<Token>();
+        var start = 0;
+        while (true)
+        {
+            var i = start;
+            while (i < text.Length && char.IsWhiteSpace(text[i]) && text[i] != separator) i++;
+            var quoted = i < text.Length && text[i] == '"';
+            var closed = false;
+            var quoteEnd = -1;
+            if (quoted)
+            {
+                var j = i + 1;
+                while (j < text.Length)
+                {
+                    if (text[j] == '"')
+                    {
+                        if (j + 1 < text.Length && text[j + 1] == '"') { j += 2; continue; }
+                        closed = true; quoteEnd = j;
+                        break;
+                    }
+                    j++;
+                }
+                i = closed ? j + 1 : text.Length;
+            }
+            var end = text.IndexOf(separator, i);
+            if (end < 0) end = text.Length;
+            tokens.Add(new Token(start, end, quoted, closed, quoteEnd));
+            if (end >= text.Length) return tokens;
+            start = end + 1;
+        }
+    }
+
+    /// <summary>Splits at the separator outside double quotes. Each part is trimmed; quotes are kept as written.</summary>
+    internal static IReadOnlyList<string> SplitOutsideQuotes(string text, char separator) =>
+        Tokenize(text, separator).Select(t => text[t.Start..t.End].Trim()).ToList();
+
+    /// <summary>Writes a choice so ParseDetails reads it back: in double quotes (quotes doubled) when it would otherwise be misread.</summary>
+    internal static string QuoteChoice(string choice)
+    {
+        var plain = choice.Length > 0 && choice == choice.Trim() && choice[0] != '"'
+            && choice.IndexOfAny([',', '|']) < 0 && !choice.Contains("..", StringComparison.Ordinal)
+            && !choice.Equals("always ask", StringComparison.OrdinalIgnoreCase);
+        return plain ? choice : "\"" + choice.Replace("\"", "\"\"") + "\"";
+    }
+
+    private static (List<string>? Choices, string? Error) ParseChoices(string text)
+    {
+        var choices = new List<string>();
+        foreach (var t in Tokenize(text, ','))
+        {
+            if (!t.Quoted)
+            {
+                var c = text[t.Start..t.End].Trim();
+                if (c.Length > 0) choices.Add(c);
+                continue;
+            }
+            if (!t.Closed) return (null, "A choice has an opening quote but no closing quote.");
+            if (text[(t.QuoteEnd + 1)..t.End].Trim().Length > 0) return (null, "Put the whole choice inside the quotes.");
+            var open = text.IndexOf('"', t.Start);
+            var c2 = text[(open + 1)..t.QuoteEnd].Replace("\"\"", "\"");
+            if (c2.Length > 0) choices.Add(c2);
+        }
+        return (choices.Count == 0 ? null : choices, null);
+    }
+
+    /// <summary>Index of the first ".." that is not inside a quoted choice, else -1.</summary>
+    private static int DotsOutsideQuotes(string text)
+    {
+        foreach (var t in Tokenize(text, ','))
+        {
+            if (t.Quoted) continue;
+            var d = text.IndexOf("..", t.Start, t.End - t.Start, StringComparison.Ordinal);
+            if (d >= 0) return d;
+        }
         return -1;
     }
 

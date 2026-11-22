@@ -55,7 +55,7 @@ The list on the left holds the pack's formulas, with **New…**, **Rename…** a
 | **Applies to:** | Which counters the formula is for, for example `has(Ammo)` |
 | **Rule ref:** | See above |
 | **Notes** | Shown as a tooltip on the formula title in the formula dialog |
-| **Bindings** | What each name in the formula means: Variable, Kind (Unit, Global, Holder, Table, Location, Input, Roll or Moved), Target, Details and Caption. **Remove unused bindings** clears names the formula no longer uses |
+| **Bindings** | What each name in the formula means: Variable, Kind (Unit, Global, Holder, Table, Location, Input, Roll or Moved), Target, Details and Caption. **Remove unused bindings** clears names the formula no longer uses. For an Input, Details holds the limits or choices (a range such as `0..20`, or choices separated by commas, with `"double quotes"` around a choice that holds a comma), then optional `\| always ask` and `\| auto: expression` (either order). A phase's on-move formula gets a warning only when it has no Moved, Input, Unit, Global or Holder binding |
 | **Outputs** | What the result changes: Target, Holder, Property and Op (Set, Add or Subtract). **Add output**, **Remove output** |
 | **Preview** | The [formula dialog](Window-Formula-Dialog) as it will look, with a **Test piece:** to try it on. Sample values are not saved |
 

@@ -27,8 +27,8 @@ public static class RulesValidator
                     if (ParseProblem(p.AppliesTo!) is { } pe)
                         Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to {pe}");
                     else
-                        foreach (var u in UnknownPropertyRefs(p.AppliesTo!, pack))
-                            Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to refers to unknown property \"{u}\"");
+                        foreach (var u in FilterRefProblems(p.AppliesTo!, pack))
+                            Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to {u}");
                 }
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
             foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues));
@@ -46,25 +46,31 @@ public static class RulesValidator
         return issues;
     }
 
-    /// <summary>Property names an applies-to expression refers to (variables and has() arguments) that no property has.</summary>
-    private static IEnumerable<string> UnknownPropertyRefs(string text, RulesPack pack)
+    /// <summary>Problems in an applies-to/filter expression, as message tails: property names (variables and has() arguments) that no property has,
+    /// and lookup() table names that no table has. The table name of a lookup is not a property; its other arguments are walked as usual.</summary>
+    private static IEnumerable<string> FilterRefProblems(string text, RulesPack pack)
     {
         var found = new List<string>();
         try { Walk(Parser.Parse(text)); }
         catch (ParseError) { }
         return found.Distinct(StringComparer.Ordinal);
 
-        void Check(string n) { if (pack.PropertyByName(n) is null) found.Add(n); }
+        void Prop(string n) { if (pack.PropertyByName(n) is null) found.Add($"refers to unknown property \"{n}\""); }
         void Walk(AstExpr e)
         {
             switch (e)
             {
-                case VarRef v: Check(v.Name); break;
+                case VarRef v: Prop(v.Name); break;
                 case Unary u: Walk(u.Operand); break;
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
-                    if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is TextLit t) Check(t.Value);
-                    else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is VarRef hv) Check(hv.Name);
+                    if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is TextLit t) Prop(t.Value);
+                    else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is VarRef hv) Prop(hv.Name);
+                    else if (c.Function == "lookup" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
+                    {
+                        if (pack.TableByName(tv.Name) is null) found.Add($"refers to unknown table \"{tv.Name}\"");
+                        foreach (var a in c.Args.Skip(1)) Walk(a);
+                    }
                     else foreach (var a in c.Args) Walk(a);
                     break;
             }
@@ -84,7 +90,7 @@ public static class RulesValidator
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         if (ParseProblem(text!) is { } pe) err($"{who}: {what} {pe}");
-        else foreach (var u in UnknownPropertyRefs(text!, pack)) err($"{who}: {what} refers to unknown property \"{u}\"");
+        else foreach (var u in FilterRefProblems(text!, pack)) err($"{who}: {what} {u}");
     }
 
     private static void CheckSide(SideDef s, RulesPack pack, List<RulesIssue> issues)
@@ -115,7 +121,8 @@ public static class RulesValidator
         {
             var f = pack.ById<FormulaDef>(e.FormulaId);
             if (f is null) Err($"{who}: formula \"{e.FormulaId}\" does not exist");
-            else if (!f.Bindings.Any(b => b.Kind == BindingKind.Moved))
+            else if (!f.Bindings.Any(b => b.Kind is BindingKind.Moved or BindingKind.Input or BindingKind.Unit
+                                              or BindingKind.Global or BindingKind.Holder))
                 Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: on-move formula \"{f.Name}\" has no Moved binding");
             CheckPhaseExpr(pack, e.UnitFilter, who, "on-move filter", Err);
         }
@@ -277,21 +284,19 @@ public static class RulesValidator
         void Err(string m) => Add(issues, RulesIssueSeverity.Error, f.Id, f.Name, $"{who}: {m}");
         void Warn(string m) => Add(issues, RulesIssueSeverity.Warning, f.Id, f.Name, $"{who}: {m}");
 
-        var used = new HashSet<string>(StringComparer.Ordinal);
         AstExpr? ast = null;
         try { ast = Parser.Parse(f.Text ?? ""); }
         catch (ParseError e) { Err($"{e.Message}"); }
 
         if (ast is not null)
         {
-            foreach (var v in Parser.Variables(ast)) used.Add(v);
             CheckLookups(ast, pack, Err);
         }
 
         if (!string.IsNullOrWhiteSpace(f.AppliesTo))
         {
             if (ParseProblem(f.AppliesTo!) is { } ape) Err($"applies-to {ape}");
-            else foreach (var u in UnknownPropertyRefs(f.AppliesTo!, pack)) Err($"applies-to refers to unknown property \"{u}\"");
+            else foreach (var u in FilterRefProblems(f.AppliesTo!, pack)) Err($"applies-to {u}");
         }
         if (!string.IsNullOrEmpty(f.RuleRefId) && pack.ById<RuleRef>(f.RuleRefId) is null)
             Err($"rule reference \"{f.RuleRefId}\" does not exist");
@@ -300,15 +305,22 @@ public static class RulesValidator
         foreach (var b in f.Bindings)
         {
             if (!bindingNames.Add(b.Variable)) Err($"variable \"{b.Variable}\" is bound more than once");
-            CheckBinding(pack, f, b, used, Err);
-            if (!string.IsNullOrWhiteSpace(b.AutoValue) && ParseProblem(b.AutoValue!) is { } ae)
-                Err($"variable \"{b.Variable}\" auto value {ae}");
+            CheckBinding(pack, f, b, Err);
+            if (!string.IsNullOrWhiteSpace(b.AutoValue))
+            {
+                if (ParseProblem(b.AutoValue!) is { } ae) Err($"variable \"{b.Variable}\" auto value {ae}");
+                else
+                {
+                    CheckLookups(Parser.Parse(b.AutoValue!), pack, Err);
+                }
+            }
         }
 
         if (ast is not null)
             foreach (var v in Parser.Variables(ast))
                 if (!bindingNames.Contains(v)) Err($"variable \"{v}\" has no binding");
-        // Variables used only inside table row/column expressions also need bindings.
+        // Variables used only inside table row/column expressions or auto values also need bindings.
+        var used = new HashSet<string>(FormulaVariables.Used(f), StringComparer.Ordinal);
         foreach (var extra in used.Where(u => ast is null || !Parser.Variables(ast).Contains(u)))
             if (!bindingNames.Contains(extra)) Err($"variable \"{extra}\" has no binding");
         foreach (var b in f.Bindings)
@@ -331,7 +343,7 @@ public static class RulesValidator
         }
     }
 
-    private static void CheckBinding(RulesPack pack, FormulaDef f, VariableBinding b, HashSet<string> used, Action<string> err)
+    private static void CheckBinding(RulesPack pack, FormulaDef f, VariableBinding b, Action<string> err)
     {
         string v = $"variable \"{b.Variable}\"";
         switch (b.Kind)
@@ -350,11 +362,11 @@ public static class RulesValidator
                 var t = pack.ById<TableDef>(b.TableId ?? "");
                 if (t is null) err($"{v} refers to unknown table \"{b.TableId}\"");
                 if (string.IsNullOrWhiteSpace(b.RowExpr)) err($"{v} needs a row expression");
-                else CheckExpr(b.RowExpr!, "row expression", v, used, err);
+                else CheckExpr(b.RowExpr!, "row expression", v, err);
                 if (t?.Kind == TableKind.TwoD && string.IsNullOrWhiteSpace(b.ColExpr))
                     err($"{v} needs a column expression because table \"{t.Name}\" has two dimensions");
                 else if (!string.IsNullOrWhiteSpace(b.ColExpr))
-                    CheckExpr(b.ColExpr!, "column expression", v, used, err);
+                    CheckExpr(b.ColExpr!, "column expression", v, err);
                 break;
             }
             case BindingKind.Input:
@@ -368,12 +380,9 @@ public static class RulesValidator
         }
     }
 
-    private static void CheckExpr(string text, string what, string v, HashSet<string> used, Action<string> err)
+    private static void CheckExpr(string text, string what, string v, Action<string> err)
     {
-        try
-        {
-            foreach (var name in Parser.Variables(Parser.Parse(text))) used.Add(name);
-        }
+        try { Parser.Parse(text); }
         catch (ParseError e) { err($"{v} {what}: {e.Message}"); }
     }
 

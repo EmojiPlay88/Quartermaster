@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Quartermaster.Render;
 
 namespace Quartermaster.Desktop.Shell;
 
@@ -39,7 +40,7 @@ sealed class PropertySheetDialog : Window
                 Margin = new Thickness(0, 2),
             };
             var managed = managedValue?.Invoke(name);
-            if (managed != null) box.IsReadOnly = true;   // the ledger owns this value; the text stays as it was so OK writes it back unchanged
+            if (managed != null) { box.IsReadOnly = true; ToolTip.SetTip(box, PieceMenuModel.ManagedSheetTip); }   // the ledger owns this value; the text stays as it was so OK writes it back unchanged
             _boxes.Add(box);
             var label = new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 8, 0) };
             var note = new TextBlock
@@ -48,6 +49,7 @@ sealed class PropertySheetDialog : Window
                 VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(8, 6, 0, 0),
             };
+            if (managed != null) ToolTip.SetTip(note, PieceMenuModel.ManagedSheetTip);
             Grid.SetRow(label, i); Grid.SetColumn(label, 0);
             Grid.SetRow(box, i); Grid.SetColumn(box, 1);
             Grid.SetRow(note, i); Grid.SetColumn(note, 2);

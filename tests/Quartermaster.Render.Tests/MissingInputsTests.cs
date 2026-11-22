@@ -23,7 +23,7 @@ public class MissingInputsTests : IDisposable
     }
 
     // Terrain has no AutoValue, so a fully automatic Movement phase cannot run it and queues a NeedsInput run.
-    private (ModuleSession S, PhaseController C, PendingRun Run) Make()
+    private (ModuleSession S, PhaseController C, PendingRun Run) Make(bool alwaysAsk = false)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
@@ -38,7 +38,7 @@ public class MissingInputsTests : IDisposable
             {
                 Formulas = p.Formulas.Select(f => f.Id != "f-fuel" ? f : f with
                 {
-                    Bindings = f.Bindings.Select(b => b.Variable == "Terrain" ? b with { AutoValue = null } : b).ToList(),
+                    Bindings = f.Bindings.Select(b => b.Variable == "Terrain" ? (alwaysAsk ? b with { AlwaysAsk = true } : b with { AutoValue = null }) : b).ToList(),
                 }).ToList(),
             };
         });
@@ -99,5 +99,18 @@ public class MissingInputsTests : IDisposable
         Assert.Equal(0, applied);
         Assert.Equal(2, failed.Count);
         Assert.Contains(s.Game!.State.Pending, r => r.Id == run.Id);
+    }
+
+    [Fact]
+    public void AlwaysAsk_input_is_queued_and_asked_in_fully_automatic()
+    {
+        var (s, c, run) = Make(alwaysAsk: true);
+        Assert.True(run.NeedsInput);
+        var m = Assert.Single(MissingInputs.For(s, run));
+        Assert.Equal("Terrain", m.Variable);
+        var (applied, failed) = MissingInputs.ApplyAll(s, c, run, new Dictionary<string, string> { ["Terrain"] = "Sand" });
+        Assert.Equal(2, applied);
+        Assert.Empty(failed);
+        Assert.DoesNotContain(s.Game!.State.Pending, r => r.Id == run.Id);
     }
 }

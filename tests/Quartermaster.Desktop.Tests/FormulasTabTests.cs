@@ -195,7 +195,7 @@ public sealed class FormulasTabTests : IDisposable
         Pick(tab.Bindings, 0, 1, "Holder");
         Pick(tab.Bindings, 0, 2, "Depot: Strength");
         Assert.Equal(("h-depot", "p-str"), (B(s, "f-att", "a").HolderId, B(s, "f-att", "a").Property));
-        Assert.Equal("A range such as 0..20, or a comma-separated list of choices.", Details(tab, BindingKind.Input));
+        Assert.Equal("A range such as 0..20, or choices separated by commas (put a choice that holds a comma in \"double quotes\"); add | auto: expression for the automatic value. Add | always ask to ask the player every time, even in Fully automatic.", Details(tab, BindingKind.Input));
 
         tab.Bindings.BeginEdit(0, 4, "Attack value");
         tab.Bindings.CommitEdit();

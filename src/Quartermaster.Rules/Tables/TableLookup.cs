@@ -85,11 +85,56 @@ public static class TableLookup
         };
     }
 
+    /// <summary>Parsed keys of one key list: text keys by name (first wins), the rest by position.</summary>
+    private sealed class KeyIndex
+    {
+        public readonly TableKey[] Keys;
+        public readonly Dictionary<string, int> TextIndex = new(StringComparer.OrdinalIgnoreCase);
+        public readonly int[] OtherIndices;
+        public readonly int Count;
+
+        public KeyIndex(List<string> raw)
+        {
+            Count = raw.Count;
+            Keys = new TableKey[Count];
+            var others = new List<int>();
+            for (int i = 0; i < Count; i++)
+            {
+                var k = ParseKey(raw[i]);
+                Keys[i] = k;
+                if (k.Kind == TableKeyKind.Text) TextIndex.TryAdd(k.Text, i);
+                else others.Add(i);
+            }
+            OtherIndices = others.ToArray();
+        }
+    }
+
+    // Key lists are replaced, never edited in place (see TableDef), so a list instance's parse is stable.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<List<string>, KeyIndex> Indexes = new();
+
+    private static KeyIndex IndexOf(List<string> keys)
+    {
+        if (Indexes.TryGetValue(keys, out var ix) && ix.Count == keys.Count) return ix;
+        ix = new KeyIndex(keys);
+        Indexes.AddOrUpdate(keys, ix);
+        return ix;
+    }
+
     private static int FindIndex(List<string> keys, Value v)
     {
-        for (int i = 0; i < keys.Count; i++)
-            if (Matches(ParseKey(keys[i]), v)) return i;
-        return -1;
+        var ix = IndexOf(keys);
+        int hit = int.MaxValue;
+        if (v.Kind != ValueKind.Bool)
+        {
+            var text = v.Kind == ValueKind.Number ? v.Display() : Normalise(v.Text);
+            if (ix.TextIndex.TryGetValue(text, out var h)) hit = h;
+        }
+        foreach (var i in ix.OtherIndices)
+        {
+            if (i >= hit) break;
+            if (Matches(ix.Keys[i], v)) return i;
+        }
+        return hit == int.MaxValue ? -1 : hit;
     }
 
     public static Value Lookup(TableDef t, Value row, Value? col)

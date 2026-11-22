@@ -282,7 +282,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             string? source = null;
             if (!r.Typed.TryGetValue(name, out var raw) || string.IsNullOrWhiteSpace(raw))
             {
-                if (!r.UseAutoValues || string.IsNullOrWhiteSpace(b.AutoValue)) return new(name, null, false, false, "Waiting for input");
+                if (!r.UseAutoValues || b.AlwaysAsk || string.IsNullOrWhiteSpace(b.AutoValue)) return new(name, null, false, false, "Waiting for input");
                 try { raw = Evaluator.Evaluate(Parser.Parse(b.AutoValue), new RunContext(this)).Display(); }
                 catch (Exception ex) when (ex is EvalError or ParseError) { return new(name, null, false, false, ex.Message); }
                 source = "default";

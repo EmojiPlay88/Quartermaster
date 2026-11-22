@@ -67,6 +67,9 @@ public sealed class PieceMenuHooks
 public static class PieceMenuModel
 {
     public const string NoCommands = "(no commands)";
+
+    /// <summary>Tooltip of a property sheet row the Ledger keeps (read-only there): says where the value is changed.</summary>
+    public const string ManagedSheetTip = "The Ledger keeps this value. Change it in the Ledger (right-click the counter > Show in Ledger) or with a formula.";
     public const string ShowInLedgerLabel = "Show in &Ledger";
     public const string ShowInLedgerCommand = "view.ledger";
     public const string LedgerNeedsRulesText = "The Ledger needs a rules pack (File > Open Rules Pack… or New Rules Pack…).";

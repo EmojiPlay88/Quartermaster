@@ -59,6 +59,84 @@ public class FormulaEditTests
         Assert.True(FormulaEdit.IsConfigured(new VariableBinding { Variable = "A", Kind = BindingKind.Global }));
     }
 
+    [Theory]
+    [InlineData("low, mid | always ask | auto: \"mid\"")]
+    [InlineData("always ask")]
+    [InlineData("0..9 | always ask")]
+    public void Always_ask_details_round_trip(string text)
+    {
+        var (b, err) = FormulaEdit.ParseDetails(new VariableBinding { Variable = "A", Kind = BindingKind.Input }, text);
+        Assert.Null(err);
+        Assert.True(b.AlwaysAsk);
+        Assert.Equal(text, FormulaEdit.FormatDetails(b));
+    }
+
+    [Theory]
+    [InlineData("0..9 | auto: 2 | always ask", 9.0, "2")]
+    [InlineData("| auto: 2 | ALWAYS ASK ", null, "2")]
+    [InlineData("low, mid | auto: \"a | b\" | always ask", null, "\"a | b\"")]
+    [InlineData("low | auto: \"a\\\" | b\" | always ask", null, "\"a\\\" | b\"")]
+    public void Always_ask_after_auto_value(string text, double? max, string auto)
+    {
+        var (b, err) = FormulaEdit.ParseDetails(new VariableBinding { Variable = "A", Kind = BindingKind.Input }, text);
+        Assert.Null(err);
+        Assert.True(b.AlwaysAsk);
+        Assert.Equal(max, b.Max);
+        Assert.Equal(auto, b.AutoValue);
+    }
+
+    [Fact]
+    public void Auto_value_keeps_bars_inside_its_text_and_rejects_other_parts()
+    {
+        var input = new VariableBinding { Variable = "A", Kind = BindingKind.Input };
+        var (q, e1) = FormulaEdit.ParseDetails(input, "low, mid | auto: \"x | always ask\"");
+        Assert.Null(e1);
+        Assert.False(q.AlwaysAsk);
+        Assert.Equal("\"x | always ask\"", q.AutoValue);
+        var (same, e2) = FormulaEdit.ParseDetails(input, "0..9 | auto: 2 | sometimes");
+        Assert.StartsWith("Auto value: ", e2);
+        Assert.Same(input, same);
+    }
+
+    [Fact]
+    public void Always_ask_details_edge_cases()
+    {
+        var input = new VariableBinding { Variable = "A", Kind = BindingKind.Input };
+        var (alone, _) = FormulaEdit.ParseDetails(input, "ALWAYS ASK");
+        Assert.True(alone.AlwaysAsk);
+        Assert.Null(alone.Choices);
+        Assert.Null(alone.Min);
+
+        var (same, err) = FormulaEdit.ParseDetails(input, "0..9 | sometimes");
+        Assert.Equal("Use a range like 0..20, or choices separated by commas; add | always ask and/or | auto: expression.", err);
+        Assert.Same(input, same);
+
+        var (reset, _) = FormulaEdit.ParseDetails(alone, "0..9");
+        Assert.False(reset.AlwaysAsk);
+
+        var f = F("A", alone with { Caption = "c" });
+        Assert.False(FormulaEdit.SetKind(f, "A", BindingKind.Roll).Bindings[0].AlwaysAsk);
+        Assert.True(FormulaEdit.IsConfigured(alone));
+
+        // A choice equal to "always ask", or holding the words after a bar, stays a choice.
+        var (q, _) = FormulaEdit.ParseDetails(input, "low, always ask");
+        Assert.Equal(new[] { "low", "always ask" }, q.Choices);
+        Assert.False(q.AlwaysAsk);
+        Assert.Equal("low, \"always ask\"", FormulaEdit.FormatDetails(q));
+        var (back, _) = FormulaEdit.ParseDetails(input, FormulaEdit.FormatDetails(q));
+        Assert.Equal(new[] { "low", "always ask" }, back.Choices);
+        Assert.False(back.AlwaysAsk);
+        var (bar, e2) = FormulaEdit.ParseDetails(input, "low, \"a | always ask\"");
+        Assert.Null(e2);
+        Assert.Equal(new[] { "low", "a | always ask" }, bar.Choices);
+        Assert.False(bar.AlwaysAsk);
+        // Old texts parse as before.
+        Assert.Equal(new[] { "low", "mid", "high" }, FormulaEdit.ParseDetails(input, "low, mid, high").Binding.Choices);
+        var (old, _) = FormulaEdit.ParseDetails(input, "0..20 | auto: 2");
+        Assert.Equal(20, old.Max); Assert.Equal("2", old.AutoValue);
+        Assert.Equal(new[] { "say \"hi\"" }, FormulaEdit.ParseDetails(input, "say \"hi\"").Binding.Choices);
+    }
+
     [Fact]
     public void SetKind_resets_kind_specific_fields_but_keeps_caption()
     {
@@ -179,6 +257,33 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void Auto_value_variables_are_used()
+    {
+        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input, AutoValue = "B + 1" },
+            new VariableBinding { Variable = "B", Kind = BindingKind.Unit, Property = "p2" });
+        Assert.Empty(FormulaEdit.Unused(f));
+        Assert.Contains(FormulaEdit.RemoveUnused(f).Bindings, b => b.Variable == "B");
+    }
+
+    [Fact]
+    public void Auto_value_of_unused_binding_does_not_keep_its_variables()
+    {
+        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input },
+            new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "B" },
+            new VariableBinding { Variable = "B", Kind = BindingKind.Unit, Property = "p2" });
+        Assert.Equal(new[] { "X", "B" }, FormulaEdit.Unused(f).Select(b => b.Variable));
+    }
+
+    [Fact]
+    public void Auto_value_naming_its_own_variable_does_not_keep_it()
+    {
+        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input },
+            new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "X + 1" });
+        Assert.Equal(new[] { "X" }, FormulaEdit.Unused(f).Select(b => b.Variable));
+        Assert.Equal(new[] { "A" }, FormulaEdit.RemoveUnused(f).Bindings.Select(b => b.Variable));
+    }
+
+    [Fact]
     public void RemoveUnused_drops_every_stale_binding_only()
     {
         var f = F("C", new VariableBinding { Variable = "A", Kind = BindingKind.Table, TableId = "t" }, new VariableBinding { Variable = "C", Kind = BindingKind.Input });
@@ -265,5 +370,98 @@ public class FormulaEditAutoTests
         Assert.Equal(b.AutoValue, FormulaEdit.ParseDetails(new VariableBinding { Variable = "Pace", Kind = BindingKind.Input }, text).Binding.AutoValue);
         Assert.Equal("| auto: 3", FormulaEdit.FormatDetails(new VariableBinding { Variable = "x", Kind = BindingKind.Input, AutoValue = "3" }));
         Assert.True(FormulaEdit.IsConfigured(new VariableBinding { Variable = "x", Kind = BindingKind.Input, AutoValue = "3" }));
+    }
+}
+
+public class FormulaEditQuotedChoiceTests
+{
+    private static VariableBinding Input() => new() { Variable = "Area", Kind = BindingKind.Input };
+    private static readonly string[] Five = ["North, coast", "Inland", "Say \"hi\", then go", "a|b", "1..2"];
+    private const string FiveText = "\"North, coast\", Inland, \"Say \"\"hi\"\", then go\", \"a|b\", \"1..2\"";
+
+    [Fact]
+    public void Choices_with_commas_round_trip()
+    {
+        var b = Input() with { Choices = Five.ToList() };
+        Assert.Equal(FiveText, FormulaEdit.FormatDetails(b));
+        var (p, err) = FormulaEdit.ParseDetails(Input(), FiveText);
+        Assert.Null(err);
+        Assert.Equal(Five, p.Choices);
+        Assert.Null(p.Min);
+        Assert.Null(p.Max);
+    }
+
+    [Fact]
+    public void Choices_with_commas_and_auto_value()
+    {
+        var b = Input() with { Choices = Five.ToList(), AutoValue = "\"Inland\"" };
+        var text = FormulaEdit.FormatDetails(b);
+        Assert.Equal(FiveText + " | auto: \"Inland\"", text);
+        var (p, err) = FormulaEdit.ParseDetails(Input(), text);
+        Assert.Null(err);
+        Assert.Equal(Five, p.Choices);
+        Assert.Equal("\"Inland\"", p.AutoValue);
+    }
+
+    [Fact]
+    public void Old_details_text_parses_as_before()
+    {
+        Assert.Equal(["low", "mid", "high"], FormulaEdit.ParseDetails(Input(), "low, mid, high").Binding.Choices);
+        var (r, _) = FormulaEdit.ParseDetails(Input(), "0..20 | auto: 2");
+        Assert.Equal(0, r.Min);
+        Assert.Equal(20, r.Max);
+        Assert.Equal("2", r.AutoValue);
+        Assert.Equal(["say \"hi\"", "bye"], FormulaEdit.ParseDetails(Input(), "say \"hi\", bye").Binding.Choices);
+    }
+
+    [Theory]
+    [InlineData("x| auto: y")]
+    [InlineData("x|auto: y")]
+    public void Non_leading_quoted_choice_containing_bar_auto_round_trips(string tricky)
+    {
+        var choices = new List<string> { "Inland", tricky };
+        var b = Input() with { Choices = choices };
+        var text = FormulaEdit.FormatDetails(b);
+        var (p, err) = FormulaEdit.ParseDetails(Input(), text);
+        Assert.Null(err);
+        Assert.Equal(choices, p.Choices);
+        Assert.Null(p.AutoValue);
+
+        var withAuto = FormulaEdit.FormatDetails(b with { AutoValue = "\"Inland\"" });
+        var (q, err2) = FormulaEdit.ParseDetails(Input(), withAuto);
+        Assert.Null(err2);
+        Assert.Equal(choices, q.Choices);
+        Assert.Equal("\"Inland\"", q.AutoValue);
+    }
+
+    [Fact]
+    public void Auto_value_may_contain_commas_after_choices()
+    {
+        var (p, err) = FormulaEdit.ParseDetails(Input(), "low, mid | auto: max(1, 2)");
+        Assert.Null(err);
+        Assert.Equal(["low", "mid"], p.Choices);
+        Assert.Equal("max(1, 2)", p.AutoValue);
+    }
+
+    [Fact]
+    public void Unclosed_quote_is_an_error()
+    {
+        var b = Input();
+        var (same, err) = FormulaEdit.ParseDetails(b, "\"North, coast");
+        Assert.Equal("A choice has an opening quote but no closing quote.", err);
+        Assert.Equal(b, same);
+    }
+
+    [Fact]
+    public void Text_after_closing_quote_is_an_error()
+    {
+        Assert.Equal("Put the whole choice inside the quotes.", FormulaEdit.ParseDetails(Input(), "\"a\"b, c").Error);
+    }
+
+    [Fact]
+    public void Split_outside_quotes_is_generic_over_the_separator()
+    {
+        Assert.Equal(["\"a|b\"", "auto: 1"], FormulaEdit.SplitOutsideQuotes("\"a|b\" | auto: 1", '|'));
+        Assert.Equal("\"always ask\"", FormulaEdit.QuoteChoice("always ask"));
     }
 }

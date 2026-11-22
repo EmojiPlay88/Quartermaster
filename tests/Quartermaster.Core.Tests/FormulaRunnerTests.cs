@@ -314,6 +314,16 @@ public class FormulaRunnerTests
         };
 
     [Fact]
+    public void Unit_binding_reads_Default_on_untouched_piece()
+    {
+        var pack = PackWith("Fu", new VariableBinding { Variable = "Fu", Kind = BindingKind.Unit, Property = "fuel" });
+        pack.Properties[0] = pack.Properties[0] with { Default = 4 };
+        var t = RunnerFx.Runner(pack).Run(RunnerFx.State(fuel: null), RunnerFx.Req("f"));
+        Assert.Null(t.Error);
+        Assert.Equal(4, t.Result!.Value.Number);
+    }
+
+    [Fact]
     public void Moved_FromRequest_Auto()
     {
         var pack = PackWith("M * 2", new VariableBinding { Variable = "M", Kind = BindingKind.Moved });
@@ -356,6 +366,18 @@ public class FormulaRunnerTests
         Assert.Null(typed.Variables.Single().Source);
         var o = RunnerFx.Runner(AutoPack("\"Sprint\"")).Run(RunnerFx.State(), RunnerFx.Req("f") with { UseAutoValues = true });
         Assert.StartsWith("Choose one of", o.Variables.Single().MissingReason);
+    }
+
+    [Fact]
+    public void AlwaysAsk_ignores_auto_value()
+    {
+        var pack = PackWith("Pace",
+            new VariableBinding { Variable = "Pace", Kind = BindingKind.Input, Choices = new() { "Slow", "Normal", "Fast" }, AutoValue = "\"Normal\"", AlwaysAsk = true });
+        var runner = RunnerFx.Runner(pack);
+        var o = runner.Run(RunnerFx.State(), RunnerFx.Req("f") with { UseAutoValues = true });
+        Assert.Equal("Waiting for input", o.Variables.Single().MissingReason);
+        var typed = runner.Run(RunnerFx.State(), RunnerFx.Req("f", typed: RunnerFx.D(("Pace", "fast"))) with { UseAutoValues = true });
+        Assert.Equal("Fast", typed.Variables.Single().Value!.Value.Text);
     }
 
     [Theory]

@@ -162,6 +162,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <summary>A guest's dice box before the host rolled it.</summary>
     public const string HostRollsText = "rolled by the host";
 
+    /// <summary>Shown after the caption of an input that always asks (<see cref="VariableBinding.AlwaysAsk"/>).</summary>
+    public const string AlwaysAskedSuffix = " (always asked)";
+
     /// <summary>
     /// Which ledger outputs the viewer may see (set by <see cref="FormulaMasking.Configure"/>); null = all (solo). Only those decide the
     /// "(negative)" mark: another side's value going negative is not shown.
@@ -275,7 +278,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var reason = v.MissingReason == "Waiting for input" || (v.MissingReason != null && typedBox && Raw(v.Variable) == "")
             ? "Waiting for input" : v.MissingReason;
         if (v.Overridden || typedBox)
-            return new BoxView(v.Variable, Raw(v.Variable), BoxBackground.Typed, v.Overridden && !typedBox ? " (override)" : "", true, reason, null,
+            return new BoxView(v.Variable, Raw(v.Variable), BoxBackground.Typed, v.Overridden && !typedBox ? " (override)" : binding is { Kind: BindingKind.Input, AlwaysAsk: true } ? AlwaysAskedSuffix : "", true, reason, null,
                 false, choices);
         var text = v.Value?.Display() ?? "";
         string? reroll = null;
