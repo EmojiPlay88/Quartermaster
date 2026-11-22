@@ -185,13 +185,20 @@ public static class FormulaEdit
         }
     }
 
-    /// <summary>Index of the '|' (outside quotes) that starts an "auto:" part, else -1.</summary>
+    /// <summary>
+    /// Index of the '|' (outside quotes) that starts an "auto:" part, else -1. Scans the comma-level tokens, so a quote only
+    /// protects a bar when it opens its own choice; in a quoted token the search starts after the closing quote.
+    /// </summary>
     private static int AutoBar(string text)
     {
-        foreach (var t in Tokenize(text, '|'))
+        foreach (var t in Tokenize(text, ','))
         {
-            var end = t.End;
-            if (end < text.Length && text[(end + 1)..].TrimStart().StartsWith("auto:", StringComparison.OrdinalIgnoreCase)) return end;
+            int from;
+            if (!t.Quoted) from = t.Start;
+            else if (t.Closed) from = t.QuoteEnd + 1;
+            else continue;
+            for (var i = text.IndexOf('|', from, Math.Max(0, t.End - from)); i >= 0 && i < t.End; i = text.IndexOf('|', i + 1, Math.Max(0, t.End - i - 1)))
+                if (text[(i + 1)..].TrimStart().StartsWith("auto:", StringComparison.OrdinalIgnoreCase)) return i;
         }
         return -1;
     }

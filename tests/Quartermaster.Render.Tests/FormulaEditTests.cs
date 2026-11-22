@@ -309,6 +309,35 @@ public class FormulaEditQuotedChoiceTests
         Assert.Equal(["say \"hi\"", "bye"], FormulaEdit.ParseDetails(Input(), "say \"hi\", bye").Binding.Choices);
     }
 
+    [Theory]
+    [InlineData("x| auto: y")]
+    [InlineData("x|auto: y")]
+    public void Non_leading_quoted_choice_containing_bar_auto_round_trips(string tricky)
+    {
+        var choices = new List<string> { "Inland", tricky };
+        var b = Input() with { Choices = choices };
+        var text = FormulaEdit.FormatDetails(b);
+        var (p, err) = FormulaEdit.ParseDetails(Input(), text);
+        Assert.Null(err);
+        Assert.Equal(choices, p.Choices);
+        Assert.Null(p.AutoValue);
+
+        var withAuto = FormulaEdit.FormatDetails(b with { AutoValue = "\"Inland\"" });
+        var (q, err2) = FormulaEdit.ParseDetails(Input(), withAuto);
+        Assert.Null(err2);
+        Assert.Equal(choices, q.Choices);
+        Assert.Equal("\"Inland\"", q.AutoValue);
+    }
+
+    [Fact]
+    public void Auto_value_may_contain_commas_after_choices()
+    {
+        var (p, err) = FormulaEdit.ParseDetails(Input(), "low, mid | auto: max(1, 2)");
+        Assert.Null(err);
+        Assert.Equal(["low", "mid"], p.Choices);
+        Assert.Equal("max(1, 2)", p.AutoValue);
+    }
+
     [Fact]
     public void Unclosed_quote_is_an_error()
     {
