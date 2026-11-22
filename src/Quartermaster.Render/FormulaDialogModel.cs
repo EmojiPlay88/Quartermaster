@@ -160,8 +160,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     private readonly Dictionary<string, IReadOnlyList<int>> _hostDice = new(StringComparer.Ordinal);
 
     /// <summary>A guest's dice box before the host rolled it.</summary>
-    public const string AlwaysAskedSuffix = " (always asked)";
     public const string HostRollsText = "rolled by the host";
+
+    /// <summary>Shown after the caption of an input that always asks (<see cref="VariableBinding.AlwaysAsk"/>).</summary>
+    public const string AlwaysAskedSuffix = " (always asked)";
 
     /// <summary>
     /// Which ledger outputs the viewer may see (set by <see cref="FormulaMasking.Configure"/>); null = all (solo). Only those decide the

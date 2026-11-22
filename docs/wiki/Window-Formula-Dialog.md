@@ -30,7 +30,9 @@ Dice values have a small **↻** button that rolls that die again.
 What you type depends on the difficulty:
 
 - **Hardcore** and **Semi-automatic**: you type each value. Quartermaster checks it against its own value. A wrong value turns red, the status line says "Doesn't match: Moved", and **Apply to ledger** stays greyed out until it is right. **Calculate** fills in the right values.
-- **Fully automatic**: the game fills everything in. You can still change a value before you apply. An input marked **(always asked)** after its caption is the exception: it is never filled in for you, and **Calculate** leaves it empty.
+- **Fully automatic**: the game fills everything in. You can still change a value before you apply.
+
+An input marked **(always asked)** after its caption (shown in every mode) is never filled in from its automatic value: Fully automatic asks you for it, and **Calculate** leaves it as you typed it (empty if you have not).
 
 ![A wrong value: the Moved box is red and Apply is greyed out](images/phases-formula-wrong.png)
 
