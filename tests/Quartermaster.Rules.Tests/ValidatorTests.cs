@@ -414,4 +414,91 @@ public class ValidatorTests
         Assert.Equal(RulesIssueSeverity.Error, i.Severity);
         Assert.StartsWith("Formula \"Fuel Use\": variable \"A\" auto value ", i.Message);
     }
+
+    // ---- phase conditions ----
+
+    private static RulesPack CondPack(string? condition) => Clean() with
+    {
+        Properties = new()
+        {
+            new PropertyDef { Id = "pf", Name = "Flag", Scope = PropertyScope.Holders },
+            new PropertyDef { Id = "pb", Name = "Both", Scope = PropertyScope.Both },
+            new PropertyDef { Id = "pp", Name = "Steps", Scope = PropertyScope.Pieces },
+        },
+        Tables = new()
+        {
+            new TableDef { Id = "t1", Name = "T", Kind = TableKind.OneD, RowKeys = new() { "1-3", "4+" }, ColumnKeys = new() { "Value" },
+                Cells = new() { new() { "1" }, new() { "2" } } },
+        },
+        Formulas = new(),
+        Phases = new() { Ph("a", "Alpha") with { Condition = condition } },
+    };
+
+    private static List<string> CondMsgs(string? c) => V(CondPack(c)).Select(i => i.Message).ToList();
+
+    [Fact]
+    public void Validator_PhaseCondition_ParseError()
+    {
+        var issues = V(CondPack("1 + * 2"));
+        var i = Assert.Single(issues);
+        Assert.Equal(RulesIssueSeverity.Error, i.Severity);
+        Assert.Equal("a", i.EntityId);
+        Assert.StartsWith("Phase \"Alpha\": condition ", i.Message);
+    }
+
+    [Fact]
+    public void Validator_PhaseCondition_UnknownName()
+    {
+        var i = Assert.Single(V(CondPack("Nope > 1")));
+        Assert.Equal(RulesIssueSeverity.Error, i.Severity);
+        Assert.Equal("a", i.EntityId);
+        Assert.Equal("Phase \"Alpha\": condition uses \"Nope\", which is not a global property", i.Message);
+    }
+
+    [Fact]
+    public void Validator_PhaseCondition_PieceProperty_IsUnknown()
+    {
+        var i = Assert.Single(V(CondPack("Steps > 1")));
+        Assert.Equal("Phase \"Alpha\": condition uses \"Steps\", which is not a global property", i.Message);
+    }
+
+    [Theory]
+    [InlineData("name")]
+    [InlineData("marker")]
+    [InlineData("has")]
+    [InlineData("dice")]
+    public void Validator_PhaseCondition_ForbiddenFunction(string fn)
+    {
+        var arg = fn == "dice" ? "1, 6" : fn == "name" ? "" : "\"x\"";
+        var msgs = CondMsgs($"{fn}({arg}) == 1");
+        Assert.Contains($"Phase \"Alpha\": condition may not use {fn}()", msgs);
+    }
+
+    [Fact]
+    public void Validator_PhaseCondition_ConstantFalse_Warning()
+    {
+        var i = Assert.Single(V(CondPack("1 > 2")));
+        Assert.Equal(RulesIssueSeverity.Warning, i.Severity);
+        Assert.Equal("a", i.EntityId);
+        Assert.Equal("Phase \"Alpha\" never runs (its condition is always false)", i.Message);
+        Assert.Empty(CondMsgs("1 < 2"));
+        Assert.Empty(CondMsgs("turn() > 99"));
+        Assert.Empty(CondMsgs("1 / 0 > 2"));
+    }
+
+    [Fact]
+    public void Validator_PhaseCondition_Clean()
+    {
+        Assert.Empty(CondMsgs("Flag == 1 and mod(turn(), 4) == 1"));
+        Assert.Empty(CondMsgs("lookup(T, turn()) > 0"));
+        Assert.Empty(CondMsgs("Both > 0 or stage() == 2"));
+        Assert.Empty(CondMsgs(null));
+        Assert.Empty(CondMsgs("  "));
+    }
+
+    [Fact]
+    public void Validator_PhaseCondition_UnknownTable()
+    {
+        Assert.Contains("Phase \"Alpha\": condition refers to unknown table \"Zip\"", CondMsgs("lookup(Zip, turn()) > 0"));
+    }
 }
