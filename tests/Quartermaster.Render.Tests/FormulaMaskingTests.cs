@@ -272,6 +272,27 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
+    public void Guest_marks_every_snapshot_as_a_player_view()
+    {
+        var (host, _) = Open(Difficulty.Hardcore, new[] { Alice, Bob });
+        var fx = PhaseFixture.Module();
+        _fixtures.Add(fx);
+        var guest = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "gcache-flag"), Path.Combine(_tmp, "groot-flag"));
+        _sessions.Add(guest);
+        guest.EnterGuestMode();
+        guest.LoadGuestRules(host.Rules!);
+        // An older host filters its snapshots but does not set the flag.
+        var old = PlayerView.For(host.Game!.State, host.Rules, host.Model, Blue);
+        old.IsPlayerView = false;
+        guest.ApplySnapshot(old, Blue);
+        Assert.True(guest.Game!.State.IsPlayerView);
+        var later = PlayerView.For(host.Game!.State, host.Rules, host.Model, Blue);
+        later.IsPlayerView = false;
+        guest.ApplySnapshot(later, Blue);
+        Assert.True(guest.Game!.State.IsPlayerView);
+    }
+
+    [Fact]
     public async Task Guest_HardcoreTyped_VerdictFromHost_NoHiddenValues()
     {
         // The host's game (full state) and a guest holding Blue that has only its filtered snapshot and the rules pack.
