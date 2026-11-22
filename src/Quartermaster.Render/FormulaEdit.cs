@@ -64,13 +64,15 @@ public static class FormulaEdit
         for (var i = 0; i < names.Count; i++)
         {
             var b = f.Bindings.FirstOrDefault(x => x.Variable == names[i]);
-            if (b is not { Kind: BindingKind.Table }) continue;
-            foreach (var src in new[] { b.RowExpr, b.ColExpr })
+            if (b is null) continue;
+            var sources = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue } : new[] { b.AutoValue };
+            foreach (var src in sources)
             {
                 if (string.IsNullOrWhiteSpace(src)) continue;
                 var sub = Analyze(src);
+                if (sub.Error != null) continue;
                 foreach (var v in sub.Variables)
-                    if (!names.Contains(v)) names.Add(v);
+                    if (v != b.Variable && !names.Contains(v)) names.Add(v);
             }
         }
         return names;

@@ -121,7 +121,8 @@ public static class RulesValidator
         {
             var f = pack.ById<FormulaDef>(e.FormulaId);
             if (f is null) Err($"{who}: formula \"{e.FormulaId}\" does not exist");
-            else if (!f.Bindings.Any(b => b.Kind == BindingKind.Moved))
+            else if (!f.Bindings.Any(b => b.Kind is BindingKind.Moved or BindingKind.Input or BindingKind.Unit
+                                              or BindingKind.Global or BindingKind.Holder))
                 Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: on-move formula \"{f.Name}\" has no Moved binding");
             CheckPhaseExpr(pack, e.UnitFilter, who, "on-move filter", Err);
         }
@@ -307,8 +308,17 @@ public static class RulesValidator
         {
             if (!bindingNames.Add(b.Variable)) Err($"variable \"{b.Variable}\" is bound more than once");
             CheckBinding(pack, f, b, used, Err);
-            if (!string.IsNullOrWhiteSpace(b.AutoValue) && ParseProblem(b.AutoValue!) is { } ae)
-                Err($"variable \"{b.Variable}\" auto value {ae}");
+            if (!string.IsNullOrWhiteSpace(b.AutoValue))
+            {
+                if (ParseProblem(b.AutoValue!) is { } ae) Err($"variable \"{b.Variable}\" auto value {ae}");
+                else
+                {
+                    var autoAst = Parser.Parse(b.AutoValue!);
+                    foreach (var v in Parser.Variables(autoAst))
+                        if (v != b.Variable) used.Add(v);
+                    CheckLookups(autoAst, pack, Err);
+                }
+            }
         }
 
         if (ast is not null)

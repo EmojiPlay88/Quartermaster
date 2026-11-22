@@ -179,6 +179,15 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void Auto_value_variables_are_used()
+    {
+        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input, AutoValue = "B + 1" },
+            new VariableBinding { Variable = "B", Kind = BindingKind.Unit, Property = "p2" });
+        Assert.Empty(FormulaEdit.Unused(f));
+        Assert.Contains(FormulaEdit.RemoveUnused(f).Bindings, b => b.Variable == "B");
+    }
+
+    [Fact]
     public void RemoveUnused_drops_every_stale_binding_only()
     {
         var f = F("C", new VariableBinding { Variable = "A", Kind = BindingKind.Table, TableId = "t" }, new VariableBinding { Variable = "C", Kind = BindingKind.Input });

@@ -354,9 +354,47 @@ public class ValidatorTests
     public void Validator_OnMoveWithoutMovedBinding_Warning()
     {
         var ph = Ph("a", "Alpha") with { OnMove = new() { new MoveEntry { FormulaId = "f1" } } };
-        var w = Assert.Single(V(Clean() with { Phases = new() { ph } }), i => i.Severity == RulesIssueSeverity.Warning);
+        var f = Fx("D", new VariableBinding { Variable = "D", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 });
+        var w = Assert.Single(V(WithFormula(f) with { Phases = new() { ph } }), i => i.Severity == RulesIssueSeverity.Warning);
         Assert.Equal("Phase \"Alpha\": on-move formula \"Fuel Use\" has no Moved binding", w.Message);
         Assert.Equal("a", w.EntityId);
+    }
+
+    [Fact]
+    public void Validator_OnMoveWithInputOrPropertyBinding_NoMovedWarning()
+    {
+        var ph = Ph("a", "Alpha") with { OnMove = new() { new MoveEntry { FormulaId = "f1" } } };
+        Assert.DoesNotContain(V(Clean() with { Phases = new() { ph } }), i => i.Message.Contains("Moved binding"));
+        var f = Fx("F", new VariableBinding { Variable = "F", Kind = BindingKind.Unit, Property = "p2" });
+        Assert.DoesNotContain(V(WithFormula(f) with { Phases = new() { ph } }), i => i.Message.Contains("Moved binding"));
+    }
+
+    [Fact]
+    public void Validator_VariableUsedOnlyInAutoValue_IsUsed()
+    {
+        var f = Fx("A", In("A") with { AutoValue = "B + 1" }, new VariableBinding { Variable = "B", Kind = BindingKind.Unit, Property = "p2" });
+        Assert.Empty(V(WithFormula(f)));
+    }
+
+    [Fact]
+    public void Validator_AutoValueSelfReference_NotUse()
+    {
+        var f = Fx("1", In("A") with { AutoValue = "A" });
+        Assert.Contains(V(WithFormula(f)), i => i.Message.Contains("variable \"A\" is bound but not used in the formula"));
+    }
+
+    [Fact]
+    public void Validator_AutoValueUnboundName_Error()
+    {
+        var f = Fx("A", In("A") with { AutoValue = "Ghost" });
+        Assert.Contains(V(WithFormula(f)), i => i.Severity == RulesIssueSeverity.Error && i.Message == "Formula \"Fuel Use\": variable \"Ghost\" has no binding");
+    }
+
+    [Fact]
+    public void Validator_AutoValueUnknownTable_Error()
+    {
+        var f = Fx("A", In("A") with { AutoValue = "lookup(Nope, 1)" });
+        Assert.Contains(V(WithFormula(f)), i => i.Severity == RulesIssueSeverity.Error && i.Message.Contains("no table named \"Nope\""));
     }
 
     [Fact]
