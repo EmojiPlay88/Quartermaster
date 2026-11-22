@@ -39,6 +39,9 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     readonly ComboBox _side = new() { Width = 220 };
     readonly TextBox _instr = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 90 };
     readonly TextBox _notes = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 44 };
+    readonly TextBox _cond = new();
+    readonly TextBlock _condLabel = new() { Text = "Runs only if", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) };
+    readonly TextBlock _condHint = new() { Text = "Leave empty to always run. Example: PlayerA == 1, turn() == 1, mod(turn(), 4) == 1.", TextWrapping = TextWrapping.Wrap, FontStyle = FontStyle.Italic };
     readonly RuleRefRow _refRow = new();
     TextBox? _lastEdit;
     readonly ListBox _check = new() { Height = 90 };
@@ -118,6 +121,11 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         Dock(nameRow, sideLabel, Avalonia.Controls.Dock.Right);
         nameRow.Children.Add(_name);
         rows.Children.Add(nameRow);
+        var condRow = new DockPanel();
+        Dock(condRow, _condLabel, Avalonia.Controls.Dock.Left);
+        condRow.Children.Add(_cond);
+        rows.Children.Add(condRow);
+        rows.Children.Add(_condHint);
         rows.Children.Add(Box("Instructions (shown while this phase is current)", _instr));
         rows.Children.Add(Box("Notes (shown as a tooltip on the phase)", _notes));
         rows.Children.Add(_refRow);
@@ -161,6 +169,8 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         _name.OnTextSet(() => { if (!_loading) Kick(); });
         _instr.OnTextSet(() => { if (!_loading) Kick(); });
         _notes.OnTextSet(() => { if (!_loading) Kick(); });
+        _cond.OnTextSet(() => { if (!_loading) Kick(); });
+        _cond.LostFocus += (_, _) => Run(Flush);
         _notes.LostFocus += (_, _) => Run(Flush);
         _name.LostFocus += (_, _) => Run(Flush);
         _instr.LostFocus += (_, _) => Run(Flush);
@@ -425,6 +435,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             _name.Text = ph?.Name ?? "";
             _instr.Text = ph?.Instructions ?? "";
             _notes.Text = ph?.Notes ?? "";
+            _cond.Text = ph?.Condition ?? "";
             var names = new List<string> { None };
             _phaseSideIds.Clear();
             _phaseSideIds.Add("");
@@ -497,17 +508,20 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             var name = _name.Text ?? "";
             var instr = _instr.Text ?? "";
             var notes = _notes.Text ?? "";
+            var cond = NullIfBlank(_cond.Text ?? "");
             // a box may hand back LF for a stored CRLF: that is no edit
             var nameChanged = ph.Name != name;
             var instrChanged = Norm(ph.Instructions ?? "") != Norm(instr);
             var notesChanged = Norm(ph.Notes ?? "") != Norm(notes);
-            if (nameChanged || instrChanged || notesChanged)
+            var condChanged = !string.Equals(ph.Condition?.Trim() ?? "", cond ?? "", StringComparison.Ordinal);
+            if (nameChanged || instrChanged || notesChanged || condChanged)
             {
                 CommitPack(p => PhaseEdit.UpdatePhase(p, ph.Id, x => x with
                 {
                     Name = nameChanged ? name : x.Name,
                     Instructions = instrChanged ? instr : x.Instructions,
                     Notes = notesChanged ? (notes.Length == 0 ? null : notes) : x.Notes,
+                    Condition = condChanged ? cond : x.Condition,
                 }));
                 RefreshList();
                 ShowIssues();
@@ -830,6 +844,9 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     internal ComboBox SideBox => _side;
     internal TextBox Instructions => _instr;
     internal TextBox Notes => _notes;
+    internal TextBox ConditionBox => _cond;
+    internal TextBlock ConditionLabel => _condLabel;
+    internal TextBlock ConditionHint => _condHint;
     internal TextBox SideFilter => _sideFilter;
     internal TextBlock SideFilterError => _sideFilterErr;
     internal TextBox Issues => _issues;

@@ -15,11 +15,13 @@ namespace Quartermaster.Desktop.Phases;
 public sealed class PhaseStrip : Border
 {
     const int MaxRows = 3, RowH = 24;
+    const double WillSkipOpacity = 0.5;
 
     readonly Button _start = new() { Content = PhaseTexts.StartGameText, Margin = new Thickness(4, 2, 4, 2), Focusable = false, IsVisible = false };
     readonly WrapPanel _flow = new() { Orientation = Orientation.Horizontal };
     readonly TextBlock _notice = new() { FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0), IsVisible = false };
     readonly List<(string Text, ChipState? State, string? Notes)> _items = new();
+    readonly List<(string Text, TextBlock Label, Control Chip)> _drawn = new();
 
     public PhaseStrip()
     {
@@ -58,6 +60,18 @@ public sealed class PhaseStrip : Border
     /// <summary>The state of each item: null for a plain label (tests).</summary>
     public IReadOnlyList<ChipState?> States => _items.Select(i => i.State).ToList();
 
+    /// <summary>True when the chip showing this text is drawn struck through (tests).</summary>
+    public bool IsStruckThrough(string chipText) => Drawn(chipText).Label.TextDecorations?.Any(d => d.Location == TextDecorationLocation.Strikethrough) == true;
+
+    /// <summary>Opacity of the chip showing this text (tests).</summary>
+    public double OpacityOf(string chipText) => Drawn(chipText).Chip.Opacity;
+
+    (TextBlock Label, Control Chip) Drawn(string chipText)
+    {
+        var d = _drawn.First(i => i.Text == chipText || i.Text.EndsWith(" — " + chipText, StringComparison.Ordinal));
+        return (d.Label, d.Chip);
+    }
+
     public string? Notice => _notice.IsVisible ? _notice.Text : null;
 
     /// <summary>Notes tooltip of the chip showing this text, or ending with " — " plus it (tests).</summary>
@@ -79,26 +93,29 @@ public sealed class PhaseStrip : Border
     public void SetView(PhaseView v)
     {
         _items.Clear();
+        _drawn.Clear();
         _flow.Children.Clear();
         _start.IsVisible = v.BeforeStart && !v.NoPhases;
         if (_start.IsVisible) _flow.Children.Add(_start);
         foreach (var chip in PhaseTexts.Strip(v))
         {
             _items.Add((chip.Text, chip.State, chip.Tooltip));
-            _flow.Children.Add(Make(chip));
+            var made = Make(chip);
+            _drawn.Add((chip.Text, made.Label, made.Chip));
+            _flow.Children.Add(made.Chip);
         }
         _notice.Text = v.Notice;
         _notice.IsVisible = !string.IsNullOrEmpty(v.Notice);
     }
 
-    Control Make(StripChip chip)
+    (TextBlock Label, Control Chip) Make(StripChip chip)
     {
         var text = new TextBlock { Text = chip.Text, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
         if (chip.State is not { } state)
         {
             text.Margin = new Thickness(4, 0, 4, 0);
             var label = new Border { Margin = new Thickness(2), MinHeight = RowH - 4, Child = text };
-            return label;
+            return (text, label);
         }
         var b = new Border
         {
@@ -120,13 +137,20 @@ public sealed class PhaseStrip : Border
                 b.Bind(Border.BorderBrushProperty, b.GetResourceObservable("Classic.FaceBrush"));
                 text.Bind(TextBlock.ForegroundProperty, text.GetResourceObservable("Classic.GrayTextBrush"));
                 break;
-            default:
+            case ChipState.Skipped:   // passed over this pass: greyed like Done, struck through
+                b.Bind(Border.BackgroundProperty, b.GetResourceObservable("Classic.FaceBrush"));
+                b.Bind(Border.BorderBrushProperty, b.GetResourceObservable("Classic.FaceBrush"));
+                text.Bind(TextBlock.ForegroundProperty, text.GetResourceObservable("Classic.GrayTextBrush"));
+                text.TextDecorations = TextDecorations.Strikethrough;
+                break;
+            default:   // Upcoming, and WillSkip (the same, faded)
+                if (state == ChipState.WillSkip) b.Opacity = WillSkipOpacity;
                 b.Bind(Border.BackgroundProperty, b.GetResourceObservable("Classic.WindowBrush"));
                 b.Bind(Border.BorderBrushProperty, b.GetResourceObservable("Classic.BorderBrush"));
                 text.Bind(TextBlock.ForegroundProperty, text.GetResourceObservable("Classic.TextBrush"));
                 break;
         }
         if (!string.IsNullOrWhiteSpace(chip.Tooltip)) ToolTip.SetTip(b, chip.Tooltip);
-        return b;
+        return (text, b);
     }
 }

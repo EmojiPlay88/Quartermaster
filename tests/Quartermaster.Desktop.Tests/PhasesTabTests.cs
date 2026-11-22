@@ -274,6 +274,44 @@ public sealed class PhasesTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void PhasesTab_condition_commits_and_clears()
+    {
+        var s = Session();
+        var tab = Tab(s);
+        tab.SelectPhase("ph-supply");
+        Pump();
+        Assert.Equal("", tab.ConditionBox.Text);
+        tab.ConditionBox.Text = "Flag == 1";
+        tab.CommitPending();
+        Assert.Equal("Flag == 1", Ph(s, "ph-supply").Condition);
+        tab.ConditionBox.Text = "   ";
+        tab.CommitPending();
+        Assert.Null(Ph(s, "ph-supply").Condition);
+        tab.ConditionBox.Text = "Flag == 1";
+        tab.CommitPending();
+        tab.ConditionBox.Text = "";
+        tab.CommitPending();
+        Assert.Null(Ph(s, "ph-supply").Condition);
+        Assert.Equal("Runs only if", tab.ConditionLabel.Text);
+        Assert.StartsWith("Leave empty to always run.", tab.ConditionHint.Text);
+    }
+
+    [AvaloniaFact]
+    public void PhasesTab_condition_shows_validator_error()
+    {
+        var s = Session();
+        var tab = Tab(s);
+        tab.SelectPhase("ph-supply");
+        Pump();
+        tab.ConditionBox.Text = "name() == \"x\"";
+        tab.CommitPending();
+        Assert.Contains("condition may not use name()", tab.Issues.Text);
+        tab.ConditionBox.Text = "";
+        tab.CommitPending();
+        Assert.DoesNotContain("condition may not use", tab.Issues.Text ?? "");
+    }
+
+    [AvaloniaFact]
     public void Instructions_and_notes_commit()
     {
         var s = Session();
