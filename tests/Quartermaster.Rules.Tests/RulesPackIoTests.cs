@@ -48,6 +48,34 @@ public class RulesPackIoTests : IDisposable
     }
 
     [Fact]
+    public void AlwaysAsk_round_trips_and_default_is_not_written()
+    {
+        var p = Sample();
+        var f = p.Formulas[0];
+        var asked = p with { Formulas = new() { f with { Bindings = new() { f.Bindings[0] with { Kind = BindingKind.Input, AlwaysAsk = true } } } } };
+        var zip = Path.Combine(_dir, "ask.qrules");
+        RulesPackIo.Save(asked, zip);
+        Assert.True(RulesPackIo.Load(zip).Formulas[0].Bindings[0].AlwaysAsk);
+
+        var plain = JsonSerializer.Serialize(f, RulesPackIo.JsonOptions);
+        Assert.DoesNotContain("alwaysAsk", plain, StringComparison.OrdinalIgnoreCase);
+        var loaded = JsonSerializer.Deserialize<FormulaDef>(plain, RulesPackIo.JsonOptions)!;
+        Assert.False(loaded.Bindings[0].AlwaysAsk);
+        Assert.Contains("alwaysAsk", JsonSerializer.Serialize(asked.Formulas[0], RulesPackIo.JsonOptions), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AlwaysAsk_unset_keeps_the_pack_hash()
+    {
+        var a = Path.Combine(_dir, "h1.qrules");
+        var b = Path.Combine(_dir, "h2.qrules");
+        RulesPackIo.Save(Sample(), a);
+        RulesPackIo.Save(RulesPackIo.Load(a), b);
+        Assert.Equal(RulesPackIo.ComputeSha256(RulesPackIo.Load(a)), RulesPackIo.ComputeSha256(RulesPackIo.Load(b)));
+        Assert.DoesNotContain("alwaysAsk", J(RulesPackIo.Load(a)), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Load_Folder_SameAsZip()
     {
         var zip = Path.Combine(_dir, "a.qrules");

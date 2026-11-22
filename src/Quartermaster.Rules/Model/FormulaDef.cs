@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Quartermaster.Rules;
 
 public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll, Moved }
@@ -21,6 +23,9 @@ public sealed record VariableBinding
     public string? Caption { get; init; }
     /// <summary>Expression giving the value to pre-fill (checked mode compares typed input against it).</summary>
     public string? AutoValue { get; init; }
+    /// <summary>Input only: asked in every difficulty; the AutoValue is never used to fill it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AlwaysAsk { get; init; }
 }
 
 public sealed record FormulaOutput

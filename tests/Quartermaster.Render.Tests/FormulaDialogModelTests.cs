@@ -84,6 +84,22 @@ public class FormulaDialogModelTests
     }
 
     [Fact]
+    public void Always_ask_input_shows_suffix_and_calculate_leaves_it_empty()
+    {
+        var pack = Pack();
+        var f = pack.Formulas.First(x => x.Id == "f1");
+        f = f with { Bindings = f.Bindings.Select(b => b.Variable == "MP" ? b with { AutoValue = "5", AlwaysAsk = true } : b).ToList() };
+        var m = new FormulaDialogModel(new FormulaRunner(pack, LazyModel.Value, (n, _) => Enumerable.Repeat(1, n).ToList()), f, "u1");
+        var state = State();
+        m.Calculate(state);
+        var v = m.Evaluate(state);
+        var mp = v.Boxes.Single(b => b.Variable == "MP");
+        Assert.Equal(FormulaDialogModel.AlwaysAskedSuffix, mp.CaptionSuffix);
+        Assert.Equal("", mp.Text);
+        Assert.Equal("Waiting for: MP", v.Status);
+    }
+
+    [Fact]
     public void FilledInputsGiveResultStatusAndApply()
     {
         var m = Make("f1");

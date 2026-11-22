@@ -368,6 +368,18 @@ public class FormulaRunnerTests
         Assert.StartsWith("Choose one of", o.Variables.Single().MissingReason);
     }
 
+    [Fact]
+    public void AlwaysAsk_ignores_auto_value()
+    {
+        var pack = PackWith("Pace",
+            new VariableBinding { Variable = "Pace", Kind = BindingKind.Input, Choices = new() { "Slow", "Normal", "Fast" }, AutoValue = "\"Normal\"", AlwaysAsk = true });
+        var runner = RunnerFx.Runner(pack);
+        var o = runner.Run(RunnerFx.State(), RunnerFx.Req("f") with { UseAutoValues = true });
+        Assert.Equal("Waiting for input", o.Variables.Single().MissingReason);
+        var typed = runner.Run(RunnerFx.State(), RunnerFx.Req("f", typed: RunnerFx.D(("Pace", "fast"))) with { UseAutoValues = true });
+        Assert.Equal("Fast", typed.Variables.Single().Value!.Value.Text);
+    }
+
     [Theory]
     [InlineData("1 +")]
     [InlineData("nosuch + 1")]

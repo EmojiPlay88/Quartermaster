@@ -160,6 +160,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     private readonly Dictionary<string, IReadOnlyList<int>> _hostDice = new(StringComparer.Ordinal);
 
     /// <summary>A guest's dice box before the host rolled it.</summary>
+    public const string AlwaysAskedSuffix = " (always asked)";
     public const string HostRollsText = "rolled by the host";
 
     /// <summary>
@@ -275,7 +276,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var reason = v.MissingReason == "Waiting for input" || (v.MissingReason != null && typedBox && Raw(v.Variable) == "")
             ? "Waiting for input" : v.MissingReason;
         if (v.Overridden || typedBox)
-            return new BoxView(v.Variable, Raw(v.Variable), BoxBackground.Typed, v.Overridden && !typedBox ? " (override)" : "", true, reason, null,
+            return new BoxView(v.Variable, Raw(v.Variable), BoxBackground.Typed, v.Overridden && !typedBox ? " (override)" : binding is { Kind: BindingKind.Input, AlwaysAsk: true } ? AlwaysAskedSuffix : "", true, reason, null,
                 false, choices);
         var text = v.Value?.Display() ?? "";
         string? reroll = null;

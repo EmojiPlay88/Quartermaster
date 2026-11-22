@@ -59,6 +59,57 @@ public class FormulaEditTests
         Assert.True(FormulaEdit.IsConfigured(new VariableBinding { Variable = "A", Kind = BindingKind.Global }));
     }
 
+    [Theory]
+    [InlineData("low, mid | always ask | auto: \"mid\"")]
+    [InlineData("always ask")]
+    [InlineData("0..9 | always ask")]
+    public void Always_ask_details_round_trip(string text)
+    {
+        var (b, err) = FormulaEdit.ParseDetails(new VariableBinding { Variable = "A", Kind = BindingKind.Input }, text);
+        Assert.Null(err);
+        Assert.True(b.AlwaysAsk);
+        Assert.Equal(text, FormulaEdit.FormatDetails(b));
+    }
+
+    [Fact]
+    public void Always_ask_details_edge_cases()
+    {
+        var input = new VariableBinding { Variable = "A", Kind = BindingKind.Input };
+        var (alone, _) = FormulaEdit.ParseDetails(input, "ALWAYS ASK");
+        Assert.True(alone.AlwaysAsk);
+        Assert.Null(alone.Choices);
+        Assert.Null(alone.Min);
+
+        var (same, err) = FormulaEdit.ParseDetails(input, "0..9 | sometimes");
+        Assert.Equal("Use a range like 0..20, or choices separated by commas; add | always ask and/or | auto: expression.", err);
+        Assert.Same(input, same);
+
+        var (reset, _) = FormulaEdit.ParseDetails(alone, "0..9");
+        Assert.False(reset.AlwaysAsk);
+
+        var f = F("A", alone with { Caption = "c" });
+        Assert.False(FormulaEdit.SetKind(f, "A", BindingKind.Roll).Bindings[0].AlwaysAsk);
+        Assert.True(FormulaEdit.IsConfigured(alone));
+
+        // A choice equal to "always ask", or holding the words after a bar, stays a choice.
+        var (q, _) = FormulaEdit.ParseDetails(input, "low, always ask");
+        Assert.Equal(new[] { "low", "always ask" }, q.Choices);
+        Assert.False(q.AlwaysAsk);
+        Assert.Equal("low, \"always ask\"", FormulaEdit.FormatDetails(q));
+        var (back, _) = FormulaEdit.ParseDetails(input, FormulaEdit.FormatDetails(q));
+        Assert.Equal(new[] { "low", "always ask" }, back.Choices);
+        Assert.False(back.AlwaysAsk);
+        var (bar, e2) = FormulaEdit.ParseDetails(input, "low, \"a | always ask\"");
+        Assert.Null(e2);
+        Assert.Equal(new[] { "low", "a | always ask" }, bar.Choices);
+        Assert.False(bar.AlwaysAsk);
+        // Old texts parse as before.
+        Assert.Equal(new[] { "low", "mid", "high" }, FormulaEdit.ParseDetails(input, "low, mid, high").Binding.Choices);
+        var (old, _) = FormulaEdit.ParseDetails(input, "0..20 | auto: 2");
+        Assert.Equal(20, old.Max); Assert.Equal("2", old.AutoValue);
+        Assert.Equal(new[] { "say \"hi\"" }, FormulaEdit.ParseDetails(input, "say \"hi\"").Binding.Choices);
+    }
+
     [Fact]
     public void SetKind_resets_kind_specific_fields_but_keeps_caption()
     {
