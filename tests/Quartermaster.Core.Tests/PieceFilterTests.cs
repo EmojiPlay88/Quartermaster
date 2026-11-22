@@ -137,4 +137,18 @@ public class PieceFilterTests
         var plain = s.Pieces["u1"];
         Assert.Equal(new[] { "Alpha", "Fuel Use" }, PieceFilter.FormulasFor(pack, plain, s, RunnerFx.Model).Select(f => f.Name).ToList());
     }
+
+    [Fact]
+    public void Filter_reads_turn_and_stage()
+    {
+        var s = RunnerFx.State();
+        var p = Marked();
+        s.Pieces[p.Id] = p;
+        s.Position = new PhasePosition(3, 2, "ph1", 0);
+        Assert.True(M("turn() == 3 and stage() == 2", p, s));
+        Assert.False(M("turn() == 2", p, s));
+        s.Position = null;
+        s.Turn = new TurnState(5, null);
+        Assert.True(M("turn() == 5 and stage() == 1", p, s));
+    }
 }

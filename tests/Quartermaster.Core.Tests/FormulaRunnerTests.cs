@@ -434,4 +434,17 @@ public class FormulaRunnerTests
         Assert.Null(d0.Tag);
         Assert.Null(d0.Subject);
     }
+
+    [Fact]
+    public void Formula_reads_turn()
+    {
+        var pack = RunnerFx.Pack(f => f with { Text = "turn() * 10", Bindings = new(), Outputs = new() });
+        var s = RunnerFx.State();
+        s.Turn = new TurnState(4, null);
+        var t = RunnerFx.Runner(pack).Run(s, RunnerFx.Req());
+        Assert.Null(t.Error);
+        Assert.Equal(40, t.Result!.Value.Number);
+        s.Position = new PhasePosition(6, 1, "ph1", 0);
+        Assert.Equal(60, RunnerFx.Runner(pack).Run(s, RunnerFx.Req()).Result!.Value.Number);
+    }
 }
