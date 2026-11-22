@@ -377,6 +377,15 @@ public class ValidatorTests
     }
 
     [Fact]
+    public void Validator_AutoValueOfUnusedBinding_DoesNotCountAsUse()
+    {
+        var f = Fx("A", In("A"), In("X") with { AutoValue = "B" }, new VariableBinding { Variable = "B", Kind = BindingKind.Unit, Property = "p2" });
+        var msgs = V(WithFormula(f)).Select(i => i.Message).ToList();
+        Assert.Contains("Formula \"Fuel Use\": variable \"X\" is bound but not used in the formula", msgs);
+        Assert.Contains("Formula \"Fuel Use\": variable \"B\" is bound but not used in the formula", msgs);
+    }
+
+    [Fact]
     public void Validator_AutoValueSelfReference_NotUse()
     {
         var f = Fx("1", In("A") with { AutoValue = "A" });

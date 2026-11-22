@@ -284,14 +284,12 @@ public static class RulesValidator
         void Err(string m) => Add(issues, RulesIssueSeverity.Error, f.Id, f.Name, $"{who}: {m}");
         void Warn(string m) => Add(issues, RulesIssueSeverity.Warning, f.Id, f.Name, $"{who}: {m}");
 
-        var used = new HashSet<string>(StringComparer.Ordinal);
         AstExpr? ast = null;
         try { ast = Parser.Parse(f.Text ?? ""); }
         catch (ParseError e) { Err($"{e.Message}"); }
 
         if (ast is not null)
         {
-            foreach (var v in Parser.Variables(ast)) used.Add(v);
             CheckLookups(ast, pack, Err);
         }
 
@@ -307,16 +305,13 @@ public static class RulesValidator
         foreach (var b in f.Bindings)
         {
             if (!bindingNames.Add(b.Variable)) Err($"variable \"{b.Variable}\" is bound more than once");
-            CheckBinding(pack, f, b, used, Err);
+            CheckBinding(pack, f, b, Err);
             if (!string.IsNullOrWhiteSpace(b.AutoValue))
             {
                 if (ParseProblem(b.AutoValue!) is { } ae) Err($"variable \"{b.Variable}\" auto value {ae}");
                 else
                 {
-                    var autoAst = Parser.Parse(b.AutoValue!);
-                    foreach (var v in Parser.Variables(autoAst))
-                        if (v != b.Variable) used.Add(v);
-                    CheckLookups(autoAst, pack, Err);
+                    CheckLookups(Parser.Parse(b.AutoValue!), pack, Err);
                 }
             }
         }
@@ -324,7 +319,8 @@ public static class RulesValidator
         if (ast is not null)
             foreach (var v in Parser.Variables(ast))
                 if (!bindingNames.Contains(v)) Err($"variable \"{v}\" has no binding");
-        // Variables used only inside table row/column expressions also need bindings.
+        // Variables used only inside table row/column expressions or auto values also need bindings.
+        var used = new HashSet<string>(FormulaVariables.Used(f), StringComparer.Ordinal);
         foreach (var extra in used.Where(u => ast is null || !Parser.Variables(ast).Contains(u)))
             if (!bindingNames.Contains(extra)) Err($"variable \"{extra}\" has no binding");
         foreach (var b in f.Bindings)
@@ -347,7 +343,7 @@ public static class RulesValidator
         }
     }
 
-    private static void CheckBinding(RulesPack pack, FormulaDef f, VariableBinding b, HashSet<string> used, Action<string> err)
+    private static void CheckBinding(RulesPack pack, FormulaDef f, VariableBinding b, Action<string> err)
     {
         string v = $"variable \"{b.Variable}\"";
         switch (b.Kind)
@@ -366,11 +362,11 @@ public static class RulesValidator
                 var t = pack.ById<TableDef>(b.TableId ?? "");
                 if (t is null) err($"{v} refers to unknown table \"{b.TableId}\"");
                 if (string.IsNullOrWhiteSpace(b.RowExpr)) err($"{v} needs a row expression");
-                else CheckExpr(b.RowExpr!, "row expression", v, used, err);
+                else CheckExpr(b.RowExpr!, "row expression", v, err);
                 if (t?.Kind == TableKind.TwoD && string.IsNullOrWhiteSpace(b.ColExpr))
                     err($"{v} needs a column expression because table \"{t.Name}\" has two dimensions");
                 else if (!string.IsNullOrWhiteSpace(b.ColExpr))
-                    CheckExpr(b.ColExpr!, "column expression", v, used, err);
+                    CheckExpr(b.ColExpr!, "column expression", v, err);
                 break;
             }
             case BindingKind.Input:
@@ -384,12 +380,9 @@ public static class RulesValidator
         }
     }
 
-    private static void CheckExpr(string text, string what, string v, HashSet<string> used, Action<string> err)
+    private static void CheckExpr(string text, string what, string v, Action<string> err)
     {
-        try
-        {
-            foreach (var name in Parser.Variables(Parser.Parse(text))) used.Add(name);
-        }
+        try { Parser.Parse(text); }
         catch (ParseError e) { err($"{v} {what}: {e.Message}"); }
     }
 

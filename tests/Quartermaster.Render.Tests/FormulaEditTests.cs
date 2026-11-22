@@ -239,6 +239,15 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void Auto_value_of_unused_binding_does_not_keep_its_variables()
+    {
+        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input },
+            new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "B" },
+            new VariableBinding { Variable = "B", Kind = BindingKind.Unit, Property = "p2" });
+        Assert.Equal(new[] { "X", "B" }, FormulaEdit.Unused(f).Select(b => b.Variable));
+    }
+
+    [Fact]
     public void RemoveUnused_drops_every_stale_binding_only()
     {
         var f = F("C", new VariableBinding { Variable = "A", Kind = BindingKind.Table, TableId = "t" }, new VariableBinding { Variable = "C", Kind = BindingKind.Input });

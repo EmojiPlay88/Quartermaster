@@ -56,27 +56,7 @@ public static class FormulaEdit
     /// The variables of the text, then any used only inside a Table binding's row or column expression (in text order, nested tables
     /// included), the same set the formula runner resolves and the validator counts as used. Empty when the text does not parse.
     /// </summary>
-    public static IReadOnlyList<string> UsedVariables(FormulaDef f)
-    {
-        var a = Analyze(f.Text);
-        if (a.Error != null) return Array.Empty<string>();
-        var names = new List<string>(a.Variables);
-        for (var i = 0; i < names.Count; i++)
-        {
-            var b = f.Bindings.FirstOrDefault(x => x.Variable == names[i]);
-            if (b is null) continue;
-            var sources = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue } : new[] { b.AutoValue };
-            foreach (var src in sources)
-            {
-                if (string.IsNullOrWhiteSpace(src)) continue;
-                var sub = Analyze(src);
-                if (sub.Error != null) continue;
-                foreach (var v in sub.Variables)
-                    if (v != b.Variable && !names.Contains(v)) names.Add(v);
-            }
-        }
-        return names;
-    }
+    public static IReadOnlyList<string> UsedVariables(FormulaDef f) => FormulaVariables.Used(f);
 
     /// <summary>Bindings whose variable is neither in the formula's current text nor in a table binding's row/column expression.</summary>
     public static IReadOnlyList<VariableBinding> Unused(FormulaDef f) =>
