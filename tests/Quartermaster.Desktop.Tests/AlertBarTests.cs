@@ -141,6 +141,33 @@ public sealed class AlertBarTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void AlertBar_game_level_match()
+    {
+        // An alert that never reads a piece has one match, on the global holder; its text is the alert's name when the message is empty.
+        var w = Game(new AlertDef { Id = "a-fog", Name = "Fog warning", Condition = "Fog == 1", Message = "", Severity = AlertSeverity.Warning });
+        w.Session!.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef { Id = "fog", Name = "Fog", Scope = PropertyScope.Holders, Default = 1, Visibility = Visibility.Public }).ToList(),
+        });
+        Pump();
+        Settle(w);
+        Assert.Equal(new[] { "Fog warning" }, w.Alerts.ChipTexts);
+        var hit = Assert.Single(w.AlertHits);
+        var m = Assert.Single(hit.Matches);
+        Assert.Null(m.PieceId);
+        Assert.Equal("Fog warning", m.Text);
+        w.Alerts.ClickChip("a-fog");   // nothing on the map to centre on: must not throw
+        Pump();
+        var menu = w.AlertMenuFor("a-fog");
+        var headers = menu.Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header!).Text).ToList();
+        Assert.Equal(new[] { "Fog warning", AlertBarModel.HideUntilNextTurnText }, headers);
+        var hide = menu.Items.OfType<MenuItem>().Last();
+        hide.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Settle(w);
+        Assert.Empty(w.Alerts.ChipTexts);   // acknowledged (hidden until next turn)
+    }
+
+    [AvaloniaFact]
     public void Chip_menu_lists_matches_go_to_and_hide()
     {
         var w = Game(Red());

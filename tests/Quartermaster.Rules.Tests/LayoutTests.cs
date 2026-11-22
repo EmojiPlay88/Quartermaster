@@ -35,6 +35,15 @@ public class LayoutTests
     }
 
     [Fact]
+    public void Layout_HolderNamesArePlainText()
+    {
+        var m = FormulaLayout.Build(F("holder(Rail, Tonnage) + A", Bind("A", BindingKind.Input)), Pack());
+        Assert.Equal(new TextItem("holder(Rail, Tonnage) + "), m.Main[0]);
+        Assert.Equal("A", Assert.IsType<BoxItem>(m.Main[1]).Variable);
+        Assert.Equal(2, m.Main.Count);
+    }
+
+    [Fact]
     public void Layout_RepeatedVariable_MirrorAfterFirst()
     {
         var m = FormulaLayout.Build(F("(A + A) / 2", Bind("A", BindingKind.Input)), Pack());

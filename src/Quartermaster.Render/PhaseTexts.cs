@@ -67,12 +67,14 @@ public static class PhaseTexts
 
     public static string RuleLinkText(RuleRef r) => r.Page > 0 ? $"Rule: {r.Label} (p. {r.Page})" : $"Rule: {r.Label}";
 
-    /// <summary>"{message} — n unit(s)" plus " (decision)" / " (acknowledged)" for decision warnings.</summary>
+    /// <summary>"{message} — n unit(s)" (just the message for a game-level warning) plus " (decision)" / " (acknowledged)" for decision warnings.</summary>
     public static string WarningText(WarningHit w)
     {
         var n = w.PieceIds.Count;
         var head = w.Message.Replace("{unit}", "").Trim();
-        return $"{head} — {n} {(n == 1 ? "unit" : "units")}{(w.IsDecision ? (w.Acknowledged ? " (acknowledged)" : " (decision)") : "")}";
+        if (n == 0 && head.Length == 0) head = w.UnitTexts.FirstOrDefault() ?? "";   // a game-level warning with no message shows its condition text
+        var count = n == 0 ? "" : $" — {n} {(n == 1 ? "unit" : "units")}";   // a game-level warning has no pieces: just its text
+        return $"{head}{count}{(w.IsDecision ? (w.Acknowledged ? " (acknowledged)" : " (decision)") : "")}";
     }
 
     /// <summary>Acknowledge applies to a decision warning not yet acknowledged, and never while a received turn replays.</summary>

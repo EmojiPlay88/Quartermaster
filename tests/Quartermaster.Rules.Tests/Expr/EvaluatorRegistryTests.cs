@@ -32,10 +32,18 @@ public class EvaluatorRegistryTests
         "has" => new AstExpr[] { new VarRef("p", 0, 1) },
         "startswith" or "contains" => new AstExpr[] { new TextLit("a", 0, 1), new TextLit("a", 0, 1) },
         "mod" => new[] { Num(7), Num(4) },
-        "name" or "turn" or "stage" => Array.Empty<AstExpr>(),
+        "holder" => new AstExpr[] { new VarRef("H", 0, 1), new VarRef("P", 0, 1) },
+        "name" or "turn" or "stage" or "side" or "phaseside" or "map" => Array.Empty<AstExpr>(),
         "marker" => new AstExpr[] { new TextLit("k", 0, 1) },
         _ => Array.Empty<AstExpr>(),
     };
+
+    [Fact]
+    public void Read_functions_are_listed()
+    {
+        foreach (var n in new[] { "side", "phaseside", "map", "holder" })
+            Assert.Contains(n, Evaluator.FunctionNames);
+    }
 
     [Fact]
     public void Every_listed_function_is_dispatched()

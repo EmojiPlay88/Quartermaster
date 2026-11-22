@@ -55,7 +55,7 @@ public static class RulesValidator
         catch (ParseError) { }
         return found.Distinct(StringComparer.Ordinal);
 
-        void Prop(string n) { if (pack.PropertyByName(n) is null) found.Add($"refers to unknown property \"{n}\""); }
+        void Prop(string n) { if (pack.PropertyByName(n) is null) found.Add(UnknownPropertyTail(n)); }
         void Walk(AstExpr e)
         {
             switch (e)
@@ -71,10 +71,37 @@ public static class RulesValidator
                         if (pack.TableByName(tv.Name) is null) found.Add($"refers to unknown table \"{tv.Name}\"");
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
-                    else foreach (var a in c.Args) Walk(a);
+                    else if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]) found.AddRange(HolderCallProblems(hn.Name, hp.Name, pack));
+                    else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
         }
+    }
+
+    /// <summary>Problems in a holder(H, P) call, as message tails: an unknown holder, an unknown property, a property that is not a holder property.</summary>
+    private static IEnumerable<string> HolderCallProblems(string holder, string property, RulesPack pack)
+    {
+        if (pack.HolderByName(holder) is null) yield return $"refers to unknown holder \"{holder}\"";
+        var prop = pack.PropertyByName(property);
+        if (prop is null) yield return UnknownPropertyTail(property);
+        else if (prop.Scope == PropertyScope.Pieces) yield return $"refers to \"{prop.Name}\", which is not a holder property";
+    }
+
+    private static string UnknownPropertyTail(string name) => $"refers to unknown property \"{name}\"";
+
+    /// <summary>True when the expression text parses and contains a side() call.</summary>
+    private static bool UsesSide(string text)
+    {
+        try { return Has(Parser.Parse(text)); }
+        catch (ParseError) { return false; }
+
+        static bool Has(AstExpr e) => e switch
+        {
+            Unary u => Has(u.Operand),
+            Binary b => Has(b.Left) || Has(b.Right),
+            Call c => c.Function == "side" || c.Args.Any(Has),
+            _ => false,
+        };
     }
 
     private static void Guarded(List<RulesIssue> issues, string id, string name, Action check)
@@ -100,6 +127,9 @@ public static class RulesValidator
             Add(issues, RulesIssueSeverity.Warning, s.Id, s.Name, $"Side \"{s.Name}\": unit filter is empty, so it matches every unit");
         CheckPhaseExpr(pack, s.UnitFilter, $"Side \"{s.Name}\"", "unit filter",
             m => Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, m));
+        // A side's filter decides who owns a piece, so it cannot depend on the owning side.
+        if (!string.IsNullOrWhiteSpace(s.UnitFilter) && UsesSide(s.UnitFilter!))
+            Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": unit filter may not use side()");
     }
 
     private static void CheckPhase(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -131,10 +161,26 @@ public static class RulesValidator
         {
             CheckPhaseExpr(pack, w.Condition, who, "warning condition", Err);
             if (string.IsNullOrWhiteSpace(w.Message)) Err($"{who}: warning message is empty");
+            else if (ShowsOnceWithUnit(pack, w.Condition, w.Message))
+                Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: warning {ShowsOnceText}");
         }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice" };
+    /// <summary>The tail of the notice for a game-level warning or alert whose message names {unit}.</summary>
+    internal const string ShowsOnceText = "shows once (its condition never reads the unit), so {unit} is left out";
+
+    /// <summary>
+    /// True when the condition parses and is game-level (<see cref="ExprFacts.IsGameLevel"/>: it is shown once, not once per unit) while
+    /// the message uses {unit}, which is then left out.
+    /// </summary>
+    private static bool ShowsOnceWithUnit(RulesPack pack, string? condition, string? message)
+    {
+        if (string.IsNullOrWhiteSpace(condition) || message?.Contains("{unit}", StringComparison.Ordinal) != true) return false;
+        try { return ExprFacts.IsGameLevel(Parser.Parse(condition), pack); }
+        catch (ParseError) { return false; }
+    }
+
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -188,7 +234,7 @@ public static class RulesValidator
                         if (pack.TableByName(tv.Name) is null) unknownTables.Add(tv.Name);
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
-                    else foreach (var a in c.Args) Walk(a);
+                    else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
         }
@@ -236,6 +282,8 @@ public static class RulesValidator
                 else if (!names.Add(a.Name)) Err($"Alert \"{a.Name}\": another alert already has this name");
                 if (string.IsNullOrWhiteSpace(a.Condition)) Err($"{who}: condition is empty");
                 else CheckPhaseExpr(pack, a.Condition, who, "condition", Err);
+                if (ShowsOnceWithUnit(pack, a.Condition, a.Message))
+                    Add(issues, RulesIssueSeverity.Warning, a.Id, a.Name, $"{who}: {ShowsOnceText}");
                 if (!string.IsNullOrEmpty(a.SideId) && pack.ById<SideDef>(a.SideId!) is null)
                     Err($"{who}: side \"{a.SideId}\" does not exist");
             });
@@ -362,7 +410,7 @@ public static class RulesValidator
 
         if (ast is not null)
         {
-            CheckLookups(ast, pack, Err);
+            CheckLookups(ast, pack, Once(Err));
         }
 
         if (!string.IsNullOrWhiteSpace(f.AppliesTo))
@@ -383,7 +431,7 @@ public static class RulesValidator
                 if (ParseProblem(b.AutoValue!) is { } ae) Err($"variable \"{b.Variable}\" auto value {ae}");
                 else
                 {
-                    CheckLookups(Parser.Parse(b.AutoValue!), pack, Err);
+                    CheckLookups(Parser.Parse(b.AutoValue!), pack, Once(Err));
                 }
             }
         }
@@ -401,6 +449,13 @@ public static class RulesValidator
         foreach (var o in f.Outputs) CheckOutput(pack, o, Err);
     }
 
+    /// <summary>Reports each distinct message once (as <see cref="FilterRefProblems"/> does), so a repeated call is one issue.</summary>
+    private static Action<string> Once(Action<string> err)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        return m => { if (seen.Add(m)) err(m); };
+    }
+
     private static void CheckLookups(AstExpr e, RulesPack pack, Action<string> err)
     {
         switch (e)
@@ -410,6 +465,8 @@ public static class RulesValidator
             case Call c:
                 if (c.Function == "lookup" && c.Args.Count > 0 && c.Args[0] is VarRef tv && pack.TableByName(tv.Name) is null)
                     err($"no table named \"{tv.Name}\"");
+                if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp])
+                    foreach (var u in HolderCallProblems(hn.Name, hp.Name, pack)) err(u);
                 foreach (var a in c.Args) CheckLookups(a, pack, err);
                 break;
         }

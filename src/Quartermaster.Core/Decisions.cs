@@ -16,6 +16,28 @@ public static class Decisions
 {
     private const string Token = "{unit}";
 
+    /// <summary>Separators that may follow a leading {unit} ("{unit}: set up" reads "set up").</summary>
+    private const string Separators = ":,-—";
+
+    /// <summary>
+    /// A game-level message with {unit} removed. Only when the message starts with {unit} is the separator run right after it dropped, and
+    /// only when that run stands alone (followed by whitespace or the end), so a sign stays: "{unit} -1 MP" reads "-1 MP", and
+    /// "-1 MP to all units" is unchanged.
+    /// </summary>
+    internal static string WithoutUnit(string? message)
+    {
+        var m = message ?? "";
+        var lead = m.TrimStart();
+        if (!lead.StartsWith(Token, StringComparison.Ordinal)) return m.Replace(Token, "").Trim();
+        var rest = lead[Token.Length..];
+        var i = 0;
+        while (i < rest.Length && char.IsWhiteSpace(rest[i])) i++;
+        var j = i;
+        while (j < rest.Length && Separators.Contains(rest[j])) j++;
+        if (j > i && (j == rest.Length || char.IsWhiteSpace(rest[j]))) rest = rest[j..];
+        return rest.Replace(Token, "").Trim();
+    }
+
     public static IReadOnlyList<WarningHit> Warnings(RulesPack pack, GameState s, PhaseDef phase)
     {
         var res = new List<WarningHit>();
@@ -26,8 +48,15 @@ public static class Decisions
         {
             var w = warnings[i];
             if (w == null || string.IsNullOrWhiteSpace(w.Condition)) continue;   // blank condition: no hits
-            var match = PieceFilter.Compile(w.Condition, s, pack);
             var msg = w.Message ?? "";
+            if (PieceFilter.ParseGameLevel(w.Condition, pack) is { } game)
+            {
+                // Reads nothing about a piece: true or false once, never once per unit.
+                if (PieceFilter.EvaluateGameLevel(game, s, pack))
+                    res.Add(new WarningHit(i, msg, Array.Empty<string>(), new[] { WithoutUnit(msg) is { Length: > 0 } txt ? txt : w.Condition!.Trim() }, w.IsDecision, s.Acknowledged?.Contains(i) == true));
+                continue;
+            }
+            var match = PieceFilter.Compile(w.Condition, s, pack);
             var ids = new List<string>();
             var texts = new List<string>();
             foreach (var p in units)
@@ -71,8 +100,10 @@ public static class Decisions
         {
             if (!w.IsDecision || w.Acknowledged) continue;
             var n = w.PieceIds.Count;
-            var head = w.Message.Replace(Token, "").Trim();
-            res.Add(new Decision(DecisionKind.Warning, $"{head} — {n} {(n == 1 ? "unit" : "units")}", w.Index, null, w.PieceIds));
+            // Per unit: as before this branch. Game-level (no units): the message reads without {unit}.
+            var head = n == 0 ? WithoutUnit(w.Message) : w.Message.Replace(Token, "").Trim();
+            if (n == 0 && head.Length == 0) head = w.UnitTexts.FirstOrDefault() ?? "";
+            res.Add(new Decision(DecisionKind.Warning, n == 0 ? head : $"{head} — {n} {(n == 1 ? "unit" : "units")}", w.Index, null, w.PieceIds));
         }
         return res;
     }

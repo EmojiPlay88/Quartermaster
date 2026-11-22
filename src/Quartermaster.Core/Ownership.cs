@@ -21,11 +21,24 @@ public static class Ownership
         return p =>
         {
             if (p == null) return null;
-            foreach (var (id, match) in sides)
-                if (match(p)) return id;
-            return null;
+            _inUnitFilter++;
+            try
+            {
+                foreach (var (id, match) in sides)
+                    if (match(p)) return id;
+                return null;
+            }
+            finally { _inUnitFilter--; }
         };
     }
+
+    [ThreadStatic] private static int _inUnitFilter;
+
+    /// <summary>
+    /// True while this thread evaluates a side's unit filter (including any applies-to it reads). side() refuses there: it would ask
+    /// for the piece's side again and recurse.
+    /// </summary>
+    internal static bool InUnitFilter => _inUnitFilter > 0;
 
     /// <summary>
     /// The holder's owning side; null for the global holder, a public holder, an unknown one, or one whose owner names a side that no

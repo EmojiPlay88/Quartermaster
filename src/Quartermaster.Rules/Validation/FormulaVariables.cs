@@ -33,4 +33,27 @@ public static class FormulaVariables
         }
         return names;
     }
+
+    /// <summary>
+    /// Every holder(H, P) call (see <see cref="ExprFacts.HolderReads"/>) in the formula text, every binding's auto value and every Table
+    /// binding's row/column expression, used or not. Expressions that do not parse are skipped (they never run).
+    /// </summary>
+    public static List<(string? Holder, string? Property)> HolderReads(FormulaDef f)
+    {
+        var found = new List<(string?, string?)>();
+        void Add(string? src)
+        {
+            if (string.IsNullOrWhiteSpace(src)) return;
+            try { found.AddRange(ExprFacts.HolderReads(Parser.Parse(src))); }
+            catch (ParseError) { }
+        }
+        Add(f?.Text);
+        foreach (var b in f?.Bindings ?? new List<VariableBinding>())
+        {
+            if (b == null) continue;
+            Add(b.AutoValue);
+            if (b.Kind == BindingKind.Table) { Add(b.RowExpr); Add(b.ColExpr); }
+        }
+        return found;
+    }
 }

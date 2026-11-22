@@ -250,6 +250,46 @@ mod(turn(), 4) == 1
 
 True on turns 1, 5, 9 and so on.
 
+### side()
+
+The name of the side the unit belongs to, as text, or `""` (empty text) when the unit has no side. Takes 0 arguments. It needs a unit. It cannot be used inside a side's own unit filter (that filter decides who belongs to the side), so there it is an error, `side() is not available in a side's unit filter`, and the filter is false.
+
+```formula
+side() == "North"
+```
+
+True for units of the side named North.
+
+### phaseside()
+
+The name of the side whose phase is current, as text, or `""` when the current phase has no side (or the game has not started). Takes 0 arguments. It needs no unit, so it is the one new function a phase condition may use. Compare it with `side()` to ask whether a unit's side is the one that is playing:
+
+```formula
+if(side() == phaseside(), 1, 0)
+```
+
+Gives 1 for the phasing side's units and 0 for everyone else's.
+
+### map()
+
+The name of the map the unit is on, as text. Takes 0 arguments. It needs a unit.
+
+```formula
+map() == "Main Map"
+```
+
+True for units on the map named Main Map.
+
+### holder(Holder, Property)
+
+The value of a property on a named holder, such as a depot. Both arguments are bare names, not quoted text and not variables: `holder(Rail, Tonnage)`. It does not read the global holder: `holder(Global, Weather)` is an error. Read a global value by its bare name instead (`Weather`). If the holder has no value for the property yet, the property's Default is used. The property must be a holder property (scope Holders or Both); a piece-only property is an error. In a player's view of the game, another side's holder record is hidden, so `holder()` on it never reads a made-up Default: it is false in a filter and an error in a formula. Your own side's holders are never hidden, so in your view an unset value still reads the Default. A formula that uses `holder()` on another side's holder is masked like a Holder binding of that holder: its working and errors are not shown to the other side.
+
+```formula
+holder(Rail, Tonnage) > holder(Rail, Capacity)
+```
+
+True when the Rail holder carries more than its Capacity.
+
 ## What a phase condition may read
 
 A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-a-Rules-Pack#phase-conditions)). A condition is checked when Quartermaster is about to start the phase, with no unit in hand, so it may read only:
@@ -257,9 +297,10 @@ A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-
 - global properties (a global property that has not been set reads its Default);
 - tables, through `lookup`;
 - `turn()` and `stage()` of the position being tested;
+- `phaseside()`, the name of the side whose phase is being tested;
 - constants and the pure functions (`if`, `min`, `max`, `round`, `floor`, `ceil`, `abs`, `clamp`, `mod`, `startswith`, `contains`).
 
-It may not use `name()`, `marker()`, `has()`, `dice()` or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
+It may not use `name()`, `marker()`, `has()`, `side()`, `map()`, `holder()`, `dice()` or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
 
 ## Where names get their values
 
@@ -280,7 +321,13 @@ A bare name in a formula (`Fuel`, `Hexes`, `Weather`) is a **variable**. How it 
 
 Every name used in the formula needs a binding, and every binding should be used. A name that appears in another binding's automatic value (for example `Hexes` in `auto: Hexes + 1`) counts as used when that other binding is itself used, but a binding's own name does not count as using itself; the Workbench's Problems list tells you when they do not match. The longer explanation, with pictures of each case, is in [Making a Rules Pack](Making-a-Rules-Pack#step-4-formulas). How the answers are shown and applied is in the [Formula dialog](Window-Formula-Dialog).
 
-**In a filter** (a formula's Applies to, a property's AppliesTo, a side's unit filter, an alert's condition, or a Ledger tab's filter), there are no bindings. A bare name means the **property of that name on the unit being tested**. If the unit has no value for it yet, the property's **default** is used, as long as the property applies to that unit (its scope includes units, and its own Applies to, if it has one, matches). `has(Readiness)` still means "this unit has a value in the ledger", so it stays false until a value is set. If the property does not apply to the unit, that is an error, so guard with `has(...)`. In a player's view of the game (hot-seat view or an online guest), a value may be hidden rather than unset, so private values, and every value of another side's masked unit, do not fall back to their default there. The functions `name()` and `marker("...")` read the unit too. `lookup` works in filters; `dice` does not.
+**In a filter** (a formula's Applies to, a property's AppliesTo, a side's unit filter, an alert's condition, or a Ledger tab's filter), there are no bindings. A bare name means the **property of that name on the unit being tested**. If the unit has no value for it yet, the property's **default** is used, as long as the property applies to that unit (its scope includes units, and its own Applies to, if it has one, matches). `has(Readiness)` still means "this unit has a value in the ledger", so it stays false until a value is set. If the property does not apply to the unit, that is an error, so guard with `has(...)`. In a player's view of the game (hot-seat view or an online guest), a value may be hidden rather than unset, so private values, and every value of another side's masked unit, do not fall back to their default there. The functions `name()`, `marker("...")`, `side()` and `map()` read the unit too. `lookup` and `holder()` work in filters; `dice` does not.
+
+**Bare names for global values.** In a filter, a bare name of a property whose scope is **Holders** reads the **game-level** (global) value, not a unit's. Names of Pieces or Both properties still read the unit. This is how a filter such as `Weather == 2` works: it is true or false for the whole game. In a rare case this changes an old pack: a property moved from scope Both to Holders that still has values on pieces now reads the global value in a filter, not the piece's.
+
+**A filter that never reads a unit shows once.** A phase warning or an alert whose condition reads no Pieces or Both property and uses none of `name()`, `marker()`, `has()`, `side()` or `map()` is a **game-level** rule. It is checked once, not once per unit. A game-level warning shows as one line in the phase panel with no units under it: its text is the message, or the condition text if the message is empty. A game-level alert has one match, on the global holder: its text is the message, or the alert's Name if the message is empty. A game-level decision reads just its text, with no "— 0 units". Text left over at the start of the message when `{unit}` is removed, such as the ": " of "{unit}: set up", is dropped. The Workbench notes a game-level warning or alert whose message uses `{unit}`, since that name is left out.
+
+This changes some older packs. A warning or alert whose condition reads only constants, `turn()`, `stage()`, `mod`, or `lookup` on those used to list every unit, one row each, and now shows one line. A game-level alert with a Side no longer applies that side's unit filter. To get one row per unit back, add a unit read to the condition, for example `and name() != ""`.
 
 ```formula
 has(Readiness) and Readiness >= 3
@@ -334,6 +381,7 @@ Most of these end with "at position N", where N counts characters from the start
 | This formula needs a unit | `name()` or `marker(...)` was used in a formula that was run with no counter. | Run the formula from a counter, or choose a Test piece in the Preview. |
 | No marker 'x' | The counter has no marker with that key. | Check the key. Riverland's keys are Side, Kind and Type. |
 | Dice are not allowed here | `dice` was used in a filter. | Roll with a Roll binding in a formula instead. |
+| side() is not available in a side's unit filter | `side()` was used inside a side's own unit filter. | Describe the side's units with `name()`, `marker()` or a property instead. |
 | Unknown property 'x' | In a filter, a name is not a property in the pack. | Fix the name, or add the property. |
 | x has no value on this piece | In a filter, the property does not apply to this unit, or its value is another side's hidden value. | Check with `has(x)` first, or check the property's scope and Applies to. |
 
@@ -352,4 +400,8 @@ These come from the bindings and outputs rather than the formula text.
 | variable "x" is bound but not used in the formula | A warning: a binding is not used. | Remove the binding or use it. |
 | refers to unknown table "x" | The Workbench: `lookup` in a filter or condition names a table that is not in the pack, or a Table binding's table was deleted. | Fix the name, or pick a table for the binding. |
 | refers to unknown property "x" | The Workbench: an applies-to, filter or condition names a property that is not in the pack. | Fix the name. |
+| refers to unknown holder "H" | The Workbench: `holder(H, ...)` names a holder that is not in the pack. | Fix the name, or add the holder. |
+| refers to "P", which is not a holder property | The Workbench: `holder(..., P)` names a property whose scope is Pieces. | Use a property whose scope is Holders or Both. |
+| shows once (its condition never reads the unit), so {unit} is left out | A note: a game-level warning or alert names `{unit}` in its message. | Remove `{unit}`, or add a unit read such as `and name() != ""` to list each unit. |
+| Side "North": unit filter may not use side() | The Workbench: a side's unit filter uses `side()`. | Remove it. |
 | The result is not a number, so it cannot change Fuel | An output writes into a property, but the formula gave text or true/false. | Make the formula give a number. |

@@ -27,6 +27,10 @@ public static class Parser
         ["turn"] = (0, 0),
         ["stage"] = (0, 0),
         ["mod"] = (2, 2),
+        ["side"] = (0, 0),
+        ["phaseside"] = (0, 0),
+        ["map"] = (0, 0),
+        ["holder"] = (2, 2),
     };
 
     public static Expr Parse(string text)
@@ -41,7 +45,7 @@ public static class Parser
         return e;
     }
 
-    /// <summary>Distinct variable names in first-occurrence order, excluding lookup's table-name argument.</summary>
+    /// <summary>Distinct variable names in first-occurrence order, excluding lookup's table-name argument and holder's two name arguments.</summary>
     public static IReadOnlyList<string> Variables(Expr e)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -64,7 +68,7 @@ public static class Parser
                     Walk(b.Right);
                     break;
                 case Call c:
-                    for (int i = c.Function == "lookup" ? 1 : 0; i < c.Args.Count; i++) Walk(c.Args[i]);
+                    for (int i = c.Function == "lookup" ? 1 : c.Function == "holder" ? 2 : 0; i < c.Args.Count; i++) Walk(c.Args[i]);
                     break;
             }
         }
@@ -265,6 +269,11 @@ public static class Parser
                 throw new ParseError(t.Start, $"'{lower}' takes {Describe(range)}, not {args.Count}");
             if (lower == "lookup" && args[0] is not VarRef)
                 throw new ParseError(args[0].Start, "lookup needs a table name");
+            if (lower == "holder")
+            {
+                if (args[0] is not VarRef) throw new ParseError(args[0].Start, "holder needs a holder name");
+                if (args[1] is not VarRef) throw new ParseError(args[1].Start, "holder needs a property name");
+            }
             var call = new Call(lower, args, t.Start, close.End - t.Start);
             return Track(call, 1 + args.Select(HeightOf).DefaultIfEmpty(0).Max(), t);
         }

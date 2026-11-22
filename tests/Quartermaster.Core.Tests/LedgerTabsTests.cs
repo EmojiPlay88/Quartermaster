@@ -233,6 +233,8 @@ public class LedgerTabsTests
         Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("has(Gone)", Pack()));
         Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("has(\"Gone\")", Pack()));
         Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("not (abs(Gone) > 1)", Pack()));
+        Assert.Null(LedgerTabs.FilterError("holder(Rail, Tonnage) > 1", Pack()));
+        Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("holder(Rail, Tonnage) > Gone", Pack()));
     }
 
     [Fact]

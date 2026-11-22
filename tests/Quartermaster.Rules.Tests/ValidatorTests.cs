@@ -314,6 +314,110 @@ public class ValidatorTests
         Assert.DoesNotContain(msgs, m => m.Contains("unknown property \"Nope\""));
     }
 
+    private static List<string> AlertMsgs(string filter) =>
+        V(Clean() with { Alerts = new() { A("a1", "Low", filter) } }).Select(i => i.Message).ToList();
+
+    [Fact]
+    public void Validator_filter_holder_unknown_holder()
+    {
+        var msgs = AlertMsgs("holder(Ghost, Fuel) > 1");
+        Assert.Contains("Alert \"Low\": condition refers to unknown holder \"Ghost\"", msgs);
+        Assert.DoesNotContain(msgs, m => m.Contains("unknown property"));
+    }
+
+    [Fact]
+    public void Validator_filter_holder_unknown_property()
+    {
+        var msgs = AlertMsgs("holder(Depot, Ghost) > 1");
+        Assert.Contains("Alert \"Low\": condition refers to unknown property \"Ghost\"", msgs);
+        Assert.DoesNotContain(msgs, m => m.Contains("unknown holder"));
+    }
+
+    [Fact]
+    public void Validator_filter_holder_pieces_property_is_not_a_holder_property()
+    {
+        var msgs = AlertMsgs("holder(Depot, Steps) > 1");
+        Assert.Contains("Alert \"Low\": condition refers to \"Steps\", which is not a holder property", msgs);
+    }
+
+    [Theory]
+    [InlineData("holder(Ghost, Fuel) + 1", "Formula \"Fuel Use\": refers to unknown holder \"Ghost\"")]
+    [InlineData("holder(Depot, Ghost) + 1", "Formula \"Fuel Use\": refers to unknown property \"Ghost\"")]
+    [InlineData("holder(Depot, Steps) + 1", "Formula \"Fuel Use\": refers to \"Steps\", which is not a holder property")]
+    public void Validator_formula_text_holder_problems(string text, string expected)
+    {
+        var issues = V(WithFormula(Fx(text))).Where(i => i.Message.Contains("refers to")).ToList();
+        var i = Assert.Single(issues);
+        Assert.Equal(RulesIssueSeverity.Error, i.Severity);
+        Assert.Equal("f1", i.EntityId);
+        Assert.Equal(expected, i.Message);
+    }
+
+    [Fact]
+    public void Validator_repeated_holder_call_is_reported_once()
+    {
+        var b = new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "holder(Ghost, Fuel) + holder(Ghost, Fuel)" };
+        var msgs = V(WithFormula(Fx("X + holder(Ghost, Fuel) * holder(Ghost, Fuel)", b))).Select(i => i.Message).ToList();
+        // Once for the text and once for the auto value, never once per call.
+        Assert.Equal(2, msgs.Count(m => m == "Formula \"Fuel Use\": refers to unknown holder \"Ghost\""));
+    }
+
+    [Fact]
+    public void Validator_auto_value_holder_problems_and_clean_call()
+    {
+        var b = new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "holder(Ghost, Steps)" };
+        var msgs = V(WithFormula(Fx("X", b))).Select(i => i.Message).ToList();
+        Assert.Contains("Formula \"Fuel Use\": refers to unknown holder \"Ghost\"", msgs);
+        Assert.Contains("Formula \"Fuel Use\": refers to \"Steps\", which is not a holder property", msgs);
+        Assert.Empty(V(WithFormula(Fx("holder(Depot, Fuel) + 1"))));
+    }
+
+    private static RulesPack WithFlag(RulesPack p) =>
+        p with { Properties = p.Properties.Append(new PropertyDef { Id = "p3", Name = "Flag", Scope = PropertyScope.Holders }).ToList() };
+
+    [Fact]
+    public void Validator_game_level_unit_message_is_a_notice()
+    {
+        var ph = Ph("a", "Alpha") with { Warnings = new() { new PhaseWarning { Condition = "Flag == 1", Message = "{unit}: flag is up" } } };
+        var al = A("a1", "Low", "Flag == 1") with { Message = "Flag up on {unit}" };
+        var issues = V(WithFlag(Clean()) with { Phases = new() { ph }, Alerts = new() { al } });
+        Assert.All(issues, i => Assert.Equal(RulesIssueSeverity.Warning, i.Severity));
+        Assert.Equal(new[]
+        {
+            "Phase \"Alpha\": warning shows once (its condition never reads the unit), so {unit} is left out",
+            "Alert \"Low\": shows once (its condition never reads the unit), so {unit} is left out",
+        }, issues.Select(i => i.Message).ToArray());
+
+        // A condition that reads the unit, or a message without {unit}: no notice.
+        var perUnit = Ph("a", "Alpha") with { Warnings = new() { new PhaseWarning { Condition = "Flag == 1 and Steps > 0", Message = "{unit}" } } };
+        var plain = A("a1", "Low", "Flag == 1") with { Message = "Flag up" };
+        Assert.Empty(V(WithFlag(Clean()) with { Phases = new() { perUnit }, Alerts = new() { plain } }));
+    }
+
+    [Fact]
+    public void Validator_filter_holder_clean()
+    {
+        Assert.Empty(V(Clean() with { Alerts = new() { A("a1", "Low", "holder(Depot, Fuel) > 1") } }));
+    }
+
+    [Fact]
+    public void Validator_side_filter_uses_side()
+    {
+        var side = new SideDef { Id = "s", Name = "Red", UnitFilter = "side() == \"Red\"" };
+        var issue = Assert.Single(V(Clean() with { Sides = new() { side } }));
+        Assert.Equal(RulesIssueSeverity.Error, issue.Severity);
+        Assert.Equal("s", issue.EntityId);
+        Assert.Equal("Side \"Red\": unit filter may not use side()", issue.Message);
+    }
+
+    [Fact]
+    public void Validator_filter_new_functions_clean()
+    {
+        var f = "side() == \"North\" and map() == \"Main\" and phaseside() == \"\"";
+        var fx = Clean().Formulas[0] with { AppliesTo = f };
+        Assert.Empty(V(Clean() with { Formulas = new() { fx } }));
+    }
+
     [Fact]
     public void Validator_LookupRowArgumentStillChecked()
     {
@@ -472,6 +576,27 @@ public class ValidatorTests
         var arg = fn == "dice" ? "1, 6" : fn == "name" ? "" : "\"x\"";
         var msgs = CondMsgs($"{fn}({arg}) == 1");
         Assert.Contains($"Phase \"Alpha\": condition may not use {fn}()", msgs);
+    }
+
+    [Theory]
+    [InlineData("side() == \"x\"", "side")]
+    [InlineData("map() == \"x\"", "map")]
+    [InlineData("holder(H, X) > 1", "holder")]
+    public void Validator_PhaseCondition_ReadFunctionsForbidden(string cond, string fn)
+    {
+        Assert.Contains($"Phase \"Alpha\": condition may not use {fn}()", CondMsgs(cond));
+    }
+
+    [Fact]
+    public void Validator_PhaseCondition_Holder_NamesAreNotVariables()
+    {
+        Assert.Equal(new[] { "Phase \"Alpha\": condition may not use holder()" }, CondMsgs("holder(H, X) > 1"));
+    }
+
+    [Fact]
+    public void Validator_PhaseCondition_Phaseside_Clean()
+    {
+        Assert.Empty(CondMsgs("phaseside() == \"North\""));
     }
 
     [Fact]

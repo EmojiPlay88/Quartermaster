@@ -62,6 +62,10 @@ public sealed class GameState
     /// <summary>True for a player's filtered view (PlayerView.For); a missing Private value there may be hidden, so filters do not read its Default.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsPlayerView { get; set; }
+    /// <summary>The sides a player view was made for (PlayerView.For); null in a full state. Their own holders are never stripped, so a
+    /// missing value there reads its Default.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? ViewSides { get; set; }
 
     public IEnumerable<StackInstance> StacksOn(string mapId) =>
         Stacks.Values.Where(s => s.MapId == mapId);

@@ -142,6 +142,8 @@ public sealed class PhasePanel : UserControl
     public string? RuleText => _ref.IsVisible ? _ref.Text : null;
     public IReadOnlyList<string> ChecklistTexts => _checklist.Children.OfType<CheckBox>().Select(b => b.Content as string ?? "").ToList();
     public IReadOnlyList<string> WarningTexts => _warnings.Items.OfType<TreeViewItem>().Select(i => i.Header as string ?? "").ToList();
+    /// <summary>The number of unit rows under each warning row, in order.</summary>
+    public IReadOnlyList<int> WarningChildCounts => _warnings.Items.OfType<TreeViewItem>().Select(i => i.Items.Count).ToList();
     public IReadOnlyList<string> OpenDecisionTexts => _open.Items.OfType<string>().ToList();
     public bool IsChecked(int i) => _checklist.Children[i] is CheckBox { IsChecked: true };
 
@@ -207,8 +209,10 @@ public sealed class PhasePanel : UserControl
         {
             var w = v.Warnings[k];
             var node = new TreeViewItem { Header = lines[k].Text, Tag = w.Index, IsExpanded = open.Contains(w.Index) };
-            for (var i = 0; i < w.UnitTexts.Count; i++)
-                node.Items.Add(new TreeViewItem { Header = w.UnitTexts[i], Tag = i < w.PieceIds.Count ? w.PieceIds[i] : null });
+            // A game-level warning matches no unit: its one text is the row itself, with nothing under it.
+            if (w.PieceIds.Count > 0)
+                for (var i = 0; i < w.UnitTexts.Count; i++)
+                    node.Items.Add(new TreeViewItem { Header = w.UnitTexts[i], Tag = i < w.PieceIds.Count ? w.PieceIds[i] : null });
             _warnings.Items.Add(node);
             if (selIndex == w.Index) reselect = node;
         }

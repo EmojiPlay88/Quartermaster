@@ -268,7 +268,7 @@ Select North Supply and choose **Duplicate**. Change the copy's **Name:** to `So
 
 ### Phase conditions
 
-A phase can run only some of the time. In the **Runs only if** field, write a formula that must be true for the phase to run. Leave it empty and the phase always runs. When the condition is false, Next Phase (and Start game) skip the phase without running anything in it: no start formulas, no warnings, no checklist. A condition may read only global properties, tables, `turn()` and `stage()` (see [What a phase condition may read](Formula-Reference#what-a-phase-condition-may-read)).
+A phase can run only some of the time. In the **Runs only if** field, write a formula that must be true for the phase to run. Leave it empty and the phase always runs. When the condition is false, Next Phase (and Start game) skip the phase without running anything in it: no start formulas, no warnings, no checklist. A condition may read only global properties, tables, `turn()`, `stage()` and `phaseside()` (see [What a phase condition may read](Formula-Reference#what-a-phase-condition-may-read)).
 
 Recipes:
 
@@ -289,6 +289,16 @@ Fuel < 2
 the **Message ({unit} = unit name):** to `{unit} is low on fuel`, and **Severity:** to Warning. Leave **Side:** on (any).
 
 **Test it:** a **Low fuel** chip appears in the main window's alert bar at once, because NL 6 Recon starts with 1 fuel. See [Main window](Window-Main-Window#alert-bar).
+
+## More recipes
+
+Short formulas for common needs. Each uses the invented Riverland names; adapt them to your own pack.
+
+- **A rate per side and turn.** Make a table `Rate` with the sides as columns and the turns as rows, then write `lookup(Rate, turn(), side())`. Each unit reads the column of its own side.
+- **A weather entry filter.** On a phase's start formula, set the entry's filter to `Weather == 2`. `Weather` is a global property (scope Holders), so in a filter it reads the game-level value: the entry runs only while the weather is 2.
+- **A capacity warning.** On a phase, add a warning with the condition `holder(Rail, Tonnage) > holder(Rail, Capacity)` and the message `Rail line is overloaded`. It reads no unit, so it shows once in the [phase panel](Window-Phases), with no units under it. Use the same condition in an alert to get one chip.
+- **A phasing modifier.** In a formula, `if(side() == phaseside(), 1, 0)` is 1 for the units of the side whose phase it is, and 0 for the rest.
+- **Upkeep on the main map only.** Set a formula's **Applies to** to `map() == "Main Map"` so units on other maps are left alone.
 
 ## Step 7: Visibility (who may see what)
 

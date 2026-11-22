@@ -54,6 +54,9 @@ public static class WorkingLine
                 }
                 sb.Append(']');
                 break;
+            case Call c when c.Function == "holder":
+                sb.Append("holder(").Append(((VarRef)c.Args[0]).Name).Append(", ").Append(((VarRef)c.Args[1]).Name).Append(')');
+                break;
             case Call c:
                 sb.Append(c.Function).Append('(');
                 for (int i = 0; i < c.Args.Count; i++)

@@ -44,12 +44,14 @@ public class PieceFilterTests
     }
 
     [Fact]
-    public void Holder_property_has_no_default_in_a_filter()
+    public void Holder_property_reads_the_global_in_a_filter()
     {
         var s = RunnerFx.State();
         var p = Marked();
         s.Pieces[p.Id] = p;
-        Assert.False(M("Supply == 0", p, s));
+        Assert.True(M("Supply == 0", p, s));
+        s.Ledgers[LedgerKey.Holder(HolderDef.GlobalId)]["supply"] = 6;
+        Assert.True(M("Supply == 6", p, s));
     }
 
     [Fact]

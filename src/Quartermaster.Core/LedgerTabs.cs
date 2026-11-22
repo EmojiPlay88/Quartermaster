@@ -177,6 +177,8 @@ public static class LedgerTabs
             }
             case Call { Function: "lookup" } c:
                 return c.Args.Skip(1).Select(a => UnknownProperty(a, pack)).FirstOrDefault(x => x != null);
+            case Call { Function: "holder" }:
+                return null;
             case Call c:
                 return c.Args.Select(a => UnknownProperty(a, pack)).FirstOrDefault(x => x != null);
             default: return null;

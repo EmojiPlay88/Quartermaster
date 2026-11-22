@@ -241,6 +241,108 @@ public class FormulaMaskingTests : IDisposable
         Assert.Empty(FormulaMasking.HiddenFor(s, s.Rules!.ById<FormulaDef>("f-mix")!, PhaseFixture.RedOne));
     }
 
+    /// <summary>
+    /// Adds a bare-named Red holder holding the Red secret and two formulas that read it through holder() in their expressions, not
+    /// through a binding: one that works and one whose lookup error would quote the value.
+    /// </summary>
+    private static void AddHolderCalls(ModuleSession s)
+    {
+        s.UpdateRules(p => p with
+        {
+            Holders = p.Holders.Append(new HolderDef { Id = "redstore", Name = "RedStore", SideId = "red" }).ToList(),
+            Formulas = p.Formulas.Concat(new[]
+            {
+                new FormulaDef
+                {
+                    Id = "f-hcall", Name = "Store read", Text = "W + holder(RedStore, Supply)",
+                    Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" } },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
+                    Id = "f-herr", Name = "Store lookup", Text = "W + T",
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                        // The row key is the hidden value: the lookup error ("No row for ...") would quote it.
+                        new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t-cost", RowExpr = "holder(RedStore, Supply)" },
+                    },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                },
+            }).ToList(),
+        });
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Holder("redstore"), "supply", 0, RedSecret, "manual", null, null, null, null));
+    }
+
+    [Fact]
+    public void HotSeat_HolderCallInText_MasksErrorAndWorking_AndBlueViewDropsTheWorking()
+    {
+        var (s, c) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddHolderCalls(s);
+        s.SetViewSides(Blue);   // Bob at the shared screen: RedStore is Red's
+        var g = s.Game!;
+
+        // An error that would quote the hidden value is replaced; the table binding counts as hidden, as for a hidden Holder binding.
+        var err = Dialog(s, "f-herr", PhaseFixture.BlueOne, check: false);
+        Assert.Contains(FormulaMasking.HolderCallInput, err.Hidden);
+        Assert.Contains("T", err.Hidden);
+        var ev = err.Evaluate(g.State);
+        Assert.Contains(RedText, ev.Trace.Error);   // the run itself read it (the test would prove nothing otherwise)
+        Assert.Equal(FormulaMasking.ErrorHiddenText, ev.Status);
+        Assert.DoesNotContain(RedText, Shown(ev));
+
+        // A working that shows the value is replaced; applying it logs a working Blue's view never shows.
+        var m = Dialog(s, "f-hcall", PhaseFixture.BlueOne, check: false);
+        Assert.Equal(new[] { FormulaMasking.HolderCallInput }, m.Hidden.ToArray());
+        var v = m.Evaluate(g.State);
+        Assert.NotEqual("", v.Trace.Working);
+        Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
+        Assert.DoesNotContain(RedText, Shown(v));
+        Assert.True(v.CanApply, v.Status);
+        Assert.True(c.ApplyFormula(null, PhaseFixture.BlueOne, v.Trace, false));
+        Assert.Contains(g.State.LedgerHistory, e => e.FormulaId == "f-hcall" && e.Working != null);
+        var blue = PlayerView.For(g.State, s.Rules, s.Model, Blue);
+        Assert.DoesNotContain(blue.LedgerHistory, e => e.FormulaId == "f-hcall" && e.Working != null);
+        Assert.DoesNotContain(RedText, Json(blue));
+
+        // Red's own view: nothing hidden; an unknown holder fails closed.
+        s.SetViewSides(Red);
+        Assert.Empty(FormulaMasking.HiddenFor(s, s.Rules!.ById<FormulaDef>("f-hcall")!, PhaseFixture.RedOne));
+        var unknown = s.Rules!.ById<FormulaDef>("f-hcall")! with { Text = "W + holder(NoSuchStore, Supply)" };
+        Assert.Contains(FormulaMasking.HolderCallInput, FormulaMasking.HiddenFor(s, unknown, PhaseFixture.RedOne));
+    }
+
+    [Fact]
+    public async Task Guest_HolderCallInText_HostIntentMasksErrorAndWorking()
+    {
+        var (host, hc) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddHolderCalls(host);
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);   // asserts no verdict carries the Red secret
+
+        // The guest's own dialog masks from the pack alone, on its filtered state.
+        var err = Dialog(guest, "f-herr", PhaseFixture.BlueOne, check: false);
+        Assert.Contains(FormulaMasking.HolderCallInput, err.Hidden);
+        // The host runs it on the full state and answers with the hidden-error text only.
+        var direct = Send(executor, "f-herr", null, calculate: true, preview: false);
+        Assert.False(direct.Applied);
+        Assert.Equal(FormulaMasking.ErrorHiddenText, direct.Message);
+        var v1 = await FormulaMasking.SendAsync(port, err, null, calculate: true);
+        Assert.False(v1.Applied);
+        Assert.DoesNotContain(RedText, Shown(err.Evaluate(guest.Game!.State)));
+
+        // Apply through the host: the logged working that read RedStore is stripped from Blue's view (its next snapshot).
+        var m = Dialog(guest, "f-hcall", PhaseFixture.BlueOne, check: false);
+        var v2 = await FormulaMasking.SendAsync(port, m, null, calculate: true);
+        Assert.True(v2.Applied, v2.Message);
+        var full = host.Game!.State;
+        Assert.Contains(full.LedgerHistory, e => e.FormulaId == "f-hcall" && e.Working != null);
+        var blue = PlayerView.For(full, host.Rules, host.Model, Blue);
+        Assert.DoesNotContain(blue.LedgerHistory, e => e.FormulaId == "f-hcall" && e.Working != null);
+        Assert.DoesNotContain(RedText, Json(blue));
+    }
+
     [Fact]
     public void HotSeat_BatchGrid_HiddenCells_NeverShowValue()
     {
