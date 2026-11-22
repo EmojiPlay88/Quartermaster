@@ -43,6 +43,17 @@ public class PhaseTextsTests : IDisposable
     private static Decision Check(int i) => new(DecisionKind.Checklist, "Item " + i, i, null, Array.Empty<string>());
 
     [Fact]
+    public void Strip_tooltip_joins_tip_and_notes()
+    {
+        var v = new PhaseView(false, false, 2, null, null,
+            new[] { new PhaseChip("a", "Weather", ChipState.WillSkip, "Move notes", "Will be skipped"), new PhaseChip("b", "Combat", ChipState.Upcoming, null, "Only tip") },
+            null, null, Array.Empty<Decision>(), Array.Empty<WarningHit>(), null);
+        var strip = PhaseTexts.Strip(v);
+        Assert.Equal("Will be skipped\nMove notes", strip.Single(x => x.Text == "Weather").Tooltip);
+        Assert.Equal("Only tip", strip.Single(x => x.Text == "Combat").Tooltip);
+    }
+
+    [Fact]
     public void Strip_texts_before_start_and_in_turn()
     {
         var (_, c) = Make(Difficulty.FullyAuto);

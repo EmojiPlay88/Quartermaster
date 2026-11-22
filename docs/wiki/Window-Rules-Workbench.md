@@ -97,6 +97,7 @@ On the right, for the selected phase:
 | **Name:**, **Side:** | The phase name and the side that plays it |
 | **Instructions** | Shown in the phase panel while this phase is current |
 | **Notes** | Shown as a tooltip on the phase |
+| **Runs only if** | A condition for the phase; the hint reads "Leave empty to always run. Example: PlayerA == 1, turn() == 1, mod(turn(), 4) == 1." Problems with the condition show in **Problems with this phase** |
 | **Rule ref:** | See above |
 | **Checklist** | Items the player ticks. **Add…**, **Remove**, double-click to edit |
 | **On start: run formulas** | Formulas that run when the phase starts: Formula, For each and Filter (units) |

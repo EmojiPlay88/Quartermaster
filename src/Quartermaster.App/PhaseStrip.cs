@@ -70,7 +70,7 @@ sealed class PhaseStrip : Panel
     static List<(string Text, Kind Kind, string? Notes)> Build(PhaseView v) =>
         PhaseTexts.Strip(v).Select(c => (c.Text, c.State switch
         {
-            null => Kind.Label, ChipState.Done => Kind.Done, ChipState.Current => Kind.Current, _ => Kind.Upcoming,
+            null => Kind.Label, ChipState.Done or ChipState.Skipped => Kind.Done, ChipState.Current => Kind.Current, _ => Kind.Upcoming,
         }, c.Tooltip)).ToList();
 
     void Relayout()

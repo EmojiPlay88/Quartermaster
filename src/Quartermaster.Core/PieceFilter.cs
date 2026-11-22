@@ -133,5 +133,7 @@ public static class PieceFilter
         public bool Has(string property) => pack.PropertyByName(property) is { } def && Stored(def) != null;
         public Value PieceName() => NameValue(p);
         public Value Marker(string key) => MarkerValue(p, key);
+        public double Turn() => s.Position?.Turn ?? s.Turn.Turn;
+        public double Stage() => s.Position?.Repeat ?? 1;
     }
 }

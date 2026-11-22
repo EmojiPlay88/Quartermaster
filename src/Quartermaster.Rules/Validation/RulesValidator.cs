@@ -126,11 +126,83 @@ public static class RulesValidator
                 Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: on-move formula \"{f.Name}\" has no Moved binding");
             CheckPhaseExpr(pack, e.UnitFilter, who, "on-move filter", Err);
         }
+        CheckPhaseCondition(pack, ph, issues);
         foreach (var w in ph.Warnings)
         {
             CheckPhaseExpr(pack, w.Condition, who, "warning condition", Err);
             if (string.IsNullOrWhiteSpace(w.Message)) Err($"{who}: warning message is empty");
         }
+    }
+
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice" };
+
+    /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
+    private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
+    {
+        if (string.IsNullOrWhiteSpace(ph.Condition)) return;
+        string who = $"Phase \"{ph.Name}\"";
+        void Err(string m) => Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, m);
+
+        AstExpr ast;
+        try { ast = Parser.Parse(ph.Condition!); }
+        catch (ParseError e) { Err($"{who}: condition {e.Message}"); return; }
+
+        var vars = new List<string>();
+        var forbidden = new List<string>();
+        bool dynamic = false;   // reads something that can change: turn(), stage() or a table
+        var unknownTables = new List<string>();
+        Walk(ast);
+
+        foreach (var fn in forbidden.Distinct()) Err($"{who}: condition may not use {fn}()");
+        foreach (var t in unknownTables.Distinct(StringComparer.Ordinal)) Err($"{who}: condition refers to unknown table \"{t}\"");
+        foreach (var v in vars.Distinct(StringComparer.Ordinal))
+        {
+            var p = pack.PropertyByName(v);
+            if (p is null || p.Scope is not (PropertyScope.Holders or PropertyScope.Both))
+                Err($"{who}: condition uses \"{v}\", which is not a global property");
+        }
+
+        if (vars.Count == 0 && !dynamic && forbidden.Count == 0)
+        {
+            try
+            {
+                var r = Evaluator.Evaluate(ast, new ConstantContext());
+                if (r.Kind != ValueKind.Text && !r.IsTruthy)
+                    Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who} never runs (its condition is always false)");
+            }
+            catch (EvalError) { }
+        }
+
+        void Walk(AstExpr e)
+        {
+            switch (e)
+            {
+                case VarRef v: vars.Add(v.Name); break;
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (ForbiddenConditionFunctions.Contains(c.Function)) forbidden.Add(c.Function);
+                    if (c.Function is "turn" or "stage" or "lookup") dynamic = true;
+                    if (c.Function == "lookup" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
+                    {
+                        if (pack.TableByName(tv.Name) is null) unknownTables.Add(tv.Name);
+                        foreach (var a in c.Args.Skip(1)) Walk(a);
+                    }
+                    else foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Context for evaluating a condition that reads nothing: any variable or table read is an <see cref="EvalError"/>.</summary>
+    private sealed class ConstantContext : IEvalContext
+    {
+        public Value GetVariable(string name) => throw new EvalError($"No value for {name}");
+        public Value Lookup(string tableName, Value row, Value? col) => throw new EvalError("No tables here");
+        public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("No dice here");
+        public bool Has(string property) => throw new EvalError("No pieces here");
+        public Value PieceName() => throw new EvalError("No pieces here");
+        public Value Marker(string key) => throw new EvalError("No pieces here");
     }
 
     private static void CheckOwners(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, List<RulesIssue> issues)

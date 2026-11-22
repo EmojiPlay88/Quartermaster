@@ -31,7 +31,8 @@ public class EvaluatorRegistryTests
         "dice" => new[] { Num(1), Num(6) },
         "has" => new AstExpr[] { new VarRef("p", 0, 1) },
         "startswith" or "contains" => new AstExpr[] { new TextLit("a", 0, 1), new TextLit("a", 0, 1) },
-        "name" => Array.Empty<AstExpr>(),
+        "mod" => new[] { Num(7), Num(4) },
+        "name" or "turn" or "stage" => Array.Empty<AstExpr>(),
         "marker" => new AstExpr[] { new TextLit("k", 0, 1) },
         _ => Array.Empty<AstExpr>(),
     };

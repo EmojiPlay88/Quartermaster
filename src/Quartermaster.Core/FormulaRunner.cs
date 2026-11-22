@@ -319,5 +319,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public bool Has(string property) => PieceFilter.HasProperty(run.State, run.Pack, run.Piece, property);
         public Value PieceName() => PieceFilter.NameValue(run.Piece);
         public Value Marker(string key) => PieceFilter.MarkerValue(run.Piece, key);
+        public double Turn() => run.State.Position?.Turn ?? run.State.Turn.Turn;
+        public double Stage() => run.State.Position?.Repeat ?? 1;
     }
 }

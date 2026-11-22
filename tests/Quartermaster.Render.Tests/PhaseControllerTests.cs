@@ -792,4 +792,176 @@ public class PhaseControllerTests : IDisposable
         Assert.NotEmpty(deltas);
         Assert.All(deltas, d => Assert.Equal("blue", d.SideId));
     }
+
+    // ---- phase conditions ----
+
+    private const string SkipTip = "Skipped this pass (condition false)";
+
+    /// <summary>Adds an invented global property Flag (Default 0) and sets conditions on phases (by id).</summary>
+    private static Func<RulesPack, RulesPack> Cond(params (string Id, string Condition)[] conds) => p =>
+    {
+        p = p with { Properties = p.Properties.Append(new PropertyDef { Id = "flag", Name = "Flag", Scope = PropertyScope.Holders, Default = 0 }).ToList() };
+        foreach (var (id, cond) in conds) p = WithPhase(p, id, x => x with { Condition = cond });
+        return p;
+    };
+
+    private static ChipState[] States(PhaseView v) => v.Chips.Select(x => x.State).ToArray();
+
+    [Fact]
+    public void Advance_skips_false_phase_and_notices()
+    {
+        var (s, c) = Make(Difficulty.FullyAuto, Cond(("ph-supply", "Flag == 1")));
+        c.Start();
+        var pass = c.Advance();
+
+        var st = s.Game!.State;
+        Assert.Equal("ph-move", st.Position!.PhaseId);
+        Assert.Equal("Pass to Red player", pass);
+        Assert.Equal("Skipped: Supply. Pass to Red player", c.View().Notice);
+        Assert.Equal(10, Water(s, "r1"));                       // Supply's OnStart never ran
+        Assert.DoesNotContain(st.Pending, r => r.FormulaId == "f-water");
+        Assert.Contains("Skipped Supply (condition false)", Texts(s));
+        var ap = s.Game.Log.OfType<AdvancePhase>().Last();
+        Assert.Equal(new[] { new SkippedPhase("ph-supply", "Supply", 1, 1) }, ap.Skipped);
+    }
+
+    [Fact]
+    public void Pass_prompt_uses_destination_after_skips()
+    {
+        // Weather (no side) -> Supply (Red, skipped) -> Movement (Blue).
+        var (_, c) = Make(Difficulty.SemiAuto, p => WithPhase(Cond(("ph-supply", "Flag == 1"))(p), "ph-move", x => x with { SideId = "blue" }));
+        c.Start();
+        Assert.Equal("Pass to Blue player", c.Advance());
+        Assert.Equal("Skipped: Supply. Pass to Blue player", c.View().Notice);
+
+        // Movement (Red) -> Combat (skipped) -> Movement round 2 (Red): same side, no prompt.
+        var (s2, c2) = Make(Difficulty.SemiAuto, Cond(("ph-combat", "Flag == 1")));
+        ToMovement(c2);
+        Assert.Null(c2.Advance());
+        Assert.Equal(2, s2.Game!.State.Position!.Repeat);
+        Assert.Equal("Skipped: Combat", c2.View().Notice);
+    }
+
+    [Fact]
+    public void Undo_restores_position_and_skipped_chips()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, Cond(("ph-supply", "Flag == 1")));
+        c.Start();
+        c.Advance();   // Movement (Supply skipped)
+        c.Advance();   // Combat
+        Assert.Equal(new[] { ChipState.Done, ChipState.Skipped, ChipState.Done, ChipState.Current, ChipState.Upcoming }, States(c.View()));
+
+        s.Game!.Undo();
+        Assert.Equal("ph-move", s.Game.State.Position!.PhaseId);
+        Assert.Equal(new[] { ChipState.Done, ChipState.Skipped, ChipState.Current, ChipState.Upcoming, ChipState.Upcoming }, States(c.View()));
+
+        s.Game.Undo();
+        Assert.Equal("ph-weather", s.Game.State.Position!.PhaseId);
+        Assert.Null(s.Game.State.SkippedPhases);
+        Assert.Equal(new[] { ChipState.Current, ChipState.WillSkip, ChipState.Upcoming, ChipState.Upcoming, ChipState.Upcoming }, States(c.View()));
+    }
+
+    [Fact]
+    public void Chips_show_skipped_and_will_skip()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, Cond(("ph-supply", "Flag == 1"), ("ph-end", "Flag == 1")));
+        c.Start();
+        var v = c.View();
+        Assert.Equal(new[] { ChipState.Current, ChipState.WillSkip, ChipState.Upcoming, ChipState.Upcoming, ChipState.WillSkip }, States(v));
+        Assert.Equal("Will be skipped unless Flag == 1 changes", v.Chips[1].Tip);
+        Assert.Equal("Will be skipped unless Flag == 1 changes", v.Chips[4].Tip);
+        Assert.Null(v.Chips[0].Tip);
+        Assert.Null(v.Chips[2].Tip);
+
+        c.Advance();   // Movement
+        v = c.View();
+        Assert.Equal(new[] { ChipState.Done, ChipState.Skipped, ChipState.Current, ChipState.Upcoming, ChipState.WillSkip }, States(v));
+        Assert.Equal(SkipTip, v.Chips[1].Tip);
+
+        // The preview follows the state: once Flag is 1, End runs.
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Holder(HolderDef.GlobalId), "flag", 0, 1, "manual", null, null, null, null));
+        v = c.View();
+        Assert.Equal(new[] { ChipState.Done, ChipState.Skipped, ChipState.Current, ChipState.Upcoming, ChipState.Upcoming }, States(v));
+        Assert.Null(v.Chips[4].Tip);
+    }
+
+    [Fact]
+    public void Chips_in_block_show_most_recent_pass()
+    {
+        // Combat runs only in round 2: skipped in round 1, then ran; after the block its chip is Done.
+        var (s, c) = Make(Difficulty.SemiAuto, Cond(("ph-combat", "stage() == 2")));
+        ToMovement(c);   // Movement round 1
+        Assert.Equal(ChipState.Upcoming, c.View().Chips[3].State);    // reached in round 2, so not will-skip
+        c.Advance();     // Movement round 2 (Combat round 1 skipped)
+        Assert.Equal(2, s.Game!.State.Position!.Repeat);
+        Assert.Equal(ChipState.Upcoming, c.View().Chips[3].State);
+        c.Advance();     // Combat round 2
+        Assert.Equal(ChipState.Current, c.View().Chips[3].State);
+        c.Advance();     // End
+        Assert.Equal(new[] { ChipState.Done, ChipState.Done, ChipState.Done, ChipState.Done, ChipState.Current }, States(c.View()));
+
+        // Combat runs only in round 1: after the block its most recent pass (round 2) was skipped.
+        var (s2, c2) = Make(Difficulty.SemiAuto, Cond(("ph-combat", "stage() == 1")));
+        ToMovement(c2);
+        c2.Advance();    // Combat round 1
+        c2.Advance();    // Movement round 2
+        Assert.Equal(ChipState.WillSkip, c2.View().Chips[3].State);
+        c2.Advance();    // End (Combat round 2 skipped)
+        Assert.Equal("ph-end", s2.Game!.State.Position!.PhaseId);
+        Assert.Equal(new[] { ChipState.Done, ChipState.Done, ChipState.Done, ChipState.Skipped, ChipState.Current }, States(c2.View()));
+    }
+
+    [Fact]
+    public void Next_name_is_destination()
+    {
+        var (_, c) = Make(Difficulty.SemiAuto, Cond(("ph-weather", "Flag == 1"), ("ph-move", "Flag == 1")));
+        var before = c.View();
+        Assert.True(before.BeforeStart);
+        Assert.Equal("Supply", before.NextName);
+        Assert.Equal(new[] { ChipState.WillSkip, ChipState.Upcoming, ChipState.WillSkip, ChipState.Upcoming, ChipState.Upcoming }, States(before));
+        c.Start();       // Supply
+        Assert.Equal("Combat", c.View().NextName);
+    }
+
+    [Fact]
+    public void Start_skips_false_first_phase()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, Cond(("ph-weather", "Flag == 1")));
+        c.Start();
+        var st = s.Game!.State;
+        Assert.Equal("ph-supply", st.Position!.PhaseId);
+        Assert.DoesNotContain(st.Pending, r => r.FormulaId == "f-weather");
+        Assert.Contains(st.Pending, r => r.FormulaId == "f-water");
+        Assert.Equal("Skipped: Weather", c.View().Notice);
+        Assert.Contains("Skipped Weather (condition false)", Texts(s));
+        Assert.Equal(ChipState.Skipped, c.View().Chips[0].State);
+    }
+
+    [Fact]
+    public void Error_condition_notice()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, Cond(("ph-supply", "mod(1, 0) == 0")));
+        c.Start();
+        Assert.Equal("Pass to Red player", c.Advance());
+        Assert.Equal("ph-supply", s.Game!.State.Position!.PhaseId);   // fail-open: not skipped
+        Assert.Equal("Condition of Supply failed: mod: division by zero; phase not skipped. Pass to Red player", c.View().Notice);
+        Assert.Contains(s.Game.State.Log, l => l.Kind == LogKind.System && l.Text == "Condition of Supply failed: mod: division by zero; phase not skipped");
+        s.Game.Undo();   // one undo step takes the move, its log lines and the strip notice back
+        Assert.DoesNotContain(s.Game.State.Log, l => l.Text.StartsWith("Condition of Supply failed"));
+        Assert.Null(c.View().Notice);
+    }
+
+    [Fact]
+    public void Loop_guard_notice_and_no_will_skip()
+    {
+        var all = Cond(("ph-weather", "false"), ("ph-supply", "false"), ("ph-move", "false"), ("ph-combat", "false"), ("ph-end", "false"));
+        var (s, c) = Make(Difficulty.SemiAuto, all);
+        c.Start();
+        Assert.Equal("ph-weather", s.Game!.State.Position!.PhaseId);
+        Assert.Equal(PhaseConditions.GuardNotice, c.View().Notice);
+        Assert.DoesNotContain(c.View().Chips, x => x.State is ChipState.WillSkip or ChipState.Skipped);
+        c.Advance();
+        Assert.Equal("ph-supply", s.Game.State.Position!.PhaseId);
+        Assert.Equal(PhaseConditions.GuardNotice + ". Pass to Red player", c.View().Notice);
+    }
 }

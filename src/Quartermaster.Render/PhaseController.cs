@@ -8,9 +8,9 @@ namespace Quartermaster.Render;
 /// <summary>Where a piece was before a move gesture (for measuring the distance moved).</summary>
 public sealed record MoveRecord(string PieceId, string FromMap, PointD From);
 
-public enum ChipState { Done, Current, Upcoming }
+public enum ChipState { Done, Current, Upcoming, Skipped, WillSkip }
 
-public sealed record PhaseChip(string Id, string Name, ChipState State, string? Notes = null);
+public sealed record PhaseChip(string Id, string Name, ChipState State, string? Notes = null, string? Tip = null);
 
 /// <summary>Everything the tracker strip and phase panel show. Built fresh by <see cref="PhaseController.View"/>.</summary>
 public sealed record PhaseView(bool NoPhases, bool BeforeStart, int Turn, string? StageText, string? SideName,
@@ -28,6 +28,18 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private sealed record Unit(string? PieceId, string Label, double? Moved);
 
     private string? _notice;
+    private PhasePosition? _noticeAt;   // the position the notice belongs to; once the game is elsewhere (undo, step back) it is dropped
+
+    private string? Notice
+    {
+        get
+        {
+            if (_notice != null && s.Game?.State.Position != _noticeAt) _notice = null;
+            return _notice;
+        }
+    }
+
+    private void SetNotice(string? text) { _notice = text; _noticeAt = s.Game?.State.Position; }
 
     /// <summary>Runs queued (or needing input) by a trigger; raised once per OnStart / OnMove batch that queued any.</summary>
     public event Action<IReadOnlyList<PendingRun>>? RunsQueued;
@@ -126,32 +138,105 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
 
     // ---- view ----
 
+    // View() also runs on guests: the will-skip chips evaluate phase conditions against the guest's own (viewer-filtered) state. That is safe because
+    // conditions read only globals, which PlayerView never hides (except Lockdown, where previews show the defaults). Advancing is still the host's job.
     public PhaseView View()
     {
         var none = Array.Empty<Decision>();
         if (!HasPhases)
-            return new PhaseView(true, false, s.Game?.State.Turn.Turn ?? 1, null, null, Array.Empty<PhaseChip>(), null, null, none, Array.Empty<WarningHit>(), _notice);
+            return new PhaseView(true, false, s.Game?.State.Turn.Turn ?? 1, null, null, Array.Empty<PhaseChip>(), null, null, none, Array.Empty<WarningHit>(), Notice);
         var pack = s.Rules!;
         var st = s.Game!.State;
         if (Resolved(out _) is not { } pos)
         {
-            var chips0 = pack.Phases.Select(p => new PhaseChip(p.Id, p.Name, ChipState.Upcoming, p.Notes)).ToList();
-            return new PhaseView(false, true, 1, null, null, chips0, null, pack.Phases[0].Name, none, Array.Empty<WarningHit>(), _notice);
+            var first = PhaseConditions.First(pack, st);
+            var willSkip0 = WillSkip(pack, st, first, 1);
+            var chips0 = pack.Phases.Select(p => Chip(p, willSkip0.Contains(p.Id) ? ChipState.WillSkip : ChipState.Upcoming)).ToList();
+            var firstName = first == null ? pack.Phases[0].Name : pack.Phases.ElementAtOrDefault(first.To.PhaseIndex)?.Name;
+            return new PhaseView(false, true, 1, null, null, chips0, null, firstName, none, Array.Empty<WarningHit>(), Notice);
         }
         var cur = pack.Phases[pos.PhaseIndex];
-        var chips = pack.Phases.Select((p, i) => new PhaseChip(p.Id, p.Name,
-            i < pos.PhaseIndex ? ChipState.Done : i == pos.PhaseIndex ? ChipState.Current : ChipState.Upcoming, p.Notes)).ToList();
-        var next = Sequencer.Next(pack, pos);
+        var next = PhaseConditions.Next(pack, st, pos);
+        var skippedBefore = SkippedBefore(pack, st, pos);
+        var willSkip = WillSkip(pack, st, next, pos.Turn);
+        var chips = pack.Phases.Select((p, i) => Chip(p,
+            i < pos.PhaseIndex ? (skippedBefore.Contains(p.Id) ? ChipState.Skipped : ChipState.Done)
+            : i == pos.PhaseIndex ? ChipState.Current
+            : willSkip.Contains(p.Id) ? ChipState.WillSkip : ChipState.Upcoming)).ToList();
         var side = Sequencer.ActingSide(pack, cur);
-        var nextName = next == null ? null : pack.Phases.ElementAtOrDefault(next.PhaseIndex)?.Name;
+        var nextName = next == null ? null : pack.Phases.ElementAtOrDefault(next.To.PhaseIndex)?.Name;
         // Hot-seat: another side's phase shows who is playing and none of their decisions.
         if (s.ViewSides is { } held && side != null && !held.Contains(side.Id))
             return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
-                Array.Empty<WarningHit>(), _notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
+                Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
         var seen = s.View ?? st;   // decisions and warnings over what this player may see
         return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
-            Decisions.Compute(pack, seen), Decisions.Warnings(pack, seen, cur), _notice);
+            Decisions.Compute(pack, seen), Decisions.Warnings(pack, seen, cur), Notice);
     }
+
+    private const string SkippedTip = "Skipped this pass (condition false)";
+    private const int MaxWalk = 10_000;   // a bound for the preview walks; a turn of a real pack is far shorter
+
+    private static PhaseChip Chip(PhaseDef p, ChipState state) => new(p.Id, p.Name, state, p.Notes,
+        state == ChipState.Skipped ? SkippedTip : state == ChipState.WillSkip ? $"Will be skipped unless {p.Condition} changes" : null);
+
+    /// <summary>
+    /// Ids of the phases before <paramref name="pos"/> whose most recent pass this turn was skipped: a phase that both ran and was skipped
+    /// this turn (block repeats) shows its latest pass. The latest pass of each phase is found by walking the plain sequence from the turn's
+    /// start to <paramref name="pos"/>; if that walk never gets there, any skip this turn counts.
+    /// </summary>
+    private static HashSet<string> SkippedBefore(RulesPack pack, GameState st, PhasePosition pos)
+    {
+        var res = new HashSet<string>();
+        var skips = st.SkippedPhases?.Where(k => k != null && k.Turn == pos.Turn).ToList();
+        if (skips is not { Count: > 0 }) return res;
+        var lastRepeat = new Dictionary<string, int>();
+        var at = new PhasePosition(pos.Turn, 1, pack.Phases[0].Id, 0);
+        var reached = false;
+        for (var guard = 0; guard < MaxWalk && at.Turn == pos.Turn; guard++)
+        {
+            if (at.PhaseId == pos.PhaseId && at.Repeat == pos.Repeat) { reached = true; break; }
+            lastRepeat[at.PhaseId] = at.Repeat;
+            if (Sequencer.Next(pack, at) is not { } n) break;
+            at = n;
+        }
+        foreach (var k in skips)
+            if (!reached || (lastRepeat.TryGetValue(k.PhaseId, out var r) && r == k.Repeat)) res.Add(k.PhaseId);
+        return res;
+    }
+
+    /// <summary>
+    /// Ids of the phases a walk from <paramref name="step"/> to the end of turn <paramref name="turn"/> skips and never reaches. A preview
+    /// only: it evaluates conditions against the current state and applies nothing. Empty when the walk hits the loop guard.
+    /// </summary>
+    private static HashSet<string> WillSkip(RulesPack pack, GameState st, PhaseStep? step, int turn)
+    {
+        var skipped = new HashSet<string>();
+        var reached = new HashSet<string>();
+        for (var guard = 0; step != null && guard < MaxWalk; guard++)
+        {
+            if (step.Notice == PhaseConditions.GuardNotice) return new HashSet<string>();
+            foreach (var k in step.Skipped)
+                if (k.Turn == turn) skipped.Add(k.PhaseId);
+            if (step.To.Turn != turn) break;
+            reached.Add(step.To.PhaseId);
+            var n = PhaseConditions.Next(pack, st, step.To);
+            if (n == null || n.To == step.To) break;
+            step = n;
+        }
+        skipped.ExceptWith(reached);
+        return skipped;
+    }
+
+    /// <summary>The strip notice: the non-empty parts joined with ". ".</summary>
+    private static string? Join(params string?[] parts)
+    {
+        var text = string.Join(". ", parts.Where(x => !string.IsNullOrEmpty(x)));
+        return text.Length == 0 ? null : text;
+    }
+
+    private static string? SkippedText(PhaseStep step) =>
+        step.Skipped.Count == 0 ? null : "Skipped: " + string.Join(", ", step.Skipped.Select(k => k.Name));
 
     // ---- advancing ----
 
@@ -159,15 +244,17 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         if (!HasPhases || s.Game!.State.Position != null) return;
         var pack = s.Rules!;
-        var first = Sequencer.First(pack);
-        if (first == null) return;
-        _notice = null;
+        var step = PhaseConditions.First(pack, s.Game.State);
+        if (step == null) return;
+        var to = pack.Phases[step.To.PhaseIndex];
+        var startNotice = Join(SkippedText(step), step.Notice);
         List<PendingRun> queued;
         // One action; the boundary (and the autosave it triggers) comes after the action closed, so the save holds it and its checkpoint.
         using (s.Game.BeginAction("Next Phase"))
         {
-            Exec(new AdvancePhase(null, first, "", pack.Phases[first.PhaseIndex].Name));
-            queued = OnEnter(pack.Phases[first.PhaseIndex]);
+            Exec(new AdvancePhase(null, step.To, "", to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
+            SetNotice(startNotice);
+            queued = OnEnter(to);   // only the destination's OnStart runs; skipped phases trigger nothing
         }
         RaiseQueued(queued);
         PhaseBoundary?.Invoke();
@@ -185,15 +272,17 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         {
             var relocated = Reconcile();
             if (Resolved(out _) is not { } cur) return null;
-            var next = Sequencer.Next(pack, cur);
-            if (next == null) return null;
+            // Conditions are evaluated here, against the state before the step; the command records the outcome (replay never re-evaluates).
+            var step = PhaseConditions.Next(pack, s.Game.State, cur);
+            if (step == null) return null;
             var from = pack.Phases[cur.PhaseIndex];
-            var to = pack.Phases[next.PhaseIndex];
-            _notice = relocated;
-            Exec(new AdvancePhase(cur, next, from.Name, to.Name));
+            var to = pack.Phases[step.To.PhaseIndex];
+            SetNotice(relocated);
+            Exec(new AdvancePhase(cur, step.To, from.Name, to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
+            // The prompt compares the destination with the phase left; skipped phases in between never act.
             var toSide = Sequencer.ActingSide(pack, to);
             pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
-            _notice = pass == null ? relocated : relocated == null ? pass : relocated + ". " + pass;
+            SetNotice(Join(relocated, SkippedText(step), step.Notice, pass));
             queued = OnEnter(to);
         }
         RaiseQueued(queued);
@@ -215,7 +304,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var (pos, notice) = Sequencer.Resolve(pack, stored);
         if (pos == null || notice == null) return null;     // unchanged, or only index / repeat clamped (no state to relocate)
         Exec(new AdvancePhase(stored, pos, stored.PhaseId, pack.Phases[pos.PhaseIndex].Name, notice));
-        _notice = notice;
+        SetNotice(notice);
         return notice;
     }
 

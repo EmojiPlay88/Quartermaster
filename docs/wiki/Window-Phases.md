@@ -20,6 +20,25 @@ When the last phase ends, the turn wraps to the next one. In a hot-seat game, a 
 
 If the rules pack has no phases, the strip says "No phases defined — add them in the Rules Workbench (Phases tab)".
 
+### Skipped phases
+
+A phase can have a condition (the **Runs only if** field in the Workbench). When Next Phase or Start game reaches a phase whose condition is false, that phase is skipped and the game moves on to the next one in a single step, so one press of Undo or Step back undoes it all.
+
+- A phase skipped this pass is greyed and struck through. Its tooltip says "Skipped this pass (condition false)".
+- An upcoming phase that will be skipped is faded. Its tooltip says "Will be skipped unless {condition} changes".
+- The label of the Next Phase button names the phase you will really land on.
+
+Four notices tell you what happened:
+
+- In the log, one line per skipped phase: `Skipped {phase name} (condition false)`.
+- On the strip: `Skipped: {name}, {name}`.
+- If every phase was skipped: `Every phase was skipped; check the phase conditions`.
+- If a condition cannot be worked out: `Condition of {phase name} failed: {message}; phase not skipped`. A condition that fails never skips its phase.
+
+The two notices about a problem (every phase skipped, a condition that failed) are also written to the log, so everyone in an online game can read them.
+
+Loading a game or changing the rules never moves the game because of a condition. (If the rules no longer have the phase the game was in, the game is still moved to the phase now in that place.) Online, a guest may press Next Phase in their own phase; the host works out the conditions and everyone gets the result.
+
 ## Phase panel
 
 The phase panel sits on the right of the main window. **View > Phase panel** shows or hides it, and **Pop out** moves it into a window of its own (the button then reads **Dock**).

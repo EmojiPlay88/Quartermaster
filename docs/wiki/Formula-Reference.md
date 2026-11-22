@@ -220,6 +220,47 @@ marker("Kind") == "Unit" and marker("Side") == "Northern League"
 
 True for the Northern League's fighting units, not its depot or the turn marker.
 
+### turn()
+
+The turn number, as a number. Takes 0 arguments. Before the game starts it is 1.
+
+```formula
+turn() == 1
+```
+
+True only on the first turn.
+
+### stage()
+
+The repeat number inside a repeating block of phases (1 for the first pass, 2 for the second, and so on). Outside a block it is 1. Takes 0 arguments.
+
+```formula
+stage() == 2
+```
+
+True on the second pass through a block.
+
+### mod(a, b)
+
+The remainder after dividing `a` by `b`, floored: the result has the sign of `b`, so it is never negative when `b` is positive. If `b` is 0 it is an error ("mod: division by zero").
+
+```formula
+mod(turn(), 4) == 1
+```
+
+True on turns 1, 5, 9 and so on.
+
+## What a phase condition may read
+
+A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-a-Rules-Pack#phase-conditions)). A condition is checked when Quartermaster is about to start the phase, with no unit in hand, so it may read only:
+
+- global properties (a global property that has not been set reads its Default);
+- tables, through `lookup`;
+- `turn()` and `stage()` of the position being tested;
+- constants and the pure functions (`if`, `min`, `max`, `round`, `floor`, `ceil`, `abs`, `clamp`, `mod`, `startswith`, `contains`).
+
+It may not use `name()`, `marker()`, `has()`, `dice()` or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
+
 ## Where names get their values
 
 A bare name in a formula (`Fuel`, `Hexes`, `Weather`) is a **variable**. How it gets its value depends on where the formula lives.

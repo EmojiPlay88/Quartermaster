@@ -24,6 +24,9 @@ public static class Parser
         ["marker"] = (1, 1),
         ["startswith"] = (2, 2),
         ["contains"] = (2, 2),
+        ["turn"] = (0, 0),
+        ["stage"] = (0, 0),
+        ["mod"] = (2, 2),
     };
 
     public static Expr Parse(string text)

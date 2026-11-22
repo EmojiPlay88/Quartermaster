@@ -19,6 +19,10 @@ public interface IEvalContext
     bool Has(string property);
     Value PieceName();
     Value Marker(string key);
+    /// <summary>The current turn number (1 when the context has no turn).</summary>
+    double Turn() => 1;
+    /// <summary>The current stage: how many times the turn's phase span has repeated (1 when unknown).</summary>
+    double Stage() => 1;
 }
 
 public static class Evaluator
@@ -147,7 +151,7 @@ public static class Evaluator
     public static IReadOnlyList<string> FunctionNames { get; } = new[]
     {
         "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup",
-        "dice", "has", "startswith", "contains", "name", "marker",
+        "dice", "has", "startswith", "contains", "name", "marker", "turn", "stage", "mod",
     };
 
     /// <summary>Every binary and unary operator the formula language accepts ('-' is both binary and unary).</summary>
@@ -218,6 +222,14 @@ public static class Evaluator
             case "contains":
                 return Value.Of(TextArg(a[0], ctx, "contains").Contains(TextArg(a[1], ctx, "contains"), StringComparison.OrdinalIgnoreCase));
             case "name": return ctx.PieceName();
+            case "turn": return Num(ctx.Turn(), c);
+            case "stage": return Num(ctx.Stage(), c);
+            case "mod":
+            {
+                double x = NumArg(a[0], ctx, "mod"), y = NumArg(a[1], ctx, "mod");
+                if (y == 0) throw new EvalError("mod: division by zero", c);
+                return Num(x - y * Math.Floor(x / y), c);
+            }
             case "marker": return ctx.Marker(TextArg(a[0], ctx, "marker"));
             default: throw new EvalError($"Unknown function '{c.Function}'", c);
         }
