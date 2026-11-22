@@ -412,6 +412,8 @@ public sealed class ContextMenuTests : IDisposable
         Assert.True(boxes[0].IsReadOnly);
         Assert.False(boxes[1].IsReadOnly);
         Assert.True(boxes[1].AcceptsReturn);
+        Assert.Equal(PieceMenuModel.ManagedSheetTip, ToolTip.GetTip(boxes[0]));
+        Assert.Null(ToolTip.GetTip(boxes[1]));
         Assert.Contains(dlg.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "(managed by ledger: 40)");
         boxes[1].Text = "c";
         Button(dlg, "OK").RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));

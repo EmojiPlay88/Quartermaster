@@ -44,6 +44,35 @@ public class PieceMenuModelTests : IDisposable
         string.Join(" | ", entries.Select(e => e.IsSeparator ? "-" : e.Children.Count > 0 ? e.Label + " [" + Shape(e.Children) + "]" : e.Label));
 
     [Fact]
+    public void Sheet_write_never_changes_ledger_values()
+    {
+        var s = Open(rules: true);
+        var phases = new PhaseController(s, (c, _) => c);
+        var history = new HistoryController(s, phases, (c, _) => c);
+        var port = new LocalActions(s, phases, history, (c, _) => c);
+        var game = s.Game!;
+        var piece = game.State.Pieces[PhaseFixture.RedOne];
+        var key = LedgerKey.Piece(piece.Id);
+        port.EditLedger(key, "fuel", 25, "spent");
+        Assert.Equal("25", PieceMenuModel.ManagedSheetValue(s, piece, "Fuel"));
+        var historyBefore = game.State.LedgerHistory.Count;
+        var idx = PieceMenuModel.SheetIndex(s, piece, "Sheet");
+        Assert.True(idx >= 0);
+        var rows = PieceActions.ReadSheet(piece, idx);
+        var values = rows.Select(r => r.Value).ToList();   // nothing edited: the managed row keeps its old sheet text (40)
+        for (var i = 0; i < rows.Count; i++)
+            if (PieceMenuModel.ManagedSheetValue(s, piece, rows[i].Name) == null) values[i] += "!";
+        port.PieceCommand(PieceActions.WriteSheet(piece, idx, values));
+        Assert.Equal(25, Ledger.Get(game.State, key, "fuel"));
+        Assert.Equal(historyBefore, game.State.LedgerHistory.Count);
+        Assert.Equal("25", PieceMenuModel.ManagedSheetValue(s, game.State.Pieces[PhaseFixture.RedOne], "Fuel"));
+        // One undo removes only the sheet write.
+        port.Undo();
+        Assert.Equal(25, Ledger.Get(game.State, key, "fuel"));
+        Assert.Equal(rows.Select(r => r.Value), PieceActions.ReadSheet(game.State.Pieces[PhaseFixture.RedOne], idx).Select(r => r.Value));
+    }
+
+    [Fact]
     public void Menu_for_movable_piece_lists_actions_in_winforms_order()
     {
         var s = Open(rules: true);
