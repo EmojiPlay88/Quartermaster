@@ -71,6 +71,33 @@ public class FormulaEditTests
         Assert.Equal(text, FormulaEdit.FormatDetails(b));
     }
 
+    [Theory]
+    [InlineData("0..9 | auto: 2 | always ask", 9.0, "2")]
+    [InlineData("| auto: 2 | ALWAYS ASK ", null, "2")]
+    [InlineData("low, mid | auto: \"a | b\" | always ask", null, "\"a | b\"")]
+    [InlineData("low | auto: \"a\\\" | b\" | always ask", null, "\"a\\\" | b\"")]
+    public void Always_ask_after_auto_value(string text, double? max, string auto)
+    {
+        var (b, err) = FormulaEdit.ParseDetails(new VariableBinding { Variable = "A", Kind = BindingKind.Input }, text);
+        Assert.Null(err);
+        Assert.True(b.AlwaysAsk);
+        Assert.Equal(max, b.Max);
+        Assert.Equal(auto, b.AutoValue);
+    }
+
+    [Fact]
+    public void Auto_value_keeps_bars_inside_its_text_and_rejects_other_parts()
+    {
+        var input = new VariableBinding { Variable = "A", Kind = BindingKind.Input };
+        var (q, e1) = FormulaEdit.ParseDetails(input, "low, mid | auto: \"x | always ask\"");
+        Assert.Null(e1);
+        Assert.False(q.AlwaysAsk);
+        Assert.Equal("\"x | always ask\"", q.AutoValue);
+        var (same, e2) = FormulaEdit.ParseDetails(input, "0..9 | auto: 2 | sometimes");
+        Assert.StartsWith("Auto value: ", e2);
+        Assert.Same(input, same);
+    }
+
     [Fact]
     public void Always_ask_details_edge_cases()
     {
@@ -245,6 +272,15 @@ public class FormulaEditTests
             new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "B" },
             new VariableBinding { Variable = "B", Kind = BindingKind.Unit, Property = "p2" });
         Assert.Equal(new[] { "X", "B" }, FormulaEdit.Unused(f).Select(b => b.Variable));
+    }
+
+    [Fact]
+    public void Auto_value_naming_its_own_variable_does_not_keep_it()
+    {
+        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input },
+            new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "X + 1" });
+        Assert.Equal(new[] { "X" }, FormulaEdit.Unused(f).Select(b => b.Variable));
+        Assert.Equal(new[] { "A" }, FormulaEdit.RemoveUnused(f).Bindings.Select(b => b.Variable));
     }
 
     [Fact]

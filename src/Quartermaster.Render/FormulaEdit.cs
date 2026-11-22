@@ -130,16 +130,17 @@ public static class FormulaEdit
         {
             case BindingKind.Input:
                 string? auto = null;
+                var alwaysAsk = false;
                 var bar = AutoBar(text);
                 if (bar >= 0)
                 {
                     auto = text[(bar + 1)..].Trim()[5..].Trim();
                     text = text[..bar].Trim();
+                    (auto, alwaysAsk) = SplitAlwaysAskAfterAuto(auto);
                     if (auto.Length == 0) auto = null;
                     else if (SyntaxProblem(auto) is { } autoErr) return (b, "Auto value: " + autoErr);
                 }
                 const string inputError = "Use a range like 0..20, or choices separated by commas; add | always ask and/or | auto: expression.";
-                var alwaysAsk = false;
                 string? basicPart = null;
                 foreach (var part in SplitAtBars(text))
                 {
@@ -198,6 +199,30 @@ public static class FormulaEdit
                 if (text[(i + 1)..].TrimStart().StartsWith("auto:", StringComparison.OrdinalIgnoreCase)) return i;
         }
         return -1;
+    }
+
+    /// <summary>
+    /// An expression has no '|' outside its text literals, so a bar there ends the auto value: when every part after it reads
+    /// "always ask" (any case), the parts are the flag. Otherwise the text is returned whole, so the auto value reports its own error.
+    /// </summary>
+    private static (string Auto, bool AlwaysAsk) SplitAlwaysAskAfterAuto(string auto)
+    {
+        var cuts = new List<int>();
+        var inText = false;
+        for (var i = 0; i < auto.Length; i++)
+        {
+            var c = auto[i];
+            if (inText && c == '\\') { i++; continue; }   // the expression lexer's \" and \\ escapes
+            if (c == '"') inText = !inText;
+            else if (c == '|' && !inText) cuts.Add(i);
+        }
+        if (cuts.Count == 0) return (auto, false);
+        for (var k = 0; k < cuts.Count; k++)
+        {
+            var end = k + 1 < cuts.Count ? cuts[k + 1] : auto.Length;
+            if (!auto[(cuts[k] + 1)..end].Trim().Equals("always ask", StringComparison.OrdinalIgnoreCase)) return (auto, false);
+        }
+        return (auto[..cuts[0]].Trim(), true);
     }
 
     /// <summary>Splits at every '|' outside quotes (same scan as <see cref="AutoBar"/>); parts are trimmed.</summary>
