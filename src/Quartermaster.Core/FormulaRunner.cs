@@ -154,6 +154,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public PieceInstance? Piece => piece;
         public GameState State => s;
         public RulesPack Pack => owner._pack;
+        /// <summary>The side map, compiled once per run on the first side() call.</summary>
+        public Lazy<Func<PieceInstance, string?>> Sides { get; } = PieceFilter.SideMap(s, owner._pack);
         private readonly Dictionary<string, IReadOnlyList<int>> _byKey = byKey;
         private int _inlineDice;
         public IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey => _byKey;
@@ -321,5 +323,9 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public Value Marker(string key) => PieceFilter.MarkerValue(run.Piece, key);
         public double Turn() => run.State.Position?.Turn ?? run.State.Turn.Turn;
         public double Stage() => run.State.Position?.Repeat ?? 1;
+        public Value Side() => PieceFilter.SideValue(run.Piece, run.Pack, run.Sides);
+        public Value PhaseSide() => PieceFilter.PhaseSideValue(run.Pack, Sequencer.Current(run.Pack, run.State));
+        public Value MapName() => PieceFilter.MapValue(run.Piece);
+        public Value HolderValue(string holder, string property) => PieceFilter.HolderRead(run.State, run.Pack, holder, property);
     }
 }

@@ -72,7 +72,7 @@ public static class PhaseConditions
         return n;
     }
 
-    /// <summary>Reads global properties (Default when unset) and the candidate's turn and stage. No pieces, no dice.</summary>
+    /// <summary>Reads global properties (Default when unset) and the candidate's turn, stage and side. No pieces, no dice.</summary>
     private sealed class PhaseContext(RulesPack pack, GameState s, PhasePosition at) : IEvalContext
     {
         public Value GetVariable(string name)
@@ -89,5 +89,8 @@ public static class PhaseConditions
         public Value Marker(string key) => throw new EvalError("marker() is not available in a phase condition");
         public double Turn() => at.Turn;
         public double Stage() => at.Repeat;
+        public Value PhaseSide() =>
+            PieceFilter.PhaseSideValue(pack, pack.Phases.FirstOrDefault(p => p.Id == at.PhaseId)
+                ?? (at.PhaseIndex >= 0 && at.PhaseIndex < pack.Phases.Count ? pack.Phases[at.PhaseIndex] : null));
     }
 }
