@@ -16,6 +16,18 @@ public static class Decisions
 {
     private const string Token = "{unit}";
 
+    /// <summary>Leading characters left behind when {unit} is removed from the start of a message ("{unit}: set up" reads "set up").</summary>
+    private const string Leftover = ":,-—";
+
+    /// <summary>A game-level message: {unit} removed, then leftover leading punctuation and surrounding whitespace trimmed.</summary>
+    internal static string WithoutUnit(string? message)
+    {
+        var t = (message ?? "").Replace(Token, "");
+        var i = 0;
+        while (i < t.Length && (char.IsWhiteSpace(t[i]) || Leftover.Contains(t[i]))) i++;
+        return t[i..].Trim();
+    }
+
     public static IReadOnlyList<WarningHit> Warnings(RulesPack pack, GameState s, PhaseDef phase)
     {
         var res = new List<WarningHit>();
@@ -31,7 +43,7 @@ public static class Decisions
             {
                 // Reads nothing about a piece: true or false once, never once per unit.
                 if (PieceFilter.EvaluateGameLevel(game, s, pack))
-                    res.Add(new WarningHit(i, msg, Array.Empty<string>(), new[] { msg.Replace(Token, "").Trim() is { Length: > 0 } txt ? txt : w.Condition!.Trim() }, w.IsDecision, s.Acknowledged?.Contains(i) == true));
+                    res.Add(new WarningHit(i, msg, Array.Empty<string>(), new[] { WithoutUnit(msg) is { Length: > 0 } txt ? txt : w.Condition!.Trim() }, w.IsDecision, s.Acknowledged?.Contains(i) == true));
                 continue;
             }
             var match = PieceFilter.Compile(w.Condition, s, pack);
@@ -78,7 +90,7 @@ public static class Decisions
         {
             if (!w.IsDecision || w.Acknowledged) continue;
             var n = w.PieceIds.Count;
-            var head = w.Message.Replace(Token, "").Trim();
+            var head = WithoutUnit(w.Message);
             if (n == 0 && head.Length == 0) head = w.UnitTexts.FirstOrDefault() ?? "";
             res.Add(new Decision(DecisionKind.Warning, n == 0 ? head : $"{head} — {n} {(n == 1 ? "unit" : "units")}", w.Index, null, w.PieceIds));
         }

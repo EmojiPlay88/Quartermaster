@@ -12,6 +12,31 @@ public static class ExprFacts
     /// </summary>
     public static bool IsGameLevel(AstExpr e, RulesPack pack) => Check(e, pack);
 
+    /// <summary>
+    /// Every holder(H, P) call in the expression, in text order, as (holder name, property name). A holder() call whose arguments are not
+    /// bare names gives (null, null): it cannot be resolved, so callers that mask treat it as reading an unknown holder.
+    /// </summary>
+    public static List<(string? Holder, string? Property)> HolderReads(AstExpr e)
+    {
+        var found = new List<(string?, string?)>();
+        Walk(e);
+        return found;
+
+        void Walk(AstExpr x)
+        {
+            switch (x)
+            {
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (c.Function == "holder")
+                        found.Add(c.Args is [VarRef h, VarRef p] ? (h.Name, p.Name) : (null, null));
+                    foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
+    }
+
     private static bool Check(AstExpr e, RulesPack pack)
     {
         switch (e)

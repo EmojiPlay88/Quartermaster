@@ -55,7 +55,7 @@ public static class RulesValidator
         catch (ParseError) { }
         return found.Distinct(StringComparer.Ordinal);
 
-        void Prop(string n) { if (pack.PropertyByName(n) is null) found.Add($"refers to unknown property \"{n}\""); }
+        void Prop(string n) { if (pack.PropertyByName(n) is null) found.Add(UnknownPropertyTail(n)); }
         void Walk(AstExpr e)
         {
             switch (e)
@@ -71,18 +71,23 @@ public static class RulesValidator
                         if (pack.TableByName(tv.Name) is null) found.Add($"refers to unknown table \"{tv.Name}\"");
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
-                    else if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp])
-                    {
-                        if (pack.HolderByName(hn.Name) is null) found.Add($"refers to unknown holder \"{hn.Name}\"");
-                        var prop = pack.PropertyByName(hp.Name);
-                        if (prop is null) Prop(hp.Name);
-                        else if (prop.Scope == PropertyScope.Pieces) found.Add($"refers to \"{prop.Name}\", which is not a holder property");
-                    }
+                    else if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]) found.AddRange(HolderCallProblems(hn.Name, hp.Name, pack));
                     else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
         }
     }
+
+    /// <summary>Problems in a holder(H, P) call, as message tails: an unknown holder, an unknown property, a property that is not a holder property.</summary>
+    private static IEnumerable<string> HolderCallProblems(string holder, string property, RulesPack pack)
+    {
+        if (pack.HolderByName(holder) is null) yield return $"refers to unknown holder \"{holder}\"";
+        var prop = pack.PropertyByName(property);
+        if (prop is null) yield return UnknownPropertyTail(property);
+        else if (prop.Scope == PropertyScope.Pieces) yield return $"refers to \"{prop.Name}\", which is not a holder property";
+    }
+
+    private static string UnknownPropertyTail(string name) => $"refers to unknown property \"{name}\"";
 
     /// <summary>True when the expression text parses and contains a side() call.</summary>
     private static bool UsesSide(string text)
@@ -156,7 +161,23 @@ public static class RulesValidator
         {
             CheckPhaseExpr(pack, w.Condition, who, "warning condition", Err);
             if (string.IsNullOrWhiteSpace(w.Message)) Err($"{who}: warning message is empty");
+            else if (ShowsOnceWithUnit(pack, w.Condition, w.Message))
+                Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: warning {ShowsOnceText}");
         }
+    }
+
+    /// <summary>The tail of the notice for a game-level warning or alert whose message names {unit}.</summary>
+    internal const string ShowsOnceText = "shows once (its condition never reads the unit), so {unit} is left out";
+
+    /// <summary>
+    /// True when the condition parses and is game-level (<see cref="ExprFacts.IsGameLevel"/>: it is shown once, not once per unit) while
+    /// the message uses {unit}, which is then left out.
+    /// </summary>
+    private static bool ShowsOnceWithUnit(RulesPack pack, string? condition, string? message)
+    {
+        if (string.IsNullOrWhiteSpace(condition) || message?.Contains("{unit}", StringComparison.Ordinal) != true) return false;
+        try { return ExprFacts.IsGameLevel(Parser.Parse(condition), pack); }
+        catch (ParseError) { return false; }
     }
 
     private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder" };
@@ -261,6 +282,8 @@ public static class RulesValidator
                 else if (!names.Add(a.Name)) Err($"Alert \"{a.Name}\": another alert already has this name");
                 if (string.IsNullOrWhiteSpace(a.Condition)) Err($"{who}: condition is empty");
                 else CheckPhaseExpr(pack, a.Condition, who, "condition", Err);
+                if (ShowsOnceWithUnit(pack, a.Condition, a.Message))
+                    Add(issues, RulesIssueSeverity.Warning, a.Id, a.Name, $"{who}: {ShowsOnceText}");
                 if (!string.IsNullOrEmpty(a.SideId) && pack.ById<SideDef>(a.SideId!) is null)
                     Err($"{who}: side \"{a.SideId}\" does not exist");
             });
@@ -435,6 +458,8 @@ public static class RulesValidator
             case Call c:
                 if (c.Function == "lookup" && c.Args.Count > 0 && c.Args[0] is VarRef tv && pack.TableByName(tv.Name) is null)
                     err($"no table named \"{tv.Name}\"");
+                if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp])
+                    foreach (var u in HolderCallProblems(hn.Name, hp.Name, pack)) err(u);
                 foreach (var a in c.Args) CheckLookups(a, pack, err);
                 break;
         }

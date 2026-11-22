@@ -60,4 +60,21 @@ public class AlertEditTests
         var bad = AlertEdit.MatchStatus(new AlertDef { Condition = "Fuel <" }, s, pack);
         Assert.StartsWith("Does not parse: ", bad);
     }
+
+    [Fact]
+    public void MatchStatus_GameLevelCondition_CountsOnce()
+    {
+        // Weather is a global value: the condition never reads a unit, so the alert shows once, not once per unit.
+        var pack = Pack() with
+        {
+            Properties = Pack().Properties.Append(new PropertyDef { Id = "weather", Name = "Weather", Scope = PropertyScope.Holders }).ToList(),
+        };
+        var s = State();
+        s.Ledgers[LedgerKey.Holder(HolderDef.GlobalId)] = new() { ["weather"] = 2 };
+        Assert.Equal("1 match now", AlertEdit.MatchStatus(new AlertDef { Condition = "Weather == 2" }, s, pack));
+        Assert.Equal("0 matches now", AlertEdit.MatchStatus(new AlertDef { Condition = "Weather == 3" }, s, pack));
+        Assert.Equal("1 match now", AlertEdit.MatchStatus(new AlertDef { Condition = "Weather == 2", SideId = "red" }, s, pack));   // no side filter
+        Assert.Equal("0 matches now", AlertEdit.MatchStatus(new AlertDef { Condition = "1 / 0 > 0" }, s, pack));   // an error matches nothing
+        Assert.Equal("3 matches now", AlertEdit.MatchStatus(new AlertDef { Condition = "Weather == 2 and Fuel > 0" }, s, pack));   // reads the unit
+    }
 }

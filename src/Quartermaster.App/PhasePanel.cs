@@ -186,8 +186,10 @@ sealed class PhasePanel : UserControl
         {
             var w = v.Warnings[k];
             var node = new TreeNode(lines[k].Text) { Tag = w };
-            for (var i = 0; i < w.UnitTexts.Count; i++)
-                node.Nodes.Add(new TreeNode(w.UnitTexts[i]) { Tag = i < w.PieceIds.Count ? w.PieceIds[i] : null });
+            // A game-level warning matches no unit: its one text is the row itself, with nothing under it.
+            if (w.PieceIds.Count > 0)
+                for (var i = 0; i < w.UnitTexts.Count; i++)
+                    node.Nodes.Add(new TreeNode(w.UnitTexts[i]) { Tag = i < w.PieceIds.Count ? w.PieceIds[i] : null });
             _warnings.Nodes.Add(node);
             if (open.Contains(w.Index)) node.Expand();
             if (selIndex == w.Index) _warnings.SelectedNode = node;

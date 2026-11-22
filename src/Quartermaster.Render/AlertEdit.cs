@@ -1,5 +1,6 @@
 using Quartermaster.Core;
 using Quartermaster.Rules;
+using Quartermaster.Rules.Expr;
 
 namespace Quartermaster.Render;
 
@@ -48,9 +49,15 @@ public static class AlertEdit
                 if (side == null) return "unknown side";
                 sideFilter = side.UnitFilter;
             }
-            var inSide = PieceFilter.Compile(sideFilter, state, pack);
-            var cond = PieceFilter.Compile(alert.Condition, state, pack);
-            var n = state.Pieces.Values.Count(p => inSide(p) && cond(p));
+            int n;
+            if (ExprFacts.IsGameLevel(Parser.Parse(alert.Condition), pack))
+                n = PieceFilter.EvaluateGameLevel(alert.Condition, state, pack) ? 1 : 0;   // shows once (Alerts): one match for the game
+            else
+            {
+                var inSide = PieceFilter.Compile(sideFilter, state, pack);
+                var cond = PieceFilter.Compile(alert.Condition, state, pack);
+                n = state.Pieces.Values.Count(p => inSide(p) && cond(p));
+            }
             return n == 1 ? "1 match now" : n + " matches now";
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return "cannot evaluate"; }

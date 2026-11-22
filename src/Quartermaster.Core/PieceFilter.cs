@@ -116,7 +116,8 @@ public static class PieceFilter
     /// <summary>
     /// holder(Holder, Property): the holder's value, else the property's Default. A player's view removes every value (and the ledger
     /// key) of a holder owned by a side the viewer does not hold, so in a view a sided holder with no ledger key is hidden, not unset, and
-    /// does not fall back to the Default. A present key belongs to a holder the viewer may see.
+    /// does not fall back to the Default. A present key belongs to a holder the viewer may see. A holder of a side the view was made for
+    /// (<see cref="GameState.ViewSides"/>) is never stripped, so there a missing value reads the Default.
     /// </summary>
     internal static Value HolderRead(GameState s, RulesPack pack, string holder, string property)
     {
@@ -126,7 +127,8 @@ public static class PieceFilter
         var key = LedgerKey.Holder(h.Id);
         var v = Ledger.Get(s, key, def.Id);
         if (v != null) return Value.Of(v.Value);
-        if (s.IsPlayerView && Ownership.SideOfHolder(h.Id, pack) != null && !s.Ledgers.ContainsKey(key))
+        if (s.IsPlayerView && Ownership.SideOfHolder(h.Id, pack) is { } side && !s.Ledgers.ContainsKey(key)
+            && s.ViewSides?.Contains(side) != true)
             throw new EvalError($"{def.Name} has no value on {h.Name}");
         return Value.Of(def.Default);
     }

@@ -8,8 +8,9 @@ namespace Quartermaster.Render;
 /// Formula input masking (spec 8a.2): which inputs of a formula come from data the viewer may not see, and how the formula dialog, the
 /// batch grid and the cheat sheet show them. The one source of truth for the host (<see cref="FormulaIntentRunner"/>) and the local
 /// dialogs, so the boxes the host reports as hidden are exactly the boxes the dialog masks.
-/// <para>A formula reads another side's data only through its bindings: a Unit binding reads the subject piece, a Holder binding a holder's
-/// value (Global is public, tables are pack data). An input is hidden when it reads a private property of a piece the viewer cannot see or
+/// <para>A formula reads another side's data through its bindings: a Unit binding reads the subject piece, a Holder binding a holder's
+/// value (Global is public, tables are pack data); and through holder(H, P) in its text, auto values and table row/column expressions,
+/// marked by <see cref="HolderCallInput"/>. An input is hidden when it reads a private property of a piece the viewer cannot see or
 /// that belongs to a side not held, or any value of a holder owned by a side not held (or missing from the pack). The rule depends only on
 /// the rules pack and the pieces, never on whether a value is set, so it gives the same answer on the host's full state and on a guest's
 /// filtered snapshot. A table lookup counts as hidden when any other input is, since its keys may be computed from them.</para>
@@ -27,6 +28,12 @@ public static class FormulaMasking
 
     /// <summary>The status shown in place of an evaluation error when an input is hidden (an error may quote a hidden value).</summary>
     public const string ErrorHiddenText = "The formula could not be calculated.";
+
+    /// <summary>
+    /// The entry <see cref="HiddenVariables"/> adds when the formula's own expressions read a hidden holder through holder(H, P): no box is
+    /// hidden by it (it is not a variable name), but the formula counts as masked, so its error and working are never shown.
+    /// </summary>
+    public const string HolderCallInput = "holder()";
 
     private static readonly IReadOnlySet<string> NoSides = new HashSet<string>();
 
@@ -90,8 +97,11 @@ public static class FormulaMasking
             };
             if (isHidden) hidden.Add(b.Variable);
         }
+        // holder(H, P) in the formula's own expressions reads the holder as a Holder binding would; an unresolvable call fails closed.
+        if (FormulaVariables.HolderReads(f).Any(r => r.Holder == null || pack.HolderByName(r.Holder) is not { } h || HolderHidden(h.Id)))
+            hidden.Add(HolderCallInput);
         if (hidden.Count > 0)
-            foreach (var b in f.Bindings!)
+            foreach (var b in f.Bindings ?? new List<VariableBinding>())
                 if (b is { Kind: BindingKind.Table, Variable: not null }) hidden.Add(b.Variable);
         return hidden;
     }

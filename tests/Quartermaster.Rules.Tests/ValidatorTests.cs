@@ -340,6 +340,51 @@ public class ValidatorTests
         Assert.Contains("Alert \"Low\": condition refers to \"Steps\", which is not a holder property", msgs);
     }
 
+    [Theory]
+    [InlineData("holder(Ghost, Fuel) + 1", "Formula \"Fuel Use\": refers to unknown holder \"Ghost\"")]
+    [InlineData("holder(Depot, Ghost) + 1", "Formula \"Fuel Use\": refers to unknown property \"Ghost\"")]
+    [InlineData("holder(Depot, Steps) + 1", "Formula \"Fuel Use\": refers to \"Steps\", which is not a holder property")]
+    public void Validator_formula_text_holder_problems(string text, string expected)
+    {
+        var issues = V(WithFormula(Fx(text))).Where(i => i.Message.Contains("refers to")).ToList();
+        var i = Assert.Single(issues);
+        Assert.Equal(RulesIssueSeverity.Error, i.Severity);
+        Assert.Equal("f1", i.EntityId);
+        Assert.Equal(expected, i.Message);
+    }
+
+    [Fact]
+    public void Validator_auto_value_holder_problems_and_clean_call()
+    {
+        var b = new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "holder(Ghost, Steps)" };
+        var msgs = V(WithFormula(Fx("X", b))).Select(i => i.Message).ToList();
+        Assert.Contains("Formula \"Fuel Use\": refers to unknown holder \"Ghost\"", msgs);
+        Assert.Contains("Formula \"Fuel Use\": refers to \"Steps\", which is not a holder property", msgs);
+        Assert.Empty(V(WithFormula(Fx("holder(Depot, Fuel) + 1"))));
+    }
+
+    private static RulesPack WithFlag(RulesPack p) =>
+        p with { Properties = p.Properties.Append(new PropertyDef { Id = "p3", Name = "Flag", Scope = PropertyScope.Holders }).ToList() };
+
+    [Fact]
+    public void Validator_game_level_unit_message_is_a_notice()
+    {
+        var ph = Ph("a", "Alpha") with { Warnings = new() { new PhaseWarning { Condition = "Flag == 1", Message = "{unit}: flag is up" } } };
+        var al = A("a1", "Low", "Flag == 1") with { Message = "Flag up on {unit}" };
+        var issues = V(WithFlag(Clean()) with { Phases = new() { ph }, Alerts = new() { al } });
+        Assert.All(issues, i => Assert.Equal(RulesIssueSeverity.Warning, i.Severity));
+        Assert.Equal(new[]
+        {
+            "Phase \"Alpha\": warning shows once (its condition never reads the unit), so {unit} is left out",
+            "Alert \"Low\": shows once (its condition never reads the unit), so {unit} is left out",
+        }, issues.Select(i => i.Message).ToArray());
+
+        // A condition that reads the unit, or a message without {unit}: no notice.
+        var perUnit = Ph("a", "Alpha") with { Warnings = new() { new PhaseWarning { Condition = "Flag == 1 and Steps > 0", Message = "{unit}" } } };
+        var plain = A("a1", "Low", "Flag == 1") with { Message = "Flag up" };
+        Assert.Empty(V(WithFlag(Clean()) with { Phases = new() { perUnit }, Alerts = new() { plain } }));
+    }
+
     [Fact]
     public void Validator_filter_holder_clean()
     {

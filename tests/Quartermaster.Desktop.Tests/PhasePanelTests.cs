@@ -195,6 +195,7 @@ public sealed class PhasePanelTests : IDisposable
         });
         ToCombat(w);
         Assert.Equal("Fog over the map (decision)", Assert.Single(w.Phases.WarningTexts));
+        Assert.Equal(0, Assert.Single(w.Phases.WarningChildCounts));   // no child row repeating the text
         w.Phases.SelectWarning(0);   // no pieces under it: selecting must not throw
         Pump();
         Assert.True(w.Phases.AckEnabled);

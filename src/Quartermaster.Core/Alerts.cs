@@ -124,6 +124,8 @@ public static class AlertEngine
         foreach (var w in Decisions.Warnings(pack, s, phase))
         {
             if (!w.IsDecision || w.Acknowledged) continue;
+            // A game-level warning matches no unit: one row with its text, as the Pending alert lists a unit-less run.
+            if (w.PieceIds.Count == 0) matches.Add(new AlertMatch(null, null, w.UnitTexts.Count > 0 ? w.UnitTexts[0] : w.Message));
             for (var i = 0; i < w.PieceIds.Count; i++)
                 matches.Add(new AlertMatch(w.PieceIds[i], null, i < w.UnitTexts.Count ? w.UnitTexts[i] : w.Message));
         }
@@ -146,7 +148,7 @@ public static class AlertEngine
         {
             // Reads nothing about a piece: one match for the whole game; the side's unit filter does not apply.
             var one = PieceFilter.EvaluateGameLevel(game, s, pack)
-                ? new List<AlertMatch> { new(null, HolderDef.GlobalId, msg.Replace(Token, "").Trim() is { Length: > 0 } txt ? txt : a.Name) }
+                ? new List<AlertMatch> { new(null, HolderDef.GlobalId, Decisions.WithoutUnit(msg) is { Length: > 0 } txt ? txt : a.Name) }
                 : new List<AlertMatch>();
             return new AlertHit(a.Id, a.Name, a.Severity, msg.Contains(Token) ? a.Name : msg, one, a.Notes);
         }

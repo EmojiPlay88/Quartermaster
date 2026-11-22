@@ -54,6 +54,7 @@ public static class PlayerView
             if (FailForTest) throw new InvalidOperationException("test fault");
             new Filter(full, pack, model, held).Apply(view);
             view.IsPlayerView = true;
+            view.ViewSides = held.Where(x => x != null).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
             return view;
         }
         catch (Exception)
@@ -121,8 +122,10 @@ public static class PlayerView
             }
             _privatePrefixes = (pack.Formulas ?? new()).Where(f => f is { PrivateRolls: true }).Select(f => (f.Name ?? "") + ": ").Distinct().ToList();
             foreach (var f in pack.Formulas ?? new())
-                if (f?.Id != null && (f.Bindings ?? new()).Any(b => b is { Kind: BindingKind.Holder }
-                        && ValueHidden(LedgerKey.Holder(b.HolderId ?? ""), b.Property, out _)))
+                if (f?.Id != null && ((f.Bindings ?? new()).Any(b => b is { Kind: BindingKind.Holder }
+                        && ValueHidden(LedgerKey.Holder(b.HolderId ?? ""), b.Property, out _))
+                    || FormulaVariables.HolderReads(f).Any(r => r.Holder == null || pack.HolderByName(r.Holder) is not { } h
+                        || ValueHidden(LedgerKey.Holder(h.Id), pack.PropertyByName(r.Property ?? "")?.Id, out _))))
                     _hiddenInputFormulas.Add(f.Id);
 
             foreach (var p in full.Pieces.Values)

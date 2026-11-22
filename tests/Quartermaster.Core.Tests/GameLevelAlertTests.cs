@@ -152,4 +152,78 @@ public class GameLevelAlertTests
         var pk = Pack(null, new AlertDef { Id = "f", Name = "F", Condition = cond, Message = "x" });
         Assert.Empty(AlertEngine.Evaluate(State(1), pk, null, null, null));
     }
+
+    [Fact]
+    public void Game_level_decision_is_listed_by_the_unacknowledged_warning_alert()
+    {
+        var phase = Phase("Flag == 1", "Flag is up", decision: true);
+        var pk = Pack(phase);
+        var s = State(1);
+        s.Position = new PhasePosition(1, 1, "P", 0);
+        var hit = Assert.Single(AlertEngine.Evaluate(s, pk, null, phase, null), h => h.Id == AlertEngine.WarningId);
+        var m = Assert.Single(hit.Matches);
+        Assert.Null(m.PieceId);
+        Assert.Null(m.HolderId);
+        Assert.Equal("Flag is up", m.Text);
+        s.Acknowledged.Add(0);
+        Assert.DoesNotContain(AlertEngine.Evaluate(s, pk, null, phase, null), h => h.Id == AlertEngine.WarningId);
+    }
+
+    [Theory]
+    [InlineData("{unit}: set up", "set up")]
+    [InlineData("{unit}, check the flag", "check the flag")]
+    [InlineData("{unit} - flag up", "flag up")]
+    [InlineData("{unit} — flag up", "flag up")]
+    [InlineData("Flag up for {unit}", "Flag up for")]
+    public void Game_level_texts_drop_leftover_punctuation(string message, string expected)
+    {
+        var phase = Phase("Flag == 1", message, decision: true);
+        var pk = Pack(phase, new AlertDef { Id = "f", Name = "Flag", Condition = "Flag == 1", Message = message });
+        var s = State(1);
+        s.Position = new PhasePosition(1, 1, "P", 0);
+        Assert.Equal(expected, Assert.Single(Assert.Single(Decisions.Warnings(pk, s, phase)).UnitTexts));
+        Assert.Equal(expected, Assert.Single(Decisions.Compute(pk, s), x => x.Kind == DecisionKind.Warning).Text);
+        Assert.Equal(expected, Assert.Single(Assert.Single(AlertEngine.Evaluate(s, pk, null, null, null), h => h.Id == "f").Matches).Text);
+    }
+
+    [Fact]
+    public void Own_empty_holder_reads_its_default_in_the_view_and_another_sides_does_not()
+    {
+        var pk = Pack();
+        var full = State(0);   // the S holder SouthStore has no ledger record at all
+        Assert.False(full.Ledgers.ContainsKey(LedgerKey.Holder("south")));
+        var own = PlayerView.For(full, pk, RunnerFx.Model, new HashSet<string> { "s" });
+        Assert.True(own.IsPlayerView);
+        Assert.Equal(new[] { "s" }, own.ViewSides);
+        Assert.True(PieceFilter.EvaluateGameLevel("holder(SouthStore, Fuel) == 0", own, pk));   // the Default
+        Assert.Equal(0, PieceFilter.HolderRead(own, pk, "SouthStore", "Fuel").Number);
+
+        var other = PlayerView.For(full, pk, RunnerFx.Model, new HashSet<string> { "a" });
+        Assert.Equal(new[] { "a" }, other.ViewSides);
+        Assert.False(PieceFilter.EvaluateGameLevel("holder(SouthStore, Fuel) == 0", other, pk));
+        Assert.Throws<Quartermaster.Rules.Expr.EvalError>(() => PieceFilter.HolderRead(other, pk, "SouthStore", "Fuel"));
+
+        // A view from an older host carries no ViewSides: its own empty holder keeps failing closed.
+        own.ViewSides = null;
+        Assert.Throws<Quartermaster.Rules.Expr.EvalError>(() => PieceFilter.HolderRead(own, pk, "SouthStore", "Fuel"));
+    }
+
+    [Fact]
+    public void View_sides_survive_a_round_trip_and_a_full_save_never_writes_them()
+    {
+        var pk = Pack();
+        var full = State(0);
+        var fullJson = System.Text.Json.JsonSerializer.Serialize(full, QuartermasterJson.Options);
+        Assert.DoesNotContain("viewSides", fullJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(full.DeepClone().ViewSides);
+        Assert.Equal(fullJson, System.Text.Json.JsonSerializer.Serialize(full.DeepClone(), QuartermasterJson.Options));
+
+        var view = PlayerView.For(full, pk, RunnerFx.Model, new HashSet<string> { "s" });
+        var json = System.Text.Json.JsonSerializer.Serialize(view, QuartermasterJson.Options);
+        Assert.Contains("\"viewSides\"", json);
+        Assert.Equal(new[] { "s" }, System.Text.Json.JsonSerializer.Deserialize<GameState>(json, QuartermasterJson.Options)!.ViewSides);
+        Assert.Equal(new[] { "s" }, view.DeepClone().ViewSides);
+        // Every side held: the view is the full state, with no ViewSides.
+        Assert.Null(PlayerView.For(full, pk, RunnerFx.Model, new HashSet<string> { "a", "s" }).ViewSides);
+    }
 }
