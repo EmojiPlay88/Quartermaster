@@ -129,6 +129,22 @@ public class PhaseConditionTests
     }
 
     [Fact]
+    public void Guard_from_a_later_repeat_tests_the_whole_turn()
+    {
+        var pk = Pack("false", "false", "stage() == 1", "false");
+        var step = PhaseConditions.Next(pk, new GameState(), P(pk, 1, 2, "P2"))!;
+        Assert.Equal(P(pk, 2, 1, "P3"), step.To);
+        Assert.Null(step.Notice);
+        Assert.Equal(new[] { Sk("P3", "Phase Three", 1, 2), Sk("P4", "Phase Four", 1, 1), Sk("P1", "Phase One", 2, 1), Sk("P2", "Phase Two", 2, 1) },
+            step.Skipped);
+
+        var none = Pack("false", "false", "false", "false");
+        var g = PhaseConditions.Next(none, new GameState(), P(none, 1, 2, "P2"))!;
+        Assert.Equal(P(none, 1, 2, "P3"), g.To);
+        Assert.Equal(Guard, g.Notice);
+    }
+
+    [Fact]
     public void Error_condition_is_not_skipped()
     {
         var pk = Pack(c2: "1/0 > 0");

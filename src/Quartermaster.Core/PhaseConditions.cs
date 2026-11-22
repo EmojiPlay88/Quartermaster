@@ -39,7 +39,7 @@ public static class PhaseConditions
         Sequencer.Next(pack, cur) is { } next ? Walk(pack, s, next, cur) : null;
 
     /// <summary>
-    /// Tests candidates from <paramref name="candidate"/> onward. Stops after one full turn of candidates (on reaching the phase of
+    /// Tests candidates from <paramref name="candidate"/> onward. Stops after one full turn of candidates (on reaching the phase and repeat of
     /// <paramref name="origin"/> one turn later, or after every repeat of every phase plus one): then the first candidate is used, with the guard notice.
     /// </summary>
     private static PhaseStep Walk(RulesPack pack, GameState s, PhasePosition candidate, PhasePosition origin)
@@ -53,7 +53,7 @@ public static class PhaseConditions
             if (Runs(pack, s, phase, candidate, out var error))
                 return new PhaseStep(candidate, skipped, error == null ? null : $"Condition of {phase.Name} failed: {error}; phase not skipped");
             skipped.Add(new SkippedPhase(phase.Id, phase.Name, candidate.Turn, candidate.Repeat));
-            if (candidate.PhaseId == origin.PhaseId && candidate.Turn > origin.Turn) break;
+            if (candidate.PhaseId == origin.PhaseId && candidate.Repeat == origin.Repeat && candidate.Turn > origin.Turn) break;
             candidate = Sequencer.Next(pack, candidate)!;
         }
         return new PhaseStep(start, Array.Empty<SkippedPhase>(), GuardNotice);
