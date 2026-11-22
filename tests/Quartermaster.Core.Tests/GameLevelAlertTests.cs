@@ -102,6 +102,7 @@ public class GameLevelAlertTests
         s.Position = new PhasePosition(1, 1, "P", 0);
         var d = Assert.Single(Decisions.Compute(pk, s) , x => x.Kind == DecisionKind.Warning);
         Assert.Equal(0, d.Index);
+        Assert.Equal("Flag is up", d.Text);
         s.Acknowledged.Add(0);
         Assert.True(Assert.Single(Decisions.Warnings(pk, s, phase)).Acknowledged);
         Assert.DoesNotContain(Decisions.Compute(pk, s), x => x.Kind == DecisionKind.Warning);
@@ -118,5 +119,37 @@ public class GameLevelAlertTests
         s.Ledgers.Remove(LedgerKey.Holder("south"));
         s.IsPlayerView = true;
         Assert.Empty(Decisions.Warnings(pk, s, phase));
+    }
+
+    [Fact]
+    public void Empty_messages_fall_back_to_readable_text()
+    {
+        var phase = Phase("Flag == 1", "");
+        Assert.Equal("Flag == 1", Assert.Single(Assert.Single(Decisions.Warnings(Pack(phase), State(1), phase)).UnitTexts));
+        var pk = Pack(null, new AlertDef { Id = "f", Name = "Flag", Condition = "Flag == 1", Message = "" });
+        Assert.Equal("Flag", Assert.Single(Assert.Single(AlertEngine.Evaluate(State(1), pk, null, null, null)).Matches).Text);
+    }
+
+    [Theory]
+    [InlineData("Fuel == 0")]
+    [InlineData("name() == \"Red One\"")]
+    public void Piece_conditions_stay_per_unit(string cond)
+    {
+        var phase = Phase(cond, "x");
+        var s = State(0);
+        foreach (var p in s.Pieces.Keys) s.Ledgers[LedgerKey.Piece(p)]["fuel"] = 0;
+        var h = Assert.Single(Decisions.Warnings(Pack(phase), s, phase));
+        Assert.NotEmpty(h.PieceIds);
+    }
+
+    [Theory]
+    [InlineData("Flag ==")]
+    [InlineData("1/0 > 0")]
+    public void Bad_or_failing_game_level_condition_gives_no_hit(string cond)
+    {
+        var phase = Phase(cond, "x");
+        Assert.Empty(Decisions.Warnings(Pack(phase), State(1), phase));
+        var pk = Pack(null, new AlertDef { Id = "f", Name = "F", Condition = cond, Message = "x" });
+        Assert.Empty(AlertEngine.Evaluate(State(1), pk, null, null, null));
     }
 }

@@ -131,6 +131,12 @@ public static class PieceFilter
         return Value.Of(def.Default);
     }
 
+    internal static double TurnOf(GameState s) => s.Position?.Turn ?? s.Turn.Turn;
+    internal static double StageOf(GameState s) => s.Position?.Repeat ?? 1;
+
+    /// <summary>A Holders-scope property reads the global holder's value (else its Default).</summary>
+    internal static Value GlobalValue(GameState s, PropertyDef def) => Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), def));
+
     internal static Value LookupTable(RulesPack pack, string tableName, Value row, Value? col)
     {
         var t = pack.TableByName(tableName) ?? throw new EvalError($"No table named '{tableName}'");
@@ -155,7 +161,7 @@ public static class PieceFilter
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
-            if (def.Scope == PropertyScope.Holders) return Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), def));
+            if (def.Scope == PropertyScope.Holders) return GlobalValue(s, def);
             var v = Stored(def);
             if (v != null) return Value.Of(v.Value);
             if (!HiddenInView(def) && Declared(def)) return Value.Of(def.Default);
@@ -196,8 +202,8 @@ public static class PieceFilter
         public bool Has(string property) => pack.PropertyByName(property) is { } def && Stored(def) != null;
         public Value PieceName() => NameValue(p);
         public Value Marker(string key) => MarkerValue(p, key);
-        public double Turn() => s.Position?.Turn ?? s.Turn.Turn;
-        public double Stage() => s.Position?.Repeat ?? 1;
+        public double Turn() => TurnOf(s);
+        public double Stage() => StageOf(s);
         public Value Side() => SideValue(p, pack, sides);
         public Value PhaseSide() => PhaseSideValue(pack, Sequencer.Current(pack, s));
         public Value MapName() => MapValue(p);
@@ -210,7 +216,7 @@ public static class PieceFilter
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
-            if (def.Scope == PropertyScope.Holders) return Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), def));
+            if (def.Scope == PropertyScope.Holders) return GlobalValue(s, def);
             throw new EvalError("This formula needs a unit");
         }
 
@@ -219,8 +225,8 @@ public static class PieceFilter
         public bool Has(string property) => false;
         public Value PieceName() => NameValue(null);
         public Value Marker(string key) => MarkerValue(null, key);
-        public double Turn() => s.Position?.Turn ?? s.Turn.Turn;
-        public double Stage() => s.Position?.Repeat ?? 1;
+        public double Turn() => TurnOf(s);
+        public double Stage() => StageOf(s);
         public Value Side() => SideValue(null, pack, SideMap(s, pack));
         public Value PhaseSide() => PhaseSideValue(pack, Sequencer.Current(pack, s));
         public Value MapName() => MapValue(null);

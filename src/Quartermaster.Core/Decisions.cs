@@ -31,7 +31,7 @@ public static class Decisions
             {
                 // Reads nothing about a piece: true or false once, never once per unit.
                 if (PieceFilter.EvaluateGameLevel(game, s, pack))
-                    res.Add(new WarningHit(i, msg, Array.Empty<string>(), new[] { msg.Replace(Token, "").Trim() }, w.IsDecision, s.Acknowledged?.Contains(i) == true));
+                    res.Add(new WarningHit(i, msg, Array.Empty<string>(), new[] { msg.Replace(Token, "").Trim() is { Length: > 0 } txt ? txt : w.Condition!.Trim() }, w.IsDecision, s.Acknowledged?.Contains(i) == true));
                 continue;
             }
             var match = PieceFilter.Compile(w.Condition, s, pack);
@@ -79,7 +79,8 @@ public static class Decisions
             if (!w.IsDecision || w.Acknowledged) continue;
             var n = w.PieceIds.Count;
             var head = w.Message.Replace(Token, "").Trim();
-            res.Add(new Decision(DecisionKind.Warning, $"{head} — {n} {(n == 1 ? "unit" : "units")}", w.Index, null, w.PieceIds));
+            if (n == 0 && head.Length == 0) head = w.UnitTexts.FirstOrDefault() ?? "";
+            res.Add(new Decision(DecisionKind.Warning, n == 0 ? head : $"{head} — {n} {(n == 1 ? "unit" : "units")}", w.Index, null, w.PieceIds));
         }
         return res;
     }
