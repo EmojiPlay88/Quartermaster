@@ -120,6 +120,36 @@ public class RulesPackIoTests : IDisposable
     }
 
     [Fact]
+    public void Pack_without_dice_count_expr_keeps_hash()
+    {
+        var p = HookedPack();
+        Assert.Equal("0b02149a4e0b3372417b625978000d7d2521b0483d4bbc55feb36d4dfbc27dc7", RulesPackIo.ComputeSha256(p));
+        var json = JsonSerializer.Serialize(p.Formulas[0] with { Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 } } }, RulesPackIo.JsonOptions);
+        Assert.DoesNotContain("diceCountExpr", json);
+    }
+
+    [Fact]
+    public void DiceCountExpr_round_trips()
+    {
+        var p = HookedPack();
+        p = p with { Formulas = new() { p.Formulas[0] with
+        {
+            Bindings = new()
+            {
+                new VariableBinding { Variable = "Planes", Kind = BindingKind.Input },
+                new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6, DiceCountExpr = "Planes" },
+                new VariableBinding { Variable = "S", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6, DiceCountExpr = "  " },
+            },
+        } } };
+        var path = Path.Combine(_dir, "dicecount.qrules");
+        RulesPackIo.Save(p, path);
+        var l = RulesPackIo.Load(path);
+        Assert.Equal("Planes", l.Formulas[0].Bindings[1].DiceCountExpr);
+        Assert.Null(l.Formulas[0].Bindings[2].DiceCountExpr);
+        Assert.Contains("\"diceCountExpr\"", JsonSerializer.Serialize(p.Formulas[0], RulesPackIo.JsonOptions));
+    }
+
+    [Fact]
     public void Guards_round_trip()
     {
         var p = HookedPack();

@@ -28,6 +28,8 @@ public class EvaluatorRegistryTests
         "round" or "floor" or "ceil" or "abs" => new[] { Num(1) },
         "clamp" => new[] { Num(1), Num(0), Num(2) },
         "lookup" => new AstExpr[] { new VarRef("T", 0, 1), Num(1) },
+        "lookuprange" => new AstExpr[] { new VarRef("T", 0, 1), Num(1), Num(2) },
+        "count" => new AstExpr[] { new VarRef("R", 0, 1), Num(1), Num(2) },
         "dice" => new[] { Num(1), Num(6) },
         "has" => new AstExpr[] { new VarRef("p", 0, 1) },
         "startswith" or "contains" => new AstExpr[] { new TextLit("a", 0, 1), new TextLit("a", 0, 1) },
@@ -41,7 +43,7 @@ public class EvaluatorRegistryTests
     [Fact]
     public void Read_functions_are_listed()
     {
-        foreach (var n in new[] { "side", "phaseside", "map", "holder" })
+        foreach (var n in new[] { "side", "phaseside", "map", "holder", "lookuprange", "count" })
             Assert.Contains(n, Evaluator.FunctionNames);
     }
 

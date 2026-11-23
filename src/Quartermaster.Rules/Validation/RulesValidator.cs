@@ -66,7 +66,7 @@ public static class RulesValidator
                 case Call c:
                     if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is TextLit t) Prop(t.Value);
                     else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is VarRef hv) Prop(hv.Name);
-                    else if (c.Function == "lookup" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
+                    else if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
                     {
                         if (pack.TableByName(tv.Name) is null) found.Add($"refers to unknown table \"{tv.Name}\"");
                         foreach (var a in c.Args.Skip(1)) Walk(a);
@@ -246,8 +246,8 @@ public static class RulesValidator
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
                     if (ForbiddenConditionFunctions.Contains(c.Function)) forbidden.Add(c.Function);
-                    if (c.Function is "turn" or "stage" or "lookup") dynamic = true;
-                    if (c.Function == "lookup" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
+                    if (c.Function is "turn" or "stage" or "lookup" or "lookuprange") dynamic = true;
+                    if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
                     {
                         if (pack.TableByName(tv.Name) is null) unknownTables.Add(tv.Name);
                         foreach (var a in c.Args.Skip(1)) Walk(a);
@@ -431,7 +431,7 @@ public static class RulesValidator
 
         if (ast is not null)
         {
-            CheckLookups(ast, pack, Once(Err));
+            CheckLookups(ast, pack, Once(Err), f);
         }
 
         if (!string.IsNullOrWhiteSpace(f.AppliesTo))
@@ -452,7 +452,7 @@ public static class RulesValidator
                 if (ParseProblem(b.AutoValue!) is { } ae) Err($"variable \"{b.Variable}\" auto value {ae}");
                 else
                 {
-                    CheckLookups(Parser.Parse(b.AutoValue!), pack, Once(Err));
+                    CheckLookups(Parser.Parse(b.AutoValue!), pack, Once(Err), f);
                 }
             }
         }
@@ -469,12 +469,15 @@ public static class RulesValidator
             if (string.IsNullOrWhiteSpace(src)) return null;
             if (ParseProblem(src!) is { } ge) { Err($"{what} {ge}"); return null; }
             var g = Parser.Parse(src!);
-            CheckLookups(g, pack, Once(Err));
+            CheckLookups(g, pack, Once(Err), f);
             CheckBound(g);
             return g;
         }
         var pre = ParseGuard(f.Precondition, "precondition");
         foreach (var b in f.Bindings) ParseGuard(b.When, $"variable \"{b.Variable}\" only-when");
+        foreach (var b in f.Bindings)
+            if (ParseGuard(b.DiceCountExpr, $"variable \"{b.Variable}\" dice count") is { } dc && Parser.Variables(dc).Contains(b.Variable))
+                Err($"variable \"{b.Variable}\" dice count cannot use {b.Variable} itself");
         if (pre is not null)
         {
             // Everything the precondition reaches is resolved before it runs, so none of it may roll.
@@ -505,18 +508,21 @@ public static class RulesValidator
         return m => { if (seen.Add(m)) err(m); };
     }
 
-    private static void CheckLookups(AstExpr e, RulesPack pack, Action<string> err)
+    private static void CheckLookups(AstExpr e, RulesPack pack, Action<string> err, FormulaDef? f = null)
     {
         switch (e)
         {
-            case Unary u: CheckLookups(u.Operand, pack, err); break;
-            case Binary b: CheckLookups(b.Left, pack, err); CheckLookups(b.Right, pack, err); break;
+            case Unary u: CheckLookups(u.Operand, pack, err, f); break;
+            case Binary b: CheckLookups(b.Left, pack, err, f); CheckLookups(b.Right, pack, err, f); break;
             case Call c:
-                if (c.Function == "lookup" && c.Args.Count > 0 && c.Args[0] is VarRef tv && pack.TableByName(tv.Name) is null)
+                if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv && pack.TableByName(tv.Name) is null)
                     err($"no table named \"{tv.Name}\"");
+                if (c.Function == "count" && f is not null && c.Args.Count > 0 && c.Args[0] is VarRef rv
+                    && !f.Bindings.Any(b => b.Variable == rv.Name && b.Kind == BindingKind.Roll))
+                    err($"count() needs a roll binding, not {rv.Name}");
                 if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp])
                     foreach (var u in HolderCallProblems(hn.Name, hp.Name, pack)) err(u);
-                foreach (var a in c.Args) CheckLookups(a, pack, err);
+                foreach (var a in c.Args) CheckLookups(a, pack, err, f);
                 break;
         }
     }
