@@ -210,6 +210,14 @@ min(Stores + Delivery, 30)
 
 For South Depot delivery, pick **South Depot: Stores** instead. **Outputs:** Target **Holder**, Holder **North Depot** (or **South Depot**), Property **Stores**, Op **Set**.
 
+### One roll, several supply losses; picking a slot
+
+An output can have its own value, and can pick its property when the formula runs. Both are optional, and both are described under [Outputs](Formula-Reference#outputs) in the Formula Reference.
+
+**One roll, several losses.** Make a formula `Raid` whose text is `Loss`, with `Loss` bound as a **Roll** of `1d6`. Add three outputs on the Unit target with Op **Subtract**: Property **Fuel** (leave **Value** blank, so it loses the roll), Property **Ammo** with **Value** `Loss * 2`, and Property **Rations** with **Value** `max(Loss - 1, 0)`. One roll now takes from all three, and the working line shows each loss.
+
+**Picking a slot by an input.** Add an Input `Slot` with Details `1..3`. On one output, fill **Choose from** with `Fuel, Ammo, Rations` and **Pick by** with `Slot`. Slot 2 changes Ammo. One formula does the work of three.
+
 ### Try each formula
 
 Under the bindings, the **Preview** shows the [formula dialog](Window-Formula-Dialog) as players will see it. Pick a counter in **Test piece:** (for example NL 1 Rifles) and try values. Nothing you type in the preview is saved.

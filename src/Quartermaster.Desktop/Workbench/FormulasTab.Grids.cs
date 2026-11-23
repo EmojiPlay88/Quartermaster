@@ -54,7 +54,13 @@ public sealed partial class FormulasTab
             new EditColumn("Holder", EditColumnKind.Combo, Weight: 80),
             new EditColumn("Property", EditColumnKind.Combo, Weight: 100),
             new EditColumn("Op", EditColumnKind.Combo, Weight: 60, Items: Enum.GetNames<OutputOp>()),
+            new EditColumn("Value", Weight: 90),
+            new EditColumn("Choose from", Weight: 100),
+            new EditColumn("Pick by", Weight: 80),
         ]);
+        _out.SetHeaderToolTip(4, OutputValueHint);
+        _out.SetHeaderToolTip(5, ChooseFromHint);
+        _out.SetHeaderToolTip(6, PickByHint);
         _out.CellCommitted += (r, c, text) => Run(() => OnOutputCell(r, c, text));
         _addOutput.Click += (_, _) => Run(() => { FlushPending(final: false); Commit(FormulaEdit.AddOutput); RebuildOutputs(); });
         _removeOutput.Click += (_, _) => Run(() =>
@@ -132,32 +138,39 @@ public sealed partial class FormulasTab
                 break;
             case 6:
                 if (b.Kind != BindingKind.Roll) return;
-                var count = string.IsNullOrWhiteSpace(text) ? null : text.Trim();   // blank is null, never ""
-                if (FormulaEdit.SyntaxProblem(count) is { } countErr) { _err.Text = "Dice count: " + countErr; _goto.IsVisible = false; again = true; break; }
-                // The count may read variables nothing else does: give them binding rows (Input) so they can be set up.
-                Commit(x =>
-                {
-                    var y = FormulaEdit.SetBinding(x, v, z => z with { DiceCountExpr = count });
-                    return FormulaEdit.Analyze(y.Text).Error != null ? y : FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula;
-                });
                 again = true;
+                if (TryExpression(text, "Dice count", out var count)) Commit(x => SyncAfter(FormulaEdit.SetBinding(x, v, z => z with { DiceCountExpr = count })));
                 break;
             case 5:
-                var when = string.IsNullOrWhiteSpace(text) ? null : text.Trim();   // blank is null, never ""
-                if (FormulaEdit.SyntaxProblem(when) is { } whenErr) { _err.Text = "Only when: " + whenErr; _goto.IsVisible = false; again = true; break; }
-                // The condition may read variables nothing else does: give them binding rows (Input) so they can be set up.
-                Commit(x =>
-                {
-                    var y = FormulaEdit.SetBinding(x, v, z => z with { When = when });
-                    return FormulaEdit.Analyze(y.Text).Error != null ? y : FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula;
-                });
                 again = true;
+                if (TryExpression(text, "Only when", out var when)) Commit(x => SyncAfter(FormulaEdit.SetBinding(x, v, z => z with { When = when })));
                 break;
         }
         if (again) Dispatcher.UIThread.Post(() => Run(RebuildBindings));   // not inside the grid's own commit
     }
 
+    /// <summary>
+    /// A blank is null, never ""; a syntax error is shown in the status line (labelled with the column) and refused. The caller then rebuilds the
+    /// grid, so a refused cell shows the stored value again.
+    /// </summary>
+    bool TryExpression(string text, string column, out string? expr)
+    {
+        expr = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        if (FormulaEdit.SyntaxProblem(expr) is not { } problem) return true;
+        _err.Text = column + ": " + problem;
+        _goto.IsVisible = false;
+        return false;
+    }
+
+    /// <summary>An expression may read variables nothing else does: give them binding rows (Input) so they can be set up.</summary>
+    static FormulaDef SyncAfter(FormulaDef y) =>
+        FormulaEdit.Analyze(y.Text).Error != null ? y : FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula;
+
     // ---------- outputs ----------
+
+    const string OutputValueHint = "Blank = the formula's result.";
+    const string ChooseFromHint = "Properties to choose from, separated by commas (put a name that holds a comma in \"double quotes\"). The property is picked by \"Pick by\": a number (1 = the first) or a property name.";
+    const string PickByHint = "An expression: a number picks the Nth property in \"Choose from\"; text picks the property with that name. Needed when \"Choose from\" is set.";
 
     void RebuildOutputs()
     {
@@ -174,7 +187,8 @@ public sealed partial class FormulasTab
                 ? o.HolderId == null ? "" : pack.ById<HolderDef>(o.HolderId)?.Name ?? FormulaEdit.Missing
                 : o.Target == OutputTarget.Global ? HolderDef.GlobalId : "";
             var prop = pack.ById<PropertyDef>(o.Property)?.Name ?? (o.Property.Length == 0 ? "" : FormulaEdit.Missing);
-            rows.Add([o.Target.ToString(), holder, prop, o.Op.ToString()]);
+            var choice = FormulaEdit.FormatNameList((o.PropertyChoice ?? new()).Select(id => pack.ById<PropertyDef>(id)?.Name ?? FormulaEdit.Missing));
+            rows.Add([o.Target.ToString(), holder, prop, o.Op.ToString(), o.Expr ?? "", choice, o.PropertySelect ?? ""]);
         }
         _out.SetRows(rows);
         for (var r = 0; r < f.Outputs.Count; r++)
@@ -182,6 +196,10 @@ public sealed partial class FormulasTab
             if (f.Outputs[r].Target == OutputTarget.Holder) _out.SetCellItems(r, 1, holders);
             else _out.SetCellReadOnly(r, 1, true);
             _out.SetCellItems(r, 2, props);
+            _out.SetCellReadOnly(r, 2, f.Outputs[r].PropertyChoice is { Count: > 0 });   // the fixed Property is not used while a list is set
+            _out.SetCellToolTip(r, 4, OutputValueHint);
+            _out.SetCellToolTip(r, 5, ChooseFromHint);
+            _out.SetCellToolTip(r, 6, PickByHint);
         }
     }
 
@@ -209,6 +227,29 @@ public sealed partial class FormulasTab
             case 3:
                 if (!Enum.TryParse<OutputOp>(text, out var op)) return;
                 Commit(x => FormulaEdit.SetOutput(x, row, o => o with { Op = op }));
+                break;
+            case 4:
+                again = true;
+                if (TryExpression(text, "Value", out var value)) Commit(x => SyncAfter(FormulaEdit.SetOutputValue(x, row, value)));
+                break;
+            case 5:
+                again = true;
+                var (names, nameErr) = FormulaEdit.ParseNameList(text);
+                var ids = new List<string>();
+                var refused = nameErr != null;
+                if (nameErr != null) _err.Text = "Choose from: " + nameErr;
+                foreach (var name in names ?? new List<string>())
+                {
+                    var q = pack.PropertyByName(name);
+                    if (q == null) { _err.Text = $"Choose from: no property named \"{name}\"."; refused = true; break; }
+                    if (!ids.Contains(q.Id)) ids.Add(q.Id);
+                }
+                if (refused) _goto.IsVisible = false;
+                else Commit(x => FormulaEdit.SetOutputChoice(x, row, ids));
+                break;
+            case 6:
+                again = true;
+                if (TryExpression(text, "Pick by", out var pick)) Commit(x => SyncAfter(FormulaEdit.SetOutputPick(x, row, pick)));
                 break;
         }
         if (again) Dispatcher.UIThread.Post(() => Run(RebuildOutputs));

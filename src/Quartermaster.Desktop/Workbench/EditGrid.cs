@@ -262,6 +262,9 @@ public sealed class EditGrid : UserControl
     /// <summary>The choices a cell offers (its own, else its column's; tests).</summary>
     internal IReadOnlyList<string>? CellItems(int row, int col) { Check(row, col); return _rows[row][col].Items ?? _cols[col].Items; }
 
+    /// <summary>True when the cell has been closed to editing (tests).</summary>
+    internal bool IsCellReadOnly(int row, int col) { Check(row, col); return _rows[row][col].ReadOnly; }
+
     public void SetCellReadOnly(int row, int col, bool readOnly)
     {
         Check(row, col);

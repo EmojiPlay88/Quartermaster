@@ -300,6 +300,16 @@ public static class FormulaEdit
         return plain ? choice : "\"" + choice.Replace("\"", "\"\"") + "\"";
     }
 
+    /// <summary>Names separated by commas, in the Input-choices format: a name holding a comma is written in "double quotes".</summary>
+    public static string FormatNameList(IEnumerable<string> names) => string.Join(", ", names.Select(QuoteChoice));
+
+    /// <summary>The reverse of <see cref="FormatNameList"/>; a blank text gives an empty list.</summary>
+    public static (List<string>? Names, string? Error) ParseNameList(string text)
+    {
+        var (list, err) = ParseChoices(text);
+        return err != null ? (null, err) : (list ?? new List<string>(), null);
+    }
+
     private static (List<string>? Choices, string? Error) ParseChoices(string text)
     {
         var choices = new List<string>();
@@ -396,10 +406,22 @@ public static class FormulaEdit
     public static FormulaOutput WithOutputTarget(FormulaOutput o, OutputTarget t) =>
         o with { Target = t, HolderId = t == OutputTarget.Holder ? o.HolderId : null };
 
+    /// <summary>Sets the output's value expression; blank is null (the formula's result), never "".</summary>
+    public static FormulaDef SetOutputValue(FormulaDef f, int index, string? expr) =>
+        SetOutput(f, index, o => o with { Expr = string.IsNullOrWhiteSpace(expr) ? null : expr.Trim() });
+
+    /// <summary>Sets the output's property list; an empty list is null (the fixed Property is used), never [].</summary>
+    public static FormulaDef SetOutputChoice(FormulaDef f, int index, IReadOnlyList<string>? propertyIds) =>
+        SetOutput(f, index, o => o with { PropertyChoice = propertyIds is { Count: > 0 } ? propertyIds.ToList() : null });
+
+    /// <summary>Sets the output's "Pick by" expression; blank is null.</summary>
+    public static FormulaDef SetOutputPick(FormulaDef f, int index, string? expr) =>
+        SetOutput(f, index, o => o with { PropertySelect = string.IsNullOrWhiteSpace(expr) ? null : expr.Trim() });
+
     // ---------- usage ----------
 
     public static IReadOnlyList<FormulaDef> FormulasUsingProperty(RulesPack pack, string propertyId) =>
-        pack.Formulas.Where(f => f.Bindings.Any(b => b.Property == propertyId) || f.Outputs.Any(o => o.Property == propertyId)).ToList();
+        pack.Formulas.Where(f => f.Bindings.Any(b => b.Property == propertyId) || f.Outputs.Any(o => o.Property == propertyId || o.PropertyChoice?.Contains(propertyId) == true)).ToList();
 
     public static IReadOnlyList<FormulaDef> FormulasUsingHolder(RulesPack pack, string holderId) =>
         pack.Formulas.Where(f => f.Bindings.Any(b => b.HolderId == holderId) || f.Outputs.Any(o => o.HolderId == holderId)).ToList();

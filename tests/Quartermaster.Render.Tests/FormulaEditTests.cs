@@ -269,6 +269,50 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void Formulas_using_property_finds_choice()
+    {
+        var pack = Pack() with
+        {
+            Formulas = new()
+            {
+                new FormulaDef { Id = "z", Name = "Z", Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, PropertyChoice = new() { "p1", "p2" }, PropertySelect = "1" } } },
+            },
+        };
+        Assert.Equal(new[] { "Z" }, FormulaEdit.FormulasUsingProperty(pack, "p2").Select(f => f.Name));
+        Assert.Empty(FormulaEdit.FormulasUsingProperty(pack, "p3"));
+    }
+
+    [Fact]
+    public void Output_value_and_choice_edits_normalise_blanks()
+    {
+        var f = FormulaEdit.AddOutput(F("A"));
+        f = FormulaEdit.SetOutputValue(f, 0, " R * 2 ");
+        Assert.Equal("R * 2", f.Outputs[0].Expr);
+        f = FormulaEdit.SetOutputValue(f, 0, "  ");
+        Assert.Null(f.Outputs[0].Expr);
+        f = FormulaEdit.SetOutputChoice(f, 0, new List<string> { "p1" });
+        Assert.Equal(new[] { "p1" }, f.Outputs[0].PropertyChoice);
+        f = FormulaEdit.SetOutputChoice(f, 0, new List<string>());
+        Assert.Null(f.Outputs[0].PropertyChoice);
+        f = FormulaEdit.SetOutputPick(f, 0, " Slot ");
+        Assert.Equal("Slot", f.Outputs[0].PropertySelect);
+        f = FormulaEdit.SetOutputPick(f, 0, "");
+        Assert.Null(f.Outputs[0].PropertySelect);
+    }
+
+    [Fact]
+    public void Choice_names_use_the_quoted_choice_format()
+    {
+        Assert.Equal("Fuel, \"Fuel, diesel\", Ammo", FormulaEdit.FormatNameList(new[] { "Fuel", "Fuel, diesel", "Ammo" }));
+        var (names, err) = FormulaEdit.ParseNameList("Fuel, \"Fuel, diesel\", Ammo");
+        Assert.Null(err);
+        Assert.Equal(new[] { "Fuel", "Fuel, diesel", "Ammo" }, names);
+        Assert.Equal(new[] { "Fuel" }, FormulaEdit.ParseNameList("Fuel").Names);
+        Assert.Empty(FormulaEdit.ParseNameList("  ").Names!);
+        Assert.NotNull(FormulaEdit.ParseNameList("\"Fuel, diesel").Error);
+    }
+
+    [Fact]
     public void SyntaxProblem_checks_filter_expressions()
     {
         Assert.Null(FormulaEdit.SyntaxProblem(""));

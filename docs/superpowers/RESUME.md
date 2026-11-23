@@ -116,7 +116,16 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-23, dice charts; read this first):**
+**CURRENT STATE (2026-11-23, formula outputs; read this first):**
+
+- **Branch `formula-outputs` (cut from master af9c12e), not pushed; all three tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-23-formula-outputs-design.md` (engine wishlist #19, #39).
+  - **Rules:** `FormulaOutput.Expr` (value expression; blank = the formula's result), `PropertyChoice` (property ids) with `PropertySelect` (a number picks the Nth, 1-based; text picks by property name, trimmed, case-insensitive). All omitted when null; `CurrentFormat` stays 4, an unchanged pack keeps its SHA-256. Validator: `Formula "{name}": output {n} has a property list but no "Pick by"`. `FormulaVariables.Used`/`HolderReads` include output expressions, so masking covers hidden reads there (tested, no code change needed).
+  - **Core:** each output has its own value (same run, same dice); the property is picked per run (`{value} is not one of the output's properties`, `The value for {property} is not a number`); all outputs are computed before anything is written; the working line shows each output's own value.
+  - **Render / Desktop:** `FormulaEdit.SetOutputValue/SetOutputChoice/SetOutputPick`, `WithoutPropertyChoice` (property delete removes the id from lists, an emptied list becomes null; also in the WinForms Workbench), "formulas using this property" includes `PropertyChoice`. Outputs grid: `Value` (hint `Blank = the formula's result.`), `Choose from` (property names separated by commas, unknown names refused), `Pick by`; syntax errors refused like `Only when` (shared helpers `TryExpression`/`SyncAfter` in FormulasTab.Grids.cs). WinForms Workbench grid not edited (keeps the fields through `with`).
+  - **Wiki:** Formula-Reference (Outputs section, errors), Making-a-Rules-Pack (one roll, several supply losses; pick a slot by an input), Window-Rules-Workbench.
+  - **Tests:** see the task 3 report for the full-run numbers.
+
+**Previous CURRENT STATE (2026-11-23, dice charts; history):**
 
 - **Branch `dice-charts` (cut from master 835e070), not pushed; all three tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-23-dice-charts-design.md` (engine wishlist #28, #50).
   - **Rules:** `lookuprange(Table, row, value)` (2-D tables; column key of the first cell of the row whose range holds the value), `count(R, lo, hi)` (dice of a Roll binding in lo..hi), `VariableBinding.DiceCountExpr` (dice count from an expression, 1 to 100; omitted when null; `CurrentFormat` stays 4, an unchanged pack keeps its SHA-256). Validator: `count() needs a roll binding, not {variable}`; warning for a dice count on a non-roll.

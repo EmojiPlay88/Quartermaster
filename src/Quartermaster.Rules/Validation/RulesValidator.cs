@@ -501,7 +501,18 @@ public static class RulesValidator
         foreach (var b in f.Bindings)
             if (!used.Contains(b.Variable)) Warn($"variable \"{b.Variable}\" is bound but not used in the formula");
 
-        foreach (var o in f.Outputs) CheckOutput(pack, o, Err);
+        var outputNo = 0;
+        foreach (var o in f.Outputs)
+        {
+            outputNo++;
+            CheckOutput(pack, o, outputNo, Err);
+            ParseGuard(o.Expr, $"output {outputNo} value");
+            if (o.PropertyChoice is { Count: > 0 })
+            {
+                if (string.IsNullOrWhiteSpace(o.PropertySelect)) Err($"output {outputNo} has a property list but no \"Pick by\"");
+                else ParseGuard(o.PropertySelect, $"output {outputNo} pick-by");
+            }
+        }
     }
 
     /// <summary>Reports each distinct message once (as <see cref="FilterRefProblems"/> does), so a repeated call is one issue.</summary>
@@ -579,13 +590,20 @@ public static class RulesValidator
         else if (pack.ById<PropertyDef>(name!) is null) err($"{v} refers to a property that no longer exists");
     }
 
-    private static void CheckOutput(RulesPack pack, FormulaOutput o, Action<string> err)
+    private static void CheckOutput(RulesPack pack, FormulaOutput o, int outputNo, Action<string> err)
     {
-        var p = pack.ById<PropertyDef>(o.Property ?? "");
-        if (p is null) { err("an output refers to a property that no longer exists"); }
+        var gone = Once(err);   // one "no longer exists" per output, however many of its ids are gone
         if (o.Target == OutputTarget.Holder && o.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(o.HolderId ?? "") is null)
             err($"output refers to unknown holder \"{o.HolderId}\"");
-        if (p is null) return;
+        // With a property list the fixed Property is not used; every listed id must suit the target as Property must.
+        if (o.PropertyChoice is { Count: > 0 } ids) foreach (var id in ids) CheckOutputProperty(pack, o, id, outputNo, err, gone);
+        else CheckOutputProperty(pack, o, o.Property, outputNo, err, gone);
+    }
+
+    private static void CheckOutputProperty(RulesPack pack, FormulaOutput o, string? id, int outputNo, Action<string> err, Action<string> gone)
+    {
+        var p = pack.ById<PropertyDef>(id ?? "");
+        if (p is null) { gone($"output {outputNo} refers to a property that no longer exists"); return; }
         bool ok = o.Target == OutputTarget.Unit
             ? p.Scope is PropertyScope.Pieces or PropertyScope.Both
             : p.Scope is PropertyScope.Holders or PropertyScope.Both;
