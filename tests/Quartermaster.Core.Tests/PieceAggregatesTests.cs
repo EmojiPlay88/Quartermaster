@@ -299,4 +299,26 @@ public class PieceAggregatesTests
             return err;
         }
     }
+
+    [Fact]
+    public void Missing_value_in_filter_is_no_match()
+    {
+        var s = Riverland();
+        var pack = Pack();
+        // Fuel applies to Red units only: Blue Rifles has no Fuel, so the filter does not match it (no error).
+        pack.Properties.Add(new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, AppliesTo = "startsWith(name(), \"Red\")" });
+        Assert.Equal(12, Eval("sum(Strength, \"Fuel >= 0\")", s, pack).Number);
+        Assert.Equal(3, Eval("countof(\"Fuel >= 0\")", s, pack).Number);
+        Assert.Equal(7, Eval("hexsum(Strength, \"Fuel >= 0\")", s, pack, s.Pieces["r1"]).Number);
+        Assert.Equal(0, Eval("countof(\"marker(\\\"Kind\\\") == \\\"Truck\\\"\")", s, pack).Number);   // no such marker: no match
+    }
+
+    [Fact]
+    public void Runtime_error_in_filter_fails_the_aggregate()
+    {
+        var s = Riverland();
+        Assert.Equal("'>' needs numbers, got text", Run(s, "sum(Strength, \"name() > 1\")").Error);
+        Assert.Equal("Division by zero", Run(s, "countof(\"Strength / 0 > 1\")").Error);
+        Assert.Equal("No table named 'Nope'", Run(s, "hexcount(\"lookup(Nope, 1) > 0\")").Error);
+    }
 }

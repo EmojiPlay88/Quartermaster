@@ -32,7 +32,8 @@ public static class PieceFilter
 
     /// <summary>
     /// The filter of an aggregate call (sum(P, "filter") ...): like <see cref="Compile"/>, but a parse error (here) or an evaluation error on a piece
-    /// (when matching) is thrown, so the aggregate fails instead of skipping pieces. Empty matches every piece.
+    /// (when matching) is thrown, so the aggregate fails instead of skipping pieces. A missing value (<see cref="EvalError.MissingValue"/>: a
+    /// property not applicable to the piece or hidden, no such marker) is no match, as in any unit filter. Empty matches every piece.
     /// </summary>
     internal static Func<PieceInstance, bool> CompileStrict(string text, GameState s, RulesPack pack, ModuleModel? model)
     {
@@ -40,7 +41,11 @@ public static class PieceFilter
         var e = Parser.Parse(text);
         var sides = SideMap(s, pack);
         var filters = new AggregateFilters(s, pack, model);
-        return p => Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides, filters, model)).IsTruthy;
+        return p =>
+        {
+            try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides, filters, model)).IsTruthy; }
+            catch (EvalError ex) when (ex.MissingValue) { return false; }
+        };
     }
 
     /// <summary>
@@ -101,7 +106,7 @@ public static class PieceFilter
     internal static Value MarkerValue(PieceInstance? p, string key)
     {
         if (p == null) throw new EvalError("This formula needs a unit");
-        return PieceInfo.Markers(p).TryGetValue(key, out var v) ? Value.Of(v) : throw new EvalError($"No marker '{key}'");
+        return PieceInfo.Markers(p).TryGetValue(key, out var v) ? Value.Of(v) : throw new EvalError($"No marker '{key}'") { MissingValue = true };
     }
 
     internal static Value NameValue(PieceInstance? p) =>
@@ -146,7 +151,7 @@ public static class PieceFilter
         if (v != null) return Value.Of(v.Value);
         if (s.IsPlayerView && Ownership.SideOfHolder(h.Id, pack) is { } side && !s.Ledgers.ContainsKey(key)
             && s.ViewSides?.Contains(side) != true)
-            throw new EvalError($"{def.Name} has no value on {h.Name}");
+            throw new EvalError($"{def.Name} has no value on {h.Name}") { MissingValue = true };
         return Value.Of(def.Default);
     }
 
@@ -188,7 +193,7 @@ public static class PieceFilter
             var v = Stored(def);
             if (v != null) return Value.Of(v.Value);
             if (!HiddenInView(def) && Declared(def)) return Value.Of(def.Default);
-            throw new EvalError($"{name} has no value on this piece");
+            throw new EvalError($"{name} has no value on this piece") { MissingValue = true };
         }
 
         /// <summary>

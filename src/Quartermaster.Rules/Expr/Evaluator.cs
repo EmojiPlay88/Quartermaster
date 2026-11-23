@@ -6,6 +6,8 @@ namespace Quartermaster.Rules.Expr;
 public sealed class EvalError : Exception
 {
     public AstExpr? At { get; }
+    /// <summary>The value read is missing (not applicable to the piece, hidden, no such marker) rather than wrong: a unit filter reads it as no match.</summary>
+    public bool MissingValue { get; init; }
     public EvalError(string message, AstExpr? at = null) : base(message) => At = at;
 }
 
