@@ -48,4 +48,7 @@ public sealed record FormulaDef
     public string? Notes { get; init; }
     /// <summary>When true, dice results of this formula are shown only to the rolling side's players.</summary>
     public bool PrivateRolls { get; init; } = false;
+    /// <summary>Phase ids the formula may be run in from the menu and by hooks. Null = any phase (the Workbench stores null, never an empty list).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Phases { get; init; }
 }

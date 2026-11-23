@@ -42,6 +42,30 @@ public class PhaseEditTests
     }
 
     [Fact]
+    public void Phase_delete_removes_id_from_formula_phases()
+    {
+        var pack = Pack(new[] { "a", "b", "c" }) with
+        {
+            Formulas = new()
+            {
+                new FormulaDef { Id = "f1", Phases = new() { "a", "b" } },
+                new FormulaDef { Id = "f2", Phases = new() { "b" } },
+                new FormulaDef { Id = "f3" },
+            },
+        };
+        var (p, err) = PhaseEdit.Remove(pack, 1);
+        Assert.Null(err);
+        Assert.Equal(new[] { "a" }, p.Formulas[0].Phases);
+        Assert.Null(p.Formulas[1].Phases);   // emptied: null, never an empty list
+        Assert.Null(p.Formulas[2].Phases);
+        // Duplicate copies OnEnd rather than sharing it.
+        var withEnd = pack with { Phases = pack.Phases.Select(x => x.Id == "a" ? x with { OnEnd = new() { new StartEntry { FormulaId = "f1" } } } : x).ToList() };
+        var (d, _) = PhaseEdit.Duplicate(withEnd, 0);
+        Assert.Equal("f1", d.Phases[1].OnEnd![0].FormulaId);
+        Assert.NotSame(d.Phases[0].OnEnd, d.Phases[1].OnEnd);
+    }
+
+    [Fact]
     public void Remove_BlockEndShrinks_EmptyBlockRemoved()
     {
         var pack = Pack(new[] { "a", "b", "c", "d" }, new PhaseBlock { FirstPhaseId = "b", LastPhaseId = "c", Count = 2, Label = "x" });

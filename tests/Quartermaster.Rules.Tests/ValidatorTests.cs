@@ -245,6 +245,53 @@ public class ValidatorTests
     private static IReadOnlyList<RulesIssue> V(RulesPack p) => RulesValidator.Validate(p);
 
     [Fact]
+    public void Validator_OnEnd_checked_like_OnStart()
+    {
+        var ph = Ph("a", "Alpha") with
+        {
+            OnStart = new() { new StartEntry { FormulaId = "zz", UnitFilter = "Zork > 1" } },
+            OnEnd = new() { new StartEntry { FormulaId = "zz", UnitFilter = "Zork > 1" } },
+        };
+        var msgs = V(Clean() with { Phases = new() { ph } }).Where(i => i.EntityId == "a").Select(i => i.Message).ToList();
+        Assert.Equal(2, msgs.Count(m => m == "Phase \"Alpha\": formula \"zz\" does not exist"));
+        Assert.Contains("Phase \"Alpha\": on-start filter refers to unknown property \"Zork\"", msgs);
+        Assert.Contains("Phase \"Alpha\": on-end filter refers to unknown property \"Zork\"", msgs);
+    }
+
+    [Fact]
+    public void Validator_formula_unknown_phase()
+    {
+        var pack = Clean() with { Phases = new() { Ph("a", "Alpha") }, Formulas = Clean().Formulas.Select(f => f with { Phases = new() { "a", "gone" } }).ToList() };
+        var issues = V(pack).Where(i => i.Message.Contains("phase list")).ToList();
+        Assert.NotEmpty(issues);
+        Assert.All(issues, i => Assert.Equal(RulesIssueSeverity.Error, i.Severity));
+        var f = pack.Formulas[0];
+        Assert.Contains(issues, i => i.EntityId == f.Id && i.Message == $"Formula \"{f.Name}\": phase list names unknown phase \"gone\"");
+        Assert.DoesNotContain(issues, i => i.Message.Contains("\"a\""));
+    }
+
+    [Fact]
+    public void Validator_hook_outside_formula_phases()
+    {
+        var f = Clean().Formulas[0] with { Phases = new() { "other" } };
+        var other = Ph("other", "Other");
+        var ph = Ph("a", "Alpha") with
+        {
+            OnStart = new() { new StartEntry { FormulaId = f.Id } },
+            OnMove = new() { new MoveEntry { FormulaId = f.Id } },
+            OnEnd = new() { new StartEntry { FormulaId = f.Id } },
+        };
+        var pack = Clean() with { Phases = new() { ph, other }, Formulas = Clean().Formulas.Skip(1).Prepend(f).ToList() };
+        var warns = V(pack).Where(i => i.Severity == RulesIssueSeverity.Warning && i.Message.Contains("limited to other phases")).ToList();
+        foreach (var kind in new[] { "start", "move", "end" })
+            Assert.Contains(warns, i => i.EntityId == "a" && i.Message == $"Phase \"Alpha\": {kind} entry runs \"{f.Name}\", which is limited to other phases");
+        Assert.Equal(3, warns.Count);   // "Other" itself lists the formula, and runs nothing
+        // in its own list, or no list: no warning
+        var ok = V(pack with { Phases = new() { ph with { Id = "other", Name = "Other" } } });
+        Assert.DoesNotContain(ok, i => i.Message.Contains("limited to other phases"));
+    }
+
+    [Fact]
     public void Validator_PhaseDanglingIds_Errors()
     {
         var ph = Ph("a", "Alpha") with
