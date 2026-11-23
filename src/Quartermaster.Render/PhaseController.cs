@@ -356,7 +356,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (s.Game == null || s.Runner == null) return false;
         if (trace.Error != null || trace.Result == null) return false;   // a failed trace changes nothing and keeps the run pending
         // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
-        if (runId != null && !IsPending(runId, pieceId)) return false;
+        if (runId != null && !IsPending(runId, pieceId, trace.Formula.Id)) return false;
         if (!s.CanActFor(pieceId, ActorSides)) return false;   // hot-seat: only the units of the sides held (or of no side)
         var name = UnitName(pieceId);
         var unit = name ?? trace.Formula.Name;
@@ -369,8 +369,8 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     }
 
     /// <summary>True while the run exists and the unit for this piece is not yet applied.</summary>
-    public bool IsPending(string runId, string? pieceId) =>
-        s.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } run && run.Units.Any(u => u.PieceId == pieceId && !u.Applied);
+    public bool IsPending(string runId, string? pieceId, string? formulaId = null) =>
+        s.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } run && (formulaId == null || run.FormulaId == formulaId) && run.Units.Any(u => u.PieceId == pieceId && !u.Applied);
 
     /// <summary>A run with no ledger outputs has no ledger line carrying its working; log it so every calculation is visible (spec 9).</summary>
     private void LogWorking(FormulaTrace trace, string unit, string? tag)

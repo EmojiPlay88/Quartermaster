@@ -36,6 +36,9 @@ public static class FormulaWindowRules
         return (manual, d == Difficulty.SemiAuto, manual);
     }
 
+    /// <summary>True when a dialog is a player-started run, so the formula's phase limit applies (not a waiting run, not a Workbench preview).</summary>
+    public static bool EnforcesPhaseLimit(string? runId, bool previewOnly) => runId == null && !previewOnly;
+
     /// <summary>True when the linked run is no longer pending for the unit (phase change or replaced game).</summary>
     public static bool RunGone(PhaseController? c, string? pieceId, string? runId) =>
         runId != null && c != null && !c.IsPending(runId, pieceId);

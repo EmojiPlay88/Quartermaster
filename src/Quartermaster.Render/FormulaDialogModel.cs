@@ -212,6 +212,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         if (PhaseReasonFor(state) != null)
         {
+            // (The runner call only gives the view its variable list; its dice are not pinned and nothing is applied.)
             // Outside the formula's phases nothing is run: the trace carries no result, so nothing can be applied.
             var idle = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), new Dictionary<string, string>(StringComparer.Ordinal), _fixedRolls, Moved, false, DiceSource));
             return idle with { Result = null, Working = "", Outputs = Array.Empty<OutputPreview>() };

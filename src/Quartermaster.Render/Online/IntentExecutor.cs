@@ -338,7 +338,7 @@ internal static class FormulaIntentRunner
         double? moved = null;
         if (i.RunId != null)
         {
-            if (!c.IsPending(i.RunId, i.PieceId)) return FormulaVerdict.Refused(NotWaitingText);
+            if (!c.IsPending(i.RunId, i.PieceId, f.Id)) return FormulaVerdict.Refused(NotWaitingText);
             moved = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied).Moved;
         }
         else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))

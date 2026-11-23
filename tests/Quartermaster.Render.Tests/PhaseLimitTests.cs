@@ -33,14 +33,14 @@ public class PhaseLimitTests : IDisposable
         Phases = p.Phases.Select(x => x.Id == "ph-move" ? x with { Name = "Organization" } : x).ToList(),
     };
 
-    private (ModuleSession S, PhaseController C) Open(Func<RulesPack, RulesPack>? tweak = null)
+    private (ModuleSession S, PhaseController C) Open(Func<RulesPack, RulesPack>? tweak = null, Difficulty difficulty = Difficulty.FullyAuto)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
         var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "cache" + _sessions.Count), Path.Combine(_tmp, "root" + _sessions.Count));
         _sessions.Add(s);
         s.SetRoller((n, _) => Enumerable.Repeat(3, n).ToList());
-        s.LoadSetup(s.Model.Setups[0], Difficulty.FullyAuto, new[] { Alice });
+        s.LoadSetup(s.Model.Setups[0], difficulty, new[] { Alice });
         s.NewRules("t");
         s.UpdateRules(_ => { var p = Limited(PhaseFixture.Pack(s.Archive.Sha256)); return tweak == null ? p : tweak(p); });
         return (s, new PhaseController(s, (c, st) => CommandLog.Prepare(c, st, s)));
@@ -121,5 +121,57 @@ public class PhaseLimitTests : IDisposable
         c.Start();
         c.Advance();           // Supply
         Assert.Equal(9, Ledger.Get(s.Game!.State, LedgerKey.Piece(PhaseFixture.RedOne), "water"));
+    }
+
+    /// <summary>Semi-automatic: Supply's OnStart queues a waiting run of f-water (limited to Organization); returns its id.</summary>
+    private static string QueuedWaterRun(ModuleSession s, PhaseController c)
+    {
+        c.Start(); c.Advance();   // Supply
+        return s.Game!.State.Pending.Single(r => r.FormulaId == "f-water").Id;
+    }
+
+    [Fact]
+    public void Host_refuses_limited_formula_with_other_formulas_run_id()
+    {
+        // Supply also queues an unlimited "f-free" run per unit; a guest names that run but asks for the limited f-water.
+        var (s, c) = Open(p => p with
+        {
+            Formulas = p.Formulas.Concat(new[] { p.Formulas.Single(f => f.Id == "f-water") with { Id = "f-free", Name = "Free water", Phases = null } }).ToList(),
+            Phases = p.Phases.Select(x => x.Id == "ph-supply" ? x with { OnStart = x.OnStart!.Concat(new[] { new StartEntry { FormulaId = "f-free", ForEach = ForEachMode.Units } }).ToList() } : x).ToList(),
+        }, Difficulty.SemiAuto);
+        var x = new IntentExecutor(s, c);
+        c.Start(); c.Advance();   // Supply
+        var free = s.Game!.State.Pending.Single(r => r.FormulaId == "f-free");
+        var before = Json(s.Game!.State);
+        var r = x.Execute("p1", Red, new FormulaIntent("f-water", PhaseFixture.RedOne, free.Id, new Dictionary<string, string>(), true));
+        Assert.False(r.Ok);
+        Assert.Equal(before, Json(s.Game!.State));
+    }
+
+    [Fact]
+    public void Host_accepts_queued_run_of_limited_formula_outside_its_phases()
+    {
+        var (s, c) = Open(difficulty: Difficulty.SemiAuto);
+        var x = new IntentExecutor(s, c);
+        var id = QueuedWaterRun(s, c);   // in Supply, not Organization
+        var r = x.Execute("p1", Red, new FormulaIntent("f-water", PhaseFixture.RedOne, id, new Dictionary<string, string>(), true));
+        Assert.True(r.Ok, r.Message);
+    }
+
+    [Fact]
+    public void Controller_pending_check_is_tied_to_the_formula()
+    {
+        var (s, c) = Open(difficulty: Difficulty.SemiAuto);
+        var id = QueuedWaterRun(s, c);
+        Assert.True(c.IsPending(id, PhaseFixture.RedOne, "f-water"));
+        Assert.False(c.IsPending(id, PhaseFixture.RedOne, "f-fuel"));
+    }
+
+    [Fact]
+    public void Linked_dialog_does_not_enforce_the_limit()
+    {
+        Assert.False(FormulaWindowRules.EnforcesPhaseLimit("run1", previewOnly: false));
+        Assert.True(FormulaWindowRules.EnforcesPhaseLimit(null, previewOnly: false));
+        Assert.False(FormulaWindowRules.EnforcesPhaseLimit(null, previewOnly: true));
     }
 }
