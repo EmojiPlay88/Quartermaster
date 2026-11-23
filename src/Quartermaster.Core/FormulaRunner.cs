@@ -39,6 +39,9 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// <summary>A roll attempted while evaluating the precondition.</summary>
     private sealed class RollsForbidden() : Exception("Rolls are not allowed here");
 
+    /// <summary>A variable that waits on another (an "Only when" not yet known, or a roll held until the precondition is decided).</summary>
+    private sealed class Waits() : Exception("Waiting");
+
     public FormulaTrace Run(GameState s, RunRequest r)
     {
         var formula = _pack.ById<FormulaDef>(r.FormulaId);
@@ -101,6 +104,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     run.Rolls, run.RollsByKey, Refused: true);
             }
             prePending = ok == null;
+            if (prePending) run.HoldRolls();   // nothing is rolled for the text until the precondition is decided
         }
 
         var states = names.Select(run.Resolve).ToList();
@@ -202,6 +206,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public VariableState? Cached(string name) => _done.TryGetValue(name, out var v) ? v : null;
 
         private bool _noRolls;
+        private bool _holdRolls;
+
+        /// <summary>From now on a variable that would roll waits instead (the precondition is not decided yet).</summary>
+        public void HoldRolls() { _noRolls = true; _holdRolls = true; }
 
         /// <summary>True when a binding's "Only when" condition could not be evaluated yet (it reads a variable not filled).</summary>
         public bool Waiting { get; private set; }
@@ -216,7 +224,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var before = _noRolls;
             _noRolls = before || !rolls;
             try { return Evaluator.Evaluate(test, new RunContext(this)).Bool; }
-            catch (Missing) { return null; }
+            catch (Exception ex) when (ex is Missing or Waits) { return null; }
             finally { _noRolls = before; }
         }
 
@@ -226,6 +234,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             var st = Resolve(name);
             if (st.Skipped) throw new EvalError($"{name} is not used here: its \"Only when\" condition is false");
+            if (st is { Value: null, MissingReason: null }) throw new Waits();
             return st.Value ?? throw new Missing(st.MissingReason ?? "Missing value");
         }
 
@@ -238,12 +247,19 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             {
                 var b = formula.Bindings.FirstOrDefault(x => x.Variable == name);
                 var auto = b is { Kind: not BindingKind.Input };
-                var use = b == null || string.IsNullOrWhiteSpace(b.When) ? true : Condition(Parser.Parse(b.When));
-                if (use == false) st = new(name, null, auto, false, null, Skipped: true);
-                else if (use == null) { st = new(name, null, auto, false, null); Waiting = true; }
-                else
-                    try { st = b == null ? new(name, null, false, false, "No binding for " + name) : Bind(b); }
-                    catch (Missing m) { st = new(name, null, auto, false, m.Message); }
+                try
+                {
+                    var use = b == null || string.IsNullOrWhiteSpace(b.When) ? true : Condition(Parser.Parse(b.When));
+                    st = use == false ? new(name, null, auto, false, null, Skipped: true)
+                        : use == null ? throw new Waits()
+                        : b == null ? new(name, null, false, false, "No binding for " + name) : Bind(b);
+                }
+                catch (Missing m) { st = new(name, null, auto, false, m.Message); }
+                catch (Exception ex) when (ex is Waits || (ex is RollsForbidden && _holdRolls))
+                {
+                    st = new(name, null, auto, false, null);   // waiting: not missing, not skipped
+                    Waiting = true;
+                }
             }
             finally { _active.Remove(name); }
             _done[name] = st;

@@ -32,6 +32,7 @@ public class FormulaGuardsTests
         Assert.Equal(new[] { 4.0, 3.0, 2.0 }, t.Variables.Select(x => x.Value!.Value.Number));
         Assert.All(t.Variables, x => { Assert.False(x.Skipped); Assert.Null(x.MissingReason); });
         Assert.Equal(4, t.Result!.Value.Number);
+        Assert.Equal("4 × Rates[3] ÷ 2 = 4 → Fuel 140 − 4 = 136", t.Working);
         var o = Assert.Single(t.Outputs);
         Assert.Equal((140.0, 136.0), (o.Before, o.After));
         Assert.Empty(t.Rolls);
@@ -234,5 +235,49 @@ public class FormulaGuardsTests
             .Run(RunnerFx.State(), RunnerFx.Req(typed: Fuel, overrides: RunnerFx.D(("Extra", "9"))));
         Assert.Equal(4, t.Result!.Value.Number);
         Assert.True(V(t, "Extra").Skipped);
+    }
+
+    [Fact]
+    public void Undecided_precondition_rolls_nothing_for_the_text()
+    {
+        var calls = 0;
+        var table = new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t-rates", RowExpr = "dice(1, 6)" };
+        var runner = Runner(f => With(f, "MP + Dmg + T + dice(1, 6)", Dmg(), table, In("Gate")) with { Precondition = "Gate > 0" },
+            (n, s) => { calls++; return Enumerable.Repeat(1, n).ToList(); });
+
+        var pending = runner.Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "4"))));
+        Assert.Null(pending.Error);
+        Assert.Null(pending.Result);
+        Assert.Equal(0, calls);
+        Assert.Empty(pending.Rolls);
+        Assert.Empty(pending.RollsByKey);
+        Assert.Equal("Waiting for input", V(pending, "Gate").MissingReason);
+        foreach (var name in new[] { "Dmg", "T" })
+        {
+            var d = V(pending, name);
+            Assert.Null(d.Value);
+            Assert.Null(d.MissingReason);
+            Assert.False(d.Skipped);
+        }
+
+        var open = runner.Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "4"), ("Gate", "1"))));
+        Assert.Null(open.Error);
+        Assert.Equal(4 + 2 + 1 + 1, open.Result!.Value.Number);
+        Assert.Equal(3, calls);
+        Assert.Contains("Dmg", open.RollsByKey.Keys);
+    }
+
+    [Fact]
+    public void Table_reading_a_waiting_variable_waits()
+    {
+        var table = new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t-rates", RowExpr = "Extra" };
+        var t = Runner(f => With(f, "MP + T", table, In("Mode"), In("Extra", "Mode == 1")))
+            .Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "4"))));
+        Assert.Null(t.Error);
+        Assert.Null(t.Result);
+        var st = V(t, "T");
+        Assert.Null(st.MissingReason);
+        Assert.False(st.Skipped);
+        Assert.Null(st.Value);
     }
 }
