@@ -386,6 +386,58 @@ public sealed class PhasesTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void PhasesTab_on_end_grid_commits()
+    {
+        var s = Session();
+        var tab = Tab(s);
+        tab.SelectPhase("ph-supply");
+        Pump();
+        Assert.Null(Ph(s, "ph-supply").OnEnd);
+        Assert.Equal(0, tab.EndGrid.RowCount);
+
+        Click(tab.EndAddButton);
+        var end = Assert.IsType<List<StartEntry>>(Ph(s, "ph-supply").OnEnd);
+        Assert.Equal("f-weather", Assert.Single(end).FormulaId);   // the first formula
+        Pick(tab.EndGrid, 0, 0, "Daily water");
+        Pick(tab.EndGrid, 0, 1, "Units");
+        tab.EndGrid.BeginEdit(0, 2, "name() != \"\"");
+        tab.EndGrid.CommitEdit();
+        var e = Assert.Single(Ph(s, "ph-supply").OnEnd!);
+        Assert.Equal(("f-water", ForEachMode.Units, "name() != \"\""), (e.FormulaId, e.ForEach, e.UnitFilter));
+        Assert.Equal("Units", tab.EndGrid.Cell(0, 1));
+
+        Click(tab.EndAddButton);
+        Assert.Equal(2, Ph(s, "ph-supply").OnEnd!.Count);
+        tab.EndGrid.SelectCell(1, 0);
+        Click(tab.EndRemoveButton);
+        Assert.Single(Ph(s, "ph-supply").OnEnd!);
+
+        tab.EndGrid.SelectCell(0, 0);
+        Click(tab.EndRemoveButton);
+        Assert.Null(Ph(s, "ph-supply").OnEnd);   // the last row gone: null, never an empty list
+        Assert.Equal(0, tab.EndGrid.RowCount);
+        // the OnStart of the phase is untouched
+        Assert.Single(Ph(s, "ph-supply").OnStart);
+    }
+
+    [AvaloniaFact]
+    public void PhasesTab_fires_for_commits()
+    {
+        var s = Session();
+        var tab = Tab(s);
+        tab.SelectPhase("ph-move");
+        Pump();
+        Assert.Equal("Acting side", tab.MoveGrid.Cell(0, 2));
+        Pick(tab.MoveGrid, 0, 2, "Other side");
+        Assert.Equal(MoveSide.Other, Ph(s, "ph-move").OnMove[0].FiresFor);
+        Pick(tab.MoveGrid, 0, 2, "Any side");
+        Assert.Equal(MoveSide.Any, Ph(s, "ph-move").OnMove[0].FiresFor);
+        Assert.Equal("Any side", tab.MoveGrid.Cell(0, 2));
+        Pick(tab.MoveGrid, 0, 2, "Acting side");
+        Assert.Equal(MoveSide.Acting, Ph(s, "ph-move").OnMove[0].FiresFor);
+    }
+
+    [AvaloniaFact]
     public void Grid_expression_error_cell()
     {
         var s = Session(true, p => p with

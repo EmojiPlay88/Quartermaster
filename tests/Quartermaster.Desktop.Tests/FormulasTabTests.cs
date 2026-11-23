@@ -88,6 +88,37 @@ public sealed class FormulasTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void FormulasTab_only_in_phases_commits_and_clears()
+    {
+        var s = Session(true, Attack(), Defend());
+        s.UpdateRules(p => p with { Phases = PhaseFixture.Pack("x").Phases });
+        var tab = Tab(s);
+        Assert.Equal(["Weather", "Supply", "Movement", "Combat", "End"], tab.PhaseChecks.Select(c => (string)c.Content!).ToList());
+        Assert.All(tab.PhaseChecks, c => Assert.NotEqual(true, c.IsChecked));
+
+        tab.PhaseChecks[2].IsChecked = true;   // Movement
+        Pump();
+        Assert.Equal(["ph-move"], F(s, "f-att").Phases);
+        tab.PhaseChecks[3].IsChecked = true;   // Combat
+        Pump();
+        Assert.Equal(["ph-move", "ph-combat"], F(s, "f-att").Phases);
+        Assert.Null(F(s, "f-def").Phases);
+
+        // another formula shows its own list; coming back shows what was saved
+        tab.SelectFormula("f-def");
+        Pump();
+        Assert.All(tab.PhaseChecks, c => Assert.NotEqual(true, c.IsChecked));
+        tab.SelectFormula("f-att");
+        Pump();
+        Assert.Equal([false, false, true, true, false], tab.PhaseChecks.Select(c => c.IsChecked == true).ToList());
+
+        tab.PhaseChecks[2].IsChecked = false;
+        tab.PhaseChecks[3].IsChecked = false;
+        Pump();
+        Assert.Null(F(s, "f-att").Phases);   // none checked: null, never an empty list
+    }
+
+    [AvaloniaFact]
     public void Select_and_rename_formula()
     {
         var s = Session(true, Attack(), Defend());

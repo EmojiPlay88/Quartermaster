@@ -22,6 +22,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     const string None = "(none)";
     const string MissingText = "(missing)";
     const string PhasesTitle = "Phases";
+    static readonly string[] FiresForNames = ["Acting side", "Other side", "Any side"];   // in MoveSide order
 
     internal sealed record PhaseRow(string Text, string Side);
 
@@ -46,6 +47,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     TextBox? _lastEdit;
     readonly ListBox _check = new() { Height = 90 };
     readonly EditGrid _start = new() { Height = 110 };
+    readonly EditGrid _end = new() { Height = 110 };
     readonly EditGrid _move = new() { Height = 100 };
     readonly EditGrid _warn = new() { Height = 110 };
     readonly TextBox _issues = new() { IsReadOnly = true, Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, Height = 52, BorderThickness = new Thickness(0) };
@@ -55,6 +57,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         _bBlock = new() { Content = "Make block from selection…" }, _bUnblock = new() { Content = "Remove block" };
     readonly Button _bCheckAdd = new() { Content = "Add…", Width = 52 }, _bCheckDel = new() { Content = "Remove", Width = 56 };
     readonly Button _startAdd = new() { Content = "Add", Width = 50 }, _startDel = new() { Content = "Remove", Width = 56 };
+    readonly Button _endAdd = new() { Content = "Add", Width = 50 }, _endDel = new() { Content = "Remove", Width = 56 };
     readonly Button _moveAdd = new() { Content = "Add", Width = 50 }, _moveDel = new() { Content = "Remove", Width = 56 };
     readonly Button _warnAdd = new() { Content = "Add", Width = 50 }, _warnDel = new() { Content = "Remove", Width = 56 };
     readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
@@ -136,9 +139,11 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         rows.Children.Add(Box("Checklist (double-click to edit)", checkInner));
 
         _start.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("For each", EditColumnKind.Combo, Weight: 40), new EditColumn("Filter (units)", Weight: 90)]);
-        _move.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("Filter (units)", Weight: 90)]);
+        _end.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("For each", EditColumnKind.Combo, Weight: 40), new EditColumn("Filter (units)", Weight: 90)]);
+        _move.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("Filter (units)", Weight: 90), new EditColumn("Fires for", EditColumnKind.Combo, Weight: 40, Items: FiresForNames)]);
         _warn.SetColumns([new EditColumn("Condition", Weight: 90), new EditColumn("Message ({unit} = unit name)", Weight: 90), new EditColumn("Decision", EditColumnKind.Check, Weight: 30)]);
         rows.Children.Add(GridBox("On start: run formulas", _start, _startAdd, _startDel));
+        rows.Children.Add(GridBox("On end: run formulas", _end, _endAdd, _endDel));
         rows.Children.Add(GridBox("On move: run formulas for moved units", _move, _moveAdd, _moveDel));
         rows.Children.Add(GridBox("Warnings", _warn, _warnAdd, _warnDel));
         rows.Children.Add(Box("Problems with this phase", _issues));
@@ -187,10 +192,13 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         _check.DoubleTapped += (_, _) => Run(EditCheckAsync);
 
         _start.CellCommitted += (r, c, t) => Run(() => OnStartCell(r, c, t));
+        _end.CellCommitted += (r, c, t) => Run(() => OnEndCell(r, c, t));
         _move.CellCommitted += (r, c, t) => Run(() => OnMoveCell(r, c, t));
         _warn.CellCommitted += (r, c, t) => Run(() => OnWarnCell(r, c, t));
         _startAdd.Click += (_, _) => Run(() => CommitPhase(p => p with { OnStart = p.OnStart.Append(new StartEntry { FormulaId = FirstFormulaId() }).ToList() }, rebuild: true));
         _startDel.Click += (_, _) => Run(() => { if (_start.CurrentCell is { } c) CommitPhase(p => p with { OnStart = Without(p.OnStart, c.Row) }, rebuild: true); });
+        _endAdd.Click += (_, _) => Run(() => CommitPhase(p => p with { OnEnd = (p.OnEnd ?? new List<StartEntry>()).Append(new StartEntry { FormulaId = FirstFormulaId() }).ToList() }, rebuild: true));
+        _endDel.Click += (_, _) => Run(() => { if (_end.CurrentCell is { } c) CommitPhase(p => p with { OnEnd = WithoutEnd(p.OnEnd, c.Row) }, rebuild: true); });
         _moveAdd.Click += (_, _) => Run(() => CommitPhase(p => p with { OnMove = p.OnMove.Append(new MoveEntry { FormulaId = FirstFormulaId() }).ToList() }, rebuild: true));
         _moveDel.Click += (_, _) => Run(() => { if (_move.CurrentCell is { } c) CommitPhase(p => p with { OnMove = Without(p.OnMove, c.Row) }, rebuild: true); });
         _warnAdd.Click += (_, _) => Run(() => CommitPhase(p => p with { Warnings = p.Warnings.Append(new PhaseWarning()).ToList() }, rebuild: true));
@@ -236,6 +244,13 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
 
     static List<T> Without<T>(List<T> list, int index) => list.Where((_, i) => i != index).ToList();
 
+    /// <summary>OnEnd without row <paramref name="index"/>; null (not an empty list) when none is left.</summary>
+    static List<StartEntry>? WithoutEnd(List<StartEntry>? list, int index)
+    {
+        var rest = (list ?? new List<StartEntry>()).Where((_, i) => i != index).ToList();
+        return rest.Count == 0 ? null : rest;
+    }
+
     // ---------- plumbing ----------
 
     public string? SelectedPhaseId => _selectedPhase;
@@ -258,6 +273,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     {
         Flush();
         _start.CommitEdit();
+        _end.CommitEdit();
         _move.CommitEdit();
         _warn.CommitEdit();
     }
@@ -330,7 +346,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     async Task Structural(Func<RulesPack, (RulesPack Pack, string? Error)> op, int? nextIndex = null, bool keepSelected = false)
     {
         Flush();
-        _start.CommitEdit(); _move.CommitEdit(); _warn.CommitEdit();
+        _start.CommitEdit(); _end.CommitEdit(); _move.CommitEdit(); _warn.CommitEdit();
         if (_s.Rules is not { } pack) return;
         var (next, err) = op(pack);
         if (err != null) { await Warn(err); return; }
@@ -478,7 +494,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         if (_loading) return;
         var id = SelectedIds().FirstOrDefault();   // read first: flushing refreshes the list, which re-selects the old phase
         Flush();
-        _start.CommitEdit(); _move.CommitEdit(); _warn.CommitEdit();
+        _start.CommitEdit(); _end.CommitEdit(); _move.CommitEdit(); _warn.CommitEdit();
         if (id == null) return;   // multi-select clears and reselects; keep the last phase shown
         if (id == _selectedPhase) return;
         if (_s.Rules?.Phases.All(p => p.Id != id) != false) return;
@@ -744,10 +760,12 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         var formulas = _s.Rules?.Formulas.Select(f => f.Name).ToList() ?? new List<string>();
         var modes = Enum.GetNames<ForEachMode>();
         var start = ph?.OnStart ?? new List<StartEntry>();
+        var end = ph?.OnEnd ?? new List<StartEntry>();
         var move = ph?.OnMove ?? new List<MoveEntry>();
         var warn = ph?.Warnings ?? new List<PhaseWarning>();
         _start.SetRows(start.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.ForEach.ToString(), e.UnitFilter ?? "" }).ToList());
-        _move.SetRows(move.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.UnitFilter ?? "" }).ToList());
+        _end.SetRows(end.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.ForEach.ToString(), e.UnitFilter ?? "" }).ToList());
+        _move.SetRows(move.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.UnitFilter ?? "", FiresForNames[(int)e.FiresFor] }).ToList());
         _warn.SetRows(warn.Select(w => (IReadOnlyList<string>)new[] { w.Condition, w.Message, w.IsDecision ? "True" : "False" }).ToList());
         // SetRows resets per-cell state: items and errors go on afterwards
         for (var i = 0; i < start.Count; i++)
@@ -756,9 +774,16 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             _start.SetCellItems(i, 1, modes);
             SetExprError(_start, i, 2);
         }
+        for (var i = 0; i < end.Count; i++)
+        {
+            _end.SetCellItems(i, 0, formulas);
+            _end.SetCellItems(i, 1, modes);
+            SetExprError(_end, i, 2);
+        }
         for (var i = 0; i < move.Count; i++)
         {
             _move.SetCellItems(i, 0, formulas);
+            _move.SetCellItems(i, 2, FiresForNames);
             SetExprError(_move, i, 1);
         }
         for (var i = 0; i < warn.Count; i++) SetExprError(_warn, i, 0);
@@ -792,6 +817,30 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         CommitPhase(p => p with { OnStart = p.OnStart.Select((e, i) => i == row ? edit(e) : e).ToList() });
     }
 
+    void OnEndCell(int row, int col, string text)
+    {
+        if (row < 0 || Current is not { } ph || ph.OnEnd is not { } end || row >= end.Count) return;
+        Func<StartEntry, StartEntry> edit;
+        switch (col)
+        {
+            case 0:
+                if (text == MissingText || FormulaIdByName(text) is not { } fid) return;
+                edit = e => e with { FormulaId = fid };
+                break;
+            case 1:
+                if (!Enum.TryParse<ForEachMode>(text, out var mode)) return;
+                edit = e => e with { ForEach = mode };
+                break;
+            case 2:
+                SetExprError(_end, row, col);
+                var filter = NullIfBlank(text);
+                edit = e => e with { UnitFilter = filter };
+                break;
+            default: return;
+        }
+        CommitPhase(p => p with { OnEnd = p.OnEnd?.Select((e, i) => i == row ? edit(e) : e).ToList() });
+    }
+
     void OnMoveCell(int row, int col, string text)
     {
         if (row < 0 || Current is not { } ph || row >= ph.OnMove.Count) return;
@@ -806,6 +855,11 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
                 SetExprError(_move, row, col);
                 var filter = NullIfBlank(text);
                 edit = e => e with { UnitFilter = filter };
+                break;
+            case 2:
+                var at = Array.IndexOf(FiresForNames, text);
+                if (at < 0) return;
+                edit = e => e with { FiresFor = (MoveSide)at };
                 break;
             default: return;
         }
@@ -852,6 +906,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     internal TextBox Issues => _issues;
     internal ListBox Checklist => _check;
     internal EditGrid StartGrid => _start;
+    internal EditGrid EndGrid => _end;
     internal EditGrid MoveGrid => _move;
     internal EditGrid WarnGrid => _warn;
     internal RuleRefRow RefRow => _refRow;
@@ -867,6 +922,8 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     internal Button SideRemoveButton => _bSideDel;
     internal Button StartAddButton => _startAdd;
     internal Button StartRemoveButton => _startDel;
+    internal Button EndAddButton => _endAdd;
+    internal Button EndRemoveButton => _endDel;
     internal Button MoveAddButton => _moveAdd;
     internal Button WarnAddButton => _warnAdd;
     internal Button CheckAddButton => _bCheckAdd;

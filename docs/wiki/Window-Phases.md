@@ -39,6 +39,40 @@ The two notices about a problem (every phase skipped, a condition that failed) a
 
 Loading a game or changing the rules never moves the game because of a condition. (If the rules no longer have the phase the game was in, the game is still moved to the phase now in that place.) Online, a guest may press Next Phase in their own phase; the host works out the conditions and everyone gets the result.
 
+### End-of-phase formulas
+
+A phase can run formulas when it is left, listed under **On end: run formulas** in the Workbench. They have the same columns as **On start** (Formula, For each, Filter (units)). In the log they are tagged `end`, as start formulas are tagged `start`.
+
+When you press **Next Phase** in a phase that has end formulas:
+
+- If every run is made automatically, the same press runs them and moves on to the next phase. Undo takes it all back in one step.
+- If a run needs you (an input to fill in, or a confirmation in the semi-automatic mode), the game **stays in the phase**, the runs are shown just as start formulas are, and the notice reads `Finish the end-of-phase runs, then press Next Phase again`. When you have finished them, press **Next Phase** again: the game moves on and does not run them a second time.
+
+A phase that is skipped (its condition is false) runs no end formulas.
+
+### Moves by the other side
+
+An **On move** entry has a **Fires for** setting that says whose moves it reacts to, relative to the side that plays the current phase:
+
+| Fires for | Reacts to |
+|---|---|
+| **Acting side** | Counters of the phase's side (what older packs always did) |
+| **Other side** | Counters that do not belong to the phase's side |
+| **Any side** | Every moved counter |
+
+A phase with no side treats all three alike: every moved counter fires the entry. The run is made for the counter's owner: it is logged under that player's side, and a run that waits for input is offered to that player, as if they had started it by hand.
+
+Dragging a counter on the map is a move too. To leave map drags out of an entry, put `map()` in its filter, for example `map() == "Main Map"` (see [Formula Reference](Formula-Reference)).
+
+### Formulas limited to phases
+
+A formula can be limited to some phases (**Only in phases** in the Workbench). The limit applies to formulas that a player starts: the counter menu's **Calculate** list and the **Run** button in the formula dialog.
+
+- Outside the listed phases the formula is greyed in the **Calculate** list, and its tooltip reads `Only in: {phase names}`, for example `Only in: North Movement, North Combat`.
+- Before the game starts a limited formula is not allowed. A rules pack with no phases ignores the limit.
+- In the formula dialog **Run** is disabled for the same reason. In an online game the host refuses a guest's run with `{formula name} can only be run in: {phase names}`.
+- Formulas that run by themselves (**On start**, **On move**, **On end**) ignore the limit.
+
 ## Phase panel
 
 The phase panel sits on the right of the main window. **View > Phase panel** shows or hides it, and **Pop out** moves it into a window of its own (the button then reads **Dock**).

@@ -53,6 +53,7 @@ The list on the left holds the pack's formulas, with **New…**, **Rename…** a
 |---|---|
 | Formula box | The formula text, for example `min(Ammo + Gain, 4)`. A mistake shows a **Go to error** link |
 | **Applies to:** | Which counters the formula is for, for example `has(Ammo)` |
+| **Only in phases** | A checkbox for each phase. Tick the phases in which a player may start this formula from the counter menu or the formula dialog; the hint reads "None checked = any phase." See [Phases](Window-Phases#formulas-limited-to-phases) |
 | **Rule ref:** | See above |
 | **Notes** | Shown as a tooltip on the formula title in the formula dialog |
 | **Bindings** | What each name in the formula means: Variable, Kind (Unit, Global, Holder, Table, Location, Input, Roll or Moved), Target, Details and Caption. **Remove unused bindings** clears names the formula no longer uses. For an Input, Details holds the limits or choices (a range such as `0..20`, or choices separated by commas, with `"double quotes"` around a choice that holds a comma), then optional `\| always ask` and `\| auto: expression` (either order). A phase's on-move formula gets a warning only when it has no Moved, Input, Unit, Global or Holder binding |
@@ -101,7 +102,8 @@ On the right, for the selected phase:
 | **Rule ref:** | See above |
 | **Checklist** | Items the player ticks. **Add…**, **Remove**, double-click to edit |
 | **On start: run formulas** | Formulas that run when the phase starts: Formula, For each and Filter (units) |
-| **On move: run formulas for moved units** | Formulas that run when a unit moves: Formula and Filter (units) |
+| **On end: run formulas** | Formulas that run when Next Phase leaves the phase: Formula, For each and Filter (units), like **On start**. See [Phases](Window-Phases#end-of-phase-formulas) |
+| **On move: run formulas for moved units** | Formulas that run when a unit moves: Formula, Filter (units) and **Fires for** (**Acting side**, **Other side** or **Any side**; the default is Acting side). See [Phases](Window-Phases#moves-by-the-other-side) |
 | **Warnings** | Condition, Message (`{unit}` = the unit's name) and Decision (ticked: the warning counts as a decision left until it is acknowledged in the phase panel) |
 | **Problems with this phase** | What is wrong with this phase |
 
