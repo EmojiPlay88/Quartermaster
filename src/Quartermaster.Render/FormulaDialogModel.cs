@@ -180,6 +180,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <summary>Shown after the caption of an input that always asks (<see cref="VariableBinding.AlwaysAsk"/>).</summary>
     public const string AlwaysAskedSuffix = " (always asked)";
 
+    /// <summary>The box of a binding whose "Only when" condition is false.</summary>
+    public const string NotUsedText = "not used";
+
+    /// <summary>A binding that is neither filled, missing nor skipped: its "Only when" condition (or the precondition) is not decided yet.</summary>
+    private static bool IsUndecided(VariableState v) => v is { Value: null, MissingReason: null, Skipped: false };
+
     /// <summary>
     /// Which ledger outputs the viewer may see (set by <see cref="FormulaMasking.Configure"/>); null = all (solo). Only those decide the
     /// "(negative)" mark: another side's value going negative is not shown.
@@ -273,13 +279,14 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             missing = vars.Select(v => v.Variable).Where(n => missing.Contains(n) || empty.Contains(n)).ToList();
             // A wrong formula must never reach the ledger: every manual box needs an engine value to be checked against.
             var verifiable = _lastExpected is { Error: null } exp
-                && vars.All(v => !IsCheckedBox(v.Variable) || exp.Variables.FirstOrDefault(e => e.Variable == v.Variable)?.Value != null);
+                && vars.All(v => !IsCheckedBox(v.Variable) || v.Skipped || exp.Variables.FirstOrDefault(e => e.Variable == v.Variable)?.Value != null);
             canApply = canApply && wrong.Count == 0 && missing.Count == 0 && verifiable;
         }
         var negative = t.Error == null && t.Outputs.Any(o => o.After < 0 && (OutputVisible == null || OutputVisible(o.Key)));
         var status = wrong.Count > 0 ? "Doesn't match: " + string.Join(", ", wrong)
             : t.Error != null ? (masked ? FormulaMasking.ErrorHiddenText : t.Error)
             : missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing)
+            : t.Result == null && vars.Any(IsUndecided) ? "Waiting for the other inputs"
             : masked && t.Result == null ? (HostCalculates ? HostWaitText : HiddenWaitText)
             : "All inputs filled";
         if (_phaseReason != null) status = _phaseReason;
@@ -296,6 +303,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         var binding = Binding(v.Variable);
         if (IsHidden(v.Variable)) return new BoxView(v.Variable, HiddenBoxText, BoxBackground.Auto, "", false, null, null);
+        // A guarded variable is not asked: "not used" once its condition is false, blank and closed while the condition is undecided.
+        if (v.Skipped) return new BoxView(v.Variable, NotUsedText, BoxBackground.Auto, "", false, null, null);
+        if (IsUndecided(v) && !IsCheckedBox(v.Variable)) return new BoxView(v.Variable, "", BoxBackground.Auto, "", false, null, null);
         if (IsCheckedBox(v.Variable)) return CheckedBox(v);
         var typedBox = binding?.Kind == BindingKind.Input || IsPhysicalRoll(v.Variable);
         var choices = binding?.Kind == BindingKind.Input ? KeyChoices.For(runner.Pack, formula, v.Variable) : null;
