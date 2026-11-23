@@ -366,6 +366,109 @@ public class FormulaMaskingTests : IDisposable
         Assert.DoesNotContain(RedText, Json(blue));
     }
 
+    /// <summary>
+    /// Adds a public piece property (Morale) and formulas on a unit that read every piece through an aggregate: over the private Water
+    /// (f-asum), a count (f-acount), over the public Morale (f-apub) and over Morale filtered on the private Water (f-apubf). Red 1's water
+    /// is set to the Red secret, so f-asum on Blue 1 gives 10 + (secret + 10 + 10): its working line (which ends in the result) reads it.
+    /// </summary>
+    private static void AddAggregates(ModuleSession s)
+    {
+        FormulaDef F(string id, string name, string text) => new()
+        {
+            Id = id, Name = name, Text = text,
+            Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" } },
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+        };
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef
+                { Id = "morale", Name = "Morale", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Default = 5 }).ToList(),
+            Formulas = p.Formulas.Concat(new[]
+            {
+                F("f-asum", "Water total", "W + sum(Water, \"Water >= 0\")"),
+                F("f-acount", "Wet count", "W + countof(\"Water > 0\") * 0"),
+                F("f-apub", "Morale total", "W + sum(Morale, \"Morale >= 0\") * 0"),
+                F("f-apubf", "Wet morale", "W + sum(Morale, \"Water > 0\") * 0"),
+            }).ToList(),
+        });
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.RedOne), "water", 10, RedSecret, "manual", null, null, null, null));
+    }
+
+    private static readonly string WaterSumText = (RedSecret + 30).ToString(CultureInfo.InvariantCulture);
+
+    [Fact]
+    public async Task Guest_aggregate_masked()
+    {
+        var (host, hc) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddAggregates(host);
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);
+
+        // A private property, a count, and a public property filtered on a private one: all read hidden data.
+        foreach (var id in new[] { "f-asum", "f-acount", "f-apubf" })
+            Assert.Equal(new[] { FormulaMasking.AggregateCallInput }, Dialog(guest, id, PhaseFixture.BlueOne, check: false).Hidden.ToArray());
+
+        // The host runs it on the full state; the guest never sees the working, nor Blue's next snapshot.
+        var m = Dialog(guest, "f-asum", PhaseFixture.BlueOne, check: false);
+        var v = await FormulaMasking.SendAsync(port, m, null, calculate: true);
+        Assert.True(v.Applied, v.Message);
+        var full = host.Game!.State;
+        Assert.Contains(full.LedgerHistory, e => e.FormulaId == "f-asum" && e.Working != null && e.Working.Contains(WaterSumText));
+        var blue = PlayerView.For(full, host.Rules, host.Model, Blue);
+        Assert.DoesNotContain(blue.LedgerHistory, e => e.FormulaId == "f-asum" && e.Working != null);
+
+        // A guard over an aggregate is decided by the host once an aggregate reads hidden data.
+        var g = new FormulaDef
+        {
+            Id = "f", Name = "F", Text = "A + B", Precondition = "countof(\"Water > 0\") > 0",
+            Bindings = new()
+            {
+                new VariableBinding { Variable = "A", Kind = BindingKind.Input, When = "hexcount() > 1" },
+                new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "B2 > 0" },
+                new VariableBinding { Variable = "B2", Kind = BindingKind.Input, AutoValue = "sum(Water, \"Water > 0\")" },
+            },
+        };
+        Assert.Empty(FormulaMasking.GuardsOnHidden(g, new HashSet<string> { FormulaMasking.HolderCallInput }));
+        Assert.Equal(new[] { "A", "B", FormulaMasking.PreconditionGuard }.OrderBy(x => x, StringComparer.Ordinal),
+            FormulaMasking.GuardsOnHidden(g, new HashSet<string> { FormulaMasking.AggregateCallInput }).OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Host_aggregate_not_masked()
+    {
+        var (s, c) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddAggregates(s);
+        var both = new HashSet<string> { "red", "blue" };
+        s.SetViewSides(both);   // the host holding every side sees everything
+        foreach (var id in new[] { "f-asum", "f-acount", "f-apub", "f-apubf" })
+            Assert.Empty(FormulaMasking.HiddenVariables(s.Rules!, s.Model, s.Game!.State, s.Rules!.ById<FormulaDef>(id)!, PhaseFixture.BlueOne, both));
+        var m = Dialog(s, "f-asum", PhaseFixture.BlueOne, check: false);
+        Assert.Empty(m.Hidden);
+        var v = m.Evaluate(s.Game!.State);
+        Assert.Contains(WaterSumText, v.WorkingText);
+        Assert.True(c.ApplyFormula(null, PhaseFixture.BlueOne, v.Trace, false));
+        var all = PlayerView.For(s.Game!.State, s.Rules, s.Model, both);
+        Assert.Contains(all.LedgerHistory, e => e.FormulaId == "f-asum" && e.Working != null);
+    }
+
+    [Fact]
+    public void Aggregate_public_property_sum_not_masked()
+    {
+        var (s, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddAggregates(s);
+        s.SetViewSides(Blue);
+        Assert.Empty(FormulaMasking.HiddenFor(s, s.Rules!.ById<FormulaDef>("f-apub")!, PhaseFixture.BlueOne));
+        var everyPiece = s.Rules!.ById<FormulaDef>("f-apub")! with { Text = "W + sum(Morale, \"\") * 0" };   // "" = every piece
+        Assert.Empty(FormulaMasking.HiddenFor(s, everyPiece, PhaseFixture.BlueOne));
+        // The same formula masks once a count appears anywhere in it, here in an output's value
+        var counted = s.Rules!.ById<FormulaDef>("f-apub")! with
+        {
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set, Expr = "W + hexcount() * 0" } },
+        };
+        Assert.Equal(new[] { FormulaMasking.AggregateCallInput }, FormulaMasking.HiddenFor(s, counted, PhaseFixture.BlueOne).ToArray());
+    }
+
     [Fact]
     public void HotSeat_BatchGrid_HiddenCells_NeverShowValue()
     {

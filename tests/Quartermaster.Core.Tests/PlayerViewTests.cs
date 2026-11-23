@@ -202,6 +202,44 @@ public class PlayerViewTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void PlayerView_redacts_aggregate_working()
+    {
+        // Blue units whose working reads every piece: the sum of the private Fuel (Red's included), a count, and the public Morale.
+        FormulaDef F(string id, string name, string text) => new()
+        {
+            Id = id, Name = name, Text = text,
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "morale", Op = OutputOp.Set } },
+        };
+        var pack = Pack() with
+        {
+            Formulas = Pack().Formulas.Concat(new[]
+            {
+                F("f-fuelsum", "Fuel census", "sum(Fuel, \"Fuel >= 0\") + 1"),
+                F("f-count", "Unit census", "countof(\"Morale >= 0\") + 1"),
+                F("f-moralesum", "Morale census", "sum(Morale, \"Morale >= 0\") + 1"),
+            }).ToList(),
+        };
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Add(s, "b1", "Lancer", "Blue");
+        Delta(s, LedgerKey.Piece("r1"), "fuel", 0, 4242);
+        Delta(s, LedgerKey.Piece("b1"), "fuel", 0, 3131);
+        foreach (var id in new[] { "f-fuelsum", "f-count", "f-moralesum" }) RunFormula(s, pack, id, "b1", 1, null, "blue");
+        Assert.All(s.LedgerHistory.Where(e => e.FormulaId != null), e => Assert.NotNull(e.Working));
+
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-fuelsum").Working);
+        Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-count").Working);
+        Assert.NotNull(blue.LedgerHistory.Single(e => e.FormulaId == "f-moralesum").Working);
+        Assert.DoesNotContain("7373", Json(blue));   // the sum of Fuel (the Morale result is 7374)
+        Assert.DoesNotContain(blue.Log, l => l.Text != null && (l.Text.Contains("sum(Fuel") || l.Text.Contains("countof(")));
+        Assert.Contains(blue.Log, l => l.Text != null && l.Text.Contains("sum(Morale"));
+
+        var both = PlayerView.For(s, pack, Model, Both);
+        Assert.NotNull(both.LedgerHistory.Single(e => e.FormulaId == "f-fuelsum").Working);
+    }
+
+    [Fact]
     public void StampAndPieceSide_BothMustBeHeld()
     {
         var pack = Pack();

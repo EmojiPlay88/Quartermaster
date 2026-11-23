@@ -312,6 +312,88 @@ holder(Rail, Tonnage) > holder(Rail, Capacity)
 
 True when the Rail holder carries more than its Capacity.
 
+### sum(Property, "filter")
+
+The total of a property over every piece the filter matches, anywhere in the game. `Property` is a bare property name, as in `has(...)`; it must be a piece property (scope Pieces or Both). The filter is quoted text written like a unit filter (see [In a filter](#where-names-get-their-values)), tested on each piece in turn; `""` matches every piece. Inside the quotes, write a quote as `\"`. A piece's value is its Ledger value, or the property's Default when it has none, as a Unit binding reads it. When no piece matches, the sum is 0. A filter that reads a value a piece does not have, or a marker it does not carry, simply does not match that piece. Works in formulas, filters, warnings, alerts and phase conditions.
+
+```formula
+sum(Fuel, "side() == \"Northern League\" and marker(\"Kind\") == \"Unit\"")
+```
+
+All the fuel the Northern League's units carry.
+
+### countof("filter")
+
+How many pieces in the game the filter matches, 0 when none do. Takes only the filter.
+
+```formula
+countof("marker(\"Type\") == \"Truck\" and side() == \"Southern Compact\"")
+```
+
+The number of trucks the Southern Compact has.
+
+### maxof(Property, "filter")
+
+The largest value of the property among the pieces the filter matches. When no piece matches it is an error, `No piece matches "{filter}"`, since there is no largest value; guard it with `countof` when that can happen.
+
+```formula
+if(countof("marker(\"Kind\") == \"Unit\"") > 0, maxof(Readiness, "marker(\"Kind\") == \"Unit\""), 0)
+```
+
+The best Readiness of any unit, or 0 when there are no units.
+
+### minof(Property, "filter")
+
+The smallest value of the property among the pieces the filter matches. When no piece matches it is an error, `No piece matches "{filter}"`.
+
+```formula
+minof(Ammo, "marker(\"Kind\") == \"Unit\"")
+```
+
+The lowest ammo of any unit.
+
+### hexsum(Property) or hexsum(Property, "filter")
+
+The total of a property over the pieces in the same hex as the piece being worked out (same map, same grid location), the piece itself included; give a filter to count only some of them. It needs a piece: it works in a formula run on a unit, in a formula's Applies to, and in warnings, alerts and Ledger filters that test units. Elsewhere it is an error, `hexsum() is not available here`; the Workbench refuses it in a side's unit filter and in a property's applies-to. A piece that is not in a hex (off the map grid) is an error, `{piece} is not in a hex`.
+
+```formula
+hexsum(Fuel, "marker(\"Kind\") == \"Unit\"")
+```
+
+All the fuel of the units stacked in this unit's hex.
+
+### hexcount() or hexcount("filter")
+
+How many pieces are in the same hex as the piece being worked out, itself included, or how many of them the filter matches. Same rules as `hexsum`.
+
+```formula
+hexcount("marker(\"Type\") == \"Engineer\"") > 0
+```
+
+True when the stack has an engineer.
+
+### hexmax(Property) or hexmax(Property, "filter")
+
+The largest value of the property among the pieces in this piece's hex (the filter, if given, narrows them). Same rules as `hexsum`; when no piece matches it is an error, `No piece matches "{filter}"`.
+
+```formula
+hexmax(Readiness, "marker(\"Kind\") == \"Unit\"")
+```
+
+The best Readiness in the stack.
+
+### hexmin(Property) or hexmin(Property, "filter")
+
+The smallest value of the property among the pieces in this piece's hex. Same rules as `hexmax`.
+
+```formula
+hexmin(Ammo)
+```
+
+The lowest ammo of anything in the hex.
+
+**Piece sums and hidden information.** `sum`, `countof`, `maxof`, `minof` and the `hex` ones read every piece and every value the rules need, hidden or not, so the result is the same for every player. In hot-seat and online play, a formula that uses one of them over a Private property, or any count (`countof`, `hexcount`), or with a filter that reads a Private property, is treated as reading hidden data for a player who does not hold every side: its working and errors are not shown, a guest's Formula dialog leaves the calculation to the host, and an "Only when" or precondition that uses one is decided by the host. A sum, maximum or minimum of a Public property whose filter reads only Public values is shown as usual.
+
 ## What a phase condition may read
 
 A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-a-Rules-Pack#phase-conditions)). A condition is checked when Quartermaster is about to start the phase, with no unit in hand, so it may read only:
@@ -321,6 +403,7 @@ A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-
 - `turn()` and `stage()` of the position being tested;
 - `phaseside()`, the name of the side whose phase is being tested;
 - constants and the pure functions (`if`, `min`, `max`, `round`, `floor`, `ceil`, `abs`, `clamp`, `mod`, `startswith`, `contains`).
+- the whole-game piece sums `sum`, `countof`, `maxof` and `minof` (their filters test each piece, so they may read pieces).
 
 It may not use `name()`, `marker()`, `has()`, `side()`, `map()`, `holder()`, `dice()` or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
 
@@ -395,6 +478,7 @@ Most of these end with "at position N", where N counts characters from the start
 | Unknown function 'x' | A name followed by `(` that is not one of the functions on this page. | Check the spelling against the list above. |
 | 'min' takes at least 2 arguments, not 1 | Wrong number of arguments. The message names the function and what it takes: `1 argument`, `3 arguments`, `1 to 2 arguments` or `at least 2 arguments`. | Give the function the right number. |
 | lookup needs a table name | The first argument of `lookup` is not a bare table name (for example a number or quoted text). | Write the table's name without quotes. |
+| sum needs a property name / sum needs a text filter | The property of `sum`, `maxof`, `minof` or a `hex` function is not a bare name, or its filter is not quoted text (the message names the function). | Write `sum(Fuel, "...")`: the property bare, the filter in quotes. |
 
 ### Errors while a formula runs
 
@@ -417,6 +501,9 @@ Most of these end with "at position N", where N counts characters from the start
 | Planes needs 4 dice from 1 to 6 | Physical dice: the typed list has the wrong number of dice, or a die outside the range. | Type exactly that many dice, each within the range. |
 | 'Planes' dice count must be a whole number from 1 to 100 | A Roll binding's **Dice count** expression gave something else. | Make the expression give a whole number from 1 to 100. |
 | lookuprange() is not available here / count() is not available here | The function was used where it cannot run (`count` outside a formula run). | Move it into a formula with a Roll binding. |
+| hexsum() is not available here | `hexsum`, `hexcount`, `hexmax` or `hexmin` was used where no piece is being worked out, such as a phase condition or a formula run with no counter. | Run it on a unit, or use `sum`, `countof`, `maxof` or `minof` for the whole game. |
+| Rifle is not in a hex | A `hex` function ran on a piece that has no grid location (the message names the piece). | Run it on a piece that is on a gridded map, or guard the formula's Applies to. |
+| No piece matches "Fuel > 3" | `maxof`, `minof`, `hexmax` or `hexmin` found no piece (the message shows the filter). | Guard it: `if(countof("...") > 0, maxof(...), 0)`. |
 | No column for x in Table | The same, for the column of a two-dimension table. | Add a column that matches. |
 | Table T needs a column | `lookup` was given only a row, but the table has two dimensions. | Give a column as the third argument. |
 | This formula needs a unit | `name()` or `marker(...)` was used in a formula that was run with no counter. | Run the formula from a counter, or choose a Test piece in the Preview. |
@@ -443,6 +530,10 @@ These come from the bindings and outputs rather than the formula text.
 | refers to unknown property "x" | The Workbench: an applies-to, filter or condition names a property that is not in the pack. | Fix the name. |
 | refers to unknown holder "H" | The Workbench: `holder(H, ...)` names a holder that is not in the pack. | Fix the name, or add the holder. |
 | refers to "P", which is not a holder property | The Workbench: `holder(..., P)` names a property whose scope is Pieces. | Use a property whose scope is Holders or Both. |
+| sum() names unknown property "P" | The Workbench: `sum`, `maxof`, `minof` or a `hex` function names a property that is not in the pack (the message names the function). | Fix the name, or add the property. |
+| sum() needs a piece property, not "P" | The Workbench: the property's scope is Holders, which pieces do not have. | Use a property whose scope is Pieces or Both. |
+| the filter of sum() does not parse: ... | The Workbench: the quoted filter is not a valid filter (the message says why). | Fix the filter; write quotes inside it as `\"`. |
+| hexsum() is not available in a side's unit filter | The Workbench: a side's unit filter, or a property's applies-to, uses a `hex` function; those are worked out without the map grid. | Describe the units another way. |
 | shows once (its condition never reads the unit), so {unit} is left out | A note: a game-level warning or alert names `{unit}` in its message. | Remove `{unit}`, or add a unit read such as `and name() != ""` to list each unit. |
 | Side "North": unit filter may not use side() | The Workbench: a side's unit filter uses `side()`. | Remove it. |
 | The result is not a number, so it cannot change Fuel | An output writes into a property, but the formula gave text or true/false. | Make the formula give a number. |

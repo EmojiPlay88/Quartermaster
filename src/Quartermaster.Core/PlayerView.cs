@@ -105,7 +105,10 @@ public static class PlayerView
         /// <summary>Piece name -> first side not held among pieces with that name (null when all are held or public).</summary>
         private readonly Dictionary<string, string?> _subjects = new(StringComparer.Ordinal);
         private readonly List<string> _privatePrefixes;
-        /// <summary>Formulas reading a holder value this viewer may not see: their working (which shows that value) is never shown.</summary>
+        /// <summary>
+        /// Formulas reading a holder value this viewer may not see, or using an aggregate that may read hidden pieces or values: their
+        /// working (which shows that value) is never shown.
+        /// </summary>
         private readonly HashSet<string> _hiddenInputFormulas = new(StringComparer.Ordinal);
         private readonly Regex? _names;
 
@@ -125,7 +128,8 @@ public static class PlayerView
                 if (f?.Id != null && ((f.Bindings ?? new()).Any(b => b is { Kind: BindingKind.Holder }
                         && ValueHidden(LedgerKey.Holder(b.HolderId ?? ""), b.Property, out _))
                     || FormulaVariables.HolderReads(f).Any(r => r.Holder == null || pack.HolderByName(r.Holder) is not { } h
-                        || ValueHidden(LedgerKey.Holder(h.Id), pack.PropertyByName(r.Property ?? "")?.Id, out _))))
+                        || ValueHidden(LedgerKey.Holder(h.Id), pack.PropertyByName(r.Property ?? "")?.Id, out _))
+                    || FormulaVariables.AggregateReadsHidden(pack, f)))
                     _hiddenInputFormulas.Add(f.Id);
 
             foreach (var p in full.Pieces.Values)

@@ -53,6 +53,37 @@ public static class ExprFacts
     public static (string? Property, string? Filter) AggregateArgs(Call c) =>
         (c.Args.Count > 0 ? (c.Args[0] as VarRef)?.Name : null, c.Args.OfType<TextLit>().FirstOrDefault()?.Value);
 
+    /// <summary>
+    /// Every aggregate call (see <see cref="IsAggregate"/>) in the expression, in text order, as (function, property, filter) from
+    /// <see cref="AggregateArgs"/>. Aggregates nested in another call's arguments are found too; a filter's text is not parsed.
+    /// </summary>
+    public static List<(string Function, string? Property, string? Filter)> AggregateReads(AstExpr e)
+    {
+        var found = new List<(string, string?, string?)>();
+        Walk(e);
+        return found;
+
+        void Walk(AstExpr x)
+        {
+            switch (x)
+            {
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (IsAggregate(c.Function))
+                    {
+                        var (property, filter) = AggregateArgs(c);
+                        found.Add((c.Function, property, filter));
+                    }
+                    foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>True for the aggregates that count pieces (countof, hexcount) rather than read a property.</summary>
+    public static bool IsCountAggregate(string function) => function is "countof" or "hexcount";
+
     /// <summary>True when the expression calls the named function anywhere.</summary>
     public static bool CallsFunction(AstExpr e, string function) => e switch
     {
