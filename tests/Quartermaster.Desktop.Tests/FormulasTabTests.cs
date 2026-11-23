@@ -229,6 +229,19 @@ public sealed class FormulasTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void FormulasTab_output_choice_quotes_names_with_commas()
+    {
+        var s = Session(true, OneOutput());
+        s.UpdateRules(p => p with { Properties = p.Properties.Append(new PropertyDef { Id = "p-dsl", Name = "Fuel, diesel" }).ToList() });
+        var tab = Tab(s);
+        Type(tab.Outputs, 0, 5, "Strength, \"Fuel, diesel\"");
+        Assert.Equal(new[] { "p-str", "p-dsl" }, F(s, "f-att").Outputs[0].PropertyChoice);
+        Assert.Equal("Strength, \"Fuel, diesel\"", tab.Outputs.Cell(0, 5));   // shown in the same quoted format, so it reads back
+        Type(tab.Outputs, 0, 5, "\"Fuel, diesel\"");
+        Assert.Equal(new[] { "p-dsl" }, F(s, "f-att").Outputs[0].PropertyChoice);
+    }
+
+    [AvaloniaFact]
     public void FormulasTab_dice_count_is_closed_for_a_non_roll()
     {
         var s = Session(true, Attack());

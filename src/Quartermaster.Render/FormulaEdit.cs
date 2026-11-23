@@ -300,6 +300,16 @@ public static class FormulaEdit
         return plain ? choice : "\"" + choice.Replace("\"", "\"\"") + "\"";
     }
 
+    /// <summary>Names separated by commas, in the Input-choices format: a name holding a comma is written in "double quotes".</summary>
+    public static string FormatNameList(IEnumerable<string> names) => string.Join(", ", names.Select(QuoteChoice));
+
+    /// <summary>The reverse of <see cref="FormatNameList"/>; a blank text gives an empty list.</summary>
+    public static (List<string>? Names, string? Error) ParseNameList(string text)
+    {
+        var (list, err) = ParseChoices(text);
+        return err != null ? (null, err) : (list ?? new List<string>(), null);
+    }
+
     private static (List<string>? Choices, string? Error) ParseChoices(string text)
     {
         var choices = new List<string>();

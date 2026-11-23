@@ -169,7 +169,7 @@ public sealed partial class FormulasTab
     // ---------- outputs ----------
 
     const string OutputValueHint = "Blank = the formula's result.";
-    const string ChooseFromHint = "Properties to choose from, separated by commas. The property is picked by \"Pick by\": a number (1 = the first) or a property name.";
+    const string ChooseFromHint = "Properties to choose from, separated by commas (put a name that holds a comma in \"double quotes\"). The property is picked by \"Pick by\": a number (1 = the first) or a property name.";
     const string PickByHint = "An expression: a number picks the Nth property in \"Choose from\"; text picks the property with that name. Needed when \"Choose from\" is set.";
 
     void RebuildOutputs()
@@ -187,7 +187,7 @@ public sealed partial class FormulasTab
                 ? o.HolderId == null ? "" : pack.ById<HolderDef>(o.HolderId)?.Name ?? FormulaEdit.Missing
                 : o.Target == OutputTarget.Global ? HolderDef.GlobalId : "";
             var prop = pack.ById<PropertyDef>(o.Property)?.Name ?? (o.Property.Length == 0 ? "" : FormulaEdit.Missing);
-            var choice = string.Join(", ", (o.PropertyChoice ?? new()).Select(id => pack.ById<PropertyDef>(id)?.Name ?? FormulaEdit.Missing));
+            var choice = FormulaEdit.FormatNameList((o.PropertyChoice ?? new()).Select(id => pack.ById<PropertyDef>(id)?.Name ?? FormulaEdit.Missing));
             rows.Add([o.Target.ToString(), holder, prop, o.Op.ToString(), o.Expr ?? "", choice, o.PropertySelect ?? ""]);
         }
         _out.SetRows(rows);
@@ -233,14 +233,18 @@ public sealed partial class FormulasTab
                 break;
             case 5:
                 again = true;
+                var (names, nameErr) = FormulaEdit.ParseNameList(text);
                 var ids = new List<string>();
-                foreach (var name in text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                var refused = nameErr != null;
+                if (nameErr != null) _err.Text = "Choose from: " + nameErr;
+                foreach (var name in names ?? new List<string>())
                 {
                     var q = pack.PropertyByName(name);
-                    if (q == null) { _err.Text = $"Choose from: no property named \"{name}\"."; _goto.IsVisible = false; ids = null; break; }
+                    if (q == null) { _err.Text = $"Choose from: no property named \"{name}\"."; refused = true; break; }
                     if (!ids.Contains(q.Id)) ids.Add(q.Id);
                 }
-                if (ids != null) Commit(x => FormulaEdit.SetOutputChoice(x, row, ids));
+                if (refused) _goto.IsVisible = false;
+                else Commit(x => FormulaEdit.SetOutputChoice(x, row, ids));
                 break;
             case 6:
                 again = true;

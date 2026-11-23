@@ -324,6 +324,18 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void Choice_names_use_the_quoted_choice_format()
+    {
+        Assert.Equal("Fuel, \"Fuel, diesel\", Ammo", FormulaEdit.FormatNameList(new[] { "Fuel", "Fuel, diesel", "Ammo" }));
+        var (names, err) = FormulaEdit.ParseNameList("Fuel, \"Fuel, diesel\", Ammo");
+        Assert.Null(err);
+        Assert.Equal(new[] { "Fuel", "Fuel, diesel", "Ammo" }, names);
+        Assert.Equal(new[] { "Fuel" }, FormulaEdit.ParseNameList("Fuel").Names);
+        Assert.Empty(FormulaEdit.ParseNameList("  ").Names!);
+        Assert.NotNull(FormulaEdit.ParseNameList("\"Fuel, diesel").Error);
+    }
+
+    [Fact]
     public void SyntaxProblem_checks_filter_expressions()
     {
         Assert.Null(FormulaEdit.SyntaxProblem(""));
