@@ -147,7 +147,7 @@ public static class AlertEngine
         if (PieceFilter.ParseGameLevel(a.Condition, pack) is { } game)
         {
             // Reads nothing about a piece: one match for the whole game; the side's unit filter does not apply.
-            var one = PieceFilter.EvaluateGameLevel(game, s, pack)
+            var one = PieceFilter.EvaluateGameLevel(game, s, pack, model)
                 ? new List<AlertMatch> { new(null, HolderDef.GlobalId, Decisions.WithoutUnit(msg) is { Length: > 0 } txt ? txt : a.Name) }
                 : new List<AlertMatch>();
             return new AlertHit(a.Id, a.Name, a.Severity, msg.Contains(Token) ? a.Name : msg, one, a.Notes);

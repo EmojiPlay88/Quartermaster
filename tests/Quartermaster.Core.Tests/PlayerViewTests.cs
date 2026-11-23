@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Quartermaster.Core;
 using Quartermaster.Rules;
+using Quartermaster.TestFixtures;
 using Quartermaster.Vassal;
 using Xunit.Abstractions;
 
@@ -230,13 +231,56 @@ public class PlayerViewTests(ITestOutputHelper output)
         var blue = PlayerView.For(s, pack, Model, Blue);
         Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-fuelsum").Working);
         Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-count").Working);
-        Assert.NotNull(blue.LedgerHistory.Single(e => e.FormulaId == "f-moralesum").Working);
+        Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-moralesum").Working);   // Red's HQ map may hold pieces Blue cannot see
         Assert.DoesNotContain("7373", Json(blue));   // the sum of Fuel (the Morale result is 7374)
         Assert.DoesNotContain(blue.Log, l => l.Text != null && (l.Text.Contains("sum(Fuel") || l.Text.Contains("countof(")));
-        Assert.Contains(blue.Log, l => l.Text != null && l.Text.Contains("sum(Morale"));
+
+        // With no owned map and no hide or mask trait in the module, the public Morale sum keeps its working.
+        var open = PlayerView.For(s, pack with { MapOwners = new() }, Model, Blue);
+        Assert.NotNull(open.LedgerHistory.Single(e => e.FormulaId == "f-moralesum").Working);
+        Assert.Null(open.LedgerHistory.Single(e => e.FormulaId == "f-fuelsum").Working);
+        Assert.Contains(open.Log, l => l.Text != null && l.Text.Contains("sum(Morale"));
 
         var both = PlayerView.For(s, pack, Model, Both);
         Assert.NotNull(both.LedgerHistory.Single(e => e.FormulaId == "f-fuelsum").Working);
+    }
+
+    /// <summary>The fixture module with a Hideable trait in its prototype "Proto": any piece may be hidden.</summary>
+    private static readonly Lazy<ModuleModel> LazyHideModel = new(() =>
+    {
+        var proto = "+/null/" + PieceTypeParser.EncodeState(new[] { HideTrait, "mark;Side" }) + "/null";
+        var xml = FixtureModule.MinimalBuildFile().Replace("+/null/mark;Side/null", proto);
+        using var fx = new FixtureModule().WithBuildFile(xml).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        return ModuleModelBuilder.Build(arch, new DiagnosticLog());
+    });
+
+    [Fact]
+    public void PlayerView_public_aggregate_redacted_when_pieces_may_hide()
+    {
+        // A public sum over the Red HQ map: Blue cannot see that map, so the result would tell it what is there.
+        var pack = Pack() with
+        {
+            MapOwners = new(),
+            Formulas = Pack().Formulas.Append(new FormulaDef
+            {
+                Id = "f-hq", Name = "HQ morale", Text = "sum(Morale, \"map() == \\\"" + RedHq + "\\\"\") + 1",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "morale", Op = OutputOp.Set } },
+            }).ToList(),
+        };
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red", RedHq);
+        Add(s, "b1", "Lancer", "Blue");
+        Delta(s, LedgerKey.Piece("r1"), "morale", 0, 4242);
+        RunFormula(s, pack, "f-hq", "b1", 1, null, "blue");
+        Assert.Contains("4243", s.LedgerHistory.Single(e => e.FormulaId == "f-hq").Working);
+
+        Assert.NotNull(PlayerView.For(s, pack, Model, Blue).LedgerHistory.Single(e => e.FormulaId == "f-hq").Working);   // nothing can hide
+        var owned = pack with { MapOwners = new() { new MapOwner { MapId = RedHq, SideId = "red" } } };
+        var blue = PlayerView.For(s, owned, Model, Blue);
+        Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-hq").Working);
+        Assert.DoesNotContain("4242", Json(blue));
+        Assert.Null(PlayerView.For(s, pack, LazyHideModel.Value, Blue).LedgerHistory.Single(e => e.FormulaId == "f-hq").Working);
     }
 
     [Fact]

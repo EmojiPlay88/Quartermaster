@@ -54,7 +54,7 @@ public static class Decisions
             if (PieceFilter.ParseGameLevel(w.Condition, pack) is { } game)
             {
                 // Reads nothing about a piece: true or false once, never once per unit.
-                if (PieceFilter.EvaluateGameLevel(game, s, pack))
+                if (PieceFilter.EvaluateGameLevel(game, s, pack, model))
                     res.Add(new WarningHit(i, msg, Array.Empty<string>(), new[] { WithoutUnit(msg) is { Length: > 0 } txt ? txt : w.Condition!.Trim() }, w.IsDecision, s.Acknowledged?.Contains(i) == true));
                 continue;
             }

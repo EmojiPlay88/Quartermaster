@@ -146,6 +146,29 @@ public class AggregateTests
         Assert.Equal("hexmin(Trucks, \"x\")", Work("hexmin(Trucks, \"x\")"));
     }
 
+    /// <summary>The text with each backtick turned into a backslash (keeps the escapes readable).</summary>
+    private static string B(string text) => text.Replace('`', (char)92);
+
+    [Fact]
+    public void WorkingLine_reescapes_filter_text()
+    {
+        // The filter holds a quote and a backslash; printed, it must read back as the same text literal.
+        var f = B("""sum(Trucks, "name() == `"A``B`"") + Fuel""");
+        var work = Work(f);
+        Assert.Equal(B("""sum(Trucks, "name() == `"A``B`"") + 3"""), work);
+        var call = Assert.IsType<Call>(Assert.IsType<Binary>(Parser.Parse(work)).Left);
+        Assert.Equal(B("""name() == "A`B" """).TrimEnd(), ExprFacts.AggregateArgs(call).Filter);
+        Assert.Equal(B("""has("A`"B")"""), Work(B("""has("A`"B")""")));   // any text literal
+    }
+
+    [Fact]
+    public void Layout_reescapes_filter_text()
+    {
+        var f = new FormulaDef { Id = "f1", Name = "F", Text = B("""countof("name() == `"A``B`"")""") };
+        var m = FormulaLayout.Build(f, Pack());
+        Assert.Equal(new TextItem(B("""countof("name() == `"A``B`"")""")), Assert.Single(m.Main));
+    }
+
     private static RulesPack Pack() => new()
     {
         Properties = new() { new PropertyDef { Id = "p1", Name = "Trucks", Scope = PropertyScope.Pieces } },
@@ -248,6 +271,7 @@ public class AggregateTests
     {
         RulesPack P(string cond) => ValPack() with { Phases = new() { new PhaseDef { Id = "ph1", Name = "Supply", Condition = cond } } };
         Assert.Empty(RulesValidator.Validate(P("sum(Trucks, \"\") > 3 and countof(\"Trucks > 1\") > 0")));
+        Assert.Empty(RulesValidator.Validate(P("countof(\"hexcount() > 1\") > 0")));   // a hex one inside a filter tests each piece
         Assert.Equal("Phase \"Supply\": condition may not use hexsum()", Assert.Single(RulesValidator.Validate(P("hexsum(Trucks) > 3"))).Message);
         Assert.Equal("Phase \"Supply\": condition sum() names unknown property \"Nope\"", Assert.Single(RulesValidator.Validate(P("sum(Nope, \"\") > 3"))).Message);
         Assert.Contains(RulesValidator.Validate(P("maxof(Trucks, \"1 +\") > 3")), i => i.Message.StartsWith("Phase \"Supply\": condition the filter of maxof() does not parse: "));
@@ -274,5 +298,41 @@ public class AggregateTests
         var pack = ValPack();
         pack.Properties.Add(new PropertyDef { Id = "p3", Name = "Ammo", Scope = PropertyScope.Pieces, AppliesTo = "hexsum(Trucks) > 1" });
         Assert.Equal("Property \"Ammo\": hexsum() is not available in a property's applies-to", Assert.Single(RulesValidator.Validate(pack)).Message);
+    }
+
+    // ---- hidden data ----
+
+    private static RulesPack MaskPack() => new()
+    {
+        Properties = new()
+        {
+            new PropertyDef { Id = "p1", Name = "Trucks", Scope = PropertyScope.Pieces, Visibility = Visibility.Public },
+            new PropertyDef { Id = "p2", Name = "Fuel", Scope = PropertyScope.Pieces, Visibility = Visibility.Private },
+        },
+    };
+
+    [Theory]
+    [InlineData("sum", "Trucks", "")]
+    [InlineData("sum", "Trucks", "map() == \"Reserve\"")]
+    [InlineData("maxof", "Trucks", "Trucks > 1")]
+    [InlineData("hexsum", "Trucks", null)]
+    public void Public_aggregate_hidden_only_when_pieces_may_hide(string fn, string property, string? filter)
+    {
+        Assert.False(FormulaVariables.AggregateCallHidden(MaskPack(), fn, property, filter, piecesMayHide: false));
+        Assert.True(FormulaVariables.AggregateCallHidden(MaskPack(), fn, property, filter, piecesMayHide: true));
+        var f = new FormulaDef { Id = "f", Name = "F", Text = $"{fn}({property}{(filter == null ? "" : ", \"" + filter.Replace("\"", "\\\"") + "\"")})" };
+        Assert.False(FormulaVariables.AggregateReadsHidden(MaskPack(), f, piecesMayHide: false));
+        Assert.True(FormulaVariables.AggregateReadsHidden(MaskPack(), f, piecesMayHide: true));
+    }
+
+    [Theory]
+    [InlineData("sum", "Fuel", "")]
+    [InlineData("countof", null, "")]
+    [InlineData("sum", "Trucks", "Fuel > 1")]
+    [InlineData("sum", "Trucks", "1 +")]
+    public void Hidden_aggregate_hidden_either_way(string fn, string? property, string filter)
+    {
+        Assert.True(FormulaVariables.AggregateCallHidden(MaskPack(), fn, property, filter, piecesMayHide: false));
+        Assert.True(FormulaVariables.AggregateCallHidden(MaskPack(), fn, property, filter, piecesMayHide: true));
     }
 }

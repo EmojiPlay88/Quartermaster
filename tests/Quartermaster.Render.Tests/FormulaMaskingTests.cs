@@ -123,9 +123,9 @@ public class FormulaMaskingTests : IDisposable
     private static string Json(GameState st) => JsonSerializer.Serialize(st, QuartermasterJson.Options);
 
     /// <summary>A guest holding Blue: only its filtered snapshot of the host's game and the rules pack.</summary>
-    private ModuleSession Guest(ModuleSession host)
+    private ModuleSession Guest(ModuleSession host, bool hideable = false)
     {
-        var fx = PhaseFixture.Module();
+        var fx = Module(hideable);
         _fixtures.Add(fx);
         var guest = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "gcache" + _sessions.Count), Path.Combine(_tmp, "groot" + _sessions.Count));
         _sessions.Add(guest);
@@ -144,9 +144,15 @@ public class FormulaMaskingTests : IDisposable
         return JsonSerializer.Deserialize<FormulaVerdict>(json, QuartermasterJson.Options)!;
     });
 
-    private (ModuleSession S, PhaseController C) Open(Difficulty d, IReadOnlyList<PlayerDef>? players = null)
+    /// <summary>The phase fixture module; with <paramref name="hideable"/>, its prototype carries a Hideable trait (any piece may be hidden).</summary>
+    private static FixtureModule Module(bool hideable) => hideable
+        ? PhaseFixture.Module().EditBuildFile(x => x.Replace("+/null/mark;Side/null",
+            "+/null/" + PieceTypeParser.EncodeState(new[] { "hide;I;Hide it;;;0.3;;false", "mark;Side" }) + "/null"))
+        : PhaseFixture.Module();
+
+    private (ModuleSession S, PhaseController C) Open(Difficulty d, IReadOnlyList<PlayerDef>? players = null, bool hideable = false)
     {
-        var fx = PhaseFixture.Module();
+        var fx = Module(hideable);
         _fixtures.Add(fx);
         var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "cache" + _sessions.Count), Path.Combine(_tmp, "root" + _sessions.Count));
         _sessions.Add(s);
@@ -467,6 +473,71 @@ public class FormulaMaskingTests : IDisposable
             Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set, Expr = "W + hexcount() * 0" } },
         };
         Assert.Equal(new[] { FormulaMasking.AggregateCallInput }, FormulaMasking.HiddenFor(s, counted, PhaseFixture.BlueOne).ToArray());
+    }
+
+    [Fact]
+    public void Guest_public_sum_not_masked_when_nothing_can_hide()
+    {
+        var (host, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddAggregates(host);
+        var guest = Guest(host);
+        var m = Dialog(guest, "f-apub", PhaseFixture.BlueOne, check: false);
+        Assert.Empty(m.Hidden);   // no owned map, no hide or mask trait: the guest's view holds every piece and Morale
+        var v = m.Evaluate(guest.Game!.State);
+        Assert.Null(v.Trace.Error);
+        Assert.NotNull(v.Trace.Result);
+        Assert.Contains("sum(Morale", v.WorkingText);
+    }
+
+    [Fact]
+    public void Guest_public_sum_masked_when_pieces_may_hide()
+    {
+        var (host, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob }, hideable: true);
+        AddAggregates(host);
+        Assert.Contains(host.Model.Prototypes.Values, t => t.Traits.Any(x => x is HideableDef));
+        var guest = Guest(host, hideable: true);
+        foreach (var id in new[] { "f-apub", "f-asum" })
+            Assert.Equal(new[] { FormulaMasking.AggregateCallInput }, Dialog(guest, id, PhaseFixture.BlueOne, check: false).Hidden.ToArray());
+        // Hot seat: Blue's screen masks it too, and Blue's view never shows its working.
+        host.SetViewSides(Blue);
+        Assert.Equal(new[] { FormulaMasking.AggregateCallInput }, FormulaMasking.HiddenFor(host, host.Rules!.ById<FormulaDef>("f-apub")!, PhaseFixture.BlueOne).ToArray());
+    }
+
+    [Fact]
+    public async Task Guest_WhenOverPublicSum_BoxTypeable_HostDecides_WhenPiecesMayHide()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob }, hideable: true);
+        AddAggregates(host);
+        host.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Append(new FormulaDef
+            {
+                Id = "f-gsum", Name = "Morale gate", Text = "W + if(sum(Morale, \"\") < 10, B, 0)",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                Bindings = new()
+                {
+                    new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                    new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "sum(Morale, \"\") < 10" },
+                },
+            }).ToList(),
+        });
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host, hideable: true);
+        var port = PortTo(executor);
+
+        var m = Dialog(guest, "f-gsum", PhaseFixture.BlueOne, check: false);
+        Assert.Contains(FormulaMasking.AggregateCallInput, m.Hidden);
+        var before = m.Evaluate(guest.Game!.State);
+        var box = before.Boxes.Single(b => b.Variable == "B");
+        Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot know: hidden pieces may count
+        Assert.True(box.Enabled);
+        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
+
+        // The host sees three pieces of Morale 5 (15): B is not used, and the run applies without it.
+        var before15 = Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water");
+        var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.True(applied.Applied, applied.Message);
+        Assert.Equal(before15 ?? host.Rules!.Properties.First(p => p.Id == "water").Default, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
     }
 
     [Fact]

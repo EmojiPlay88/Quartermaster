@@ -132,7 +132,7 @@ public static class FormulaLayout
             switch (e)
             {
                 case NumberLit n: em.Text(Value.FormatNumber(n.Value)); break;
-                case TextLit t: em.Text("\"" + t.Value + "\""); break;
+                case TextLit t: em.Text(Lexer.Quote(t.Value)); break;
                 case BoolLit b: em.Text(b.Value ? "true" : "false"); break;
                 case VarRef v: Variable(v.Name, em); break;
                 case Unary u:
@@ -154,7 +154,7 @@ public static class FormulaLayout
                     break;
                 }
                 case Call c when ExprFacts.IsAggregate(c.Function):
-                    em.Text(c.Function + "(" + string.Join(", ", c.Args.Select(a => a is VarRef pn ? pn.Name : "\"" + ((TextLit)a).Value + "\"")) + ")");
+                    em.Text(c.Function + "(" + string.Join(", ", c.Args.Select(a => a is VarRef pn ? pn.Name : Lexer.Quote(((TextLit)a).Value))) + ")");
                     break;
                 case Call c when c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]:
                     em.Text("holder(" + hn.Name + ", " + hp.Name + ")");

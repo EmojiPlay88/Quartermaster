@@ -67,7 +67,7 @@ public class PieceAggregatesTests
     {
         var call = Assert.IsType<Call>(Parser.Parse(expr));
         var (property, filter) = ExprFacts.AggregateArgs(call);
-        return PieceAggregates.Evaluate(call.Function, property, filter, s, pack, Model, self, new AggregateFilters(s, pack, Model).Compile);
+        return PieceAggregates.Evaluate(call.Function, property, filter, self, new AggregateFilters(s, pack, Model));
     }
 
     private static FormulaTrace Run(GameState s, string text, string? piece = "r1")
@@ -320,5 +320,122 @@ public class PieceAggregatesTests
         Assert.Equal("'>' needs numbers, got text", Run(s, "sum(Strength, \"name() > 1\")").Error);
         Assert.Equal("Division by zero", Run(s, "countof(\"Strength / 0 > 1\")").Error);
         Assert.Equal("No table named 'Nope'", Run(s, "hexcount(\"lookup(Nope, 1) > 0\")").Error);
+    }
+
+    // ---- player views (a player who does not hold every side) ----
+
+    private const string HiddenText = "reads data this player cannot see";
+
+    /// <summary>Red and Blue sides by name; Strength is Public. With <paramref name="ownedSideMap"/>, Red owns the side map.</summary>
+    private static RulesPack SidedPack(bool ownedSideMap)
+    {
+        var pack = Pack(Formula("0"));
+        pack.Properties[0] = pack.Properties[0] with { Visibility = Visibility.Public };
+        return pack with
+        {
+            Sides = new()
+            {
+                new SideDef { Id = "red", Name = "Red", UnitFilter = "startsWith(name(), \"Red\")" },
+                new SideDef { Id = "blue", Name = "Blue", UnitFilter = "startsWith(name(), \"Blue\")" },
+            },
+            MapOwners = ownedSideMap ? new() { new MapOwner { MapId = "Side Map", SideId = "red" } } : new(),
+        };
+    }
+
+    private static readonly IReadOnlySet<string> BlueOnly = new HashSet<string> { "blue" };
+
+    [Fact]
+    public void View_aggregate_that_may_read_hidden_pieces_is_an_error()
+    {
+        var pack = SidedPack(ownedSideMap: true);
+        var full = Riverland();
+        Add(full, "b2", "Blue Guns", 6);
+        var view = PlayerView.For(full, pack, Model, BlueOnly);
+        Assert.True(view.IsPlayerView);
+        var runner = new FormulaRunner(pack with { Formulas = new() { Formula("sum(Strength, \"\")") } }, Model, (n, _) => Enumerable.Repeat(1, n).ToList());
+        var t = runner.Run(view, new RunRequest("f", "b2", new Dictionary<string, string>(), new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.Equal("sum() " + HiddenText, t.Error);
+        // An "Only when" over it is undecided there (the host decides), not an error.
+        var guarded = new FormulaDef
+        {
+            Id = "g", Name = "Guarded", Text = "B",
+            Bindings = new() { new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "sum(Strength, \"\") > 0" } },
+        };
+        var g = new FormulaRunner(pack with { Formulas = new() { guarded } }, Model, (n, _) => Enumerable.Repeat(1, n).ToList())
+            .Run(view, new RunRequest("g", "b2", new Dictionary<string, string> { ["B"] = "3" }, new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.Null(g.Error);
+        Assert.Null(g.Result);
+        Assert.True(Assert.Single(g.Variables).Waiting);
+        // Filters, warnings, alerts and Ledger filters read it as false; on the full state the same filter matches.
+        var inView = PieceFilter.Compile("sum(Strength, \"\") > 0", view, pack, Model);
+        Assert.Equal(0, view.Pieces.Values.Count(inView));
+        var inFull = PieceFilter.Compile("sum(Strength, \"\") > 0", full, pack, Model);
+        Assert.Equal(full.Pieces.Count, full.Pieces.Values.Count(inFull));
+        Assert.False(PieceFilter.EvaluateGameLevel("sum(Strength, \"\") >= 0", view, pack, Model));
+        Assert.True(PieceFilter.EvaluateGameLevel("sum(Strength, \"\") >= 0", full, pack, Model));
+        // A count, or an aggregate over a hidden property, is an error in a view even when nothing can hide.
+        var open = SidedPack(ownedSideMap: false);
+        var openView = PlayerView.For(full, open, Model, BlueOnly);
+        Assert.False(PieceFilter.EvaluateGameLevel("countof(\"\") >= 0", openView, open, Model));
+        Assert.True(PieceFilter.EvaluateGameLevel("countof(\"\") >= 0", full, open, Model));
+    }
+
+    [Fact]
+    public void View_public_aggregate_when_nothing_can_hide()
+    {
+        var pack = SidedPack(ownedSideMap: false);
+        var full = Riverland();
+        var view = PlayerView.For(full, pack, Model, BlueOnly);
+        Assert.True(view.IsPlayerView);
+        Assert.True(PieceFilter.EvaluateGameLevel("sum(Strength, \"\") == 22", view, pack, Model));
+        Assert.True(PieceFilter.EvaluateGameLevel("maxof(Strength, \"startsWith(name(), \\\"Red\\\")\") == 5", view, pack, Model));
+    }
+
+    [Fact]
+    public void Pieces_may_hide_from_pack_and_module()
+    {
+        var all = new HashSet<string> { "red", "blue" };
+        Assert.False(PieceAccess.PiecesMayHide(SidedPack(false), Model, BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(true), Model, BlueOnly));
+        Assert.False(PieceAccess.PiecesMayHide(SidedPack(true), Model, all));   // every side held
+        Assert.False(PieceAccess.PiecesMayHide(SidedPack(true), Model, new HashSet<string> { "red" }));   // the owner's own map
+        var ghost = SidedPack(false) with { MapOwners = new() { new MapOwner { MapId = "Side Map", SideId = "ghost" } } };
+        Assert.False(PieceAccess.PiecesMayHide(ghost, Model, BlueOnly));   // an owner that is no side owns nothing
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), TraitModel("hide;I;Hide it;;;0.3;;false"), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), TraitModel("obs;M;m.png;Mask it;I;?"), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), null, BlueOnly));   // no module: fail closed
+    }
+
+    /// <summary>The fixture module with <paramref name="trait"/> added to its prototype "Proto".</summary>
+    private static ModuleModel TraitModel(string trait)
+    {
+        var proto = "+/null/" + PieceTypeParser.EncodeState(new[] { trait, "mark;Side" }) + "/null";
+        var xml = FixtureModule.MinimalBuildFile().Replace("+/null/mark;Side/null", proto);
+        using var fx = new FixtureModule().WithBuildFile(xml).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        return ModuleModelBuilder.Build(arch, new DiagnosticLog());
+    }
+
+    [Fact]
+    public void Hex_aggregate_in_whole_game_filter_at_game_level()
+    {
+        // countof("hexcount() > 1") reads each piece's hex: r1 and r2 share a square.
+        var pack = Pack();
+        var s = Riverland();
+        var at = new PhasePosition(1, 1, "P", 0);
+        pack.Phases[0] = pack.Phases[0] with { Condition = "countof(\"hexcount() > 1\") == 3" };
+        Assert.False(PhaseConditions.Runs(pack, s, pack.Phases[0], at, out var err, Model));
+        Assert.Null(err);
+        pack.Phases[0] = pack.Phases[0] with { Condition = "countof(\"hexcount() > 1\") == 2" };
+        Assert.True(PhaseConditions.Runs(pack, s, pack.Phases[0], at, out err, Model));
+        Assert.Null(err);
+        Assert.True(PieceFilter.EvaluateGameLevel("countof(\"hexcount() > 1\") == 2", s, pack, Model));
+        // Game-level warnings and alerts get the model from their callers.
+        var phase = new PhaseDef { Id = "P", Name = "Movement", Warnings = new() { new PhaseWarning { Condition = "countof(\"hexcount() > 1\") > 1", Message = "Stacks" } } };
+        pack.Phases[0] = phase;
+        pack.Alerts.Add(new AlertDef { Id = "a3", Name = "Stacks", Condition = "countof(\"hexcount() > 1\") > 1", Message = "Stacks" });
+        s.Position = at;
+        Assert.Equal(new[] { "Stacks" }, Assert.Single(Decisions.Warnings(pack, s, phase, Model)).UnitTexts);
+        Assert.Contains(AlertEngine.Evaluate(s, pack, Model, phase, null), h => h.Id == "a3");
     }
 }

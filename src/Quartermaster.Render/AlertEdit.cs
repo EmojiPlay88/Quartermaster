@@ -52,7 +52,7 @@ public static class AlertEdit
             }
             int n;
             if (ExprFacts.IsGameLevel(Parser.Parse(alert.Condition), pack))
-                n = PieceFilter.EvaluateGameLevel(alert.Condition, state, pack) ? 1 : 0;   // shows once (Alerts): one match for the game
+                n = PieceFilter.EvaluateGameLevel(alert.Condition, state, pack, model) ? 1 : 0;   // shows once (Alerts): one match for the game
             else
             {
                 var inSide = PieceFilter.Compile(sideFilter, state, pack, model);

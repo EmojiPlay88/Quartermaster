@@ -8,6 +8,11 @@ public sealed class EvalError : Exception
     public AstExpr? At { get; }
     /// <summary>The value read is missing (not applicable to the piece, hidden, no such marker) rather than wrong: a unit filter reads it as no match.</summary>
     public bool MissingValue { get; init; }
+    /// <summary>
+    /// The value exists but this player's view cannot answer it (a piece aggregate that may read hidden pieces or values): not a missing value
+    /// (a filter does not read it as no match), but a formula's "Only when" condition over it is undecided, so the host decides.
+    /// </summary>
+    public bool HiddenData { get; init; }
     public EvalError(string message, AstExpr? at = null) : base(message) => At = at;
 }
 

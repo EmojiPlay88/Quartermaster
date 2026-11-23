@@ -12,7 +12,8 @@ namespace Quartermaster.Render;
 /// <para>A formula reads another side's data through its bindings: a Unit binding reads the subject piece, a Holder binding a holder's
 /// value (Global is public, tables are pack data); and through holder(H, P) in its text, auto values and table row/column expressions,
 /// marked by <see cref="HolderCallInput"/>; and through a piece aggregate (sum, countof, hexsum...) that reads every piece, marked by
-/// <see cref="AggregateCallInput"/> when it counts or reads a property that is not Public (itself or in its filter). An input is hidden when it reads a private property of a piece the viewer cannot see or
+/// <see cref="AggregateCallInput"/> when it counts or reads a property that is not Public (itself or in its filter), or whatever it reads once
+/// the viewer's view may lack pieces or values (<see cref="PieceAccess.PiecesMayHide"/>: from the pack and module, so host and guest agree). An input is hidden when it reads a private property of a piece the viewer cannot see or
 /// that belongs to a side not held, or any value of a holder owned by a side not held (or missing from the pack). The rule depends only on
 /// the rules pack and the pieces, never on whether a value is set, so it gives the same answer on the host's full state and on a guest's
 /// filtered snapshot. A table lookup counts as hidden when any other input is, since its keys may be computed from them.</para>
@@ -108,8 +109,9 @@ public static class FormulaMasking
         // holder(H, P) in the formula's own expressions reads the holder as a Holder binding would; an unresolvable call fails closed.
         if (FormulaVariables.HolderReads(f).Any(r => r.Holder == null || pack.HolderByName(r.Holder) is not { } h || HolderHidden(h.Id)))
             hidden.Add(HolderCallInput);
-        // Aggregates read every piece, hidden or not: a count, a non-public property or a filter over one reads data this viewer may not see.
-        if (FormulaVariables.AggregateReadsHidden(pack, f)) hidden.Add(AggregateCallInput);
+        // Aggregates read every piece, hidden or not: a count, a non-public property or a filter over one reads data this viewer may not see,
+        // and so does any aggregate once the viewer's view may lack pieces or values (a map it cannot see, a Hideable or Obscurable trait).
+        if (FormulaVariables.AggregateReadsHidden(pack, f, PieceAccess.PiecesMayHide(pack, model, sides))) hidden.Add(AggregateCallInput);
         if (hidden.Count > 0)
             foreach (var b in f.Bindings ?? new List<VariableBinding>())
                 if (b is { Kind: BindingKind.Table, Variable: not null }) hidden.Add(b.Variable);

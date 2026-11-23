@@ -314,7 +314,7 @@ True when the Rail holder carries more than its Capacity.
 
 ### sum(Property, "filter")
 
-The total of a property over every piece the filter matches, anywhere in the game. `Property` is a bare property name, as in `has(...)`; it must be a piece property (scope Pieces or Both). The filter is quoted text written like a unit filter (see [In a filter](#where-names-get-their-values)), tested on each piece in turn; `""` matches every piece. Inside the quotes, write a quote as `\"`. A piece's value is its Ledger value, or the property's Default when it has none, as a Unit binding reads it. When no piece matches, the sum is 0. A filter that reads a value a piece does not have, or a marker it does not carry, simply does not match that piece. Works in formulas, filters, warnings, alerts and phase conditions.
+The total of a property over every piece the filter matches, anywhere in the game. `Property` is a bare property name, as in `has(...)`; it must be a piece property (scope Pieces or Both). The filter is quoted text written like a unit filter (see [In a filter](#where-names-get-their-values)), tested on each piece in turn; `""` matches every piece. Inside the quotes, write a quote as `\"`. A piece's value is its Ledger value, or the property's Default when it has none, as a Unit binding reads it. That includes pieces the property does not apply to (its Applies to does not match them): they count with the Default too, so filter them out (by kind or type) when they should not count. When no piece matches, the sum is 0. A filter that reads a value a piece does not have, or a marker it does not carry, simply does not match that piece. Works in formulas, filters, warnings, alerts and phase conditions.
 
 ```formula
 sum(Fuel, "side() == \"Northern League\" and marker(\"Kind\") == \"Unit\"")
@@ -387,12 +387,22 @@ The best Readiness in the stack.
 The smallest value of the property among the pieces in this piece's hex. Same rules as `hexmax`.
 
 ```formula
-hexmin(Ammo)
+hexmin(Ammo, "marker(\"Kind\") == \"Unit\"")
 ```
 
-The lowest ammo of anything in the hex.
+The lowest ammo of the units in the hex. The filter matters: without it, every other piece in the hex (a marker, a fort) counts too, with Ammo's Default.
 
-**Piece sums and hidden information.** `sum`, `countof`, `maxof`, `minof` and the `hex` ones read every piece and every value the rules need, hidden or not, so the result is the same for every player. In hot-seat and online play, a formula that uses one of them over a Private property, or any count (`countof`, `hexcount`), or with a filter that reads a Private property, is treated as reading hidden data for a player who does not hold every side: its working and errors are not shown, a guest's Formula dialog leaves the calculation to the host, and an "Only when" or precondition that uses one is decided by the host. A sum, maximum or minimum of a Public property whose filter reads only Public values is shown as usual.
+**Piece sums and hidden information.** In a formula, `sum`, `countof`, `maxof`, `minof` and the `hex` ones read every piece and every value the rules need, hidden or not, so a formula gives the same result whoever runs it. In hot-seat and online play, a player who does not hold every side cannot be shown such a result when it may depend on something they cannot see. For that player a piece sum counts as reading hidden data when:
+
+- it is a count (`countof`, `hexcount`);
+- its property is Private, or its filter reads a Private property, calls `holder()` or another piece sum, or does not parse;
+- or some pieces may be hidden from that player at all: a map or organisation display belongs to a side they do not hold (the Visibility tab of the Rules Workbench), or a piece of the module can be hidden or masked (a VASSAL Invisible or Mask trait). Then every piece sum counts, even of a Public property.
+
+A formula that uses such a piece sum (in its text, an output, a precondition, an "Only when", an auto value or a table key) does not show its working or errors to that player; a guest's Formula dialog leaves the calculation to the host, and an "Only when" or precondition that uses one is decided by the host. A sum, maximum or minimum of a Public property whose filter reads only Public values, in a game where no piece can be hidden, is shown as usual.
+
+Warnings, alerts and Ledger filters are worked out on what each player can see. For a player who does not hold every side, one that uses such a piece sum does not match (in a formula run on that player's own screen, the piece sum is the error `sum() reads data this player cannot see`). A player holding every side sees them as usual.
+
+An output still writes its result where the formula says: if a formula writes a piece sum (or anything worked out from one) into a Public property, every player sees that value, and so learns the total. Write such results into a Private property, or a holder of the side that owns them, when the total should stay hidden.
 
 ## What a phase condition may read
 
@@ -403,7 +413,7 @@ A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-
 - `turn()` and `stage()` of the position being tested;
 - `phaseside()`, the name of the side whose phase is being tested;
 - constants and the pure functions (`if`, `min`, `max`, `round`, `floor`, `ceil`, `abs`, `clamp`, `mod`, `startswith`, `contains`).
-- the whole-game piece sums `sum`, `countof`, `maxof` and `minof` (their filters test each piece, so they may read pieces).
+- the whole-game piece sums `sum`, `countof`, `maxof` and `minof` (their filters test each piece, so they may read pieces, and even use the `hex` ones: `countof("hexcount() > 1") > 0` is true when any hex holds a stack).
 
 It may not use `name()`, `marker()`, `has()`, `side()`, `map()`, `holder()`, `dice()` or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
 
@@ -503,6 +513,7 @@ Most of these end with "at position N", where N counts characters from the start
 | lookuprange() is not available here / count() is not available here | The function was used where it cannot run (`count` outside a formula run). | Move it into a formula with a Roll binding. |
 | hexsum() is not available here | `hexsum`, `hexcount`, `hexmax` or `hexmin` was used where no piece is being worked out, such as a phase condition or a formula run with no counter. | Run it on a unit, or use `sum`, `countof`, `maxof` or `minof` for the whole game. |
 | Rifle is not in a hex | A `hex` function ran on a piece that has no grid location (the message names the piece). | Run it on a piece that is on a gridded map, or guard the formula's Applies to. |
+| sum() reads data this player cannot see | A piece sum ran on the screen of a player who does not hold every side, and it may read pieces or values that player cannot see (see "Piece sums and hidden information" under the functions above). | Nothing to fix: the host (or a player holding every side) works it out. In a warning, alert or Ledger filter it simply does not match. |
 | No piece matches "Fuel > 3" | `maxof`, `minof`, `hexmax` or `hexmin` found no piece (the message shows the filter). | Guard it: `if(countof("...") > 0, maxof(...), 0)`. |
 | No column for x in Table | The same, for the column of a two-dimension table. | Add a column that matches. |
 | Table T needs a column | `lookup` was given only a row, but the table has two dimensions. | Give a column as the third argument. |

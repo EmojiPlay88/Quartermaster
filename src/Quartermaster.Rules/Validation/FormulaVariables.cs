@@ -110,23 +110,28 @@ public static class FormulaVariables
     public static List<(string Function, string? Property, string? Filter)> AggregateReads(FormulaDef f) => Collect(f, ExprFacts.AggregateReads);
 
     /// <summary>
-    /// True when an aggregate in the formula may read data a viewer who does not hold every side cannot see (aggregates read every piece,
-    /// hidden or not): any count (countof, hexcount), an aggregate over a property that is not Public (or unknown), or one whose filter reads
-    /// a property that is not Public, calls holder() or another aggregate, or does not parse. Depends on the pack alone, so the host and a
-    /// guest agree. An aggregate over a Public property with no filter (or ""), or a filter over Public properties and piece facts, is not hidden.
+    /// True when an aggregate in the formula may read data a viewer who does not hold every side cannot see (see <see cref="AggregateCallHidden"/>).
+    /// Depends on the pack and <paramref name="piecesMayHide"/> alone, so the host and a guest agree.
     /// </summary>
-    public static bool AggregateReadsHidden(RulesPack pack, FormulaDef f)
+    public static bool AggregateReadsHidden(RulesPack pack, FormulaDef f, bool piecesMayHide) =>
+        AggregateReads(f).Any(r => AggregateCallHidden(pack, r.Function, r.Property, r.Filter, piecesMayHide));
+
+    /// <summary>
+    /// True when one aggregate call may read data a viewer who does not hold every side cannot see (aggregates read every piece, hidden or not):
+    /// any aggregate when <paramref name="piecesMayHide"/> (the viewer's view may lack pieces or their values: a map owned by a side it does not
+    /// hold, a Hideable or Obscurable trait), any count (countof, hexcount), an aggregate over a property that is not Public (or unknown), or
+    /// one whose filter reads a property that is not Public, calls holder() or another aggregate, or does not parse. Otherwise (a Public
+    /// property, with no filter, "", or a filter over Public properties and piece facts) it is not hidden.
+    /// </summary>
+    public static bool AggregateCallHidden(RulesPack pack, string function, string? property, string? filter, bool piecesMayHide)
     {
-        bool NotPublic(string? property) => property == null || pack.PropertyByName(property)?.Visibility != Visibility.Public;
-        bool FilterHidden(string? filter)
-        {
-            if (string.IsNullOrWhiteSpace(filter)) return false;   // "" matches every piece
-            Quartermaster.Rules.Expr.Expr e;
-            try { e = Parser.Parse(filter); }
-            catch (ParseError) { return true; }   // fail closed
-            return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
-                || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && p.Visibility != Visibility.Public);
-        }
-        return AggregateReads(f).Any(r => ExprFacts.IsCountAggregate(r.Function) || NotPublic(r.Property) || FilterHidden(r.Filter));
+        if (piecesMayHide || ExprFacts.IsCountAggregate(function)) return true;
+        if (property == null || pack.PropertyByName(property)?.Visibility != Visibility.Public) return true;
+        if (string.IsNullOrWhiteSpace(filter)) return false;   // "" matches every piece
+        Quartermaster.Rules.Expr.Expr e;
+        try { e = Parser.Parse(filter); }
+        catch (ParseError) { return true; }   // fail closed
+        return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
+            || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && p.Visibility != Visibility.Public);
     }
 }

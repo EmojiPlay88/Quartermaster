@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Quartermaster.Rules;
 using Quartermaster.Vassal;
 
@@ -51,6 +52,60 @@ public sealed class PieceAccess
             foreach (var m in _model.Maps)
                 if (m.Name == mapId && m.Id != mapId && Ownership.SideOfMap(m.Id, _pack) is { } s) { side = s; break; }
         return _mapHidden[mapId] = NotHeld(side);
+    }
+
+    /// <summary>
+    /// True when a <see cref="PlayerView"/> for a viewer holding <paramref name="held"/> may lack pieces or their values: the viewer does not hold
+    /// every side and the pack gives a map to an existing side it does not hold, or a piece type of the module (palette slot, setup stack piece,
+    /// prototype, or a marker they place) has a Hideable or Obscurable trait. Read from the pack and module only, never the state, so the host
+    /// and a guest agree. Without a module it is true (fail closed). Then every piece aggregate reads hidden data
+    /// (<see cref="FormulaVariables.AggregateCallHidden"/>).
+    /// </summary>
+    public static bool PiecesMayHide(RulesPack pack, ModuleModel? model, IReadOnlySet<string>? held)
+    {
+        held ??= new HashSet<string>();
+        if ((pack.Sides ?? new List<SideDef>()).All(x => x == null || held.Contains(x.Id))) return false;   // as PlayerView.For
+        foreach (var o in pack.MapOwners ?? new List<MapOwner>())
+            if (o?.MapId != null && Ownership.SideOfMap(o.MapId, pack) is { } side && !held.Contains(side)) return true;
+        return model == null || HasHideOrMask.GetValue(model, m => new StrongBox<bool>(ScanForHideOrMask(m))).Value;
+    }
+
+    private static readonly ConditionalWeakTable<ModuleModel, StrongBox<bool>> HasHideOrMask = new();
+
+    /// <summary>True when a piece type of the module has a Hideable or Obscurable trait (see <see cref="PiecesMayHide"/>).</summary>
+    private static bool ScanForHideOrMask(ModuleModel model)
+    {
+        var log = new DiagnosticLog();
+        bool Hides(string? typeString, int depth)
+        {
+            if (string.IsNullOrEmpty(typeString) || depth > 8) return false;
+            return Traits(PieceTypeParser.Parse(typeString, log, null), depth);
+        }
+        bool Traits(PieceType t, int depth)
+        {
+            foreach (var tr in t.Traits)
+            {
+                if (tr is HideableDef or ObscurableDef) return true;
+                // A marker placed or swapped in from an inline definition ("+/id/type/state") is a piece type of its own.
+                var spec = tr switch { PlaceMarkerDef p => p.MarkerSpec, ReplaceDef r => r.MarkerSpec, _ => null };
+                if (spec != null && spec.StartsWith("+/", StringComparison.Ordinal))
+                {
+                    var parts = SequenceEncoder.Decode(spec, '/');
+                    if (parts.Count > 2 && Hides(parts[2], depth + 1)) return true;
+                }
+            }
+            return false;
+        }
+        try
+        {
+            return model.Prototypes.Values.Any(p => Traits(p, 0))
+                || model.Slots.Any(s => Hides(s.TypeString, 0))
+                || model.Maps.SelectMany(m => m.SetupStacks).SelectMany(st => st.Pieces).Any(s => Hides(s.TypeString, 0));
+        }
+        catch (Exception)
+        {
+            return true;   // fail closed
+        }
     }
 
     /// <summary>The piece's active Hideable (hide) and first active Obscurable (mask), from its own trait states.</summary>
