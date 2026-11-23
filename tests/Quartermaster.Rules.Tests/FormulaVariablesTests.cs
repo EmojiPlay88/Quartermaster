@@ -69,4 +69,11 @@ public class FormulaVariablesTests
         var f = F("A", a) with { Precondition = "holder(Depot, Fuel) > 1" };
         Assert.Equal(new (string?, string?)[] { ("Depot", "Fuel"), ("Riverland", "Supply") }, FormulaVariables.HolderReads(f));
     }
+
+    [Fact]
+    public void HolderReads_ignore_pick_by_without_a_list()
+    {
+        var f = F("A", In("A")) with { Outputs = new() { Out() with { PropertySelect = "holder(Riverland, Supply)" } } };
+        Assert.Empty(FormulaVariables.HolderReads(f));   // a selector only runs with a list, as OutputSources
+    }
 }

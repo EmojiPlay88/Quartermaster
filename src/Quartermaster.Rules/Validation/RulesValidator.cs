@@ -505,7 +505,7 @@ public static class RulesValidator
         foreach (var o in f.Outputs)
         {
             outputNo++;
-            CheckOutput(pack, o, Err);
+            CheckOutput(pack, o, outputNo, Err);
             ParseGuard(o.Expr, $"output {outputNo} value");
             if (o.PropertyChoice is { Count: > 0 })
             {
@@ -590,19 +590,20 @@ public static class RulesValidator
         else if (pack.ById<PropertyDef>(name!) is null) err($"{v} refers to a property that no longer exists");
     }
 
-    private static void CheckOutput(RulesPack pack, FormulaOutput o, Action<string> err)
+    private static void CheckOutput(RulesPack pack, FormulaOutput o, int outputNo, Action<string> err)
     {
+        var gone = Once(err);   // one "no longer exists" per output, however many of its ids are gone
         if (o.Target == OutputTarget.Holder && o.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(o.HolderId ?? "") is null)
             err($"output refers to unknown holder \"{o.HolderId}\"");
         // With a property list the fixed Property is not used; every listed id must suit the target as Property must.
-        if (o.PropertyChoice is { Count: > 0 } ids) foreach (var id in ids) CheckOutputProperty(pack, o, id, err);
-        else CheckOutputProperty(pack, o, o.Property, err);
+        if (o.PropertyChoice is { Count: > 0 } ids) foreach (var id in ids) CheckOutputProperty(pack, o, id, outputNo, err, gone);
+        else CheckOutputProperty(pack, o, o.Property, outputNo, err, gone);
     }
 
-    private static void CheckOutputProperty(RulesPack pack, FormulaOutput o, string? id, Action<string> err)
+    private static void CheckOutputProperty(RulesPack pack, FormulaOutput o, string? id, int outputNo, Action<string> err, Action<string> gone)
     {
         var p = pack.ById<PropertyDef>(id ?? "");
-        if (p is null) { err("an output refers to a property that no longer exists"); return; }
+        if (p is null) { gone($"output {outputNo} refers to a property that no longer exists"); return; }
         bool ok = o.Target == OutputTarget.Unit
             ? p.Scope is PropertyScope.Pieces or PropertyScope.Both
             : p.Scope is PropertyScope.Holders or PropertyScope.Both;

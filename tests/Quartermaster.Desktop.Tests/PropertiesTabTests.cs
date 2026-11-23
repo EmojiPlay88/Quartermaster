@@ -206,6 +206,28 @@ public sealed class PropertiesTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Delete_leaves_the_id_in_a_choice_list_and_the_validator_reports_it()
+    {
+        var s = Session(p => p with
+        {
+            Formulas = p.Formulas.Append(new FormulaDef
+            {
+                Id = "f-pick", Name = "Pick supply", Text = "1",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, PropertyChoice = new() { "fuel", "water" }, PropertySelect = "2" } },
+            }).ToList(),
+        });
+        var tab = Tab(s);
+        tab.SelectProperty("fuel");
+        Pump();
+        _dialogs.Answer = true;
+        Click(tab.DeletePropertyButton);
+        Assert.DoesNotContain(s.Rules!.Properties, p => p.Id == "fuel");
+        // the list is not renumbered: a number pick would otherwise silently change which property it writes
+        Assert.Equal(new[] { "fuel", "water" }, s.Rules.Formulas.Single(f => f.Id == "f-pick").Outputs[0].PropertyChoice);
+        Assert.Contains(RulesValidator.Validate(s.Rules), i => i.Message == "Formula \"Pick supply\": output 1 refers to a property that no longer exists");
+    }
+
+    [AvaloniaFact]
     public void Delete_asks_with_formula_users_default_no()
     {
         var s = Session();

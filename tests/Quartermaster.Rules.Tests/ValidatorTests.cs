@@ -255,7 +255,12 @@ public class ValidatorTests
     public void Validator_output_choice_unknown_property()
     {
         var msgs = FormulaMsgs(WithFormula(WithOut(GOut() with { PropertyChoice = new() { "p1", "zz" }, PropertySelect = "A" })));
-        Assert.Contains("Formula \"Fuel Use\": an output refers to a property that no longer exists", msgs);
+        Assert.Contains("Formula \"Fuel Use\": output 1 refers to a property that no longer exists", msgs);
+        // reported once per output, however many of its ids are gone
+        var twice = FormulaMsgs(WithFormula(WithOut(GOut() with { PropertyChoice = new() { "zz", "yy" }, PropertySelect = "A" })));
+        Assert.Single(twice, m => m.Contains("no longer exists"));
+        var fixedGone = FormulaMsgs(WithFormula(WithOut(GOut() with { Property = "zz" })));
+        Assert.Contains("Formula \"Fuel Use\": output 1 refers to a property that no longer exists", fixedGone);
         // scope is checked per id too: p2 is Pieces-only, the target is a holder
         var scope = FormulaMsgs(WithFormula(WithOut(GOut() with { PropertyChoice = new() { "p2" }, PropertySelect = "A" })));
         Assert.Contains(scope, m => m.Contains("output property \"Steps\" cannot be written to a holder"));

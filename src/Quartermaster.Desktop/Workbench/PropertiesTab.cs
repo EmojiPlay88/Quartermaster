@@ -328,7 +328,7 @@ public sealed class PropertiesTab : UserControl
         if (!await _dialogs.AskYesNoAsync(w, WorkbenchRules.DeleteQuestion("property", prop.Name, FormulaEdit.FormulasUsingProperty(pack, prop.Id)), "Delete property", defaultNo: true)) return;
         // the dialog is modal but the pack can still change (host edit, replay): act only if the property is still there and still the current row
         if (_s.Rules?.ById<PropertyDef>(id) == null || _props.CurrentCell is not { } now || now.Row >= _propIds.Count || _propIds[now.Row] != id) return;
-        Commit(p => FormulaEdit.WithoutPropertyChoice(p, id) with { Properties = p.Properties.Where(x => x.Id != id).ToList() });
+        Commit(p => p with { Properties = p.Properties.Where(x => x.Id != id).ToList() });
         Rebuild();
     }
 

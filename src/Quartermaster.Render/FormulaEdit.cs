@@ -418,26 +418,6 @@ public static class FormulaEdit
     public static FormulaDef SetOutputPick(FormulaDef f, int index, string? expr) =>
         SetOutput(f, index, o => o with { PropertySelect = string.IsNullOrWhiteSpace(expr) ? null : expr.Trim() });
 
-    /// <summary>The pack without <paramref name="propertyId"/> in any output's property list; an emptied list becomes null. The same pack when nothing lists it.</summary>
-    public static RulesPack WithoutPropertyChoice(RulesPack pack, string propertyId)
-    {
-        if (!pack.Formulas.Any(f => f.Outputs.Any(o => o.PropertyChoice?.Contains(propertyId) == true))) return pack;
-        return pack with
-        {
-            Formulas = pack.Formulas.Select(f => f.Outputs.Any(o => o.PropertyChoice?.Contains(propertyId) == true)
-                ? f with
-                {
-                    Outputs = f.Outputs.Select(o =>
-                    {
-                        if (o.PropertyChoice?.Contains(propertyId) != true) return o;
-                        var rest = o.PropertyChoice.Where(x => x != propertyId).ToList();
-                        return o with { PropertyChoice = rest.Count > 0 ? rest : null };
-                    }).ToList(),
-                }
-                : f).ToList(),
-        };
-    }
-
     // ---------- usage ----------
 
     public static IReadOnlyList<FormulaDef> FormulasUsingProperty(RulesPack pack, string propertyId) =>

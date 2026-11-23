@@ -283,29 +283,6 @@ public class FormulaEditTests
     }
 
     [Fact]
-    public void Property_delete_cleans_choice_lists()
-    {
-        var pack = Pack() with
-        {
-            Formulas = new()
-            {
-                new FormulaDef { Id = "z", Name = "Z", Outputs = new()
-                {
-                    new FormulaOutput { Target = OutputTarget.Unit, PropertyChoice = new() { "p1", "p2" }, PropertySelect = "1" },
-                    new FormulaOutput { Target = OutputTarget.Unit, PropertyChoice = new() { "p2" }, PropertySelect = "1" },
-                    new FormulaOutput { Target = OutputTarget.Unit, Property = "p1" },
-                } },
-            },
-        };
-        var after = FormulaEdit.WithoutPropertyChoice(pack, "p2");
-        var o = after.Formulas[0].Outputs;
-        Assert.Equal(new[] { "p1" }, o[0].PropertyChoice);
-        Assert.Null(o[1].PropertyChoice);   // an emptied list is null, never []
-        Assert.Equal("p1", o[2].Property);
-        Assert.Same(pack, FormulaEdit.WithoutPropertyChoice(pack, "p9"));   // nothing to clean: unchanged
-    }
-
-    [Fact]
     public void Output_value_and_choice_edits_normalise_blanks()
     {
         var f = FormulaEdit.AddOutput(F("A"));

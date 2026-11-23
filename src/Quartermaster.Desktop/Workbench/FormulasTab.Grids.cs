@@ -196,6 +196,7 @@ public sealed partial class FormulasTab
             if (f.Outputs[r].Target == OutputTarget.Holder) _out.SetCellItems(r, 1, holders);
             else _out.SetCellReadOnly(r, 1, true);
             _out.SetCellItems(r, 2, props);
+            _out.SetCellReadOnly(r, 2, f.Outputs[r].PropertyChoice is { Count: > 0 });   // the fixed Property is not used while a list is set
             _out.SetCellToolTip(r, 4, OutputValueHint);
             _out.SetCellToolTip(r, 5, ChooseFromHint);
             _out.SetCellToolTip(r, 6, PickByHint);

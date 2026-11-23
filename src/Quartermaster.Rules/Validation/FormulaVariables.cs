@@ -79,7 +79,7 @@ public static class FormulaVariables
         {
             if (o == null) continue;
             Add(o.Expr);
-            Add(o.PropertySelect);
+            if (o.PropertyChoice is { Count: > 0 }) Add(o.PropertySelect);   // only a list uses its selector, as OutputSources
         }
         foreach (var b in f?.Bindings ?? new List<VariableBinding>())
         {

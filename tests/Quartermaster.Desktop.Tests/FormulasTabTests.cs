@@ -229,6 +229,18 @@ public sealed class FormulasTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void FormulasTab_output_property_cell_is_read_only_with_a_list()
+    {
+        var s = Session(true, OneOutput());
+        var tab = Tab(s);
+        Assert.False(tab.Outputs.IsCellReadOnly(0, 2));
+        Type(tab.Outputs, 0, 5, "Strength, Moves");
+        Assert.True(tab.Outputs.IsCellReadOnly(0, 2));   // the fixed Property is not used while a list is set
+        Type(tab.Outputs, 0, 5, "");
+        Assert.False(tab.Outputs.IsCellReadOnly(0, 2));
+    }
+
+    [AvaloniaFact]
     public void FormulasTab_output_choice_quotes_names_with_commas()
     {
         var s = Session(true, OneOutput());
