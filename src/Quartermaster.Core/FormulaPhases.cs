@@ -19,8 +19,9 @@ public static class FormulaPhases
     public static bool Allowed(RulesPack pack, GameState s, FormulaDef f, out string? reason)
     {
         reason = null;
-        var ids = f?.Phases?.Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet();
         var phases = pack?.Phases ?? new List<PhaseDef>();
+        // Ids the pack does not know are ignored; a list of only unknown ids means any phase.
+        var ids = f?.Phases?.Where(id => !string.IsNullOrWhiteSpace(id) && phases.Any(p => p != null && p.Id == id)).ToHashSet();
         if (ids == null || ids.Count == 0 || phases.Count == 0) return true;
         if (s?.Position is { } pos && ids.Contains(pos.PhaseId)) return true;
         var names = phases.Where(p => p != null && ids.Contains(p.Id)).Select(p => p.Name).Distinct();

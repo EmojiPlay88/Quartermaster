@@ -124,6 +124,46 @@ public class PhaseHooksTests
     }
 
     [Fact]
+    public void MovedUnitsFor_other_is_complement_of_acting()
+    {
+        var s = State();
+        foreach (var (a, b) in new[]
+        {
+            ((string?)null, "marker(\"Side\") == \"Blue\""),                 // empty-filter side listed first
+            ("", ""),                                                          // two empty-filter sides
+            ("marker(\"Side\") != \"Blue\"", "marker(\"Side\") != \"Red\""),   // overlapping filters
+        })
+        {
+            var pk = Pack();
+            pk.Sides[0] = pk.Sides[0] with { UnitFilter = a };
+            pk.Sides[1] = pk.Sides[1] with { UnitFilter = b };
+            foreach (var ph in new[] { pk.Phases[1], pk.Phases[2] })
+            {
+                IEnumerable<string> Ids(MoveSide m) =>
+                    Sequencer.MovedUnitsFor(pk, s, ph, null, new MoveEntry { FormulaId = "f", FiresFor = m }).Select(p => p.Id);
+                var acting = Ids(MoveSide.Acting).ToHashSet();
+                var other = Ids(MoveSide.Other).ToHashSet();
+                Assert.Empty(acting.Intersect(other));
+                Assert.Equal(Ids(MoveSide.Any).ToHashSet(), acting.Union(other).ToHashSet());
+            }
+        }
+    }
+
+    [Fact]
+    public void FormulaPhases_unknown_ids_are_ignored()
+    {
+        var pk = Pack();
+        var s = new GameState { Position = P(pk, 1, "RM") };
+        FormulaDef F(params string[] phases) => new() { Id = "f", Name = "F", Text = "1", Phases = phases.ToList() };
+
+        Assert.True(FormulaPhases.Allowed(pk, s, F("gone"), out var r0));   // only unknown ids = any phase
+        Assert.Null(r0);
+        Assert.True(FormulaPhases.Allowed(pk, new GameState(), F("gone", "also gone"), out _));
+        Assert.False(FormulaPhases.Allowed(pk, s, F("gone", "BM"), out var r1));   // mixed: limited to the known ones
+        Assert.Equal("Only in: Blue Move", r1);
+    }
+
+    [Fact]
     public void FormulaPhases_allowed_cases()
     {
         var pk = Pack();

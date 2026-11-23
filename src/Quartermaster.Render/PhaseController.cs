@@ -442,6 +442,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         var distances = new Dictionary<string, double>();
         var bySide = Sequencer.ActingSide(pack, phase) != null;
+        Func<PieceInstance, string?>? owner = null;   // built once per call, only when an Other / Any entry needs it
         foreach (var e in phase.OnMove)
         {
             if (e == null) continue;
@@ -455,7 +456,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 continue;
             }
             // Other / Any: each owner's pieces are a run made for that owner (its stamp, its own queued run), as if that player ran it.
-            var owner = Ownership.PieceSides(g.State, pack);
+            owner ??= Ownership.PieceSides(g.State, pack);
             foreach (var group in moved.GroupBy(p => owner(p)))
                 AsOwner(group.Key, () => Apply(f, "move", MovedUnits(group, records, distances), queued));
         }

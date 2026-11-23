@@ -240,7 +240,7 @@ In **On start: run formulas**, choose **Add** four times:
 
 ### North Movement
 
-Add a phase `North Movement`, side Northern League. In **On move: run formulas for moved units**, add **Fuel for movement** with the filter `has(Fuel)`. Now every move during this phase charges fuel.
+Add a phase `North Movement`, side Northern League. In **On move: run formulas for moved units**, add the **Fuel for movement** formula from the tutorial above with the filter `has(Fuel)`. Now every move during this phase charges fuel.
 
 Under **Warnings**, add a row with this **Condition**:
 
@@ -268,11 +268,11 @@ Select North Supply and choose **Duplicate**. Change the copy's **Name:** to `So
 
 ### End-of-phase formulas
 
-Some work belongs at the end of a phase. In **On end: run formulas**, add rows just as under **On start**. Example: add a formula `Fuel upkeep` at the end of North Combat with For each **Units** and the filter `has(Fuel)`. When a player presses Next Phase, these formulas run first. If they all run by themselves, the game moves on in the same press; if one needs input, the game stays in the phase until you finish it and then press Next Phase again (`Finish the end-of-phase runs, then press Next Phase again`). See [Phases](Window-Phases#end-of-phase-formulas).
+Some work belongs at the end of a phase. In **On end: run formulas**, add rows just as under **On start**. Example: first create a formula `Fuel upkeep` (or reuse one of the formulas above), then add it at the end of North Combat with For each **Units** and the filter `has(Fuel)`. When a player presses Next Phase, these formulas run first. If they all run by themselves, the game moves on in the same press; if one needs input, the game stays in the phase until you finish it and then press Next Phase again (`Finish the end-of-phase runs, then press Next Phase again`). See [Phases](Window-Phases#end-of-phase-formulas).
 
 ### Moves by the other side
 
-On **North Movement**, give an **On move** row **Fires for** **Other side**, and the formula runs when a Southern Compact counter moves during the Northern League's phase (a reaction move). **Acting side** is the default; **Any side** reacts to every move. To ignore map drags, add `map()` to the entry's filter, for example `map() == "Main Map"`. See [Phases](Window-Phases#moves-by-the-other-side).
+On **North Movement**, give an **On move** row **Fires for** **Other side**, and the formula runs when a Southern Compact counter moves during the Northern League's phase (a reaction move). **Acting side** is the default; **Any side** reacts to every move. To limit an entry to moves on one map (for example, to ignore drags into an off-board box), filter on `map()`: `map() == "Main Map"`. See [Phases](Window-Phases#moves-by-the-other-side).
 
 ### Formulas limited to phases
 

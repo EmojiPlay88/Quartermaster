@@ -86,8 +86,8 @@ public static class Sequencer
 
     /// <summary>
     /// The pieces an OnMove entry fires for, by its <see cref="MoveEntry.FiresFor"/> (callers keep those that moved, as with
-    /// <see cref="UnitsFor"/>). Acting: <see cref="UnitsFor"/>. Other: pieces whose owning side (<see cref="Ownership.PieceSides"/>) is not the
-    /// phase's side; a piece of no side counts as other. Any: every piece. Formula applies-to and the entry filter apply in all modes; a phase
+    /// <see cref="UnitsFor"/>). Acting: <see cref="UnitsFor"/>. Other: the complement of Acting, the pieces the phase side's unit filter does not match
+    /// (a piece of no side counts as other; Acting and Other never overlap). Any: every piece. Formula applies-to and the entry filter apply in all modes; a phase
     /// without a (known) side behaves as Acting in every mode.
     /// </summary>
     public static IReadOnlyList<PieceInstance> MovedUnitsFor(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, MoveEntry e)
@@ -99,8 +99,8 @@ public static class Sequencer
         var units = s.Pieces.Values.Where(p => ff(p) && ef(p));
         if (e.FiresFor == MoveSide.Other)
         {
-            var owner = Ownership.PieceSides(s, pack);
-            units = units.Where(p => owner(p) != side.Id);
+            var acting = PieceFilter.Compile(side.UnitFilter, s, pack);
+            units = units.Where(p => !acting(p));
         }
         return units.ToList();
     }

@@ -62,7 +62,7 @@ An **On move** entry has a **Fires for** setting that says whose moves it reacts
 
 A phase with no side treats all three alike: every moved counter fires the entry. The run is made for the counter's owner: it is logged under that player's side, and a run that waits for input is offered to that player, as if they had started it by hand.
 
-Dragging a counter on the map is a move too. To leave map drags out of an entry, put `map()` in its filter, for example `map() == "Main Map"` (see [Formula Reference](Formula-Reference)).
+Dragging a counter on the map is a move too. To limit an entry to moves on one map (for example, to ignore drags into an off-board box), filter on `map()`: `map() == "Main Map"` (see [Formula Reference](Formula-Reference)).
 
 ### Formulas limited to phases
 
