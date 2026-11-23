@@ -343,6 +343,8 @@ internal static class FormulaIntentRunner
         }
         else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))
             return FormulaVerdict.Refused("That formula does not apply to this unit.");
+        // A player-started run obeys the formula's phase limit; a waiting run (queued by a hook) does not.
+        if (i.RunId == null && !FormulaPhases.Allowed(pack, full, f, out var phaseReason)) return FormulaVerdict.Refused(FormulaPhases.Refusal(f, phaseReason!));
 
         // The same masking as the sender's own dialog: hidden boxes are filled by the engine and never typed (FormulaMasking).
         var hidden = FormulaMasking.HiddenVariables(pack, s.Model, full, f, i.PieceId, sides);

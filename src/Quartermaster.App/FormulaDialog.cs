@@ -86,7 +86,7 @@ sealed class FormulaDialog : Form
         var rules = s.Rules ?? throw new InvalidOperationException("No rules pack is loaded.");
         var runner = s.Runner ?? throw new InvalidOperationException("No rules pack is loaded.");
         var formula = rules.ById<FormulaDef>(formulaId) ?? new FormulaDef { Id = formulaId, Name = "(missing formula)" };
-        _model = new FormulaDialogModel(runner, formula, pieceId) { Moved = link?.Moved };
+        _model = new FormulaDialogModel(runner, formula, pieceId) { Moved = link?.Moved, EnforcePhaseLimit = link == null && !previewOnly };
         // Hardcore and semi-automatic: the user types the values and the dialog only checks them. Fully automatic keeps the prefilled dialog.
         if (!previewOnly && s.Game?.State.Difficulty is { } mode)
         {

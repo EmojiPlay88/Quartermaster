@@ -151,7 +151,9 @@ public static class PieceMenuModel
         var children = formulas.Select(f =>
         {
             var id = f.Id;
-            return MenuEntry.Item(f.Name, () => hooks.ShowFormula?.Invoke(id, piece.Id));
+            // A formula limited to other phases is shown greyed with the reason; hook runs ignore the limit.
+            var allowed = FormulaPhases.Allowed(rules, game.State, f, out var why);
+            return MenuEntry.Item(f.Name, () => hooks.ShowFormula?.Invoke(id, piece.Id), allowed, why);
         }).ToList();
         menu.Add(MenuEntry.Submenu("Calculate", children));
     }
