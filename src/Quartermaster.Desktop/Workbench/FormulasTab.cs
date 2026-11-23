@@ -37,6 +37,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     readonly TextBlock _appliesErr = new() { Foreground = ErrorText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
     readonly TextBox _notes = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
     readonly RuleRefRow _refRow = new();
+    readonly WrapPanel _phaseChecks = new();
     readonly FormulaPreview _preview;
     readonly Button _bNew = new() { Content = "New…", Width = 50 }, _bRename = new() { Content = "Rename…", Width = 62 }, _bDel = new() { Content = "Delete", Width = 50 };
     readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
@@ -73,14 +74,14 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
 
         var rows = new Grid();
         rows.RowDefinitions.Add(new RowDefinition(64, GridUnitType.Pixel));
-        for (var i = 0; i < 3; i++) rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        for (var i = 0; i < 4; i++) rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         rows.RowDefinitions.Add(new RowDefinition(52, GridUnitType.Pixel));
         rows.RowDefinitions.Add(new RowDefinition(38, GridUnitType.Star));
         rows.RowDefinitions.Add(new RowDefinition(22, GridUnitType.Star));
         rows.RowDefinitions.Add(new RowDefinition(40, GridUnitType.Star));
         var cells = new Control[]
         {
-            _text, errRow, appliesRow, _refRow,
+            _text, errRow, appliesRow, BuildPhasesBox(), _refRow,
             Group("Notes (shown as a tooltip on the formula title)", _notes),
             BuildBindingsBox(), BuildOutputsBox(),
             Group("Preview (sample values are not saved)", _preview),
@@ -131,6 +132,41 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         if (bar != null) { DockPanel.SetDock(bar, Dock.Top); d.Children.Add(bar); }
         d.Children.Add(body);
         return d;
+    }
+
+    Control BuildPhasesBox()
+    {
+        var hint = new TextBlock { Text = "None checked = any phase.", FontStyle = FontStyle.Italic, Margin = new Thickness(0, 0, 0, 2) };
+        DockPanel.SetDock(hint, Dock.Bottom);
+        var box = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
+        var label = new TextBlock { Text = "Only in phases:", VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 6, 0) };
+        DockPanel.SetDock(label, Dock.Left);
+        box.Children.Add(label);
+        box.Children.Add(new StackPanel { Children = { new ScrollViewer { MaxHeight = 56, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Content = _phaseChecks }, hint } });
+        return box;
+    }
+
+    /// <summary>Rebuilds the checkbox per pack phase from the formula's phase list (an id no phase has stays in the list: the validator names it).</summary>
+    void LoadPhaseChecks(FormulaDef? f)
+    {
+        _phaseChecks.Children.Clear();
+        var on = f?.Phases ?? new List<string>();
+        foreach (var ph in _s.Rules?.Phases ?? new List<PhaseDef>())
+        {
+            var c = new CheckBox { Content = ph.Name, Tag = ph.Id, IsChecked = on.Contains(ph.Id), IsEnabled = f != null, Margin = new Thickness(0, 0, 8, 0) };
+            c.IsCheckedChanged += (_, _) => Run(() => OnPhaseChecked());
+            _phaseChecks.Children.Add(c);
+        }
+    }
+
+    void OnPhaseChecked()
+    {
+        if (_loadingUi || Current is not { } f) return;
+        FlushPending(final: false);
+        var shown = _phaseChecks.Children.OfType<CheckBox>().ToList();
+        var ids = shown.Where(c => c.IsChecked == true).Select(c => (string)c.Tag!).ToList();
+        ids.AddRange((f.Phases ?? new List<string>()).Where(id => shown.All(c => (string)c.Tag! != id)));   // unknown ids are kept
+        Commit(x => x with { Phases = ids.Count == 0 ? null : ids });
     }
 
     void OnTick() => Run(() => FlushPending(final: false));
@@ -294,6 +330,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
             if ((_applies.Text ?? "") != (f?.AppliesTo ?? "")) _applies.Text = f?.AppliesTo ?? "";
             _appliesErr.Text = FormulaEdit.SyntaxProblem(_applies.Text) ?? "";
             if (Norm(_notes.Text ?? "") != Norm(f?.Notes ?? "")) _notes.Text = f?.Notes ?? "";
+            LoadPhaseChecks(f);
             ShowRefLabel(f);
         }
         finally { _loadingUi = false; }
@@ -436,6 +473,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     internal string AppliesError => _appliesErr.Text ?? "";
     internal bool GoToErrorVisible => _goto.IsVisible;
     internal RuleRefRow RefRow => _refRow;
+    internal IReadOnlyList<CheckBox> PhaseChecks => _phaseChecks.Children.OfType<CheckBox>().ToList();
     internal Button NewButton => _bNew;
     internal Button RenameButton => _bRename;
     internal Button DeleteButton => _bDel;

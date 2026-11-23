@@ -30,6 +30,7 @@ public static class PhaseEdit
             Name = src.Name + " (copy)",
             Checklist = src.Checklist.ToList(),
             OnStart = src.OnStart.ToList(),
+            OnEnd = src.OnEnd?.ToList(),
             OnMove = src.OnMove.ToList(),
             Warnings = src.Warnings.ToList(),
         };
@@ -53,7 +54,10 @@ public static class PhaseEdit
             else if (index == l) blocks.Add(b with { LastPhaseId = pack.Phases[l - 1].Id });
             else blocks.Add(b);
         }
-        return (pack with { Phases = pack.Phases.Where(p => p.Id != id).ToList(), Blocks = blocks }, null);
+        // A formula limited to this phase loses it from its list; an emptied list becomes null (= any phase), never an empty list.
+        var formulas = pack.Formulas.Select(f => f.Phases?.Contains(id) == true
+            ? f with { Phases = f.Phases.Where(x => x != id).ToList() is { Count: > 0 } rest ? rest : null } : f).ToList();
+        return (pack with { Phases = pack.Phases.Where(p => p.Id != id).ToList(), Blocks = blocks, Formulas = formulas }, null);
     }
 
     public static (RulesPack Pack, string? Error) Move(RulesPack pack, int index, int delta)

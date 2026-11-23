@@ -31,6 +31,21 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     public FormulaDef Formula => formula;
 
+    /// <summary>
+    /// True for a run the player starts (menu, not a waiting run): the formula's phase limit then applies and Run / Calculate refuse
+    /// outside its phases. Hook runs and waiting runs leave it off.
+    /// </summary>
+    public bool EnforcePhaseLimit { get; set; }
+
+    private string? _phaseReason;
+
+    private string? PhaseReasonFor(GameState state)
+    {
+        _phaseReason = null;
+        if (EnforcePhaseLimit && !FormulaPhases.Allowed(runner.Pack, state, formula, out var why)) _phaseReason = why;
+        return _phaseReason;
+    }
+
     private static readonly IReadOnlySet<string> NoneHidden = new HashSet<string>();
     private IReadOnlySet<string> _hidden = NoneHidden;
     private readonly Dictionary<string, string> _verdict = new(StringComparer.Ordinal);
@@ -195,6 +210,13 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     public FormulaTrace Run(GameState state)
     {
+        if (PhaseReasonFor(state) != null)
+        {
+            // (The runner call only gives the view its variable list; its dice are not pinned and nothing is applied.)
+            // Outside the formula's phases nothing is run: the trace carries no result, so nothing can be applied.
+            var idle = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), new Dictionary<string, string>(StringComparer.Ordinal), _fixedRolls, Moved, false, DiceSource));
+            return idle with { Result = null, Working = "", Outputs = Array.Empty<OutputPreview>() };
+        }
         var typed = new Dictionary<string, string>(_typed);
         // Physical roll boxes always carry an override (blank = still waiting), so the runner never rolls for them.
         var ov = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -216,6 +238,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <summary>Runs with the engine's auto values (rolling and pinning dice) and copies every value into the boxes.</summary>
     public void Calculate(GameState state)
     {
+        if (PhaseReasonFor(state) != null) return;
         var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed),
             PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource));
         MergePins(trace);
@@ -243,7 +266,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var masked = _hidden.Count > 0;
         var missing = vars.Where(v => v.MissingReason != null && !IsHidden(v.Variable)).Select(v => v.Variable).ToList();
         var wrong = boxes.Where(b => b.Wrong).Select(b => b.Variable).ToList();
-        var canApply = t.Result != null && t.Error == null;
+        var canApply = t.Result != null && t.Error == null && _phaseReason == null;
         if (Checked)
         {
             var empty = boxes.Where(b => IsCheckedBox(b.Variable) && !IsHidden(b.Variable) && b.Text.Trim().Length == 0).Select(b => b.Variable).ToList();
@@ -259,7 +282,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             : missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing)
             : masked && t.Result == null ? (HostCalculates ? HostWaitText : HiddenWaitText)
             : "All inputs filled";
-        if (_verdictMessage != null) status = _verdictMessage;
+        if (_phaseReason != null) status = _phaseReason;
+        else if (_verdictMessage != null) status = _verdictMessage;
         // The working line shows every input's value: with a hidden input it is replaced (the logged working is redacted by PlayerView).
         var working = masked ? (t.Result != null ? FormulaMasking.WorkingHiddenText : "") : t.Working;
         var result = t.Result?.Display() ?? "";

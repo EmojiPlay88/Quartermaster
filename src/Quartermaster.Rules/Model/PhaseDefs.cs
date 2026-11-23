@@ -18,10 +18,16 @@ public sealed record StartEntry
     public string? UnitFilter { get; init; }
 }
 
+/// <summary>Whose moves fire an OnMove entry, relative to the phase's acting side.</summary>
+public enum MoveSide { Acting, Other, Any }
+
 public sealed record MoveEntry
 {
     public string FormulaId { get; init; } = "";
     public string? UnitFilter { get; init; }
+    /// <summary>Which side's moves fire the entry; Acting (the default) is the only behaviour older packs had.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public MoveSide FiresFor { get; init; } = MoveSide.Acting;
 }
 
 public sealed record PhaseWarning
@@ -41,6 +47,9 @@ public sealed record PhaseDef
     public string? RuleRefId { get; init; }
     public List<string> Checklist { get; init; } = new();
     public List<StartEntry> OnStart { get; init; } = new();
+    /// <summary>Runs when the phase is left, like OnStart. Null = none (the Workbench stores null, never an empty list).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<StartEntry>? OnEnd { get; init; }
     public List<MoveEntry> OnMove { get; init; } = new();
     public List<PhaseWarning> Warnings { get; init; } = new();
     public string? Notes { get; init; }

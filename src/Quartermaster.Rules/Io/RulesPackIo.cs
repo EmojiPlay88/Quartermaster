@@ -272,6 +272,7 @@ public static class RulesPackIo
             Instructions = x.Instructions ?? "",
             Checklist = (x.Checklist ?? new()).Select(c => c ?? "").ToList(),
             OnStart = (x.OnStart ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
+            OnEnd = x.OnEnd?.Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
             OnMove = (x.OnMove ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
             Warnings = (x.Warnings ?? new()).Where(w => w != null)
                 .Select(w => w with { Condition = w.Condition ?? "", Message = w.Message ?? "" }).ToList(),
@@ -287,6 +288,7 @@ public static class RulesPackIo
         {
             Name = f.Name ?? "",
             Text = f.Text ?? "",
+            Phases = f.Phases?.Select(i => i ?? "").ToList(),
             Bindings = (f.Bindings ?? new()).Where(b => b != null).Select(b => b with { Variable = b.Variable ?? "" }).ToList(),
             Outputs = (f.Outputs ?? new()).Where(o => o != null).Select(o => o with { Property = o.Property ?? "" }).ToList(),
         }).ToList(),

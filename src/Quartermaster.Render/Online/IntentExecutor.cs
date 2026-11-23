@@ -338,11 +338,13 @@ internal static class FormulaIntentRunner
         double? moved = null;
         if (i.RunId != null)
         {
-            if (!c.IsPending(i.RunId, i.PieceId)) return FormulaVerdict.Refused(NotWaitingText);
+            if (!c.IsPending(i.RunId, i.PieceId, f.Id)) return FormulaVerdict.Refused(NotWaitingText);
             moved = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied).Moved;
         }
         else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))
             return FormulaVerdict.Refused("That formula does not apply to this unit.");
+        // A player-started run obeys the formula's phase limit; a waiting run (queued by a hook) does not.
+        if (i.RunId == null && !FormulaPhases.Allowed(pack, full, f, out var phaseReason)) return FormulaVerdict.Refused(FormulaPhases.Refusal(f, phaseReason!));
 
         // The same masking as the sender's own dialog: hidden boxes are filled by the engine and never typed (FormulaMasking).
         var hidden = FormulaMasking.HiddenVariables(pack, s.Model, full, f, i.PieceId, sides);

@@ -85,6 +85,54 @@ public class RulesPackIoTests : IDisposable
         },
     };
 
+    private static RulesPack HookedPack() => PhasedPack() with
+    {
+        Formulas = new() { new FormulaDef { Id = "f1", Name = "Supply roll", Text = "1" } },
+        Phases = new()
+        {
+            new PhaseDef { Id = "a", Name = "Alpha", OnStart = new() { new StartEntry { FormulaId = "f1" } }, OnMove = new() { new MoveEntry { FormulaId = "f1" } } },
+        },
+    };
+
+    [Fact]
+    public void Pack_without_new_fields_keeps_hash()
+    {
+        var p = HookedPack();
+        // Pinned with the code before OnEnd / FiresFor / Phases existed.
+        Assert.Equal("0b02149a4e0b3372417b625978000d7d2521b0483d4bbc55feb36d4dfbc27dc7", RulesPackIo.ComputeSha256(p));
+        var json = JsonSerializer.Serialize(p.Phases[0], RulesPackIo.JsonOptions) + JsonSerializer.Serialize(p.Formulas[0], RulesPackIo.JsonOptions)
+                   + JsonSerializer.Serialize(p.Phases[0].OnMove[0], RulesPackIo.JsonOptions);
+        Assert.DoesNotContain("onEnd", json);
+        Assert.DoesNotContain("firesFor", json);
+        Assert.DoesNotContain("\"phases\"", JsonSerializer.Serialize(p.Formulas[0], RulesPackIo.JsonOptions));
+    }
+
+    [Fact]
+    public void New_fields_round_trip()
+    {
+        var p = HookedPack();
+        p = p with
+        {
+            Formulas = new() { p.Formulas[0] with { Phases = new() { "a" } } },
+            Phases = new() { p.Phases[0] with
+            {
+                OnEnd = new() { new StartEntry { FormulaId = "f1", ForEach = ForEachMode.Units, UnitFilter = "Fuel > 1" } },
+                OnMove = new() { new MoveEntry { FormulaId = "f1", FiresFor = MoveSide.Other } },
+            } },
+        };
+        var path = Path.Combine(_dir, "hooks.qrules");
+        RulesPackIo.Save(p, path);
+        var l = RulesPackIo.Load(path);
+        Assert.Equal(new[] { "a" }, l.Formulas[0].Phases);
+        Assert.Equal("f1", l.Phases[0].OnEnd![0].FormulaId);
+        Assert.Equal(ForEachMode.Units, l.Phases[0].OnEnd![0].ForEach);
+        Assert.Equal(MoveSide.Other, l.Phases[0].OnMove[0].FiresFor);
+        Assert.Equal(RulesPackIo.ComputeSha256(p), RulesPackIo.ComputeSha256(l));
+        var any = JsonSerializer.Serialize(p.Phases[0].OnMove[0] with { FiresFor = MoveSide.Any }, RulesPackIo.JsonOptions);
+        Assert.Contains("firesFor", any);
+        Assert.Contains("\"any\"", any);
+    }
+
     [Fact]
     public void Condition_unset_keeps_pack_hash()
     {

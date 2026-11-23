@@ -29,17 +29,18 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
 
     private string? _notice;
     private PhasePosition? _noticeAt;   // the position the notice belongs to; once the game is elsewhere (undo, step back) it is dropped
+    private PhasePosition? _noticeEnded; // and its end-of-phase mark (undoing a press that stopped for end runs drops its notice)
 
     private string? Notice
     {
         get
         {
-            if (_notice != null && s.Game?.State.Position != _noticeAt) _notice = null;
+            if (_notice != null && (s.Game?.State.Position != _noticeAt || s.Game?.State.EndedAt != _noticeEnded)) _notice = null;
             return _notice;
         }
     }
 
-    private void SetNotice(string? text) { _notice = text; _noticeAt = s.Game?.State.Position; }
+    private void SetNotice(string? text) { _notice = text; _noticeAt = s.Game?.State.Position; _noticeEnded = s.Game?.State.EndedAt; }
 
     /// <summary>Runs queued (or needing input) by a trigger; raised once per OnStart / OnMove batch that queued any.</summary>
     public event Action<IReadOnlyList<PendingRun>>? RunsQueued;
@@ -260,32 +261,50 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         PhaseBoundary?.Invoke();
     }
 
-    /// <returns>"Pass to {side} player" when the acting side changed, else null.</returns>
+    /// <summary>The strip notice when a press ran end-of-phase entries that queued runs, so the game stays in the phase.</summary>
+    public const string EndStopNotice = "Finish the end-of-phase runs, then press Next Phase again";
+
+    /// <returns>"Pass to {side} player" when the acting side changed, else null (also when the press stopped for end-of-phase runs).</returns>
     public string? Advance()
     {
         if (!HasPhases) return null;
         if (s.Game!.State.Position == null) { Start(); return null; }
         var pack = s.Rules!;
-        string? pass;
+        string? pass = null;
         List<PendingRun> queued;
+        var stopped = false;
         using (s.Game.BeginAction("Next Phase"))
         {
             var relocated = Reconcile();
             if (Resolved(out _) is not { } cur) return null;
-            // Conditions are evaluated here, against the state before the step; the command records the outcome (replay never re-evaluates).
-            var step = PhaseConditions.Next(pack, s.Game.State, cur);
-            if (step == null) return null;
             var from = pack.Phases[cur.PhaseIndex];
-            var to = pack.Phases[step.To.PhaseIndex];
-            SetNotice(relocated);
-            Exec(new AdvancePhase(cur, step.To, from.Name, to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
-            // The prompt compares the destination with the phase left; skipped phases in between never act.
-            var toSide = Sequencer.ActingSide(pack, to);
-            pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
-            SetNotice(Join(relocated, SkippedText(step), step.Notice, pass));
-            queued = OnEnter(to);
+            // End-of-phase entries run once per pass, in this press's action. All applied: the same press advances (one undo step).
+            // Any run queued for the player: the press stops in the phase; the next press finds EndedAt set and advances without
+            // re-running them. Skipped phases are never left, so they run none.
+            queued = from.OnEnd is { Count: > 0 } && s.Game.State.EndedAt != cur ? OnLeave(from, cur) : new();
+            if (queued.Count > 0)
+            {
+                SetNotice(Join(relocated, EndStopNotice));
+                stopped = true;
+            }
+            else
+            {
+                // Conditions are evaluated here, against the state before the step (after any end entries); the command records the
+                // outcome (replay never re-evaluates).
+                var step = PhaseConditions.Next(pack, s.Game.State, cur);
+                if (step == null) return null;
+                var to = pack.Phases[step.To.PhaseIndex];
+                SetNotice(relocated);
+                Exec(new AdvancePhase(cur, step.To, from.Name, to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
+                // The prompt compares the destination with the phase left; skipped phases in between never act.
+                var toSide = Sequencer.ActingSide(pack, to);
+                pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
+                SetNotice(Join(relocated, SkippedText(step), step.Notice, pass));
+                queued = OnEnter(to);
+            }
         }
         RaiseQueued(queued);
+        if (stopped) return null;   // still in the phase: no boundary
         PhaseBoundary?.Invoke();
         return pass;
     }
@@ -337,7 +356,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (s.Game == null || s.Runner == null) return false;
         if (trace.Error != null || trace.Result == null) return false;   // a failed trace changes nothing and keeps the run pending
         // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
-        if (runId != null && !IsPending(runId, pieceId)) return false;
+        if (runId != null && !IsPending(runId, pieceId, trace.Formula.Id)) return false;
         if (!s.CanActFor(pieceId, ActorSides)) return false;   // hot-seat: only the units of the sides held (or of no side)
         var name = UnitName(pieceId);
         var unit = name ?? trace.Formula.Name;
@@ -350,8 +369,8 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     }
 
     /// <summary>True while the run exists and the unit for this piece is not yet applied.</summary>
-    public bool IsPending(string runId, string? pieceId) =>
-        s.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } run && run.Units.Any(u => u.PieceId == pieceId && !u.Applied);
+    public bool IsPending(string runId, string? pieceId, string? formulaId = null) =>
+        s.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } run && (formulaId == null || run.FormulaId == formulaId) && run.Units.Any(u => u.PieceId == pieceId && !u.Applied);
 
     /// <summary>A run with no ledger outputs has no ledger line carrying its working; log it so every calculation is visible (spec 9).</summary>
     private void LogWorking(FormulaTrace trace, string unit, string? tag)
@@ -366,13 +385,23 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     // ---- triggers ----
 
     /// <returns>The runs queued (the caller raises <see cref="RunsQueued"/> once its action has closed).</returns>
-    private List<PendingRun> OnEnter(PhaseDef phase) => AsTrigger(phase, () => OnEnterCore(phase));
+    private List<PendingRun> OnEnter(PhaseDef phase) => AsTrigger(phase, () => RunEntries(phase, phase.OnStart, "start"));
 
-    private List<PendingRun> OnEnterCore(PhaseDef phase)
+    /// <summary>Runs the phase's end entries (tag "end") and records that they ran this pass (<see cref="EndPhase"/>).</summary>
+    /// <returns>The runs queued (the caller raises <see cref="RunsQueued"/> once its action has closed).</returns>
+    private List<PendingRun> OnLeave(PhaseDef phase, PhasePosition at)
+    {
+        var queued = AsTrigger(phase, () => RunEntries(phase, phase.OnEnd, "end"));
+        Exec(new EndPhase(at));
+        return queued;
+    }
+
+    /// <summary>OnStart / OnEnd entries: once, or for each unit of the phase's side.</summary>
+    private List<PendingRun> RunEntries(PhaseDef phase, List<StartEntry>? entries, string trigger)
     {
         var queued = new List<PendingRun>();
         if (s.Game == null || s.Rules is not { } pack) return queued;
-        foreach (var e in phase.OnStart ?? new())
+        foreach (var e in entries ?? new())
         {
             if (e == null) continue;
             var f = FindFormula(phase, e.FormulaId);
@@ -381,7 +410,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             var units = e.ForEach == ForEachMode.Once
                 ? new List<Unit> { new(null, f.Name, null) }
                 : Sequencer.UnitsFor(pack, s.Game.State, phase, f, e.UnitFilter).Select(p => new Unit(p.Id, PieceInfo.Name(p), null)).ToList();
-            Apply(f, "start", units, queued);
+            Apply(f, trigger, units, queued);
         }
         return queued;
     }
@@ -412,28 +441,57 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private List<PendingRun> OnMoveCore(GameSession g, RulesPack pack, PhaseDef phase, Dictionary<string, MoveRecord> records, List<PendingRun> queued)
     {
         var distances = new Dictionary<string, double>();
+        var bySide = Sequencer.ActingSide(pack, phase) != null;
+        Func<PieceInstance, string?>? owner = null;   // built once per call, only when an Other / Any entry needs it
         foreach (var e in phase.OnMove)
         {
             if (e == null) continue;
             var f = FindFormula(phase, e.FormulaId);
             if (f == null) continue;
             if (BadFilter(phase, f, e.UnitFilter)) continue;
-            var units = new List<Unit>();
-            foreach (var p in Sequencer.UnitsFor(pack, g.State, phase, f, e.UnitFilter))
+            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e).Where(p => records.ContainsKey(p.Id)).ToList();
+            if (!bySide || e.FiresFor == MoveSide.Acting)
             {
-                if (!records.TryGetValue(p.Id, out var rec)) continue;
-                if (!distances.TryGetValue(p.Id, out var d))
-                {
-                    var (cells, problem) = MoveMeasure.Cells(s.Model, rec.FromMap, rec.From, p.MapId, p.Pos);
-                    d = cells;
-                    distances[p.Id] = d;
-                    if (problem != null) Calc($"{PieceInfo.Name(p)}: moved distance counted as 0 ({problem})", p.Id, LogKind.NoWorking);
-                }
-                units.Add(new Unit(p.Id, PieceInfo.Name(p), d));
+                Apply(f, "move", MovedUnits(moved, records, distances), queued);
+                continue;
             }
-            Apply(f, "move", units, queued);
+            // Other / Any: each owner's pieces are a run made for that owner (its stamp, its own queued run), as if that player ran it.
+            owner ??= Ownership.PieceSides(g.State, pack);
+            foreach (var group in moved.GroupBy(p => owner(p)))
+                AsOwner(group.Key, () => Apply(f, "move", MovedUnits(group, records, distances), queued));
         }
         return queued;
+    }
+
+    /// <summary>The moved pieces as units with their moved distance (measured once per piece; a problem is logged and counts as 0).</summary>
+    private List<Unit> MovedUnits(IEnumerable<PieceInstance> pieces, Dictionary<string, MoveRecord> records, Dictionary<string, double> distances)
+    {
+        var units = new List<Unit>();
+        foreach (var p in pieces)
+        {
+            var rec = records[p.Id];
+            if (!distances.TryGetValue(p.Id, out var d))
+            {
+                var (cells, problem) = MoveMeasure.Cells(s.Model, rec.FromMap, rec.From, p.MapId, p.Pos);
+                d = cells;
+                distances[p.Id] = d;
+                if (problem != null) Calc($"{PieceInfo.Name(p)}: moved distance counted as 0 ({problem})", p.Id, LogKind.NoWorking);
+            }
+            units.Add(new Unit(p.Id, PieceInfo.Name(p), d));
+        }
+        return units;
+    }
+
+    /// <summary>
+    /// Inside a trigger, runs <paramref name="run"/> stamped for <paramref name="side"/> (a piece's owner) when a hot-seat stamp is in use;
+    /// a piece of no side keeps the phase's stamp.
+    /// </summary>
+    private void AsOwner(string? side, Action run)
+    {
+        var outer = _triggerSide;
+        if (side != null && ActorSides != null) _triggerSide = side;
+        try { run(); }
+        finally { _triggerSide = outer; }
     }
 
     private FormulaDef? FindFormula(PhaseDef phase, string id)

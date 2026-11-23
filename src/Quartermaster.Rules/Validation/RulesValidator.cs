@@ -142,11 +142,8 @@ public static class RulesValidator
         if (!string.IsNullOrEmpty(ph.RuleRefId) && pack.ById<RuleRef>(ph.RuleRefId!) is null)
             Err($"{who}: rule reference \"{ph.RuleRefId}\" does not exist");
 
-        foreach (var e in ph.OnStart)
-        {
-            if (pack.ById<FormulaDef>(e.FormulaId) is null) Err($"{who}: formula \"{e.FormulaId}\" does not exist");
-            CheckPhaseExpr(pack, e.UnitFilter, who, "on-start filter", Err);
-        }
+        CheckRunEntries(pack, ph, ph.OnStart, "start", issues);
+        CheckRunEntries(pack, ph, ph.OnEnd ?? new(), "end", issues);
         foreach (var e in ph.OnMove)
         {
             var f = pack.ById<FormulaDef>(e.FormulaId);
@@ -155,6 +152,7 @@ public static class RulesValidator
                                               or BindingKind.Global or BindingKind.Holder))
                 Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: on-move formula \"{f.Name}\" has no Moved binding");
             CheckPhaseExpr(pack, e.UnitFilter, who, "on-move filter", Err);
+            WarnOutsidePhases(ph, f, "move", issues);
         }
         CheckPhaseCondition(pack, ph, issues);
         foreach (var w in ph.Warnings)
@@ -164,6 +162,26 @@ public static class RulesValidator
             else if (ShowsOnceWithUnit(pack, w.Condition, w.Message))
                 Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: warning {ShowsOnceText}");
         }
+    }
+
+    /// <summary>OnStart / OnEnd entries: the formula exists, the unit filter is sound, the formula is allowed in this phase. <paramref name="kind"/> is "start" or "end".</summary>
+    private static void CheckRunEntries(RulesPack pack, PhaseDef ph, List<StartEntry> entries, string kind, List<RulesIssue> issues)
+    {
+        string who = $"Phase \"{ph.Name}\"";
+        void Err(string m) => Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, m);
+        foreach (var e in entries)
+        {
+            var f = pack.ById<FormulaDef>(e.FormulaId);
+            if (f is null) Err($"{who}: formula \"{e.FormulaId}\" does not exist");
+            CheckPhaseExpr(pack, e.UnitFilter, who, $"on-{kind} filter", Err);
+            WarnOutsidePhases(ph, f, kind, issues);
+        }
+    }
+
+    private static void WarnOutsidePhases(PhaseDef ph, FormulaDef? f, string kind, List<RulesIssue> issues)
+    {
+        if (f?.Phases is { Count: > 0 } allowed && !allowed.Contains(ph.Id))
+            Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"Phase \"{ph.Name}\": {kind} entry runs \"{f.Name}\", which is limited to other phases");
     }
 
     /// <summary>The tail of the notice for a game-level warning or alert whose message names {unit}.</summary>
@@ -403,6 +421,9 @@ public static class RulesValidator
         string who = $"Formula \"{f.Name}\"";
         void Err(string m) => Add(issues, RulesIssueSeverity.Error, f.Id, f.Name, $"{who}: {m}");
         void Warn(string m) => Add(issues, RulesIssueSeverity.Warning, f.Id, f.Name, $"{who}: {m}");
+
+        foreach (var id in (f.Phases ?? new()).Distinct(StringComparer.Ordinal))
+            if (pack.ById<PhaseDef>(id) is null) Err($"phase list names unknown phase \"{id}\"");
 
         AstExpr? ast = null;
         try { ast = Parser.Parse(f.Text ?? ""); }

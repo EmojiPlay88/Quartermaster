@@ -116,7 +116,19 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-22, formula reads; read this first):**
+**CURRENT STATE (2026-11-23, phase hooks; read this first):**
+
+- **Branch `phase-hooks` (cut from master a9d0088), not pushed; all five tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-22-phase-hooks-design.md` (wishlist #35, #26, #40).
+  - **End-of-phase entries (#35):** `PhaseDef.OnEnd : List<StartEntry>?` (null = none). Next Phase runs them (log tag `end`); if nothing was queued the same press advances (one undo step); if a run was queued the game stays and the notice is `Finish the end-of-phase runs, then press Next Phase again`; the next press advances without re-running. State: `GameState.EndedAt`, command `EndPhase`, cleared by `AdvancePhase`. Skipped phases run no OnEnd.
+  - **Other-side moves (#26):** `MoveEntry.FiresFor : MoveSide { Acting, Other, Any }` (default Acting). Runs are made for the piece's owner (stamp and queued run). A phase without a side: all three alike. Map drags are excluded with `map()` in the entry filter.
+  - **Formula phase limits (#40):** `FormulaDef.Phases : List<string>?` (null = any). `FormulaPhases.Allowed` / `Refusal`; menu item greyed with `Only in: {names}`, dialog Run disabled, host refusal `{formula name} can only be run in: {names}`; hook runs ignore the limit (a queued run exempts only the formula it was queued for). `PhaseEdit.Remove` strips a deleted phase id from the lists.
+  - **Validator:** error `Formula "{name}": phase list names unknown phase "{id}"`; warning `Phase "{phase}": {start|move|end} entry runs "{formula}", which is limited to other phases`; OnEnd entries get the OnStart checks.
+  - **Workbench (Avalonia Phases and Formulas tabs):** `On end` grid (null written back when the last row goes), `Fires for` column (`Acting side`, `Other side`, `Any side`), `Only in phases` checkbox list with hint `None checked = any phase.` (none checked stores null, never an empty list). The old WinForms Workbench is not edited.
+  - **Compatibility:** old packs and saves load unchanged, an unchanged pack keeps its SHA-256 (new members omitted when default), `CurrentFormat` stays 4.
+- **Wiki updated:** Window-Phases (end formulas, other-side moves, limits), Window-Rules-Workbench, Making-a-Rules-Pack.
+- **Tests (full runs, Release, one project at a time):** Rules 262, Core 363, Render 1359 (+1 skipped), Desktop 1066, Docs 20, all passed first time; `src/Quartermaster.App` builds in Release.
+
+**Previous CURRENT STATE (2026-11-22, formula reads; history):**
 
 - **Branch `formula-reads`, not pushed; final review done and its fix wave committed; next: user review, merge/PR (ask).** Spec `specs/2026-11-22-formula-reads-design.md`.
   - New functions in every expression: `side()` (owning side name, `""` when none), `phaseside()` (the current phase's side name, `""` when none), `map()` (the piece's map name), `holder(Holder, Property)` (bare names; falls back to the Default when unset).
