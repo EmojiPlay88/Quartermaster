@@ -126,6 +126,9 @@ sealed class FormulaFormView : StackPanel
     /// <summary>The box's text as shown (null when there is no such box).</summary>
     public string? BoxText(string variable) => _slots.TryGetValue(variable, out var s) ? s.Text : null;
 
+    /// <summary>The box's placeholder hint (null when none or no such box).</summary>
+    public string? BoxHint(string variable) => _slots.TryGetValue(variable, out var s) ? s.Box.PlaceholderText : null;
+
     /// <summary>True when the box can be typed into (false for a "not used" or waiting box).</summary>
     public bool BoxEnabled(string variable) => _slots.TryGetValue(variable, out var s) && s.Input.IsEnabled;
 
@@ -179,6 +182,7 @@ sealed class FormulaFormView : StackPanel
                     s.Caption.Text = s.BaseCaption + b.CaptionSuffix;
                     s.Caption.FontStyle = b.CaptionSuffix.Length > 0 ? FontStyle.Italic : FontStyle.Normal;
                     s.Reroll.IsVisible = b.RerollKey != null;
+                    s.Box.PlaceholderText = b.Hint;
                     ToolTip.SetTip(s.Input, string.IsNullOrEmpty(b.Tooltip) ? null : b.Tooltip);
                 }
                 if (_mirrors.TryGetValue(b.Variable, out var ms))

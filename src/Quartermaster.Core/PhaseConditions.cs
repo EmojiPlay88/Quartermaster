@@ -83,6 +83,7 @@ public static class PhaseConditions
         }
 
         public Value Lookup(string tableName, Value row, Value? col) => PieceFilter.LookupTable(pack, tableName, row, col);
+        public Value LookupRange(string table, Value row, Value value) => PieceFilter.LookupRangeTable(pack, table, row, value);
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("dice() is not available in a phase condition");
         public bool Has(string property) => throw new EvalError("has() is not available in a phase condition");
         public Value PieceName() => throw new EvalError("name() is not available in a phase condition");

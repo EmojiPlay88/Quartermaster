@@ -7,7 +7,7 @@ public static class FormulaVariables
 {
     /// <summary>
     /// The variables of the formula text in text order, then those of the precondition, then (transitively, only from bindings that are
-    /// themselves used) those named in a used binding's Table row/column expression, auto value or "Only when" condition, never counting a
+    /// themselves used) those named in a used binding's Table row/column expression, auto value, "Only when" condition or dice count expression, never counting a
     /// binding's own variable in its own expressions. Empty when the text does not parse; expressions that do not parse are skipped.
     /// </summary>
     public static List<string> Used(FormulaDef f)
@@ -34,10 +34,11 @@ public static class FormulaVariables
         return names;
     }
 
-    /// <summary>The expressions a resolved binding evaluates: a Table's row and column, the auto value, the "Only when" condition (non-blank only).</summary>
+    /// <summary>The expressions a resolved binding evaluates: a Table's row and column, the auto value, the "Only when" condition, the dice count expression (non-blank only).</summary>
     public static IEnumerable<string> Sources(VariableBinding b)
     {
-        var all = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue, b.When } : new[] { b.AutoValue, b.When };
+        var count = b.Kind == BindingKind.Roll ? b.DiceCountExpr : null;   // only a Roll expands its dice count expression
+        var all = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue, b.When, count } : new[] { b.AutoValue, b.When, count };
         return all.Where(x => !string.IsNullOrWhiteSpace(x))!;
     }
 
@@ -50,7 +51,7 @@ public static class FormulaVariables
 
     /// <summary>
     /// Every holder(H, P) call (see <see cref="ExprFacts.HolderReads"/>) in the formula text, the precondition, every binding's auto value
-    /// and "Only when" condition and every Table binding's row/column expression, used or not. Expressions that do not parse are skipped (they never run).
+    /// and "Only when" condition and dice count expression and every Table binding's row/column expression, used or not. Expressions that do not parse are skipped (they never run).
     /// </summary>
     public static List<(string? Holder, string? Property)> HolderReads(FormulaDef f)
     {
@@ -68,6 +69,7 @@ public static class FormulaVariables
             if (b == null) continue;
             Add(b.AutoValue);
             Add(b.When);
+            Add(b.DiceCountExpr);
             if (b.Kind == BindingKind.Table) { Add(b.RowExpr); Add(b.ColExpr); }
         }
         return found;

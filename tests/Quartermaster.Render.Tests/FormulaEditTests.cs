@@ -35,6 +35,20 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void SetKind_clears_dice_count_expr_when_leaving_roll()
+    {
+        var f = F("R", new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 2, DiceSides = 6, DiceCountExpr = "P" });
+        Assert.Null(FormulaEdit.SetKind(f, "R", BindingKind.Input).Bindings[0].DiceCountExpr);
+        Assert.Equal("P", FormulaEdit.SetKind(f, "R", BindingKind.Roll).Bindings[0].DiceCountExpr);   // same kind: untouched
+    }
+
+    [Fact]
+    public void IsConfigured_counts_dice_count_expr()
+    {
+        Assert.True(FormulaEdit.IsConfigured(new VariableBinding { Variable = "R", Kind = BindingKind.Input, DiceCountExpr = "P" }));
+    }
+
+    [Fact]
     public void IsConfigured_counts_when_so_sync_keeps_it()
     {
         var b = new VariableBinding { Variable = "Gone", Kind = BindingKind.Input, When = "1 = 1" };

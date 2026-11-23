@@ -181,6 +181,13 @@ public class EvaluatorTests
     }
 
     [Fact]
+    public void WorkingLine_LookupRangeRendersBracketed_CountKeepsRollName()
+    {
+        Assert.Equal("Rates[12, 3]", Work("lookuprange(Rates, MP, Rate)"));
+        Assert.Equal("count(Rate, 1, 2)", Work("count(Rate, 1, 2)"));
+    }
+
+    [Fact]
     public void StartsWith_Contains_CaseInsensitive()
     {
         Assert.True(Eval("startsWith(\"Red 1\", \"red\")").Bool);

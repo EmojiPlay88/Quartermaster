@@ -47,10 +47,10 @@ public static class KeyChoices
             case Unary u: return FromLookup(u.Operand, pack, variable, out found);
             case Binary b: return FromLookup(b.Left, pack, variable, out found) || FromLookup(b.Right, pack, variable, out found);
             case Call c:
-                if (c.Function == "lookup" && c.Args.Count >= 2 && c.Args[0] is VarRef tn && pack.TableByName(tn.Name) is { } t)
+                if (c.Function is "lookup" or "lookuprange" && c.Args.Count >= 2 && c.Args[0] is VarRef tn && pack.TableByName(tn.Name) is { } t)
                 {
                     if (c.Args[1] is VarRef r && r.Name == variable) { found = Keys(t.RowKeys); return true; }
-                    if (c.Args.Count > 2 && c.Args[2] is VarRef col && col.Name == variable && t.Kind == TableKind.TwoD)
+                    if (c.Function == "lookup" && c.Args.Count > 2 && c.Args[2] is VarRef col && col.Name == variable && t.Kind == TableKind.TwoD)
                     { found = Keys(t.ColumnKeys); return true; }
                 }
                 foreach (var a in c.Args)

@@ -57,7 +57,7 @@ public static class ExprFacts
             case Binary b: return Check(b.Left, pack) && Check(b.Right, pack);
             case Call c:
                 if (c.Function is "name" or "marker" or "has" or "side" or "map") return false;
-                int skip = c.Function == "lookup" ? 1 : c.Function == "holder" ? 2 : 0;
+                int skip = c.Function is "lookup" or "lookuprange" ? 1 : c.Function == "holder" ? 2 : 0;
                 for (int i = skip; i < c.Args.Count; i++)
                     if (!Check(c.Args[i], pack)) return false;
                 return true;

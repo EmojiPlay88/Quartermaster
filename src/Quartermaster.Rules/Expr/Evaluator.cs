@@ -15,6 +15,10 @@ public interface IEvalContext
     /// <summary>Throws <see cref="EvalError"/> when the value is missing.</summary>
     Value GetVariable(string name);
     Value Lookup(string tableName, Value row, Value? col);
+    /// <summary>The column key of the first cell of the table row that holds the value (see <c>TableLookup.RangeColumn</c>).</summary>
+    Value LookupRange(string table, Value row, Value value) => throw new EvalError("lookuprange() is not available here");
+    /// <summary>The dice of a Roll binding as drawn (only the formula runner knows them).</summary>
+    IReadOnlyList<int> DiceOf(string variable) => throw new EvalError("count() is not available here");
     IReadOnlyList<int> RollDice(int n, int sides);
     bool Has(string property);
     Value PieceName();
@@ -158,7 +162,7 @@ public static class Evaluator
     /// <summary>Every function name <see cref="EvalCall"/> dispatches (lower-case; the parser matches names case-insensitively).</summary>
     public static IReadOnlyList<string> FunctionNames { get; } = new[]
     {
-        "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup",
+        "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup", "lookuprange", "count",
         "dice", "has", "startswith", "contains", "name", "marker", "turn", "stage", "mod",
         "side", "phaseside", "map", "holder",
     };
@@ -211,6 +215,20 @@ public static class Evaluator
                 var row = Eval(a[1], ctx);
                 Value? col = a.Count > 2 ? Eval(a[2], ctx) : null;
                 return ctx.Lookup(table.Name, row, col);
+            }
+            case "lookuprange":
+            {
+                if (a[0] is not VarRef table) throw new EvalError("lookuprange needs a table name", a[0]);
+                var row = Eval(a[1], ctx);
+                return ctx.LookupRange(table.Name, row, Eval(a[2], ctx));
+            }
+            case "count":
+            {
+                if (a[0] is not VarRef roll) throw new EvalError("count needs a roll name", a[0]);
+                double lo = NumArg(a[1], ctx, "count"), hi = NumArg(a[2], ctx, "count");
+                int n = 0;
+                foreach (var d in ctx.DiceOf(roll.Name)) if (d >= lo && d <= hi) n++;
+                return Num(n, c);
             }
             case "dice":
             {

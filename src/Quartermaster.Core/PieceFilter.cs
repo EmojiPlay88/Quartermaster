@@ -139,11 +139,15 @@ public static class PieceFilter
     /// <summary>A Holders-scope property reads the global holder's value (else its Default).</summary>
     internal static Value GlobalValue(GameState s, PropertyDef def) => Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), def));
 
-    internal static Value LookupTable(RulesPack pack, string tableName, Value row, Value? col)
-    {
-        var t = pack.TableByName(tableName) ?? throw new EvalError($"No table named '{tableName}'");
-        return TableLookup.Lookup(t, row, col);
-    }
+    internal static Value LookupTable(RulesPack pack, string tableName, Value row, Value? col) =>
+        TableLookup.Lookup(TableNamed(pack, tableName), row, col);
+
+    /// <summary>lookuprange(): the column key of the first cell of the row that holds the value (<see cref="TableLookup.RangeColumn"/>).</summary>
+    internal static Value LookupRangeTable(RulesPack pack, string tableName, Value row, Value value) =>
+        TableLookup.RangeColumn(TableNamed(pack, tableName), row, value);
+
+    private static TableDef TableNamed(RulesPack pack, string tableName) =>
+        pack.TableByName(tableName) ?? throw new EvalError($"No table named '{tableName}'");
 
     /// <summary>Parsed applies-to per property record (records are replaced on edit, so this never goes stale); null = does not parse.</summary>
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PropertyDef, ParsedAppliesTo> AppliesToCache = new();
@@ -200,6 +204,7 @@ public static class PieceFilter
         }
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
+        public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
         public bool Has(string property) => pack.PropertyByName(property) is { } def && Stored(def) != null;
         public Value PieceName() => NameValue(p);
@@ -223,6 +228,7 @@ public static class PieceFilter
         }
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
+        public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
         public bool Has(string property) => false;
         public Value PieceName() => NameValue(null);

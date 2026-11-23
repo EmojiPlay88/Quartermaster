@@ -29,6 +29,9 @@ public sealed record VariableBinding
     /// <summary>Expression: when it is false the binding is not resolved (a Roll is not rolled, an Input is not asked). Null = always used (the Workbench stores null, never "").</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? When { get; init; }
+    /// <summary>Roll only: expression giving the number of dice (a whole number 1-100) in place of <see cref="DiceCount"/>; it may not read this binding. Null = the fixed DiceCount (the Workbench stores null, never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DiceCountExpr { get; init; }
 }
 
 public sealed record FormulaOutput

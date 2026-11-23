@@ -18,6 +18,8 @@ public static class Parser
         ["abs"] = (1, 1),
         ["clamp"] = (3, 3),
         ["lookup"] = (2, 3),
+        ["lookuprange"] = (3, 3),
+        ["count"] = (3, 3),
         ["dice"] = (2, 2),
         ["has"] = (1, 1),
         ["name"] = (0, 0),
@@ -45,7 +47,7 @@ public static class Parser
         return e;
     }
 
-    /// <summary>Distinct variable names in first-occurrence order, excluding lookup's table-name argument and holder's two name arguments.</summary>
+    /// <summary>Distinct variable names in first-occurrence order, excluding the table-name argument of lookup and lookuprange and holder's two name arguments.</summary>
     public static IReadOnlyList<string> Variables(Expr e)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -68,7 +70,7 @@ public static class Parser
                     Walk(b.Right);
                     break;
                 case Call c:
-                    for (int i = c.Function == "lookup" ? 1 : c.Function == "holder" ? 2 : 0; i < c.Args.Count; i++) Walk(c.Args[i]);
+                    for (int i = c.Function is "lookup" or "lookuprange" ? 1 : c.Function == "holder" ? 2 : 0; i < c.Args.Count; i++) Walk(c.Args[i]);
                     break;
             }
         }
@@ -269,6 +271,10 @@ public static class Parser
                 throw new ParseError(t.Start, $"'{lower}' takes {Describe(range)}, not {args.Count}");
             if (lower == "lookup" && args[0] is not VarRef)
                 throw new ParseError(args[0].Start, "lookup needs a table name");
+            if (lower == "lookuprange" && args[0] is not VarRef)
+                throw new ParseError(args[0].Start, "lookuprange needs a table name");
+            if (lower == "count" && args[0] is not VarRef)
+                throw new ParseError(args[0].Start, "count needs a roll name");
             if (lower == "holder")
             {
                 if (args[0] is not VarRef) throw new ParseError(args[0].Start, "holder needs a holder name");

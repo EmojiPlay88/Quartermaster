@@ -143,6 +143,26 @@ public static class TableLookup
         return CellAt(t, r, c);
     }
 
+    /// <summary>
+    /// The column key of the first cell, in column order, of the row found as <see cref="Lookup"/> does whose range key matches the value
+    /// (empty cells never match). The key is a number when it is a plain number, else its text. Two-way tables only.
+    /// </summary>
+    public static Value RangeColumn(TableDef t, Value row, Value value)
+    {
+        if (t.Kind != TableKind.TwoD) throw new EvalError("lookuprange needs a two-way table");
+        int r = FindIndex(t.RowKeys, row);
+        if (r < 0) throw new EvalError($"No row for {row.Display()} in {t.Name}");
+        var cells = r < t.Cells.Count ? t.Cells[r] : new List<string>();
+        for (int c = 0; c < t.ColumnKeys.Count && c < cells.Count; c++)
+        {
+            var cell = Normalise(cells[c]);
+            if (cell.Length == 0 || !Matches(ParseKey(cell), value)) continue;
+            var key = ParseKey(t.ColumnKeys[c]);
+            return key.Kind == TableKeyKind.Number ? Value.Of(key.Lo) : Value.Of(key.Text);
+        }
+        throw new EvalError($"No column of {t.Name} row {row.Display()} holds {value.Display()}");
+    }
+
     /// <summary>The cell at the given indices, as a number when it parses, else as text.</summary>
     public static Value CellAt(TableDef t, int r, int c)
     {

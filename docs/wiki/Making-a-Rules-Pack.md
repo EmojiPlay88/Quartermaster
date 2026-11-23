@@ -162,6 +162,23 @@ has(Readiness)
 
 A **Roll** binding rolls dice; Details takes dice notation such as `1d6` or `2d6`. This formula has no outputs: it only shows the result, and the player decides what happens.
 
+### A range chart and a roll per plane
+
+Some charts print a different range in each cell of a row, and some are rolled once for every plane of a squadron. Two functions cover them: `lookuprange` and `count`.
+
+**A range chart.** Make a table `Landing` with the altitude bands as rows (`1`, `2`, `3`) and the landing results as columns (`Hard`, `Rough`, `Smooth`). Put a range in each cell: in row `2` the `Hard` cell holds `1-3`, the `Rough` cell `4-5` and the `Smooth` cell `6+`. Then the formula is `lookuprange(Landing, Altitude, Roll)` with these bindings:
+
+| Variable | Kind | Details |
+|---|---|---|
+| Altitude | Input | `1..3` |
+| Roll | Roll | `1d6` |
+
+With Altitude 2 and a Roll of 5 the formula gives `Rough`. If no cell of the row holds the roll, the run stops with `No column of Landing row 2 holds 7`, so end each row with an open range such as `6+`.
+
+**A roll per plane.** A squadron of Riverland bombers rolls one die per plane. Bind `Planes` as Kind **Roll**, Details `1d6`, and put an expression in the **Dice count** column of the bindings grid: `Squadron` (an Input of `1..12`). Leave it blank to use the fixed number from Details. The expression may read inputs and other bindings, but not the roll itself, and must give a whole number from 1 to 100. Then count the dice with `count(Planes, 1, 2) * 10 + count(Planes, 6, 6)`.
+
+This gives 10 for every plane that rolled 1 or 2, plus 1 for every 6. With **Physical dice** on in the formula dialog, type the dice of `Planes` separated by spaces (`1 2 5 6`); the dice are logged one by one.
+
 ### Ammo for firing
 
 ```formula

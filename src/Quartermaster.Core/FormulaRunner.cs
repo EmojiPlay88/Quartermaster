@@ -75,15 +75,20 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         AstExpr? pre = string.IsNullOrWhiteSpace(formula.Precondition) ? null : Parser.Parse(formula.Precondition);
 
-        // Variables of the text, then of the precondition, then any used only inside Table binding row/column expressions or
-        // "Only when" conditions.
+        // Variables of the text, then of the precondition, then any used only inside Table binding row/column expressions,
+        // "Only when" conditions or Roll binding dice count expressions.
         var names = new List<string>(Parser.Variables(expr));
         if (pre != null) foreach (var v in Parser.Variables(pre)) if (!names.Contains(v)) names.Add(v);
         for (var i = 0; i < names.Count; i++)
         {
             var b = formula.Bindings.FirstOrDefault(x => x.Variable == names[i]);
             if (b == null) continue;
-            var srcs = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.When } : new[] { b.When };
+            var srcs = b.Kind switch
+            {
+                BindingKind.Table => new[] { b.RowExpr, b.ColExpr, b.When },
+                BindingKind.Roll => new[] { b.When, b.DiceCountExpr },
+                _ => new[] { b.When },
+            };
             foreach (var src in srcs)
             {
                 if (string.IsNullOrWhiteSpace(src)) continue;
@@ -198,9 +203,15 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             IReadOnlyList<int> res;
             if (r.FixedRolls.TryGetValue(key, out var pin) && pin != null && pin.Count == n && pin.All(x => x >= 1 && x <= sides)) res = pin;
             else res = r.Dice?.Invoke(key, n, sides) ?? owner._roller(n, sides);
-            _rolls.Add(new DiceEntry(0, $"{formula.Name}: {key}", n, sides, res));
-            _byKey[key] = res;
+            Record(key, n, sides, res);
             return res;
+        }
+
+        /// <summary>Logs a key's dice (rolled, pinned or typed one by one) and keeps them for count().</summary>
+        private void Record(string key, int n, int sides, IReadOnlyList<int> dice)
+        {
+            _rolls.Add(new DiceEntry(0, $"{formula.Name}: {key}", n, sides, dice));
+            _byKey[key] = dice;
         }
 
         public IReadOnlyList<int> Roll(int n, int sides) => RollKey("dice#" + _inlineDice++, n, sides);
@@ -238,6 +249,20 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             if (st.Skipped) throw new EvalError($"{name} is not used here: its \"Only when\" condition is false");
             if (st.Waiting) throw new Waits();
             return st.Value ?? throw new Missing(st.MissingReason ?? "Missing value");
+        }
+
+        /// <summary>The dice a Roll binding drew in this run. Reading it resolves the binding first, so a skipped, waiting or missing
+        /// binding behaves as for any read.</summary>
+        public IReadOnlyList<int> DiceOf(string name)
+        {
+            var value = ValueOf(name);
+            if (formula.Bindings.FirstOrDefault(x => x.Variable == name) is not { Kind: BindingKind.Roll } rb)
+                throw new EvalError($"count() needs a roll binding, not {name}");
+            if (_byKey.TryGetValue(name, out var dice)) return dice;
+            // A single typed number is not recorded; for a one-die roll it is that die.
+            if (DiceCount(rb) == 1 && value.Kind == ValueKind.Number && value.Number == Math.Floor(value.Number) && value.Number >= 1 && value.Number <= (rb.DiceSides ?? 6))
+                return new[] { (int)value.Number };
+            throw new EvalError($"count() needs each die of {name}: type them separated by spaces");
         }
 
         public VariableState Resolve(string name)
@@ -281,6 +306,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var auto = b.Kind != BindingKind.Input;
             if (r.Overrides.TryGetValue(name, out var ov) && ov != null)
             {
+                if (b.Kind == BindingKind.Roll) return TypedRoll(b, ov);
                 if (Numeric(b))
                     return TryNum(ov, out var n)
                         ? new(name, Value.Of(n), auto, true, null)
@@ -331,9 +357,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 }
                 case BindingKind.Roll:
                 {
-                    var n = b.DiceCount ?? 1;
-                    var sides = b.DiceSides ?? 6;
-                    var res = RollKey(name, n, sides);
+                    var res = RollKey(name, DiceCount(b), b.DiceSides ?? 6);
                     return new(name, Value.Of(res.Sum()), true, false, null);
                 }
                 case BindingKind.Moved:
@@ -342,6 +366,44 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 default:
                     return Input(b);
             }
+        }
+
+        /// <summary>
+        /// A Roll binding typed in (physical dice). Several numbers (separated by spaces and/or commas) are the dice themselves: exactly the dice
+        /// count of them, each 1 to the sides, else missing. A single number is the sum as before (a one-die roll's count() reads it as the die, see DiceOf).
+        /// Typed dice are logged and seen by count() like rolled ones; a typed single number is neither logged nor pinned.
+        /// </summary>
+        private VariableState TypedRoll(VariableBinding b, string typed)
+        {
+            var name = b.Variable;
+            var parts = typed.Split(new[] { ' ', ',', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2 && !TryNum(typed, out _)) return new(name, null, true, true, "Not a number");
+            int n = DiceCount(b), sides = b.DiceSides ?? 6;
+            var dice = new List<int>();
+            foreach (var p in parts)
+            {
+                if (!TryNum(p, out var d) || d != Math.Floor(d) || d < 1 || d > sides) break;
+                dice.Add((int)d);
+            }
+            if (parts.Length < 2)
+            {
+                TryNum(typed, out var sum);
+                return new(name, Value.Of(sum), true, true, null);
+            }
+            if (dice.Count != parts.Length || dice.Count != n) return new(name, null, true, true, $"{name} needs {n} dice from 1 to {sides}");
+            Record(name, n, sides, dice);
+            return new(name, Value.Of(dice.Sum()), true, true, null);
+        }
+
+        /// <summary>A Roll binding's number of dice: the fixed count, or its dice count expression evaluated in this run (a whole number
+        /// 1-100, the limits and wording of dice()).</summary>
+        private int DiceCount(VariableBinding b)
+        {
+            if (string.IsNullOrWhiteSpace(b.DiceCountExpr)) return b.DiceCount ?? 1;
+            var v = Evaluator.Evaluate(Parser.Parse(b.DiceCountExpr!), new RunContext(this));
+            if (v.Kind != ValueKind.Number || v.Number != Math.Floor(v.Number) || v.Number < 1 || v.Number > 100)
+                throw new EvalError($"'{b.Variable}' dice count must be a whole number from 1 to 100");
+            return (int)v.Number;
         }
 
         private PropertyDef Prop(VariableBinding b) =>
@@ -386,6 +448,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     {
         public Value GetVariable(string name) => run.ValueOf(name);
         public Value Lookup(string tableName, Value row, Value? col) => PieceFilter.LookupTable(run.Pack, tableName, row, col);
+        public Value LookupRange(string table, Value row, Value value) => PieceFilter.LookupRangeTable(run.Pack, table, row, value);
+        public IReadOnlyList<int> DiceOf(string variable) => run.DiceOf(variable);
         public IReadOnlyList<int> RollDice(int n, int sides) => run.Roll(n, sides);
         public bool Has(string property) => PieceFilter.HasProperty(run.State, run.Pack, run.Piece, property);
         public Value PieceName() => PieceFilter.NameValue(run.Piece);

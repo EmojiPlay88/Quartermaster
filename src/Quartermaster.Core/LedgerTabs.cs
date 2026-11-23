@@ -175,7 +175,7 @@ public static class LedgerTabs
                 var name = c.Args[0] is VarRef hv ? hv.Name : ((TextLit)c.Args[0]).Value;
                 return Known(name) ? null : name;
             }
-            case Call { Function: "lookup" } c:
+            case Call { Function: "lookup" or "lookuprange" } c:
                 return c.Args.Skip(1).Select(a => UnknownProperty(a, pack)).FirstOrDefault(x => x != null);
             case Call { Function: "holder" }:
                 return null;

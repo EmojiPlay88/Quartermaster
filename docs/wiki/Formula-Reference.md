@@ -160,6 +160,28 @@ lookup(SupplyByDistance, Hexes)
 
 With the Riverland chart, if Hexes is 2 this gives 2; if Hexes is 7 it gives 0. The table name is not a variable and needs no binding.
 
+### lookuprange(Table, row, value)
+
+For a chart that prints a different range in each cell of a row. The table must have two dimensions. `lookuprange` finds the row the way `lookup` does, then reads each cell of that row as a key (`2-4`, `5+`, `3-`, a single number or a word) and gives the **column key** of the first cell, from left to right, that holds `value`. The column key comes back as a number when it is a number, otherwise as text. It works wherever `lookup` does: formulas, filters, warnings and phase conditions.
+
+```formula
+lookuprange(Landing, Altitude, Roll)
+```
+
+With a Riverland table `Landing` whose row `2` holds `1-3` under the column `Hard`, `4-5` under `Rough` and `6+` under `Smooth`, a Roll of 5 gives `Rough`. The table name is not a variable and needs no binding.
+
+### count(Roll, low, high)
+
+How many of a Roll binding's dice show a value from `low` to `high`, both ends included. The first argument must be a variable of Kind **Roll**. The roll keeps its value (the total of its dice), so one roll can feed several counts:
+
+```formula
+count(Planes, 1, 2) * 10 + count(Planes, 6, 6)
+```
+
+With `Planes` rolling 4d6 and the dice 1, 2, 5, 6, this gives 2 * 10 + 1 = 21. The number of dice can come from an expression: see **Dice count** in [Making a Rules Pack](Making-a-Rules-Pack#a-range-chart-and-a-roll-per-plane).
+
+With **Physical dice** on, type the dice of such a roll one by one, separated by spaces or commas (`1 2 5 6`): exactly as many as the roll has, each from 1 to the number of sides. A single typed number is taken as the total; for a roll of more than one die `count` then cannot tell the dice apart (a one-die roll typed as a number is that die). The number of dice rolled is public: a dice count that reads hidden data shows its size in the dice log. `count` works only in a formula run (not in filters, warnings or phase conditions).
+
 ### dice(count, sides)
 
 Rolls `count` dice with `sides` sides each, and gives their total. `count` is a whole number from 1 to 100 and `sides` a whole number from 2 to 1000. The roll goes into the shared dice log. Dice work only where a game can roll them (for example in a formula run from the Formula dialog); they are not allowed in filters.
@@ -376,6 +398,13 @@ Most of these end with "at position N", where N counts characters from the start
 | Result is not a finite number | A sum overflowed. | Check for huge values. |
 | No table named 'x' | A `lookup` names a table that does not exist. | Check the spelling against the Tables tab. Write the name as it appears on the Tables tab (capitals don't matter); use one word. |
 | No row for 5 in SupplyByDistance | No row key in the table matches the value (the message shows the value and the table). | Add a row, or an open-ended row such as `5+`. |
+| No column of Landing row 2 holds 7 | `lookuprange` found the row, but no cell of it holds the value (the message shows the table, the row and the value). | Add a cell that holds it, such as an open-ended `6+`. |
+| lookuprange needs a two-way table | `lookuprange` was given a table with one dimension. | Use a table with rows and columns, or use `lookup`. |
+| count() needs a roll binding, not Fuel | Validator: `Formula "{name}": count() needs a roll binding, not {variable}`. The first argument of `count` is not a Roll binding. | Make that variable Kind Roll. |
+| count() needs each die of Planes: type them separated by spaces | Physical dice: a single number was typed for a roll that `count` reads. | Type every die, such as `1 2 5 6`. |
+| Planes needs 4 dice from 1 to 6 | Physical dice: the typed list has the wrong number of dice, or a die outside the range. | Type exactly that many dice, each within the range. |
+| 'Planes' dice count must be a whole number from 1 to 100 | A Roll binding's **Dice count** expression gave something else. | Make the expression give a whole number from 1 to 100. |
+| lookuprange() is not available here / count() is not available here | The function was used where it cannot run (`count` outside a formula run). | Move it into a formula with a Roll binding. |
 | No column for x in Table | The same, for the column of a two-dimension table. | Add a column that matches. |
 | Table T needs a column | `lookup` was given only a row, but the table has two dimensions. | Give a column as the third argument. |
 | This formula needs a unit | `name()` or `marker(...)` was used in a formula that was run with no counter. | Run the formula from a counter, or choose a Test piece in the Preview. |
