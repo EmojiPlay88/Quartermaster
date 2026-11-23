@@ -243,6 +243,21 @@ public class FormulaDialogModelTests
         Assert.Equal("10", v.ResultText);
         Assert.True(v.CanApply);
     }
+    [Fact]
+    public void PhysicalRollBoxHintsTypingEachDieWhenMoreThanOneDie()
+    {
+        FormulaDialogModel Build(VariableBinding b)
+        {
+            var pack = new RulesPack { Formulas = new() { new FormulaDef { Id = "fh", Name = "H", Text = "R", Bindings = new() { b } } } };
+            using var fx = new FixtureModule().WithBuildFile(FixtureModule.MinimalBuildFile()).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+            using var arch = VmodArchive.Open(fx.Build());
+            var model = ModuleModelBuilder.Build(arch, new DiagnosticLog());
+            return new FormulaDialogModel(new FormulaRunner(pack, model, (_, _) => throw new InvalidOperationException("rolled")), pack.Formulas[0], null) { PhysicalDice = true };
+        }
+        Assert.Equal("Type each die, separated by spaces", Build(new() { Variable = "R", Kind = BindingKind.Roll, DiceCount = 4, DiceSides = 6 }).Evaluate(new GameState()).Boxes.Single().Hint);
+        Assert.Null(Build(new() { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 }).Evaluate(new GameState()).Boxes.Single().Hint);
+        Assert.Equal("Type each die, separated by spaces", Build(new() { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6, DiceCountExpr = "3" }).Evaluate(new GameState()).Boxes.Single().Hint);
+    }
 }
 
 public class FormulaDialogModelPhysicalToggleTests

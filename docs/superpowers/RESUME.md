@@ -116,7 +116,16 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-23, formula guards; read this first):**
+**CURRENT STATE (2026-11-23, dice charts; read this first):**
+
+- **Branch `dice-charts` (cut from master 835e070), not pushed; all three tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-23-dice-charts-design.md` (engine wishlist #28, #50).
+  - **Rules:** `lookuprange(Table, row, value)` (2-D tables; column key of the first cell of the row whose range holds the value), `count(R, lo, hi)` (dice of a Roll binding in lo..hi), `VariableBinding.DiceCountExpr` (dice count from an expression, 1 to 100; omitted when null; `CurrentFormat` stays 4, an unchanged pack keeps its SHA-256). Validator: `count() needs a roll binding, not {variable}`; warning for a dice count on a non-roll.
+  - **Core:** both functions work in formulas, filters, warnings and phase conditions (`count` only in a formula run). Physical dice: a typed roll may be the individual dice (`1 2 5 6`), then `count` works and the dice are logged; a single number stays the total.
+  - **Render / Desktop:** the formula dialog's physical roll box hints `Type each die, separated by spaces` (BoxView.Hint, placeholder in the Avalonia view); Formulas tab bindings grid has a `Dice count` column for Rolls (blank = null, syntax error rejected, re-syncs binding rows); `SetKind` clears `DiceCountExpr` when the kind leaves Roll; `IsConfigured` counts it.
+  - **Wiki:** Formula-Reference, Making-a-Rules-Pack (range chart and roll per plane), Window-Rules-Workbench, Window-Formula-Dialog.
+  - **Tests:** see the task 3 report for the full-run numbers.
+
+**Previous CURRENT STATE (2026-11-23, formula guards; history):**
 
 - **Branch `formula-guards` (cut from master 32c7531), not pushed; all four tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-23-formula-guards-design.md`.
   - **Rules:** `FormulaDef.Precondition` and `FormulaDef.RefusalMessage` (string?), `VariableBinding.When` (string?), all omitted when null; old packs load unchanged, SHA-256 unchanged, `CurrentFormat` stays 4. Validator: parse and unknown-variable checks; `Formula "{name}": the precondition cannot use the roll {variable}` / `... cannot use dice()` (transitive through Table rows, auto values and Whens). `FormulaVariables.Used` counts guard variables, so Sync keeps and adds binding rows for them.

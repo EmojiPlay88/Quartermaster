@@ -9,7 +9,7 @@ public enum BoxBackground { Auto, Typed }
 
 /// <summary>What one input box in the formula dialog should look like. Wrong = checked mode and the typed value differs from the engine's.</summary>
 public sealed record BoxView(string Variable, string Text, BoxBackground Background, string CaptionSuffix, bool Enabled,
-    string? Tooltip, string? RerollKey, bool Wrong = false, IReadOnlyList<string>? Choices = null);
+    string? Tooltip, string? RerollKey, bool Wrong = false, IReadOnlyList<string>? Choices = null, string? Hint = null);
 
 /// <summary>A pinned inline dice() roll, with the key that re-rolls it.</summary>
 public sealed record InlineRollView(string Key, string Text);
@@ -309,6 +309,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     private static readonly IReadOnlySet<string> NoHostGuards = new HashSet<string>();
 
+    /// <summary>Shown on a typed dice box that may hold several dice (what count() reads).</summary>
+    public const string TypeEachDieHint = "Type each die, separated by spaces";
+
     private BoxView Box(VariableState v, FormulaTrace t, IReadOnlySet<string> hostGuards)
     {
         var binding = Binding(v.Variable);
@@ -325,7 +328,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             ? "Waiting for input" : v.MissingReason;
         if (v.Overridden || typedBox)
             return new BoxView(v.Variable, Raw(v.Variable), BoxBackground.Typed, v.Overridden && !typedBox ? " (override)" : binding is { Kind: BindingKind.Input, AlwaysAsk: true } ? AlwaysAskedSuffix : "", true, reason, null,
-                false, choices);
+                false, choices, binding is { Kind: BindingKind.Roll } && (binding.DiceCount > 1 || binding.DiceCountExpr != null) ? TypeEachDieHint : null);
         var text = v.Value?.Display() ?? "";
         string? reroll = null;
         if (binding?.Kind == BindingKind.Roll && HostCalculates && !HostRolled(v.Variable, t))

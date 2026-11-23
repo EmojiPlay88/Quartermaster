@@ -151,6 +151,49 @@ public sealed class FormulasTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void FormulasTab_dice_count_commits_and_clears()
+    {
+        var planes = new FormulaDef
+        {
+            Id = "f-sq", Name = "Squadron", Text = "R + P",
+            Bindings = new() { new() { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 }, new() { Variable = "P", Kind = BindingKind.Input } },
+        };
+        var s = Session(true, planes);
+        var tab = Tab(s);
+        tab.Bindings.BeginEdit(0, 6, "P * 2");
+        tab.Bindings.CommitEdit();
+        Pump();
+        Assert.Equal("P * 2", B(s, "f-sq", "R").DiceCountExpr);
+        Assert.Equal("P * 2", tab.Bindings.Cell(0, 6));
+
+        tab.Bindings.BeginEdit(0, 6, "z + 1");   // a variable only the count reads gets a row
+        tab.Bindings.CommitEdit();
+        Pump();
+        Assert.Contains(F(s, "f-sq").Bindings, b => b.Variable == "z");
+
+        tab.Bindings.BeginEdit(0, 6, "P *");   // syntax error: rejected, old value kept
+        tab.Bindings.CommitEdit();
+        Pump();
+        Assert.Equal("z + 1", B(s, "f-sq", "R").DiceCountExpr);
+
+        tab.Bindings.BeginEdit(0, 6, "  ");
+        tab.Bindings.CommitEdit();
+        Pump();
+        Assert.Null(B(s, "f-sq", "R").DiceCountExpr);   // blank is null, never ""
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_dice_count_is_closed_for_a_non_roll()
+    {
+        var s = Session(true, Attack());
+        var tab = Tab(s);
+        tab.Bindings.BeginEdit(0, 6, "3");
+        tab.Bindings.CommitEdit();
+        Pump();
+        Assert.Null(B(s, "f-att", "a").DiceCountExpr);
+    }
+
+    [AvaloniaFact]
     public void FormulasTab_binding_when_commits_and_clears()
     {
         var s = Session(true, Attack());

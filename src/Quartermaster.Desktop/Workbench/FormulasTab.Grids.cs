@@ -27,6 +27,7 @@ public sealed partial class FormulasTab
             new EditColumn("Details", Weight: 120),
             new EditColumn("Caption", Weight: 70),
             new EditColumn("Only when", Weight: 90),
+            new EditColumn("Dice count", Weight: 80),
         ]);
         _bind.CellCommitted += (r, c, text) => Run(() => OnBindingCell(r, c, text));
         _removeUnused.Click += (_, _) => Run(() => { FlushPending(final: false); Commit(FormulaEdit.RemoveUnused); RebuildBindings(); });
@@ -42,6 +43,8 @@ public sealed partial class FormulasTab
         BindingKind.Table => "row: expression | col: expression (the expressions may use other variables).",
         _ => "",
     };
+
+    const string DiceCountHint = "Blank = the fixed number.";
 
     Control BuildOutputsBox()
     {
@@ -77,7 +80,7 @@ public sealed partial class FormulasTab
         var unused = FormulaEdit.Unused(f).Select(b => b.Variable).ToHashSet(StringComparer.Ordinal);
         var rows = new List<IReadOnlyList<string>>();
         foreach (var b in f.Bindings)
-            rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? "", b.When ?? ""]);
+            rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? "", b.When ?? "", b.DiceCountExpr ?? ""]);
         _bind.SetRows(rows);   // resets per-cell items, read-only state and hints: they go on afterwards
         for (var r = 0; r < f.Bindings.Count; r++)
         {
@@ -90,6 +93,8 @@ public sealed partial class FormulasTab
             var noDetails = b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Location or BindingKind.Moved;
             _bind.SetCellReadOnly(r, 3, noDetails);
             _bind.SetCellToolTip(r, 3, DetailsHint(b.Kind));
+            _bind.SetCellReadOnly(r, 6, b.Kind != BindingKind.Roll);
+            _bind.SetCellToolTip(r, 6, b.Kind == BindingKind.Roll ? DiceCountHint : "");
         }
     }
 
@@ -124,6 +129,18 @@ public sealed partial class FormulasTab
                 break;
             case 4:
                 Commit(x => FormulaEdit.SetCaption(x, v, text));
+                break;
+            case 6:
+                if (b.Kind != BindingKind.Roll) return;
+                var count = string.IsNullOrWhiteSpace(text) ? null : text.Trim();   // blank is null, never ""
+                if (FormulaEdit.SyntaxProblem(count) is { } countErr) { _err.Text = "Dice count: " + countErr; _goto.IsVisible = false; again = true; break; }
+                // The count may read variables nothing else does: give them binding rows (Input) so they can be set up.
+                Commit(x =>
+                {
+                    var y = FormulaEdit.SetBinding(x, v, z => z with { DiceCountExpr = count });
+                    return FormulaEdit.Analyze(y.Text).Error != null ? y : FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula;
+                });
+                again = true;
                 break;
             case 5:
                 var when = string.IsNullOrWhiteSpace(text) ? null : text.Trim();   // blank is null, never ""
