@@ -186,10 +186,14 @@ public class FormulaGuardsTests
         Assert.Null(e.MissingReason);
         Assert.False(e.Skipped);
         Assert.Null(e.Value);
+        Assert.True(e.Waiting);
+        Assert.False(V(waiting, "Mode").Waiting);
+        Assert.False(V(waiting, "MP").Waiting);
 
         var skipped = Go(("MP", "4"), ("Mode", "2"));
         Assert.Equal(4, skipped.Result!.Value.Number);
         Assert.True(V(skipped, "Extra").Skipped);
+        Assert.False(V(skipped, "Extra").Waiting);
 
         var asked = Go(("MP", "4"), ("Mode", "1"));
         Assert.Null(asked.Result);
@@ -258,7 +262,9 @@ public class FormulaGuardsTests
             Assert.Null(d.Value);
             Assert.Null(d.MissingReason);
             Assert.False(d.Skipped);
+            Assert.True(d.Waiting);
         }
+        Assert.False(V(pending, "Gate").Waiting);
 
         var open = runner.Run(RunnerFx.State(), RunnerFx.Req(typed: RunnerFx.D(("MP", "4"), ("Gate", "1"))));
         Assert.Null(open.Error);
@@ -279,5 +285,6 @@ public class FormulaGuardsTests
         Assert.Null(st.MissingReason);
         Assert.False(st.Skipped);
         Assert.Null(st.Value);
+        Assert.True(st.Waiting);
     }
 }

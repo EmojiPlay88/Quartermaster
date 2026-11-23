@@ -9,8 +9,10 @@ namespace Quartermaster.Core;
 
 public sealed record TableCell(string TableId, int Row, int Col);
 
+/// <param name="Skipped">The binding's "Only when" condition is false: it is not used in this run.</param>
+/// <param name="Waiting">Neither filled, missing nor skipped: its "Only when" condition (or the precondition, for a roll) is not decided yet.</param>
 public sealed record VariableState(string Variable, Value? Value, bool Auto, bool Overridden, string? MissingReason,
-    string? Source = null, TableCell? Cell = null, bool Skipped = false);
+    string? Source = null, TableCell? Cell = null, bool Skipped = false, bool Waiting = false);
 
 public sealed record OutputPreview(string Key, string PropertyId, string PropertyName, double Before, double After);
 
@@ -234,7 +236,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             var st = Resolve(name);
             if (st.Skipped) throw new EvalError($"{name} is not used here: its \"Only when\" condition is false");
-            if (st is { Value: null, MissingReason: null }) throw new Waits();
+            if (st.Waiting) throw new Waits();
             return st.Value ?? throw new Missing(st.MissingReason ?? "Missing value");
         }
 
@@ -257,7 +259,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 catch (Missing m) { st = new(name, null, auto, false, m.Message); }
                 catch (Exception ex) when (ex is Waits || (ex is RollsForbidden && _holdRolls))
                 {
-                    st = new(name, null, auto, false, null);   // waiting: not missing, not skipped
+                    st = new(name, null, auto, false, null, Waiting: true);   // not missing, not skipped
                     Waiting = true;
                 }
             }

@@ -84,7 +84,7 @@ public static class FormulaEdit
     public static FormulaDef SetBinding(FormulaDef f, string variable, Func<VariableBinding, VariableBinding> edit) =>
         f with { Bindings = f.Bindings.Select(b => b.Variable == variable ? edit(b) : b).ToList() };
 
-    /// <summary>Changes the kind and clears everything specific to the old kind (caption stays).</summary>
+    /// <summary>Changes the kind and clears everything specific to the old kind; the caption and the "Only when" condition are kept.</summary>
     public static FormulaDef SetKind(FormulaDef f, string variable, BindingKind kind) =>
         SetBinding(f, variable, b => b.Kind == kind ? b : new VariableBinding { Variable = b.Variable, Kind = kind, Caption = b.Caption, When = b.When });
 

@@ -125,6 +125,21 @@ public class FormulaGuardsRenderTests : IDisposable
         Assert.True(v.CanApply);
     }
 
+    [Theory]
+    [InlineData(false, FormulaDialogModel.HiddenWaitText)]
+    [InlineData(true, FormulaDialogModel.HostWaitText)]
+    public void Dialog_masked_undecided_says_hidden_wait_not_other_inputs(bool hostCalculates, string expected)
+    {
+        // A is hidden (never typed, missing on this screen); B's "Only when" reads it, so B is undecided and no visible input is missing.
+        var m = Dialog(DialogPack());
+        m.Hidden = new HashSet<string> { "A" };
+        m.HostCalculates = hostCalculates;
+        var v = m.Evaluate(State());
+        Assert.True(v.Trace.Variables.Single(x => x.Variable == "B").Waiting);
+        Assert.False(v.CanApply);
+        Assert.Equal(expected, v.Status);
+    }
+
     // ---- host, hooks, queue (PhaseFixture) ----
 
     private readonly string _tmp = Path.Combine(Path.GetTempPath(), "qm-guardsrender-" + Guid.NewGuid().ToString("N"));
