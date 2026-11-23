@@ -10,13 +10,13 @@ namespace Quartermaster.Core;
 public sealed record TableCell(string TableId, int Row, int Col);
 
 public sealed record VariableState(string Variable, Value? Value, bool Auto, bool Overridden, string? MissingReason,
-    string? Source = null, TableCell? Cell = null);
+    string? Source = null, TableCell? Cell = null, bool Skipped = false);
 
 public sealed record OutputPreview(string Key, string PropertyId, string PropertyName, double Before, double After);
 
 public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableState> Variables, Value? Result, string Working,
     IReadOnlyList<OutputPreview> Outputs, string? Error, IReadOnlyList<DiceEntry> Rolls,
-    IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey, string? PieceId = null);
+    IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey, string? PieceId = null, bool Refused = false);
 
 /// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
 /// roller. The online host uses it so every die of a guest's run is pinned per dice configuration.</param>
@@ -35,6 +35,9 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
     /// <summary>A variable that cannot be filled yet (not an error).</summary>
     private sealed class Missing(string reason) : Exception(reason);
+
+    /// <summary>A roll attempted while evaluating the precondition.</summary>
+    private sealed class RollsForbidden() : Exception("Rolls are not allowed here");
 
     public FormulaTrace Run(GameState s, RunRequest r)
     {
@@ -65,18 +68,39 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var piece = r.PieceId != null && s.Pieces.TryGetValue(r.PieceId, out var pi) ? pi : null;
         var run = new RunScope(this, s, r, formula, piece, produced);
 
-        // Variables of the text, then any used only inside Table binding row/column expressions.
+        AstExpr? pre = string.IsNullOrWhiteSpace(formula.Precondition) ? null : Parser.Parse(formula.Precondition);
+
+        // Variables of the text, then of the precondition, then any used only inside Table binding row/column expressions or
+        // "Only when" conditions.
         var names = new List<string>(Parser.Variables(expr));
+        if (pre != null) foreach (var v in Parser.Variables(pre)) if (!names.Contains(v)) names.Add(v);
         for (var i = 0; i < names.Count; i++)
         {
             var b = formula.Bindings.FirstOrDefault(x => x.Variable == names[i]);
-            if (b is not { Kind: BindingKind.Table }) continue;
-            foreach (var src in new[] { b.RowExpr, b.ColExpr })
+            if (b == null) continue;
+            var srcs = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.When } : new[] { b.When };
+            foreach (var src in srcs)
             {
                 if (string.IsNullOrWhiteSpace(src)) continue;
                 foreach (var v in Parser.Variables(Parser.Parse(src)))
-                    if (!names.Contains(v)) names.Add(v);
+                    if (v != b.Variable && !names.Contains(v)) names.Add(v);
             }
+        }
+
+        // The precondition runs before the text's variables are resolved and never rolls; unknown (an input not filled) waits.
+        var prePending = false;
+        if (pre != null)
+        {
+            bool? ok;
+            try { ok = run.Condition(pre, rolls: false); }
+            catch (RollsForbidden) { throw new EvalError($"The precondition of {formula.Name} cannot roll dice"); }
+            if (ok == false)
+            {
+                var seen = names.Select(run.Cached).OfType<VariableState>().ToList();
+                return new(formula, seen, null, "", Array.Empty<OutputPreview>(), formula.RefusalMessage ?? $"{formula.Name} cannot be run now",
+                    run.Rolls, run.RollsByKey, Refused: true);
+            }
+            prePending = ok == null;
         }
 
         var states = names.Select(run.Resolve).ToList();
@@ -87,7 +111,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         if (needsUnit && piece == null)
             return new(formula, states, null, "", Array.Empty<OutputPreview>(), NeedsUnit, rolls, run.RollsByKey);
 
-        if (states.Any(x => x.MissingReason != null))
+        if (prePending || run.Waiting || states.Any(x => x.MissingReason != null))
             return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls, run.RollsByKey);
 
         var result = Evaluator.Evaluate(expr, new RunContext(run));
@@ -164,6 +188,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         /// A pin whose count or sides do not match is ignored. Inline call order follows evaluation order, so an `if` that changes branch can renumber keys.</summary>
         public IReadOnlyList<int> RollKey(string key, int n, int sides)
         {
+            if (_noRolls) throw new RollsForbidden();
             IReadOnlyList<int> res;
             if (r.FixedRolls.TryGetValue(key, out var pin) && pin != null && pin.Count == n && pin.All(x => x >= 1 && x <= sides)) res = pin;
             else res = r.Dice?.Invoke(key, n, sides) ?? owner._roller(n, sides);
@@ -176,10 +201,31 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         public VariableState? Cached(string name) => _done.TryGetValue(name, out var v) ? v : null;
 
-        /// <summary>The value, or throws <see cref="Missing"/> when it cannot be filled.</summary>
+        private bool _noRolls;
+
+        /// <summary>True when a binding's "Only when" condition could not be evaluated yet (it reads a variable not filled).</summary>
+        public bool Waiting { get; private set; }
+
+        /// <summary>
+        /// A condition's truth (numbers count as an <c>if</c> condition does; text is the evaluator's <c>if</c> error), or null when it reads a
+        /// variable that cannot be filled yet. With <paramref name="rolls"/> false any roll throws <see cref="RollsForbidden"/>.
+        /// </summary>
+        public bool? Condition(AstExpr cond, bool rolls = true)
+        {
+            var test = new Call("if", new AstExpr[] { cond, new BoolLit(true, cond.Start, 0), new BoolLit(false, cond.Start, 0) }, cond.Start, cond.Length);
+            var before = _noRolls;
+            _noRolls = before || !rolls;
+            try { return Evaluator.Evaluate(test, new RunContext(this)).Bool; }
+            catch (Missing) { return null; }
+            finally { _noRolls = before; }
+        }
+
+        /// <summary>The value, or throws <see cref="Missing"/> when it cannot be filled (or waits on another variable), or
+        /// <see cref="EvalError"/> when its "Only when" condition is false.</summary>
         public Value ValueOf(string name)
         {
             var st = Resolve(name);
+            if (st.Skipped) throw new EvalError($"{name} is not used here: its \"Only when\" condition is false");
             return st.Value ?? throw new Missing(st.MissingReason ?? "Missing value");
         }
 
@@ -191,8 +237,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             try
             {
                 var b = formula.Bindings.FirstOrDefault(x => x.Variable == name);
-                try { st = b == null ? new(name, null, false, false, "No binding for " + name) : Bind(b); }
-                catch (Missing m) { st = new(name, null, b is { Kind: not BindingKind.Input }, false, m.Message); }
+                var auto = b is { Kind: not BindingKind.Input };
+                var use = b == null || string.IsNullOrWhiteSpace(b.When) ? true : Condition(Parser.Parse(b.When));
+                if (use == false) st = new(name, null, auto, false, null, Skipped: true);
+                else if (use == null) { st = new(name, null, auto, false, null); Waiting = true; }
+                else
+                    try { st = b == null ? new(name, null, false, false, "No binding for " + name) : Bind(b); }
+                    catch (Missing m) { st = new(name, null, auto, false, m.Message); }
             }
             finally { _active.Remove(name); }
             _done[name] = st;

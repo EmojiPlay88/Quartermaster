@@ -37,4 +37,12 @@ public class FormulaVariablesTests
         var f = F("A", In("A"), t, In("R")) with { Precondition = "T > 0" };
         Assert.Equal(new[] { "A", "T", "R" }, FormulaVariables.Used(f));
     }
+
+    [Fact]
+    public void HolderReads_include_precondition_and_when()
+    {
+        var a = In("A") with { When = "holder(Riverland, Supply) > 0" };
+        var f = F("A", a) with { Precondition = "holder(Depot, Fuel) > 1" };
+        Assert.Equal(new (string?, string?)[] { ("Depot", "Fuel"), ("Riverland", "Supply") }, FormulaVariables.HolderReads(f));
+    }
 }

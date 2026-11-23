@@ -49,8 +49,8 @@ public static class FormulaVariables
     }
 
     /// <summary>
-    /// Every holder(H, P) call (see <see cref="ExprFacts.HolderReads"/>) in the formula text, every binding's auto value and every Table
-    /// binding's row/column expression, used or not. Expressions that do not parse are skipped (they never run).
+    /// Every holder(H, P) call (see <see cref="ExprFacts.HolderReads"/>) in the formula text, the precondition, every binding's auto value
+    /// and "Only when" condition and every Table binding's row/column expression, used or not. Expressions that do not parse are skipped (they never run).
     /// </summary>
     public static List<(string? Holder, string? Property)> HolderReads(FormulaDef f)
     {
@@ -62,10 +62,12 @@ public static class FormulaVariables
             catch (ParseError) { }
         }
         Add(f?.Text);
+        Add(f?.Precondition);
         foreach (var b in f?.Bindings ?? new List<VariableBinding>())
         {
             if (b == null) continue;
             Add(b.AutoValue);
+            Add(b.When);
             if (b.Kind == BindingKind.Table) { Add(b.RowExpr); Add(b.ColExpr); }
         }
         return found;
