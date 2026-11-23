@@ -292,7 +292,7 @@ public sealed class AlertsTab : UserControl
     {
         if (_s.Rules is not { } pack || Current is not { } a) { _status.Text = ""; return; }
         var probe = a with { Condition = _condition.Text ?? "" };
-        _status.Text = AlertEdit.MatchStatus(probe, _s.View, pack);
+        _status.Text = AlertEdit.MatchStatus(probe, _s.View, pack, _s.Model);
         if (_status.Text.StartsWith("Does not parse", StringComparison.Ordinal)) _status.Foreground = Brushes.Firebrick;
         else _status.ClearValue(TextBlock.ForegroundProperty);   // a null local value would hide the text
     }

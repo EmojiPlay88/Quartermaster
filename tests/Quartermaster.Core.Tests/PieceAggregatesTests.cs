@@ -67,7 +67,7 @@ public class PieceAggregatesTests
     {
         var call = Assert.IsType<Call>(Parser.Parse(expr));
         var (property, filter) = ExprFacts.AggregateArgs(call);
-        return PieceAggregates.Evaluate(call.Function, property, filter, s, pack, Model, self, t => PieceFilter.Compile(t, s, pack, Model));
+        return PieceAggregates.Evaluate(call.Function, property, filter, s, pack, Model, self, new AggregateFilters(s, pack, Model).Compile);
     }
 
     private static FormulaTrace Run(GameState s, string text, string? piece = "r1")
@@ -250,5 +250,53 @@ public class PieceAggregatesTests
         Assert.True(ExprFacts.IsGameLevel(Parser.Parse("maxof(Strength, \"\") > minof(Strength, \"\")"), pack));
         Assert.False(ExprFacts.IsGameLevel(Parser.Parse("hexcount() > 1"), pack));
         Assert.False(ExprFacts.IsGameLevel(Parser.Parse("hexsum(Strength) > 1 or Flag == 0"), pack));
+    }
+
+    [Fact]
+    public void Sequencer_queues_stacked_units_by_hex_aggregate()
+    {
+        var s = Riverland();
+        var formula = Formula("1") with { AppliesTo = "hexcount(\"startsWith(name(), \\\"Red\\\")\") > 1" };
+        var pack = Pack(formula);
+        var phase = pack.Phases[0];
+        Assert.Equal(new[] { "r1", "r2" }, Sequencer.UnitsFor(pack, s, phase, formula, null, Model).Select(p => p.Id));
+        Assert.Equal(new[] { "r1", "r2" }, Sequencer.UnitsFor(pack, s, phase, null, "hexcount() > 1 and hexsum(Strength) > 6", Model).Select(p => p.Id));
+        var any = new MoveEntry { FormulaId = "f", UnitFilter = "hexcount() > 1", FiresFor = MoveSide.Any };
+        Assert.Equal(new[] { "r1", "r2" }, Sequencer.MovedUnitsFor(pack, s, phase, null, any, Model).Select(p => p.Id));
+        // Warnings use the phase's units, so a hex aggregate there sees the model too.
+        phase = phase with { Warnings = new() { new PhaseWarning { Condition = "hexcount() > 1", Message = "{unit}" } } };
+        Assert.Equal(new[] { "r1", "r2" }, Decisions.Warnings(pack, s, phase, Model).Single().PieceIds);
+    }
+
+    [Fact]
+    public void Holder_property_is_not_a_piece_property()
+    {
+        var s = Riverland();
+        Assert.Equal("Flag is not a piece property", Run(s, "sum(Flag, \"\")").Error);
+        Assert.Equal("Flag is not a piece property", Run(s, "hexmax(Flag)").Error);
+    }
+
+    [Fact]
+    public void Inner_filter_error_fails_the_aggregate()
+    {
+        var s = Riverland();
+        var pack = Pack();
+        Assert.Equal("Unknown property 'Nope'", Run(s, "countof(\"Nope > 1\")").Error);
+        Assert.Equal("Unknown property 'Nope'", Run(s, "hexsum(Strength, \"Nope > 1\")").Error);
+        Assert.NotNull(Run(s, "countof(\"1 +\")").Error);   // a filter that does not parse fails too
+        var ex = Assert.Throws<EvalError>(() => Eval("sum(Strength, \"Nope > 1\")", s, pack));
+        Assert.Equal("Unknown property 'Nope'", ex.Message);
+        // A plain filter still reads an error as no match, and so does a filter whose aggregate fails.
+        Assert.False(PieceFilter.Compile("Nope > 1", s, pack, Model)(s.Pieces["r1"]));
+        Assert.False(PieceFilter.Compile("countof(\"Nope > 1\") >= 0", s, pack, Model)(s.Pieces["r1"]));
+        Assert.Contains("Unknown property 'Nope'", PhaseErr("countof(\"Nope > 1\") > 0"));
+
+        string? PhaseErr(string cond)
+        {
+            var pk = Pack();
+            pk.Phases[0] = pk.Phases[0] with { Condition = cond };
+            PhaseConditions.Runs(pk, s, pk.Phases[0], new PhasePosition(1, 1, "P", 0), out var err);
+            return err;
+        }
     }
 }

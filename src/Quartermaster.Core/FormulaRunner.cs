@@ -223,7 +223,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public Lazy<Func<PieceInstance, string?>> Sides { get; } = PieceFilter.SideMap(s, owner._pack);
         public ModuleModel Model => owner._model;
         /// <summary>The compiled filters of this run's aggregate calls, each filter text compiled once per run.</summary>
-        public Func<string, Func<PieceInstance, bool>> Filters { get; } = PieceFilter.AggregateFilters(s, owner._pack, owner._model);
+        public Func<string, Func<PieceInstance, bool>> Filters => (_filters ??= new(s, owner._pack, owner._model)).Compile;
+        private AggregateFilters? _filters;
         private readonly Dictionary<string, IReadOnlyList<int>> _byKey = byKey;
         private int _inlineDice;
         public IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey => _byKey;

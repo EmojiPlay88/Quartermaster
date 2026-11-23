@@ -409,7 +409,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             if (BadFilter(phase, f, e.UnitFilter)) continue;
             var units = e.ForEach == ForEachMode.Once
                 ? new List<Unit> { new(null, f.Name, null) }
-                : Sequencer.UnitsFor(pack, s.Game.State, phase, f, e.UnitFilter).Select(p => new Unit(p.Id, PieceInfo.Name(p), null)).ToList();
+                : Sequencer.UnitsFor(pack, s.Game.State, phase, f, e.UnitFilter, s.Model).Select(p => new Unit(p.Id, PieceInfo.Name(p), null)).ToList();
             Apply(f, trigger, units, queued);
         }
         return queued;
@@ -449,7 +449,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             var f = FindFormula(phase, e.FormulaId);
             if (f == null) continue;
             if (BadFilter(phase, f, e.UnitFilter)) continue;
-            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e).Where(p => records.ContainsKey(p.Id)).ToList();
+            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model).Where(p => records.ContainsKey(p.Id)).ToList();
             if (!bySide || e.FiresFor == MoveSide.Acting)
             {
                 Apply(f, "move", MovedUnits(moved, records, distances), queued);

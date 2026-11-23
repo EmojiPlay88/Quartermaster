@@ -79,7 +79,7 @@ public static class OutlinerModel
             if (pack != null)
                 foreach (var side in pack.Sides)
                 {
-                    var match = PieceFilter.Compile(side.UnitFilter, s, pack);
+                    var match = PieceFilter.Compile(side.UnitFilter, s, pack, model);
                     var mine = rest.Where(l => match(l.Piece)).ToList();
                     rest = rest.Except(mine).ToList();
                     if (mine.Count > 0) roots.Add(Group("side:" + side.Id, side.Name, mine));

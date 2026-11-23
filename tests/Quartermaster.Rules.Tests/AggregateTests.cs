@@ -252,4 +252,27 @@ public class AggregateTests
         Assert.Equal("Phase \"Supply\": condition sum() names unknown property \"Nope\"", Assert.Single(RulesValidator.Validate(P("sum(Nope, \"\") > 3"))).Message);
         Assert.Contains(RulesValidator.Validate(P("maxof(Trucks, \"1 +\") > 3")), i => i.Message.StartsWith("Phase \"Supply\": condition the filter of maxof() does not parse: "));
     }
+
+    [Theory]
+    [InlineData("sum(Supply, \"\")", "sum")]
+    [InlineData("hexmin(Supply)", "hexmin")]
+    public void Validator_holder_property_is_not_a_piece_property(string text, string fn)
+        => Assert.Equal($"Formula \"Reserve\": {fn}() needs a piece property, not \"Supply\"", Assert.Single(Check(F(text))).Message);
+
+    [Fact]
+    public void Validator_side_unit_filter_refuses_hex_aggregates()
+    {
+        var side = new SideDef { Id = "red", Name = "Red", UnitFilter = "hexcount() > 1 and countof(\"hexsum(Trucks) > 0\") >= 0" };
+        var msgs = RulesValidator.Validate(ValPack() with { Sides = new() { side } }).Select(i => i.Message).ToList();
+        Assert.Equal(new[] { "Side \"Red\": hexcount() is not available in a side's unit filter", "Side \"Red\": hexsum() is not available in a side's unit filter" }, msgs);
+        Assert.Empty(RulesValidator.Validate(ValPack() with { Sides = new() { side with { UnitFilter = "countof(\"Trucks > 1\") > 0" } } }));
+    }
+
+    [Fact]
+    public void Validator_property_applies_to_refuses_hex_aggregates()
+    {
+        var pack = ValPack();
+        pack.Properties.Add(new PropertyDef { Id = "p3", Name = "Ammo", Scope = PropertyScope.Pieces, AppliesTo = "hexsum(Trucks) > 1" });
+        Assert.Equal("Property \"Ammo\": hexsum() is not available in a property's applies-to", Assert.Single(RulesValidator.Validate(pack)).Message);
+    }
 }

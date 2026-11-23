@@ -45,7 +45,7 @@ public static class Decisions
         var res = new List<WarningHit>();
         var warnings = phase.Warnings ?? new();
         if (warnings.Count == 0) return res;
-        var units = Sequencer.UnitsFor(pack, s, phase, null, null);
+        var units = Sequencer.UnitsFor(pack, s, phase, null, null, model);
         for (var i = 0; i < warnings.Count; i++)
         {
             var w = warnings[i];

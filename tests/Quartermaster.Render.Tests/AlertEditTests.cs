@@ -77,4 +77,22 @@ public class AlertEditTests
         Assert.Equal("0 matches now", AlertEdit.MatchStatus(new AlertDef { Condition = "1 / 0 > 0" }, s, pack));   // an error matches nothing
         Assert.Equal("3 matches now", AlertEdit.MatchStatus(new AlertDef { Condition = "Weather == 2 and Fuel > 0" }, s, pack));   // reads the unit
     }
+
+    private static readonly Lazy<ModuleModel> GridModel = new(() =>
+    {
+        const string P = "VASSAL.build.module.map.boardPicker.board.";
+        var xml = Quartermaster.TestFixtures.FixtureModule.MinimalBuildFile().Replace("y0=\"25\"/>",
+            $"y0=\"25\"><{P}mapgrid.SquareGridNumbering first=\"H\" hType=\"N\" vType=\"N\" sep=\"\" hLeading=\"1\" vLeading=\"1\" hOff=\"1\" vOff=\"1\"/></{P}SquareGrid>");
+        using var fx = new Quartermaster.TestFixtures.FixtureModule().WithBuildFile(xml).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        return ModuleModelBuilder.Build(arch, new DiagnosticLog());
+    });
+
+    [Fact]
+    public void MatchStatus_HexAggregate_UsesTheModel()
+    {
+        var s = State();   // the three units share one square
+        s.Pieces["c"].Pos = new PointD(160, 40);
+        Assert.Equal("2 matches now", AlertEdit.MatchStatus(new AlertDef { Condition = "hexcount() > 1" }, s, Pack(), GridModel.Value));
+    }
 }

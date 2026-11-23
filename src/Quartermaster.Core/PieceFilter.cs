@@ -22,12 +22,25 @@ public static class PieceFilter
         var e = TryParse(expr);
         if (e == null) return _ => false;
         var sides = SideMap(s, pack);
-        var filters = AggregateFilters(s, pack, model);   // shared by every piece this filter is evaluated on
+        var filters = new AggregateFilters(s, pack, model);   // shared by every piece this filter is evaluated on
         return p =>
         {
             try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides, filters, model)).IsTruthy; }
             catch (Exception) { return false; }
         };
+    }
+
+    /// <summary>
+    /// The filter of an aggregate call (sum(P, "filter") ...): like <see cref="Compile"/>, but a parse error (here) or an evaluation error on a piece
+    /// (when matching) is thrown, so the aggregate fails instead of skipping pieces. Empty matches every piece.
+    /// </summary>
+    internal static Func<PieceInstance, bool> CompileStrict(string text, GameState s, RulesPack pack, ModuleModel? model)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return _ => true;
+        var e = Parser.Parse(text);
+        var sides = SideMap(s, pack);
+        var filters = new AggregateFilters(s, pack, model);
+        return p => Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides, filters, model)).IsTruthy;
     }
 
     /// <summary>
@@ -39,7 +52,7 @@ public static class PieceFilter
         if (string.IsNullOrWhiteSpace(appliesTo)) return true;
         var e = TryParse(appliesTo);
         if (e == null) return false;
-        try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), AggregateFilters(s, pack, null), null, pending)).IsTruthy; }
+        try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), new AggregateFilters(s, pack, null), null, pending)).IsTruthy; }
         catch (Exception) { return false; }
     }
 
@@ -110,10 +123,6 @@ public static class PieceFilter
         return Value.Of(id == null ? "" : (pack.Sides ?? new List<SideDef>()).FirstOrDefault(x => x != null && x.Id == id)?.Name ?? "");
     }
 
-    /// <summary>The compiled filters of aggregate calls (sum(P, "filter") ...), each filter text compiled once per evaluation context.</summary>
-    internal static Func<string, Func<PieceInstance, bool>> AggregateFilters(GameState s, RulesPack pack, ModuleModel? model) =>
-        PieceAggregates.Cached(text => Compile(text, s, pack, model));
-
     /// <summary>The name of the phase's acting side; "" when there is no phase or it has no (existing) side.</summary>
     internal static Value PhaseSideValue(RulesPack pack, PhaseDef? phase) =>
         Value.Of(phase == null ? "" : Sequencer.ActingSide(pack, phase)?.Name ?? "");
@@ -163,7 +172,7 @@ public static class PieceFilter
     private sealed class ParsedAppliesTo(Quartermaster.Rules.Expr.Expr? expr) { public Quartermaster.Rules.Expr.Expr? Expr { get; } = expr; }
 
     private sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack, Lazy<Func<PieceInstance, string?>> sides,
-        Func<string, Func<PieceInstance, bool>> filters, ModuleModel? model, IReadOnlyDictionary<string, double>? pending = null) : IEvalContext
+        AggregateFilters filters, ModuleModel? model, IReadOnlyDictionary<string, double>? pending = null) : IEvalContext
     {
         private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
         private readonly Dictionary<string, bool> _declared = new(StringComparer.Ordinal);
@@ -224,13 +233,13 @@ public static class PieceFilter
         public Value MapName() => MapValue(p);
         public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property);
         public Value Aggregate(string fn, string? property, string? filter) =>
-            PieceAggregates.Evaluate(fn, property, filter, s, pack, model, p, filters);
+            PieceAggregates.Evaluate(fn, property, filter, s, pack, model, p, filters.Compile);
     }
 
     /// <summary>The context of an expression read once for the whole game: globals, holder(), turn, stage and phaseside; nothing of a piece.</summary>
     private sealed class GameContext(GameState s, RulesPack pack) : IEvalContext
     {
-        private readonly Func<string, Func<PieceInstance, bool>> _filters = AggregateFilters(s, pack, null);
+        private AggregateFilters? _filters;
 
         public Value GetVariable(string name)
         {
@@ -252,6 +261,6 @@ public static class PieceFilter
         public Value MapName() => MapValue(null);
         public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property);
         public Value Aggregate(string fn, string? property, string? filter) =>
-            PieceAggregates.Evaluate(fn, property, filter, s, pack, null, null, _filters);
+            PieceAggregates.Evaluate(fn, property, filter, s, pack, null, null, (_filters ??= new(s, pack, null)).Compile);
     }
 }

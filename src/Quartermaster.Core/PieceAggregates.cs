@@ -10,13 +10,14 @@ namespace Quartermaster.Core;
 /// </summary>
 public static class PieceAggregates
 {
-    /// <summary>How many filter texts the caches made by <see cref="Cached"/> compiled on this thread (tests read it).</summary>
+    /// <summary>How many filter texts the <see cref="AggregateFilters"/> caches compiled on this thread (tests read it).</summary>
     [ThreadStatic] internal static int FilterCompiles;
 
     /// <summary>
     /// The value of an aggregate call. <paramref name="self"/> is the piece being evaluated (null where there is none: the hex ones then throw
     /// "{fn}() is not available here", as they do without a module model). <paramref name="compile"/> turns a filter text into a match;
-    /// "" matches every piece. A piece's value is its ledger value of the property, else the property's Default (as a Unit binding reads it).
+    /// "" matches every piece; an error the filter raises on a piece fails the whole aggregate (no piece is skipped silently). A piece's value is
+    /// its ledger value of the property, else the property's Default (as a Unit binding reads it); a holder-only property is an error.
     /// </summary>
     public static Value Evaluate(string fn, string? property, string? filter, GameState s, RulesPack pack, ModuleModel? model,
         PieceInstance? self, Func<string, Func<PieceInstance, bool>> compile)
@@ -34,6 +35,7 @@ public static class PieceAggregates
         if (fn is "countof" or "hexcount") return Value.Of(pieces.Count());
 
         var def = (property == null ? null : pack.PropertyByName(property)) ?? throw new EvalError($"Unknown property '{property}'");
+        if (def.Scope == PropertyScope.Holders) throw new EvalError($"{def.Name} is not a piece property");
         var values = pieces.Select(p => Ledger.GetOrDefault(s, LedgerKey.Piece(p.Id), def));
         switch (fn)
         {
@@ -51,22 +53,30 @@ public static class PieceAggregates
         }
     }
 
-    /// <summary>A compiler that compiles each filter text once and then reuses it (one per evaluation context, or per compiled filter).</summary>
-    internal static Func<string, Func<PieceInstance, bool>> Cached(Func<string, Func<PieceInstance, bool>> compile)
-    {
-        var cache = new Dictionary<string, Func<PieceInstance, bool>>(StringComparer.Ordinal);
-        return text =>
-        {
-            if (cache.TryGetValue(text, out var hit)) return hit;
-            FilterCompiles++;
-            return cache[text] = compile(text);
-        };
-    }
-
     /// <summary>A piece as the log names it: its name, else "piece".</summary>
     private static string Label(PieceInstance p)
     {
         var n = PieceInfo.Name(p);
         return string.IsNullOrWhiteSpace(n) ? "piece" : n;
+    }
+}
+
+/// <summary>
+/// The compiled filters of aggregate calls, each filter text compiled once (one cache per evaluation context, or per compiled unit filter, so an
+/// aggregate in a unit filter does not recompile per piece). Its dictionary and delegate are made only when an aggregate is evaluated.
+/// </summary>
+internal sealed class AggregateFilters(GameState s, RulesPack pack, ModuleModel? model)
+{
+    private Dictionary<string, Func<PieceInstance, bool>>? _cache;
+    private Func<string, Func<PieceInstance, bool>>? _compile;
+
+    public Func<string, Func<PieceInstance, bool>> Compile => _compile ??= CompileOnce;
+
+    private Func<PieceInstance, bool> CompileOnce(string text)
+    {
+        _cache ??= new(StringComparer.Ordinal);
+        if (_cache.TryGetValue(text, out var hit)) return hit;
+        PieceAggregates.FilterCompiles++;
+        return _cache[text] = PieceFilter.CompileStrict(text, s, pack, model);
     }
 }

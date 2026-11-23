@@ -29,6 +29,9 @@ public static class RulesValidator
                     else
                         foreach (var u in FilterRefProblems(p.AppliesTo!, pack))
                             Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to {u}");
+                    // Seeding evaluates applies-to without the module's grid, so there is no hex to read.
+                    foreach (var fn in HexAggregatesIn(p.AppliesTo))
+                        Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": {fn}() is not available in a property's applies-to");
                 }
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
             foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues));
@@ -95,13 +98,46 @@ public static class RulesValidator
     private static IEnumerable<string> AggregateProblems(Call c, RulesPack pack)
     {
         var (property, filter) = ExprFacts.AggregateArgs(c);
-        if (property is not null && pack.PropertyByName(property) is null) yield return $"{c.Function}() names unknown property \"{property}\"";
+        var prop = property is null ? null : pack.PropertyByName(property);
+        if (property is not null && prop is null) yield return $"{c.Function}() names unknown property \"{property}\"";
+        else if (prop is { Scope: PropertyScope.Holders }) yield return $"{c.Function}() needs a piece property, not \"{property}\"";
         if (string.IsNullOrWhiteSpace(filter)) yield break;
         if (ParseProblem(filter) is { } pe) yield return $"the filter of {c.Function}() does not parse: {pe}";
         else foreach (var u in FilterRefProblems(filter, pack)) yield return $"the filter of {c.Function}() {u}";
     }
 
     private static string UnknownPropertyTail(string name) => $"refers to unknown property \"{name}\"";
+
+    /// <summary>
+    /// The hex aggregates (hexsum() ...) an expression text calls, also inside the filters of its aggregate calls, distinct in text order. Empty when
+    /// the text does not parse (that is reported elsewhere).
+    /// </summary>
+    private static List<string> HexAggregatesIn(string? text)
+    {
+        var found = new List<string>();
+        Scan(text);
+        return found.Distinct(StringComparer.Ordinal).ToList();
+
+        void Scan(string? t)
+        {
+            if (string.IsNullOrWhiteSpace(t)) return;
+            try { Walk(Parser.Parse(t)); }
+            catch (ParseError) { }
+        }
+        void Walk(AstExpr e)
+        {
+            switch (e)
+            {
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (ExprFacts.IsHexAggregate(c.Function)) found.Add(c.Function);
+                    if (ExprFacts.IsAggregate(c.Function)) Scan(ExprFacts.AggregateArgs(c).Filter);
+                    foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
+    }
 
     /// <summary>True when the expression text parses and contains a side() call.</summary>
     private static bool UsesSide(string text)
@@ -144,6 +180,9 @@ public static class RulesValidator
         // A side's filter decides who owns a piece, so it cannot depend on the owning side.
         if (!string.IsNullOrWhiteSpace(s.UnitFilter) && UsesSide(s.UnitFilter!))
             Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": unit filter may not use side()");
+        // Ownership evaluates side filters without the module's grid, so there is no hex to read.
+        foreach (var fn in HexAggregatesIn(s.UnitFilter))
+            Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": {fn}() is not available in a side's unit filter");
     }
 
     private static void CheckPhase(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
