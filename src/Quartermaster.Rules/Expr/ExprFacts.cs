@@ -37,6 +37,15 @@ public static class ExprFacts
         }
     }
 
+    /// <summary>True when the expression calls the named function anywhere.</summary>
+    public static bool CallsFunction(AstExpr e, string function) => e switch
+    {
+        Unary u => CallsFunction(u.Operand, function),
+        Binary b => CallsFunction(b.Left, function) || CallsFunction(b.Right, function),
+        Call c => c.Function == function || c.Args.Any(a => CallsFunction(a, function)),
+        _ => false,
+    };
+
     private static bool Check(AstExpr e, RulesPack pack)
     {
         switch (e)

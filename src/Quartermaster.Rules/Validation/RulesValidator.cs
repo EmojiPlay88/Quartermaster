@@ -457,13 +457,13 @@ public static class RulesValidator
             }
         }
 
+        var noBinding = Once(Err);   // one message per name, however many expressions use it
         void CheckBound(AstExpr e)
         {
             foreach (var v in Parser.Variables(e))
-                if (!bindingNames.Contains(v)) Err($"variable \"{v}\" has no binding");
+                if (!bindingNames.Contains(v)) noBinding($"variable \"{v}\" has no binding");
         }
         // Guards: parsed and checked like the text (lookups, unknown variables); blank means none.
-        var guardVars = new HashSet<string>(StringComparer.Ordinal);
         AstExpr? ParseGuard(string? src, string what)
         {
             if (string.IsNullOrWhiteSpace(src)) return null;
@@ -471,37 +471,32 @@ public static class RulesValidator
             var g = Parser.Parse(src!);
             CheckLookups(g, pack, Once(Err));
             CheckBound(g);
-            foreach (var v in Parser.Variables(g)) guardVars.Add(v);
             return g;
         }
         var pre = ParseGuard(f.Precondition, "precondition");
         foreach (var b in f.Bindings) ParseGuard(b.When, $"variable \"{b.Variable}\" only-when");
         if (pre is not null)
         {
-            foreach (var v in Parser.Variables(pre))
+            // Everything the precondition reaches is resolved before it runs, so none of it may roll.
+            var reached = FormulaVariables.Reach(f, Parser.Variables(pre));
+            foreach (var v in reached)
                 if (f.Bindings.Any(b => b.Variable == v && b.Kind == BindingKind.Roll))
                     Err($"the precondition cannot use the roll {v}");
-            if (CallsDice(pre)) Err("the precondition cannot use dice()");
+            var reachedSources = new[] { f.Precondition! }.Concat(f.Bindings.Where(b => reached.Contains(b.Variable)).SelectMany(FormulaVariables.Sources));
+            if (reachedSources.Any(src => ParseProblem(src) is null && ExprFacts.CallsFunction(Parser.Parse(src), "dice")))
+                Err("the precondition cannot use dice()");
         }
 
         if (ast is not null) CheckBound(ast);
         // Variables used only inside table row/column expressions or auto values also need bindings.
         var used = new HashSet<string>(FormulaVariables.Used(f), StringComparer.Ordinal);
         foreach (var extra in used.Where(u => ast is null || !Parser.Variables(ast).Contains(u)))
-            if (!bindingNames.Contains(extra)) Err($"variable \"{extra}\" has no binding");
+            if (!bindingNames.Contains(extra)) noBinding($"variable \"{extra}\" has no binding");
         foreach (var b in f.Bindings)
-            if (!used.Contains(b.Variable) && !guardVars.Contains(b.Variable)) Warn($"variable \"{b.Variable}\" is bound but not used in the formula");
+            if (!used.Contains(b.Variable)) Warn($"variable \"{b.Variable}\" is bound but not used in the formula");
 
         foreach (var o in f.Outputs) CheckOutput(pack, o, Err);
     }
-
-    private static bool CallsDice(AstExpr e) => e switch
-    {
-        Unary u => CallsDice(u.Operand),
-        Binary b => CallsDice(b.Left) || CallsDice(b.Right),
-        Call c => c.Function == "dice" || c.Args.Any(CallsDice),
-        _ => false,
-    };
 
     /// <summary>Reports each distinct message once (as <see cref="FilterRefProblems"/> does), so a repeated call is one issue.</summary>
     private static Action<string> Once(Action<string> err)

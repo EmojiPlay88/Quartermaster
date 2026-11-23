@@ -21,6 +21,31 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void Sync_keeps_bindings_read_only_by_guards()
+    {
+        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input, When = "W > 0" },
+                  new VariableBinding { Variable = "W", Kind = BindingKind.Input },
+                  new VariableBinding { Variable = "P", Kind = BindingKind.Input, Caption = "p" }) with { Precondition = "P > 0" };
+        Assert.Empty(FormulaEdit.Unused(f));
+        var r = FormulaEdit.RemoveUnused(f);
+        Assert.Equal(new[] { "A", "P", "W" }, r.Bindings.Select(b => b.Variable).OrderBy(x => x));
+        // a guard-only variable with no binding is added
+        var g = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Input }) with { Precondition = "Q > 0" };
+        Assert.Contains(FormulaEdit.RemoveUnused(g).Bindings, b => b.Variable == "Q");
+    }
+
+    [Fact]
+    public void IsConfigured_counts_when_so_sync_keeps_it()
+    {
+        var b = new VariableBinding { Variable = "Gone", Kind = BindingKind.Input, When = "1 = 1" };
+        Assert.True(FormulaEdit.IsConfigured(b));
+        var r = FormulaEdit.Sync(F("A"), new[] { "A" }, keepConfigured: true);
+        Assert.Empty(r.Removed);
+        var r2 = FormulaEdit.Sync(F("A", b), new[] { "A" }, keepConfigured: true);
+        Assert.Contains(r2.Formula.Bindings, x => x.Variable == "Gone");
+    }
+
+    [Fact]
     public void Sync_adds_new_variables_as_input_and_keeps_existing()
     {
         var f = F("A + B", new VariableBinding { Variable = "A", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 });

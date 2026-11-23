@@ -46,15 +46,15 @@ public static class FormulaEdit
     /// <summary>True when the binding holds anything beyond a default, unconfigured Input.</summary>
     public static bool IsConfigured(VariableBinding b) =>
         b.Kind != BindingKind.Input || b.Property != null || b.HolderId != null || b.TableId != null || b.RowExpr != null || b.ColExpr != null
-        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null || b.AlwaysAsk;
+        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null || b.AlwaysAsk || b.When != null;
 
     /// <summary>Bindings whose variable no longer appears in the text.</summary>
     public static IReadOnlyList<VariableBinding> Stale(FormulaDef f, IReadOnlyList<string> variables) =>
         f.Bindings.Where(b => !variables.Contains(b.Variable, StringComparer.Ordinal)).ToList();
 
     /// <summary>
-    /// The variables of the text, then any used only inside a Table binding's row or column expression (in text order, nested tables
-    /// included), the same set the formula runner resolves and the validator counts as used. Empty when the text does not parse.
+    /// The variables of the text and the precondition, then any used only inside a used binding's Table row/column expression, auto value
+    /// or "Only when" condition (nested included), the same set the formula runner resolves and the validator counts as used. Empty when the text does not parse.
     /// </summary>
     public static IReadOnlyList<string> UsedVariables(FormulaDef f) => FormulaVariables.Used(f);
 

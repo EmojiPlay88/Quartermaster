@@ -291,6 +291,37 @@ public class ValidatorTests
     }
 
     [Fact]
+    public void Validator_precondition_uses_roll_through_table_row()
+    {
+        var t = new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t1", RowExpr = "R" };
+        var f = Fx("A + T", In("A"), t, Roll("R")) with { Precondition = "T > 1" };
+        Assert.Contains("Formula \"Fuel Use\": the precondition cannot use the roll R", FormulaMsgs(WithFormula(f)));
+    }
+
+    [Fact]
+    public void Validator_precondition_uses_dice_through_auto_value()
+    {
+        var f = Fx("A", In("A") with { AutoValue = "dice(1, 6)" }) with { Precondition = "A > 1" };
+        Assert.Contains("Formula \"Fuel Use\": the precondition cannot use dice()", FormulaMsgs(WithFormula(f)));
+    }
+
+    [Fact]
+    public void Validator_guard_only_table_row_unknown_variable_and_no_unused_warning()
+    {
+        var t = new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t1", RowExpr = "Zork" };
+        var msgs = FormulaMsgs(WithFormula(Fx("A", In("A"), t) with { Precondition = "T > 1" }));
+        Assert.Contains("Formula \"Fuel Use\": variable \"Zork\" has no binding", msgs);
+        Assert.DoesNotContain(msgs, m => m.Contains("bound but not used"));
+    }
+
+    [Fact]
+    public void Validator_unbound_name_in_text_and_guard_reported_once()
+    {
+        var msgs = FormulaMsgs(WithFormula(Fx("Zork") with { Precondition = "Zork > 1" }));
+        Assert.Single(msgs, m => m == "Formula \"Fuel Use\": variable \"Zork\" has no binding");
+    }
+
+    [Fact]
     public void Validator_guards_ok_and_blank_ignored()
     {
         var f = Fx("A + R", In("A"), Roll("R") with { When = "A > 1" }) with { Precondition = "A < 9", RefusalMessage = "no" };
