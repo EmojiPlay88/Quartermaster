@@ -78,6 +78,27 @@ public class LayoutTests
     }
 
     [Fact]
+    public void Layout_LookupRange_table_name_is_not_a_variable()
+    {
+        var f = F("lookuprange(Grid, N, 5)", Bind("N", BindingKind.Input));
+        var m = FormulaLayout.Build(f, Pack());
+        Assert.DoesNotContain(m.Main, i => i is BoxItem { Variable: "Grid" });
+        var sub = Assert.Single(m.SubRows);
+        Assert.Equal("Grid[…]", sub.Label);
+        Assert.DoesNotContain(sub.Items, i => i is BoxItem { Variable: "Grid" });
+        Assert.Contains(sub.Items, i => i is BoxItem { Variable: "N" });
+    }
+
+    [Fact]
+    public void Layout_Count_renders_roll_box_once()
+    {
+        var f = F("count(R, 1, 2)", Bind("R", BindingKind.Roll));
+        var m = FormulaLayout.Build(f, Pack());
+        Assert.Equal(new[] { "R" }, m.Main.OfType<BoxItem>().Select(b => b.Variable));
+        Assert.Empty(m.SubRows);
+    }
+
+    [Fact]
     public void Layout_TableBinding_TwoD_And_UnparsableExpr()
     {
         var f = F("Rate", Bind("Rate", BindingKind.Table) with { TableId = "t2", RowExpr = "X", ColExpr = "Y" });

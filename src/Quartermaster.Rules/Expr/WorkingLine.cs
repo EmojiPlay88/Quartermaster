@@ -45,7 +45,7 @@ public static class WorkingLine
                 sb.Append(' ').Append(Symbol(b.Op)).Append(' ');
                 Write(b.Right, src, values, sb);
                 break;
-            case Call c when c.Function == "lookup":
+            case Call c when c.Function is "lookup" or "lookuprange":
                 sb.Append(((VarRef)c.Args[0]).Name).Append('[');
                 for (int i = 1; i < c.Args.Count; i++)
                 {
@@ -53,6 +53,15 @@ public static class WorkingLine
                     Write(c.Args[i], src, values, sb);
                 }
                 sb.Append(']');
+                break;
+            case Call c when c.Function == "count":
+                sb.Append("count(").Append(((VarRef)c.Args[0]).Name);
+                for (int i = 1; i < c.Args.Count; i++)
+                {
+                    sb.Append(", ");
+                    Write(c.Args[i], src, values, sb);
+                }
+                sb.Append(')');
                 break;
             case Call c when c.Function == "holder":
                 sb.Append("holder(").Append(((VarRef)c.Args[0]).Name).Append(", ").Append(((VarRef)c.Args[1]).Name).Append(')');

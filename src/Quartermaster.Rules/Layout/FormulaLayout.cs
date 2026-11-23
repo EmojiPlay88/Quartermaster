@@ -144,7 +144,7 @@ public static class FormulaLayout
                     em.Text(" " + WorkingLine.Symbol(b.Op) + " ");
                     Write(b.Right, src, em);
                     break;
-                case Call c when c.Function == "lookup" && c.Args.Count > 0 && c.Args[0] is VarRef tv:
+                case Call c when c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv:
                 {
                     var label = tv.Name + "[…]";
                     em.Text(label);

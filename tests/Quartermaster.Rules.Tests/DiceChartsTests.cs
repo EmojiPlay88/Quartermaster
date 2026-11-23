@@ -184,3 +184,32 @@ public class DiceChartsTests
         Assert.Equal(new[] { "A" }, FormulaVariables.Used(f));
     }
 }
+
+public class DiceChartsFixRound1Tests
+{
+    [Fact]
+    public void ExprFacts_lookuprange_table_name_is_skipped_in_holder_check()
+    {
+        var pack = new RulesPack { Properties = new() { new PropertyDef { Id = "p", Name = "Crash", Scope = PropertyScope.Pieces } } };
+        Assert.True(ExprFacts.IsGameLevel(Parser.Parse("lookuprange(Crash, 1, 2)"), pack));
+    }
+
+    [Fact]
+    public void Validator_dice_count_expr_on_non_roll_is_flagged()
+    {
+        var f = new FormulaDef { Id = "f1", Name = "Landing", Text = "A", Bindings = new() { new VariableBinding { Variable = "A", Kind = BindingKind.Input, DiceCountExpr = "1" } } };
+        var msgs = RulesValidator.Validate(new RulesPack { Formulas = new() { f } }).Where(i => i.EntityId == "f1").Select(i => i.Message).ToList();
+        Assert.Contains("Formula \"Landing\": variable \"A\" has a dice count but is not a roll", msgs);
+    }
+
+    [Fact]
+    public void KeyChoices_lookuprange_row_variable_gets_row_keys_value_does_not()
+    {
+        var t = new TableDef { Id = "t", Name = "Crash", Kind = TableKind.TwoD, RowKeys = new() { "1", "2" }, ColumnKeys = new() { "A" }, Cells = new() { new() { "1-3" }, new() { "4+" } } };
+        var f = new FormulaDef { Id = "f", Name = "F", Text = "lookuprange(Crash, X, Y)", Bindings = new()
+            { new VariableBinding { Variable = "X", Kind = BindingKind.Input }, new VariableBinding { Variable = "Y", Kind = BindingKind.Input } } };
+        var pack = new RulesPack { Tables = new() { t } };
+        Assert.Equal(new[] { "1", "2" }, KeyChoices.For(pack, f, "X"));
+        Assert.Null(KeyChoices.For(pack, f, "Y"));
+    }
+}

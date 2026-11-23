@@ -475,6 +475,8 @@ public static class RulesValidator
         }
         var pre = ParseGuard(f.Precondition, "precondition");
         foreach (var b in f.Bindings) ParseGuard(b.When, $"variable \"{b.Variable}\" only-when");
+        foreach (var b in f.Bindings.Where(b => b.Kind != BindingKind.Roll && !string.IsNullOrWhiteSpace(b.DiceCountExpr)))
+            Warn($"variable \"{b.Variable}\" has a dice count but is not a roll");
         foreach (var b in f.Bindings)
             if (ParseGuard(b.DiceCountExpr, $"variable \"{b.Variable}\" dice count") is { } dc && Parser.Variables(dc).Contains(b.Variable))
                 Err($"variable \"{b.Variable}\" dice count cannot use {b.Variable} itself");
