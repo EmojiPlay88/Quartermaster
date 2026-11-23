@@ -75,10 +75,12 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         AstExpr? pre = string.IsNullOrWhiteSpace(formula.Precondition) ? null : Parser.Parse(formula.Precondition);
 
-        // Variables of the text, then of the precondition, then any used only inside Table binding row/column expressions,
-        // "Only when" conditions or Roll binding dice count expressions.
+        // Variables of the text, then of the precondition, then of the outputs' value and pick-by expressions, then any used only inside
+        // Table binding row/column expressions, "Only when" conditions or Roll binding dice count expressions.
         var names = new List<string>(Parser.Variables(expr));
         if (pre != null) foreach (var v in Parser.Variables(pre)) if (!names.Contains(v)) names.Add(v);
+        foreach (var src in FormulaVariables.OutputSources(formula))
+            foreach (var v in Parser.Variables(Parser.Parse(src))) if (!names.Contains(v)) names.Add(v);
         for (var i = 0; i < names.Count; i++)
         {
             var b = formula.Bindings.FirstOrDefault(x => x.Variable == names[i]);
@@ -130,9 +132,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         var outputs = new List<OutputPreview>();
         var parts = new List<string>();
+        // Every output is computed (value and property) before the trace is returned, so a failing output writes nothing.
         foreach (var o in formula.Outputs)
         {
-            var prop = _pack.ById<PropertyDef>(o.Property) ?? throw new EvalError("An output refers to a deleted property");
+            var prop = OutputProperty(o, run);
             string key;
             switch (o.Target)
             {
@@ -144,14 +147,24 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     key = LedgerKey.Holder(o.HolderId);
                     break;
             }
-            if (result.Kind != ValueKind.Number) throw new EvalError("The result is not a number, so it cannot change " + prop.Name);
-            var x = result.Number;
+            Value value;
+            if (string.IsNullOrWhiteSpace(o.Expr))
+            {
+                if (result.Kind != ValueKind.Number) throw new EvalError("The result is not a number, so it cannot change " + prop.Name);
+                value = result;
+            }
+            else
+            {
+                value = Evaluator.Evaluate(Parser.Parse(o.Expr), new RunContext(run));
+                if (value.Kind != ValueKind.Number) throw new EvalError($"The value for {prop.Name} is not a number");
+            }
+            var x = value.Number;
             var before = Ledger.GetOrDefault(s, key, prop);
             var after = o.Op switch { OutputOp.Subtract => before - x, OutputOp.Add => before + x, _ => x };
             if (double.IsNaN(after) || double.IsInfinity(after)) throw new EvalError("Result is not a finite number");
             outputs.Add(new OutputPreview(key, prop.Id, prop.Name, before, after));
             var b = Value.Of(before).Display();
-            var xs = result.Display();
+            var xs = value.Display();
             var a = Value.Of(after).Display();
             parts.Add(o.Op switch
             {
@@ -162,6 +175,23 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
         if (parts.Count > 0) working += " → " + string.Join("; ", parts);
         return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey);
+    }
+
+    /// <summary>The output's fixed property, or with a property list the one its pick-by expression names: a whole number N is the Nth listed
+    /// property, a text the listed property whose name equals it (trimmed, case-insensitive).</summary>
+    private PropertyDef OutputProperty(FormulaOutput o, RunScope run)
+    {
+        PropertyDef Def(string id) => _pack.ById<PropertyDef>(id) ?? throw new EvalError("An output refers to a deleted property");
+        if (o.PropertyChoice is not { Count: > 0 } list) return Def(o.Property);
+        var pick = Evaluator.Evaluate(Parser.Parse(o.PropertySelect ?? ""), new RunContext(run));
+        var props = list.Select(Def).ToList();
+        PropertyDef? hit = pick.Kind switch
+        {
+            ValueKind.Number when pick.Number == Math.Floor(pick.Number) && pick.Number >= 1 && pick.Number <= props.Count => props[(int)pick.Number - 1],
+            ValueKind.Text => props.FirstOrDefault(p => string.Equals(p.Name.Trim(), (pick.Text ?? "").Trim(), StringComparison.OrdinalIgnoreCase)),
+            _ => null,
+        };
+        return hit ?? throw new EvalError($"{pick.Display()} is not one of the output's properties");
     }
 
     /// <summary>
