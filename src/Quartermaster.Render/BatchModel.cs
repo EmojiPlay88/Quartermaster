@@ -220,7 +220,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         try
         {
             if (s.Game != null && s.Rules is { } pack && Sequencer.Current(pack, s.Game.State) is { } phase)
-                foreach (var w in Decisions.Warnings(pack, s.Game.State, phase))
+                foreach (var w in Decisions.Warnings(pack, s.Game.State, phase, s.Model))
                 {
                     var name = (w.Message ?? "").Replace("{unit}", "").Trim();
                     if (name.Length == 0) name = "warning";

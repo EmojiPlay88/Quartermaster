@@ -71,7 +71,7 @@ public static class LedgerTabs
 
         var baseRows = LedgerTable.Rows(view, p, m, "", includeEmpty);
         var sideOf = Ownership.PieceSides(view, p);
-        Func<PieceInstance, bool> userFilter = tab.Kind == LedgerTabKind.User ? PieceFilter.Compile(tab.User?.Filter, view, p) : _ => true;
+        Func<PieceInstance, bool> userFilter = tab.Kind == LedgerTabKind.User ? PieceFilter.Compile(tab.User?.Filter, view, p, m) : _ => true;
 
         var holders = new List<LedgerRowEx>();
         var units = new List<LedgerRowEx>();

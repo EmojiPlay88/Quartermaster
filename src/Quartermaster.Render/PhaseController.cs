@@ -172,7 +172,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
         var seen = s.View ?? st;   // decisions and warnings over what this player may see
         return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
-            Decisions.Compute(pack, seen), Decisions.Warnings(pack, seen, cur), Notice);
+            Decisions.Compute(pack, seen, s.Model), Decisions.Warnings(pack, seen, cur, s.Model), Notice);
     }
 
     private const string SkippedTip = "Skipped this pass (condition false)";

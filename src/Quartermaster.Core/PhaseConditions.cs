@@ -75,6 +75,8 @@ public static class PhaseConditions
     /// <summary>Reads global properties (Default when unset) and the candidate's turn, stage and side. No pieces, no dice.</summary>
     private sealed class PhaseContext(RulesPack pack, GameState s, PhasePosition at) : IEvalContext
     {
+        private readonly Func<string, Func<PieceInstance, bool>> _filters = PieceFilter.AggregateFilters(s, pack, null);
+
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
@@ -93,5 +95,8 @@ public static class PhaseConditions
         public Value PhaseSide() =>
             PieceFilter.PhaseSideValue(pack, pack.Phases.FirstOrDefault(p => p.Id == at.PhaseId)
                 ?? (at.PhaseIndex >= 0 && at.PhaseIndex < pack.Phases.Count ? pack.Phases[at.PhaseIndex] : null));
+        /// <summary>Whole-game aggregates only: there is no piece, so the hex ones are not available.</summary>
+        public Value Aggregate(string fn, string? property, string? filter) =>
+            PieceAggregates.Evaluate(fn, property, filter, s, pack, null, null, _filters);
     }
 }
