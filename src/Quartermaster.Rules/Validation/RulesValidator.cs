@@ -263,6 +263,7 @@ public static class RulesValidator
     {
         public Value GetVariable(string name) => throw new EvalError($"No value for {name}");
         public Value Lookup(string tableName, Value row, Value? col) => throw new EvalError("No tables here");
+        public Value LookupRange(string table, Value row, Value value) => throw new EvalError("No tables here");
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("No dice here");
         public bool Has(string property) => throw new EvalError("No pieces here");
         public Value PieceName() => throw new EvalError("No pieces here");

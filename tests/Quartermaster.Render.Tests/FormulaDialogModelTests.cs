@@ -248,6 +248,31 @@ public class FormulaDialogModelTests
 public class FormulaDialogModelPhysicalToggleTests
 {
     [Fact]
+    public void PhysicalDiceTypedOneByOneFeedCount()
+    {
+        var pack = new RulesPack
+        {
+            Formulas = new()
+            {
+                new FormulaDef
+                {
+                    Id = "f3", Name = "Crash", Text = "count(R, 1, 2) * 10 + count(R, 3, 3)",
+                    Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 4, DiceSides = 6 } },
+                },
+            },
+        };
+        using var fx = new FixtureModule().WithBuildFile(FixtureModule.MinimalBuildFile()).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        var model = ModuleModelBuilder.Build(arch, new DiagnosticLog());
+        var m = new FormulaDialogModel(new FormulaRunner(pack, model, (_, _) => throw new InvalidOperationException("rolled")), pack.Formulas[0], null);
+        m.PhysicalDice = true;
+        m.SetBoxText("R", "1 2 3 6");
+        var v = m.Evaluate(new GameState());
+        Assert.Equal("21", v.ResultText);
+        Assert.True(v.CanApply);
+    }
+
+    [Fact]
     public void TogglingPhysicalDiceClearsRollOverridesBothWays()
     {
         var pack = new RulesPack

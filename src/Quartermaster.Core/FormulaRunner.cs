@@ -203,9 +203,15 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             IReadOnlyList<int> res;
             if (r.FixedRolls.TryGetValue(key, out var pin) && pin != null && pin.Count == n && pin.All(x => x >= 1 && x <= sides)) res = pin;
             else res = r.Dice?.Invoke(key, n, sides) ?? owner._roller(n, sides);
-            _rolls.Add(new DiceEntry(0, $"{formula.Name}: {key}", n, sides, res));
-            _byKey[key] = res;
+            Record(key, n, sides, res);
             return res;
+        }
+
+        /// <summary>Logs a key's dice (rolled, pinned or typed one by one) and keeps them for count().</summary>
+        private void Record(string key, int n, int sides, IReadOnlyList<int> dice)
+        {
+            _rolls.Add(new DiceEntry(0, $"{formula.Name}: {key}", n, sides, dice));
+            _byKey[key] = dice;
         }
 
         public IReadOnlyList<int> Roll(int n, int sides) => RollKey("dice#" + _inlineDice++, n, sides);
@@ -253,7 +259,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             if (formula.Bindings.FirstOrDefault(x => x.Variable == name) is not { Kind: BindingKind.Roll })
                 throw new EvalError($"count() needs a roll binding, not {name}");
             return _byKey.TryGetValue(name, out var dice) ? dice
-                : throw new EvalError($"count() cannot see the dice of {name}: its value was typed in");
+                : throw new EvalError($"count() needs each die of {name}: type them separated by spaces");
         }
 
         public VariableState Resolve(string name)
@@ -297,6 +303,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var auto = b.Kind != BindingKind.Input;
             if (r.Overrides.TryGetValue(name, out var ov) && ov != null)
             {
+                if (b.Kind == BindingKind.Roll) return TypedRoll(b, ov);
                 if (Numeric(b))
                     return TryNum(ov, out var n)
                         ? new(name, Value.Of(n), auto, true, null)
@@ -347,9 +354,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 }
                 case BindingKind.Roll:
                 {
-                    var n = string.IsNullOrWhiteSpace(b.DiceCountExpr) ? b.DiceCount ?? 1 : DiceCount(b);
-                    var sides = b.DiceSides ?? 6;
-                    var res = RollKey(name, n, sides);
+                    var res = RollKey(name, DiceCount(b), b.DiceSides ?? 6);
                     return new(name, Value.Of(res.Sum()), true, false, null);
                 }
                 case BindingKind.Moved:
@@ -360,9 +365,39 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             }
         }
 
-        /// <summary>A Roll binding's dice count expression, evaluated in this run: a whole number 1-100 (the limits and wording of dice()).</summary>
+        /// <summary>
+        /// A Roll binding typed in (physical dice). Several numbers (separated by spaces and/or commas) are the dice themselves: exactly the dice
+        /// count of them, each 1 to the sides, else missing. A single number is the sum as before, and also the die when the roll has one die.
+        /// Typed dice are logged and seen by count() like rolled ones; a typed sum of several dice is not.
+        /// </summary>
+        private VariableState TypedRoll(VariableBinding b, string typed)
+        {
+            var name = b.Variable;
+            var parts = typed.Split(new[] { ' ', ',', '	' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2 && !TryNum(typed, out _)) return new(name, null, true, true, "Not a number");
+            int n = DiceCount(b), sides = b.DiceSides ?? 6;
+            var dice = new List<int>();
+            foreach (var p in parts)
+            {
+                if (!TryNum(p, out var d) || d != Math.Floor(d) || d < 1 || d > sides) break;
+                dice.Add((int)d);
+            }
+            if (parts.Length < 2)
+            {
+                if (n == 1 && dice.Count == 1) Record(name, n, sides, dice);
+                TryNum(typed, out var sum);
+                return new(name, Value.Of(sum), true, true, null);
+            }
+            if (dice.Count != parts.Length || dice.Count != n) return new(name, null, true, true, $"{name} needs {n} dice from 1 to {sides}");
+            Record(name, n, sides, dice);
+            return new(name, Value.Of(dice.Sum()), true, true, null);
+        }
+
+        /// <summary>A Roll binding's number of dice: the fixed count, or its dice count expression evaluated in this run (a whole number
+        /// 1-100, the limits and wording of dice()).</summary>
         private int DiceCount(VariableBinding b)
         {
+            if (string.IsNullOrWhiteSpace(b.DiceCountExpr)) return b.DiceCount ?? 1;
             var v = Evaluator.Evaluate(Parser.Parse(b.DiceCountExpr!), new RunContext(this));
             if (v.Kind != ValueKind.Number || v.Number != Math.Floor(v.Number) || v.Number < 1 || v.Number > 100)
                 throw new EvalError($"'{b.Variable}' dice count must be a whole number from 1 to 100");

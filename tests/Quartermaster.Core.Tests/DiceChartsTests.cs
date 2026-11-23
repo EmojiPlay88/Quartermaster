@@ -180,12 +180,95 @@ public class DiceChartsTests
         Assert.Null(t.Result);
     }
 
-    [Fact]
-    public void Count_of_overridden_roll_errors()
+    private const string NeedsEachDie = "count() needs each die of R: type them separated by spaces";
+
+    private static Func<int, int, IReadOnlyList<int>> NoRolls => (_, _) => throw new InvalidOperationException("rolled");
+
+    [Theory]
+    [InlineData("1 2 3 6")]
+    [InlineData("1,2,3,6")]
+    [InlineData(" 1, 2  3 ,6 ")]
+    public void Typed_dice_feed_count(string typed)
     {
-        var t = Run(Pack("count(R, 1, 6)", Roll("R", 2)), overrides: RunnerFx.D(("R", "7")));
-        Assert.Equal("count() cannot see the dice of R: its value was typed in", t.Error);
+        var pack = Pack("count(R, 1, 2) * 10 + count(R, 3, 3)", Roll("R", 4));
+        var t = Run(pack, overrides: RunnerFx.D(("R", typed)), roller: NoRolls);
+        Assert.Null(t.Error);
+        Assert.Equal(21, t.Result!.Value.Number);
+        var r = V(t, "R");
+        Assert.Equal(12, r.Value!.Value.Number);
+        Assert.True(r.Overridden);
+        Assert.Equal(new[] { 1, 2, 3, 6 }, t.RollsByKey["R"]);
+        var roll = Assert.Single(t.Rolls);
+        Assert.Equal((4, 6), (roll.Count, roll.Sides));
+        Assert.Equal(new[] { 1, 2, 3, 6 }, roll.Results);
+        Assert.Contains(RunnerFx.Runner(pack).Commands(t, null), c => c is RollDice d && d.Results.SequenceEqual(new[] { 1, 2, 3, 6 }));
+    }
+
+    [Fact]
+    public void Typed_dice_for_a_dice_count_expression()
+    {
+        var t = Run(Pack("count(R, 5, 6)", In("Planes"), Roll("R", 1, "Planes")), RunnerFx.D(("Planes", "3")),
+            overrides: RunnerFx.D(("R", "5 6 1")), roller: NoRolls);
+        Assert.Null(t.Error);
+        Assert.Equal(2, t.Result!.Value.Number);
+    }
+
+    [Theory]
+    [InlineData("1 2 3")]
+    [InlineData("1 2 3 6 6")]
+    [InlineData("1 2 3 7")]
+    [InlineData("0 2 3 4")]
+    [InlineData("1 2 3 4.5")]
+    [InlineData("1 2 x 4")]
+    public void Typed_dice_wrong_count_or_range(string typed)
+    {
+        var t = Run(Pack("R + 1", Roll("R", 4)), overrides: RunnerFx.D(("R", typed)), roller: NoRolls);
+        Assert.Null(t.Error);
         Assert.Null(t.Result);
+        Assert.Empty(t.Rolls);
+        var r = V(t, "R");
+        Assert.Null(r.Value);
+        Assert.Equal("R needs 4 dice from 1 to 6", r.MissingReason);
+    }
+
+    [Fact]
+    public void Typed_sum_unchanged_but_count_needs_each_die()
+    {
+        var plain = Run(Pack("R + 1", Roll("R", 2)), overrides: RunnerFx.D(("R", "7")), roller: NoRolls);
+        Assert.Null(plain.Error);
+        Assert.Equal(8, plain.Result!.Value.Number);
+        Assert.Empty(plain.Rolls);
+        Assert.Empty(plain.RollsByKey);
+
+        var t = Run(Pack("count(R, 1, 6)", Roll("R", 2)), overrides: RunnerFx.D(("R", "7")), roller: NoRolls);
+        Assert.Equal(NeedsEachDie, t.Error);
+        Assert.Null(t.Result);
+    }
+
+    [Fact]
+    public void Typed_single_die_is_that_die()
+    {
+        var t = Run(Pack("count(R, 4, 4) * 10 + R", Roll("R", 1)), overrides: RunnerFx.D(("R", "4")), roller: NoRolls);
+        Assert.Null(t.Error);
+        Assert.Equal(14, t.Result!.Value.Number);
+        Assert.Equal(new[] { 4 }, Assert.Single(t.Rolls).Results);
+
+        // Out of the die's range: a typed value as today, with no die.
+        var big = Run(Pack("R", Roll("R", 1)), overrides: RunnerFx.D(("R", "9")), roller: NoRolls);
+        Assert.Equal(9, big.Result!.Value.Number);
+        Assert.Empty(big.Rolls);
+        var cnt = Run(Pack("count(R, 1, 6)", Roll("R", 1)), overrides: RunnerFx.D(("R", "9")), roller: NoRolls);
+        Assert.Equal(NeedsEachDie, cnt.Error);
+    }
+
+    [Fact]
+    public void Typed_blank_or_text_roll_unchanged()
+    {
+        var blank = Run(Pack("R", Roll("R", 2)), overrides: RunnerFx.D(("R", "")), roller: NoRolls);
+        Assert.Null(blank.Error);
+        Assert.Equal("Not a number", V(blank, "R").MissingReason);
+        var text = Run(Pack("R", Roll("R", 2)), overrides: RunnerFx.D(("R", "many")), roller: NoRolls);
+        Assert.Equal("Not a number", V(text, "R").MissingReason);
     }
 
     [Fact]
