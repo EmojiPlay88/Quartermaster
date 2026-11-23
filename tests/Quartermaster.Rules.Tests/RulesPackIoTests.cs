@@ -120,6 +120,37 @@ public class RulesPackIoTests : IDisposable
     }
 
     [Fact]
+    public void Pack_without_output_fields_keeps_hash()
+    {
+        var p = HookedPack();
+        Assert.Equal("0b02149a4e0b3372417b625978000d7d2521b0483d4bbc55feb36d4dfbc27dc7", RulesPackIo.ComputeSha256(p));
+        var json = JsonSerializer.Serialize(p.Formulas[0] with { Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "p1", Op = OutputOp.Set } } }, RulesPackIo.JsonOptions);
+        Assert.DoesNotContain("expr", json);
+        Assert.DoesNotContain("propertyChoice", json);
+        Assert.DoesNotContain("propertySelect", json);
+    }
+
+    [Fact]
+    public void Output_fields_round_trip()
+    {
+        var o = new FormulaOutput { Target = OutputTarget.Global, Property = "p1", Op = OutputOp.Set, Expr = "R * 2", PropertyChoice = new() { "p1", "p2" }, PropertySelect = "R" };
+        var blank = new FormulaOutput { Target = OutputTarget.Global, Property = "p1", Op = OutputOp.Set, Expr = "  ", PropertyChoice = new() { null!, null! }, PropertySelect = "" };
+        var p = HookedPack() with { Formulas = new() { HookedPack().Formulas[0] with { Outputs = new() { o, blank } } } };
+        var a = Path.Combine(_dir, "o1.qrules");
+        RulesPackIo.Save(p, a);
+        var l = RulesPackIo.Load(a);
+        var lo = l.Formulas[0].Outputs;
+        Assert.Equal("R * 2", lo[0].Expr);
+        Assert.Equal(new[] { "p1", "p2" }, lo[0].PropertyChoice);
+        Assert.Equal("R", lo[0].PropertySelect);
+        Assert.Null(lo[1].Expr);
+        Assert.Null(lo[1].PropertyChoice);
+        Assert.Null(lo[1].PropertySelect);
+        Assert.Equal(RulesPackIo.ComputeSha256(l), RulesPackIo.ComputeSha256(RulesPackIo.Load(a)));
+        Assert.NotEqual(RulesPackIo.ComputeSha256(HookedPack()), RulesPackIo.ComputeSha256(l));
+    }
+
+    [Fact]
     public void Pack_without_dice_count_expr_keeps_hash()
     {
         var p = HookedPack();

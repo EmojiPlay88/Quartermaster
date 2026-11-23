@@ -14,6 +14,30 @@ public class FormulaVariablesTests
         Assert.Equal(new[] { "A", "T", "R", "C" }, FormulaVariables.Used(F("A + T", In("A"), t, In("R"), In("C"))));
     }
 
+    private static FormulaOutput Out() => new() { Target = OutputTarget.Global, Property = "p1", Op = OutputOp.Set };
+
+    [Fact]
+    public void Used_includes_output_expr_and_pick_by()
+    {
+        var t = new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t", RowExpr = "R" };
+        var f = F("A", In("A"), In("B"), In("S"), t, In("R")) with
+        {
+            Outputs = new() { Out() with { Expr = "B * 2", PropertyChoice = new() { "p1", "p2" }, PropertySelect = "S + T" } },
+        };
+        Assert.Equal(new[] { "A", "B", "S", "T", "R" }, FormulaVariables.Used(f));
+        Assert.Equal(new[] { "B", "S", "T", "R" }, FormulaVariables.Reach(f, new[] { "B", "S", "T" }));
+        var g = F("A", In("A")) with { Outputs = new() { Out() with { Expr = "holder(Depot, Fuel)", PropertyChoice = new() { "p1" }, PropertySelect = "holder(Riverland, Supply)" } } };
+        Assert.Equal(new (string?, string?)[] { ("Depot", "Fuel"), ("Riverland", "Supply") }, FormulaVariables.HolderReads(g));
+    }
+
+    [Fact]
+    public void Used_unchanged_without_output_fields()
+    {
+        var f = F("A", In("A"), In("P")) with { Precondition = "P > 0", Outputs = new() { Out(), Out() with { Expr = "  ", PropertySelect = " " } } };
+        Assert.Equal(new[] { "A", "P" }, FormulaVariables.Used(f));
+        Assert.Empty(FormulaVariables.HolderReads(f));
+    }
+
     [Fact]
     public void Used_includes_precondition_variables()
     {

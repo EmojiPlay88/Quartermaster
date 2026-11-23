@@ -247,6 +247,48 @@ public class ValidatorTests
     private static VariableBinding Roll(string v) => new() { Variable = v, Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 };
     private static List<string> FormulaMsgs(RulesPack p) => V(p).Where(i => i.EntityId == "f1").Select(i => i.Message).ToList();
 
+    private static FormulaDef WithOut(FormulaOutput o, params VariableBinding[] b) =>
+        Fx("A", b.Prepend(In("A")).ToArray()) with { Outputs = new() { o } };
+    private static FormulaOutput GOut() => new() { Target = OutputTarget.Global, Property = "p1", Op = OutputOp.Set };
+
+    [Fact]
+    public void Validator_output_choice_unknown_property()
+    {
+        var msgs = FormulaMsgs(WithFormula(WithOut(GOut() with { PropertyChoice = new() { "p1", "zz" }, PropertySelect = "A" })));
+        Assert.Contains("Formula \"Fuel Use\": an output refers to a property that no longer exists", msgs);
+        // scope is checked per id too: p2 is Pieces-only, the target is a holder
+        var scope = FormulaMsgs(WithFormula(WithOut(GOut() with { PropertyChoice = new() { "p2" }, PropertySelect = "A" })));
+        Assert.Contains(scope, m => m.Contains("output property \"Steps\" cannot be written to a holder"));
+        // the fixed Property is not used (and not checked) when a list is given
+        Assert.Empty(FormulaMsgs(WithFormula(WithOut(GOut() with { Property = "", PropertyChoice = new() { "p1" }, PropertySelect = "A" }))));
+    }
+
+    [Fact]
+    public void Validator_output_choice_without_pick_by()
+    {
+        var msgs = FormulaMsgs(WithFormula(WithOut(GOut() with { PropertyChoice = new() { "p1" } })));
+        Assert.Contains("Formula \"Fuel Use\": output 1 has a property list but no \"Pick by\"", msgs);
+        var second = Fx("A", In("A")) with { Outputs = new() { GOut(), GOut() with { PropertyChoice = new() { "p1" }, PropertySelect = " " } } };
+        Assert.Contains("Formula \"Fuel Use\": output 2 has a property list but no \"Pick by\"", FormulaMsgs(WithFormula(second)));
+
+        // an empty list means the fixed property: no error
+        Assert.Empty(FormulaMsgs(WithFormula(WithOut(GOut() with { PropertyChoice = new() }))));
+    }
+
+    [Fact]
+    public void Validator_output_expr_unknown_variable()
+    {
+        var msgs = FormulaMsgs(WithFormula(WithOut(GOut() with { Expr = "A + Zork", PropertyChoice = new() { "p1" }, PropertySelect = "Quux" })));
+        Assert.Contains("Formula \"Fuel Use\": variable \"Zork\" has no binding", msgs);
+        Assert.Contains("Formula \"Fuel Use\": variable \"Quux\" has no binding", msgs);
+        var bad = FormulaMsgs(WithFormula(WithOut(GOut() with { Expr = "A >", PropertyChoice = new() { "p1" }, PropertySelect = "A +" })));
+        Assert.Contains(bad, m => m.StartsWith("Formula \"Fuel Use\": output 1 value "));
+        Assert.Contains(bad, m => m.StartsWith("Formula \"Fuel Use\": output 1 pick-by "));
+        // a variable read only by an output expression is used (no unused warning)
+        var used = WithOut(GOut() with { Expr = "B" }, In("B"));
+        Assert.DoesNotContain(FormulaMsgs(WithFormula(used)), m => m.Contains("not used"));
+    }
+
     [Fact]
     public void Validator_precondition_parse_error()
     {

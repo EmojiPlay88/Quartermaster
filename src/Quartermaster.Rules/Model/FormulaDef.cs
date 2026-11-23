@@ -40,6 +40,15 @@ public sealed record FormulaOutput
     public string? HolderId { get; init; }
     public string Property { get; init; } = "";
     public OutputOp Op { get; init; }
+    /// <summary>Expression giving this output's value, read from the formula's bindings (the formula's own result is not a variable). Null = the formula's result (the Workbench stores null, never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Expr { get; init; }
+    /// <summary>Property ids the output may write, one picked per run by <see cref="PropertySelect"/>; when non-empty <see cref="Property"/> is not used. Null = the fixed Property (never an empty list).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? PropertyChoice { get; init; }
+    /// <summary>Expression picking from <see cref="PropertyChoice"/>: a number N is the Nth listed property (1-based), a text its property name. Null = none (an error with a non-empty list; never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PropertySelect { get; init; }
 }
 
 public sealed record FormulaDef
