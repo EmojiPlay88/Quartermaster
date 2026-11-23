@@ -251,7 +251,9 @@ public class DiceChartsTests
         var t = Run(Pack("count(R, 4, 4) * 10 + R", Roll("R", 1)), overrides: RunnerFx.D(("R", "4")), roller: NoRolls);
         Assert.Null(t.Error);
         Assert.Equal(14, t.Result!.Value.Number);
-        Assert.Equal(new[] { 4 }, Assert.Single(t.Rolls).Results);
+        // A single typed number is not recorded, logged or pinned: the roll behaves as on master.
+        Assert.Empty(t.Rolls);
+        Assert.False(t.RollsByKey.ContainsKey("R"));
 
         // Out of the die's range: a typed value as today, with no die.
         var big = Run(Pack("R", Roll("R", 1)), overrides: RunnerFx.D(("R", "9")), roller: NoRolls);

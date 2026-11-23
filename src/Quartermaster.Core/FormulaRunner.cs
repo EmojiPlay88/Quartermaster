@@ -255,11 +255,14 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         /// binding behaves as for any read.</summary>
         public IReadOnlyList<int> DiceOf(string name)
         {
-            ValueOf(name);
-            if (formula.Bindings.FirstOrDefault(x => x.Variable == name) is not { Kind: BindingKind.Roll })
+            var value = ValueOf(name);
+            if (formula.Bindings.FirstOrDefault(x => x.Variable == name) is not { Kind: BindingKind.Roll } rb)
                 throw new EvalError($"count() needs a roll binding, not {name}");
-            return _byKey.TryGetValue(name, out var dice) ? dice
-                : throw new EvalError($"count() needs each die of {name}: type them separated by spaces");
+            if (_byKey.TryGetValue(name, out var dice)) return dice;
+            // A single typed number is not recorded; for a one-die roll it is that die.
+            if (DiceCount(rb) == 1 && value.Kind == ValueKind.Number && value.Number == Math.Floor(value.Number) && value.Number >= 1 && value.Number <= (rb.DiceSides ?? 6))
+                return new[] { (int)value.Number };
+            throw new EvalError($"count() needs each die of {name}: type them separated by spaces");
         }
 
         public VariableState Resolve(string name)
@@ -367,13 +370,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         /// <summary>
         /// A Roll binding typed in (physical dice). Several numbers (separated by spaces and/or commas) are the dice themselves: exactly the dice
-        /// count of them, each 1 to the sides, else missing. A single number is the sum as before, and also the die when the roll has one die.
-        /// Typed dice are logged and seen by count() like rolled ones; a typed sum of several dice is not.
+        /// count of them, each 1 to the sides, else missing. A single number is the sum as before (a one-die roll's count() reads it as the die, see DiceOf).
+        /// Typed dice are logged and seen by count() like rolled ones; a typed single number is neither logged nor pinned.
         /// </summary>
         private VariableState TypedRoll(VariableBinding b, string typed)
         {
             var name = b.Variable;
-            var parts = typed.Split(new[] { ' ', ',', '	' }, StringSplitOptions.RemoveEmptyEntries);
+            var parts = typed.Split(new[] { ' ', ',', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 2 && !TryNum(typed, out _)) return new(name, null, true, true, "Not a number");
             int n = DiceCount(b), sides = b.DiceSides ?? 6;
             var dice = new List<int>();
@@ -384,7 +387,6 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             }
             if (parts.Length < 2)
             {
-                if (n == 1 && dice.Count == 1) Record(name, n, sides, dice);
                 TryNum(typed, out var sum);
                 return new(name, Value.Of(sum), true, true, null);
             }

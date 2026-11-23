@@ -37,7 +37,8 @@ public static class FormulaVariables
     /// <summary>The expressions a resolved binding evaluates: a Table's row and column, the auto value, the "Only when" condition, the dice count expression (non-blank only).</summary>
     public static IEnumerable<string> Sources(VariableBinding b)
     {
-        var all = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue, b.When, b.DiceCountExpr } : new[] { b.AutoValue, b.When, b.DiceCountExpr };
+        var count = b.Kind == BindingKind.Roll ? b.DiceCountExpr : null;   // only a Roll expands its dice count expression
+        var all = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue, b.When, count } : new[] { b.AutoValue, b.When, count };
         return all.Where(x => !string.IsNullOrWhiteSpace(x))!;
     }
 

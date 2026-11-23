@@ -180,7 +180,7 @@ count(Planes, 1, 2) * 10 + count(Planes, 6, 6)
 
 With `Planes` rolling 4d6 and the dice 1, 2, 5, 6, this gives 2 * 10 + 1 = 21. The number of dice can come from an expression: see **Dice count** in [Making a Rules Pack](Making-a-Rules-Pack#a-range-chart-and-a-roll-per-plane).
 
-With **Physical dice** on, type the dice of such a roll one by one, separated by spaces or commas (`1 2 5 6`): exactly as many as the roll has, each from 1 to the number of sides. A single typed number is taken as the total, and `count` then cannot tell the dice apart. `count` works only in a formula run (not in filters, warnings or phase conditions).
+With **Physical dice** on, type the dice of such a roll one by one, separated by spaces or commas (`1 2 5 6`): exactly as many as the roll has, each from 1 to the number of sides. A single typed number is taken as the total; for a roll of more than one die `count` then cannot tell the dice apart (a one-die roll typed as a number is that die). The number of dice rolled is public: a dice count that reads hidden data shows its size in the dice log. `count` works only in a formula run (not in filters, warnings or phase conditions).
 
 ### dice(count, sides)
 

@@ -315,4 +315,39 @@ public class FormulaDialogModelPhysicalToggleTests
         m.PhysicalDice = true;
         Assert.Equal("", m.Evaluate(s).Boxes.Single().Text);
     }
+
+    [Fact]
+    public void OverridingASingleDieRollInNormalModeKeepsTheRealRollAndLogsNothing()
+    {
+        var pack = new RulesPack
+        {
+            Formulas = new()
+            {
+                new FormulaDef
+                {
+                    Id = "f2", Name = "Dice", Text = "R + 1",
+                    Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 } },
+                },
+            },
+        };
+        using var fx = new FixtureModule().WithBuildFile(FixtureModule.MinimalBuildFile()).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        var model = ModuleModelBuilder.Build(arch, new DiagnosticLog());
+        var m = new FormulaDialogModel(new FormulaRunner(pack, model, (n, _) => Enumerable.Repeat(3, n).ToList()), pack.Formulas[0], null);
+        var s = new GameState();
+        Assert.Equal("4", m.Evaluate(s).ResultText);
+        Assert.Equal(new[] { 3 }, m.PinnedRolls["R"]);
+
+        m.SetBoxText("R", "4");
+        var trace = m.Run(s);
+        Assert.Equal(5, trace.Result!.Value.Number);
+        Assert.Empty(trace.Rolls);
+        Assert.Equal(new[] { 3 }, m.PinnedRolls["R"]);
+
+        m.SetBoxText("R", "");
+        var v = m.Evaluate(s);
+        Assert.Equal("4", v.ResultText);
+        Assert.Equal("3", v.Boxes.Single().Text.Split(' ')[0]);
+        Assert.Equal(new[] { 3 }, m.PinnedRolls["R"]);
+    }
 }

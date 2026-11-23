@@ -178,6 +178,15 @@ public class DiceChartsTests
     }
 
     [Fact]
+    public void Sources_ignores_dice_count_expr_of_non_roll_binding()
+    {
+        var odd = In("Planes") with { DiceCountExpr = "Other" };
+        Assert.DoesNotContain("Other", FormulaVariables.Sources(odd));
+        var tbl = new VariableBinding { Variable = "T", Kind = BindingKind.Table, DiceCountExpr = "Other" };
+        Assert.DoesNotContain("Other", FormulaVariables.Sources(tbl));
+    }
+
+    [Fact]
     public void Used_skips_dice_count_expr_of_unused_binding_and_its_own_variable()
     {
         var f = Fx("A", In("A"), In("Planes"), Roll("R") with { DiceCountExpr = "Planes + R" });
