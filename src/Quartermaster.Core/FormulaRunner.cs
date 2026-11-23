@@ -75,15 +75,20 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         AstExpr? pre = string.IsNullOrWhiteSpace(formula.Precondition) ? null : Parser.Parse(formula.Precondition);
 
-        // Variables of the text, then of the precondition, then any used only inside Table binding row/column expressions or
-        // "Only when" conditions.
+        // Variables of the text, then of the precondition, then any used only inside Table binding row/column expressions,
+        // "Only when" conditions or Roll binding dice count expressions.
         var names = new List<string>(Parser.Variables(expr));
         if (pre != null) foreach (var v in Parser.Variables(pre)) if (!names.Contains(v)) names.Add(v);
         for (var i = 0; i < names.Count; i++)
         {
             var b = formula.Bindings.FirstOrDefault(x => x.Variable == names[i]);
             if (b == null) continue;
-            var srcs = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.When } : new[] { b.When };
+            var srcs = b.Kind switch
+            {
+                BindingKind.Table => new[] { b.RowExpr, b.ColExpr, b.When },
+                BindingKind.Roll => new[] { b.When, b.DiceCountExpr },
+                _ => new[] { b.When },
+            };
             foreach (var src in srcs)
             {
                 if (string.IsNullOrWhiteSpace(src)) continue;
@@ -240,6 +245,17 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             return st.Value ?? throw new Missing(st.MissingReason ?? "Missing value");
         }
 
+        /// <summary>The dice a Roll binding drew in this run. Reading it resolves the binding first, so a skipped, waiting or missing
+        /// binding behaves as for any read.</summary>
+        public IReadOnlyList<int> DiceOf(string name)
+        {
+            ValueOf(name);
+            if (formula.Bindings.FirstOrDefault(x => x.Variable == name) is not { Kind: BindingKind.Roll })
+                throw new EvalError($"count() needs a roll binding, not {name}");
+            return _byKey.TryGetValue(name, out var dice) ? dice
+                : throw new EvalError($"count() cannot see the dice of {name}: its value was typed in");
+        }
+
         public VariableState Resolve(string name)
         {
             if (_done.TryGetValue(name, out var done)) return done;
@@ -331,7 +347,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 }
                 case BindingKind.Roll:
                 {
-                    var n = b.DiceCount ?? 1;
+                    var n = string.IsNullOrWhiteSpace(b.DiceCountExpr) ? b.DiceCount ?? 1 : DiceCount(b);
                     var sides = b.DiceSides ?? 6;
                     var res = RollKey(name, n, sides);
                     return new(name, Value.Of(res.Sum()), true, false, null);
@@ -342,6 +358,15 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 default:
                     return Input(b);
             }
+        }
+
+        /// <summary>A Roll binding's dice count expression, evaluated in this run: a whole number 1-100 (the limits and wording of dice()).</summary>
+        private int DiceCount(VariableBinding b)
+        {
+            var v = Evaluator.Evaluate(Parser.Parse(b.DiceCountExpr!), new RunContext(this));
+            if (v.Kind != ValueKind.Number || v.Number != Math.Floor(v.Number) || v.Number < 1 || v.Number > 100)
+                throw new EvalError($"'{b.Variable}' dice count must be a whole number from 1 to 100");
+            return (int)v.Number;
         }
 
         private PropertyDef Prop(VariableBinding b) =>
@@ -386,6 +411,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     {
         public Value GetVariable(string name) => run.ValueOf(name);
         public Value Lookup(string tableName, Value row, Value? col) => PieceFilter.LookupTable(run.Pack, tableName, row, col);
+        public Value LookupRange(string table, Value row, Value value) => PieceFilter.LookupRangeTable(run.Pack, table, row, value);
+        public IReadOnlyList<int> DiceOf(string variable) => run.DiceOf(variable);
         public IReadOnlyList<int> RollDice(int n, int sides) => run.Roll(n, sides);
         public bool Has(string property) => PieceFilter.HasProperty(run.State, run.Pack, run.Piece, property);
         public Value PieceName() => PieceFilter.NameValue(run.Piece);

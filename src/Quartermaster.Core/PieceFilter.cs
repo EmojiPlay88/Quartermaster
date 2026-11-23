@@ -145,6 +145,13 @@ public static class PieceFilter
         return TableLookup.Lookup(t, row, col);
     }
 
+    /// <summary>lookuprange(): the column key of the first cell of the row that holds the value (<see cref="TableLookup.RangeColumn"/>).</summary>
+    internal static Value LookupRangeTable(RulesPack pack, string tableName, Value row, Value value)
+    {
+        var t = pack.TableByName(tableName) ?? throw new EvalError($"No table named '{tableName}'");
+        return TableLookup.RangeColumn(t, row, value);
+    }
+
     /// <summary>Parsed applies-to per property record (records are replaced on edit, so this never goes stale); null = does not parse.</summary>
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PropertyDef, ParsedAppliesTo> AppliesToCache = new();
 
@@ -200,6 +207,7 @@ public static class PieceFilter
         }
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
+        public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
         public bool Has(string property) => pack.PropertyByName(property) is { } def && Stored(def) != null;
         public Value PieceName() => NameValue(p);
@@ -223,6 +231,7 @@ public static class PieceFilter
         }
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
+        public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
         public bool Has(string property) => false;
         public Value PieceName() => NameValue(null);
