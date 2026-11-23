@@ -1,5 +1,6 @@
 using Quartermaster.Core;
 using Quartermaster.Rules;
+using Quartermaster.Rules.Expr;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.Render;
@@ -104,6 +105,48 @@ public static class FormulaMasking
             foreach (var b in f.Bindings ?? new List<VariableBinding>())
                 if (b is { Kind: BindingKind.Table, Variable: not null }) hidden.Add(b.Variable);
         return hidden;
+    }
+
+    /// <summary>The entry <see cref="GuardsOnHidden"/> adds when the formula's precondition depends on hidden data (not a variable name).</summary>
+    public const string PreconditionGuard = "(precondition)";
+
+    /// <summary>
+    /// The bindings whose "Only when" condition depends on data the viewer may not see, plus <see cref="PreconditionGuard"/> when the
+    /// precondition does: the condition reads a <paramref name="hidden"/> variable, or one whose own guard, auto value or table key does
+    /// (transitively), or (when <see cref="HolderCallInput"/> is hidden) any holder(H, P) call along the way. A viewer without the data
+    /// cannot decide such a guard, so an online guest's dialog leaves it to the host. Conservative: any holder() call counts once one is
+    /// hidden. Empty when nothing is hidden.
+    /// </summary>
+    public static HashSet<string> GuardsOnHidden(FormulaDef f, IReadOnlySet<string> hidden)
+    {
+        var guards = new HashSet<string>(StringComparer.Ordinal);
+        if (f == null || hidden == null || hidden.Count == 0) return guards;
+        var holderHidden = hidden.Contains(HolderCallInput);
+        bool HasHolderCall(string? src)
+        {
+            if (string.IsNullOrWhiteSpace(src)) return false;
+            try { return ExprFacts.HolderReads(Parser.Parse(src)).Count > 0; }
+            catch (ParseError) { return false; }
+        }
+        bool Reaches(string? cond)
+        {
+            if (string.IsNullOrWhiteSpace(cond)) return false;
+            IReadOnlyList<string> vars;
+            try { vars = Parser.Variables(Parser.Parse(cond)); }
+            catch (ParseError) { return false; }   // never runs
+            if (holderHidden && HasHolderCall(cond)) return true;
+            foreach (var v in FormulaVariables.Reach(f, vars))
+            {
+                if (hidden.Contains(v)) return true;
+                if (holderHidden && (f.Bindings ?? new List<VariableBinding>()).FirstOrDefault(b => b?.Variable == v) is { } b && FormulaVariables.Sources(b).Any(HasHolderCall))
+                    return true;
+            }
+            return false;
+        }
+        foreach (var b in f.Bindings ?? new List<VariableBinding>())
+            if (b?.Variable != null && Reaches(b.When)) guards.Add(b.Variable);
+        if (Reaches(f.Precondition)) guards.Add(PreconditionGuard);
+        return guards;
     }
 
     /// <summary>

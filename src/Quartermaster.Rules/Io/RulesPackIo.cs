@@ -289,7 +289,10 @@ public static class RulesPackIo
             Name = f.Name ?? "",
             Text = f.Text ?? "",
             Phases = f.Phases?.Select(i => i ?? "").ToList(),
-            Bindings = (f.Bindings ?? new()).Where(b => b != null).Select(b => b with { Variable = b.Variable ?? "" }).ToList(),
+            Precondition = string.IsNullOrWhiteSpace(f.Precondition) ? null : f.Precondition,
+            RefusalMessage = string.IsNullOrWhiteSpace(f.RefusalMessage) ? null : f.RefusalMessage,
+            Bindings = (f.Bindings ?? new()).Where(b => b != null)
+                .Select(b => b with { Variable = b.Variable ?? "", When = string.IsNullOrWhiteSpace(b.When) ? null : b.When }).ToList(),
             Outputs = (f.Outputs ?? new()).Where(o => o != null).Select(o => o with { Property = o.Property ?? "" }).ToList(),
         }).ToList(),
     };

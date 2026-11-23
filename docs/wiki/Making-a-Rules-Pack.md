@@ -278,6 +278,22 @@ On **North Movement**, give an **On move** row **Fires for** **Other side**, and
 
 To stop a formula being used in the wrong phase, tick the phases it belongs to under **Only in phases** on the Formulas tab (for example, tick North Movement for **Fuel for movement**). Everywhere else it is greyed in the counter menu with the tooltip `Only in: North Movement`, and the formula dialog will not run it. Leave all boxes empty and the formula is allowed in any phase. Formulas that phases run by themselves ignore the limit. The validator reports a phase that no longer exists (`Formula "{name}": phase list names unknown phase "{id}"`) and warns when a phase's entry runs a formula limited to other phases (`Phase "{phase}": {start|move|end} entry runs "{formula}", which is limited to other phases`). See [Phases](Window-Phases#formulas-limited-to-phases).
 
+### Formulas that can refuse to run
+
+A formula can insist on a condition before it runs. On the Formulas tab, write it in **Only runs when**, for example `Fuel > 0` on **Fuel for movement**. When the condition is false the run is refused: nothing is rolled, nothing is written to the ledger, and the formula dialog shows the reason in its status line with **Apply to ledger** greyed out. The reason is the **Refusal message** you typed, or, when you left it empty, `Fuel for movement cannot be run now`. A formula that a phase runs by itself logs the refusal as `{formula}: {unit}: {message}`; a run waiting in the phase panel stays waiting.
+
+While the condition reads a value the player has not typed yet, the formula waits and its dice are not rolled until the condition can be decided.
+
+The condition may read variables of the formula and anything else a formula may read, but it **cannot use a Roll variable or `dice()`**: the validator reports `Formula "{name}": the precondition cannot use the roll {variable}` or `Formula "{name}": the precondition cannot use dice()` (this includes a roll reached through a table row, an auto value or an **Only when** condition). A variable that only the condition reads still gets its own row under **Bindings**.
+
+### Variables used only sometimes
+
+A binding can have an **Only when** condition (the last column of the bindings grid). Example, on a formula `if(Coast == 1, Fuel - Surf, Fuel)`: give the input `Surf` the condition `Coast == 1`. The condition may read another input, so one answer decides whether the next is asked: while `Coast` is empty the `Surf` box is blank and closed, once `Coast` is 0 the box shows `not used`, and once it is 1 the box asks for a value. A binding whose condition is false is skipped: it is not asked, rolled or looked up.
+
+Only the branch that is taken may read such a variable. If the formula reads `Surf` when its condition is false, the run stops with `Surf is not used here: its "Only when" condition is false`. Wrap every read in an `if` that matches the condition, as above.
+
+A skipped Table binding is not looked up, but the inputs and rolls that feed only its row or column are still asked and rolled. Give those feeder bindings the same **Only when** condition.
+
 ### Phase conditions
 
 A phase can run only some of the time. In the **Runs only if** field, write a formula that must be true for the phase to run. Leave it empty and the phase always runs. When the condition is false, Next Phase (and Start game) skip the phase without running anything in it: no start formulas, no warnings, no checklist. A condition may read only global properties, tables, `turn()`, `stage()` and `phaseside()` (see [What a phase condition may read](Formula-Reference#what-a-phase-condition-may-read)).

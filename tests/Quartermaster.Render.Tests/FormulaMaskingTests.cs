@@ -455,6 +455,126 @@ public class FormulaMaskingTests : IDisposable
         Assert.Equal(GuestSession.NoAnswerText, m.Evaluate(guest.Game!.State).Status);
     }
 
+    /// <summary>
+    /// Guards over Red's private depot (E). Blue's snapshot has no depot value, so a guest deciding them locally would decide on the default.
+    /// f-gw: B is asked only when the depot is not empty; f-gp: runs only when it is not empty; f-gv: a guard over Blue's own unit.
+    /// </summary>
+    private static void AddHiddenGuards(ModuleSession s)
+    {
+        VariableBinding W() => new() { Variable = "W", Kind = BindingKind.Unit, Property = "water" };
+        VariableBinding E() => new() { Variable = "E", Kind = BindingKind.Holder, HolderId = "reddepot", Property = "supply" };
+        List<FormulaOutput> Water() => new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } };
+        s.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Concat(new[]
+            {
+                new FormulaDef
+                {
+                    Id = "f-gw", Name = "Depot raid", Text = "W + if(E > 0, B, 0)", Outputs = Water(),
+                    Bindings = new() { W(), E(), new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "E > 0" } },
+                },
+                new FormulaDef
+                {
+                    Id = "f-gp", Name = "Depot gate", Text = "W + 1", Precondition = "E > 0", RefusalMessage = "The depot is empty", Outputs = Water(),
+                    Bindings = new() { W(), E() },
+                },
+                new FormulaDef
+                {
+                    Id = "f-gv", Name = "Own gate", Text = "W + if(W > 1000, B, 0)", Outputs = Water(),
+                    Bindings = new() { W(), new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "W > 1000" } },
+                },
+            }).ToList(),
+        });
+    }
+
+    [Fact]
+    public void GuardsOnHidden_FollowsHiddenVariablesAndHolderCalls()
+    {
+        var f = new FormulaDef
+        {
+            Id = "f", Name = "F", Text = "A + B + C + D", Precondition = "X > 0",
+            Bindings = new()
+            {
+                new VariableBinding { Variable = "A", Kind = BindingKind.Input, When = "H > 0" },
+                new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "A > 0" },   // through A's own guard
+                new VariableBinding { Variable = "C", Kind = BindingKind.Input, When = "holder(RedStore, Supply) > 0" },
+                new VariableBinding { Variable = "D", Kind = BindingKind.Input, When = "X > 0" },
+                new VariableBinding { Variable = "H", Kind = BindingKind.Holder, HolderId = "reddepot", Property = "supply" },
+                new VariableBinding { Variable = "X", Kind = BindingKind.Input },
+            },
+        };
+        Assert.Empty(FormulaMasking.GuardsOnHidden(f, new HashSet<string>()));
+        Assert.Equal(new[] { "A", "B" }, FormulaMasking.GuardsOnHidden(f, new HashSet<string> { "H" }).OrderBy(x => x));
+        Assert.Equal(new[] { "C" }, FormulaMasking.GuardsOnHidden(f, new HashSet<string> { FormulaMasking.HolderCallInput }));
+        Assert.Equal(new[] { "D", FormulaMasking.PreconditionGuard }.OrderBy(x => x, StringComparer.Ordinal),
+            FormulaMasking.GuardsOnHidden(f, new HashSet<string> { "X" }).OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Guest_WhenOverHiddenHolder_BoxTypeable_HostDecides()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddHiddenGuards(host);
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);   // asserts no verdict carries the Red secret
+
+        var m = Dialog(guest, "f-gw", PhaseFixture.BlueOne, check: false);
+        Assert.Contains("E", m.Hidden);
+        var before = m.Evaluate(guest.Game!.State);
+        var box = before.Boxes.Single(b => b.Variable == "B");
+        Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot know: the depot value is Red's
+        Assert.True(box.Enabled);
+        Assert.Equal(BoxBackground.Typed, box.Background);
+        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
+        Assert.Equal("", before.ResultText);
+        Assert.DoesNotContain(RedText, Shown(before));
+
+        // Without B the host (whose depot is not empty) waits for it; with B it applies.
+        var waiting = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.False(waiting.Applied);
+        Assert.Equal("Waiting for: B", waiting.Message);
+        m.SetBoxText("B", "5");
+        Assert.Equal("5", m.Evaluate(guest.Game!.State).Boxes.Single(b => b.Variable == "B").Text);
+        var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.True(applied.Applied, applied.Message);
+        Assert.Equal(15, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+
+    [Fact]
+    public async Task Guest_PreconditionOverHiddenHolder_NoLocalRefusal_HostDecides()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddHiddenGuards(host);
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);
+
+        var m = Dialog(guest, "f-gp", PhaseFixture.BlueOne, check: false);
+        var local = m.Evaluate(guest.Game!.State);
+        Assert.True(local.Trace.Refused);   // the guest's own run sees an empty depot
+        Assert.Equal(FormulaDialogModel.HostWaitText, local.Status);
+        Assert.DoesNotContain("The depot is empty", Shown(local));
+
+        var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.True(applied.Applied, applied.Message);
+        Assert.Equal(11, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+
+    [Fact]
+    public void Guest_WhenOverVisibleData_StillNotUsed()
+    {
+        var (host, _) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddHiddenGuards(host);
+        var guest = Guest(host);
+        var m = Dialog(guest, "f-gv", PhaseFixture.BlueOne, check: false);
+        Assert.True(m.HostCalculates);
+        var v = m.Evaluate(guest.Game!.State);
+        var box = v.Boxes.Single(b => b.Variable == "B");
+        Assert.Equal(FormulaDialogModel.NotUsedText, box.Text);
+        Assert.False(box.Enabled);
+    }
+
     [Fact]
     public void Solo_NoMasking()
     {

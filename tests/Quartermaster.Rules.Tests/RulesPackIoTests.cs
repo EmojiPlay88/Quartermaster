@@ -108,6 +108,41 @@ public class RulesPackIoTests : IDisposable
     }
 
     [Fact]
+    public void Pack_without_guards_keeps_hash()
+    {
+        var p = HookedPack();
+        // Pinned with the code before Precondition / RefusalMessage / When existed.
+        Assert.Equal("0b02149a4e0b3372417b625978000d7d2521b0483d4bbc55feb36d4dfbc27dc7", RulesPackIo.ComputeSha256(p));
+        var json = JsonSerializer.Serialize(p.Formulas[0] with { Bindings = new() { new VariableBinding { Variable = "x", Kind = BindingKind.Input } } }, RulesPackIo.JsonOptions);
+        Assert.DoesNotContain("precondition", json);
+        Assert.DoesNotContain("refusalMessage", json);
+        Assert.DoesNotContain("when", json);
+    }
+
+    [Fact]
+    public void Guards_round_trip()
+    {
+        var p = HookedPack();
+        p = p with { Formulas = new() { p.Formulas[0] with
+        {
+            Precondition = "Fuel > 0",
+            RefusalMessage = "No fuel",
+            Bindings = new() { new VariableBinding { Variable = "Fuel", Kind = BindingKind.Input, When = "1 = 1" } },
+        } } };
+        var path = Path.Combine(_dir, "guards.qrules");
+        RulesPackIo.Save(p, path);
+        var l = RulesPackIo.Load(path);
+        Assert.Equal("Fuel > 0", l.Formulas[0].Precondition);
+        Assert.Equal("No fuel", l.Formulas[0].RefusalMessage);
+        Assert.Equal("1 = 1", l.Formulas[0].Bindings[0].When);
+        Assert.Equal(RulesPackIo.ComputeSha256(p), RulesPackIo.ComputeSha256(l));
+        var json = JsonSerializer.Serialize(p.Formulas[0], RulesPackIo.JsonOptions);
+        Assert.Contains("\"precondition\"", json);
+        Assert.Contains("\"refusalMessage\"", json);
+        Assert.Contains("\"when\"", json);
+    }
+
+    [Fact]
     public void New_fields_round_trip()
     {
         var p = HookedPack();

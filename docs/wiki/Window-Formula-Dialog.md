@@ -25,6 +25,8 @@ The title names the formula and the counter, for example "Fuel for movement: NL 
 | **Physical dice** | Asks you for each die instead of rolling it |
 | Status line | "All inputs filled", or what is still wrong |
 
+A value whose **Only when** condition is false shows `not used` in a greyed box: it is not asked and does not count. A value whose condition depends on a box you have not filled yet stays blank and closed; the status line names the boxes still to fill (`Waiting for: Coast`), and says `Waiting for the other inputs` only when no box you can see is missing. When the formula's **Only runs when** condition is false, the run is refused: the status line shows the formula's refusal message (or `{formula name} cannot be run now`), no result is shown and **Apply to ledger** stays greyed out. A guest's run that is refused gets the same message from the host, unless the formula reads hidden values: then the guest sees `The formula could not be calculated.` On an online guest, an **Only when** or **Only runs when** condition that reads the other side's hidden data is decided by the host: the box stays open to type in, and the host asks for it or ignores it.
+
 Dice values have a small **↻** button that rolls that die again.
 
 What you type depends on the difficulty:

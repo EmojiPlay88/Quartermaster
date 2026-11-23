@@ -119,6 +119,60 @@ public sealed class FormulasTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void FormulasTab_precondition_commits_and_clears()
+    {
+        var s = Session(true, Attack(), Defend());
+        var tab = Tab(s);
+        Assert.Equal("", tab.Precondition.Text ?? "");
+        Assert.Equal("", tab.RefusalMessage.Text ?? "");
+
+        tab.Precondition.Text = "c > 0";
+        tab.RefusalMessage.Text = "Needs a charge";
+        Debounce(tab);
+        Assert.Equal("c > 0", F(s, "f-att").Precondition);
+        Assert.Equal("Needs a charge", F(s, "f-att").RefusalMessage);
+        Assert.Null(F(s, "f-def").Precondition);
+        Assert.Contains(F(s, "f-att").Bindings, b => b.Variable == "c");   // a variable only the guard reads gets a binding row
+        Assert.Equal(3, tab.Bindings.RowCount);
+
+        tab.SelectFormula("f-def");
+        Pump();
+        Assert.Equal("", tab.Precondition.Text ?? "");
+        tab.SelectFormula("f-att");
+        Pump();
+        Assert.Equal("c > 0", tab.Precondition.Text);
+        Assert.Equal("Needs a charge", tab.RefusalMessage.Text);
+
+        tab.Precondition.Text = "  ";
+        tab.RefusalMessage.Text = "";
+        Debounce(tab);
+        Assert.Null(F(s, "f-att").Precondition);   // blank: null, never ""
+        Assert.Null(F(s, "f-att").RefusalMessage);
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_binding_when_commits_and_clears()
+    {
+        var s = Session(true, Attack());
+        var tab = Tab(s);
+        tab.Bindings.BeginEdit(0, 5, "b > 1");
+        tab.Bindings.CommitEdit();
+        Pump();
+        Assert.Equal("b > 1", B(s, "f-att", "a").When);
+        Assert.Equal("b > 1", tab.Bindings.Cell(0, 5));
+
+        tab.Bindings.BeginEdit(0, 5, "z == 2");   // a variable only the condition reads gets a row
+        tab.Bindings.CommitEdit();
+        Pump();
+        Assert.Contains(F(s, "f-att").Bindings, b => b.Variable == "z");
+
+        tab.Bindings.BeginEdit(0, 5, "  ");
+        tab.Bindings.CommitEdit();
+        Pump();
+        Assert.Null(B(s, "f-att", "a").When);
+    }
+
+    [AvaloniaFact]
     public void Select_and_rename_formula()
     {
         var s = Session(true, Attack(), Defend());

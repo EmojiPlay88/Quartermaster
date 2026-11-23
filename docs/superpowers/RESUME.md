@@ -116,7 +116,17 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-23, phase hooks; read this first):**
+**CURRENT STATE (2026-11-23, formula guards; read this first):**
+
+- **Branch `formula-guards` (cut from master 32c7531), not pushed; all four tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-23-formula-guards-design.md`.
+  - **Rules:** `FormulaDef.Precondition` and `FormulaDef.RefusalMessage` (string?), `VariableBinding.When` (string?), all omitted when null; old packs load unchanged, SHA-256 unchanged, `CurrentFormat` stays 4. Validator: parse and unknown-variable checks; `Formula "{name}": the precondition cannot use the roll {variable}` / `... cannot use dice()` (transitive through Table rows, auto values and Whens). `FormulaVariables.Used` counts guard variables, so Sync keeps and adds binding rows for them.
+  - **Core:** a false precondition gives a refused trace (nothing rolled or written), message = RefusalMessage or `{formula name} cannot be run now`; while the precondition reads an unfilled input the text's dice are not rolled. A binding whose When is false is skipped (`not used`); reading it on the taken branch fails with `{variable} is not used here: its "Only when" condition is false`. A When that reads an unfilled input waits.
+  - **Render / Desktop dialog:** `not used` box (disabled, auto background); blank disabled box while waiting; status `Waiting for the other inputs`; refusal shown as status, Apply disabled. Host refuses guests with the message; hook runs log `{formula}: {unit}: {message}`; queued runs stay pending. Headless test `Guarded_formula_shows_waiting_not_used_and_refusal` checks the Avalonia window.
+  - **Workbench (Avalonia Formulas tab):** `Only runs when` and `Refusal message` fields (blank stored as null), `Only when` bindings column (a change re-syncs the binding rows; `SetKind` keeps When). The old WinForms Workbench is not edited.
+  - **Wiki:** Making-a-Rules-Pack (two new sections), Window-Rules-Workbench, Window-Formula-Dialog.
+  - **Tests:** see the task 4 report for the full-run numbers.
+
+**Previous CURRENT STATE (2026-11-23, phase hooks; history):**
 
 - **Branch `phase-hooks` (cut from master a9d0088), not pushed; all five tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-22-phase-hooks-design.md` (wishlist #35, #26, #40).
   - **End-of-phase entries (#35):** `PhaseDef.OnEnd : List<StartEntry>?` (null = none). Next Phase runs them (log tag `end`); if nothing was queued the same press advances (one undo step); if a run was queued the game stays and the notice is `Finish the end-of-phase runs, then press Next Phase again`; the next press advances without re-running. State: `GameState.EndedAt`, command `EndPhase`, cleared by `AdvancePhase`. Skipped phases run no OnEnd.

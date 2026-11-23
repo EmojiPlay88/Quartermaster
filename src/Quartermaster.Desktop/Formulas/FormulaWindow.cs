@@ -125,6 +125,7 @@ public sealed class FormulaWindow : Window
     internal string StatusText => _status.Text ?? "";
     internal string WorkingText => _working.Text ?? "";
     internal string? BoxText(string variable) => _view.BoxText(variable);
+    internal bool BoxEnabled(string variable) => _view.BoxEnabled(variable);
     internal bool BoxWrong(string variable) => _view.BoxWrong(variable);
     internal IReadOnlyList<Button> InlineRollButtons => _inline.Children.OfType<Button>().ToList();
     internal CheatSheetView? CheatSheet => _cheat;

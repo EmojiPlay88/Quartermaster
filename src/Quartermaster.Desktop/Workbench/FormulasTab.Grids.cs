@@ -26,6 +26,7 @@ public sealed partial class FormulasTab
             new EditColumn("Target", EditColumnKind.Combo, Weight: 100),
             new EditColumn("Details", Weight: 120),
             new EditColumn("Caption", Weight: 70),
+            new EditColumn("Only when", Weight: 90),
         ]);
         _bind.CellCommitted += (r, c, text) => Run(() => OnBindingCell(r, c, text));
         _removeUnused.Click += (_, _) => Run(() => { FlushPending(final: false); Commit(FormulaEdit.RemoveUnused); RebuildBindings(); });
@@ -76,7 +77,7 @@ public sealed partial class FormulasTab
         var unused = FormulaEdit.Unused(f).Select(b => b.Variable).ToHashSet(StringComparer.Ordinal);
         var rows = new List<IReadOnlyList<string>>();
         foreach (var b in f.Bindings)
-            rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? ""]);
+            rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? "", b.When ?? ""]);
         _bind.SetRows(rows);   // resets per-cell items, read-only state and hints: they go on afterwards
         for (var r = 0; r < f.Bindings.Count; r++)
         {
@@ -123,6 +124,17 @@ public sealed partial class FormulasTab
                 break;
             case 4:
                 Commit(x => FormulaEdit.SetCaption(x, v, text));
+                break;
+            case 5:
+                var when = string.IsNullOrWhiteSpace(text) ? null : text.Trim();   // blank is null, never ""
+                if (FormulaEdit.SyntaxProblem(when) is { } whenErr) { _err.Text = "Only when: " + whenErr; _goto.IsVisible = false; again = true; break; }
+                // The condition may read variables nothing else does: give them binding rows (Input) so they can be set up.
+                Commit(x =>
+                {
+                    var y = FormulaEdit.SetBinding(x, v, z => z with { When = when });
+                    return FormulaEdit.Analyze(y.Text).Error != null ? y : FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula;
+                });
+                again = true;
                 break;
         }
         if (again) Dispatcher.UIThread.Post(() => Run(RebuildBindings));   // not inside the grid's own commit

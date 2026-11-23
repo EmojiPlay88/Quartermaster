@@ -26,6 +26,9 @@ public sealed record VariableBinding
     /// <summary>Input only: asked in every difficulty; the AutoValue is never used to fill it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool AlwaysAsk { get; init; }
+    /// <summary>Expression: when it is false the binding is not resolved (a Roll is not rolled, an Input is not asked). Null = always used (the Workbench stores null, never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? When { get; init; }
 }
 
 public sealed record FormulaOutput
@@ -51,4 +54,10 @@ public sealed record FormulaDef
     /// <summary>Phase ids the formula may be run in by a player (menu, formula dialog, host intent); hook runs (OnStart / OnMove / OnEnd) ignore it. Null = any phase (the Workbench stores null, never an empty list).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? Phases { get; init; }
+    /// <summary>Expression that must be true for the formula to run; false refuses the run. May not read a Roll binding or call dice(). Null = no guard (the Workbench stores null, never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Precondition { get; init; }
+    /// <summary>Text shown when the precondition refuses a run. Null = "{formula name} cannot be run now".</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RefusalMessage { get; init; }
 }

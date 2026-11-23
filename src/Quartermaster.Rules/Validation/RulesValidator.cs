@@ -457,13 +457,41 @@ public static class RulesValidator
             }
         }
 
-        if (ast is not null)
-            foreach (var v in Parser.Variables(ast))
-                if (!bindingNames.Contains(v)) Err($"variable \"{v}\" has no binding");
+        var noBinding = Once(Err);   // one message per name, however many expressions use it
+        void CheckBound(AstExpr e)
+        {
+            foreach (var v in Parser.Variables(e))
+                if (!bindingNames.Contains(v)) noBinding($"variable \"{v}\" has no binding");
+        }
+        // Guards: parsed and checked like the text (lookups, unknown variables); blank means none.
+        AstExpr? ParseGuard(string? src, string what)
+        {
+            if (string.IsNullOrWhiteSpace(src)) return null;
+            if (ParseProblem(src!) is { } ge) { Err($"{what} {ge}"); return null; }
+            var g = Parser.Parse(src!);
+            CheckLookups(g, pack, Once(Err));
+            CheckBound(g);
+            return g;
+        }
+        var pre = ParseGuard(f.Precondition, "precondition");
+        foreach (var b in f.Bindings) ParseGuard(b.When, $"variable \"{b.Variable}\" only-when");
+        if (pre is not null)
+        {
+            // Everything the precondition reaches is resolved before it runs, so none of it may roll.
+            var reached = FormulaVariables.Reach(f, Parser.Variables(pre));
+            foreach (var v in reached)
+                if (f.Bindings.Any(b => b.Variable == v && b.Kind == BindingKind.Roll))
+                    Err($"the precondition cannot use the roll {v}");
+            var reachedSources = new[] { f.Precondition! }.Concat(f.Bindings.Where(b => reached.Contains(b.Variable)).SelectMany(FormulaVariables.Sources));
+            if (reachedSources.Any(src => ParseProblem(src) is null && ExprFacts.CallsFunction(Parser.Parse(src), "dice")))
+                Err("the precondition cannot use dice()");
+        }
+
+        if (ast is not null) CheckBound(ast);
         // Variables used only inside table row/column expressions or auto values also need bindings.
         var used = new HashSet<string>(FormulaVariables.Used(f), StringComparer.Ordinal);
         foreach (var extra in used.Where(u => ast is null || !Parser.Variables(ast).Contains(u)))
-            if (!bindingNames.Contains(extra)) Err($"variable \"{extra}\" has no binding");
+            if (!bindingNames.Contains(extra)) noBinding($"variable \"{extra}\" has no binding");
         foreach (var b in f.Bindings)
             if (!used.Contains(b.Variable)) Warn($"variable \"{b.Variable}\" is bound but not used in the formula");
 

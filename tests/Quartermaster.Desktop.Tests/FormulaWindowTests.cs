@@ -97,6 +97,15 @@ public sealed class FormulaWindowTests : IDisposable
                 },
                 new FormulaDef
                 {
+                    Id = "f-guard", Name = "Guarded add", Text = "if(N > 5, N + X, N)", Precondition = "N > 0", RefusalMessage = "Needs a positive N",
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "N", Kind = BindingKind.Input },
+                        new VariableBinding { Variable = "X", Kind = BindingKind.Input, When = "N > 5" },
+                    },
+                },
+                new FormulaDef
+                {
                     Id = "f-mix", Name = "Mixed supply", Text = "W + S",
                     Bindings = new()
                     {
@@ -218,6 +227,21 @@ public sealed class FormulaWindowTests : IDisposable
         Assert.Equal("All inputs filled", win.StatusText);
         Assert.Contains("15", win.WorkingText);
         Assert.True(ButtonOf(win, "&Apply to ledger").IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Guarded_formula_shows_waiting_not_used_and_refusal()
+    {
+        var w = Game(Difficulty.FullyAuto);
+        var win = Open(w, "f-guard", PhaseFixture.RedOne);
+        Assert.False(win.BoxEnabled("X"));   // waiting for N: blank and closed
+        Assert.Equal("", win.BoxText("X"));
+        TypeAndWait(win, "N", "3", () => win.BoxText("X") == "not used");   // condition false: skipped
+        Assert.False(win.BoxEnabled("X"));
+        TypeAndWait(win, "N", "7", () => win.BoxEnabled("X"));              // condition true: asked
+        Assert.Equal("", win.BoxText("X"));
+        TypeAndWait(win, "N", "0", () => win.StatusText == "Needs a positive N");   // precondition false: refused
+        Assert.False(ButtonOf(win, "&Apply to ledger").IsEnabled);
     }
 
     [AvaloniaFact]

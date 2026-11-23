@@ -180,6 +180,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <summary>Shown after the caption of an input that always asks (<see cref="VariableBinding.AlwaysAsk"/>).</summary>
     public const string AlwaysAskedSuffix = " (always asked)";
 
+    /// <summary>The box of a binding whose "Only when" condition is false.</summary>
+    public const string NotUsedText = "not used";
+
+    /// <summary>A binding that is neither filled, missing nor skipped: its "Only when" condition (or the precondition) is not decided yet.</summary>
+    private static bool IsUndecided(VariableState v) => v.Waiting;
+
     /// <summary>
     /// Which ledger outputs the viewer may see (set by <see cref="FormulaMasking.Configure"/>); null = all (solo). Only those decide the
     /// "(negative)" mark: another side's value going negative is not shown.
@@ -258,7 +264,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     public DialogView View(FormulaTrace t)
     {
         var vars = t.Variables;
-        var boxes = vars.Select(v => Box(v, t)).ToList();
+        // An online guest cannot decide a guard over data it does not have: such a box stays open and the host decides (spec 8a.2).
+        var hostGuards = HostCalculates && _hidden.Count > 0 ? FormulaMasking.GuardsOnHidden(formula, _hidden) : NoHostGuards;
+        var boxes = vars.Select(v => Box(v, t, hostGuards)).ToList();
         var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || HostRolled(kv.Key, t)))
             .Select(kv => new InlineRollView(kv.Key, DiceText(kv.Value))).ToList();
         // A guest's local run rolls its own dice; until the host's are in, no result built on them is shown.
@@ -273,29 +281,43 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             missing = vars.Select(v => v.Variable).Where(n => missing.Contains(n) || empty.Contains(n)).ToList();
             // A wrong formula must never reach the ledger: every manual box needs an engine value to be checked against.
             var verifiable = _lastExpected is { Error: null } exp
-                && vars.All(v => !IsCheckedBox(v.Variable) || exp.Variables.FirstOrDefault(e => e.Variable == v.Variable)?.Value != null);
+                && vars.All(v => !IsCheckedBox(v.Variable) || v.Skipped || exp.Variables.FirstOrDefault(e => e.Variable == v.Variable)?.Value != null);
             canApply = canApply && wrong.Count == 0 && missing.Count == 0 && verifiable;
         }
-        var negative = t.Error == null && t.Outputs.Any(o => o.After < 0 && (OutputVisible == null || OutputVisible(o.Key)));
+        // The local run decided (or could not decide) a guard over hidden data on this guest's defaults: its refusal, error, waiting
+        // state and result are guesses, so none is shown; the host decides.
+        var hostDecides = (hostGuards.Contains(FormulaMasking.PreconditionGuard) && (t.Refused || vars.Any(IsUndecided)))
+            || vars.Any(v => (v.Skipped || IsUndecided(v)) && hostGuards.Contains(v.Variable));
+        if (hostDecides) canApply = false;
+        var negative = !hostDecides && t.Error == null && t.Outputs.Any(o => o.After < 0 && (OutputVisible == null || OutputVisible(o.Key)));
         var status = wrong.Count > 0 ? "Doesn't match: " + string.Join(", ", wrong)
+            : hostDecides ? (missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing) : HostWaitText)
             : t.Error != null ? (masked ? FormulaMasking.ErrorHiddenText : t.Error)
             : missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing)
             : masked && t.Result == null ? (HostCalculates ? HostWaitText : HiddenWaitText)
+            : t.Result == null && vars.Any(IsUndecided) ? "Waiting for the other inputs"
             : "All inputs filled";
         if (_phaseReason != null) status = _phaseReason;
         else if (_verdictMessage != null) status = _verdictMessage;
         // The working line shows every input's value: with a hidden input it is replaced (the logged working is redacted by PlayerView).
         var working = masked ? (t.Result != null ? FormulaMasking.WorkingHiddenText : "") : t.Working;
         var result = t.Result?.Display() ?? "";
-        if (localDice) { working = ""; result = ""; negative = false; }
+        if (localDice || hostDecides) { working = ""; result = ""; negative = false; }
         return new DialogView(boxes, inline, result, working + (negative ? " (negative)" : ""), negative, status,
             canApply, t);
     }
 
-    private BoxView Box(VariableState v, FormulaTrace t)
+    private static readonly IReadOnlySet<string> NoHostGuards = new HashSet<string>();
+
+    private BoxView Box(VariableState v, FormulaTrace t, IReadOnlySet<string> hostGuards)
     {
         var binding = Binding(v.Variable);
         if (IsHidden(v.Variable)) return new BoxView(v.Variable, HiddenBoxText, BoxBackground.Auto, "", false, null, null);
+        // A guarded variable is not asked: "not used" once its condition is false, blank and closed while the condition is undecided.
+        // On an online guest a guard over hidden data is the host's to decide: the box stays as it would be without the guard.
+        var hostGuard = hostGuards.Contains(v.Variable);
+        if (v.Skipped && !hostGuard) return new BoxView(v.Variable, NotUsedText, BoxBackground.Auto, "", false, null, null);
+        if (IsUndecided(v) && !hostGuard && !IsCheckedBox(v.Variable)) return new BoxView(v.Variable, "", BoxBackground.Auto, "", false, null, null);
         if (IsCheckedBox(v.Variable)) return CheckedBox(v);
         var typedBox = binding?.Kind == BindingKind.Input || IsPhysicalRoll(v.Variable);
         var choices = binding?.Kind == BindingKind.Input ? KeyChoices.For(runner.Pack, formula, v.Variable) : null;
