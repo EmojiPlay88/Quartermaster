@@ -313,6 +313,29 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
+    public void HotSeat_HolderCallInOutputExpression_MasksLikeTheText()
+    {
+        var (s, c) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddHolderCalls(s);
+        s.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Select(f => f.Id != "f-hcall" ? f : f with
+            {
+                Text = "W",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set, Expr = "W + holder(RedStore, Supply)" } },
+            }).ToList(),
+        });
+        s.SetViewSides(Blue);
+        var m = Dialog(s, "f-hcall", PhaseFixture.BlueOne, check: false);
+        Assert.Equal(new[] { FormulaMasking.HolderCallInput }, m.Hidden.ToArray());
+        var v = m.Evaluate(s.Game!.State);
+        Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
+        Assert.DoesNotContain(RedText, Shown(v));
+        s.SetViewSides(Red);
+        Assert.Empty(FormulaMasking.HiddenFor(s, s.Rules!.ById<FormulaDef>("f-hcall")!, PhaseFixture.RedOne));
+    }
+
+    [Fact]
     public async Task Guest_HolderCallInText_HostIntentMasksErrorAndWorking()
     {
         var (host, hc) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });

@@ -357,6 +357,18 @@ has(Readiness) and Readiness >= 3
 
 True for units that have Readiness 3 or more.
 
+## Outputs
+
+A formula's **Outputs** say what its result changes. Two optional columns in the outputs grid change what each output does.
+
+**A value per output.** Normally every output gets the formula's result. Type an expression in **Value** and that output gets its own value instead, worked out in the same run (the same dice, inputs and bindings as the text). The formula's result is not a variable there. A blank **Value** means the formula's result. The working line shows each output's own value, such as `Fuel 140 - 12 = 128; Ammo 30 - 6 = 24`. If the value is not a number the run stops with `The value for Fuel is not a number`.
+
+An invented example: a convoy loses supplies to one roll of `Loss` (a Roll of `1d6`). The text is `Loss`, the Fuel output keeps a blank Value, the Ammo output has Value `Loss * 2` and the Rations output has Value `max(Loss - 1, 0)`. One roll then takes from three supplies, and no scratch property is needed.
+
+**A property picked at run time.** In **Choose from**, list properties separated by commas (for example `Fuel, Ammo, Rations`) and give **Pick by** an expression. A number picks the Nth property in the list (1 is the first); text picks the property with that name (capitals and spaces at the ends do not matter). Anything else stops the run with `Medicine is not one of the output's properties`. With a list but no **Pick by**, the Workbench reports `Formula "Raid": output 1 has a property list but no "Pick by"`. An empty list means the output's own **Property** is used. If you delete a property from the pack, it is removed from every list.
+
+For example, an Input `Slot` of `1..3` and Pick by `Slot` lets the player choose which of Fuel, Ammo or Rations the output changes, with one formula instead of three. Values and the picked property are all worked out before anything is written, so a run that fails changes nothing.
+
 ## Common errors
 
 The Workbench shows these in the Problems list and next to the box you are typing in. The Ledger shows a filter error in a banner above the table. Errors found while a formula runs appear in the Formula dialog.
@@ -434,3 +446,6 @@ These come from the bindings and outputs rather than the formula text.
 | shows once (its condition never reads the unit), so {unit} is left out | A note: a game-level warning or alert names `{unit}` in its message. | Remove `{unit}`, or add a unit read such as `and name() != ""` to list each unit. |
 | Side "North": unit filter may not use side() | The Workbench: a side's unit filter uses `side()`. | Remove it. |
 | The result is not a number, so it cannot change Fuel | An output writes into a property, but the formula gave text or true/false. | Make the formula give a number. |
+| The value for Ammo is not a number | An output's **Value** gave text or true/false. | Make the expression give a number. |
+| Medicine is not one of the output's properties | **Pick by** gave a number outside the list or a name that is not in **Choose from**. | Check the expression against the list. |
+| output 1 has a property list but no "Pick by" | The Workbench: **Choose from** is filled in but **Pick by** is empty. | Fill in **Pick by**, or clear **Choose from**. |

@@ -182,6 +182,52 @@ public sealed class FormulasTabTests : IDisposable
         Assert.Null(B(s, "f-sq", "R").DiceCountExpr);   // blank is null, never ""
     }
 
+    static void Type(EditGrid g, int row, int col, string text) { g.BeginEdit(row, col, text); g.CommitEdit(); Pump(); }
+
+    static FormulaDef OneOutput() => Attack() with { Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "p-str", Op = OutputOp.Subtract } } };
+
+    [AvaloniaFact]
+    public void FormulasTab_output_value_commits_and_clears()
+    {
+        var s = Session(true, OneOutput());
+        var tab = Tab(s);
+        Type(tab.Outputs, 0, 4, " a * 2 ");
+        Assert.Equal("a * 2", F(s, "f-att").Outputs[0].Expr);
+        Assert.Equal("a * 2", tab.Outputs.Cell(0, 4));
+
+        Type(tab.Outputs, 0, 4, "a *");   // syntax error: rejected, old value kept
+        Assert.Equal("a * 2", F(s, "f-att").Outputs[0].Expr);
+
+        Type(tab.Outputs, 0, 4, "z + 1");   // a variable only the output reads gets a row
+        Assert.Contains(F(s, "f-att").Bindings, b => b.Variable == "z");
+
+        Type(tab.Outputs, 0, 4, "  ");
+        Assert.Null(F(s, "f-att").Outputs[0].Expr);   // blank is null, never ""
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_output_choice_commits_and_clears()
+    {
+        var s = Session(true, OneOutput());
+        var tab = Tab(s);
+        Type(tab.Outputs, 0, 5, "Strength, Moves");
+        Assert.Equal(new[] { "p-str", "p-mov" }, F(s, "f-att").Outputs[0].PropertyChoice);
+        Assert.Equal("Strength, Moves", tab.Outputs.Cell(0, 5));
+
+        Type(tab.Outputs, 0, 6, "a");
+        Assert.Equal("a", F(s, "f-att").Outputs[0].PropertySelect);
+        Type(tab.Outputs, 0, 6, "a +");   // syntax error: rejected
+        Assert.Equal("a", F(s, "f-att").Outputs[0].PropertySelect);
+
+        Type(tab.Outputs, 0, 5, "Strength, Nope");   // an unknown property: rejected, old list kept
+        Assert.Equal(new[] { "p-str", "p-mov" }, F(s, "f-att").Outputs[0].PropertyChoice);
+
+        Type(tab.Outputs, 0, 5, "");
+        Assert.Null(F(s, "f-att").Outputs[0].PropertyChoice);   // empty is null, never []
+        Type(tab.Outputs, 0, 6, " ");
+        Assert.Null(F(s, "f-att").Outputs[0].PropertySelect);
+    }
+
     [AvaloniaFact]
     public void FormulasTab_dice_count_is_closed_for_a_non_roll()
     {

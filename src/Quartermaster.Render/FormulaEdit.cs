@@ -396,10 +396,42 @@ public static class FormulaEdit
     public static FormulaOutput WithOutputTarget(FormulaOutput o, OutputTarget t) =>
         o with { Target = t, HolderId = t == OutputTarget.Holder ? o.HolderId : null };
 
+    /// <summary>Sets the output's value expression; blank is null (the formula's result), never "".</summary>
+    public static FormulaDef SetOutputValue(FormulaDef f, int index, string? expr) =>
+        SetOutput(f, index, o => o with { Expr = string.IsNullOrWhiteSpace(expr) ? null : expr.Trim() });
+
+    /// <summary>Sets the output's property list; an empty list is null (the fixed Property is used), never [].</summary>
+    public static FormulaDef SetOutputChoice(FormulaDef f, int index, IReadOnlyList<string>? propertyIds) =>
+        SetOutput(f, index, o => o with { PropertyChoice = propertyIds is { Count: > 0 } ? propertyIds.ToList() : null });
+
+    /// <summary>Sets the output's "Pick by" expression; blank is null.</summary>
+    public static FormulaDef SetOutputPick(FormulaDef f, int index, string? expr) =>
+        SetOutput(f, index, o => o with { PropertySelect = string.IsNullOrWhiteSpace(expr) ? null : expr.Trim() });
+
+    /// <summary>The pack without <paramref name="propertyId"/> in any output's property list; an emptied list becomes null. The same pack when nothing lists it.</summary>
+    public static RulesPack WithoutPropertyChoice(RulesPack pack, string propertyId)
+    {
+        if (!pack.Formulas.Any(f => f.Outputs.Any(o => o.PropertyChoice?.Contains(propertyId) == true))) return pack;
+        return pack with
+        {
+            Formulas = pack.Formulas.Select(f => f.Outputs.Any(o => o.PropertyChoice?.Contains(propertyId) == true)
+                ? f with
+                {
+                    Outputs = f.Outputs.Select(o =>
+                    {
+                        if (o.PropertyChoice?.Contains(propertyId) != true) return o;
+                        var rest = o.PropertyChoice.Where(x => x != propertyId).ToList();
+                        return o with { PropertyChoice = rest.Count > 0 ? rest : null };
+                    }).ToList(),
+                }
+                : f).ToList(),
+        };
+    }
+
     // ---------- usage ----------
 
     public static IReadOnlyList<FormulaDef> FormulasUsingProperty(RulesPack pack, string propertyId) =>
-        pack.Formulas.Where(f => f.Bindings.Any(b => b.Property == propertyId) || f.Outputs.Any(o => o.Property == propertyId)).ToList();
+        pack.Formulas.Where(f => f.Bindings.Any(b => b.Property == propertyId) || f.Outputs.Any(o => o.Property == propertyId || o.PropertyChoice?.Contains(propertyId) == true)).ToList();
 
     public static IReadOnlyList<FormulaDef> FormulasUsingHolder(RulesPack pack, string holderId) =>
         pack.Formulas.Where(f => f.Bindings.Any(b => b.HolderId == holderId) || f.Outputs.Any(o => o.HolderId == holderId)).ToList();

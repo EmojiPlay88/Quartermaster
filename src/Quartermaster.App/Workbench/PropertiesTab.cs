@@ -307,7 +307,7 @@ sealed class PropertiesTab : UserControl
         var prop = pack.ById<PropertyDef>(_propIds[c.RowIndex]);
         if (prop == null) return;
         if (!Confirm("property", prop.Name, FormulaEdit.FormulasUsingProperty(pack, prop.Id))) return;
-        Commit(p => p with { Properties = p.Properties.Where(x => x.Id != prop.Id).ToList() });
+        Commit(p => FormulaEdit.WithoutPropertyChoice(p, prop.Id) with { Properties = p.Properties.Where(x => x.Id != prop.Id).ToList() });
         Rebuild();
     }
 

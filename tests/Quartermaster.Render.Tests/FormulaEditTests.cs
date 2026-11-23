@@ -269,6 +269,61 @@ public class FormulaEditTests
     }
 
     [Fact]
+    public void Formulas_using_property_finds_choice()
+    {
+        var pack = Pack() with
+        {
+            Formulas = new()
+            {
+                new FormulaDef { Id = "z", Name = "Z", Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, PropertyChoice = new() { "p1", "p2" }, PropertySelect = "1" } } },
+            },
+        };
+        Assert.Equal(new[] { "Z" }, FormulaEdit.FormulasUsingProperty(pack, "p2").Select(f => f.Name));
+        Assert.Empty(FormulaEdit.FormulasUsingProperty(pack, "p3"));
+    }
+
+    [Fact]
+    public void Property_delete_cleans_choice_lists()
+    {
+        var pack = Pack() with
+        {
+            Formulas = new()
+            {
+                new FormulaDef { Id = "z", Name = "Z", Outputs = new()
+                {
+                    new FormulaOutput { Target = OutputTarget.Unit, PropertyChoice = new() { "p1", "p2" }, PropertySelect = "1" },
+                    new FormulaOutput { Target = OutputTarget.Unit, PropertyChoice = new() { "p2" }, PropertySelect = "1" },
+                    new FormulaOutput { Target = OutputTarget.Unit, Property = "p1" },
+                } },
+            },
+        };
+        var after = FormulaEdit.WithoutPropertyChoice(pack, "p2");
+        var o = after.Formulas[0].Outputs;
+        Assert.Equal(new[] { "p1" }, o[0].PropertyChoice);
+        Assert.Null(o[1].PropertyChoice);   // an emptied list is null, never []
+        Assert.Equal("p1", o[2].Property);
+        Assert.Same(pack, FormulaEdit.WithoutPropertyChoice(pack, "p9"));   // nothing to clean: unchanged
+    }
+
+    [Fact]
+    public void Output_value_and_choice_edits_normalise_blanks()
+    {
+        var f = FormulaEdit.AddOutput(F("A"));
+        f = FormulaEdit.SetOutputValue(f, 0, " R * 2 ");
+        Assert.Equal("R * 2", f.Outputs[0].Expr);
+        f = FormulaEdit.SetOutputValue(f, 0, "  ");
+        Assert.Null(f.Outputs[0].Expr);
+        f = FormulaEdit.SetOutputChoice(f, 0, new List<string> { "p1" });
+        Assert.Equal(new[] { "p1" }, f.Outputs[0].PropertyChoice);
+        f = FormulaEdit.SetOutputChoice(f, 0, new List<string>());
+        Assert.Null(f.Outputs[0].PropertyChoice);
+        f = FormulaEdit.SetOutputPick(f, 0, " Slot ");
+        Assert.Equal("Slot", f.Outputs[0].PropertySelect);
+        f = FormulaEdit.SetOutputPick(f, 0, "");
+        Assert.Null(f.Outputs[0].PropertySelect);
+    }
+
+    [Fact]
     public void SyntaxProblem_checks_filter_expressions()
     {
         Assert.Null(FormulaEdit.SyntaxProblem(""));
