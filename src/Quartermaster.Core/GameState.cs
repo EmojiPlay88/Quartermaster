@@ -50,6 +50,10 @@ public sealed class GameState
     public TurnState Turn { get; set; } = new(1, null);
     /// <summary>Null = before turn 1.</summary>
     public PhasePosition? Position { get; set; }
+    /// <summary>The position whose end-of-phase entries have run this pass (set by <see cref="EndPhase"/>, cleared by
+    /// <see cref="AdvancePhase"/>); null when they have not.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PhasePosition? EndedAt { get; set; }
     public Difficulty Difficulty { get; set; } = Difficulty.SemiAuto;
     public List<int> Ticked { get; set; } = new();
     public List<int> Acknowledged { get; set; } = new();
@@ -127,6 +131,9 @@ public sealed class GameState
                 Log.Add(LogBuilder.Turn(this, st));
                 break;
             case AdvancePhase ap: DoAdvance(ap); break;
+            case EndPhase ep:
+                if (ep.At != null) EndedAt = ep.At;
+                break;
             case SetPlayers sp:
                 Players = Core.Players.Clean(sp.Players);
                 Log.Add(LogBuilder.Line(this, LogKind.System, LogBuilder.PlayersText(Players), sp.Who, sp.At));
@@ -199,6 +206,7 @@ public sealed class GameState
         skipped.AddRange((a.Skipped ?? Array.Empty<SkippedPhase>()).Where(k => k != null && k.Turn == a.To.Turn));
         SkippedPhases = skipped.Count == 0 ? null : skipped;
         Position = a.To;
+        EndedAt = null;
         Turn = new TurnState(a.To.Turn, a.ToName);
         Ticked = new(); Acknowledged = new(); Pending = new();
         foreach (var k in a.Skipped ?? Array.Empty<SkippedPhase>())

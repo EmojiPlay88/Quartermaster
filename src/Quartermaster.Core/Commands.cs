@@ -26,6 +26,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(AddLogLine), "addLogLine")]
 [JsonDerivedType(typeof(SteppedBack), "steppedBack")]
 [JsonDerivedType(typeof(HideAlert), "hideAlert")]
+[JsonDerivedType(typeof(EndPhase), "endPhase")]
 public abstract record GameCommand;
 
 public sealed record AddPiece(string PieceId, string TypeString, string StateString, string MapId, PointD Pos, string? StackOnto, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
@@ -69,3 +70,7 @@ public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone,
 /// name at the time, used only for the log line (the id is logged when it is missing).
 /// </summary>
 public sealed record HideAlert(string AlertId, DateTimeOffset? At = null, string? Who = null, string? Name = null) : GameCommand;
+
+/// <summary>Marks the phase at <paramref name="At"/> as having run its end-of-phase entries this pass (<see cref="GameState.EndedAt"/>), so the
+/// next Next Phase press advances without re-running them. Logs nothing; <see cref="AdvancePhase"/> clears it.</summary>
+public sealed record EndPhase(PhasePosition At) : GameCommand;
