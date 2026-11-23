@@ -72,6 +72,7 @@ public static class RulesValidator
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
                     else if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]) found.AddRange(HolderCallProblems(hn.Name, hp.Name, pack));
+                    else if (ExprFacts.IsAggregate(c.Function)) found.AddRange(AggregateProblems(c, pack));
                     else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
@@ -85,6 +86,19 @@ public static class RulesValidator
         var prop = pack.PropertyByName(property);
         if (prop is null) yield return UnknownPropertyTail(property);
         else if (prop.Scope == PropertyScope.Pieces) yield return $"refers to \"{prop.Name}\", which is not a holder property";
+    }
+
+    /// <summary>
+    /// Problems in a piece-sum call, as message tails: a property that does not exist, a filter that does not parse (the same parse the unit filters get),
+    /// a filter that names an unknown property or table. The filter is a separate expression run per piece, so its names are not the formula's variables.
+    /// </summary>
+    private static IEnumerable<string> AggregateProblems(Call c, RulesPack pack)
+    {
+        var (property, filter) = ExprFacts.AggregateArgs(c);
+        if (property is not null && pack.PropertyByName(property) is null) yield return $"{c.Function}() names unknown property \"{property}\"";
+        if (string.IsNullOrWhiteSpace(filter)) yield break;
+        if (ParseProblem(filter) is { } pe) yield return $"the filter of {c.Function}() does not parse: {pe}";
+        else foreach (var u in FilterRefProblems(filter, pack)) yield return $"the filter of {c.Function}() {u}";
     }
 
     private static string UnknownPropertyTail(string name) => $"refers to unknown property \"{name}\"";
@@ -198,7 +212,7 @@ public static class RulesValidator
         catch (ParseError) { return false; }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder" };
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder", "hexsum", "hexcount", "hexmax", "hexmin" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -215,10 +229,12 @@ public static class RulesValidator
         var forbidden = new List<string>();
         bool dynamic = false;   // reads something that can change: turn(), stage() or a table
         var unknownTables = new List<string>();
+        var aggregateProblems = new List<string>();
         Walk(ast);
 
         foreach (var fn in forbidden.Distinct()) Err($"{who}: condition may not use {fn}()");
         foreach (var t in unknownTables.Distinct(StringComparer.Ordinal)) Err($"{who}: condition refers to unknown table \"{t}\"");
+        foreach (var m in aggregateProblems.Distinct(StringComparer.Ordinal)) Err($"{who}: condition {m}");
         foreach (var v in vars.Distinct(StringComparer.Ordinal))
         {
             var p = pack.PropertyByName(v);
@@ -246,7 +262,8 @@ public static class RulesValidator
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
                     if (ForbiddenConditionFunctions.Contains(c.Function)) forbidden.Add(c.Function);
-                    if (c.Function is "turn" or "stage" or "lookup" or "lookuprange") dynamic = true;
+                    if (c.Function is "turn" or "stage" or "lookup" or "lookuprange" || ExprFacts.IsAggregate(c.Function)) dynamic = true;
+                    if (ExprFacts.IsAggregate(c.Function)) { aggregateProblems.AddRange(AggregateProblems(c, pack)); break; }
                     if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
                     {
                         if (pack.TableByName(tv.Name) is null) unknownTables.Add(tv.Name);
@@ -536,6 +553,11 @@ public static class RulesValidator
                     err($"count() needs a roll binding, not {rv.Name}");
                 if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp])
                     foreach (var u in HolderCallProblems(hn.Name, hp.Name, pack)) err(u);
+                if (ExprFacts.IsAggregate(c.Function))
+                {
+                    foreach (var u in AggregateProblems(c, pack)) err(u);
+                    break;
+                }
                 foreach (var a in c.Args) CheckLookups(a, pack, err, f);
                 break;
         }

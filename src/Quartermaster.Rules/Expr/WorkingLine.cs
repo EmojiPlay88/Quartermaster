@@ -63,6 +63,15 @@ public static class WorkingLine
                 }
                 sb.Append(')');
                 break;
+            case Call c when ExprFacts.IsAggregate(c.Function):
+                sb.Append(c.Function).Append('(');
+                for (int i = 0; i < c.Args.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(c.Args[i] is VarRef pn ? pn.Name : "\"" + ((TextLit)c.Args[i]).Value + "\"");
+                }
+                sb.Append(')');
+                break;
             case Call c when c.Function == "holder":
                 sb.Append("holder(").Append(((VarRef)c.Args[0]).Name).Append(", ").Append(((VarRef)c.Args[1]).Name).Append(')');
                 break;

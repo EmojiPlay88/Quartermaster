@@ -153,6 +153,9 @@ public static class FormulaLayout
                     SubRows.Add(new SubRow(label, sub.Done()));
                     break;
                 }
+                case Call c when ExprFacts.IsAggregate(c.Function):
+                    em.Text(c.Function + "(" + string.Join(", ", c.Args.Select(a => a is VarRef pn ? pn.Name : "\"" + ((TextLit)a).Value + "\"")) + ")");
+                    break;
                 case Call c when c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]:
                     em.Text("holder(" + hn.Name + ", " + hp.Name + ")");
                     break;

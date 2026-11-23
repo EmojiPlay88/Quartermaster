@@ -35,6 +35,11 @@ public interface IEvalContext
     Value MapName() => throw new EvalError("map() is not available here");
     /// <summary>A holder's property value, addressed by holder name and property name.</summary>
     Value HolderValue(string holder, string property) => throw new EvalError("holder() is not available here");
+    /// <summary>
+    /// A piece-sum: <paramref name="fn"/> is sum, countof, maxof, minof or a hex* one (lower-case); <paramref name="property"/> is the bare property name
+    /// (null for countof and hexcount); <paramref name="filter"/> is the unit-filter text (null when a hex* call omits it; "" means every piece).
+    /// </summary>
+    Value Aggregate(string fn, string? property, string? filter) => throw new EvalError($"{fn}() is not available here");
 }
 
 public static class Evaluator
@@ -165,6 +170,7 @@ public static class Evaluator
         "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup", "lookuprange", "count",
         "dice", "has", "startswith", "contains", "name", "marker", "turn", "stage", "mod",
         "side", "phaseside", "map", "holder",
+        "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin",
     };
 
     /// <summary>Every binary and unary operator the formula language accepts ('-' is both binary and unary).</summary>
@@ -264,6 +270,19 @@ public static class Evaluator
                 double x = NumArg(a[0], ctx, "mod"), y = NumArg(a[1], ctx, "mod");
                 if (y == 0) throw new EvalError("mod: division by zero", c);
                 return Num(x - y * Math.Floor(x / y), c);
+            }
+            case "sum":
+            case "countof":
+            case "maxof":
+            case "minof":
+            case "hexsum":
+            case "hexcount":
+            case "hexmax":
+            case "hexmin":
+            {
+                var (property, filter) = ExprFacts.AggregateArgs(c);
+                if (c.Function is not ("countof" or "hexcount") && property is null) throw new EvalError($"{c.Function} needs a property name", c);
+                return ctx.Aggregate(c.Function, property, filter);
             }
             case "marker": return ctx.Marker(TextArg(a[0], ctx, "marker"));
             default: throw new EvalError($"Unknown function '{c.Function}'", c);

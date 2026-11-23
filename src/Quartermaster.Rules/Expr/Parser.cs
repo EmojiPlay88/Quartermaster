@@ -33,6 +33,14 @@ public static class Parser
         ["phaseside"] = (0, 0),
         ["map"] = (0, 0),
         ["holder"] = (2, 2),
+        ["sum"] = (2, 2),
+        ["countof"] = (1, 1),
+        ["maxof"] = (2, 2),
+        ["minof"] = (2, 2),
+        ["hexsum"] = (1, 2),
+        ["hexcount"] = (0, 1),
+        ["hexmax"] = (1, 2),
+        ["hexmin"] = (1, 2),
     };
 
     public static Expr Parse(string text)
@@ -47,7 +55,7 @@ public static class Parser
         return e;
     }
 
-    /// <summary>Distinct variable names in first-occurrence order, excluding the table-name argument of lookup and lookuprange and holder's two name arguments.</summary>
+    /// <summary>Distinct variable names in first-occurrence order, excluding the table-name argument of lookup and lookuprange and holder's two name arguments and every argument of the aggregates (a property name and a filter text, which is evaluated per piece).</summary>
     public static IReadOnlyList<string> Variables(Expr e)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -70,6 +78,7 @@ public static class Parser
                     Walk(b.Right);
                     break;
                 case Call c:
+                    if (ExprFacts.IsAggregate(c.Function)) break;
                     for (int i = c.Function is "lookup" or "lookuprange" ? 1 : c.Function == "holder" ? 2 : 0; i < c.Args.Count; i++) Walk(c.Args[i]);
                     break;
             }
@@ -275,6 +284,13 @@ public static class Parser
                 throw new ParseError(args[0].Start, "lookuprange needs a table name");
             if (lower == "count" && args[0] is not VarRef)
                 throw new ParseError(args[0].Start, "count needs a roll name");
+            if (ExprFacts.IsAggregate(lower))
+            {
+                bool hasProperty = lower is not ("countof" or "hexcount");
+                if (hasProperty && args[0] is not VarRef) throw new ParseError(args[0].Start, $"{lower} needs a property name");
+                for (int i = hasProperty ? 1 : 0; i < args.Count; i++)
+                    if (args[i] is not TextLit) throw new ParseError(args[i].Start, $"{lower} needs a text filter");
+            }
             if (lower == "holder")
             {
                 if (args[0] is not VarRef) throw new ParseError(args[0].Start, "holder needs a holder name");
