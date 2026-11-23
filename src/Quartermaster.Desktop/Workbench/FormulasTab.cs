@@ -36,6 +36,9 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     readonly TextBox _applies = new() { Width = 260 };
     readonly TextBlock _appliesErr = new() { Foreground = ErrorText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
     readonly TextBox _notes = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
+    readonly TextBox _precond = new() { Width = 360, FontFamily = new FontFamily("Consolas, Menlo, monospace"), FontSize = 13 };
+    readonly TextBlock _precondErr = new() { Foreground = ErrorText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
+    readonly TextBox _refusal = new() { Width = 360 };
     readonly RuleRefRow _refRow = new();
     readonly WrapPanel _phaseChecks = new();
     readonly FormulaPreview _preview;
@@ -70,18 +73,28 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         appliesRow.Children.Add(new TextBlock { Text = "Applies to:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) });
         appliesRow.Children.Add(_applies);
         appliesRow.Children.Add(_appliesErr);
+        var precondRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        precondRow.Children.Add(new TextBlock { Text = "Only runs when", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0), Width = 100 });
+        precondRow.Children.Add(_precond);
+        precondRow.Children.Add(_precondErr);
+        var refusalRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        refusalRow.Children.Add(new TextBlock { Text = "Refusal message", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0), Width = 100 });
+        refusalRow.Children.Add(_refusal);
+        ToolTip.SetTip(_precond, "A condition that must be true for the formula to run, for example Charge > 0. When it is false the run is refused and nothing is rolled or written. It cannot use a Roll variable or dice().");
+        ToolTip.SetTip(_refusal, "Shown when the condition is false. Empty: \"<formula name> cannot be run now\".");
+        var guardRows = new StackPanel { Children = { precondRow, refusalRow } };
         _refRow.Margin = new Thickness(0, 2, 0, 2);
 
         var rows = new Grid();
         rows.RowDefinitions.Add(new RowDefinition(64, GridUnitType.Pixel));
-        for (var i = 0; i < 4; i++) rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        for (var i = 0; i < 5; i++) rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         rows.RowDefinitions.Add(new RowDefinition(52, GridUnitType.Pixel));
         rows.RowDefinitions.Add(new RowDefinition(38, GridUnitType.Star));
         rows.RowDefinitions.Add(new RowDefinition(22, GridUnitType.Star));
         rows.RowDefinitions.Add(new RowDefinition(40, GridUnitType.Star));
         var cells = new Control[]
         {
-            _text, errRow, appliesRow, BuildPhasesBox(), _refRow,
+            _text, errRow, appliesRow, guardRows, BuildPhasesBox(), _refRow,
             Group("Notes (shown as a tooltip on the formula title)", _notes),
             BuildBindingsBox(), BuildOutputsBox(),
             Group("Preview (sample values are not saved)", _preview),
@@ -101,6 +114,10 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         _list.SelectionChanged += (_, _) => Run(OnListSelection);
         _text.PropertyChanged += (_, e) => { if (e.Property != TextBox.TextProperty) return; if (_loadingUi) return; ShowTextErrors(); Restart(); };
         _applies.PropertyChanged += (_, e) => { if (e.Property != TextBox.TextProperty) return; if (_loadingUi) return; _appliesErr.Text = FormulaEdit.SyntaxProblem(_applies.Text) ?? ""; Restart(); };
+        _precond.PropertyChanged += (_, e) => { if (e.Property != TextBox.TextProperty) return; if (_loadingUi) return; _precondErr.Text = FormulaEdit.SyntaxProblem(_precond.Text) ?? ""; Restart(); };
+        _refusal.PropertyChanged += (_, e) => { if (e.Property != TextBox.TextProperty) return; if (_loadingUi) return; Restart(); };
+        _precond.LostFocus += (_, _) => Run(() => FlushPending(final: true));
+        _refusal.LostFocus += (_, _) => Run(() => FlushPending(final: true));
         _notes.PropertyChanged += (_, e) => { if (e.Property != TextBox.TextProperty) return; if (_loadingUi) return; Restart(); };
         _text.LostFocus += (_, _) => Run(() => FlushPending(final: true));
         _applies.LostFocus += (_, _) => Run(() => FlushPending(final: true));
@@ -316,6 +333,8 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
 
     // ---------- text and details ----------
 
+    static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
     static string Norm(string s) => s.Replace("\r\n", "\n");
 
     void LoadDetails()
@@ -325,10 +344,13 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         {
             var f = Current;
             var on = f != null;
-            _text.IsEnabled = _applies.IsEnabled = _notes.IsEnabled = _refRow.LinkButton.IsEnabled = _refRow.FindButton.IsEnabled = on;
+            _text.IsEnabled = _applies.IsEnabled = _precond.IsEnabled = _refusal.IsEnabled = _notes.IsEnabled = _refRow.LinkButton.IsEnabled = _refRow.FindButton.IsEnabled = on;
             if (_text.Text != (f?.Text ?? "") && Norm(_text.Text ?? "") != Norm(f?.Text ?? "")) _text.Text = f?.Text ?? "";
             if ((_applies.Text ?? "") != (f?.AppliesTo ?? "")) _applies.Text = f?.AppliesTo ?? "";
             _appliesErr.Text = FormulaEdit.SyntaxProblem(_applies.Text) ?? "";
+            if ((_precond.Text ?? "") != (f?.Precondition ?? "")) _precond.Text = f?.Precondition ?? "";
+            _precondErr.Text = FormulaEdit.SyntaxProblem(_precond.Text) ?? "";
+            if ((_refusal.Text ?? "") != (f?.RefusalMessage ?? "")) _refusal.Text = f?.RefusalMessage ?? "";
             if (Norm(_notes.Text ?? "") != Norm(f?.Notes ?? "")) _notes.Text = f?.Notes ?? "";
             LoadPhaseChecks(f);
             ShowRefLabel(f);
@@ -366,9 +388,13 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         var text = _text.Text ?? "";
         var apply = (_applies.Text ?? "").Trim();
         var notes = _notes.Text ?? "";
+        var precond = Blank(_precond.Text);   // blank is null, never ""
+        var refusal = Blank(_refusal.Text);
+        var precondChanged = f.Precondition != precond;
+        if (f.RefusalMessage != refusal) Commit(x => x with { RefusalMessage = refusal });
         var textChanged = Norm(f.Text) != Norm(text);   // the box may hand back LF for a stored CRLF: that is no edit
         if (Norm(f.Notes ?? "") != Norm(notes)) Commit(x => x with { Notes = notes.Length == 0 ? null : notes });
-        if (textChanged || (f.AppliesTo ?? "").Trim() != apply)
+        if (textChanged || precondChanged || (f.AppliesTo ?? "").Trim() != apply)
         {
             var analysis = FormulaEdit.Analyze(text);
             Commit(x =>
@@ -376,9 +402,10 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
                 var y = x;
                 if (textChanged) y = FormulaEdit.SetText(y, text);
                 if ((x.AppliesTo ?? "").Trim() != apply) y = FormulaEdit.SetAppliesTo(y, apply);
-                return analysis.Error != null || !textChanged ? y : FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula;
+                if (precondChanged) y = y with { Precondition = precond };
+                return analysis.Error != null || !(textChanged || precondChanged) ? y : FormulaEdit.Sync(y, FormulaEdit.UsedVariables(y), keepConfigured: true).Formula;
             });
-            if (analysis.Error == null && textChanged) RebuildBindings();
+            if (analysis.Error == null && (textChanged || precondChanged)) RebuildBindings();
         }
         if (final) Run(() => AskRemoveUnusedAsync(f.Id));
     }
@@ -469,6 +496,8 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     internal TextBox Text => _text;
     internal TextBox Applies => _applies;
     internal TextBox Notes => _notes;
+    internal TextBox Precondition => _precond;
+    internal TextBox RefusalMessage => _refusal;
     internal string ErrorLabel => _err.Text ?? "";
     internal string AppliesError => _appliesErr.Text ?? "";
     internal bool GoToErrorVisible => _goto.IsVisible;

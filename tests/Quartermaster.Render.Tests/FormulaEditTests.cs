@@ -165,12 +165,13 @@ public class FormulaEditTests
     [Fact]
     public void SetKind_resets_kind_specific_fields_but_keeps_caption()
     {
-        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Table, TableId = "t", RowExpr = "X", ColExpr = "Y", Caption = "cap", Min = 1 });
+        var f = F("A", new VariableBinding { Variable = "A", Kind = BindingKind.Table, TableId = "t", RowExpr = "X", ColExpr = "Y", Caption = "cap", Min = 1, When = "X > 0" });
         var g = FormulaEdit.SetKind(f, "A", BindingKind.Roll);
         var b = g.Bindings[0];
         Assert.Equal(BindingKind.Roll, b.Kind);
         Assert.Null(b.TableId); Assert.Null(b.RowExpr); Assert.Null(b.Min);
         Assert.Equal("cap", b.Caption);
+        Assert.Equal("X > 0", b.When);   // the condition does not depend on the kind
         Assert.Equal(BindingKind.Table, f.Bindings[0].Kind);
     }
 

@@ -86,7 +86,7 @@ public static class FormulaEdit
 
     /// <summary>Changes the kind and clears everything specific to the old kind (caption stays).</summary>
     public static FormulaDef SetKind(FormulaDef f, string variable, BindingKind kind) =>
-        SetBinding(f, variable, b => b.Kind == kind ? b : new VariableBinding { Variable = b.Variable, Kind = kind, Caption = b.Caption });
+        SetBinding(f, variable, b => b.Kind == kind ? b : new VariableBinding { Variable = b.Variable, Kind = kind, Caption = b.Caption, When = b.When });
 
     public static FormulaDef SetCaption(FormulaDef f, string variable, string? caption) =>
         SetBinding(f, variable, b => b with { Caption = string.IsNullOrWhiteSpace(caption) ? null : caption.Trim() });

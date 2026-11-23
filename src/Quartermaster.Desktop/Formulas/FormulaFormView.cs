@@ -126,6 +126,9 @@ sealed class FormulaFormView : StackPanel
     /// <summary>The box's text as shown (null when there is no such box).</summary>
     public string? BoxText(string variable) => _slots.TryGetValue(variable, out var s) ? s.Text : null;
 
+    /// <summary>True when the box can be typed into (false for a "not used" or waiting box).</summary>
+    public bool BoxEnabled(string variable) => _slots.TryGetValue(variable, out var s) && s.Input.IsEnabled;
+
     /// <summary>True when the box is drawn as a wrong value.</summary>
     public bool BoxWrong(string variable) => _slots.TryGetValue(variable, out var s) && ReferenceEquals(BackOf(s), WrongColor);
 
