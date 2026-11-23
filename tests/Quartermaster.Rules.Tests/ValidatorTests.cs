@@ -244,6 +244,61 @@ public class ValidatorTests
     private static PhaseDef Ph(string id, string name = "") => new() { Id = id, Name = name == "" ? id : name };
     private static IReadOnlyList<RulesIssue> V(RulesPack p) => RulesValidator.Validate(p);
 
+    private static VariableBinding Roll(string v) => new() { Variable = v, Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 };
+    private static List<string> FormulaMsgs(RulesPack p) => V(p).Where(i => i.EntityId == "f1").Select(i => i.Message).ToList();
+
+    [Fact]
+    public void Validator_precondition_parse_error()
+    {
+        var msgs = FormulaMsgs(WithFormula(Fx("A", In("A")) with { Precondition = "A >" }));
+        Assert.Contains(msgs, m => m.StartsWith("Formula \"Fuel Use\": precondition "));
+    }
+
+    [Fact]
+    public void Validator_precondition_unknown_variable()
+    {
+        var msgs = FormulaMsgs(WithFormula(Fx("A", In("A")) with { Precondition = "A > Zork" }));
+        Assert.Contains("Formula \"Fuel Use\": variable \"Zork\" has no binding", msgs);
+        Assert.DoesNotContain(msgs, m => m.Contains("\"A\""));   // bound, and used by the precondition
+    }
+
+    [Fact]
+    public void Validator_when_unknown_variable()
+    {
+        var b = In("B") with { When = "Zork > 1" };
+        var msgs = FormulaMsgs(WithFormula(Fx("A + B", In("A"), b)));
+        Assert.Contains("Formula \"Fuel Use\": variable \"Zork\" has no binding", msgs);
+        var bad = FormulaMsgs(WithFormula(Fx("A + B", In("A"), In("B") with { When = "A >" })));
+        Assert.Contains(bad, m => m.StartsWith("Formula \"Fuel Use\": variable \"B\" only-when "));
+    }
+
+    [Fact]
+    public void Validator_precondition_uses_roll()
+    {
+        var f = Fx("A + R", In("A"), Roll("R")) with { Precondition = "R > 3" };
+        var issues = V(WithFormula(f)).Where(i => i.EntityId == "f1").ToList();
+        var hit = Assert.Single(issues, i => i.Message == "Formula \"Fuel Use\": the precondition cannot use the roll R");
+        Assert.Equal(RulesIssueSeverity.Error, hit.Severity);
+    }
+
+    [Fact]
+    public void Validator_precondition_uses_dice()
+    {
+        var f = Fx("A", In("A")) with { Precondition = "dice(1, 6) > 3" };
+        var issues = V(WithFormula(f)).Where(i => i.EntityId == "f1").ToList();
+        var hit = Assert.Single(issues, i => i.Message == "Formula \"Fuel Use\": the precondition cannot use dice()");
+        Assert.Equal(RulesIssueSeverity.Error, hit.Severity);
+    }
+
+    [Fact]
+    public void Validator_guards_ok_and_blank_ignored()
+    {
+        var f = Fx("A + R", In("A"), Roll("R") with { When = "A > 1" }) with { Precondition = "A < 9", RefusalMessage = "no" };
+        Assert.DoesNotContain(FormulaMsgs(WithFormula(f)), m => m.Contains("precondition") || m.Contains("no binding") || m.Contains("only-when"));
+        var blank = Fx("A", In("A") with { When = " " }) with { Precondition = "  " };
+        Assert.Empty(FormulaMsgs(WithFormula(blank)));
+    }
+
     [Fact]
     public void Validator_OnEnd_checked_like_OnStart()
     {
