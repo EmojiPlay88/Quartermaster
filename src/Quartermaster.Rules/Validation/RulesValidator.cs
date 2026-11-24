@@ -211,6 +211,14 @@ public static class RulesValidator
         // A side's filter decides who owns a piece, so it cannot depend on the owning side.
         if (!string.IsNullOrWhiteSpace(s.UnitFilter) && UsesSide(s.UnitFilter!))
             Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": unit filter may not use side()");
+        // A player's view strips Private values, so there a filter reading one cannot place another side's pieces; a computed property that is
+        // Private in effect is hidden only on pieces of a side the viewer does not hold, so it would show on those pieces.
+        if (!string.IsNullOrWhiteSpace(s.UnitFilter) && ParseProblem(s.UnitFilter!) == null
+            && pack.Properties.Any(p => p != null && PropertyFacts.IsComputed(p) && !PropertyFacts.IsPublic(pack, p)))
+            foreach (var v in Parser.Variables(Parser.Parse(s.UnitFilter!)).Distinct(StringComparer.Ordinal))
+                if (pack.PropertyByName(v) is { } read && !PropertyFacts.IsPublic(pack, read))
+                    Add(issues, RulesIssueSeverity.Error, s.Id, s.Name,
+                        $"Side \"{s.Name}\": unit filter may not read Private property \"{read.Name}\" while the pack has Private computed properties (players' views could not tell whose pieces they hide)");
         // Ownership evaluates side filters without the module's grid, so there is no hex to read.
         foreach (var fn in PieceBoundAggregatesIn(s.UnitFilter))
             Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": {fn}() is not available in a side's unit filter");

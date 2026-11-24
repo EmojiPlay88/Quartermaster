@@ -197,4 +197,20 @@ public class ComputedTests
         Assert.Equal(RulesIssueSeverity.Warning, w.Severity);
         Assert.Equal("Property \"Shown\" is Public but is computed from hidden data; players who do not hold every side see it as Private", w.Message);
     }
+
+    [Fact]
+    public void Validator_side_filter_reading_private_with_private_computed()
+    {
+        const string text = "Side \"Red\": unit filter may not read Private property \"Morale\" while the pack has Private computed properties (players' views could not tell whose pieces they hide)";
+        SideDef Red(string filter) => new() { Id = "red", Name = "Red", UnitFilter = filter };
+        var morale = P("Morale", vis: Visibility.Private);
+        var pack = Pack(morale, P("Might", "Morale * 2", Visibility.Private)) with { Sides = new() { Red("Morale > 0") } };
+        var e = Assert.Single(Issues(pack), i => i.Message.StartsWith("Side \"Red\": unit filter may not read"));
+        Assert.Equal(RulesIssueSeverity.Error, e.Severity);
+        Assert.Equal(text, e.Message);
+        // A computed property that is Public in effect (Public inputs only), or none at all: nothing can leak, old packs stay valid.
+        Assert.DoesNotContain(Issues(Pack(morale, P("Steps"), P("Might", "Steps * 2")) with { Sides = new() { Red("Morale > 0") } }), i => i.Message.Contains("may not read Private"));
+        // A Public input is fine.
+        Assert.DoesNotContain(Issues(Pack(P("Steps"), P("Might", "Steps * 2", Visibility.Private)) with { Sides = new() { Red("Steps > 0") } }), i => i.Message.Contains("may not read Private"));
+    }
 }
