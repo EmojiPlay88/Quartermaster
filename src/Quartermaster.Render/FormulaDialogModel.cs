@@ -72,7 +72,28 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <see cref="FormulaMasking.Configure"/>: the viewer's sides when the dialog runs on the full state for a viewer (hot-seat, the online
     /// host's screen, the host running a guest's intent); null in solo and on a guest, whose state is already its own view.
     /// </summary>
-    public IReadOnlySet<string>? PickSides { get; set; }
+    public IReadOnlySet<string>? PickSides
+    {
+        get => _pickSides;
+        set
+        {
+            var same = value == null ? _pickSides == null : _pickSides != null && _pickSides.SetEquals(value);
+            _pickSides = value;
+            if (same) return;
+            // Another viewer: a pick is a label from the previous viewer's own list, never carried into this one's box.
+            foreach (var b in formula.Bindings)
+                if (b is { Kind: BindingKind.Piece, Variable: not null }) { _typed.Remove(b.Variable); _pickedId.Remove(b.Variable); }
+        }
+    }
+
+    private IReadOnlySet<string>? _pickSides;
+
+    /// <summary>
+    /// The piece each Piece binding's typed label was picked as (from the viewer's candidate list at the time). A label is only a position
+    /// among same-named candidates (" #2"), so when the list changes the box is rewritten to that piece's current label, or cleared when the
+    /// piece is no longer a candidate: a pick never silently moves to another piece.
+    /// </summary>
+    private readonly Dictionary<string, string> _pickedId = new(StringComparer.Ordinal);
 
     /// <summary>The state of the last run: a Piece binding's candidates are listed from it.</summary>
     private GameState? _state;
@@ -164,6 +185,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (b == null || (IsHidden(variable) && b.Kind != BindingKind.Piece)) return;   // a hidden pick is still the viewer's to make
         _verdict.Remove(variable);
         _verdictMessage = null;
+        if (b.Kind == BindingKind.Piece) { _typed[variable] = text; RecordPick(variable, text); return; }
         if (IsTypedKind(b.Kind)) { _typed[variable] = text; return; }
         if (IsPhysicalRoll(variable) || IsCheckedBox(variable)) { _overrides[variable] = text; return; }
         if (string.IsNullOrWhiteSpace(text)) _overrides.Remove(variable);
@@ -242,6 +264,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     public FormulaTrace Run(GameState state)
     {
         _state = state;
+        SyncPicks();
         if (PhaseReasonFor(state) != null)
         {
             // (The runner call only gives the view its variable list; its dice are not pinned and nothing is applied.)
@@ -271,6 +294,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     public void Calculate(GameState state)
     {
         _state = state;
+        SyncPicks();
         if (PhaseReasonFor(state) != null) return;
         var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed),
             PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource, PickSides));
@@ -348,22 +372,45 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// </summary>
     private Dictionary<string, IReadOnlyList<string>> PieceLabels()
     {
-        if (_state == null || !formula.Bindings.Any(b => b is { Kind: BindingKind.Piece })) return new(StringComparer.Ordinal);
+        PieceLists();
+        return _labels ?? new(StringComparer.Ordinal);
+    }
+
+    /// <summary>The candidates (label and piece) of each Piece binding on the last run's state for <see cref="PickSides"/>; cached as the labels.</summary>
+    private Dictionary<string, IReadOnlyList<PieceChoice>> PieceLists()
+    {
+        if (_state == null || !formula.Bindings.Any(b => b is { Kind: BindingKind.Piece }))
+        {
+            _labels = null;
+            return new(StringComparer.Ordinal);
+        }
         var key = LabelsKey(_state);
-        if (_labels != null && _labelsKey == key) return _labels;
-        var labels = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        if (_choices != null && _labelsKey == key) return _choices;
+        var choices = new Dictionary<string, IReadOnlyList<PieceChoice>>(StringComparer.Ordinal);
         foreach (var b in formula.Bindings)
             if (b is { Kind: BindingKind.Piece, Variable: not null })
-                labels[b.Variable] = PieceCandidates.For(_state, runner.Pack, runner.Model, b, PickSides).Select(c => c.Label).ToList();
+                choices[b.Variable] = PieceCandidates.For(_state, runner.Pack, runner.Model, b, PickSides);
         _labelsKey = key;
-        return _labels = labels;
+        _labels = choices.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value.Select(c => c.Label).ToList(), StringComparer.Ordinal);
+        return _choices = choices;
     }
 
     private Dictionary<string, IReadOnlyList<string>>? _labels;
+    private Dictionary<string, IReadOnlyList<PieceChoice>>? _choices;
     private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, int, int, int, int)? _labelsKey;
 
     /// <summary>What the candidate lists depend on: the state object, its pieces (place, type, trait states), the ledger and log lengths.</summary>
     private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, int, int, int, int) LabelsKey(GameState st)
+    {
+        var (h, count, ledger, log) = StateFingerprint(st);
+        return (st, formula, runner, PickSides, h, count, ledger, log);
+    }
+
+    /// <summary>
+    /// What a Piece binding's candidate list depends on in a state: its pieces (place, type, trait states) and the ledger and log lengths
+    /// (a filter may read either). Compared together with the state object and the viewer's sides.
+    /// </summary>
+    internal static (int Hash, int Pieces, int Ledger, int Log) StateFingerprint(GameState st)
     {
         var h = new HashCode();
         foreach (var p in st.Pieces.Values)
@@ -372,7 +419,38 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             h.Add(p.Id); h.Add(p.MapId); h.Add(p.Pos); h.Add(p.TypeString);
             foreach (var t in p.TraitStates ?? new List<string>()) h.Add(t);
         }
-        return (st, formula, runner, PickSides, h.ToHashCode(), st.Pieces.Count, st.LedgerHistory.Count, st.Log.Count);
+        return (h.ToHashCode(), st.Pieces.Count, st.LedgerHistory.Count, st.Log.Count);
+    }
+
+    /// <summary>The user picked (typed) a Piece label: remember which candidate of the current list it is (none: not a listed label).</summary>
+    private void RecordPick(string variable, string? text)
+    {
+        _pickedId.Remove(variable);
+        if (_state == null || !PieceLists().TryGetValue(variable, out var list)) return;   // adopted by the next run (SyncPicks)
+        var typed = (text ?? "").Trim();
+        if (typed.Length == 0) return;
+        var hit = list.FirstOrDefault(c => string.Equals(c.Label, typed, StringComparison.OrdinalIgnoreCase));
+        if (hit != null) _pickedId[variable] = hit.PieceId;
+    }
+
+    /// <summary>
+    /// Before a run: each picked piece's box follows that piece in the (possibly changed) candidate list, its label rewritten when it
+    /// changed and the pick cleared (back to "Waiting for input") when the piece is no longer a candidate. A label typed before any list
+    /// existed is matched against this list first. Text that is no listed label is left as typed (the run says to choose a listed piece).
+    /// </summary>
+    private void SyncPicks()
+    {
+        foreach (var (variable, list) in PieceLists())
+        {
+            if (_pickedId.TryGetValue(variable, out var id))
+            {
+                var now = list.FirstOrDefault(c => c.PieceId == id);
+                if (now == null) { _pickedId.Remove(variable); _typed.Remove(variable); continue; }
+                if (!string.Equals(_typed.GetValueOrDefault(variable)?.Trim(), now.Label, StringComparison.OrdinalIgnoreCase))
+                    _typed[variable] = now.Label;
+            }
+            else if (_typed.TryGetValue(variable, out var text)) RecordPick(variable, text);
+        }
     }
 
     private BoxView Box(VariableState v, FormulaTrace t, IReadOnlySet<string> hostGuards, IReadOnlyDictionary<string, IReadOnlyList<string>> picks)

@@ -261,6 +261,47 @@ public class BatchModelTests : IDisposable
         Assert.False(b.ModelFor(0).Checked);
     }
 
+    /// <summary>The fuel formula also reads a picked piece's Fuel (times zero): a Piece column.</summary>
+    private static RulesPack PickInFuel(RulesPack p) => p with
+    {
+        Formulas = p.Formulas.Select(f => f.Id != "f-fuel" ? f : f with
+        {
+            Text = f.Text + " + P * 0",
+            Bindings = f.Bindings.Append(new VariableBinding { Variable = "P", Kind = BindingKind.Piece, Property = "fuel" }).ToList(),
+        }).ToList(),
+    };
+
+    private static IReadOnlyList<string> PickLabels(ModuleSession s, IReadOnlySet<string>? sides) =>
+        Quartermaster.Core.PieceChoices.For(s.Game!.State, s.Rules!, s.Model, s.Rules!.ById<FormulaDef>("f-fuel")!.Bindings.Single(b => b.Variable == "P"), sides)
+            .Select(c => c.Label).ToList();
+
+    [Fact]
+    public void ChoicesFor_PieceColumn_ListsViewerCandidates_PickFollowsPiece()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, PickInFuel);
+        var (b, _) = MoveBatch(s, c);
+        var all = PickLabels(s, null);
+        Assert.Equal(3, all.Count);
+        Assert.Equal(all, b.ChoicesFor("P"));
+        Assert.Same(b.ChoicesFor("P"), b.ChoicesFor("P"));   // cached while the state is unchanged
+
+        // Hot seat: the viewer's own list.
+        var red = new HashSet<string> { "red" };
+        s.SetViewSides(red);
+        Assert.Equal(PickLabels(s, red), b.ChoicesFor("P"));
+        s.SetViewSides(null);
+
+        // A row's pick follows its piece: once the picked piece is gone the cell clears (never another piece's label).
+        var col = b.Variables.ToList().IndexOf("P");
+        var blue = all.Single(l => l.StartsWith("Blue 1", StringComparison.Ordinal));
+        b.SetCell(0, "P", blue);
+        Assert.Equal(blue, b.Row(0).Cells[col]);
+        s.Game!.Execute(new RemovePiece(PhaseFixture.BlueOne));
+        b.Invalidate();
+        Assert.Equal("", b.Row(0).Cells[col]);
+        Assert.DoesNotContain(b.ChoicesFor("P")!, l => l.StartsWith("Blue 1", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void ChoicesFor_TableKeyInput_ListsKeys_OthersNull()
     {

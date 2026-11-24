@@ -1329,6 +1329,27 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
+    public void HotSeat_viewer_change_clears_piece_pick()
+    {
+        var (host, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddPieceBindings(host);
+        host.SetViewSides(Blue);
+        var m = Dialog(host, "f-cmp", PhaseFixture.BlueOne, check: false);
+        var label = LabelOf(Labels(host, "f-cmp", "M", Blue), "Red 1");
+        m.SetBoxText("M", label);
+        Assert.Equal("17", m.Evaluate(host.Game!.State).ResultText);
+        FormulaMasking.Configure(m, host);   // the same viewer: the pick stays
+        Assert.Equal(label, m.Evaluate(host.Game!.State).Boxes.Single(b => b.Variable == "M").Text);
+
+        host.SetViewSides(Red);   // Red takes the shared screen: Blue's pick is never Red's
+        FormulaMasking.Configure(m, host);
+        var v = m.Evaluate(host.Game!.State);
+        Assert.Equal("", v.Boxes.Single(b => b.Variable == "M").Text);
+        Assert.Equal("Waiting for: M", v.Status);
+        Assert.False(m.Intent(null, false).Typed.ContainsKey("M"));
+    }
+
+    [Fact]
     public async Task Guest_piece_binding_private_masked()
     {
         var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });

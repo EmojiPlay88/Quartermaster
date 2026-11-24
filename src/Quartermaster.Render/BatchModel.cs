@@ -68,9 +68,36 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     public IReadOnlyList<string> Variables =>
         Formula is { } f ? _variables ??= f.Bindings.Select(b => b.Variable).ToList() : Array.Empty<string>();
 
-    /// <summary>The dropdown keys of an Input column (its own Choices, or the table keys it indexes). Null: free text (also for range keys).</summary>
-    public IReadOnlyList<string>? ChoicesFor(string variable) =>
-        Formula is { } f && s.Rules is { } pack ? KeyChoices.For(pack, f, variable) : null;
+    /// <summary>
+    /// The dropdown of a column: an Input's keys (its own Choices, or the table keys it indexes), or a Piece binding's candidate labels as
+    /// the viewer sees them (<see cref="FormulaMasking.PickSides"/>; the list does not depend on the row). Null: free text (also for range keys).
+    /// </summary>
+    public IReadOnlyList<string>? ChoicesFor(string variable)
+    {
+        if (Formula is not { } f || s.Rules is not { } pack) return null;
+        if (f.Bindings.FirstOrDefault(b => b?.Variable == variable) is { Kind: BindingKind.Piece } pick) return PieceLabels(pack, f, pick);
+        return KeyChoices.For(pack, f, variable);
+    }
+
+    /// <summary>True for a column whose cell is a dropdown: an Input with keys, or a Piece binding (even while it has no candidate).</summary>
+    public bool IsChoiceColumn(string variable) =>
+        Formula is { } f && (f.Bindings.Any(b => b is { Kind: BindingKind.Piece } && b.Variable == variable) || ChoicesFor(variable) is { Count: > 0 });
+
+    private readonly Dictionary<string, IReadOnlyList<string>> _pieceLabels = new(StringComparer.Ordinal);
+    private object? _pieceLabelsKey;
+
+    /// <summary>A Piece column's labels, cached per (state object, its fingerprint, rules pack, formula, viewer's sides).</summary>
+    private IReadOnlyList<string> PieceLabels(RulesPack pack, FormulaDef f, VariableBinding b)
+    {
+        if (s.Game?.State is not { } st) return Array.Empty<string>();
+        var sides = FormulaMasking.PickSides(s);
+        var key = (st, FormulaDialogModel.StateFingerprint(st), pack, f, s.Model, sides == null ? "" : string.Join("\n", sides.Order(StringComparer.Ordinal)));
+        if (!Equals(_pieceLabelsKey, key)) { _pieceLabels.Clear(); _pieceLabelsKey = key; }
+        if (_pieceLabels.TryGetValue(b.Variable, out var cached)) return cached;
+        var labels = Quartermaster.Core.PieceChoices.For(st, pack, s.Model, b, sides).Select(c => c.Label).ToList();
+        _pieceLabels[b.Variable] = labels;
+        return labels;
+    }
 
     public int RowCount => Run != null && Formula != null ? Run.Units.Count : 0;
 
