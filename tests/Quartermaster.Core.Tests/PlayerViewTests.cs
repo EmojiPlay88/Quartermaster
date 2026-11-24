@@ -337,6 +337,55 @@ public class PlayerViewTests(ITestOutputHelper output)
         Assert.DoesNotContain("4242", Json(blue));
     }
 
+    /// <summary>The pack with "Boost" (Private unless <paramref name="vis"/>) overriding Units/Speed and "Speed watch": T * 0 + 1 with T = Units[name(), Speed].</summary>
+    private static RulesPack OverridePack(Visibility vis = Visibility.Private) => Pack() with
+    {
+        Properties = Pack().Properties.Append(new PropertyDef
+            { Id = "boost", Name = "Boost", Scope = PropertyScope.Pieces, Visibility = vis, OverridesTable = "tu", OverridesColumn = "Speed" }).ToList(),
+        Tables = new()
+        {
+            new TableDef
+            {
+                Id = "tu", Name = "Units", Kind = TableKind.TwoD, RowKeys = new() { "Rifle", "Lancer" }, ColumnKeys = new() { "Speed" },
+                Cells = new() { new() { "3" }, new() { "5" } },
+            },
+        },
+        Formulas = Pack().Formulas.Append(new FormulaDef
+        {
+            Id = "f-sp", Name = "Speed watch", Text = "T * 0 + 1",
+            Bindings = new() { new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "tu", RowExpr = "name()", ColExpr = "\"Speed\"" } },
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "morale", Op = OutputOp.Set } },
+        }).ToList(),
+    };
+
+    [Fact]
+    public void PlayerView_redacts_private_override_working()
+    {
+        // Red's Rifle has a Private Boost of 4242 overriding its printed Speed 3; Blue's Lancer has its own Boost of 77.
+        var pack = OverridePack();
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Add(s, "b1", "Lancer", "Blue");
+        Delta(s, LedgerKey.Piece("r1"), "boost", 0, 4242);
+        Delta(s, LedgerKey.Piece("b1"), "boost", 0, 77);
+        RunFormula(s, pack, "f-sp", "r1", 1, null, "red");
+        RunFormula(s, pack, "f-sp", "b1", 1, null, "blue");
+        Assert.Contains("4242", s.LedgerHistory.Single(e => e.FormulaId == "f-sp" && e.Key == LedgerKey.Piece("r1")).Working);
+
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-sp" && e.Key == LedgerKey.Piece("r1")).Working);   // run on Red's piece
+        Assert.DoesNotContain("4242", Json(blue));
+        Assert.Contains("77", blue.LedgerHistory.Single(e => e.FormulaId == "f-sp" && e.Key == LedgerKey.Piece("b1")).Working);   // its own piece
+        Assert.Contains("4242", PlayerView.For(s, pack, Model, Red).LedgerHistory.Single(e => e.FormulaId == "f-sp" && e.Key == LedgerKey.Piece("r1")).Working);
+
+        // The host-side view path agrees: in Blue's view the Rifle's Boost is hidden, so the binding is missing (the host calculates).
+        var runner = new FormulaRunner(pack, Model, (n, _) => Enumerable.Repeat(1, n).ToList());
+        var t = runner.Run(blue, new RunRequest("f-sp", "r1", new Dictionary<string, string>(), new Dictionary<string, string>(),
+            new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.Null(t.Result);
+        Assert.Equal("Boost of Rifle reads data this player cannot see", t.Variables.Single().MissingReason);
+    }
+
     [Fact]
     public void Private_computed_from_public_missing_on_other_sides_piece_and_holder_in_view()
     {

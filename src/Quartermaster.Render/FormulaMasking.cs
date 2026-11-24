@@ -13,7 +13,9 @@ namespace Quartermaster.Render;
 /// value (Global is public, tables are pack data); and through holder(H, P) in its text, auto values and table row/column expressions,
 /// marked by <see cref="HolderCallInput"/>; and through a piece aggregate (sum, countof, hexsum...) that reads every piece, marked by
 /// <see cref="AggregateCallInput"/> when it counts or reads a property that is not Public (itself or in its filter), or whatever it reads once
-/// the viewer's view may lack pieces or values (<see cref="PieceAccess.PiecesMayHide"/>: from the pack and module, so host and guest agree). An input is hidden when it reads a private property of a piece the viewer cannot see or
+/// the viewer's view may lack pieces or values (<see cref="PieceAccess.PiecesMayHide"/>: from the pack and module, so host and guest agree);
+/// and through a table read (a Table binding, or lookup() in its expressions, marked by <see cref="TableCallInput"/>) of a table a non-Public
+/// property overrides, which reads that property on the run piece and so hides exactly when a Private Unit binding would. An input is hidden when it reads a private property of a piece the viewer cannot see or
 /// that belongs to a side not held, or any value of a holder owned by a side not held (or missing from the pack). The rule depends only on
 /// the rules pack and the pieces, never on whether a value is set, so it gives the same answer on the host's full state and on a guest's
 /// filtered snapshot. A table lookup counts as hidden when any other input is, since its keys may be computed from them. A computed property
@@ -45,6 +47,13 @@ public static class FormulaMasking
     /// <see cref="FormulaVariables.AggregateReadsHidden"/>): like <see cref="HolderCallInput"/>, it hides no box but masks the formula.
     /// </summary>
     public const string AggregateCallInput = "aggregate()";
+
+    /// <summary>
+    /// The entry <see cref="HiddenVariables"/> adds when the formula's own expressions look up a table that a non-Public property overrides
+    /// (<see cref="Quartermaster.Rules.Tables.CellOverrideFacts.HiddenOverride"/>) while it runs on a piece whose private values the viewer
+    /// cannot see: like <see cref="HolderCallInput"/>, it hides no box but masks the formula.
+    /// </summary>
+    public const string TableCallInput = "lookup()";
 
     private static readonly IReadOnlySet<string> NoSides = new HashSet<string>();
 
@@ -91,6 +100,16 @@ public static class FormulaMasking
         var access = new PieceAccess(state, pack, model, sides);
         bool PropPrivate(string? prop) =>
             !PropertyFacts.IsPublic(pack, (pack.Properties ?? new List<PropertyDef>()).FirstOrDefault(p => p != null && p.Id == prop));   // computed from hidden data: Private
+        // The run piece's private values are hidden: it is not in the state, the viewer cannot see it, or it is of a side not held.
+        bool RunPieceHidden()
+        {
+            if (pieceId == null) return false;   // no piece: a table read is the printed cell
+            if (!state.Pieces.TryGetValue(pieceId, out var p) || p == null || !access.CanSee(pieceId)) return true;
+            try { return access.NotHeld(access.SideOf(p)); }
+            catch (Exception) { return true; }   // fail closed
+        }
+        // A table read of the run piece's own row may be a non-Public override: hidden as a Private Unit read is.
+        bool TableHidden(string? tableId) => tableId != null && Quartermaster.Rules.Tables.CellOverrideFacts.HiddenOverride(pack, tableId) && RunPieceHidden();
         bool UnitHidden(string? prop)
         {
             if (pieceId == null) return false;   // a unit-less run has no unit values to read
@@ -111,7 +130,8 @@ public static class FormulaMasking
             {
                 BindingKind.Unit => UnitHidden(b.Property),
                 BindingKind.Holder => HolderHidden(b.HolderId),
-                _ => false,   // Global is public; Input, Roll, Location and Moved are the player's own; Table and Piece are decided below
+                BindingKind.Table => TableHidden(b.TableId),   // otherwise decided below
+                _ => false,   // Global is public; Input, Roll, Location and Moved are the player's own; Piece is decided below
             };
             if (isHidden) hidden.Add(b.Variable);
         }
@@ -121,6 +141,8 @@ public static class FormulaMasking
         // Aggregates read every piece, hidden or not: a count, a non-public property or a filter over one reads data this viewer may not see,
         // and so does any aggregate once the viewer's view may lack pieces or values (a map it cannot see, a Hideable or Obscurable trait).
         if (FormulaVariables.AggregateReadsHidden(pack, f, PieceAccess.PiecesMayHide(pack, model, sides))) hidden.Add(AggregateCallInput);
+        // lookup() of a table a non-Public property overrides reads the run piece's value, as a Table binding does.
+        if (FormulaVariables.TablesRead(f).Any(t => FormulaVariables.LookupHidden(pack, t)) && RunPieceHidden()) hidden.Add(TableCallInput);
         // A computed property built from hidden data shows that data wherever it is read: through a binding of any kind (the viewer's own
         // unit and the global holder included) or a variable, which is hidden itself, and through holder(H, P), which hides like a hidden holder.
         hidden.UnionWith(FormulaVariables.ComputedHiddenVariables(pack, f));
@@ -141,8 +163,8 @@ public static class FormulaMasking
     /// The bindings whose "Only when" condition depends on data the viewer may not see, plus <see cref="PreconditionGuard"/> when the
     /// precondition does: the condition reads a <paramref name="hidden"/> variable, or one whose own guard, auto value or table key does
     /// (transitively), or (when <see cref="HolderCallInput"/> is hidden) any holder(H, P) call along the way, or (when
-    /// <see cref="AggregateCallInput"/> is hidden) any piece aggregate along the way. A viewer without the data cannot decide such a guard,
-    /// so an online guest's dialog leaves it to the host. Conservative: any holder() call, or any aggregate, counts once one is hidden.
+    /// <see cref="AggregateCallInput"/> is hidden) any piece aggregate along the way, or (when <see cref="TableCallInput"/> is hidden) any lookup() call. A viewer without the data cannot decide such a guard,
+    /// so an online guest's dialog leaves it to the host. Conservative: any holder() call, aggregate or lookup() counts once one is hidden.
     /// Empty when nothing is hidden.
     /// </summary>
     public static HashSet<string> GuardsOnHidden(FormulaDef f, IReadOnlySet<string> hidden)
@@ -151,13 +173,15 @@ public static class FormulaMasking
         if (f == null || hidden == null || hidden.Count == 0) return guards;
         var holderHidden = hidden.Contains(HolderCallInput);
         var aggregateHidden = hidden.Contains(AggregateCallInput);
+        var tableHidden = hidden.Contains(TableCallInput);
         bool HasHiddenCall(string? src)
         {
-            if (string.IsNullOrWhiteSpace(src) || !(holderHidden || aggregateHidden)) return false;
+            if (string.IsNullOrWhiteSpace(src) || !(holderHidden || aggregateHidden || tableHidden)) return false;
             try
             {
                 var e = Parser.Parse(src);
-                return (holderHidden && ExprFacts.HolderReads(e).Count > 0) || (aggregateHidden && ExprFacts.AggregateReads(e).Count > 0);
+                return (holderHidden && ExprFacts.HolderReads(e).Count > 0) || (aggregateHidden && ExprFacts.AggregateReads(e).Count > 0)
+                    || (tableHidden && ExprFacts.LookupTables(e).Count > 0);
             }
             catch (ParseError) { return false; }
         }

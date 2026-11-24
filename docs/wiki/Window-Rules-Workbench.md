@@ -82,6 +82,8 @@ The list on the left holds the pack's formulas, with **New…**, **Rename…** a
 | Outliner | How the [outliner](Window-Log-and-Panels#outliner) totals it per group: None, Sum, Min or Average |
 | Notes | Your notes |
 | Expression | Makes the property **computed**: its value is this expression, worked out whenever it is read and never stored, for example `Fuel * 2 + Readiness`. Default and SheetField are greyed while it is set. Empty means a stored value. See [Computed properties](Formula-Reference#computed-properties) |
+| Overrides table | A table this property overrides for the counter that holds it: a read of that table at the row named like the counter gives the counter's own value instead of the printed cell. Pick from the pack's tables; blank means none. See [A piece's own value for a table rating](Formula-Reference#a-pieces-own-value-for-a-table-rating) |
+| Column | The overridden column, picked from the table's columns. Greyed for a table with one dimension (it has no column) and when no table is picked |
 
 **Holders** keep values that do not belong to a counter, such as a depot's stores. The built-in **global** holder always exists. **Add holder** and **Delete holder** change the list.
 

@@ -30,10 +30,12 @@ public static class LedgerBreakdown
     {
         var b = ForCore(s, pack, model, key, propertyId);
         var prop = pack?.ById<PropertyDef>(propertyId);
-        return OverrideLine(pack, prop) is { } line ? b with { Lines = b.Lines.Append(new BreakdownLine("", line, null)).ToList() } : b;
+        var isPiece = LedgerKey.TryParse(key, out var piece, out _) && piece;   // a holder's value overrides no table cell
+        return isPiece && OverrideLine(pack, prop) is { } line ? b with { Lines = b.Lines.Append(new BreakdownLine("", line, null)).ToList() } : b;
     }
 
-    /// <summary>"overrides {table}, column {c}" (1-D: "overrides {table}") for a piece property overriding a table that exists, else null.</summary>
+    /// <summary>"overrides {table}, column {c}" (1-D: "overrides {table}") for a piece property overriding a table that exists, else null.
+    /// Shown only for a piece's value (<see cref="For"/>): a Both property's holder value overrides nothing.</summary>
     static string? OverrideLine(RulesPack? pack, PropertyDef? prop)
     {
         if (pack == null || prop == null || prop.Scope == PropertyScope.Holders || string.IsNullOrWhiteSpace(prop.OverridesTable)) return null;

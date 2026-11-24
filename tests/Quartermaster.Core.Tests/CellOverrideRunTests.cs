@@ -185,6 +185,17 @@ public class CellOverrideRunTests
     }
 
     [Fact]
+    public void Breakdown_line_only_for_piece_keys()
+    {
+        var both = new PropertyDef { Id = "bo", Name = "Boat Speed", Scope = PropertyScope.Both, OverridesTable = "tu", OverridesColumn = "Speed" };
+        var (pack, s) = (Pack(both), State());
+        s.Ledgers[LedgerKey.Holder("depot")] = new() { ["bo"] = 4 };
+        Assert.Contains(LedgerBreakdown.For(s, pack, null, LedgerKey.Piece("u1"), "bo").Lines, l => l.Label == "overrides Units, column Speed");
+        Assert.DoesNotContain(LedgerBreakdown.For(s, pack, null, LedgerKey.Holder("depot"), "bo").Lines, l => l.Label.StartsWith("overrides", StringComparison.Ordinal));
+        Assert.DoesNotContain(LedgerBreakdown.For(s, pack, null, LedgerKey.Holder(HolderDef.GlobalId), "bo").Lines, l => l.Label.StartsWith("overrides", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Hidden_private_override_in_view_is_missing()
     {
         var pack = Pack() with { Sides = new() { new SideDef { Id = "red", Name = "Red", UnitFilter = "name() == \"Raft A\"" } } };
@@ -194,8 +205,10 @@ public class CellOverrideRunTests
         s.ViewSides = new() { "blue" };
         var bind = RunnerFx.Runner(pack).Run(s, RunnerFx.Req("f-bind", "u3"));
         Assert.Null(bind.Result);
-        Assert.False(string.IsNullOrEmpty(bind.Variables.Single().MissingReason));
-        Assert.Null(RunnerFx.Runner(pack).Run(s, RunnerFx.Req("f-inline", "u3")).Result);
+        Assert.Equal("Fast Speed of Raft A reads data this player cannot see", bind.Variables.Single().MissingReason);
+        var inline = RunnerFx.Runner(pack).Run(s, RunnerFx.Req("f-inline", "u3"));
+        Assert.Null(inline.Result);
+        Assert.Equal("Fast Speed of Raft A reads data this player cannot see", inline.Error);
         Assert.Equal(5, Result(pack, s, "f-b", "u3"));   // another row: the cell, nothing hidden
         s.ViewSides = new() { "red" };
         Assert.Equal(3, Result(pack, s, "f-inline", "u3"));   // own side: no value, the cell
@@ -224,6 +237,22 @@ public class CellOverrideRunTests
         var pack = Pack(load, plus);
         pack.Properties.RemoveAt(0);
         Assert.Equal(13, Result(pack, State(), "f-inline", "u1"));   // printed Speed 3 + overridden Load 10
+    }
+
+    [Fact]
+    public void Intermediate_reading_the_cell_errors_when_read_directly()
+    {
+        // Base reads the cell and feeds the override Plus. Through the table, Plus reads the printed cell (3 + 2); Base read directly on
+        // Raft A reads the table, which is Plus, which reads Base: a cycle (the wiki's advice: read the cell inside Plus's own expression).
+        var b = new PropertyDef { Id = "bs", Name = "Base", Scope = PropertyScope.Pieces, Expr = "lookup(Units, name(), \"Speed\")" };
+        var plus = new PropertyDef { Id = "pl", Name = "Plus", Scope = PropertyScope.Pieces, Expr = "Base + 2", OverridesTable = "tu", OverridesColumn = "Speed" };
+        var pack = Pack(b, plus);
+        pack.Properties.RemoveAt(0);
+        var s = State();
+        Assert.Equal(5, Result(pack, s, "f-inline", "u1"));
+        var ex = Assert.ThrowsAny<EvalError>(() => PropertyValues.Get(s, pack, RunnerFx.Model, LedgerKey.Piece("u1"), b));
+        Assert.Equal("Base is computed from itself", ex.Message);
+        Assert.Equal(7, Result(pack, s, "f-bind", "u2"));   // Raft B through the table: printed 5 + 2
     }
 
     [Fact]

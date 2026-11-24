@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-24 (other-piece binding on branch `other-piece`, see CURRENT STATE below); earlier: 2026-11-14 (stage 6b-2 is merged as PR #11, master 05a9b75, so stage 6a (PR #9), 6b-1 (PR #10) and 6b-2 (Windows and Linux packages) are all merged; small 6b follow-ups (CI runs the Windows zip and Linux tar.gz through the updater staging, installer cleanup of stale files and folder guard gaps, privacy scan of the mac zip) are on branch port-stage6b-followups; see CURRENT STATE below; earlier: stage 5d was merged as PR #8, master b82a566, so stage 5 of the port is complete); earlier text: stage 5c (2026-11-13), stage 5b (2026-11-12); after piece 8 (ledger images and tabs, updater, release script) was built on branch `piece8` (merge into master pending; pieces through 7 and the launcher are pushed). A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-25 (table cell overrides on branch `cell-override`, see CURRENT STATE below); earlier: 2026-11-24 (other-piece binding on branch `other-piece`); earlier: 2026-11-14 (stage 6b-2 is merged as PR #11, master 05a9b75, so stage 6a (PR #9), 6b-1 (PR #10) and 6b-2 (Windows and Linux packages) are all merged; small 6b follow-ups (CI runs the Windows zip and Linux tar.gz through the updater staging, installer cleanup of stale files and folder guard gaps, privacy scan of the mac zip) are on branch port-stage6b-followups; see CURRENT STATE below; earlier: stage 5d was merged as PR #8, master b82a566, so stage 5 of the port is complete); earlier text: stage 5c (2026-11-13), stage 5b (2026-11-12); after piece 8 (ledger images and tabs, updater, release script) was built on branch `piece8` (merge into master pending; pieces through 7 and the launcher are pushed). A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -116,7 +116,17 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-24, other-piece binding; read this first):**
+**CURRENT STATE (2026-11-25, table cell overrides; read this first):**
+
+- **Branch `cell-override` (cut from master 357042d), not pushed; all three tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-25-cell-override-design.md` (engine wishlist #65).
+  - **Rules:** `PropertyDef.OverridesTable` / `OverridesColumn` (omitted when null/empty; `CurrentFormat` stays 4). `CellOverrideFacts.For/Overriders/HiddenOverride` (Holders scope never overrides), cached per pack (`ConditionalWeakTable`, rebuilt when the pack or its Properties/Tables list or counts change; a table nothing overrides is one dictionary miss). Validator: table gone, column missing, not a piece property (errors); two properties on one cell (warning, first wins). `ExprFacts.LookupTables`, `FormulaVariables.TablesRead/LookupHidden`; a Public computed property that looks up a table a non-Public property overrides counts as Private (`PropertyFacts.ReadsHidden`), and so does a piece-sum filter that does (`AggregateCallHidden`).
+  - **Core:** `CellOverrides.Read` is the one choke point (Table binding, `RunContext.Lookup`, `FilterContext.Lookup`): the piece's own value when the row is its name and it has a value; else the printed cell. Working source `{table}, row {r}, column {c}: {property} of {piece} (printed {cell})`. A computed override reading its own cell reads the printed cell (thread-static guard); an intermediate computed property that reads the cell and feeds the override is a cycle when read directly (wiki says so). In a player view a non-Public override of a piece of a side not held is `{property} of {piece} reads data this player cannot see` (binding missing). Ledger breakdown `overrides {table}, column {c}` for piece keys only. PlayerView: no new rule needed; a run on another side's piece is owned by it, so its working is redacted (test pins it).
+  - **Render:** `FormulaMasking` hides a Table binding of such a table, and adds `TableCallInput` ("lookup()") for an inline lookup of one, only when the run piece is of a side not held or cannot be seen (as a Private Unit binding); `GuardsOnHidden` counts lookup() calls once it is hidden.
+  - **Workbench (Avalonia):** Properties tab columns "Overrides table" (index 8, table picker, blank clears both) and "Column" (index 9, the table's columns; greyed for 1-D or no table). The WinForms Properties tab is not edited (build only).
+  - **Wiki:** Formula-Reference "A piece's own value for a table rating" (Riverland rafts, guard scope, hidden rule) and error rows; Window-Rules-Workbench (two columns).
+  - **Tests:** see `.superpowers/sdd/2026-11-25-cell-override/task-3-report.md` for the full-run numbers.
+
+**Previous CURRENT STATE (2026-11-24, other-piece binding; history):**
 
 - **Branch `other-piece` (cut from master a063e19), not pushed; all three tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-24-other-piece-design.md` (engine wishlist #45).
   - **Rules:** `BindingKind.Piece` with `Property` and optional `VariableBinding.PieceFilter` (omitted when null; `CurrentFormat` stays 4). Validator: unknown property, holder property, filter does not parse. `FormulaVariables.PieceBindingsHidden` (Piece bindings of a non-Public property).

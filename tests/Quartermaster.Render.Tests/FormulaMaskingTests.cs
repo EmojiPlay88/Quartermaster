@@ -783,6 +783,88 @@ public class FormulaMaskingTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// Adds the invented table Speeds (Red 1: 3, Blue 1: 5), "Boost" (<paramref name="vis"/>) overriding its Speed column, Red 1's Boost set to
+    /// the Red secret and Blue 1's to 9, and formulas reading the cell through a Table binding ("f-sb"), inline ("f-sl"), and an Input asked only
+    /// when the inline lookup is above 1 ("f-sg").
+    /// </summary>
+    private static void AddOverride(ModuleSession s, Visibility vis)
+    {
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef
+                { Id = "boost", Name = "Boost", Scope = PropertyScope.Pieces, Visibility = vis, OverridesTable = "t-speed", OverridesColumn = "Speed" }).ToList(),
+            Tables = p.Tables.Append(new TableDef
+            {
+                Id = "t-speed", Name = "Speeds", Kind = TableKind.TwoD, RowKeys = new() { "Red 1", "Blue 1" }, ColumnKeys = new() { "Speed" },
+                Cells = new() { new() { "3" }, new() { "5" } },
+            }).ToList(),
+            Formulas = p.Formulas.Concat(new[]
+            {
+                new FormulaDef
+                {
+                    Id = "f-sb", Name = "Speed bound", Text = "T + 1",
+                    Bindings = new() { new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t-speed", RowExpr = "name()", ColExpr = "\"Speed\"" } },
+                },
+                new FormulaDef { Id = "f-sl", Name = "Speed inline", Text = "lookup(Speeds, name(), \"Speed\") + 1" },
+                new FormulaDef
+                {
+                    Id = "f-sg", Name = "Speed gate", Text = "B",
+                    Bindings = new() { new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "lookup(Speeds, name(), \"Speed\") > 1" } },
+                },
+            }).ToList(),
+        });
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.RedOne), "boost", 0, RedSecret, "manual", null, null, null, null));
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.BlueOne), "boost", 0, 9, "manual", null, null, null, null));
+    }
+
+    [Fact]
+    public void Guest_private_override_masked()
+    {
+        var (host, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddOverride(host, Visibility.Private);
+        var guest = Guest(host);
+        HashSet<string> HostSees(string id, string piece) =>
+            FormulaMasking.HiddenVariables(host.Rules!, host.Model, host.Game!.State, host.Rules!.ById<FormulaDef>(id)!, piece, Blue);
+
+        // On Red's piece: the bound cell is hidden, and the inline lookup masks the formula; the host decides the guard.
+        var bound = Dialog(guest, "f-sb", PhaseFixture.RedOne, check: false);
+        Assert.Equal(new[] { "T" }, bound.Hidden.ToArray());
+        Assert.Equal(bound.Hidden.ToArray(), HostSees("f-sb", PhaseFixture.RedOne).ToArray());   // host and guest agree
+        var shown = Shown(bound.Evaluate(guest.Game!.State));
+        Assert.DoesNotContain(RedText, shown);
+        Assert.Contains(FormulaMasking.HostCalculatesText, shown);
+        Assert.Equal(new[] { FormulaMasking.TableCallInput }, Dialog(guest, "f-sl", PhaseFixture.RedOne, check: false).Hidden.ToArray());
+        Assert.Equal(new[] { FormulaMasking.TableCallInput }, HostSees("f-sl", PhaseFixture.RedOne).ToArray());
+        var gate = Dialog(guest, "f-sg", PhaseFixture.RedOne, check: false);
+        Assert.Equal(new[] { "B" }, FormulaMasking.GuardsOnHidden(gate.Formula, gate.Hidden).ToArray());
+        Assert.DoesNotContain(RedText, Shown(Dialog(guest, "f-sl", PhaseFixture.RedOne, check: false).Evaluate(guest.Game!.State)));
+
+        // On Blue's own piece nothing is hidden: the guest reads its own Boost.
+        Assert.Empty(Dialog(guest, "f-sb", PhaseFixture.BlueOne, check: false).Hidden);
+        Assert.Empty(HostSees("f-sl", PhaseFixture.BlueOne));
+        Assert.Equal("10", Dialog(guest, "f-sb", PhaseFixture.BlueOne, check: false).Evaluate(guest.Game!.State).ResultText);
+
+        // Hot-seat: Blue's view on the host's screen masks the same boxes.
+        Assert.Equal(new[] { "T" }, FormulaMasking.HiddenVariables(host.Rules!, host.Model, host.Game!.State, host.Rules!.ById<FormulaDef>("f-sb")!,
+            PhaseFixture.RedOne, Blue).ToArray());
+    }
+
+    [Fact]
+    public void Guest_public_override_shown()
+    {
+        var (host, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddOverride(host, Visibility.Public);
+        var guest = Guest(host);
+        foreach (var id in new[] { "f-sb", "f-sl" })
+        {
+            var m = Dialog(guest, id, PhaseFixture.RedOne, check: false);
+            Assert.Empty(m.Hidden);
+            Assert.Equal((RedSecret + 1).ToString(CultureInfo.InvariantCulture), m.Evaluate(guest.Game!.State).ResultText);
+        }
+        Assert.Empty(FormulaMasking.HiddenVariables(host.Rules!, host.Model, host.Game!.State, host.Rules!.ById<FormulaDef>("f-sb")!, PhaseFixture.RedOne, Blue));
+    }
+
     [Fact]
     public void GuardsOnHidden_FollowsHiddenVariablesAndHolderCalls()
     {

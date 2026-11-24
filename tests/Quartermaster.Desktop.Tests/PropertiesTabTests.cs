@@ -193,6 +193,60 @@ public sealed class PropertiesTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void PropertiesTab_override_pickers()
+    {
+        var s = Session(p => p with
+        {
+            Tables = new()
+            {
+                new TableDef { Id = "tu", Name = "Rafts", Kind = TableKind.TwoD, RowKeys = new() { "Raft A" }, ColumnKeys = new() { "Speed", "Load" }, Cells = new() { new() { "3", "4" } } },
+                new TableDef { Id = "tc", Name = "Costs", Kind = TableKind.OneD, RowKeys = new() { "Raft A" }, ColumnKeys = new() { "Cost" }, Cells = new() { new() { "5" } } },
+            },
+        });
+        var tab = Tab(s);
+        var g = tab.PropertyGrid;
+        var (tc, cc) = (PropertiesTab.OverridesTableColumn, PropertiesTab.OverridesColumnColumn);
+        Assert.Equal("", g.Cell(1, tc));
+        Assert.True(g.IsCellReadOnly(1, cc));   // no table: no column to pick
+        Assert.NotNull(g.HeaderToolTip(tc));
+        Assert.NotNull(g.HeaderToolTip(cc));
+
+        g.BeginEdit(1, tc);
+        Assert.Equal(new[] { "", "Rafts", "Costs" }, ((ComboBox)g.Editor!).ItemsSource!.Cast<string>());
+        ((ComboBox)g.Editor!).SelectedItem = "Rafts";
+        g.CommitEdit();
+        Pump();
+        Assert.Equal("tu", s.Rules!.Properties[1].OverridesTable);
+        Assert.Null(s.Rules.Properties[1].OverridesColumn);
+        Assert.Equal("Rafts", g.Cell(1, tc));
+        Assert.False(g.IsCellReadOnly(1, cc));
+        g.BeginEdit(1, cc);
+        Assert.Equal(new[] { "", "Speed", "Load" }, ((ComboBox)g.Editor!).ItemsSource!.Cast<string>());
+        ((ComboBox)g.Editor!).SelectedItem = "Speed";
+        g.CommitEdit();
+        Pump();
+        Assert.Equal("Speed", s.Rules.Properties[1].OverridesColumn);
+        Assert.Equal("Speed", g.Cell(1, cc));
+
+        g.BeginEdit(1, tc);   // a one-dimension table: no column
+        ((ComboBox)g.Editor!).SelectedItem = "Costs";
+        g.CommitEdit();
+        Pump();
+        Assert.Equal("tc", s.Rules.Properties[1].OverridesTable);
+        Assert.Null(s.Rules.Properties[1].OverridesColumn);
+        Assert.Equal("", g.Cell(1, cc));
+        Assert.True(g.IsCellReadOnly(1, cc));
+
+        g.BeginEdit(1, tc);   // blank clears both
+        ((ComboBox)g.Editor!).SelectedItem = "";
+        g.CommitEdit();
+        Pump();
+        Assert.Null(s.Rules.Properties[1].OverridesTable);
+        Assert.Null(s.Rules.Properties[1].OverridesColumn);
+        Assert.Null(s.Rules.Properties[0].OverridesTable);   // the other row untouched
+    }
+
+    [AvaloniaFact]
     public void Applies_to_error_cell_pink_with_tooltip()
     {
         var s = Session();

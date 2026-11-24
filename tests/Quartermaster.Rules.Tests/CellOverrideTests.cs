@@ -112,4 +112,57 @@ public class CellOverrideTests
         Assert.False(CellOverrideFacts.HiddenOverride(pack, "t1"));
         Assert.DoesNotContain(Issues(pack), i => i.Message.Contains("both override"));
     }
+    [Fact]
+    public void For_is_cached_per_pack_and_follows_a_new_pack()
+    {
+        var pack = Pack(P("A", "t2", "Speed"), P("B", "t1"));
+        var first = CellOverrideFacts.For(pack, "t2", "Speed");
+        Assert.Same(first, CellOverrideFacts.For(pack, "t2", "Speed"));   // no scan or list per read
+        Assert.Same(CellOverrideFacts.For(pack, "nope", "Speed"), CellOverrideFacts.For(pack, "t2", "Load Cap"));   // the shared empty list
+        var edited = pack with { Properties = pack.Properties.Append(P("C", "t2", "Speed")).ToList() };
+        Assert.Equal(new[] { "A", "C" }, CellOverrideFacts.For(edited, "t2", "Speed").Select(p => p.Name));
+        Assert.Equal(new[] { "A" }, CellOverrideFacts.For(pack, "t2", "Speed").Select(p => p.Name));
+        pack.Properties.Add(P("D", "t2", "Speed"));   // a list grown in place (as a smoke edit does) is noticed
+        Assert.Equal(new[] { "A", "D" }, CellOverrideFacts.For(pack, "t2", "Speed").Select(p => p.Name));
+        var flipped = pack with { Tables = new() { Two() with { Kind = TableKind.OneD }, One() } };
+        Assert.Equal(new[] { "A", "D" }, CellOverrideFacts.For(flipped, "t2", "anything").Select(p => p.Name));   // now 1-D: any column
+    }
+
+    [Fact]
+    public void Public_computed_reading_a_hidden_override_is_not_public()
+    {
+        var reads = new PropertyDef { Id = "q", Name = "Quick", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "lookup(Units, name(), \"Speed\") * 2" };
+        var other = new PropertyDef { Id = "c", Name = "Cost2", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "lookup(Costs, name())" };
+        var hidden = Pack(P("Fast", "t2", "Speed", vis: Visibility.Private), reads, other);
+        Assert.False(PropertyFacts.IsPublic(hidden, reads));   // it shows the Private override of the piece it is read on
+        Assert.True(PropertyFacts.IsPublic(hidden, other));
+        Assert.True(PropertyFacts.IsPublic(Pack(P("Fast", "t2", "Speed"), reads), reads));   // a Public override hides nothing
+        // A Public computed override reading its own (printed) cell stays Public; one reading a Private value does not.
+        var self = new PropertyDef { Id = "s", Name = "Plus", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "lookup(Units, name(), \"Speed\") + 1", OverridesTable = "t2", OverridesColumn = "Speed" };
+        Assert.True(PropertyFacts.IsPublic(Pack(self), self));
+        Assert.False(CellOverrideFacts.HiddenOverride(Pack(self), "t2"));
+        var secret = P("Secret", vis: Visibility.Private);
+        var leaky = self with { Expr = "lookup(Units, name(), \"Speed\") + Secret" };
+        Assert.False(PropertyFacts.IsPublic(Pack(secret, leaky), leaky));
+        Assert.True(CellOverrideFacts.HiddenOverride(Pack(secret, leaky), "t2"));
+    }
+
+    [Fact]
+    public void TablesRead_lists_lookup_tables_only()
+    {
+        var f = new FormulaDef
+        {
+            Id = "f", Name = "f", Text = "lookup(Units, name(), \"Speed\") + lookuprange(Units, 1, 2)", Precondition = "lookup(Costs, name()) > 0",
+            Bindings = new() { new VariableBinding { Variable = "T", Kind = BindingKind.Table, TableId = "t2", RowExpr = "lookup(Other, 1)" } },
+        };
+        Assert.Equal(new[] { "Units", "Costs", "Other" }, FormulaVariables.TablesRead(f));
+    }
+
+    [Fact]
+    public void Aggregate_filter_reading_a_hidden_override_is_hidden()
+    {
+        var pack = Pack(P("Fast", "t2", "Speed", vis: Visibility.Private), P("Load"), P("Cheap", "t1"));
+        Assert.True(FormulaVariables.AggregateCallHidden(pack, "sum", "Load", "lookup(Units, name(), \"Speed\") > 3", false));
+        Assert.False(FormulaVariables.AggregateCallHidden(pack, "sum", "Load", "lookup(Costs, name()) > 3", false));
+    }
 }
