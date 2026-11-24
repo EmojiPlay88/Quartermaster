@@ -413,6 +413,36 @@ public sealed class FormulasTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Workbench_piece_binding_details()
+    {
+        var s = Session(true, Attack());
+        s.UpdateRules(p => p with { Properties = p.Properties.Append(new PropertyDef { Id = "p-tally", Name = "Tally", Scope = PropertyScope.Holders }).ToList() });
+        var tab = Tab(s);
+        Assert.Contains("Piece", tab.Bindings.CellItems(0, 1)!);
+        Pick(tab.Bindings, 0, 1, "Piece");
+        Assert.Equal(BindingKind.Piece, B(s, "f-att", "a").Kind);
+        Assert.Equal(new[] { "Strength", "Moves" }, tab.Bindings.CellItems(0, 2));   // a holder property is never a piece's
+        Pick(tab.Bindings, 0, 2, "Strength");
+        Assert.Equal("p-str", B(s, "f-att", "a").Property);
+        Assert.Equal("Strength", tab.Bindings.Cell(0, 2));
+        Assert.False(tab.Bindings.CellBackground(0, 3) == EditGrid.ReadOnlyBrush);   // Piece has details: the "which pieces" filter
+        Assert.Equal((object)FormulaEdit.PieceDetailsHint, tab.Bindings.CellToolTip(0, 3));
+
+        Type(tab.Bindings, 0, 3, "startsWith(name(), \"Blue\")");
+        Assert.Equal("startsWith(name(), \"Blue\")", B(s, "f-att", "a").PieceFilter);
+        Assert.Equal("startsWith(name(), \"Blue\")", tab.Bindings.Cell(0, 3));
+
+        Type(tab.Bindings, 0, 3, "name( ==");   // does not parse: refused, the old filter kept
+        Assert.StartsWith("Which pieces: ", tab.ErrorLabel);
+        Assert.Equal("startsWith(name(), \"Blue\")", B(s, "f-att", "a").PieceFilter);
+        Assert.Equal("startsWith(name(), \"Blue\")", tab.Bindings.Cell(0, 3));
+
+        Type(tab.Bindings, 0, 3, "  ");
+        Assert.Null(B(s, "f-att", "a").PieceFilter);   // blank = every piece, stored as null
+        Assert.Equal("p-str", B(s, "f-att", "a").Property);
+    }
+
+    [AvaloniaFact]
     public void Binding_details_parse_error_keeps_text()
     {
         var s = Session(true, Attack());

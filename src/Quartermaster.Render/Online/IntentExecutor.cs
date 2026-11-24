@@ -349,13 +349,17 @@ internal static class FormulaIntentRunner
 
         // The same masking as the sender's own dialog: hidden boxes are filled by the engine and never typed (FormulaMasking).
         var hidden = FormulaMasking.HiddenVariables(pack, s.Model, full, f, i.PieceId, sides);
-        var model = new FormulaDialogModel(runner, f, i.PieceId) { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden };
+        // A Piece binding's label is resolved among the candidates the sender sees (its sides' view of the full state).
+        var model = new FormulaDialogModel(runner, f, i.PieceId)
+            { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden, PickSides = sides };
         foreach (var (variable, text) in i.Typed ?? new Dictionary<string, string>())
         {
-            if (variable == null || hidden.Contains(variable)) continue;
+            if (variable == null) continue;
             var b = f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable);
-            // Input boxes always; checked boxes only in the manual modes (they gate Apply and never feed the run); never dice or overrides.
-            var accept = b != null && (b.Kind == BindingKind.Input || (model.Checked && IsCheckedKind(b.Kind)));
+            // A pick is a label from the sender's own list, so it is taken even when the value it reads is hidden; nothing else hidden is.
+            if (hidden.Contains(variable) && b is not { Kind: BindingKind.Piece }) continue;
+            // Input boxes and picks always; checked boxes only in the manual modes (they gate Apply and never feed the run); never dice or overrides.
+            var accept = b != null && (b.Kind is BindingKind.Input or BindingKind.Piece || (model.Checked && IsCheckedKind(b.Kind)));
             if (accept) model.SetBoxText(variable, text ?? "");
         }
         // One unit, one set of dice: while the unit has this formula's run waiting, a guest uses that run (an ad-hoc run would be another roll).

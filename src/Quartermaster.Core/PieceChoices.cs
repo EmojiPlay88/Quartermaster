@@ -8,8 +8,9 @@ public sealed record PieceChoice(string Label, string PieceId);
 
 /// <summary>
 /// The candidate pieces of a Piece binding (<see cref="BindingKind.Piece"/>): every piece matching its "which pieces" filter that the viewer
-/// sees, labelled "{name} ({location})" ("{name}" off grid), a repeated label (case-insensitive) suffixed " #2", " #3" ... in state order (the
-/// first keeps the plain label), sorted by label (ordinal, ignoring case). The runner resolves a typed label against the same list.
+/// sees, labelled "{name} ({location})" ("{name}" off grid; a nameless one, a masked placeholder, named "Unknown piece"), a repeated label
+/// (case-insensitive) suffixed " #2", " #3" ... in state order (the first keeps the plain label; a suffix that is another candidate's plain
+/// label is skipped), sorted by label (ordinal, ignoring case). The runner resolves a typed label against the same list.
 /// </summary>
 public static class PieceChoices
 {
@@ -18,6 +19,9 @@ public static class PieceChoices
 
     /// <summary>No candidate with an empty filter; with a filter it is "No piece matches \"{filter}\"".</summary>
     public const string NoPiece = "No piece to choose";
+
+    /// <summary>The name a candidate without one (a masked piece's nameless placeholder) is labelled with.</summary>
+    public const string UnknownName = "Unknown piece";
 
     /// <param name="sides">The viewer's sides: the list is built on that viewer's <see cref="PlayerView"/> (only pieces it can see, a masked
     /// piece of another side under its nameless placeholder name, the filter answered as the viewer's own list answers it), so the host and the
@@ -31,17 +35,31 @@ public static class PieceChoices
     {
         var shown = sides == null ? s : PlayerView.For(s, pack, model, sides);
         var match = PieceFilter.Compile(b.PieceFilter, shown, pack, model);
-        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var list = new List<(string Label, string PieceId, string Name)>();
+        var plain = new List<(string Label, string PieceId, string Name)>();
         foreach (var p in shown.Pieces.Values)
         {
             if (p?.Id == null || !match(p)) continue;
-            var name = PieceInfo.Name(p) ?? "";
+            var name = PieceInfo.Name(p)?.Trim() is { Length: > 0 } n ? n : UnknownName;   // a masked placeholder has no name
             var loc = PieceInfo.Location(p, model);
-            var label = (loc == null ? name : $"{name} ({loc})").Trim();
-            var n = seen.TryGetValue(label, out var k) ? k + 1 : 1;
-            seen[label] = n;
-            list.Add((n == 1 ? label : $"{label} #{n}".Trim(), p.Id, name));
+            plain.Add(((loc == null ? name : $"{name} ({loc})").Trim(), p.Id, name));
+        }
+        // A repeated label gets " #2", " #3" ... in state order, skipping any suffixed label that is another candidate's plain label.
+        var plains = new HashSet<string>(plain.Select(c => c.Label), StringComparer.OrdinalIgnoreCase);
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var next = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<(string Label, string PieceId, string Name)>();
+        foreach (var c in plain)
+        {
+            var label = c.Label;
+            if (!used.Add(label))
+            {
+                var k = next.GetValueOrDefault(c.Label, 2);
+                while (plains.Contains($"{c.Label} #{k}") || used.Contains($"{c.Label} #{k}")) k++;
+                label = $"{c.Label} #{k}";
+                next[c.Label] = k + 1;
+                used.Add(label);
+            }
+            list.Add((label, c.PieceId, c.Name));
         }
         return list.OrderBy(c => c.Label, StringComparer.OrdinalIgnoreCase).ToList();
     }

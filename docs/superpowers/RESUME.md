@@ -1,6 +1,6 @@
 # Quartermaster — resume here
 
-*Last updated 2026-11-14 (stage 6b-2 is merged as PR #11, master 05a9b75, so stage 6a (PR #9), 6b-1 (PR #10) and 6b-2 (Windows and Linux packages) are all merged; small 6b follow-ups (CI runs the Windows zip and Linux tar.gz through the updater staging, installer cleanup of stale files and folder guard gaps, privacy scan of the mac zip) are on branch port-stage6b-followups; see CURRENT STATE below; earlier: stage 5d was merged as PR #8, master b82a566, so stage 5 of the port is complete); earlier text: stage 5c (2026-11-13), stage 5b (2026-11-12); after piece 8 (ledger images and tabs, updater, release script) was built on branch `piece8` (merge into master pending; pieces through 7 and the launcher are pushed). A new session should read this file first, then the docs it points to.*
+*Last updated 2026-11-24 (other-piece binding on branch `other-piece`, see CURRENT STATE below); earlier: 2026-11-14 (stage 6b-2 is merged as PR #11, master 05a9b75, so stage 6a (PR #9), 6b-1 (PR #10) and 6b-2 (Windows and Linux packages) are all merged; small 6b follow-ups (CI runs the Windows zip and Linux tar.gz through the updater staging, installer cleanup of stale files and folder guard gaps, privacy scan of the mac zip) are on branch port-stage6b-followups; see CURRENT STATE below; earlier: stage 5d was merged as PR #8, master b82a566, so stage 5 of the port is complete); earlier text: stage 5c (2026-11-13), stage 5b (2026-11-12); after piece 8 (ledger images and tabs, updater, release script) was built on branch `piece8` (merge into master pending; pieces through 7 and the launcher are pushed). A new session should read this file first, then the docs it points to.*
 
 ## What this is
 
@@ -116,7 +116,17 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-24, computed properties and attached aggregates; read this first):**
+**CURRENT STATE (2026-11-24, other-piece binding; read this first):**
+
+- **Branch `other-piece` (cut from master a063e19), not pushed; all three tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-24-other-piece-design.md` (engine wishlist #45).
+  - **Rules:** `BindingKind.Piece` with `Property` and optional `VariableBinding.PieceFilter` (omitted when null; `CurrentFormat` stays 4). Validator: unknown property, holder property, filter does not parse. `FormulaVariables.PieceBindingsHidden` (Piece bindings of a non-Public property).
+  - **Core:** `PieceChoices` (labels `{name} ({location})` / `{name}` off grid / `Unknown piece` for a nameless placeholder; duplicates ` #2`, ` #3` in state order, skipping a suffix that is another candidate's plain label; sorted ignoring case), built on the viewer's `PlayerView` when sides are given. `RunRequest.PickSides`; runner errors `Choose one of the listed pieces`, `No piece matches "{filter}"` / `No piece to choose`, `Hidden from this player`; never auto-filled; working `{property} of {piece}`. `PlayerView` hides the working of a formula with a hidden Piece binding.
+  - **Render:** `FormulaMasking` adds hidden Piece bindings and sets `FormulaDialogModel.PickSides` (viewer sides on the full state; null on a guest and in solo). The dialog shows a Piece binding as a choice box of the candidate labels; a hidden pick stays pickable (label only; value hidden, the host calculates for a guest). The host's intent runner takes the guest's pick with `PickSides` = the guest's sides. `FormulaRunner.Model` exposed. Batch grid: no dropdown for Piece columns yet (typed label works).
+  - **Workbench (both):** kind `Piece`; Target = a Pieces/Both property; Details = the "which pieces" filter (`FormulaEdit.PieceDetailsHint`, parse error `Which pieces: ...`).
+  - **Wiki:** Formula-Reference (Piece kind, picking, labels, errors, hidden rule, Riverland raider example), Window-Rules-Workbench (kind list, Details).
+  - **Tests:** see `.superpowers/sdd/2026-11-24-other-piece/task-3-report.md` for the full-run numbers.
+
+**Previous CURRENT STATE (2026-11-24, computed properties and attached aggregates; history: merged as PR #23):**
 
 - **Branch `computed-attached` (cut from master 57d9527), not pushed; all four tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-24-computed-attached-design.md` (engine wishlist #30, #42).
   - **Rules:** `PropertyDef.Expr` (omitted when null/empty; `CurrentFormat` stays 4, an unchanged pack keeps its SHA-256). `PropertyFacts.IsComputed/ReadsHidden/IsPublic/CycleFrom`. `attachedsum(P[, "f"])`, `attachedcount(["f"])`, `attachedmax(P[, "f"])`, `attachedmin(P[, "f"])` with the hex ones' argument rules; forbidden in phase conditions and side unit filters. Validator: Expr does not parse, computed from itself (`A → B → A`), an output writing a computed property (error); Default/SheetField on a computed property, Public computed from hidden data (warnings).

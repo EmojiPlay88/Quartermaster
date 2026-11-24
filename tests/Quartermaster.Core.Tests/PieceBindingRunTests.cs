@@ -193,14 +193,15 @@ public class PieceBindingRunTests
         var blue = PieceChoices.For(s, pack, Model, Pick(), Blue);
         Assert.All(blue, c => Assert.DoesNotContain("Secret", c.Label));
         var masked = Assert.Single(blue, c => c.PieceId == "r1");
-        Assert.Equal($"{placeholder} ({l})".Trim(), masked.Label);
+        Assert.Equal("", placeholder);
+        Assert.Equal($"Unknown piece ({l})", masked.Label);
         Assert.Contains(PieceChoices.For(s, pack, Model, Pick(), null), c => c.Label == $"Red Secret Unit ({l})");
         Assert.Contains(PieceChoices.For(s, pack, Model, Pick(), Red), c => c.Label == $"Red Secret Unit ({l})");
 
         // Host run for Blue: a Public value reads normally, and the working never names the hidden piece.
         var t = Run(s, pack, masked.Label, Blue);
         Assert.Equal(4, t.Result!.Value.Number);
-        Assert.DoesNotContain("Secret", Assert.Single(t.Variables).Source ?? "");
+        Assert.Equal("Strength of Unknown piece", Assert.Single(t.Variables).Source);
         Assert.Equal(4, Run(s, pack, $"Red Secret Unit ({l})").Result!.Value.Number);
 
         // On Blue's own view the placeholder's values are gone: neither the Private nor the Public value is read (no Default either).
@@ -258,5 +259,54 @@ public class PieceBindingRunTests
         Assert.Equal("Strength of Blue Guns", v.Source);
         Assert.False(v.Auto);
         Assert.Equal(7, Assert.Single(t.Outputs).After);
+    }
+
+    [Fact]
+    public void Nameless_candidate_labelled_unknown_piece()
+    {
+        var s = new GameState();
+        Add(s, "n1", "");
+        Add(s, "n2", "", map: "Nowhere");   // off grid
+        var list = PieceChoices.For(s, Pack(), Model, Pick(), null);
+        Assert.Equal(new[] { ("Unknown piece", "n2"), ($"Unknown piece ({Loc(s, "n1")})", "n1") },
+            list.Select(c => (c.Label, c.PieceId)).ToArray());
+        Assert.Equal(2, Run(s, Pack(), "Unknown piece").Result!.Value.Number);
+    }
+
+    [Fact]
+    public void Duplicate_suffix_skips_real_names()
+    {
+        // A piece really named "Depot #2" keeps its plain label; the second "Depot" skips to " #3".
+        var s = new GameState();
+        Add(s, "d1", "Depot", 1, map: "Nowhere");
+        Add(s, "d2", "Depot", 2, map: "Nowhere");
+        Add(s, "d3", "Depot #2", 3, map: "Nowhere");
+        Add(s, "d4", "Depot", 4, map: "Nowhere");
+        var list = PieceChoices.For(s, Pack(), Model, Pick(), null);
+        Assert.Equal(new[] { ("Depot", "d1"), ("Depot #2", "d3"), ("Depot #3", "d2"), ("Depot #4", "d4") },
+            list.Select(c => (c.Label, c.PieceId)).ToArray());
+        Assert.Equal(list.Count, list.Select(c => c.Label).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(3, Run(s, Pack(), "Depot #2").Result!.Value.Number);
+        Assert.Equal(2, Run(s, Pack(), "Depot #3").Result!.Value.Number);
+    }
+
+    [Fact]
+    public void Player_view_private_property_of_visible_enemy_is_hidden()
+    {
+        var s = new GameState();
+        Add(s, "r1", "Red Rifles", 3, secret: 8);
+        Add(s, "b1", "Blue Guns", 7, x: 160);
+        var b = Pick("secret");
+        var pack = Pack(b, sides: true);
+        var view = PlayerView.For(s, pack, Model, Blue);
+        var label = Assert.Single(PieceChoices.For(view, pack, Model, b, Blue), c => c.PieceId == "r1").Label;
+        Assert.Equal($"Red Rifles ({Loc(s, "r1")})", label);
+        var t = Run(view, pack, label, Blue);
+        Assert.Null(t.Result);
+        var v = Assert.Single(t.Variables);
+        Assert.Equal("Hidden from this player", v.MissingReason);
+        Assert.Null(v.Value);
+        // Blue's own piece reads its Private value as usual.
+        Assert.Equal(0, Run(view, pack, $"Blue Guns ({Loc(s, "b1")})", Blue).Result!.Value.Number);
     }
 }

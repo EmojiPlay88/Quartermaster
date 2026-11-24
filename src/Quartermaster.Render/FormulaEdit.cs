@@ -45,7 +45,7 @@ public static class FormulaEdit
 
     /// <summary>True when the binding holds anything beyond a default, unconfigured Input.</summary>
     public static bool IsConfigured(VariableBinding b) =>
-        b.Kind != BindingKind.Input || b.Property != null || b.HolderId != null || b.TableId != null || b.RowExpr != null || b.ColExpr != null
+        b.Kind != BindingKind.Input || b.PieceFilter != null || b.Property != null || b.HolderId != null || b.TableId != null || b.RowExpr != null || b.ColExpr != null
         || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null || b.AlwaysAsk || b.When != null || b.DiceCountExpr != null;
 
     /// <summary>Bindings whose variable no longer appears in the text.</summary>
@@ -93,6 +93,10 @@ public static class FormulaEdit
 
     // ---------- details column ----------
 
+    /// <summary>The Details hint of a Piece binding (both Workbenches).</summary>
+    public const string PieceDetailsHint =
+        "Which pieces: a unit filter such as startsWith(name(), \"Blue\"); blank = every piece. The player picks one of the pieces they can see when the formula runs.";
+
     private static string Num(double d) => d.ToString("R", CultureInfo.InvariantCulture);
 
     public static string FormatDetails(VariableBinding b)
@@ -117,6 +121,8 @@ public static class FormulaEdit
                 if (!string.IsNullOrWhiteSpace(b.RowExpr)) parts.Add("row: " + b.RowExpr);
                 if (!string.IsNullOrWhiteSpace(b.ColExpr)) parts.Add("col: " + b.ColExpr);
                 return string.Join(" | ", parts);
+            case BindingKind.Piece:
+                return b.PieceFilter ?? "";
             default:
                 return "";
         }
@@ -178,6 +184,11 @@ public static class FormulaEdit
                     else return (b, "Use \"row: expression | col: expression\".");
                 }
                 return (b with { RowExpr = string.IsNullOrEmpty(row) ? null : row, ColExpr = string.IsNullOrEmpty(col) ? null : col }, null);
+            case BindingKind.Piece:
+                // The "which pieces" filter: blank = every piece (stored as null, never ""); it must parse.
+                if (text.Length == 0) return (b with { PieceFilter = null }, null);
+                if (SyntaxProblem(text) is { } filterErr) return (b, "Which pieces: " + filterErr);
+                return (b with { PieceFilter = text }, null);
             default:
                 return (b, null);
         }
@@ -360,6 +371,8 @@ public static class FormulaEdit
         {
             case BindingKind.Unit or BindingKind.Global:
                 return pack.Properties.Select(p => new TargetOption(p.Name, p.Id, null, null)).ToList();
+            case BindingKind.Piece:   // a property a piece holds (a holder-only property is never a piece's)
+                return pack.Properties.Where(p => p.Scope != PropertyScope.Holders).Select(p => new TargetOption(p.Name, p.Id, null, null)).ToList();
             case BindingKind.Holder:
                 return pack.Holders.SelectMany(h => pack.Properties.Select(p => new TargetOption($"{h.Name}: {p.Name}", p.Id, h.Id, null))).ToList();
             case BindingKind.Table:
@@ -377,7 +390,7 @@ public static class FormulaEdit
     {
         switch (b.Kind)
         {
-            case BindingKind.Unit or BindingKind.Global:
+            case BindingKind.Unit or BindingKind.Global or BindingKind.Piece:
                 return b.Property == null ? "" : pack.ById<PropertyDef>(b.Property)?.Name ?? Missing;
             case BindingKind.Holder:
                 if (b.Property == null && b.HolderId == null) return "";

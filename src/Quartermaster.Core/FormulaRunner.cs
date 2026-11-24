@@ -35,6 +35,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     private readonly RulesPack _pack = pack;
     public RulesPack Pack => _pack;
     private readonly ModuleModel _model = model;
+    public ModuleModel Model => _model;
     private readonly Func<int, int, IReadOnlyList<int>> _roller = roller;
 
     /// <summary>A variable that cannot be filled yet (not an error).</summary>

@@ -110,8 +110,8 @@ public static class PlayerView
         private readonly List<string> _privatePrefixes;
         /// <summary>
         /// Formulas reading a holder value this viewer may not see, using an aggregate that may read hidden pieces or values, or reading a
-        /// computed property built from hidden data (<see cref="FormulaVariables.ComputedReadsHidden"/>): their working (which shows that
-        /// value) is never shown.
+        /// computed property built from hidden data (<see cref="FormulaVariables.ComputedReadsHidden"/>), or picking a piece whose non-Public
+        /// property they read (<see cref="FormulaVariables.PieceBindingsHidden"/>): their working (which shows that value) is never shown.
         /// </summary>
         private readonly HashSet<string> _hiddenInputFormulas = new(StringComparer.Ordinal);
         private readonly Regex? _names;
@@ -136,7 +136,8 @@ public static class PlayerView
                     || FormulaVariables.HolderReads(f).Any(r => r.Holder == null || pack.HolderByName(r.Holder) is not { } h
                         || ValueHidden(LedgerKey.Holder(h.Id), pack.PropertyByName(r.Property ?? "")?.Id, out _))
                     || FormulaVariables.AggregateReadsHidden(pack, f, piecesMayHide)
-                    || FormulaVariables.ComputedReadsHidden(pack, f)))   // a computed value built from hidden data, even on a held piece or the global holder
+                    || FormulaVariables.ComputedReadsHidden(pack, f)   // a computed value built from hidden data, even on a held piece or the global holder
+                    || FormulaVariables.PieceBindingsHidden(pack, f).Any()))   // a picked piece's non-Public value
                     _hiddenInputFormulas.Add(f.Id);
 
             foreach (var p in full.Pieces.Values)

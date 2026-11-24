@@ -1225,6 +1225,205 @@ public class FormulaMaskingTests : IDisposable
         finally { Environment.SetEnvironmentVariable(AppDataRoot.EnvVar, old); }
     }
 
+    /// <summary>
+    /// Piece bindings (invented): "Spy" (W + P * 0, P = the picked piece's Private Water) and "Compare" (W + M, M = the picked piece's Public
+    /// Morale). Red 1's water is the Red secret, its morale 7; Red 2's morale 9. With <paramref name="hideRedTwo"/> Red 2 carries a Hideable
+    /// trait switched on by Red, so Blue cannot see it.
+    /// </summary>
+    private static void AddPieceBindings(ModuleSession s, bool hideRedTwo = false)
+    {
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef
+                { Id = "morale", Name = "Morale", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Default = 5 }).ToList(),
+            Formulas = p.Formulas.Concat(new[]
+            {
+                new FormulaDef
+                {
+                    Id = "f-spy", Name = "Spy", Text = "W + P * 0",
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                        new VariableBinding { Variable = "P", Kind = BindingKind.Piece, Property = "water" },
+                    },
+                },
+                new FormulaDef
+                {
+                    Id = "f-cmp", Name = "Compare", Text = "W + M",
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                    Bindings = new()
+                    {
+                        new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                        new VariableBinding { Variable = "M", Kind = BindingKind.Piece, Property = "morale" },
+                    },
+                },
+            }).ToList(),
+        });
+        var g = s.Game!;
+        g.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.RedOne), "water", 10, RedSecret, "manual", null, null, null, null));
+        g.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.RedOne), "morale", 5, 7, "manual", null, null, null, null));
+        g.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.RedTwo), "morale", 5, 9, "manual", null, null, null, null));
+        if (hideRedTwo)
+        {
+            var r2 = g.State.Pieces[PhaseFixture.RedTwo];
+            r2.TypeString = PieceTypeParser.EncodeState(new[] { "hide;I;Hide it;;;0.3;;false", "piece;;;unit.svg;Red 2" });
+            r2.TraitStates = new() { "red", "" };
+        }
+    }
+
+    private static VariableBinding PieceBinding(ModuleSession s, string formulaId, string variable) =>
+        s.Rules!.ById<FormulaDef>(formulaId)!.Bindings.Single(b => b.Variable == variable);
+
+    private static IReadOnlyList<string> Labels(ModuleSession s, string formulaId, string variable, IReadOnlySet<string>? sides) =>
+        Quartermaster.Core.PieceChoices.For(s.Game!.State, s.Rules!, s.Model, PieceBinding(s, formulaId, variable), sides).Select(c => c.Label).ToList();
+
+    private static string LabelOf(IReadOnlyList<string> labels, string name) =>
+        labels.Single(l => l.StartsWith(name + " (", StringComparison.Ordinal) || l == name);
+
+    [Fact]
+    public void PieceBinding_dialog_lists_visible_choices()
+    {
+        var (host, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddPieceBindings(host, hideRedTwo: true);
+        var blueLabels = Labels(host, "f-cmp", "M", Blue);
+        Assert.Equal(2, blueLabels.Count);
+        Assert.DoesNotContain(blueLabels, l => l.StartsWith("Red 2", StringComparison.Ordinal));
+
+        // Hot seat, Blue at the screen: the list is Blue's, and the box is a typed choice box.
+        host.SetViewSides(Blue);
+        var m = Dialog(host, "f-cmp", PhaseFixture.BlueOne, check: false);
+        Assert.Equal(Blue, m.PickSides);
+        var v = m.Evaluate(host.Game!.State);
+        var box = v.Boxes.Single(b => b.Variable == "M");
+        Assert.Equal(blueLabels, box.Choices);
+        Assert.Equal(BoxBackground.Typed, box.Background);
+        Assert.True(box.Enabled);
+        Assert.Equal("", box.Text);
+        Assert.Equal("Waiting for: M", v.Status);
+        m.SetBoxText("M", LabelOf(blueLabels, "Red 1"));
+        var picked = m.Evaluate(host.Game!.State);
+        Assert.Equal(LabelOf(blueLabels, "Red 1"), picked.Boxes.Single(b => b.Variable == "M").Text);
+        Assert.Equal("17", picked.ResultText);
+        Assert.Equal("Morale of Red 1", picked.Trace.Variables.Single(x => x.Variable == "M").Source);
+        // Blue cannot reach the hidden Red 2 by typing its label.
+        m.SetBoxText("M", LabelOf(Labels(host, "f-cmp", "M", null), "Red 2"));
+        Assert.Null(m.Evaluate(host.Game!.State).Trace.Result);
+
+        // Red at the screen sees its own hidden piece.
+        host.SetViewSides(Red);
+        var red = Dialog(host, "f-cmp", PhaseFixture.RedOne, check: false).Evaluate(host.Game!.State);
+        Assert.Contains(red.Boxes.Single(b => b.Variable == "M").Choices!, l => l.StartsWith("Red 2", StringComparison.Ordinal));
+
+        // Solo (no viewer): every piece.
+        host.SetViewSides(null);
+        var solo = Dialog(host, "f-cmp", PhaseFixture.RedOne, check: false);
+        Assert.Null(solo.PickSides);
+        Assert.Equal(3, solo.Evaluate(host.Game!.State).Boxes.Single(b => b.Variable == "M").Choices!.Count);
+
+        // The guest's dialog runs on its own view: the same list, built from that view.
+        var guest = Guest(host);
+        var gm = Dialog(guest, "f-cmp", PhaseFixture.BlueOne, check: false);
+        Assert.Null(gm.PickSides);
+        Assert.Equal(blueLabels, gm.Evaluate(guest.Game!.State).Boxes.Single(b => b.Variable == "M").Choices);
+    }
+
+    [Fact]
+    public async Task Guest_piece_binding_private_masked()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddPieceBindings(host);
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);
+        Assert.Equal(new[] { "P" }, FormulaMasking.HiddenVariables(host.Rules!, host.Model, host.Game!.State,
+            host.Rules!.ById<FormulaDef>("f-spy")!, PhaseFixture.BlueOne, Blue).ToArray());
+
+        var m = Dialog(guest, "f-spy", PhaseFixture.BlueOne, check: false);
+        Assert.Contains("P", m.Hidden);
+        Assert.True(m.HostCalculates);
+        var before = m.Evaluate(guest.Game!.State);
+        var box = before.Boxes.Single(b => b.Variable == "P");
+        Assert.NotNull(box.Choices);   // the pick stays the guest's own: still a choice box
+        Assert.True(box.Enabled);
+        Assert.Equal("Waiting for: P", before.Status);
+        var label = LabelOf(box.Choices!, "Red 1");
+        m.SetBoxText("P", label);
+        var picked = m.Evaluate(guest.Game!.State);
+        var pbox = picked.Boxes.Single(b => b.Variable == "P");
+        Assert.Equal(label, pbox.Text);
+        Assert.Equal(FormulaMasking.HostCalculatesText, pbox.Tooltip);
+        Assert.Equal(FormulaDialogModel.HostWaitText, picked.Status);
+        Assert.Equal("", picked.WorkingText);
+        Assert.DoesNotContain(RedText, Shown(picked));
+        Assert.Equal(label, m.Intent(null, false).Typed["P"]);
+
+        // The host reads the Red secret with Blue's list and applies; the verdict (checked by PortTo) and Blue's view never carry it.
+        var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.True(applied.Applied, applied.Message);
+        Assert.Equal(FormulaBox.Hidden, applied.Boxes.Single(b => b.Var == "P").State);
+        var full = host.Game!.State;
+        Assert.Contains(full.LedgerHistory, e => e.FormulaId == "f-spy" && e.Working != null && e.Working.Contains(RedText));
+        var blue = PlayerView.For(full, host.Rules, host.Model, Blue);
+        Assert.DoesNotContain(blue.LedgerHistory, e => e.FormulaId == "f-spy" && e.Working != null);
+        Assert.DoesNotContain(RedText, Json(blue));
+        // The rule is per formula (as every hidden input): Red's view drops it too; only the full state keeps it.
+        Assert.DoesNotContain(PlayerView.For(full, host.Rules, host.Model, Red).LedgerHistory, e => e.FormulaId == "f-spy" && e.Working != null);
+
+        // Hot seat, Blue at the screen: the box is a choice box too, its value hidden, the working redacted.
+        host.SetViewSides(Blue);
+        var hs = Dialog(host, "f-spy", PhaseFixture.BlueOne, check: false);
+        hs.SetBoxText("P", label);
+        var hv = hs.Evaluate(full);
+        Assert.Equal(label, hv.Boxes.Single(b => b.Variable == "P").Text);
+        Assert.Equal(FormulaMasking.HiddenText, hv.Boxes.Single(b => b.Variable == "P").Tooltip);
+        Assert.Equal(FormulaMasking.WorkingHiddenText, hv.WorkingText);
+        Assert.DoesNotContain(RedText, Shown(hv));
+        Assert.True(hv.CanApply, hv.Status);
+    }
+
+    [Fact]
+    public async Task Guest_piece_binding_public_shown()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddPieceBindings(host);
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);
+
+        var m = Dialog(guest, "f-cmp", PhaseFixture.BlueOne, check: false);
+        Assert.Empty(m.Hidden);
+        m.SetBoxText("M", LabelOf(Labels(host, "f-cmp", "M", Blue), "Red 1"));
+        var v = m.Evaluate(guest.Game!.State);
+        Assert.Equal("17", v.ResultText);
+        Assert.Contains("7", v.WorkingText);
+        var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.True(applied.Applied, applied.Message);
+        Assert.Equal(17, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+        var blue = PlayerView.For(host.Game!.State, host.Rules, host.Model, Blue);
+        Assert.Contains(blue.LedgerHistory, e => e.FormulaId == "f-cmp" && e.Working != null);
+    }
+
+    [Fact]
+    public void Host_resolves_guest_pick_with_guest_sides()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddPieceBindings(host, hideRedTwo: true);
+        var executor = new IntentExecutor(host, hc);
+        var hiddenLabel = LabelOf(Labels(host, "f-cmp", "M", null), "Red 2");   // on the host's full list only
+        FormulaVerdict Send(string label) =>
+            executor.Execute("p2", Blue, new FormulaIntent("f-cmp", PhaseFixture.BlueOne, null, new Dictionary<string, string> { ["M"] = label }, false)).Verdict!;
+
+        var refused = Send(hiddenLabel);
+        Assert.False(refused.Applied);
+        Assert.Equal("Waiting for: M", refused.Message);
+        Assert.DoesNotContain(host.Game!.State.LedgerHistory, e => e.FormulaId == "f-cmp");
+
+        var ok = Send(LabelOf(Labels(host, "f-cmp", "M", Blue), "Red 1"));
+        Assert.True(ok.Applied, ok.Message);
+        Assert.Equal(17, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+
     /// <summary>A port whose formula intents are answered by the given host function; nothing else is used by these tests.</summary>
     private sealed class HostPort(Func<FormulaIntent, FormulaVerdict> host) : IActionPort
     {

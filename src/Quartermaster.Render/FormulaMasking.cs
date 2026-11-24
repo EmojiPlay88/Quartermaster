@@ -55,6 +55,12 @@ public static class FormulaMasking
     public static IReadOnlySet<string>? ViewerSides(ModuleSession s) =>
         s.IsGuest ? s.GuestSides ?? NoSides : s.ViewSides;
 
+    /// <summary>
+    /// The sides a Piece binding's candidates are listed and resolved for (<see cref="RunRequest.PickSides"/>): the viewer's sides when the
+    /// dialog runs on the full state (hot-seat, the online host's screen); null in solo and on an online guest, whose state is already its view.
+    /// </summary>
+    public static IReadOnlySet<string>? PickSides(ModuleSession s) => s.IsGuest ? null : s.ViewSides;
+
     /// <summary>The hidden inputs of a formula for the current viewer of <paramref name="s"/> (empty in solo).</summary>
     public static HashSet<string> HiddenFor(ModuleSession s, FormulaDef f, string? pieceId) =>
         s.Rules is { } pack && s.Game?.State is { } st
@@ -66,6 +72,7 @@ public static class FormulaMasking
     {
         m.Hidden = HiddenFor(s, m.Formula, m.PieceId);
         m.HostCalculates = s.IsGuest;
+        m.PickSides = PickSides(s);
         var sides = ViewerSides(s);
         m.OutputVisible = sides == null ? null : key => s.CanEditLedgerFor(key, sides);
     }
@@ -104,7 +111,7 @@ public static class FormulaMasking
             {
                 BindingKind.Unit => UnitHidden(b.Property),
                 BindingKind.Holder => HolderHidden(b.HolderId),
-                _ => false,   // Global is public; Input, Roll, Location and Moved are the player's own; Table is decided below
+                _ => false,   // Global is public; Input, Roll, Location and Moved are the player's own; Table and Piece are decided below
             };
             if (isHidden) hidden.Add(b.Variable);
         }
@@ -117,6 +124,8 @@ public static class FormulaMasking
         // A computed property built from hidden data shows that data wherever it is read: through a binding of any kind (the viewer's own
         // unit and the global holder included) or a variable, which is hidden itself, and through holder(H, P), which hides like a hidden holder.
         hidden.UnionWith(FormulaVariables.ComputedHiddenVariables(pack, f));
+        // A picked piece's non-Public property: the pick is the viewer's own, its value is the host's (the cheapest safe rule).
+        hidden.UnionWith(FormulaVariables.PieceBindingsHidden(pack, f));
         if (FormulaVariables.ComputedHolderCallHidden(pack, f)) hidden.Add(HolderCallInput);
         if (hidden.Count > 0)
             foreach (var b in f.Bindings ?? new List<VariableBinding>())
