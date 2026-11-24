@@ -441,6 +441,105 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
+    public void Guest_formula_reading_public_computed_from_private_is_masked()
+    {
+        // Thirst is declared Public but computed from the Private Water; Spirit is computed from the Public Morale only.
+        var (host, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        FormulaDef F(string id, string prop) => new()
+        {
+            Id = id, Name = id, Text = "W + 1",
+            Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = prop } },
+        };
+        host.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Concat(new[]
+            {
+                new PropertyDef { Id = "morale", Name = "Morale", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Default = 5 },
+                new PropertyDef { Id = "thirst", Name = "Thirst", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Water * 2" },
+                new PropertyDef { Id = "spirit", Name = "Spirit", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Morale + 1" },
+            }).ToList(),
+            Formulas = p.Formulas.Concat(new[] { F("f-thirst", "thirst"), F("f-spirit", "spirit") }).ToList(),
+        });
+        var guest = Guest(host);
+        Assert.Equal(new[] { "W" }, Dialog(guest, "f-thirst", PhaseFixture.RedOne, check: false).Hidden.ToArray());
+        Assert.Empty(Dialog(guest, "f-spirit", PhaseFixture.RedOne, check: false).Hidden);
+    }
+
+    /// <summary>
+    /// Adds Wetness, a Public global computed from every piece's Private Water, and Blue's "Wet gate" on its own unit: W + if(G &lt; 10, B, 0)
+    /// with G the Global Wetness and B an Input asked only when G &lt; 10. Red 1's water is the Red secret, so Wetness is far above 10.
+    /// </summary>
+    private static void AddComputedGlobal(ModuleSession s)
+    {
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef
+                { Id = "wetness", Name = "Wetness", Scope = PropertyScope.Holders, Visibility = Visibility.Public, Expr = "sum(Water, \"\")" }).ToList(),
+            Formulas = p.Formulas.Append(new FormulaDef
+            {
+                Id = "f-gwet", Name = "Wet gate", Text = "W + if(G < 10, B, 0)",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+                Bindings = new()
+                {
+                    new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" },
+                    new VariableBinding { Variable = "G", Kind = BindingKind.Global, Property = "wetness" },
+                    new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "G < 10" },
+                },
+            }).ToList(),
+        });
+        s.Game!.Execute(new LedgerDelta(LedgerKey.Piece(PhaseFixture.RedOne), "water", 10, RedSecret, "manual", null, null, null, null));
+    }
+
+    [Fact]
+    public void HotSeat_global_bound_to_computed_from_hidden_is_masked()
+    {
+        var (s, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        AddComputedGlobal(s);
+        s.SetViewSides(Blue);
+        var f = s.Rules!.ById<FormulaDef>("f-gwet")!;
+        Assert.Contains("G", FormulaMasking.HiddenFor(s, f, PhaseFixture.BlueOne));
+        Assert.DoesNotContain("W", FormulaMasking.HiddenFor(s, f, PhaseFixture.BlueOne));   // Blue's own water
+        var v = Dialog(s, "f-gwet", PhaseFixture.BlueOne, check: false).Evaluate(s.Game!.State);
+        Assert.Equal(FormulaMasking.HiddenText, v.Boxes.Single(b => b.Variable == "G").Text);
+        Assert.DoesNotContain(RedText, Shown(v));
+        Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
+        // holder(Global, Wetness) in the text reads it as well.
+        var call = f with { Text = "W + holder(Global, Wetness) * 0", Bindings = f.Bindings.Take(1).ToList() };
+        Assert.NotEmpty(FormulaMasking.HiddenFor(s, call, PhaseFixture.BlueOne));
+        // Holding every side shows everything.
+        s.SetViewSides(new HashSet<string> { "red", "blue" });
+        Assert.Empty(FormulaMasking.HiddenFor(s, f, PhaseFixture.BlueOne));
+    }
+
+    [Fact]
+    public async Task Guest_global_bound_to_computed_from_hidden_host_decides()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddComputedGlobal(host);
+        var executor = new IntentExecutor(host, hc);
+        var guest = Guest(host);
+        var port = PortTo(executor);
+
+        var m = Dialog(guest, "f-gwet", PhaseFixture.BlueOne, check: false);
+        Assert.Contains("G", m.Hidden);
+        var before = m.Evaluate(guest.Game!.State);
+        Assert.All(before.Boxes.Where(b => b.Variable == "G"), b => Assert.Equal(FormulaMasking.HostCalculatesText, b.Text));
+        var box = before.Boxes.Single(b => b.Variable == "B");
+        Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot decide G < 10
+        Assert.True(box.Enabled);
+        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
+        Assert.DoesNotContain("sum()", Shown(before));
+
+        // The host knows G is far above 10: B is not used, and the run applies without it.
+        var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.True(applied.Applied, applied.Message);
+        Assert.Contains(host.Game!.State.LedgerHistory, e => e.FormulaId == "f-gwet" && e.Working != null);
+        var blue = PlayerView.For(host.Game!.State, host.Rules, host.Model, Blue);
+        Assert.DoesNotContain(blue.LedgerHistory, e => e.FormulaId == "f-gwet" && e.Working != null);
+        Assert.DoesNotContain(RedText, Json(blue));
+    }
+
+    [Fact]
     public void Host_aggregate_not_masked()
     {
         var (s, c) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });

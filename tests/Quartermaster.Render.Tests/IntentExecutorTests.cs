@@ -153,6 +153,22 @@ public class IntentExecutorTests : IDisposable
     }
 
     [Fact]
+    public void Intent_edit_of_computed_refused()
+    {
+        var (s, _, x) = Open();
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef { Id = "reach", Name = "Reach", Scope = PropertyScope.Pieces, Expr = "Water + 2" }).ToList(),
+        });
+        var g = s.Game!;
+        var before = Json(g.State);
+        var r = x.Execute("p2", Blue, new LedgerEditIntent(LedgerKey.Piece(PhaseFixture.BlueOne), "reach", 4, "filled"));
+        Assert.False(r.Ok);
+        Assert.Equal("Reach is computed (= Water + 2) and cannot be edited", r.Message);
+        Assert.Equal(before, Json(g.State));
+    }
+
+    [Fact]
     public void Intent_NextPhaseOutOfPhase_Refused()
     {
         var (s, c, x) = Open();

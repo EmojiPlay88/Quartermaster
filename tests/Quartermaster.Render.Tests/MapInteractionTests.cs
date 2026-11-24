@@ -370,4 +370,25 @@ public class PieceDetailTests
         Assert.Empty(PieceDetails.For(p, t).Ledger);
         Assert.Empty(PieceDetails.For(p, t, st, null).Ledger);
     }
+
+    [Fact]
+    public void PieceDetails_include_computed_values()
+    {
+        var typeStr = SequenceEncoder.Encode(new[] { "piece;;;unit.svg;Rifle" }, '	');
+        var t = PieceTypeParser.Parse(typeStr, new DiagnosticLog(), null);
+        var p = new PieceInstance { Id = "p1", TypeString = typeStr, TraitStates = new() { "" } };
+        var st = new GameState();
+        st.Pieces["p1"] = p;
+        st.Ledgers["p:p1"] = new() { ["fuel"] = 12 };
+        var pack = new Quartermaster.Rules.RulesPack
+        {
+            Properties =
+            {
+                new Quartermaster.Rules.PropertyDef { Id = "fuel", Name = "Fuel", Scope = Quartermaster.Rules.PropertyScope.Pieces },
+                new Quartermaster.Rules.PropertyDef { Id = "reach", Name = "Reach", Scope = Quartermaster.Rules.PropertyScope.Pieces, Expr = "Fuel * 2" },
+                new Quartermaster.Rules.PropertyDef { Id = "bad", Name = "Bad", Scope = Quartermaster.Rules.PropertyScope.Pieces, Expr = "Fuel / 0" },   // an error: no line
+            },
+        };
+        Assert.Equal([("fuel", "Fuel", 12d), ("reach", "Reach", 24d)], PieceDetails.For(p, t, st, pack).Ledger);
+    }
 }

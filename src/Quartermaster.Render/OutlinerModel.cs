@@ -47,7 +47,7 @@ public static class OutlinerModel
             string name;
             try { name = nameOf(p) ?? ""; }
             catch (Exception ex) when (ex is not OutOfMemoryException) { name = ""; } // one bad piece type must not blank the tree
-            var vals = props.Select(c => Ledger.Get(s, LedgerKey.Piece(p.Id), c.Id)).ToArray();
+            var vals = props.Select(c => DisplayValues.Get(s, pack!, model, LedgerKey.Piece(p.Id), c)).ToArray();   // a computed one that fails: no value
             var sev = bySeverity.TryGetValue(p.Id, out var set) ? set.OrderByDescending(x => x).ToArray() : Array.Empty<AlertSeverity>();
             leaves[p.Id] = new Leaf(p, name.Length > 0 ? name : p.Id, vals, sev);
         }

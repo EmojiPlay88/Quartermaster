@@ -177,7 +177,7 @@ sealed class InventoryWindow : Form
         _tip.Hide();
         if (group == null || CurrentKey != InventoryKey.LedgerProperty || _s.View is not { } view || _s.Rules is not { } pack) return;
         var row = _rows.FirstOrDefault(r => string.Equals(r.Group, group, StringComparison.OrdinalIgnoreCase));
-        if (row == null || InventoryRules.TotalBreakdown(row, _keyName.SelectedItem as string ?? "", view, pack, _s.ViewFiltered) is not { } tip) return;
+        if (row == null || InventoryRules.TotalBreakdown(row, _keyName.SelectedItem as string ?? "", view, pack, _s.ViewFiltered, _s.Model) is not { } tip) return;
         _tip.Show(_list, new Point(at.X + 12, at.Y + 18), tip);
     }
 

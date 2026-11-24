@@ -6,7 +6,7 @@ namespace Quartermaster.Core;
 
 /// <summary>
 /// Piece sums: sum, countof, maxof and minof over every piece, and hexsum, hexcount, hexmax and hexmin over the pieces in the hex of the piece
-/// being evaluated. Shared by every evaluation context (<see cref="IEvalContext.Aggregate"/>).
+/// being evaluated, and attachedsum, attachedcount, attachedmax and attachedmin over the pieces on its organisation chart. Shared by every evaluation context (<see cref="IEvalContext.Aggregate"/>).
 /// </summary>
 public static class PieceAggregates
 {
@@ -20,7 +20,7 @@ public static class PieceAggregates
     /// The value of an aggregate call over the state of <paramref name="ctx"/>. <paramref name="self"/> is the piece being evaluated (null where there
     /// is none: the hex ones then throw "{fn}() is not available here", as they do without a module model). "" matches every piece; an error the
     /// filter raises on a piece fails the whole aggregate (no piece is skipped silently). A piece's value is its ledger value of the property,
-    /// else the property's Default (as a Unit binding reads it); a holder-only property is an error. In a player view, a call that may read
+    /// else the property's Default (as a Unit binding reads it); a computed one is evaluated (<see cref="PropertyValues"/>) and a piece it does not apply to is skipped; a holder-only property is an error. In a player view, a call that may read
     /// data the viewer cannot see (<see cref="FormulaVariables.AggregateCallHidden"/>) is the error "{fn}() reads data this player cannot see":
     /// the view lacks pieces or values, so any answer would be wrong.
     /// </summary>
@@ -35,22 +35,31 @@ public static class PieceAggregates
             var here = PieceInfo.Location(self, model) ?? throw new EvalError($"{Label(self)} is not in a hex");
             pieces = ctx.InHex(self.MapId, here);
         }
+        else if (ExprFacts.IsAttachedAggregate(fn))
+        {
+            if (self == null || model == null) throw new EvalError($"{fn}() is not available here");
+            var display = FormationDisplay(self, model) ?? throw new EvalError($"{Label(self)} has no organisation chart");
+            pieces = ctx.OnMap(display.Id);
+        }
         else pieces = s.Pieces.Values;
         var text = filter ?? "";
         var match = ctx.Compile(text);
         pieces = pieces.Where(match);
-        if (fn is "countof" or "hexcount") return Value.Of(pieces.Count());
+        if (fn is "countof" or "hexcount" or "attachedcount") return Value.Of(pieces.Count());
 
         var def = (property == null ? null : pack.PropertyByName(property)) ?? throw new EvalError($"Unknown property '{property}'");
         if (def.Scope == PropertyScope.Holders) throw new EvalError($"{def.Name} is not a piece property");
-        var values = pieces.Select(p => Ledger.GetOrDefault(s, LedgerKey.Piece(p.Id), def));
+        // a piece where a computed property does not apply is skipped (it has no value there); an error still fails the aggregate
+        var values = PropertyFacts.IsComputed(def)
+            ? pieces.Select(p => PropertyValues.Get(s, pack, model, LedgerKey.Piece(p.Id), def, ctx)).Where(v => v != null).Select(v => v!.Value)
+            : pieces.Select(p => Ledger.GetOrDefault(s, LedgerKey.Piece(p.Id), def));
         switch (fn)
         {
-            case "sum" or "hexsum":
+            case "sum" or "hexsum" or "attachedsum":
                 return Value.Of(values.Sum());
-            case "maxof" or "hexmax":
-            case "minof" or "hexmin":
-                var max = fn is "maxof" or "hexmax";
+            case "maxof" or "hexmax" or "attachedmax":
+            case "minof" or "hexmin" or "attachedmin":
+                var max = fn is "maxof" or "hexmax" or "attachedmax";
                 double? best = null;
                 foreach (var v in values)
                     if (best == null || (max ? v > best : v < best)) best = v;
@@ -58,6 +67,23 @@ public static class PieceAggregates
             default:
                 throw new EvalError($"{fn}() is not available here");
         }
+    }
+
+    /// <summary>
+    /// The organisation display of a piece's formation: the map named by its first SendTo trait that is an organisation display; null when
+    /// it has none. Reads the piece's own type, whose prototypes were expanded when the piece was created (<see cref="PieceFactory.FromTypeAndState"/>
+    /// and <see cref="SaveImporter"/>'s ReadPiece, through the model's Expander), so a SendTo defined only in a prototype counts, as
+    /// <see cref="PieceActions"/> sees it.
+    /// </summary>
+    public static MapDef? FormationDisplay(PieceInstance p, ModuleModel model)
+    {
+        foreach (var d in PieceInfo.TypeOf(p).Traits.OfType<SendToDef>())
+        {
+            if (d.MapName.Length == 0) continue;
+            var map = model.Maps.FirstOrDefault(m => m.Name == d.MapName || m.Id == d.MapName);
+            if (map is { IsOrgDisplay: true }) return map;
+        }
+        return null;
     }
 
     /// <summary>A piece as the log names it: its name, else "piece".</summary>
@@ -78,14 +104,23 @@ internal sealed class AggregateFilters(GameState s, RulesPack pack, ModuleModel?
     private Dictionary<string, Func<PieceInstance, bool>>? _cache;
     private Func<string, Func<PieceInstance, bool>>? _compile;
     private Dictionary<(string?, string), List<PieceInstance>>? _hexes;
+    private Dictionary<string, List<PieceInstance>>? _maps;
     private bool? _piecesMayHide;
     private Dictionary<(string, string?, string?), bool>? _hidden;
 
     public GameState State => s;
     public RulesPack Pack => pack;
+
+    /// <summary>The position a phase condition is evaluated at (its candidate), read by turn(), stage() and phaseside() of a computed global; null = the game's.</summary>
+    public PhasePosition? At { get; init; }
     public ModuleModel? Model => model;
 
     public Func<string, Func<PieceInstance, bool>> Compile => _compile ??= CompileOnce;
+
+    private Func<PieceInstance, string?>? _sides;
+
+    /// <summary>The side owning a piece (<see cref="Ownership.PieceSides"/>, compiled on first use and then shared); null when none.</summary>
+    public string? SideOf(PieceInstance p) => (_sides ??= Ownership.PieceSides(s, pack))(p);
 
     private Func<PieceInstance, bool> CompileOnce(string text)
     {
@@ -109,6 +144,28 @@ internal sealed class AggregateFilters(GameState s, RulesPack pack, ModuleModel?
             }
         }
         return _hexes.TryGetValue((mapId, location), out var found) ? found : Array.Empty<PieceInstance>();
+    }
+
+    /// <summary>The pieces on this map (<see cref="PieceInstance.MapId"/> is its id or its name), in state order; the index is built once.</summary>
+    public IReadOnlyList<PieceInstance> OnMap(string mapId)
+    {
+        if (_maps == null)
+        {
+            _maps = new(StringComparer.Ordinal);
+            foreach (var p in s.Pieces.Values)
+            {
+                if (p.MapId == null) continue;
+                if (!_maps.TryGetValue(p.MapId, out var list)) _maps[p.MapId] = list = new();
+                list.Add(p);
+            }
+        }
+        var name = model?.Maps.FirstOrDefault(m => m.Id == mapId)?.Name;
+        var byId = _maps.TryGetValue(mapId, out var a) ? a : null;
+        var byName = name != null && name != mapId && _maps.TryGetValue(name, out var b) ? b : null;
+        if (byName == null) return byId ?? (IReadOnlyList<PieceInstance>)Array.Empty<PieceInstance>();
+        if (byId == null) return byName;
+        var ids = new HashSet<PieceInstance>(byId.Concat(byName));
+        return s.Pieces.Values.Where(ids.Contains).ToList();   // keep state order
     }
 
     /// <summary>

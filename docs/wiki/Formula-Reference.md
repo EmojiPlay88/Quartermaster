@@ -392,13 +392,53 @@ hexmin(Ammo, "marker(\"Kind\") == \"Unit\"")
 
 The lowest ammo of the units in the hex. The filter matters: without it, every other piece in the hex (a marker, a fort) counts too, with Ammo's Default.
 
-**Piece sums and hidden information.** In a formula, `sum`, `countof`, `maxof`, `minof` and the `hex` ones read every piece and every value the rules need, hidden or not, so a formula gives the same result whoever runs it. In hot-seat and online play, a player who does not hold every side cannot be shown such a result when it may depend on something they cannot see. For that player a piece sum counts as reading hidden data when:
+### attachedsum(Property) or attachedsum(Property, "filter")
 
-- it is a count (`countof`, `hexcount`);
+The total of a property over the pieces on the organisation chart of the piece being worked out, such as the units attached to an HQ; give a filter to count only some of them. The chart is the map named by the piece's first **Send to location** (VASSAL SendTo) trait whose map is an organisation display (a map the module shows as an org chart). Only pieces physically on that chart count: a unit of the formation that stands on the main map is not attached. The piece itself counts when it is on the chart too (a filter can leave it out), and it does not matter where the piece itself stands: an HQ on the main map still reads its chart. Same rules as `hexsum`: it needs a piece, elsewhere it is `attachedsum() is not available here`, and a phase condition may not use it. A piece with no such trait is an error, `{piece} has no organisation chart`.
+
+```formula
+attachedsum(Fuel, "marker(\"Kind\") == \"Unit\"")
+```
+
+All the fuel of the units on this HQ's organisation chart.
+
+### attachedcount() or attachedcount("filter")
+
+How many pieces are on the organisation chart of the piece being worked out, or how many of them the filter matches. Same rules as `attachedsum`.
+
+```formula
+attachedcount("marker(\"Kind\") == \"Unit\"") == 0
+```
+
+True when the HQ has no units left on its chart.
+
+### attachedmax(Property) or attachedmax(Property, "filter")
+
+The largest value of the property among the pieces on this piece's organisation chart. Same rules as `attachedsum`; when no piece matches it is an error, `No piece matches "{filter}"`.
+
+```formula
+attachedmax(Readiness, "marker(\"Kind\") == \"Unit\"")
+```
+
+The best Readiness of the units attached to this HQ.
+
+### attachedmin(Property) or attachedmin(Property, "filter")
+
+The smallest value of the property among the pieces on this piece's organisation chart. Same rules as `attachedmax`.
+
+```formula
+attachedmin(Ammo, "marker(\"Kind\") == \"Unit\"")
+```
+
+The lowest ammo of the units attached to this HQ.
+
+**Piece sums and hidden information.** In a formula, `sum`, `countof`, `maxof`, `minof` and the `hex` and `attached` ones read every piece and every value the rules need, hidden or not, so a formula gives the same result whoever runs it. In hot-seat and online play, a player who does not hold every side cannot be shown such a result when it may depend on something they cannot see. For that player a piece sum counts as reading hidden data when:
+
+- it is a count (`countof`, `hexcount`, `attachedcount`);
 - its property is Private, or its filter reads a Private property, calls `holder()` or another piece sum, or does not parse;
 - or some pieces may be hidden from that player at all: a map or organisation display belongs to a side they do not hold (the Visibility tab of the Rules Workbench), or a piece of the module, including one placed by a predefined setup, can be hidden or masked (a VASSAL Invisible or Mask trait). Then every piece sum counts, even of a Public property.
 
-A formula that uses such a piece sum (in its text, an output, a precondition, an "Only when", an auto value or a table key) does not show its working or errors to that player; a guest's Formula dialog leaves the calculation to the host, and an "Only when" or precondition that uses one is decided by the host. A sum, maximum or minimum of a Public property whose filter reads only Public values, in a game where no piece can be hidden, is shown as usual.
+A formula that uses such a piece sum (in its text, an output, a precondition, an "Only when", an auto value or a table key), or reads a computed property built from hidden data (see "Computed properties" below), does not show its working or errors to that player; a guest's Formula dialog leaves the calculation to the host, and an "Only when" or precondition that uses one is decided by the host. A sum, maximum or minimum of a Public property whose filter reads only Public values, in a game where no piece can be hidden, is shown as usual.
 
 Warnings, alerts and Ledger filters are worked out on what each player can see. For a player who does not hold every side, one that uses such a piece sum does not match (in a formula run on that player's own screen, the piece sum is the error `sum() reads data this player cannot see`). A player holding every side sees them as usual.
 
@@ -415,7 +455,7 @@ A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-
 - constants and the pure functions (`if`, `min`, `max`, `round`, `floor`, `ceil`, `abs`, `clamp`, `mod`, `startswith`, `contains`).
 - the whole-game piece sums `sum`, `countof`, `maxof` and `minof` (their filters test each piece, so they may read pieces, and even use the `hex` ones: `countof("hexcount() > 1") > 0` is true when any hex holds a stack).
 
-It may not use `name()`, `marker()`, `has()`, `side()`, `map()`, `holder()`, `dice()` or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
+It may not use `name()`, `marker()`, `has()`, `side()`, `map()`, `holder()`, `dice()`, the `hex` and `attached` functions (outside a piece sum's filter) or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
 
 ## Where names get their values
 
@@ -461,6 +501,19 @@ An invented example: a convoy loses supplies to one roll of `Loss` (a Roll of `1
 **A property picked at run time.** In **Choose from**, list properties separated by commas (for example `Fuel, Ammo, Rations`), with a name that holds a comma in "double quotes" and give **Pick by** an expression. A number picks the Nth property in the list (1 is the first); text picks the property with that name (capitals and spaces at the ends do not matter). Anything else stops the run with `Medicine is not one of the output's properties`. With a list but no **Pick by**, the Workbench reports `Formula "Raid": output 1 has a property list but no "Pick by"`. An empty list means the output's own **Property** is used. If you delete a property that a list names, the list keeps it (so a number pick still means the same position) and the Workbench reports `Formula "Raid": output 1 refers to a property that no longer exists` until you fix the list.
 
 For example, an Input `Slot` of `1..3` and Pick by `Slot` lets the player choose which of Fuel, Ammo or Rations the output changes, with one formula instead of three. Values and the picked property are all worked out before anything is written, so a run that fails changes nothing.
+
+## Computed properties
+
+A property can hold an **Expression** (the Expression column of the [Properties & Holders tab](Window-Rules-Workbench#properties--holders-tab)). It is then **computed**: its value is the expression, worked out every time the property is read, and never stored. Use it for a value that follows from others, so the expression is written once instead of being pasted into every formula, warning and filter. An empty Expression means an ordinary stored property; packs without expressions behave exactly as before.
+
+An invented example: Riverland's units could have a property **Range** with the expression `Fuel * 2 + Readiness`. A formula binding, a filter such as `Range >= 6`, a warning, `sum(Range, "...")` and the Ledger all read the current value; when Fuel changes, Range changes with it.
+
+- **What the expression reads.** A Pieces or Both property's expression is worked out for the piece, as a filter reads it: that piece's properties, global values, `name()`, `marker()`, `lookup`, the piece sums and the `hex` and `attached` functions (`attachedcount("marker(\"Kind\") == \"Unit\"")` gives each HQ the number of units on its chart). A Holders property's expression is worked out for the holder: that holder's properties and global values. A computed property may read other computed properties.
+- **Read-only.** The Ledger shows the value, with `= {expression}` in its tooltip, and refuses to edit it: `Range is computed (= Fuel * 2 + Readiness) and cannot be edited`. Formula outputs may not write it, and its Default and SheetField are ignored (the Workbench greys them).
+- **Where it does not apply.** On a piece its Applies to does not match, a computed property has no value (`has(Range)` is false there). A piece sum skips such pieces instead of counting a Default: `sum` and `countof` over none of them give 0, and `maxof` or `minof` over none is `No piece matches "{filter}"`.
+- **Errors.** An expression that fails when read (a division by zero, a missing value, `{piece} has no organisation chart`) is an error named after the property, such as `Range: Division by zero`. The Ledger shows `error` in the cell with the message as its tooltip; a formula, warning or filter treats it as it treats any other error. It never reads as 0.
+- **Cycles.** A property that reads itself through other computed properties (Range reads Reach, which reads Range) is an error in the Workbench, `Property "Range" is computed from itself: Range → Reach → Range`. If one slips through anyway, or computed properties nest more than 16 deep, reading it is the error `Range is computed from itself`.
+- **Hidden information.** A computed property counts as **Private**, whatever its Visibility says, when its expression reads a Private property (directly or through another computed property), calls `holder()`, or uses any piece sum or `attached` function: a player who does not hold every side sees it as Private, as in "Piece sums and hidden information" above. The Workbench warns when such a property is set to Public, and the Visibility tab marks it "(computed from hidden data)". A formula that reads such a property, through a unit, global or holder binding (even of that player's own unit or the global holder) or `holder()`, is treated like one using a hidden piece sum: its working and errors are not shown to that player, a guest's Formula dialog leaves that value to the host, and an "Only when" that depends on it is decided by the host. A computed property set to Private has no value on the pieces and holders of a side that player does not hold, even when everything it reads is Public, just as a stored Private value is not shown there. For this the views must know whose pieces are whose, so while the pack has a computed property that counts as Private, a side's unit filter may not read a Private property (`Side "Red": unit filter may not read Private property "Morale" while the pack has Private computed properties (players' views could not tell whose pieces they hide)`).
 
 ## Common errors
 
@@ -511,10 +564,13 @@ Most of these end with "at position N", where N counts characters from the start
 | Planes needs 4 dice from 1 to 6 | Physical dice: the typed list has the wrong number of dice, or a die outside the range. | Type exactly that many dice, each within the range. |
 | 'Planes' dice count must be a whole number from 1 to 100 | A Roll binding's **Dice count** expression gave something else. | Make the expression give a whole number from 1 to 100. |
 | lookuprange() is not available here / count() is not available here | The function was used where it cannot run (`count` outside a formula run). | Move it into a formula with a Roll binding. |
-| hexsum() is not available here | `hexsum`, `hexcount`, `hexmax` or `hexmin` was used where no piece is being worked out, such as a phase condition or a formula run with no counter. | Run it on a unit, or use `sum`, `countof`, `maxof` or `minof` for the whole game. |
+| hexsum() is not available here | `hexsum`, `hexcount`, `hexmax` or `hexmin` (or `attachedsum` and the other `attached` ones) was used where no piece is being worked out, such as a phase condition or a formula run with no counter. | Run it on a unit, or use `sum`, `countof`, `maxof` or `minof` for the whole game. |
+| HQ North has no organisation chart | An `attached` function ran on a piece with no Send to location trait to an organisation display (the message names the piece). | Run it on an HQ, or guard the formula's Applies to. |
+| Range: Division by zero | Reading the computed property Range failed (the message names the property, then the error). | Fix the property's Expression, or guard it, such as `if(Hexes == 0, 0, Fuel / Hexes)`. |
+| Range is computed from itself | A computed property reads itself through other computed properties, or they nest more than 16 deep. | Break the circle in the Expressions. |
 | Rifle is not in a hex | A `hex` function ran on a piece that has no grid location (the message names the piece). | Run it on a piece that is on a gridded map, or guard the formula's Applies to. |
 | sum() reads data this player cannot see | A piece sum ran on the screen of a player who does not hold every side, and it may read pieces or values that player cannot see (see "Piece sums and hidden information" under the functions above). | Nothing to fix: the host (or a player holding every side) works it out. In a warning, alert or Ledger filter it simply does not match. |
-| No piece matches "Fuel > 3" | `maxof`, `minof`, `hexmax` or `hexmin` found no piece (the message shows the filter). | Guard it: `if(countof("...") > 0, maxof(...), 0)`. |
+| No piece matches "Fuel > 3" | `maxof`, `minof`, `hexmax`, `hexmin`, `attachedmax` or `attachedmin` found no piece (the message shows the filter). | Guard it: `if(countof("...") > 0, maxof(...), 0)`. |
 | No column for x in Table | The same, for the column of a two-dimension table. | Add a column that matches. |
 | Table T needs a column | `lookup` was given only a row, but the table has two dimensions. | Give a column as the third argument. |
 | This formula needs a unit | `name()` or `marker(...)` was used in a formula that was run with no counter. | Run the formula from a counter, or choose a Test piece in the Preview. |
@@ -544,10 +600,17 @@ These come from the bindings and outputs rather than the formula text.
 | sum() names unknown property "P" | The Workbench: `sum`, `maxof`, `minof` or a `hex` function names a property that is not in the pack (the message names the function). | Fix the name, or add the property. |
 | sum() needs a piece property, not "P" | The Workbench: the property's scope is Holders, which pieces do not have. | Use a property whose scope is Pieces or Both. |
 | the filter of sum() does not parse: ... | The Workbench: the quoted filter is not a valid filter (the message says why). | Fix the filter; write quotes inside it as `\"`. |
-| hexsum() is not available in a side's unit filter | The Workbench: a side's unit filter, or a property's applies-to, uses a `hex` function; those are worked out without the map grid. | Describe the units another way. |
+| hexsum() is not available in a side's unit filter | The Workbench: a side's unit filter, or a property's applies-to, uses a `hex` or `attached` function; those are worked out without the map grid. | Describe the units another way. |
 | shows once (its condition never reads the unit), so {unit} is left out | A note: a game-level warning or alert names `{unit}` in its message. | Remove `{unit}`, or add a unit read such as `and name() != ""` to list each unit. |
 | Side "North": unit filter may not use side() | The Workbench: a side's unit filter uses `side()`. | Remove it. |
 | The result is not a number, so it cannot change Fuel | An output writes into a property, but the formula gave text or true/false. | Make the formula give a number. |
 | The value for Ammo is not a number | An output's **Value** gave text or true/false. | Make the expression give a number. |
 | Medicine is not one of the output's properties | **Pick by** gave a number outside the list or a name that is not in **Choose from**. | Check the expression against the list. |
 | output 1 has a property list but no "Pick by" | The Workbench: **Choose from** is filled in but **Pick by** is empty. | Fill in **Pick by**, or clear **Choose from**. |
+| Property "Range": the expression does not parse: ... | The Workbench: a property's Expression is not a valid expression (the message says why). | Fix the Expression. |
+| Property "Range" is computed from itself: Range → Reach → Range | The Workbench: computed properties read each other in a circle. | Break the circle. |
+| Formula "Refuel": output 1 writes computed property "Range" | The Workbench: an output writes a computed property, whose value is never stored. A run of such a formula is refused with the same text and writes nothing. | Write the stored property it is computed from. |
+| Property "Range" is computed; its Default and Sheet field are ignored | A warning: a computed property also has a Default or a SheetField. | Clear them, or clear the Expression. |
+| Side "Red": unit filter may not read Private property "Morale" while the pack has Private computed properties (players' views could not tell whose pieces they hide) | A side's unit filter reads a Private property, and some computed property counts as Private: in a player's view that filter could not tell whose pieces are whose. | Make the property the filter reads Public, or define the side with Public values (name, marker). |
+| Property "Range" is Public but is computed from hidden data; players who do not hold every side see it as Private | A warning: see "Computed properties" above. | Set it to Private, or compute it from Public values only. |
+| Range is computed (= Fuel * 2 + Readiness) and cannot be edited | The Ledger: a computed value was typed over. | Change the values it is computed from. |

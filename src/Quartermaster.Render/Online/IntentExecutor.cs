@@ -226,6 +226,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (ChatText.Clean(l.Note) is not { } note) return IntentResult.Refused("A manual change needs a note.");
         if (s.Rules?.Properties.FirstOrDefault(p => p != null && p.Id == l.PropertyId) is not { } prop)
             return IntentResult.Refused("That value no longer exists.");
+        if (LedgerViewRules.ComputedRefusal(s.Rules, prop.Id) is { } computed) return IntentResult.Refused(computed);
         if (LedgerKey.TryParse(l.Key, out var isPiece, out var id) && isPiece && !Exists(g, Access(g, sides), id))
             return IntentResult.Refused(GoneText);
         if (!s.CanEditLedgerFor(l.Key, sides)) return IntentResult.Refused(OtherSide("That value"));
@@ -391,6 +392,9 @@ internal static class FormulaIntentRunner
                 model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal));
         }
         if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));   // the dice stay pinned for a corrected Apply
+        // A computed value is never stored: a trace writing one is refused whole, never applied in part.
+        if (dv.Trace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
+            return new FormulaVerdict(false, boxes, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId));
         if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated || scope?.Previewed == true))
             return new FormulaVerdict(false, boxes, NotWaitingText);
         pins?.Remove(pinKey);   // consumed

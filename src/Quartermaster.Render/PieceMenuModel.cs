@@ -252,6 +252,7 @@ public static class PieceMenuModel
     {
         if (s.Rules is not { } rules || s.Game is not { } game) return null;
         var prop = rules.Properties.FirstOrDefault(p => p.Scope != Quartermaster.Rules.PropertyScope.Holders
+            && !Quartermaster.Rules.PropertyFacts.IsComputed(p)   // a computed property's Sheet field is ignored: it manages no row
             && string.Equals(p.SheetField, rowName, StringComparison.OrdinalIgnoreCase)
             && PieceFilter.Matches(p.AppliesTo, piece, game.State, s.Model, rules));
         if (prop == null) return null;

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Quartermaster.Core;
 using Quartermaster.Rules;
+using Quartermaster.Rules.Expr;
 using Quartermaster.TestFixtures;
 using Quartermaster.Vassal;
 using Xunit.Abstractions;
@@ -281,6 +282,124 @@ public class PlayerViewTests(ITestOutputHelper output)
         Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-hq").Working);
         Assert.DoesNotContain("4242", Json(blue));
         Assert.Null(PlayerView.For(s, pack, LazyHideModel.Value, Blue).LedgerHistory.Single(e => e.FormulaId == "f-hq").Working);
+    }
+
+    /// <summary>The pack with one extra computed property and one Blue formula "G * 0 + 1" whose G is bound (Global or Unit) to it.</summary>
+    private static RulesPack ComputedBindingPack(PropertyDef computed, BindingKind kind) => Pack() with
+    {
+        Properties = Pack().Properties.Append(computed).ToList(),
+        Formulas = Pack().Formulas.Append(new FormulaDef
+        {
+            Id = "f-g", Name = "Fuel watch", Text = "G * 0 + 1",
+            Bindings = new() { new VariableBinding { Variable = "G", Kind = kind, Property = computed.Id } },
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "morale", Op = OutputOp.Set } },
+        }).ToList(),
+    };
+
+    [Fact]
+    public void PlayerView_hides_working_of_computed_global_over_private()
+    {
+        // RedFuel is a Public global computed from Red's Private Fuel; a Blue formula binds it as a Global.
+        var pack = ComputedBindingPack(new PropertyDef
+        {
+            Id = "redfuel", Name = "RedFuel", Scope = PropertyScope.Holders, Visibility = Visibility.Public,
+            Expr = "sum(Fuel, \"side() == \\\"Red\\\"\")",
+        }, BindingKind.Global);
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Add(s, "b1", "Lancer", "Blue");
+        Delta(s, LedgerKey.Piece("r1"), "fuel", 0, 4242);
+        RunFormula(s, pack, "f-g", "b1", 1, null, "blue");
+        Assert.Contains("4242", s.LedgerHistory.Single(e => e.FormulaId == "f-g").Working);
+
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-g").Working);
+        Assert.DoesNotContain("4242", Json(blue));
+    }
+
+    [Fact]
+    public void PlayerView_hides_working_of_own_piece_computed_sum()
+    {
+        // Census is a Public unit property computed from every piece's Private Fuel; Blue binds it on its own unit.
+        var pack = ComputedBindingPack(new PropertyDef
+        {
+            Id = "census", Name = "Census", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "sum(Fuel, \"\")",
+        }, BindingKind.Unit);
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Add(s, "b1", "Lancer", "Blue");
+        Delta(s, LedgerKey.Piece("r1"), "fuel", 0, 4242);
+        RunFormula(s, pack, "f-g", "b1", 1, null, "blue");
+        Assert.Contains("4242", s.LedgerHistory.Single(e => e.FormulaId == "f-g").Working);
+
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.Null(blue.LedgerHistory.Single(e => e.FormulaId == "f-g").Working);
+        Assert.DoesNotContain("4242", Json(blue));
+    }
+
+    [Fact]
+    public void Private_computed_from_public_missing_on_other_sides_piece_and_holder_in_view()
+    {
+        // Might is Private, computed from the Public Morale; Stock is a Private holder property a constant.
+        var pack = Pack() with
+        {
+            Properties = Pack().Properties.Concat(new[]
+            {
+                new PropertyDef { Id = "might", Name = "Might", Scope = PropertyScope.Pieces, Visibility = Visibility.Private, Expr = "Morale * 2" },
+                new PropertyDef { Id = "stock", Name = "Stock", Scope = PropertyScope.Holders, Visibility = Visibility.Private, Expr = "7" },
+            }).ToList(),
+        };
+        var might = pack.Properties.Single(p => p.Id == "might");
+        var stock = pack.Properties.Single(p => p.Id == "stock");
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Add(s, "b1", "Lancer", "Blue");
+        Delta(s, LedgerKey.Piece("r1"), "morale", 0, 21);
+        Delta(s, LedgerKey.Piece("b1"), "morale", 0, 5);
+
+        Assert.Equal(42, PropertyValues.Get(s, pack, Model, LedgerKey.Piece("r1"), might));   // full state
+        Assert.Equal(7, PropertyValues.Get(s, pack, Model, LedgerKey.Holder("reddepot"), stock));
+
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        var ex = Assert.Throws<EvalError>(() => PropertyValues.Get(blue, pack, Model, LedgerKey.Piece("r1"), might));
+        Assert.True(ex.MissingValue);
+        Assert.Equal("Might has no value on this piece", ex.Message);
+        Assert.Equal(10, PropertyValues.Get(blue, pack, Model, LedgerKey.Piece("b1"), might));   // its own piece
+        Assert.False(PieceFilter.Matches("Might > 0", blue.Pieces["r1"], blue, Model, pack));
+        var hex = Assert.Throws<EvalError>(() => PropertyValues.Get(blue, pack, Model, LedgerKey.Holder("reddepot"), stock));
+        Assert.True(hex.MissingValue);
+        Assert.Equal(7, PropertyValues.Get(blue, pack, Model, LedgerKey.Holder("pool"), stock));   // a holder of no side
+
+        var red = PlayerView.For(s, pack, Model, Red);
+        Assert.Equal(42, PropertyValues.Get(red, pack, Model, LedgerKey.Piece("r1"), might));
+        Assert.Equal(7, PropertyValues.Get(red, pack, Model, LedgerKey.Holder("reddepot"), stock));
+    }
+
+    [Fact]
+    public void PlayerView_redacts_public_computed_from_private()
+    {
+        // Range is declared Public but computed from the Private Fuel; Spirit is computed from the Public Morale. Values stored under them
+        // (written before the pack made them computed) follow the effective visibility: Range's is Private.
+        var pack = Pack() with
+        {
+            Properties = Pack().Properties.Concat(new[]
+            {
+                new PropertyDef { Id = "range", Name = "Range", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Fuel * 2" },
+                new PropertyDef { Id = "spirit", Name = "Spirit", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Morale + 1" },
+            }).ToList(),
+        };
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Delta(s, LedgerKey.Piece("r1"), "fuel", 0, 3131);
+        Delta(s, LedgerKey.Piece("r1"), "range", 0, 4242);
+        Delta(s, LedgerKey.Piece("r1"), "spirit", 0, 5353);
+
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.Null(Ledger.Get(blue, LedgerKey.Piece("r1"), "range"));
+        Assert.DoesNotContain(blue.LedgerHistory, e => e.PropertyId == "range");
+        Assert.DoesNotContain("4242", Json(blue));
+        Assert.Equal(5353, Ledger.Get(blue, LedgerKey.Piece("r1"), "spirit"));
+        Assert.Equal(4242, Ledger.Get(PlayerView.For(s, pack, Model, Red), LedgerKey.Piece("r1"), "range"));
     }
 
     [Fact]

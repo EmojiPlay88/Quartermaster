@@ -71,7 +71,7 @@ public static class LedgerSeeder
     public static SeedLedger? BuildSeeds(GameState s, RulesPack pack, Func<PieceInstance, bool> appliesTo, ModuleModel? model = null, DiagnosticLog? log = null)
     {
         // Nothing to seed: skip every piece (workbench commits re-seed often and a game can hold thousands of pieces).
-        if (!pack.Properties.Any(p => p.Scope != PropertyScope.Holders && !string.IsNullOrWhiteSpace(p.SheetField))) return null;
+        if (!pack.Properties.Any(Seeded)) return null;
         var seeds = new List<LedgerSeed>();
         foreach (var piece in s.Pieces.Values)
         {
@@ -98,7 +98,7 @@ public static class LedgerSeeder
         var candidates = new List<(PropertyDef Prop, double? Value)>();
         foreach (var prop in pack.Properties)
         {
-            if (prop.Scope == PropertyScope.Holders || string.IsNullOrWhiteSpace(prop.SheetField)) continue;
+            if (!Seeded(prop)) continue;
             if (Ledger.Get(s, key, prop.Id) != null) continue;
             if (!string.IsNullOrWhiteSpace(prop.AppliesTo) && model == null)
             {
@@ -118,6 +118,10 @@ public static class LedgerSeeder
             if (accepted.TryGetValue(prop.Id, out var v)) seeds.Add(new LedgerSeed(key, prop.Id, v));
         // a piece that fails midway contributes nothing (nothing is added before the last loop)
     }
+
+    /// <summary>A piece property bound to a sheet row and stored (a computed property is never seeded: its Sheet field is ignored).</summary>
+    private static bool Seeded(PropertyDef p) =>
+        p.Scope != PropertyScope.Holders && !string.IsNullOrWhiteSpace(p.SheetField) && !PropertyFacts.IsComputed(p);
 
     /// <summary>The finite number in the first property sheet having this row, else null.</summary>
     private static double? SheetValue(PieceInstance piece, IReadOnlyList<TraitDef> traits, string field)

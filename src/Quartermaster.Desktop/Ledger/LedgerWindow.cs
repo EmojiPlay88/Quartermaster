@@ -33,6 +33,8 @@ public sealed partial class LedgerWindow : Window
     const double NameWidth = 180, KindWidth = 140, ValueWidth = 90, MinColumnWidth = 20;
     static readonly IBrush GroupBrush = new SolidColorBrush(Color.FromRgb(0xE3, 0xE3, 0xE3));     // SystemColors.ControlLight
     static readonly IBrush NegativeBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x00, 0x00));  // Color.Red
+    /// <summary>The text of a computed cell whose read failed.</summary>
+    internal const string ErrorText = "error";
 
     readonly ModuleSession _s;
     readonly IDialogs _dialogs;
@@ -321,6 +323,7 @@ public sealed partial class LedgerWindow : Window
     {
         0 => r.Row.Name,
         1 => r.Row.Kind,
+        _ when r.Row.Errors?.ContainsKey(col - FixedCols) == true => ErrorText,   // a computed cell whose read failed; the hover tip has the message
         _ when col - FixedCols < r.Row.Values.Count && r.Row.Values[col - FixedCols] is { } v => LedgerTable.FormatNumber(v),
         _ => "",
     };
@@ -528,6 +531,12 @@ public sealed partial class LedgerWindow : Window
     {
         if (_closing || _editing != null || row < 0 || row >= _rows.Count || col < FixedCols || col - FixedCols >= _cols.Count) return false;
         if (_rows[row].IsGroupHeader) return false;
+        if (LedgerViewRules.ComputedRefusal(_s.Rules, _cols[col - FixedCols].Id) is { } refused)
+        {
+            // a computed value is never stored: say so instead of opening an editor whose value would be refused
+            Dispatcher.UIThread.Post(() => { if (!_closing) RunAsync(() => WarnAsync(refused)); });
+            return false;
+        }
         ScrollToRow(row);
         if (Live(row) is not { } view) return false;
         var box = view.BeginEdit(col, typed ?? CellText(row, col));

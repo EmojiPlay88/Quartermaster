@@ -75,6 +75,25 @@ public class InventoryQueryTests
     }
 
     [Fact]
+    public void Inventory_ByLedger_computed_totals()
+    {
+        var pack = new RulesPack();
+        pack.Properties.Add(new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces });
+        pack.Properties.Add(new PropertyDef { Id = "reach", Name = "Reach", Scope = PropertyScope.Pieces, Expr = "Fuel * 2" });
+        var s = State(P("a", "Rifle"), P("b", "Rifle"), P("c", "Armor"));
+        s.Ledgers[LedgerKey.Piece("a")] = new() { ["fuel"] = 3 };
+        s.Ledgers[LedgerKey.Piece("b")] = new() { ["fuel"] = 4.5 };
+        var rows = InventoryQuery.Run(s, Model, pack, InventoryKey.LedgerProperty, "Reach", "");
+        Assert.Equal(new[] { "Armor", "Rifle" }, rows.Select(r => r.Group));   // c reads Fuel's Default 0
+        Assert.Equal(new double?[] { 0, 15 }, rows.Select(r => r.Total));
+        var tip = InventoryRules.TotalBreakdown(rows[1], "Reach", s, pack, false, Model);
+        Assert.NotNull(tip);
+        Assert.Equal(new[] { "+9", "+6" }, tip!.Lines.Select(l => l.Amount));
+        pack.Properties.Add(new PropertyDef { Id = "bad", Name = "Bad", Scope = PropertyScope.Pieces, Expr = "Fuel / 0" });
+        Assert.Empty(InventoryQuery.Run(s, Model, pack, InventoryKey.LedgerProperty, "Bad", ""));   // every read fails: no values, no crash
+    }
+
+    [Fact]
     public void Inventory_Filter()
     {
         var s = State(P("a", "Rifle"), P("b", "Armor"), P("c", "Rifle Sniper"));

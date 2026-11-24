@@ -81,6 +81,7 @@ The list on the left holds the pack's formulas, with **New…**, **Rename…** a
 | AppliesTo | Which counters have it, for example `marker("Kind") == "Unit"` |
 | Outliner | How the [outliner](Window-Log-and-Panels#outliner) totals it per group: None, Sum, Min or Average |
 | Notes | Your notes |
+| Expression | Makes the property **computed**: its value is this expression, worked out whenever it is read and never stored, for example `Fuel * 2 + Readiness`. Default and SheetField are greyed while it is set. Empty means a stored value. See [Computed properties](Formula-Reference#computed-properties) |
 
 **Holders** keep values that do not belong to a counter, such as a depot's stores. The built-in **global** holder always exists. **Add holder** and **Delete holder** change the list.
 
@@ -134,7 +135,7 @@ The tab decides what each side may see in hot-seat and online games. It has four
 
 | Box | What you set |
 |---|---|
-| **Properties** | Private or Public for each property. Only the owning side's players see a private value. In Riverland, Readiness is private |
+| **Properties** | Private or Public for each property. Only the owning side's players see a private value. In Riverland, Readiness is private. A Public computed property that reads hidden data is marked "(computed from hidden data)": players who do not hold every side see it as Private |
 | **Holders** | An owner side for each holder (none = public) |
 | **Maps and org displays** | An owner side for each map (none = public) |
 | **Formulas** | Tick **Private dice** to show a formula's rolls only to the rolling side |

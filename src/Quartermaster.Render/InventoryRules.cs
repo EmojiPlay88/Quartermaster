@@ -17,14 +17,14 @@ public static class InventoryRules
     };
 
     /// <summary>The pieces that add up to a row's total; null when the property is unknown or the row has no total.</summary>
-    public static Breakdown? TotalBreakdown(InventoryRow row, string prop, GameState view, RulesPack pack, bool visibleOnly)
+    public static Breakdown? TotalBreakdown(InventoryRow row, string prop, GameState view, RulesPack pack, bool visibleOnly, ModuleModel? model = null)
     {
         var def = pack.PropertyByName((prop ?? "").Trim());
         if (row.Total is not { } total || def == null) return null;
         var parts = new List<(string, double)>();
         foreach (var id in row.PieceIds)
         {
-            if (!view.Pieces.TryGetValue(id, out var p) || Ledger.Get(view, LedgerKey.Piece(id), def.Id) is not { } v) continue;
+            if (!view.Pieces.TryGetValue(id, out var p) || DisplayValues.Get(view, pack, model, LedgerKey.Piece(id), def) is not { } v) continue;
             string name;
             try { name = PieceInfo.Name(p); } catch (Exception ex) when (ex is not OutOfMemoryException) { name = ""; }
             parts.Add((string.IsNullOrWhiteSpace(name) ? id : name, v));
@@ -35,6 +35,6 @@ public static class InventoryRules
     }
 
     /// <summary>The tooltip text of <see cref="TotalBreakdown"/>; empty when there is none.</summary>
-    public static string TotalTip(InventoryRow row, string prop, GameState view, RulesPack pack, bool visibleOnly) =>
-        TotalBreakdown(row, prop, view, pack, visibleOnly) is { } b ? LedgerBreakdown.Format(b) : "";
+    public static string TotalTip(InventoryRow row, string prop, GameState view, RulesPack pack, bool visibleOnly, ModuleModel? model = null) =>
+        TotalBreakdown(row, prop, view, pack, visibleOnly, model) is { } b ? LedgerBreakdown.Format(b) : "";
 }

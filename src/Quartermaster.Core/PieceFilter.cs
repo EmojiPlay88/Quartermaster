@@ -98,12 +98,16 @@ public static class PieceFilter
             .ThenBy(f => f.Id, StringComparer.Ordinal)
             .ToList();
 
-    /// <summary>True iff the piece's ledger holds a value for the property with this name (no default fallback).</summary>
-    internal static bool HasProperty(GameState s, RulesPack pack, PieceInstance? p, string name)
+    /// <summary>
+    /// True iff the piece's ledger holds a value for the property with this name (no default fallback); for a computed property, true when
+    /// it applies to the piece (it is never stored).
+    /// </summary>
+    internal static bool HasProperty(GameState s, RulesPack pack, PieceInstance? p, string name, ModuleModel? model = null)
     {
         if (p == null) return false;
         var def = pack.PropertyByName(name);
-        return def != null && Ledger.Get(s, LedgerKey.Piece(p.Id), def.Id) != null;
+        if (def == null) return false;
+        return PropertyFacts.IsComputed(def) ? PropertyValues.AppliesTo(s, pack, model, p, def) : Ledger.Get(s, LedgerKey.Piece(p.Id), def.Id) != null;
     }
 
     internal static Value MarkerValue(PieceInstance? p, string key)
@@ -144,25 +148,53 @@ public static class PieceFilter
     /// does not fall back to the Default. A present key belongs to a holder the viewer may see. A holder of a side the view was made for
     /// (<see cref="GameState.ViewSides"/>) is never stripped, so there a missing value reads the Default.
     /// </summary>
-    internal static Value HolderRead(GameState s, RulesPack pack, string holder, string property)
+    /// <remarks>A computed property is evaluated for the holder (<see cref="PropertyValues"/>); <paramref name="filters"/> is the caller's aggregate state.</remarks>
+    internal static Value HolderRead(GameState s, RulesPack pack, string holder, string property, ModuleModel? model = null, AggregateFilters? filters = null)
     {
         var h = pack.HolderByName(holder) ?? throw new EvalError($"No holder named '{holder}'");
         var def = pack.PropertyByName(property) ?? throw new EvalError($"Unknown property '{property}'");
         if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{def.Name} is not a holder property");
-        var key = LedgerKey.Holder(h.Id);
-        var v = Ledger.Get(s, key, def.Id);
+        return HolderKeyValue(s, pack, h.Id, h.Name, def, model, filters);
+    }
+
+    /// <summary>The holder's value of a holder (or Both) property, with the player-view rule of <see cref="HolderRead"/>.</summary>
+    private static Value HolderKeyValue(GameState s, RulesPack pack, string holderId, string holderName, PropertyDef def, ModuleModel? model,
+        AggregateFilters? filters)
+    {
+        var key = LedgerKey.Holder(holderId);
+        var v = PropertyValues.Get(s, pack, filters?.Model ?? model, key, def, filters);
         if (v != null) return Value.Of(v.Value);
-        if (s.IsPlayerView && Ownership.SideOfHolder(h.Id, pack) is { } side && !s.Ledgers.ContainsKey(key)
+        if (s.IsPlayerView && Ownership.SideOfHolder(holderId, pack) is { } side && !s.Ledgers.ContainsKey(key)
             && s.ViewSides?.Contains(side) != true)
-            throw new EvalError($"{def.Name} has no value on {h.Name}") { MissingValue = true };
+            throw new EvalError($"{def.Name} has no value on {holderName}") { MissingValue = true };
         return Value.Of(def.Default);
     }
 
     internal static double TurnOf(GameState s) => s.Position?.Turn ?? s.Turn.Turn;
     internal static double StageOf(GameState s) => s.Position?.Repeat ?? 1;
 
-    /// <summary>A Holders-scope property reads the global holder's value (else its Default).</summary>
-    internal static Value GlobalValue(GameState s, PropertyDef def) => Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), def));
+    /// <summary>A Holders-scope property reads the global holder's value (else its Default; a computed one is evaluated for the global holder).</summary>
+    internal static Value GlobalValue(GameState s, RulesPack pack, PropertyDef def, AggregateFilters? filters) =>
+        Value.Of(PropertyValues.GetOrDefault(s, pack, filters?.Model, LedgerKey.Holder(HolderDef.GlobalId), def, filters));
+
+    /// <summary>The context a computed property is evaluated in for a piece: the unit filter's (the piece's properties, globals, functions).</summary>
+    /// <param name="pending">Values about to be seeded on the piece (see <see cref="MatchesWithPending"/>), read as if already in its ledger.</param>
+    internal static FilterContext PieceContext(PieceInstance p, GameState s, RulesPack pack, AggregateFilters filters,
+        IReadOnlyDictionary<string, double>? pending = null) =>
+        new(p, s, pack, SideMap(s, pack), filters, pending);
+
+    /// <summary>The turn, stage and phase an expression reads: the phase condition's candidate (<see cref="AggregateFilters.At"/>), else the game's.</summary>
+    private static double TurnAt(GameState s, AggregateFilters? f) => f?.At is { } at ? at.Turn : TurnOf(s);
+    private static double StageAt(GameState s, AggregateFilters? f) => f?.At is { } at ? at.Repeat : StageOf(s);
+    private static Value PhaseSideAt(GameState s, RulesPack pack, AggregateFilters? f) =>
+        PhaseSideValue(pack, f?.At is { } at ? PhaseConditions.PhaseAt(pack, at) : Sequencer.Current(pack, s));
+
+    /// <summary>
+    /// The context a computed property is evaluated in for a holder: holder (and Both) properties read this holder's values, globals and
+    /// holder() as anywhere; a unit property or piece function is "This formula needs a unit".
+    /// </summary>
+    internal static IEvalContext HolderContext(GameState s, RulesPack pack, string holderId, AggregateFilters filters) =>
+        new GameContext(s, pack, filters.Model, holderId, filters);
 
     internal static Value LookupTable(RulesPack pack, string tableName, Value row, Value? col) =>
         TableLookup.Lookup(TableNamed(pack, tableName), row, col);
@@ -179,7 +211,7 @@ public static class PieceFilter
 
     private sealed class ParsedAppliesTo(Quartermaster.Rules.Expr.Expr? expr) { public Quartermaster.Rules.Expr.Expr? Expr { get; } = expr; }
 
-    private sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack, Lazy<Func<PieceInstance, string?>> sides,
+    internal sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack, Lazy<Func<PieceInstance, string?>> sides,
         AggregateFilters filters, IReadOnlyDictionary<string, double>? pending = null) : IEvalContext
     {
         private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
@@ -192,7 +224,10 @@ public static class PieceFilter
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
-            if (def.Scope == PropertyScope.Holders) return GlobalValue(s, def);
+            if (def.Scope == PropertyScope.Holders) return GlobalValue(s, pack, def, filters);
+            if (PropertyFacts.IsComputed(def))
+                return PropertyValues.Get(s, pack, filters.Model, LedgerKey.Piece(p.Id), def, filters, pending) is { } c ? Value.Of(c)
+                    : throw new EvalError($"{name} has no value on this piece") { MissingValue = true };
             var v = Stored(def);
             if (v != null) return Value.Of(v.Value);
             if (!HiddenInView(def) && Declared(def)) return Value.Of(def.Default);
@@ -204,10 +239,10 @@ public static class PieceFilter
         /// another side's masked piece (its whole ledger was removed). Those do not fall back to the Default.
         /// </summary>
         private bool HiddenInView(PropertyDef def) =>
-            s.IsPlayerView && (def.Visibility == Visibility.Private || PlayerView.IsPlaceholder(p));
+            s.IsPlayerView && (!PropertyFacts.IsPublic(pack, def) || PlayerView.IsPlaceholder(p));
 
         /// <summary>True when the property is declared on this piece: not Holders-scoped, and its applies-to is empty or matches. Re-entry counts as not declared.</summary>
-        private bool Declared(PropertyDef def)
+        internal bool Declared(PropertyDef def)
         {
             if (def.Scope == PropertyScope.Holders) return false;
             if (string.IsNullOrWhiteSpace(def.AppliesTo)) return true;
@@ -220,7 +255,7 @@ public static class PieceFilter
                 if (e != null)
                 {
                     try { result = Evaluator.Evaluate(e, this).IsTruthy; }
-                    catch (Exception ex) when (ex is EvalError or ParseError) { result = false; }
+                    catch (Exception ex) when (ex is EvalError or ParseError && !PropertyValues.IsCycle(ex)) { result = false; }   // a cycle is reported
                 }
                 _declared[def.Id] = result;
                 return result;
@@ -231,28 +266,38 @@ public static class PieceFilter
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
         public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
-        public bool Has(string property) => pack.PropertyByName(property) is { } def && Stored(def) != null;
+        public bool Has(string property) =>
+            pack.PropertyByName(property) is { } def && (PropertyFacts.IsComputed(def) ? Declared(def) : Stored(def) != null);
         public Value PieceName() => NameValue(p);
         public Value Marker(string key) => MarkerValue(p, key);
-        public double Turn() => TurnOf(s);
-        public double Stage() => StageOf(s);
+        public double Turn() => TurnAt(s, filters);
+        public double Stage() => StageAt(s, filters);
         public Value Side() => SideValue(p, pack, sides);
-        public Value PhaseSide() => PhaseSideValue(pack, Sequencer.Current(pack, s));
+        public Value PhaseSide() => PhaseSideAt(s, pack, filters);
         public Value MapName() => MapValue(p);
-        public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property);
+        public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property, filters.Model, filters);
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, p, filters);
     }
 
-    /// <summary>The context of an expression read once for the whole game: globals, holder(), turn, stage and phaseside; nothing of a piece.</summary>
-    private sealed class GameContext(GameState s, RulesPack pack, ModuleModel? model) : IEvalContext
+    /// <summary>
+    /// The context of an expression read once for the whole game: globals, holder(), turn, stage and phaseside; nothing of a piece. With
+    /// <paramref name="holderId"/> it is a holder's context (a computed holder property): holder and Both properties read that holder.
+    /// </summary>
+    private sealed class GameContext(GameState s, RulesPack pack, ModuleModel? model, string? holderId = null, AggregateFilters? filters = null) : IEvalContext
     {
-        private AggregateFilters? _filters;
+        private AggregateFilters? _filters = filters;
+
+        private AggregateFilters Filters => _filters ??= new(s, pack, model);
 
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
-            if (def.Scope == PropertyScope.Holders) return GlobalValue(s, def);
+            if (holderId != null && def.Scope != PropertyScope.Pieces)
+                return HolderKeyValue(s, pack, holderId, holderId == HolderDef.GlobalId ? "Global" : pack.ById<HolderDef>(holderId)?.Name ?? holderId, def,
+                    model, PropertyFacts.IsComputed(def) ? Filters : _filters);
+            if (def.Scope == PropertyScope.Holders)
+                return Value.Of(PropertyValues.GetOrDefault(s, pack, model, LedgerKey.Holder(HolderDef.GlobalId), def, PropertyFacts.IsComputed(def) ? Filters : _filters));
             throw new EvalError("This formula needs a unit");
         }
 
@@ -262,13 +307,13 @@ public static class PieceFilter
         public bool Has(string property) => false;
         public Value PieceName() => NameValue(null);
         public Value Marker(string key) => MarkerValue(null, key);
-        public double Turn() => TurnOf(s);
-        public double Stage() => StageOf(s);
+        public double Turn() => TurnAt(s, _filters);
+        public double Stage() => StageAt(s, _filters);
         public Value Side() => SideValue(null, pack, SideMap(s, pack));
-        public Value PhaseSide() => PhaseSideValue(pack, Sequencer.Current(pack, s));
+        public Value PhaseSide() => PhaseSideAt(s, pack, _filters);
         public Value MapName() => MapValue(null);
-        public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property);
+        public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property, model, _filters);
         public Value Aggregate(string fn, string? property, string? filter) =>
-            PieceAggregates.Evaluate(fn, property, filter, null, _filters ??= new(s, pack, model));
+            PieceAggregates.Evaluate(fn, property, filter, null, Filters);
     }
 }

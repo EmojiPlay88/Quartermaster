@@ -78,7 +78,11 @@ public static class LedgerTabs
         foreach (var r in baseRows)
         {
             if (!LedgerKey.TryParse(r.Key, out var isPiece, out var id)) continue;
-            var projected = new LedgerRow(r.Key, r.Name, r.Kind, map.Select(i => i >= 0 && i < r.Values.Count ? r.Values[i] : null).ToList());
+            Dictionary<int, string>? errors = null;   // a failed computed cell keeps its message in the tab's own column order
+            if (r.Errors != null)
+                for (var j = 0; j < map.Length; j++)
+                    if (r.Errors.TryGetValue(map[j], out var message)) (errors ??= new())[j] = message;
+            var projected = new LedgerRow(r.Key, r.Name, r.Kind, map.Select(i => i >= 0 && i < r.Values.Count ? r.Values[i] : null).ToList(), errors);
             if (!isPiece) { holders.Add(new LedgerRowEx(projected, null, null, null, false)); continue; }
             if (!view.Pieces.TryGetValue(id, out var piece)) continue;
             var side = sideOf(piece);

@@ -1,12 +1,16 @@
 using System.Globalization;
 using System.Text;
 using Quartermaster.Rules;
+using Quartermaster.Rules.Expr;
 using Quartermaster.Vassal;
 
 namespace Quartermaster.Core;
 
-/// <summary>One row of the ledger grid. Values align with <see cref="LedgerTable.Columns"/>; null means no ledger value.</summary>
-public sealed record LedgerRow(string Key, string Name, string Kind, IReadOnlyList<double?> Values);
+/// <summary>
+/// One row of the ledger grid. Values align with <see cref="LedgerTable.Columns"/>; null means no ledger value (for a computed column: it
+/// does not apply, or its evaluation failed). Errors: column index to the error message of a computed cell that failed; null when none did.
+/// </summary>
+public sealed record LedgerRow(string Key, string Name, string Kind, IReadOnlyList<double?> Values, IReadOnlyDictionary<int, string>? Errors = null);
 
 /// <summary>Pure model behind the ledger window: columns, rows, filtering and CSV export.</summary>
 public static class LedgerTable
@@ -22,11 +26,18 @@ public static class LedgerTable
     public static IReadOnlyList<LedgerRow> Rows(GameState s, RulesPack p, ModuleModel m, string filter, bool includeEmpty = false)
     {
         var cols = Columns(p);
+        AggregateFilters? filters = null;   // shared by every computed cell of this call
         LedgerRow Make(string key, string name, string kind)
         {
             var vals = new double?[cols.Count];
-            for (var i = 0; i < cols.Count; i++) vals[i] = Ledger.Get(s, key, cols[i].Id);
-            return new LedgerRow(key, name, kind, vals);
+            Dictionary<int, string>? errors = null;
+            for (var i = 0; i < cols.Count; i++)
+            {
+                if (!PropertyFacts.IsComputed(cols[i])) { vals[i] = Ledger.Get(s, key, cols[i].Id); continue; }
+                try { vals[i] = PropertyValues.Get(s, p, m, key, cols[i], filters ??= new(s, p, m)); }
+                catch (EvalError ex) { (errors ??= new())[i] = ex.Message; }
+            }
+            return new LedgerRow(key, name, kind, vals, errors);
         }
 
         var rows = new List<LedgerRow> { Make(LedgerKey.Holder(HolderDef.GlobalId), "Global", "Holder") };

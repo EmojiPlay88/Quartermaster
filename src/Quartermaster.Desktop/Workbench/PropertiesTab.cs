@@ -19,6 +19,10 @@ public sealed class PropertiesTab : UserControl
 {
     const string SheetTip = "A property-sheet row name from the module's pieces; seeds the property from that row.";
     const string OutlinerTip = "How the outliner totals this property per group: None hides it; Sum, Min or Average show a column.";
+    const string ExpressionTip = "An expression makes the property computed: its value is worked out whenever it is read and never stored. Empty = a stored value.";
+    internal const string ComputedIgnoredTip = "Ignored: the property is computed from its Expression.";
+    /// <summary>Column index of Expression (after Notes, so the older columns keep their places).</summary>
+    internal const int ExpressionColumn = 7;
 
     readonly ModuleSession _s;
     readonly IDialogs _dialogs;
@@ -44,10 +48,12 @@ public sealed class PropertiesTab : UserControl
             new EditColumn("AppliesTo", Weight: 120),
             new EditColumn("Outliner", EditColumnKind.Combo, Weight: 60, Items: Enum.GetNames<OutlinerAggregate>()),
             new EditColumn("Notes", Weight: 160),
+            new EditColumn("Expression", Weight: 120),
         ]);
         _holders.SetColumns([new EditColumn("Name", Weight: 80), new EditColumn("Notes", Weight: 200)]);
         _props.SetHeaderToolTip(3, SheetTip);
         _props.SetHeaderToolTip(5, OutlinerTip);
+        _props.SetHeaderToolTip(ExpressionColumn, ExpressionTip);
 
         var propsBox = Box("Properties", _props, Bar(_bAddProp, _bDelProp));
         var holdersBox = Box("Holders (the built-in \"global\" holder always exists)", _holders, Bar(_bAddHolder, _bDelHolder));
@@ -190,6 +196,7 @@ public sealed class PropertiesTab : UserControl
         _props.SetRows(props.Select(p => (IReadOnlyList<string>)new[]
         {
             p.Name, p.Scope.ToString(), p.Default.ToString("R", CultureInfo.InvariantCulture), p.SheetField ?? "", p.AppliesTo ?? "", p.Outliner.ToString(), p.Notes ?? "",
+            p.Expr ?? "",
         }).ToList());
         for (var i = 0; i < props.Count; i++)
         {
@@ -197,6 +204,9 @@ public sealed class PropertiesTab : UserControl
             _props.SetCellToolTip(i, 3, SheetTip);
             _props.SetCellToolTip(i, 5, OutlinerTip);
             _props.SetCellError(i, 4, FormulaEdit.SyntaxProblem(props[i].AppliesTo));
+            _props.SetCellToolTip(i, ExpressionColumn, ExpressionTip);
+            _props.SetCellError(i, ExpressionColumn, FormulaEdit.SyntaxProblem(props[i].Expr));
+            ShowComputed(i, PropertyFacts.IsComputed(props[i]));
         }
         ApplySheetItems();
         var rows = new List<IReadOnlyList<string>> { new[] { HolderDef.GlobalId, "Built in; always exists." } };
@@ -207,6 +217,15 @@ public sealed class PropertiesTab : UserControl
         }
         _holders.SetRows(pack == null ? [] : rows);
         if (pack != null) { _holders.SetCellReadOnly(0, 0, true); _holders.SetCellReadOnly(0, 1, true); }
+    }
+
+    /// <summary>A computed property's Default and Sheet field are ignored: those cells are greyed and closed to editing.</summary>
+    void ShowComputed(int row, bool computed)
+    {
+        _props.SetCellReadOnly(row, 2, computed);
+        _props.SetCellReadOnly(row, 3, computed);
+        _props.SetCellToolTip(row, 2, computed ? ComputedIgnoredTip : null);
+        _props.SetCellToolTip(row, 3, computed ? ComputedIgnoredTip : SheetTip);
     }
 
     IReadOnlyList<string> SafeFields()
@@ -275,6 +294,14 @@ public sealed class PropertiesTab : UserControl
                 Commit(p => Edit(p, id, x => x with { Outliner = oa }));
                 break;
             case 6: Commit(p => Edit(p, id, x => x with { Notes = text.Length == 0 ? null : text })); break;
+            case ExpressionColumn:
+                var expr = text.Trim().Length == 0 ? null : text.Trim();
+                Commit(p => Edit(p, id, x => x with { Expr = expr }));
+                var exprProblem = FormulaEdit.SyntaxProblem(expr);
+                if (exprProblem != null) _status.Text = "Expression: " + exprProblem;
+                _props.SetCellError(row, ExpressionColumn, exprProblem);
+                ShowComputed(row, expr != null);
+                break;
         }
     }
 

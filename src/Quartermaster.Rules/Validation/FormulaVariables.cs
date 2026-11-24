@@ -110,6 +110,44 @@ public static class FormulaVariables
     public static List<(string Function, string? Property, string? Filter)> AggregateReads(FormulaDef f) => Collect(f, ExprFacts.AggregateReads);
 
     /// <summary>
+    /// True for a computed property whose expression reads data a viewer who does not hold every side may not see
+    /// (<see cref="PropertyFacts.ReadsHidden(RulesPack, PropertyDef)"/>): its value reveals that data wherever the property is read, on the
+    /// viewer's own piece and on the global holder too. A Private computed property over public inputs is not one (it is hidden only where a
+    /// stored Private value would be).
+    /// </summary>
+    public static bool ComputedFromHidden(RulesPack pack, PropertyDef? p) => p != null && PropertyFacts.IsComputed(p) && PropertyFacts.ReadsHidden(pack, p);
+
+    /// <summary>
+    /// The variables of the formula whose value is a computed property read from hidden data (<see cref="ComputedFromHidden"/>): every Unit,
+    /// Global or Holder binding of one, used or not, and every variable named like one in any expression of the formula (as
+    /// <see cref="HolderReads(FormulaDef)"/> scans them). Depends on the pack alone, so the host and a guest agree.
+    /// </summary>
+    public static List<string> ComputedHiddenVariables(RulesPack pack, FormulaDef f)
+    {
+        var names = new List<string>();
+        void Add(string? v) { if (!string.IsNullOrEmpty(v) && !names.Contains(v)) names.Add(v); }
+        PropertyDef? ById(string? id) => id == null ? null : (pack.Properties ?? new List<PropertyDef>()).FirstOrDefault(p => p != null && p.Id == id);
+        foreach (var b in f?.Bindings ?? new List<VariableBinding>())
+            if (b is { Kind: BindingKind.Unit or BindingKind.Global or BindingKind.Holder } && ComputedFromHidden(pack, ById(b.Property)))
+                Add(b.Variable);
+        foreach (var v in Collect(f, e => Parser.Variables(e).ToList()))
+            if (ComputedFromHidden(pack, pack.PropertyByName(v))) Add(v);
+        return names;
+    }
+
+    /// <summary>
+    /// True when the formula reads a computed property built from hidden data: through a binding or variable (<see cref="ComputedHiddenVariables"/>)
+    /// or through holder(H, P) of one anywhere in its expressions. Such a formula's working may show that data to any viewer who does not
+    /// hold every side.
+    /// </summary>
+    public static bool ComputedReadsHidden(RulesPack pack, FormulaDef f) =>
+        ComputedHiddenVariables(pack, f).Count > 0 || ComputedHolderCallHidden(pack, f);
+
+    /// <summary>True when a holder(H, P) call anywhere in the formula reads a computed property built from hidden data.</summary>
+    public static bool ComputedHolderCallHidden(RulesPack pack, FormulaDef f) =>
+        HolderReads(f).Any(r => r.Property != null && ComputedFromHidden(pack, pack.PropertyByName(r.Property)));
+
+    /// <summary>
     /// True when an aggregate in the formula may read data a viewer who does not hold every side cannot see (see <see cref="AggregateCallHidden"/>).
     /// Depends on the pack and <paramref name="piecesMayHide"/> alone, so the host and a guest agree.
     /// </summary>
@@ -126,12 +164,12 @@ public static class FormulaVariables
     public static bool AggregateCallHidden(RulesPack pack, string function, string? property, string? filter, bool piecesMayHide)
     {
         if (piecesMayHide || ExprFacts.IsCountAggregate(function)) return true;
-        if (property == null || pack.PropertyByName(property)?.Visibility != Visibility.Public) return true;
+        if (property == null || !PropertyFacts.IsPublic(pack, pack.PropertyByName(property))) return true;
         if (string.IsNullOrWhiteSpace(filter)) return false;   // "" matches every piece
         Quartermaster.Rules.Expr.Expr e;
         try { e = Parser.Parse(filter); }
         catch (ParseError) { return true; }   // fail closed
         return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
-            || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && p.Visibility != Visibility.Public);
+            || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p));
     }
 }

@@ -129,7 +129,7 @@ public sealed class VisibilityTab : UserControl
 
             _propIds.Clear();
             var props = pack?.Properties ?? new List<PropertyDef>();
-            _props.SetRows(props.Select(p => (IReadOnlyList<string>)new[] { p.Name, p.Visibility.ToString() }).ToList());
+            _props.SetRows(props.Select(p => (IReadOnlyList<string>)new[] { VisibilityEdit.PropertyLabel(pack!, p), p.Visibility.ToString() }).ToList());
             foreach (var p in props) _propIds.Add(p.Id);
 
             FillOwnerGrid(_holders, _holderIds, _holderNames, (pack?.Holders ?? new()).Select(h => (h.Id, h.Name, h.SideId)), sideNames);
@@ -202,6 +202,8 @@ public sealed class VisibilityTab : UserControl
         if (!Enum.TryParse<Visibility>(text, out var v)) return;
         var id = _propIds[row];
         Commit(p => VisibilityEdit.SetPropertyVisibility(p, id, v));
+        // A computed property's "(computed from hidden data)" may change with any property's visibility: redraw the names once the edit is done.
+        if (_s.Rules?.Properties.Any(PropertyFacts.IsComputed) == true) Dispatcher.UIThread.Post(() => Run(Reload));
     }
 
     void OnOwnerChanged(List<string> ids, List<List<string>> choices, int row, int col, string shown, Func<RulesPack, string, string?, RulesPack> set)

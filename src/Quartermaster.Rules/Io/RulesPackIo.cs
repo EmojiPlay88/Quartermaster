@@ -255,7 +255,7 @@ public static class RulesPackIo
         ModuleSha256 = p.ModuleSha256 ?? "",
         // Packs older than format 4 had no visibility setting: everything stays visible.
         Properties = (p.Properties ?? new()).Where(x => x != null)
-            .Select(x => x with { Name = x.Name ?? "", Visibility = p.Format < 4 ? Visibility.Public : x.Visibility }).ToList(),
+            .Select(x => x with { Name = x.Name ?? "", Expr = string.IsNullOrWhiteSpace(x.Expr) ? null : x.Expr, Visibility = p.Format < 4 ? Visibility.Public : x.Visibility }).ToList(),
         MapOwners = (p.MapOwners ?? new()).Where(x => x != null)
             .Select(x => x with { MapId = x.MapId ?? "", SideId = x.SideId ?? "" }).ToList(),
         Holders = (p.Holders ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),

@@ -29,6 +29,7 @@ public static class LedgerBreakdown
     public static Breakdown For(GameState s, RulesPack? pack, ModuleModel? model, string key, string propertyId)
     {
         var prop = pack?.ById<PropertyDef>(propertyId);
+        if (prop != null && PropertyFacts.IsComputed(prop)) return ForComputed(s, pack!, model, key, prop);
         var value = Ledger.Get(s, key, propertyId) ?? prop?.Default ?? 0;
         var title = $"{prop?.Name ?? propertyId} {Num(value)}  ({OwnerName(s, pack, key)})";
 
@@ -60,6 +61,18 @@ public static class LedgerBreakdown
                 lines.Add(new BreakdownLine(Signed(e.After - e.Before), Ledger.SourceLabel(e, pack), Where(e)));
         }
         return new Breakdown(title, lines);
+    }
+
+    /// <summary>A computed value has no history: its value (or "error" and the message) and its expression.</summary>
+    static Breakdown ForComputed(GameState s, RulesPack pack, ModuleModel? model, string key, PropertyDef prop)
+    {
+        string shown;
+        string? error = null;
+        try { shown = PropertyValues.Get(s, pack, model, key, prop) is { } v ? Num(v) : "—"; }
+        catch (Rules.Expr.EvalError ex) { shown = "error"; error = ex.Message; }
+        var lines = new List<BreakdownLine> { new("", "= " + prop.Expr!.Trim(), null) };
+        if (error != null) lines.Add(new BreakdownLine("", error, null));
+        return new Breakdown($"{prop.Name} {shown}  ({OwnerName(s, pack, key)})", lines);
     }
 
     public static Breakdown ForTotal(string title, IEnumerable<(string Label, double Value)> parts)

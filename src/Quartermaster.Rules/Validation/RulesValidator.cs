@@ -30,9 +30,11 @@ public static class RulesValidator
                         foreach (var u in FilterRefProblems(p.AppliesTo!, pack))
                             Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to {u}");
                     // Seeding evaluates applies-to without the module's grid, so there is no hex to read.
-                    foreach (var fn in HexAggregatesIn(p.AppliesTo))
+                    foreach (var fn in PieceBoundAggregatesIn(p.AppliesTo))
                         Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": {fn}() is not available in a property's applies-to");
                 }
+            foreach (var p in pack.Properties) CheckComputed(pack, p, issues);
+            CheckComputedCycles(pack, issues);
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
             foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues));
             foreach (var s in pack.Sides) Guarded(issues, s.Id, s.Name, () => CheckSide(s, pack, issues));
@@ -47,6 +49,35 @@ public static class RulesValidator
             Add(issues, RulesIssueSeverity.Error, pack.Id, pack.Name, $"Validation failed unexpectedly: {ex.Message}");
         }
         return issues;
+    }
+
+    private static void CheckComputed(RulesPack pack, PropertyDef p, List<RulesIssue> issues)
+    {
+        if (!PropertyFacts.IsComputed(p)) return;
+        if (ParseProblem(p.Expr!) is { } pe)
+        {
+            Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": the expression does not parse: {pe}");
+            return;
+        }
+        foreach (var u in FilterRefProblems(p.Expr!, pack))   // unknown property, table and holder names, as an applies-to is checked
+            Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": {u}");
+        if (p.Default != 0 || !string.IsNullOrWhiteSpace(p.SheetField))
+            Add(issues, RulesIssueSeverity.Warning, p.Id, p.Name, $"Property \"{p.Name}\" is computed; its Default and Sheet field are ignored");
+        if (p.Visibility == Visibility.Public && PropertyFacts.ReadsHidden(pack, p))
+            Add(issues, RulesIssueSeverity.Warning, p.Id, p.Name,
+                $"Property \"{p.Name}\" is Public but is computed from hidden data; players who do not hold every side see it as Private");
+    }
+
+    /// <summary>Each distinct cycle once, on the first property of it in pack order.</summary>
+    private static void CheckComputedCycles(RulesPack pack, List<RulesIssue> issues)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in pack.Properties)
+        {
+            if (PropertyFacts.CycleFrom(pack, p) is not { } cycle) continue;
+            if (!seen.Add(string.Join("|", cycle.Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal)))) continue;
+            Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" is computed from itself: {string.Join(" → ", cycle)}");
+        }
     }
 
     /// <summary>Problems in an applies-to/filter expression, as message tails: property names (variables and has() arguments) that no property has,
@@ -109,10 +140,10 @@ public static class RulesValidator
     private static string UnknownPropertyTail(string name) => $"refers to unknown property \"{name}\"";
 
     /// <summary>
-    /// The hex aggregates (hexsum() ...) an expression text calls, also inside the filters of its aggregate calls, distinct in text order. Empty when
+    /// The aggregates that need a piece (hexsum(), attachedsum() ...) an expression text calls, also inside the filters of its aggregate calls, distinct in text order. Empty when
     /// the text does not parse (that is reported elsewhere).
     /// </summary>
-    private static List<string> HexAggregatesIn(string? text)
+    private static List<string> PieceBoundAggregatesIn(string? text)
     {
         var found = new List<string>();
         Scan(text);
@@ -131,7 +162,7 @@ public static class RulesValidator
                 case Unary u: Walk(u.Operand); break;
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
-                    if (ExprFacts.IsHexAggregate(c.Function)) found.Add(c.Function);
+                    if (ExprFacts.NeedsPiece(c.Function)) found.Add(c.Function);
                     if (ExprFacts.IsAggregate(c.Function)) Scan(ExprFacts.AggregateArgs(c).Filter);
                     foreach (var a in c.Args) Walk(a);
                     break;
@@ -180,8 +211,16 @@ public static class RulesValidator
         // A side's filter decides who owns a piece, so it cannot depend on the owning side.
         if (!string.IsNullOrWhiteSpace(s.UnitFilter) && UsesSide(s.UnitFilter!))
             Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": unit filter may not use side()");
+        // A player's view strips Private values, so there a filter reading one cannot place another side's pieces; a computed property that is
+        // Private in effect is hidden only on pieces of a side the viewer does not hold, so it would show on those pieces.
+        if (!string.IsNullOrWhiteSpace(s.UnitFilter) && ParseProblem(s.UnitFilter!) == null
+            && pack.Properties.Any(p => p != null && PropertyFacts.IsComputed(p) && !PropertyFacts.IsPublic(pack, p)))
+            foreach (var v in Parser.Variables(Parser.Parse(s.UnitFilter!)).Distinct(StringComparer.Ordinal))
+                if (pack.PropertyByName(v) is { } read && !PropertyFacts.IsPublic(pack, read))
+                    Add(issues, RulesIssueSeverity.Error, s.Id, s.Name,
+                        $"Side \"{s.Name}\": unit filter may not read Private property \"{read.Name}\" while the pack has Private computed properties (players' views could not tell whose pieces they hide)");
         // Ownership evaluates side filters without the module's grid, so there is no hex to read.
-        foreach (var fn in HexAggregatesIn(s.UnitFilter))
+        foreach (var fn in PieceBoundAggregatesIn(s.UnitFilter))
             Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": {fn}() is not available in a side's unit filter");
     }
 
@@ -251,7 +290,7 @@ public static class RulesValidator
         catch (ParseError) { return false; }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder", "hexsum", "hexcount", "hexmax", "hexmin" };
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -668,6 +707,7 @@ public static class RulesValidator
         bool ok = o.Target == OutputTarget.Unit
             ? p.Scope is PropertyScope.Pieces or PropertyScope.Both
             : p.Scope is PropertyScope.Holders or PropertyScope.Both;
+        if (PropertyFacts.IsComputed(p)) { err($"output {outputNo} writes computed property \"{p.Name}\""); return; }
         if (!ok)
             err($"output property \"{p.Name}\" cannot be written to {(o.Target == OutputTarget.Unit ? "a unit" : "a holder")} (its scope is {p.Scope})");
     }

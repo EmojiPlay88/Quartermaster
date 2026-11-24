@@ -39,12 +39,19 @@ public static class ExprFacts
 
     private static readonly HashSet<string> WholeGameAggregates = new() { "sum", "countof", "maxof", "minof" };
     private static readonly HashSet<string> HexAggregates = new() { "hexsum", "hexcount", "hexmax", "hexmin" };
+    private static readonly HashSet<string> AttachedAggregates = new() { "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
 
     /// <summary>True for the piece-sum functions: sum, countof, maxof, minof and the hex* ones (lower-case name).</summary>
-    public static bool IsAggregate(string function) => WholeGameAggregates.Contains(function) || HexAggregates.Contains(function);
+    public static bool IsAggregate(string function) => WholeGameAggregates.Contains(function) || HexAggregates.Contains(function) || AttachedAggregates.Contains(function);
 
     /// <summary>True for the aggregates over this piece's hex (hexsum, hexcount, hexmax, hexmin): they need a piece being evaluated.</summary>
     public static bool IsHexAggregate(string function) => HexAggregates.Contains(function);
+
+    /// <summary>True for the aggregates over the pieces attached to this piece (attachedsum, attachedcount, attachedmax, attachedmin): they need a piece being evaluated.</summary>
+    public static bool IsAttachedAggregate(string function) => AttachedAggregates.Contains(function);
+
+    /// <summary>True for the aggregates that read from the piece being evaluated (the hex* and attached* ones), so they have no meaning without one.</summary>
+    public static bool NeedsPiece(string function) => IsHexAggregate(function) || IsAttachedAggregate(function);
 
     /// <summary>
     /// The property name (bare first argument, none for countof/hexcount) and the filter text (the text literal argument, null when omitted)
@@ -81,8 +88,8 @@ public static class ExprFacts
         }
     }
 
-    /// <summary>True for the aggregates that count pieces (countof, hexcount) rather than read a property.</summary>
-    public static bool IsCountAggregate(string function) => function is "countof" or "hexcount";
+    /// <summary>True for the aggregates that count pieces (countof, hexcount, attachedcount) rather than read a property.</summary>
+    public static bool IsCountAggregate(string function) => function is "countof" or "hexcount" or "attachedcount";
 
     /// <summary>True when the expression calls the named function anywhere.</summary>
     public static bool CallsFunction(AstExpr e, string function) => e switch
@@ -104,7 +111,7 @@ public static class ExprFacts
             case Binary b: return Check(b.Left, pack) && Check(b.Right, pack);
             case Call c:
                 if (c.Function is "name" or "marker" or "has" or "side" or "map") return false;
-                if (IsHexAggregate(c.Function)) return false;
+                if (NeedsPiece(c.Function)) return false;
                 if (IsAggregate(c.Function)) return true;   // the property and filter are read per piece, whatever they name
                 int skip = c.Function is "lookup" or "lookuprange" ? 1 : c.Function == "holder" ? 2 : 0;
                 for (int i = skip; i < c.Args.Count; i++)

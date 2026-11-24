@@ -42,6 +42,12 @@ public class AggregateTests
     [InlineData("hexmax(Trucks, \"a\")")]
     [InlineData("hexmin(Trucks)")]
     [InlineData("hexmin(Trucks, \"a\")")]
+    [InlineData("attachedsum(Trucks)")]
+    [InlineData("attachedsum(Trucks, \"a\")")]
+    [InlineData("attachedcount()")]
+    [InlineData("attachedcount(\"a\")")]
+    [InlineData("attachedmax(Trucks)")]
+    [InlineData("attachedmin(Trucks, \"a\")")]
     [InlineData("SUM(Trucks, \"a\")")]
     public void Parses(string text) => Parser.Parse(text);
 
@@ -55,6 +61,10 @@ public class AggregateTests
     [InlineData("hexcount(\"a\", \"b\")", "'hexcount' takes 0 to 1 arguments, not 2")]
     [InlineData("hexmax()", "'hexmax' takes 1 to 2 arguments, not 0")]
     [InlineData("hexmin(Trucks, \"a\", \"b\")", "'hexmin' takes 1 to 2 arguments, not 3")]
+    [InlineData("attachedsum()", "'attachedsum' takes 1 to 2 arguments, not 0")]
+    [InlineData("attachedcount(\"a\", \"b\")", "'attachedcount' takes 0 to 1 arguments, not 2")]
+    [InlineData("attachedmax()", "'attachedmax' takes 1 to 2 arguments, not 0")]
+    [InlineData("attachedmin(Trucks, \"a\", \"b\")", "'attachedmin' takes 1 to 2 arguments, not 3")]
     public void Arity_errors(string text, string message) => Assert.Equal(message, ParseError_(text));
 
     [Theory]
@@ -74,6 +84,11 @@ public class AggregateTests
     [InlineData("hexcount(Fuel)", "hexcount needs a text filter")]
     [InlineData("hexmax(Trucks, 2)", "hexmax needs a text filter")]
     [InlineData("hexmin(Trucks, Fuel)", "hexmin needs a text filter")]
+    [InlineData("attachedsum(\"a\")", "attachedsum needs a property name")]
+    [InlineData("attachedmax(1)", "attachedmax needs a property name")]
+    [InlineData("attachedsum(Trucks, Fuel)", "attachedsum needs a text filter")]
+    [InlineData("attachedcount(Fuel)", "attachedcount needs a text filter")]
+    [InlineData("attachedmin(Trucks, 2)", "attachedmin needs a text filter")]
     public void Argument_kind_errors(string text, string message) => Assert.Equal(message, ParseError_(text));
 
     [Fact]
@@ -98,11 +113,16 @@ public class AggregateTests
         Evaluator.Evaluate(Parser.Parse("hexcount(\"d\")"), c);
         Evaluator.Evaluate(Parser.Parse("hexmax(Trucks)"), c);
         Evaluator.Evaluate(Parser.Parse("hexmin(Trucks, \"e\")"), c);
+        Evaluator.Evaluate(Parser.Parse("attachedsum(Trucks)"), c);
+        Evaluator.Evaluate(Parser.Parse("attachedcount(\"f\")"), c);
+        Evaluator.Evaluate(Parser.Parse("attachedmax(Trucks, \"g\")"), c);
+        Evaluator.Evaluate(Parser.Parse("attachedmin(Trucks)"), c);
         Assert.Equal(new (string, string?, string?)[]
         {
             ("sum", "Trucks", "side() == 1"), ("countof", null, ""), ("maxof", "Trucks", "a"), ("minof", "Trucks", "b"),
             ("hexsum", "Trucks", null), ("hexsum", "Trucks", "c"), ("hexcount", null, null), ("hexcount", null, "d"),
             ("hexmax", "Trucks", null), ("hexmin", "Trucks", "e"),
+            ("attachedsum", "Trucks", null), ("attachedcount", null, "f"), ("attachedmax", "Trucks", "g"), ("attachedmin", "Trucks", null),
         }, c.Calls);
     }
 
@@ -115,6 +135,10 @@ public class AggregateTests
     [InlineData("hexcount()", "hexcount")]
     [InlineData("hexmax(Trucks)", "hexmax")]
     [InlineData("hexmin(Trucks)", "hexmin")]
+    [InlineData("attachedsum(Trucks)", "attachedsum")]
+    [InlineData("attachedcount()", "attachedcount")]
+    [InlineData("attachedmax(Trucks)", "attachedmax")]
+    [InlineData("attachedmin(Trucks)", "attachedmin")]
     public void Default_context_is_not_available(string text, string fn)
     {
         var e = Assert.Throws<EvalError>(() => Evaluator.Evaluate(Parser.Parse(text), new PlainCtx()));
@@ -128,7 +152,7 @@ public class AggregateTests
     [Fact]
     public void Functions_are_listed()
     {
-        foreach (var n in new[] { "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin" })
+        foreach (var n in new[] { "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" })
             Assert.Contains(n, Evaluator.FunctionNames);
     }
 
@@ -144,6 +168,8 @@ public class AggregateTests
         Assert.Equal("hexmax(Trucks)", Work("hexmax(Trucks)"));
         Assert.Equal("hexcount()", Work("hexcount()"));
         Assert.Equal("hexmin(Trucks, \"x\")", Work("hexmin(Trucks, \"x\")"));
+        Assert.Equal("attachedsum(Trucks) + 3", Work("attachedsum(Trucks) + Fuel"));
+        Assert.Equal("attachedcount()", Work("attachedcount()"));
     }
 
     /// <summary>The text with each backtick turned into a backslash (keeps the escapes readable).</summary>
