@@ -500,6 +500,30 @@ public class PhaseControllerTests : IDisposable
     }
 
     [Fact]
+    public void Tick_sends_item_id_and_raw_text()
+    {
+        // An item with an id is ticked by id; the log carries the item's own text, links unrendered (no linked item's text).
+        var (s, c) = Make(Difficulty.SemiAuto, p => WithPhase(WithPhase(p, "ph-combat", ph => ph with
+        {
+            Checklist = new() { new ChecklistItem { Id = "atk", Text = "Resolve attacks after {item:other}" }, "Plain" },
+        }), "ph-weather", ph => ph with { Checklist = new() { new ChecklistItem { Id = "other", Text = "TEST secret step" } } }));
+        c.Start();
+        c.Advance();
+        c.Advance();
+        c.Advance();       // Combat
+        c.Tick(0, true);
+        var tick = s.Game!.Log.OfType<TickChecklist>().Single();
+        Assert.Equal("atk", tick.ItemId);
+        Assert.Equal("Resolve attacks after {item:other}", tick.Item);
+        Assert.Equal(new[] { "atk" }, s.Game.State.TickedIds);
+        Assert.Empty(s.Game.State.Ticked);
+        Assert.DoesNotContain(Texts(s), t => t.Contains("TEST secret step"));
+        c.Tick(1, true);
+        Assert.Null(s.Game.Log.OfType<TickChecklist>().Last().ItemId);
+        Assert.Equal(new[] { 1 }, s.Game.State.Ticked);
+    }
+
+    [Fact]
     public void Warning_FiresAndAcknowledges()
     {
         var (s, c) = Make(Difficulty.FullyAuto);

@@ -202,7 +202,7 @@ sealed class PhasePanel : UserControl
     {
         // Hot-seat: another side's phase shows none of its decisions (its checklist included).
         var items = checklistHidden ? new List<string>() : v.Current?.Checklist.Select(c => c.Text).ToList() ?? new List<string>();
-        var ticked = _s.View?.Ticked;
+        var ticked = ChecklistState.TickedIndexes(_s.View, v.Current?.Checklist);   // id-ticks by id, the rest by position
         _checklist.BeginUpdate();
         _checklist.Items.Clear();
         for (var i = 0; i < items.Count; i++) _checklist.Items.Add(items[i] ?? "", ticked?.Contains(i) == true);

@@ -54,13 +54,17 @@ public sealed record AdvancePhase(PhasePosition? From, PhasePosition To, string 
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SkippedPhase>? Skipped = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Notice = null) : GameCommand;
 public sealed record SetDifficulty(Difficulty Difficulty, DateTimeOffset? At = null, string? Who = null) : GameCommand;
-public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+/// <summary>ItemId: the item's stable id (ticked by id, <see cref="GameState.TickedIds"/>); null = ticked by <paramref name="Index"/>. Omitted when null.</summary>
+public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTimeOffset? At = null, string? Who = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ItemId = null) : GameCommand;
 public sealed record AcknowledgeWarning(int Index, string Message, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record QueueRuns(IReadOnlyList<PendingRun> Runs, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record ResolveRun(string RunId, IReadOnlyList<string?> PieceIds, DateTimeOffset? At = null, string? Who = null) : GameCommand;
-/// <summary>FormulaId: set on a calc line that shows a formula's working (see <see cref="LogEntry.FormulaId"/>).</summary>
+/// <summary>FormulaId: set on a calc line that shows a formula's working (see <see cref="LogEntry.FormulaId"/>).
+/// Error: the line reports a failed or refused run (see <see cref="LogEntry.Error"/>); omitted when false.</summary>
 public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null, string? SideId = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null) : GameCommand;
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Error = false) : GameCommand;
 
 /// <summary>Log line recorded after stepping back to a checkpoint. Folding: never an undoable action of its own.</summary>
 public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone, string Target, DateTimeOffset? At = null, string? Who = null) : GameCommand;

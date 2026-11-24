@@ -74,6 +74,14 @@ public static class Decisions
         return res;
     }
 
+    /// <summary>
+    /// Whether a player view may see a phase's checklist: always in a full state; in a player view (<see cref="GameState.ViewSides"/>) only a
+    /// phase with no side or one of the view's sides (as <see cref="PlayerView"/> treats a phase's side). A linked item of a hidden phase keeps
+    /// its token, so its text never reaches that player.
+    /// </summary>
+    public static bool ChecklistShown(PhaseDef phase, GameState s) =>
+        (s.ViewSides == null && !s.IsPlayerView) || string.IsNullOrWhiteSpace(phase.SideId) || s.ViewSides?.Contains(phase.SideId) == true;
+
     public static IReadOnlyList<Decision> Compute(RulesPack pack, GameState s, ModuleModel? model = null)
     {
         var res = new List<Decision>();
@@ -82,8 +90,9 @@ public static class Decisions
 
         var items = phase.Checklist ?? new();
         for (var i = 0; i < items.Count; i++)
-            if (s.Ticked?.Contains(i) != true)
-                res.Add(new Decision(DecisionKind.Checklist, items[i].Text, i, null, Array.Empty<string>()));
+            if (!ChecklistState.IsTicked(s, items[i], i))
+                res.Add(new Decision(DecisionKind.Checklist, ChecklistText.Render(pack, items[i]?.Text ?? "", ph => ChecklistShown(ph, s)), i, null,
+                    Array.Empty<string>()));
 
         foreach (var r in s.Pending ?? new())
         {

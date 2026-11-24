@@ -6,10 +6,14 @@ namespace Quartermaster.Rules.Expr;
 /// <summary>Renders a formula with values substituted, using math symbols.</summary>
 public static class WorkingLine
 {
-    public static string Render(AstExpr e, string source, Func<string, Value?> values)
+    public static string Render(AstExpr e, string source, Func<string, Value?> values) => Render(e, source, values, null);
+
+    /// <summary>As <see cref="Render(AstExpr, string, Func{string, Value?})"/>; a variable whose value <paramref name="label"/> names
+    /// (variable, value → label, null for none) is written "{value} ({label})", e.g. "3 (Fog)".</summary>
+    public static string Render(AstExpr e, string source, Func<string, Value?> values, Func<string, Value, string?>? label)
     {
         var sb = new StringBuilder();
-        Write(e, source ?? "", values, sb);
+        new Writer(source ?? "", values, label, sb).Write(e);
         return sb.ToString();
     }
 
@@ -21,71 +25,75 @@ public static class WorkingLine
         return true;
     }
 
-    private static void Write(AstExpr e, string src, Func<string, Value?> values, StringBuilder sb)
+    private sealed class Writer(string src, Func<string, Value?> values, Func<string, Value, string?>? label, StringBuilder sb)
     {
-        bool paren = Parenthesised(e, src);
-        if (paren) sb.Append('(');
-        switch (e)
+        public void Write(AstExpr e)
         {
-            case NumberLit n: sb.Append(Value.FormatNumber(n.Value)); break;
-            case TextLit t: sb.Append(Lexer.Quote(t.Value)); break;
-            case BoolLit b: sb.Append(b.Value ? "true" : "false"); break;
-            case VarRef v:
+            bool paren = Parenthesised(e, src);
+            if (paren) sb.Append('(');
+            switch (e)
             {
-                var val = values(v.Name);
-                sb.Append(val is { } x ? x.Display() : "?");
-                break;
+                case NumberLit n: sb.Append(Value.FormatNumber(n.Value)); break;
+                case TextLit t: sb.Append(Lexer.Quote(t.Value)); break;
+                case BoolLit b: sb.Append(b.Value ? "true" : "false"); break;
+                case VarRef v:
+                {
+                    var val = values(v.Name);
+                    sb.Append(val is { } x ? x.Display() : "?");
+                    if (val is { } lv && label?.Invoke(v.Name, lv) is { Length: > 0 } l) sb.Append(" (").Append(l).Append(')');
+                    break;
+                }
+                case Unary u:
+                    sb.Append(u.Op == "-" ? "−" : "not ");
+                    Write(u.Operand);
+                    break;
+                case Binary b:
+                    Write(b.Left);
+                    sb.Append(' ').Append(Symbol(b.Op)).Append(' ');
+                    Write(b.Right);
+                    break;
+                case Call c when c.Function is "lookup" or "lookuprange":
+                    sb.Append(((VarRef)c.Args[0]).Name).Append('[');
+                    for (int i = 1; i < c.Args.Count; i++)
+                    {
+                        if (i > 1) sb.Append(", ");
+                        Write(c.Args[i]);
+                    }
+                    sb.Append(']');
+                    break;
+                case Call c when c.Function == "count":
+                    sb.Append("count(").Append(((VarRef)c.Args[0]).Name);
+                    for (int i = 1; i < c.Args.Count; i++)
+                    {
+                        sb.Append(", ");
+                        Write(c.Args[i]);
+                    }
+                    sb.Append(')');
+                    break;
+                case Call c when ExprFacts.IsAggregate(c.Function):
+                    sb.Append(c.Function).Append('(');
+                    for (int i = 0; i < c.Args.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        sb.Append(c.Args[i] is VarRef pn ? pn.Name : Lexer.Quote(((TextLit)c.Args[i]).Value));
+                    }
+                    sb.Append(')');
+                    break;
+                case Call c when c.Function == "holder":
+                    sb.Append("holder(").Append(((VarRef)c.Args[0]).Name).Append(", ").Append(((VarRef)c.Args[1]).Name).Append(')');
+                    break;
+                case Call c:
+                    sb.Append(c.Function).Append('(');
+                    for (int i = 0; i < c.Args.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        Write(c.Args[i]);
+                    }
+                    sb.Append(')');
+                    break;
             }
-            case Unary u:
-                sb.Append(u.Op == "-" ? "−" : "not ");
-                Write(u.Operand, src, values, sb);
-                break;
-            case Binary b:
-                Write(b.Left, src, values, sb);
-                sb.Append(' ').Append(Symbol(b.Op)).Append(' ');
-                Write(b.Right, src, values, sb);
-                break;
-            case Call c when c.Function is "lookup" or "lookuprange":
-                sb.Append(((VarRef)c.Args[0]).Name).Append('[');
-                for (int i = 1; i < c.Args.Count; i++)
-                {
-                    if (i > 1) sb.Append(", ");
-                    Write(c.Args[i], src, values, sb);
-                }
-                sb.Append(']');
-                break;
-            case Call c when c.Function == "count":
-                sb.Append("count(").Append(((VarRef)c.Args[0]).Name);
-                for (int i = 1; i < c.Args.Count; i++)
-                {
-                    sb.Append(", ");
-                    Write(c.Args[i], src, values, sb);
-                }
-                sb.Append(')');
-                break;
-            case Call c when ExprFacts.IsAggregate(c.Function):
-                sb.Append(c.Function).Append('(');
-                for (int i = 0; i < c.Args.Count; i++)
-                {
-                    if (i > 0) sb.Append(", ");
-                    sb.Append(c.Args[i] is VarRef pn ? pn.Name : Lexer.Quote(((TextLit)c.Args[i]).Value));
-                }
-                sb.Append(')');
-                break;
-            case Call c when c.Function == "holder":
-                sb.Append("holder(").Append(((VarRef)c.Args[0]).Name).Append(", ").Append(((VarRef)c.Args[1]).Name).Append(')');
-                break;
-            case Call c:
-                sb.Append(c.Function).Append('(');
-                for (int i = 0; i < c.Args.Count; i++)
-                {
-                    if (i > 0) sb.Append(", ");
-                    Write(c.Args[i], src, values, sb);
-                }
-                sb.Append(')');
-                break;
+            if (paren) sb.Append(')');
         }
-        if (paren) sb.Append(')');
     }
 
     internal static string Symbol(string op) => op switch

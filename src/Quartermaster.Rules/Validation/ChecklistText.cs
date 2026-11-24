@@ -18,13 +18,18 @@ public static class ChecklistText
         TokenRx.Matches(text ?? "").Select(m => (m.Groups[1].Value, m.Groups[2].Value, m.Value)).ToList();
 
     /// <summary>The text with each link replaced: an item by its quoted (cut) text, a formula by its name. A link to nothing stays as written.</summary>
-    public static string Render(RulesPack pack, string text) =>
+    public static string Render(RulesPack pack, string text) => Render(pack, text, null);
+
+    /// <summary>As <see cref="Render(RulesPack, string)"/>; a link to an item of a phase <paramref name="phaseShown"/> rejects (a phase whose
+    /// checklist this player may not see) also stays as written, so its text never reaches that player.</summary>
+    public static string Render(RulesPack pack, string text, Func<PhaseDef, bool>? phaseShown) =>
         TokenRx.Replace(text ?? "", m =>
         {
             var id = m.Groups[2].Value;
             if (m.Groups[1].Value == "item")
             {
-                if (ItemById(pack, id) is not { } item) return m.Value;
+                if (Find(pack, id) is not { } hit || (phaseShown != null && !phaseShown(hit.Phase))) return m.Value;
+                var item = hit.Item;
                 var t = item.Text ?? "";
                 return "\"" + (t.Length > CutAt ? t[..CutAt] + "…" : t) + "\"";
             }

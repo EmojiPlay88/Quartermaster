@@ -339,8 +339,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     public void Tick(int index, bool ticked)
     {
         var items = CurrentPhase()?.Checklist;
-        if (items == null || index < 0 || index >= items.Count) return;
-        Exec(new TickChecklist(index, ticked, items[index].Text));
+        if (items == null || index < 0 || index >= items.Count || items[index] is not { } item) return;
+        // The raw text (links unrendered) is logged; an item with an id is ticked by id, so reordering items keeps the tick.
+        Exec(new TickChecklist(index, ticked, item.Text ?? "", ItemId: item.Id));
     }
 
     public void Acknowledge(int warningIndex)
