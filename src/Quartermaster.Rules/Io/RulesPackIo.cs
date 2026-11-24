@@ -255,14 +255,16 @@ public static class RulesPackIo
         ModuleSha256 = p.ModuleSha256 ?? "",
         // Packs older than format 4 had no visibility setting: everything stays visible.
         Properties = (p.Properties ?? new()).Where(x => x != null)
-            .Select(x => x with { Name = x.Name ?? "", Expr = string.IsNullOrWhiteSpace(x.Expr) ? null : x.Expr, OverridesTable = string.IsNullOrWhiteSpace(x.OverridesTable) ? null : x.OverridesTable, OverridesColumn = string.IsNullOrWhiteSpace(x.OverridesColumn) ? null : x.OverridesColumn, Visibility = p.Format < 4 ? Visibility.Public : x.Visibility }).ToList(),
+            .Select(x => x with { Name = x.Name ?? "", Expr = string.IsNullOrWhiteSpace(x.Expr) ? null : x.Expr, OverridesTable = string.IsNullOrWhiteSpace(x.OverridesTable) ? null : x.OverridesTable, OverridesColumn = string.IsNullOrWhiteSpace(x.OverridesColumn) ? null : x.OverridesColumn, Visibility = p.Format < 4 ? Visibility.Public : x.Visibility,
+                RuleRefId = Blank(x.RuleRefId), Labels = Blank(x.Labels),
+                Holders = x.Holders?.Select(h => h?.Trim()).Where(h => !string.IsNullOrEmpty(h)).Select(h => h!).Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } hs ? hs : null }).ToList(),
         MapOwners = (p.MapOwners ?? new()).Where(x => x != null)
             .Select(x => x with { MapId = x.MapId ?? "", SideId = x.SideId ?? "" }).ToList(),
-        Holders = (p.Holders ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),
+        Holders = (p.Holders ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "", RuleRefId = Blank(x.RuleRefId) }).ToList(),
         RuleRefs = (p.RuleRefs ?? new()).Where(x => x != null)
             .Select(x => x with { Label = x.Label ?? "", DocumentEntry = x.DocumentEntry ?? "" }).ToList(),
         Alerts = (p.Alerts ?? new()).Where(x => x != null)
-            .Select(x => x with { Name = x.Name ?? "", Condition = x.Condition ?? "", Message = x.Message ?? "" }).ToList(),
+            .Select(x => x with { Name = x.Name ?? "", Condition = x.Condition ?? "", Message = x.Message ?? "", RuleRefId = Blank(x.RuleRefId) }).ToList(),
         Sides = (p.Sides ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),
         Blocks = (p.Blocks ?? new()).Where(x => x != null)
             .Select(x => x with { FirstPhaseId = x.FirstPhaseId ?? "", LastPhaseId = x.LastPhaseId ?? "", Label = x.Label ?? "" }).ToList(),
@@ -270,12 +272,12 @@ public static class RulesPackIo
         {
             Name = x.Name ?? "",
             Instructions = x.Instructions ?? "",
-            Checklist = (x.Checklist ?? new()).Select(c => c ?? "").ToList(),
+            Checklist = (x.Checklist ?? new()).Select(c => (c ?? new ChecklistItem()) with { Text = c?.Text ?? "", Id = Blank(c?.Id), RuleRefId = Blank(c?.RuleRefId), Notes = Blank(c?.Notes) }).ToList(),
             OnStart = (x.OnStart ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
             OnEnd = x.OnEnd?.Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
             OnMove = (x.OnMove ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
             Warnings = (x.Warnings ?? new()).Where(w => w != null)
-                .Select(w => w with { Condition = w.Condition ?? "", Message = w.Message ?? "" }).ToList(),
+                .Select(w => w with { Condition = w.Condition ?? "", Message = w.Message ?? "", RuleRefId = Blank(w.RuleRefId) }).ToList(),
         }).ToList(),
         Tables = (p.Tables ?? new()).Where(x => x != null).Select(t => t with
         {
@@ -302,6 +304,8 @@ public static class RulesPackIo
             }).ToList(),
         }).ToList(),
     };
+
+    private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
     private static byte[] Utf8Lf(string json) => Encoding.UTF8.GetBytes(json.Replace("\r\n", "\n") + "\n");
 

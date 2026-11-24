@@ -6,6 +6,9 @@ namespace Quartermaster.Rules;
 /// <summary>Facts about properties that depend on the pack: whether one is computed and whether every player may see its value.</summary>
 public static class PropertyFacts
 {
+    /// <summary>True when the holder keeps the property: a property with no holder list is kept by every holder (ids compare ordinally).</summary>
+    public static bool KeptBy(PropertyDef p, string holderId) => p.Holders is null || p.Holders.Contains(holderId, StringComparer.Ordinal);
+
     /// <summary>True when the property is computed from an expression (<see cref="PropertyDef.Expr"/> is set).</summary>
     public static bool IsComputed(PropertyDef p) => !string.IsNullOrWhiteSpace(p.Expr);
 

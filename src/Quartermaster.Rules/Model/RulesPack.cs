@@ -20,7 +20,13 @@ public sealed record AlertDef
     public AlertSeverity Severity { get; init; } = AlertSeverity.Warning;
     public string? SideId { get; init; }
     public string? Notes { get; init; }
+    /// <summary>Id of the rule reference this alert cites. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RuleRefId { get; init; }
 }
+
+/// <summary>What a copy of a counter (the Clone command) gets for a property: the source's current value, or what a new counter starts with.</summary>
+public enum CloneValue { Copy, Default }
 
 public sealed record PropertyDef
 {
@@ -49,6 +55,18 @@ public sealed record PropertyDef
     public OutlinerAggregate Outliner { get; init; } = OutlinerAggregate.None;
     /// <summary>New properties are Private; packs of format 1-3 load with every property Public.</summary>
     public Visibility Visibility { get; init; } = Visibility.Private;
+    /// <summary>Id of the rule reference this property cites. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RuleRefId { get; init; }
+    /// <summary>Id of a one-column table whose row for a value gives the text shown next to it. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Labels { get; init; }
+    /// <summary>Ids of the holders that keep this property (a holder property only); null = every holder. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Holders { get; init; }
+    /// <summary>What a Clone copy gets for this property. Omitted from the pack JSON when Copy.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public CloneValue CloneAs { get; init; } = CloneValue.Copy;
 }
 
 /// <summary>Marks a map as belonging to one side; other players do not see its pieces.</summary>
@@ -67,6 +85,9 @@ public sealed record HolderDef
     public string? Notes { get; init; }
     /// <summary>Side that owns this holder's ledger; null = public.</summary>
     public string? SideId { get; init; }
+    /// <summary>Id of the rule reference this holder cites. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RuleRefId { get; init; }
 }
 
 public sealed record RuleRef

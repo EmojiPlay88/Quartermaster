@@ -739,14 +739,14 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         var i = _check.SelectedIndex;
         if (i < 0 || Current is not { } ph || i >= ph.Checklist.Count || Owner is not { } w) return;
         var id = ph.Id;
-        var old = ph.Checklist[i];
+        var old = ph.Checklist[i].Text;
         var text = await _dialogs.AskTextAsync(w, "Checklist item", "Text of the item:", old);
-        if (string.IsNullOrWhiteSpace(text) || StillCurrent(id) is not { } cur || i >= cur.Checklist.Count || cur.Checklist[i] != old) return;
-        CommitPhase(p => p with { Checklist = p.Checklist.Select((c, k) => k == i ? text.Trim() : c).ToList() });
+        if (string.IsNullOrWhiteSpace(text) || StillCurrent(id) is not { } cur || i >= cur.Checklist.Count || cur.Checklist[i].Text != old) return;
+        CommitPhase(p => p with { Checklist = p.Checklist.Select((c, k) => k == i ? c with { Text = text.Trim() } : c).ToList() });
         LoadChecklist();
     }
 
-    void LoadChecklist() => _check.ItemsSource = (Current?.Checklist ?? new List<string>()).ToList();
+    void LoadChecklist() => _check.ItemsSource = (Current?.Checklist.Select(c => c.Text) ?? Enumerable.Empty<string>()).ToList();
 
     // ---------- grids ----------
 

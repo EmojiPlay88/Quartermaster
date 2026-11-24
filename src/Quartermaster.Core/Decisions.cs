@@ -83,7 +83,7 @@ public static class Decisions
         var items = phase.Checklist ?? new();
         for (var i = 0; i < items.Count; i++)
             if (s.Ticked?.Contains(i) != true)
-                res.Add(new Decision(DecisionKind.Checklist, items[i], i, null, Array.Empty<string>()));
+                res.Add(new Decision(DecisionKind.Checklist, items[i].Text, i, null, Array.Empty<string>()));
 
         foreach (var r in s.Pending ?? new())
         {

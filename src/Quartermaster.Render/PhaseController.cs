@@ -340,7 +340,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         var items = CurrentPhase()?.Checklist;
         if (items == null || index < 0 || index >= items.Count) return;
-        Exec(new TickChecklist(index, ticked, items[index]));
+        Exec(new TickChecklist(index, ticked, items[index].Text));
     }
 
     public void Acknowledge(int warningIndex)

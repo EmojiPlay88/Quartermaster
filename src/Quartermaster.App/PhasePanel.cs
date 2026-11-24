@@ -201,7 +201,7 @@ sealed class PhasePanel : UserControl
     void ShowDecisions(PhaseView v, bool checklistHidden)
     {
         // Hot-seat: another side's phase shows none of its decisions (its checklist included).
-        var items = checklistHidden ? new List<string>() : v.Current?.Checklist ?? new List<string>();
+        var items = checklistHidden ? new List<string>() : v.Current?.Checklist.Select(c => c.Text).ToList() ?? new List<string>();
         var ticked = _s.View?.Ticked;
         _checklist.BeginUpdate();
         _checklist.Items.Clear();
