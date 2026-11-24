@@ -13,6 +13,29 @@ public static class MissingInputs
     private static IEnumerable<PendingUnit> Open(ModuleSession s, PendingRun run) =>
         (s.Game?.State.Pending.FirstOrDefault(r => r.Id == run.Id) ?? run).Units.Where(u => !u.Applied);
 
+    /// <summary>
+    /// True when a unit of the run the current player may act for has a used Piece binding with no value: a pick is made per unit in the
+    /// formula dialog, never asked once for the whole run nor filled automatically. Never throws (false on an error).
+    /// </summary>
+    public static bool NeedsPick(ModuleSession s, PendingRun run)
+    {
+        try
+        {
+            if (s.Game is not { } game || s.Runner is not { } runner || s.Rules?.ById<FormulaDef>(run.FormulaId) is not { } f) return false;
+            if (!f.Bindings.Any(b => b is { Kind: BindingKind.Piece })) return false;
+            var none = new Dictionary<string, string>();
+            var noRolls = new Dictionary<string, IReadOnlyList<int>>();
+            foreach (var u in Open(s, run).Where(u => s.CanAct(u.PieceId)))
+            {
+                var trace = runner.Run(game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
+                if (trace.Variables.Any(v => v.Value == null && !v.Skipped && f.Bindings.FirstOrDefault(x => x.Variable == v.Variable) is { Kind: BindingKind.Piece }))
+                    return true;
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        return false;
+    }
+
     /// <summary>The Input variables that stay empty for the run's unfinished units even with the pack's auto values. Never throws.</summary>
     public static IReadOnlyList<MissingInput> For(ModuleSession s, PendingRun run)
     {

@@ -258,6 +258,121 @@ public class FormulaDialogModelTests
         Assert.Null(Build(new() { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 }).Evaluate(new GameState()).Boxes.Single().Hint);
         Assert.Equal("Type each die, separated by spaces", Build(new() { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6, DiceCountExpr = "3" }).Evaluate(new GameState()).Boxes.Single().Hint);
     }
+    // ---- Piece picks follow the picked piece (invented "Rifle" pieces) ----
+
+    private static readonly RulesPack PickPack = new()
+    {
+        Properties = new() { new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, Default = 0 } },
+        Formulas = new()
+        {
+            new FormulaDef
+            {
+                Id = "fp", Name = "Pick", Text = "P",
+                Bindings = new() { new VariableBinding { Variable = "P", Kind = BindingKind.Piece, Property = "fuel" } },
+            },
+        },
+    };
+
+    /// <summary>Two "Rifle" pieces on the same spot (a1 then a2 in state order: a2 is labelled " #2"), fuel 1 and 2.</summary>
+    private static GameState TwoRifles()
+    {
+        var s = new GameState();
+        foreach (var (id, fuel) in new[] { ("a1", 1.0), ("a2", 2.0) })
+        {
+            s.Pieces[id] = new PieceInstance { Id = id, TypeString = "piece;;;unit.svg;Rifle", MapId = "Main Map", Pos = new PointD(60, 40), TraitStates = new() { "" } };
+            s.Ledgers[LedgerKey.Piece(id)] = new() { ["fuel"] = fuel };
+        }
+        return s;
+    }
+
+    private static FormulaDialogModel MakePick() =>
+        new(new FormulaRunner(PickPack, LazyModel.Value, (n, _) => Enumerable.Repeat(1, n).ToList()), PickPack.Formulas[0], null);
+
+    private static string LabelOfPiece(GameState s, string pieceId) =>
+        Quartermaster.Core.PieceChoices.For(s, PickPack, LazyModel.Value, PickPack.Formulas[0].Bindings[0], null).Single(c => c.PieceId == pieceId).Label;
+
+    [Fact]
+    public void Pick_follows_piece_when_earlier_duplicate_removed()
+    {
+        var s = TwoRifles();
+        var m = MakePick();
+        m.Evaluate(s);
+        var second = LabelOfPiece(s, "a2");
+        Assert.EndsWith(" #2", second);
+        m.SetBoxText("P", second);
+        Assert.Equal("2", m.Evaluate(s).ResultText);
+
+        s.Pieces.Remove("a1");   // the earlier duplicate leaves: a2 now carries the plain label
+        var v = m.Evaluate(s);
+        var plain = LabelOfPiece(s, "a2");
+        Assert.DoesNotContain("#", plain);
+        Assert.Equal(plain, v.Boxes.Single(b => b.Variable == "P").Text);
+        Assert.Equal("2", v.ResultText);
+        Assert.Equal(plain, m.Intent(null, false).Typed["P"]);
+    }
+
+    [Fact]
+    public void Intent_carries_picked_piece_id()
+    {
+        var s = TwoRifles();
+        var m = MakePick();
+        m.SetBoxText("P", LabelOfPiece(s, "a2"));
+        Assert.Null(m.Intent(null, false).Picks);   // no list yet: label only
+        m.Evaluate(s);
+        var i = m.Intent(null, false);
+        Assert.Equal(LabelOfPiece(s, "a2"), i.Typed["P"]);
+        Assert.Equal("a2", i.Picks!["P"]);
+        m.SetBoxText("P", "not a listed piece");
+        Assert.Null(m.Intent(null, false).Picks);
+    }
+
+    [Fact]
+    public void Pick_cleared_when_picked_piece_leaves_candidates()
+    {
+        var s = TwoRifles();
+        var m = MakePick();
+        m.Evaluate(s);
+        m.SetBoxText("P", LabelOfPiece(s, "a1"));
+        Assert.Equal("1", m.Evaluate(s).ResultText);
+
+        s.Pieces.Remove("a1");   // the picked piece leaves: a2 now has a1's old plain label, but the pick must not move to it
+        var v = m.Evaluate(s);
+        var box = v.Boxes.Single(b => b.Variable == "P");
+        Assert.Equal("", box.Text);
+        Assert.Equal("Waiting for input", box.Tooltip);
+        Assert.Equal("Waiting for: P", v.Status);
+        Assert.Equal("", v.ResultText);
+        Assert.Null(v.Trace.Result);
+        Assert.False(m.Intent(null, false).Typed.ContainsKey("P"));
+    }
+
+    [Fact]
+    public void Pick_typed_before_first_run_is_tracked()
+    {
+        var s = TwoRifles();
+        var m = MakePick();
+        m.SetBoxText("P", LabelOfPiece(s, "a1"));   // no run yet: adopted against the first run's list
+        Assert.Equal("1", m.Evaluate(s).ResultText);
+        s.Pieces.Remove("a1");
+        Assert.Equal("", m.Evaluate(s).Boxes.Single(b => b.Variable == "P").Text);
+    }
+
+    [Fact]
+    public void Pick_cleared_when_pick_sides_change()
+    {
+        var s = TwoRifles();
+        var m = MakePick();
+        m.PickSides = new HashSet<string> { "blue" };
+        m.Evaluate(s);
+        m.SetBoxText("P", LabelOfPiece(s, "a1"));
+        m.PickSides = new HashSet<string> { "blue" };   // the same sides (another set object): kept
+        Assert.Equal(LabelOfPiece(s, "a1"), (m.Intent(null, false).Typed.GetValueOrDefault("P") ?? ""));
+        m.PickSides = new HashSet<string> { "red" };    // another viewer: the previous viewer's pick is dropped
+        Assert.Equal("", (m.Intent(null, false).Typed.GetValueOrDefault("P") ?? ""));
+        m.SetBoxText("P", LabelOfPiece(s, "a1"));
+        m.PickSides = null;
+        Assert.Equal("", (m.Intent(null, false).Typed.GetValueOrDefault("P") ?? ""));
+    }
 }
 
 public class FormulaDialogModelPhysicalToggleTests
@@ -350,4 +465,5 @@ public class FormulaDialogModelPhysicalToggleTests
         Assert.Equal("3", v.Boxes.Single().Text.Split(' ')[0]);
         Assert.Equal(new[] { 3 }, m.PinnedRolls["R"]);
     }
+
 }

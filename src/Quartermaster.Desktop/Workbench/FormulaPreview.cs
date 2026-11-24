@@ -162,7 +162,7 @@ public sealed class FormulaPreview : UserControl
     {
         var game = _s.View;
         var maps = _s.Model.Maps;
-        var entries = game == null ? Array.Empty<PieceEntry>() : PieceChoices.Entries(game, id => maps.FirstOrDefault(m => m.Id == id)?.Name ?? id).Where(e => _s.CanAct(e.PieceId)).ToArray();
+        var entries = game == null ? Array.Empty<PieceEntry>() : Quartermaster.Render.PieceChoices.Entries(game, id => maps.FirstOrDefault(m => m.Id == id)?.Name ?? id).Where(e => _s.CanAct(e.PieceId)).ToArray();
         _loading = true;
         try
         {

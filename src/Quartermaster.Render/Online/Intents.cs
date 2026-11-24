@@ -30,9 +30,12 @@ public sealed record PieceCommandIntent(GameCommand Command) : GameIntent;
 /// Run formula X on unit Y with these typed values, or with the engine's values when <paramref name="Calculate"/>; apply when it checks out.
 /// With <paramref name="Preview"/> the host only runs it (nothing is executed, never applied) and answers with the visible values and the
 /// dice it rolled; those dice are pinned for the sender's next Apply of the same formula on the same unit/run (the dialog's Calculate).
+/// <paramref name="Picks"/> (optional; absent from older guests' messages): for a Piece binding, the id of the piece its typed label was
+/// picked as. The host then refuses the run ("Choose one of the listed pieces") unless the label still resolves, among the sender's own
+/// candidates, to that same piece.
 /// </summary>
 public sealed record FormulaIntent(string FormulaId, string? PieceId, string? RunId, IReadOnlyDictionary<string, string> Typed, bool Calculate,
-    bool Preview = false) : GameIntent;
+    bool Preview = false, IReadOnlyDictionary<string, string>? Picks = null) : GameIntent;
 
 /// <summary>A manual ledger change with its (required) note.</summary>
 public sealed record LedgerEditIntent(string Key, string PropertyId, double After, string Note) : GameIntent;

@@ -79,7 +79,7 @@ public sealed class BatchGridWindow : Window
         var vars = _model.Variables;
         _headers = new[] { FormulaWindowRules.BatchUnit }.Concat(vars)
             .Concat(new[] { FormulaWindowRules.BatchResult, FormulaWindowRules.BatchLedger, FormulaWindowRules.BatchExceptions }).ToList();
-        _widths = new[] { UnitWidth }.Concat(vars.Select(v => _model.ChoicesFor(v) is { Count: > 0 } ? 90d : 80d))
+        _widths = new[] { UnitWidth }.Concat(vars.Select(v => _model.IsChoiceColumn(v) ? 90d : 80d))
             .Concat(new[] { ResultWidth, LedgerWidth, ExceptionsWidth }).ToArray();
 
         var header = new Grid { ColumnDefinitions = Columns(_widths) };
@@ -188,8 +188,8 @@ public sealed class BatchGridWindow : Window
     int VarCount => _model.Variables.Count;
     int ResultCol => 1 + VarCount;
 
-    /// <summary>True when the variable column is a dropdown of table keys.</summary>
-    internal bool IsChoiceColumn(int col) => col >= 1 && col <= VarCount && _model.ChoicesFor(_model.Variables[col - 1]) is { Count: > 0 };
+    /// <summary>True when the variable column is a dropdown: table keys, or a Piece binding's candidates.</summary>
+    internal bool IsChoiceColumn(int col) => col >= 1 && col <= VarCount && _model.IsChoiceColumn(_model.Variables[col - 1]);
 
     BatchRow? Live(int row) => _rows.FirstOrDefault(r => r.Index == row);
 
@@ -212,6 +212,9 @@ public sealed class BatchGridWindow : Window
     internal void TypeCell(int row, int col, string text) => (Live(row) ?? throw new InvalidOperationException("Row is not on screen.")).Type(col, text);
 
     internal void SelectRow(int row) => _list.SelectedIndex = row;
+
+    /// <summary>The items of a dropdown cell on screen (the first is the blank item); null for a free-text cell.</summary>
+    internal IReadOnlyList<string>? ChoicesOf(int row, int col) => (Live(row) ?? throw new InvalidOperationException("Row is not on screen.")).ItemsOf(col);
 
     /// <summary>Centre of the row's Unit cell in window coordinates (tests double-click there).</summary>
     internal Point UnitCellCenter(int row)
@@ -268,8 +271,9 @@ public sealed class BatchGridWindow : Window
                 if (c >= 1 && c <= w.VarCount)
                 {
                     var v = w._model.Variables[c - 1];
-                    if (w._model.ChoicesFor(v) is { Count: > 0 } keys)
+                    if (w._model.IsChoiceColumn(v))
                     {
+                        var keys = w._model.ChoicesFor(v) ?? Array.Empty<string>();
                         var combo = new ComboBox { IsEditable = true, ItemsSource = new[] { "" }.Concat(keys).ToList(), HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(2, 0) };
                         combo.PropertyChanged += (_, e) => { if (e.Property == ComboBox.TextProperty) Edited(col, combo.Text ?? ""); };
                         inner = combo;
@@ -314,6 +318,9 @@ public sealed class BatchGridWindow : Window
             ComboBox c => c.Text ?? "",
             _ => "",
         };
+
+        public IReadOnlyList<string>? ItemsOf(int col) =>
+            _content[col] is ComboBox c ? (c.ItemsSource as IEnumerable<string>)?.ToList() : null;
 
         public void Type(int col, string text)
         {
@@ -367,6 +374,13 @@ public sealed class BatchGridWindow : Window
                             ToolTip.SetTip(b, wrong ? _w.WrongTip(Index, c) : null);
                             break;
                         case ComboBox cb:
+                            // A Piece column's candidates follow the game (and the viewer): the items are refreshed when the list changed.
+                            var items = new[] { "" }.Concat(_w._model.ChoicesFor(_w._model.Variables[c - 1]) ?? Array.Empty<string>()).ToList();
+                            if (cb.ItemsSource is not IEnumerable<string> shown || !shown.SequenceEqual(items))
+                            {
+                                cb.ItemsSource = items;
+                                cb.Text = cell.Text;
+                            }
                             if ((cb.Text ?? "") != cell.Text) cb.Text = cell.Text;
                             Style(cb, fore);
                             ToolTip.SetTip(cb, wrong ? _w.WrongTip(Index, c) : null);

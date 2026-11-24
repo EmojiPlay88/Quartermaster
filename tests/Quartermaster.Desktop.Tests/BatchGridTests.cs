@@ -60,7 +60,7 @@ public sealed class BatchGridTests : IDisposable
     /// run. The phase wiring opens the run's UI as soon as it is queued; unless <paramref name="keepOpened"/>, those windows are closed again so
     /// the tests below drive the windows themselves.</summary>
     (MainWindow W, PendingRun Run) Make(Difficulty d, bool terrainMissing = false, bool keepOpened = false, string[]? moved = null,
-        Func<VariableBinding, VariableBinding>? terrain = null)
+        Func<VariableBinding, VariableBinding>? terrain = null, Func<RulesPack, RulesPack>? pack = null)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
@@ -75,6 +75,7 @@ public sealed class BatchGridTests : IDisposable
         s.UpdateRules(_ =>
         {
             var p = PhaseFixture.Pack(s.Archive.Sha256);
+            if (pack != null) p = pack(p);
             var tweak = terrain ?? (terrainMissing ? b => b with { AutoValue = null } : null);
             return tweak != null
                 ? p with { Formulas = p.Formulas.Select(f => f.Id != "f-fuel" ? f : f with { Bindings = f.Bindings.Select(b => b.Variable == "Terrain" ? tweak(b) : b).ToList() }).ToList() }
@@ -120,6 +121,42 @@ public sealed class BatchGridTests : IDisposable
         ButtonOf(win, "Apply all");
         ButtonOf(win, "Apply row");
         Assert.Null(win.CheatSheet);   // hardcore: no cheat sheet
+    }
+
+    /// <summary>The fuel formula also reads a picked piece's Fuel (times zero): a Piece column "P".</summary>
+    static RulesPack PickInFuel(RulesPack p) => p with
+    {
+        Formulas = p.Formulas.Select(f => f.Id != "f-fuel" ? f : f with
+        {
+            Text = f.Text + " + P * 0",
+            Bindings = f.Bindings.Append(new VariableBinding { Variable = "P", Kind = BindingKind.Piece, Property = "fuel" }).ToList(),
+        }).ToList(),
+    };
+
+    [AvaloniaFact]
+    public void Piece_column_is_a_combo_of_candidate_labels()
+    {
+        var (w, run) = Make(Difficulty.SemiAuto, pack: PickInFuel);
+        var win = Batch(w, run);
+        var col = 1 + win.Headers.Skip(1).ToList().IndexOf("P");
+        Assert.True(col >= 1);
+        Assert.True(win.IsChoiceColumn(col));
+        var s = w.Session!;
+        var binding = s.Rules!.ById<FormulaDef>("f-fuel")!.Bindings.Single(b => b.Variable == "P");
+        var labels = Quartermaster.Core.PieceChoices.For(s.Game!.State, s.Rules!, s.Model, binding, FormulaMasking.PickSides(s)).Select(c => c.Label).ToList();
+        Assert.Equal(3, labels.Count);
+        Assert.Equal(new[] { "" }.Concat(labels), win.ChoicesOf(0, col));
+
+        var blue = labels.Single(l => l.StartsWith("Blue 1", StringComparison.Ordinal));
+        win.TypeCell(0, col, blue);
+        Pump();
+        Assert.Equal(blue, win.CellText(0, col));
+
+        // The picked piece leaves: the combo's items follow the list and the pick clears (never another piece's label).
+        s.Game!.Execute(new RemovePiece(PhaseFixture.BlueOne));
+        PumpUntil(() => win.ChoicesOf(0, col)?.Any(l => l.StartsWith("Blue 1", StringComparison.Ordinal)) == false);
+        Assert.Equal(3, win.ChoicesOf(0, col)!.Count);   // "" and the two red units
+        Assert.Equal("", win.CellText(0, col));
     }
 
     [AvaloniaFact]

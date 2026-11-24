@@ -41,6 +41,7 @@ public sealed partial class FormulasTab
         BindingKind.Input => "A range such as 0..20, or choices separated by commas (put a choice that holds a comma in \"double quotes\"); add | auto: expression for the automatic value. Add | always ask to ask the player every time, even in Fully automatic.",
         BindingKind.Roll => "Dice, such as 2d6.",
         BindingKind.Table => "row: expression | col: expression (the expressions may use other variables).",
+        BindingKind.Piece => FormulaEdit.PieceDetailsHint,
         _ => "",
     };
 
@@ -94,7 +95,7 @@ public sealed partial class FormulasTab
             var opts = FormulaEdit.TargetOptions(pack, b.Kind);
             _targets.Add(opts);
             _bind.SetCellItems(r, 2, opts.Select(o => o.Display).ToList());
-            if (opts.Count == 0 && b.Kind is not (BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Table))
+            if (opts.Count == 0 && b.Kind is not (BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Table or BindingKind.Piece))
                 _bind.SetCellReadOnly(r, 2, true);
             var noDetails = b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Location or BindingKind.Moved;
             _bind.SetCellReadOnly(r, 3, noDetails);

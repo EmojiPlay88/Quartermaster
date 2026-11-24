@@ -300,7 +300,8 @@ public sealed class FormulaWindow : Window
     void CalculateAll()
     {
         _debounce.Stop();
-        if (_s.IsGuest) { SendToHost(calculate: true, preview: true); return; }   // a preview on the host: fills the boxes, applies nothing
+        // A preview on the host: fills the boxes, applies nothing. Re-evaluated first, so each pick is sent with its current label.
+        if (_s.IsGuest) { Recalc(); SendToHost(calculate: true, preview: true); return; }
         _model.Calculate(_s.Game?.State ?? new GameState());
         Recalc();
     }
@@ -362,7 +363,7 @@ public sealed class FormulaWindow : Window
     void ApplyToLedger()
     {
         _debounce.Stop();
-        if (_s.IsGuest) { SendToHost(calculate: false); return; }
+        if (_s.IsGuest) { Recalc(); SendToHost(calculate: false); return; }   // re-evaluated first: picks follow the current list
         Recalc();   // always re-evaluate against the current game and mode before writing anything
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
         // Hot-seat: the viewer may have changed while the window was open; another side's unit is refused.

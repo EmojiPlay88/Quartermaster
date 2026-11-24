@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Quartermaster.Rules;
 
-public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll, Moved }
+public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll, Moved, Piece }
 public enum OutputTarget { Unit, Global, Holder }
 public enum OutputOp { Subtract, Add, Set }
 
@@ -32,6 +32,9 @@ public sealed record VariableBinding
     /// <summary>Roll only: expression giving the number of dice (a whole number 1-100) in place of <see cref="DiceCount"/>; it may not read this binding. Null = the fixed DiceCount (the Workbench stores null, never "").</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DiceCountExpr { get; init; }
+    /// <summary>Piece only: unit-filter text choosing which pieces may be picked ("which pieces"). Null = every piece (the Workbench stores null, never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PieceFilter { get; init; }
 }
 
 public sealed record FormulaOutput

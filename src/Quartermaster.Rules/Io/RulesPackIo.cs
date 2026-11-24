@@ -292,7 +292,7 @@ public static class RulesPackIo
             Precondition = string.IsNullOrWhiteSpace(f.Precondition) ? null : f.Precondition,
             RefusalMessage = string.IsNullOrWhiteSpace(f.RefusalMessage) ? null : f.RefusalMessage,
             Bindings = (f.Bindings ?? new()).Where(b => b != null)
-                .Select(b => b with { Variable = b.Variable ?? "", When = string.IsNullOrWhiteSpace(b.When) ? null : b.When, DiceCountExpr = string.IsNullOrWhiteSpace(b.DiceCountExpr) ? null : b.DiceCountExpr }).ToList(),
+                .Select(b => b with { Variable = b.Variable ?? "", When = string.IsNullOrWhiteSpace(b.When) ? null : b.When, DiceCountExpr = string.IsNullOrWhiteSpace(b.DiceCountExpr) ? null : b.DiceCountExpr, PieceFilter = string.IsNullOrWhiteSpace(b.PieceFilter) ? null : b.PieceFilter }).ToList(),
             Outputs = (f.Outputs ?? new()).Where(o => o != null).Select(o => o with
             {
                 Property = o.Property ?? "",

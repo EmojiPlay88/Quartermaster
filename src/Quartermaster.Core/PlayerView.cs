@@ -66,6 +66,9 @@ public static class PlayerView
     /// <summary>Trait states <see cref="For"/> gives the nameless placeholder of a masked piece (mask trait, then the basic piece).</summary>
     private static readonly string[] PlaceholderStates = { "masked", "" };
 
+    /// <summary>Type string <see cref="For"/> gives the nameless placeholder of a masked piece: the mask trait over a nameless basic piece.</summary>
+    internal static string PlaceholderType(ObscurableDef mask) => PieceTypeParser.EncodeState(new[] { mask.RawType, "piece;;;;" });
+
     /// <summary>
     /// True for the nameless placeholder <see cref="For"/> leaves for another side's masked piece: its ledger values were all removed,
     /// so a missing value there is hidden, not unset. Only meaningful in a player view.
@@ -107,8 +110,8 @@ public static class PlayerView
         private readonly List<string> _privatePrefixes;
         /// <summary>
         /// Formulas reading a holder value this viewer may not see, using an aggregate that may read hidden pieces or values, or reading a
-        /// computed property built from hidden data (<see cref="FormulaVariables.ComputedReadsHidden"/>): their working (which shows that
-        /// value) is never shown.
+        /// computed property built from hidden data (<see cref="FormulaVariables.ComputedReadsHidden"/>), or picking a piece whose non-Public
+        /// property they read (<see cref="FormulaVariables.PieceBindingsHidden"/>): their working (which shows that value) is never shown.
         /// </summary>
         private readonly HashSet<string> _hiddenInputFormulas = new(StringComparer.Ordinal);
         private readonly Regex? _names;
@@ -133,7 +136,8 @@ public static class PlayerView
                     || FormulaVariables.HolderReads(f).Any(r => r.Holder == null || pack.HolderByName(r.Holder) is not { } h
                         || ValueHidden(LedgerKey.Holder(h.Id), pack.PropertyByName(r.Property ?? "")?.Id, out _))
                     || FormulaVariables.AggregateReadsHidden(pack, f, piecesMayHide)
-                    || FormulaVariables.ComputedReadsHidden(pack, f)))   // a computed value built from hidden data, even on a held piece or the global holder
+                    || FormulaVariables.ComputedReadsHidden(pack, f)   // a computed value built from hidden data, even on a held piece or the global holder
+                    || FormulaVariables.PieceBindingsHidden(pack, f, piecesMayHide).Any()))   // a picked piece's non-Public value, or any once a pick may be masked
                     _hiddenInputFormulas.Add(f.Id);
 
             foreach (var p in full.Pieces.Values)
@@ -290,7 +294,7 @@ public static class PlayerView
             foreach (var (id, mask) in _masked)
             {
                 if (!v.Pieces.TryGetValue(id, out var p)) continue;
-                p.TypeString = PieceTypeParser.EncodeState(new[] { mask.RawType, "piece;;;;" });
+                p.TypeString = PlaceholderType(mask);
                 p.TraitStates = new(PlaceholderStates);
                 p.Trail = new();
                 p.TrailVisible = false;
