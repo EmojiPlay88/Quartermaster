@@ -35,6 +35,7 @@ public static class RulesValidator
                 }
             foreach (var p in pack.Properties) CheckComputed(pack, p, issues);
             CheckComputedCycles(pack, issues);
+            CheckOverrides(pack, issues);
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
             foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues));
             foreach (var s in pack.Sides) Guarded(issues, s.Id, s.Name, () => CheckSide(s, pack, issues));
@@ -66,6 +67,41 @@ public static class RulesValidator
         if (p.Visibility == Visibility.Public && PropertyFacts.ReadsHidden(pack, p))
             Add(issues, RulesIssueSeverity.Warning, p.Id, p.Name,
                 $"Property \"{p.Name}\" is Public but is computed from hidden data; players who do not hold every side see it as Private");
+    }
+
+    private static void CheckOverrides(RulesPack pack, List<RulesIssue> issues)
+    {
+        foreach (var p in pack.Properties)
+        {
+            if (string.IsNullOrWhiteSpace(p.OverridesTable)) continue;
+            if (p.Scope == PropertyScope.Holders)
+                Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" overrides a table but is not a piece property");
+            if (pack.ById<TableDef>(p.OverridesTable!) is not { } t)
+            {
+                Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" overrides a table that no longer exists");
+                continue;
+            }
+            if (t.Kind == TableKind.TwoD)
+            {
+                var c = TableLookup.Normalise(p.OverridesColumn);
+                if (!t.ColumnKeys.Any(k => TableLookup.Normalise(k) == c))
+                    Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" overrides column \"{p.OverridesColumn}\", which table \"{t.Name}\" does not have");
+            }
+        }
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in pack.Properties)
+        {
+            if (string.IsNullOrWhiteSpace(p.OverridesTable) || pack.ById<TableDef>(p.OverridesTable!) is not { } t) continue;
+            var oneD = t.Kind != TableKind.TwoD;
+            var col = oneD ? "" : TableLookup.Normalise(p.OverridesColumn);
+            if (!seen.Add(t.Id + "" + col)) continue;
+            var all = CellOverrideFacts.For(pack, t.Id, col);
+            if (all.Count < 2) continue;
+            var (a, b) = (all[0], all[1]);
+            Add(issues, RulesIssueSeverity.Warning, b.Id, b.Name, oneD
+                ? $"Properties \"{a.Name}\" and \"{b.Name}\" both override {t.Name}; \"{a.Name}\" wins"
+                : $"Properties \"{a.Name}\" and \"{b.Name}\" both override {t.Name}, column {col}; \"{a.Name}\" wins");
+        }
     }
 
     /// <summary>Each distinct cycle once, on the first property of it in pack order.</summary>
