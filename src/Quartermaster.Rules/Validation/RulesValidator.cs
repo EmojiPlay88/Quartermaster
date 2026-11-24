@@ -88,13 +88,13 @@ public static class RulesValidator
                     Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" overrides column \"{p.OverridesColumn}\", which table \"{t.Name}\" does not have");
             }
         }
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<(string, string)>();
         foreach (var p in pack.Properties)
         {
             if (string.IsNullOrWhiteSpace(p.OverridesTable) || pack.ById<TableDef>(p.OverridesTable!) is not { } t) continue;
             var oneD = t.Kind != TableKind.TwoD;
             var col = oneD ? "" : TableLookup.Normalise(p.OverridesColumn);
-            if (!seen.Add(t.Id + "" + col)) continue;
+            if (!seen.Add((t.Id, col))) continue;
             var all = CellOverrideFacts.For(pack, t.Id, col);
             if (all.Count < 2) continue;
             var (a, b) = (all[0], all[1]);

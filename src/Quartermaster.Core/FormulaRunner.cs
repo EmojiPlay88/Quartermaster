@@ -388,7 +388,11 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     var (ri, ci) = TableLookup.Locate(table, row, col);
                     var src = $"{table.Name}, row {TableLookup.Normalise(table.RowKeys[ri])}"
                         + (table.Kind == TableKind.TwoD ? $", column {TableLookup.Normalise(table.ColumnKeys[ci])}" : "");
-                    return new(name, TableLookup.CellAt(table, ri, ci), true, false, null, src, new TableCell(table.Id, ri, ci));
+                    (Value Value, PropertyDef? By, Value Printed) read;
+                    try { read = CellOverrides.Read(table, ri, ci, piece, s, owner._pack, owner._model, Filters, Sides); }
+                    catch (EvalError ex) when (ex.MissingValue || ex.HiddenData) { throw new Missing(ex.Message); }
+                    if (read.By != null) src += $": {read.By.Name} of {PieceInfo.Name(piece!)} (printed {read.Printed.Display()})";
+                    return new(name, read.Value, true, false, null, src, new TableCell(table.Id, ri, ci));
                 }
                 case BindingKind.Location:
                 {
@@ -523,7 +527,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     private sealed class RunContext(RunScope run) : IEvalContext
     {
         public Value GetVariable(string name) => run.ValueOf(name);
-        public Value Lookup(string tableName, Value row, Value? col) => PieceFilter.LookupTable(run.Pack, tableName, row, col);
+        public Value Lookup(string tableName, Value row, Value? col) =>
+            PieceFilter.LookupTable(run.Pack, tableName, row, col, run.Piece, run.State, run.Model, run.Filters, run.Sides);
         public Value LookupRange(string table, Value row, Value value) => PieceFilter.LookupRangeTable(run.Pack, table, row, value);
         public IReadOnlyList<int> DiceOf(string variable) => run.DiceOf(variable);
         public IReadOnlyList<int> RollDice(int n, int sides) => run.Roll(n, sides);

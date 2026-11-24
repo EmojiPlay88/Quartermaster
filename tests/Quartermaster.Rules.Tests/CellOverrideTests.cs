@@ -101,4 +101,15 @@ public class CellOverrideTests
         Assert.True(CellOverrideFacts.HiddenOverride(pack, "t1"));
         Assert.False(CellOverrideFacts.HiddenOverride(pack, "other"));
     }
+
+    [Fact]
+    public void For_and_HiddenOverride_skip_holder_scope()
+    {
+        var pack = Pack(P("H", "t2", "Speed", scope: PropertyScope.Holders), P("B", "t2", "Speed", scope: PropertyScope.Both),
+            P("Hp", "t1", vis: Visibility.Private, scope: PropertyScope.Holders));
+        Assert.Equal(new[] { "B" }, CellOverrideFacts.For(pack, "t2", "Speed").Select(p => p.Name));
+        Assert.Empty(CellOverrideFacts.For(pack, "t1", null));
+        Assert.False(CellOverrideFacts.HiddenOverride(pack, "t1"));
+        Assert.DoesNotContain(Issues(pack), i => i.Message.Contains("both override"));
+    }
 }

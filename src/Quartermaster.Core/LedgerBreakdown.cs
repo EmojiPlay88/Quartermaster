@@ -28,6 +28,23 @@ public static class LedgerBreakdown
 
     public static Breakdown For(GameState s, RulesPack? pack, ModuleModel? model, string key, string propertyId)
     {
+        var b = ForCore(s, pack, model, key, propertyId);
+        var prop = pack?.ById<PropertyDef>(propertyId);
+        return OverrideLine(pack, prop) is { } line ? b with { Lines = b.Lines.Append(new BreakdownLine("", line, null)).ToList() } : b;
+    }
+
+    /// <summary>"overrides {table}, column {c}" (1-D: "overrides {table}") for a piece property overriding a table that exists, else null.</summary>
+    static string? OverrideLine(RulesPack? pack, PropertyDef? prop)
+    {
+        if (pack == null || prop == null || prop.Scope == PropertyScope.Holders || string.IsNullOrWhiteSpace(prop.OverridesTable)) return null;
+        if (pack.ById<TableDef>(prop.OverridesTable!) is not { } t) return null;
+        return t.Kind == TableKind.TwoD
+            ? $"overrides {t.Name}, column {Rules.Tables.TableLookup.Normalise(prop.OverridesColumn)}"
+            : $"overrides {t.Name}";
+    }
+
+    static Breakdown ForCore(GameState s, RulesPack? pack, ModuleModel? model, string key, string propertyId)
+    {
         var prop = pack?.ById<PropertyDef>(propertyId);
         if (prop != null && PropertyFacts.IsComputed(prop)) return ForComputed(s, pack!, model, key, prop);
         var value = Ledger.Get(s, key, propertyId) ?? prop?.Default ?? 0;
