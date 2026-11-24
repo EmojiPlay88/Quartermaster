@@ -136,6 +136,18 @@ public static class FormulaVariables
     }
 
     /// <summary>
+    /// The variables of the formula's Piece bindings whose property is not Public (<see cref="PropertyFacts.IsPublic"/>; an unknown property counts as not public):
+    /// a hidden input for a viewer who does not hold every side, like a hidden computed read. Depends on the pack alone, so the host and a guest agree.
+    /// </summary>
+    public static IEnumerable<string> PieceBindingsHidden(RulesPack pack, FormulaDef f)
+    {
+        var props = pack.Properties ?? new List<PropertyDef>();
+        foreach (var b in f?.Bindings ?? new List<VariableBinding>())
+            if (b is { Kind: BindingKind.Piece } && !PropertyFacts.IsPublic(pack, b.Property == null ? null : props.FirstOrDefault(p => p != null && p.Id == b.Property)))
+                yield return b.Variable;
+    }
+
+    /// <summary>
     /// True when the formula reads a computed property built from hidden data: through a binding or variable (<see cref="ComputedHiddenVariables"/>)
     /// or through holder(H, P) of one anywhere in its expressions. Such a formula's working may show that data to any viewer who does not
     /// hold every side.

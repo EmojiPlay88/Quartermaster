@@ -60,6 +60,7 @@ public static class FormulaLayout
             }
             case BindingKind.Table: return pack.ById<TableDef>(b.TableId ?? "")?.Name ?? b.TableId ?? b.Variable;
             case BindingKind.Location: return "location";
+            case BindingKind.Piece: return $"{PropName(b, pack)} (piece)";
             case BindingKind.Input:
                 return b.Min is { } lo && b.Max is { } hi
                     ? $"{b.Variable} {Value.FormatNumber(lo)}–{Value.FormatNumber(hi)}"

@@ -667,6 +667,18 @@ public static class RulesValidator
                     CheckExpr(b.ColExpr!, "column expression", v, err);
                 break;
             }
+            case BindingKind.Piece:
+            {
+                if (string.IsNullOrWhiteSpace(b.Property)) err($"{v} has no property chosen");
+                else if (pack.ById<PropertyDef>(b.Property!) is not { } pp) err($"{v} reads unknown property \"{b.Property}\"");
+                else if (pp.Scope == PropertyScope.Holders) err($"{v} reads holder property \"{pp.Name}\"");
+                if (!string.IsNullOrWhiteSpace(b.PieceFilter))
+                {
+                    try { Parser.Parse(b.PieceFilter!); }
+                    catch (ParseError e) { err($"{v} \"which pieces\" filter does not parse: {e.Message}"); }
+                }
+                break;
+            }
             case BindingKind.Input:
                 if (b.Min is { } lo && b.Max is { } hi && lo > hi)
                     err($"{v} has a minimum ({lo}) above its maximum ({hi})");
