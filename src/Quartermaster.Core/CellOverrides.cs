@@ -35,6 +35,8 @@ internal static class CellOverrides
         foreach (var p in props)
         {
             double? v;
+            if (PropertyFacts.IsComputed(p) && PropertyValues.Computing(key, p.Id))
+                return (printed, null, printed);   // the override read directly (printed + n): its own expression reads the cell
             if (PropertyFacts.IsComputed(p))
             {
                 _resolving ??= new();

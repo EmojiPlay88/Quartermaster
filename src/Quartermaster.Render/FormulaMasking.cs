@@ -142,7 +142,9 @@ public static class FormulaMasking
         // and so does any aggregate once the viewer's view may lack pieces or values (a map it cannot see, a Hideable or Obscurable trait).
         if (FormulaVariables.AggregateReadsHidden(pack, f, PieceAccess.PiecesMayHide(pack, model, sides))) hidden.Add(AggregateCallInput);
         // lookup() of a table a non-Public property overrides reads the run piece's value, as a Table binding does.
-        if (FormulaVariables.TablesRead(f).Any(t => FormulaVariables.LookupHidden(pack, t)) && RunPieceHidden()) hidden.Add(TableCallInput);
+        // Cheapest first: a pack with no hidden override (most packs) never parses the formula's expressions for lookup() calls.
+        if (Quartermaster.Rules.Tables.CellOverrideFacts.AnyHidden(pack) && RunPieceHidden()
+            && FormulaVariables.TablesRead(f).Any(t => FormulaVariables.LookupHidden(pack, t))) hidden.Add(TableCallInput);
         // A computed property built from hidden data shows that data wherever it is read: through a binding of any kind (the viewer's own
         // unit and the global holder included) or a variable, which is hidden itself, and through holder(H, P), which hides like a hidden holder.
         hidden.UnionWith(FormulaVariables.ComputedHiddenVariables(pack, f));

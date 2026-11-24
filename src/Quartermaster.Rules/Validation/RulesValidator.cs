@@ -255,6 +255,13 @@ public static class RulesValidator
                 if (pack.PropertyByName(v) is { } read && !PropertyFacts.IsPublic(pack, read))
                     Add(issues, RulesIssueSeverity.Error, s.Id, s.Name,
                         $"Side \"{s.Name}\": unit filter may not read Private property \"{read.Name}\" while the pack has Private computed properties (players' views could not tell whose pieces they hide)");
+        // A lookup of a table a non-Public property overrides reads that property's value on the piece, which a player's view hides
+        // inside a unit filter (the side is not known yet), so the filter could not place the piece.
+        if (!string.IsNullOrWhiteSpace(s.UnitFilter) && ParseProblem(s.UnitFilter!) == null)
+            foreach (var t in ExprFacts.LookupTables(Parser.Parse(s.UnitFilter!)).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+                if (pack.TableByName(t) is { } table && CellOverrideFacts.HiddenOverride(pack, table.Id))
+                    Add(issues, RulesIssueSeverity.Error, s.Id, s.Name,
+                        $"Side \"{s.Name}\": unit filter may not look up table \"{table.Name}\", which a Private property overrides");
         // Ownership evaluates side filters without the module's grid, so there is no hex to read.
         foreach (var fn in PieceBoundAggregatesIn(s.UnitFilter))
             Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": {fn}() is not available in a side's unit filter");

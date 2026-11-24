@@ -230,6 +230,37 @@ public class CellOverrideRunTests
     }
 
     [Fact]
+    public void Computed_override_read_directly_is_printed_plus_n()
+    {
+        var plus = new PropertyDef { Id = "pl", Name = "Plus", Scope = PropertyScope.Pieces, Expr = "lookup(Units, name(), \"Speed\") + 2", OverridesTable = "tu", OverridesColumn = "Speed" };
+        var pack = Pack(plus);
+        pack.Properties.RemoveAt(0);
+        pack.Formulas.Add(F("f-unit", "P", new VariableBinding { Variable = "P", Kind = BindingKind.Unit, Property = "pl" }));
+        var s = State();
+        Assert.Equal(5, PropertyValues.Get(s, pack, RunnerFx.Model, LedgerKey.Piece("u1"), plus));   // printed 3 + 2, not a cycle
+        Assert.Equal(7, PropertyValues.Get(s, pack, RunnerFx.Model, LedgerKey.Piece("u2"), plus));
+        Assert.True(PieceFilter.Matches("Plus == 5", s.Pieces["u1"], s, RunnerFx.Model, pack));
+        Assert.True(PieceFilter.EvaluateGameLevel("sum(Plus, \"\") == 17", s, pack, RunnerFx.Model));   // 5 + 7 + 5
+        Assert.Equal(5, Result(pack, s, "f-unit", "u1"));
+    }
+
+    [Fact]
+    public void Computed_override_error_clears_guard()
+    {
+        var bad = new PropertyDef { Id = "bd", Name = "Bad", Scope = PropertyScope.Pieces, Expr = "lookup(Units, name(), \"Speed\") + nosuch", OverridesTable = "tu", OverridesColumn = "Speed" };
+        var plus = new PropertyDef { Id = "pl", Name = "Plus", Scope = PropertyScope.Pieces, Expr = "lookup(Units, name(), \"Load\") + 2", OverridesTable = "tu", OverridesColumn = "Load" };
+        var pack = Pack(bad, plus);
+        pack.Properties.RemoveAt(0);
+        var s = State();
+        Assert.ThrowsAny<EvalError>(() => PropertyValues.Get(s, pack, RunnerFx.Model, LedgerKey.Piece("u1"), bad));
+        Assert.ThrowsAny<EvalError>(() => PropertyValues.Get(s, pack, RunnerFx.Model, LedgerKey.Piece("u1"), bad));   // same error again, not a stale guard
+        Assert.Equal(6, PropertyValues.Get(s, pack, RunnerFx.Model, LedgerKey.Piece("u1"), plus));   // printed Load 4 + 2
+        Assert.Equal(6, Result(pack, s, "f-load", "u1"));
+        var ok = pack with { Properties = pack.Properties.Select(p => p.Id == "bd" ? p with { Expr = "lookup(Units, name(), \"Speed\") + 1" } : p).ToList() };
+        Assert.Equal(4, PropertyValues.Get(s, ok, RunnerFx.Model, LedgerKey.Piece("u1"), ok.Properties.First(p => p.Id == "bd")));
+    }
+
+    [Fact]
     public void Computed_override_reads_other_overrides()
     {
         var load = new PropertyDef { Id = "ld", Name = "Big Load", Scope = PropertyScope.Pieces, Expr = "10", OverridesTable = "tu", OverridesColumn = "Load" };

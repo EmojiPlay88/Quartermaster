@@ -42,6 +42,42 @@ public class CellOverrideTests
     }
 
     [Fact]
+    public void Pack_without_overrides_saves_byte_equal()
+    {
+        var pack = Pack(P("Speed"), P("Morale", vis: Visibility.Private)) with
+        {
+            Format = RulesPackIo.CurrentFormat, Id = "keep-bytes", Name = "Riverland",
+            Formulas = new()
+            {
+                new FormulaDef
+                {
+                    Id = "f1", Name = "Move", Text = "S + M",
+                    Bindings =
+                    {
+                        new VariableBinding { Variable = "S", Kind = BindingKind.Table, TableId = "t2", RowExpr = "name()", ColExpr = "\"Speed\"" },
+                        new VariableBinding { Variable = "M", Kind = BindingKind.Unit, Property = "idMorale" },
+                    },
+                },
+            },
+        };
+        var dir = Path.Combine(Path.GetTempPath(), "qm-keep-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var a = Path.Combine(dir, "a.qmrules");
+            var b = Path.Combine(dir, "b.qmrules");
+            RulesPackIo.Save(pack, a);
+            var bytes = File.ReadAllBytes(a);
+            RulesPackIo.Save(RulesPackIo.Load(a), b);
+            Assert.Equal(bytes, File.ReadAllBytes(b));
+            var text = File.ReadAllText(a);
+            foreach (var key in new[] { "\"expr\"", "\"pieceFilter\"", "\"overridesTable\"", "\"overridesColumn\"" })
+                Assert.DoesNotContain(key, text, StringComparison.OrdinalIgnoreCase);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
     public void Validator_missing_table()
     {
         var pack = Pack(P("Spd", "gone", "Speed"));
@@ -164,5 +200,38 @@ public class CellOverrideTests
         var pack = Pack(P("Fast", "t2", "Speed", vis: Visibility.Private), P("Load"), P("Cheap", "t1"));
         Assert.True(FormulaVariables.AggregateCallHidden(pack, "sum", "Load", "lookup(Units, name(), \"Speed\") > 3", false));
         Assert.False(FormulaVariables.AggregateCallHidden(pack, "sum", "Load", "lookup(Costs, name()) > 3", false));
+    }
+
+    [Fact]
+    public void Validator_side_filter_may_not_look_up_hidden_override()
+    {
+        var pack = Pack(P("Fast", "t2", "Speed", vis: Visibility.Private), P("Cheap", "t1")) with
+        {
+            Sides = new()
+            {
+                new SideDef { Id = "red", Name = "Red", UnitFilter = "lookup(Units, name(), \"Load  Cap\") > 3" },
+                new SideDef { Id = "blue", Name = "Blue", UnitFilter = "lookup(Costs, name()) > 3" },
+            },
+        };
+        var issues = Issues(pack);
+        Assert.Contains(issues, i => i.Severity == RulesIssueSeverity.Error && i.EntityId == "red"
+            && i.Message == "Side \"Red\": unit filter may not look up table \"Units\", which a Private property overrides");
+        Assert.DoesNotContain(issues, i => i.Message.Contains("may not look up table \"Costs\""));   // Cheap is Public
+    }
+
+    [Fact]
+    public void AnyHidden_is_pack_level_and_follows_edits()
+    {
+        Assert.False(CellOverrideFacts.AnyHidden(Pack(P("Plain"), P("Secret", vis: Visibility.Private))));   // no overrides at all
+        var pub = Pack(P("Fast", "t2", "Speed"), P("Cheap", "t1"));
+        Assert.False(CellOverrideFacts.AnyHidden(pub));
+        Assert.False(CellOverrideFacts.AnyHidden(pub));   // cached answer
+        var hid = pub with { Properties = new() { P("Fast", "t2", "Speed"), P("Cheap", "t1", vis: Visibility.Private) } };
+        Assert.True(CellOverrideFacts.AnyHidden(hid));
+        Assert.Equal(CellOverrideFacts.AnyHidden(hid), FormulaVariables.LookupHidden(hid, null));
+        Assert.False(CellOverrideFacts.AnyHidden(pub));
+        pub.Properties.Add(P("Secret", "t2", "Speed", vis: Visibility.Private));   // a list grown in place is noticed
+        Assert.True(CellOverrideFacts.AnyHidden(pub));
+        Assert.False(CellOverrideFacts.AnyHidden(new RulesPack()));
     }
 }

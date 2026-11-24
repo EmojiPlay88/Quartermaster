@@ -20,6 +20,7 @@ public static class CellOverrideFacts
         public readonly List<TableDef>? Tables;
         public readonly int TableCount;
         public readonly Dictionary<string, Entry> ByTable = new(StringComparer.Ordinal);
+        public int AnyHidden = -1;   // -1 not yet worked out, 0 false, 1 true
 
         public Index(RulesPack pack)
         {
@@ -81,5 +82,16 @@ public static class CellOverrideFacts
         if (tableId == null || !IndexOf(pack).ByTable.TryGetValue(tableId, out var e)) return false;
         if (e.Hidden < 0) e.Hidden = e.All.Any(p => !PropertyFacts.IsPublic(pack, p)) ? 1 : 0;
         return e.Hidden == 1;
+    }
+
+    /// <summary>
+    /// True when any table has a non-Public overriding property (<see cref="HiddenOverride"/> of some table), worked out once per pack index:
+    /// false for a pack without overrides at no cost beyond the index, so callers can skip parsing expressions for lookup() calls.
+    /// </summary>
+    public static bool AnyHidden(RulesPack pack)
+    {
+        var ix = IndexOf(pack);
+        if (ix.AnyHidden < 0) ix.AnyHidden = ix.ByTable.Keys.Any(id => HiddenOverride(pack, id)) ? 1 : 0;
+        return ix.AnyHidden == 1;
     }
 }

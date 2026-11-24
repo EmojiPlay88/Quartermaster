@@ -29,6 +29,9 @@ public static class PropertyValues
     /// <summary>True for the "{name} is computed from itself" error.</summary>
     internal static bool IsCycle(Exception ex) => ex.Data.Contains(CycleKey);
 
+    /// <summary>True while the computed property <paramref name="id"/> is being evaluated at <paramref name="key"/> on this thread.</summary>
+    internal static bool Computing(string key, string id) => _active?.Contains((key, id)) == true;
+
     /// <summary>Parsed expression per property record (records are replaced on edit, so this never goes stale).</summary>
     private static readonly ConditionalWeakTable<PropertyDef, ParsedExpr> ExprCache = new();
 
