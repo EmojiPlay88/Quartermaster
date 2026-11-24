@@ -66,6 +66,9 @@ public static class PlayerView
     /// <summary>Trait states <see cref="For"/> gives the nameless placeholder of a masked piece (mask trait, then the basic piece).</summary>
     private static readonly string[] PlaceholderStates = { "masked", "" };
 
+    /// <summary>Type string <see cref="For"/> gives the nameless placeholder of a masked piece: the mask trait over a nameless basic piece.</summary>
+    internal static string PlaceholderType(ObscurableDef mask) => PieceTypeParser.EncodeState(new[] { mask.RawType, "piece;;;;" });
+
     /// <summary>
     /// True for the nameless placeholder <see cref="For"/> leaves for another side's masked piece: its ledger values were all removed,
     /// so a missing value there is hidden, not unset. Only meaningful in a player view.
@@ -290,7 +293,7 @@ public static class PlayerView
             foreach (var (id, mask) in _masked)
             {
                 if (!v.Pieces.TryGetValue(id, out var p)) continue;
-                p.TypeString = PieceTypeParser.EncodeState(new[] { mask.RawType, "piece;;;;" });
+                p.TypeString = PlaceholderType(mask);
                 p.TraitStates = new(PlaceholderStates);
                 p.Trail = new();
                 p.TrailVisible = false;

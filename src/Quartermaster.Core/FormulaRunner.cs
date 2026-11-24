@@ -22,9 +22,11 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
 
 /// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
 /// roller. The online host uses it so every die of a guest's run is pinned per dice configuration.</param>
+/// <param name="PickSides">The sides whose view a Piece binding's typed label is resolved in (<see cref="PieceChoices"/>): the requesting
+/// guest's sides on the host; null = every piece (solo, the host's own full-state runs, a run on a player view state).</param>
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
     IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false,
-    Func<string, int, int, IReadOnlyList<int>>? Dice = null);
+    Func<string, int, int, IReadOnlyList<int>>? Dice = null, IReadOnlySet<string>? PickSides = null);
 
 /// <summary>Binds a formula's variables to game data, evaluates it and previews/produces the ledger commands. Run never throws.</summary>
 public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, int, IReadOnlyList<int>> roller)
@@ -311,7 +313,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             try
             {
                 var b = formula.Bindings.FirstOrDefault(x => x.Variable == name);
-                var auto = b is { Kind: not BindingKind.Input };
+                var auto = b is { Kind: not (BindingKind.Input or BindingKind.Piece) };
                 try
                 {
                     var use = b == null || string.IsNullOrWhiteSpace(b.When) ? true : Condition(Parser.Parse(b.When));
@@ -332,7 +334,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
 
         private static bool Numeric(VariableBinding b) =>
-            b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Roll or BindingKind.Moved
+            b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Roll or BindingKind.Moved or BindingKind.Piece
             || (b.Kind == BindingKind.Input && (b.Choices is { Count: > 0 } ? b.Choices.All(c => TryNum(c, out _)) : b.Min != null || b.Max != null));
 
         private static bool TryNum(string s, out double d) =>
@@ -341,7 +343,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private VariableState Bind(VariableBinding b)
         {
             var name = b.Variable;
-            var auto = b.Kind != BindingKind.Input;
+            var auto = b.Kind is not (BindingKind.Input or BindingKind.Piece);
             if (r.Overrides.TryGetValue(name, out var ov) && ov != null)
             {
                 if (b.Kind == BindingKind.Roll) return TypedRoll(b, ov);
@@ -401,6 +403,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 case BindingKind.Moved:
                     if (r.Moved is not { } m || !double.IsFinite(m)) throw new Missing("Only known when a unit is moved");
                     return new(name, Value.Of(m), true, false, null, "distance moved");
+                case BindingKind.Piece:
+                    return PickedPiece(b);
                 default:
                     return Input(b);
             }
@@ -452,6 +456,29 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             try { return PropertyValues.GetOrDefault(s, owner._pack, owner._model, key, prop, PropertyFacts.IsComputed(prop) ? Filters : null); }
             catch (EvalError ex) when (ex.MissingValue || ex.HiddenData) { throw new Missing(ex.Message); }
+        }
+
+        /// <summary>
+        /// A Piece binding: the typed label (trimmed, case-insensitive) resolved among the candidates of <see cref="RunRequest.PickSides"/>
+        /// (<see cref="PieceChoices"/>), then that piece's property as a Unit binding reads it. Never filled automatically. On a player view
+        /// state the placeholder of a masked piece, and a non-Public value of a side the view was not made for, are hidden (missing), not Default.
+        /// </summary>
+        private VariableState PickedPiece(VariableBinding b)
+        {
+            var name = b.Variable;
+            var prop = Prop(b);
+            var list = PieceChoices.Named(s, owner._pack, owner._model, b, r.PickSides);
+            if (list.Count == 0)
+                throw new Missing(string.IsNullOrWhiteSpace(b.PieceFilter) ? PieceChoices.NoPiece : $"No piece matches \"{b.PieceFilter.Trim()}\"");
+            if (!r.Typed.TryGetValue(name, out var raw) || string.IsNullOrWhiteSpace(raw)) throw new Missing("Waiting for input");
+            var typed = raw.Trim();
+            var hit = list.FirstOrDefault(c => string.Equals(c.Label, typed, StringComparison.OrdinalIgnoreCase));
+            if (hit.PieceId == null || !s.Pieces.TryGetValue(hit.PieceId, out var picked) || picked == null) throw new Missing(PieceChoices.Unknown);
+            if (s.IsPlayerView && (PlayerView.IsPlaceholder(picked)
+                    || (!PropertyFacts.IsPublic(owner._pack, prop) && Sides.Value(picked) is { } side && s.ViewSides?.Contains(side) != true)))
+                throw new Missing("Hidden from this player");
+            return new(name, Value.Of(Read(LedgerKey.Piece(picked.Id), prop)), false, false, null,
+                $"{prop.Name} of {(hit.Name.Length > 0 ? hit.Name : hit.Label)}");
         }
 
         private PropertyDef Prop(VariableBinding b) =>
