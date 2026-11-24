@@ -104,6 +104,12 @@ public static class FormulaVariables
     public static List<(string? Holder, string? Property)> HolderReads(FormulaDef f) => Collect(f, ExprFacts.HolderReads);
 
     /// <summary>
+    /// The tables read by lookup(Table, ...) in any expression of the formula (see <see cref="ExprFacts.LookupTables"/>), each once, in the
+    /// order of <see cref="HolderReads(FormulaDef)"/>; null for a call whose table is not a bare name. A Table binding's own table is not listed.
+    /// </summary>
+    public static List<string?> TablesRead(FormulaDef f) => Collect(f, ExprFacts.LookupTables).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>
     /// Every piece aggregate call (see <see cref="ExprFacts.AggregateReads"/>) as (function, property, filter), from the same expressions as
     /// <see cref="HolderReads(FormulaDef)"/>. Expressions that do not parse are skipped (they never run).
     /// </summary>
@@ -183,7 +189,8 @@ public static class FormulaVariables
     /// True when one aggregate call may read data a viewer who does not hold every side cannot see (aggregates read every piece, hidden or not):
     /// any aggregate when <paramref name="piecesMayHide"/> (the viewer's view may lack pieces or their values: a map owned by a side it does not
     /// hold, a Hideable or Obscurable trait), any count (countof, hexcount), an aggregate over a property that is not Public (or unknown), or
-    /// one whose filter reads a property that is not Public, calls holder() or another aggregate, or does not parse. Otherwise (a Public
+    /// one whose filter reads a property that is not Public, calls holder() or another aggregate, looks up a table a non-Public property
+    /// overrides (<see cref="LookupHidden"/>), or does not parse. Otherwise (a Public
     /// property, with no filter, "", or a filter over Public properties and piece facts) it is not hidden.
     /// </summary>
     public static bool AggregateCallHidden(RulesPack pack, string function, string? property, string? filter, bool piecesMayHide)
@@ -195,6 +202,17 @@ public static class FormulaVariables
         try { e = Parser.Parse(filter); }
         catch (ParseError) { return true; }   // fail closed
         return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
-            || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p));
+            || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p))
+            || ExprFacts.LookupTables(e).Any(t => LookupHidden(pack, t));
+    }
+
+    /// <summary>
+    /// True when lookup() of the named table may read a non-Public property's value instead of a printed cell
+    /// (<see cref="Tables.CellOverrideFacts.HiddenOverride"/>). A call whose table is not a bare name (null) fails closed when any table has one.
+    /// </summary>
+    public static bool LookupHidden(RulesPack pack, string? tableName)
+    {
+        if (tableName == null) return (pack.Tables ?? new List<TableDef>()).Any(t => t != null && Tables.CellOverrideFacts.HiddenOverride(pack, t.Id));
+        return pack.TableByName(tableName) is { } t2 && Tables.CellOverrideFacts.HiddenOverride(pack, t2.Id);
     }
 }

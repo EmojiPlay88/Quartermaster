@@ -199,6 +199,15 @@ public static class PieceFilter
     internal static Value LookupTable(RulesPack pack, string tableName, Value row, Value? col) =>
         TableLookup.Lookup(TableNamed(pack, tableName), row, col);
 
+    /// <summary>lookup() while a piece is evaluated: the located cell, or the piece's own override of it (<see cref="CellOverrides.Read"/>).</summary>
+    internal static Value LookupTable(RulesPack pack, string tableName, Value row, Value? col, PieceInstance? piece, GameState s,
+        ModuleModel? model, AggregateFilters? filters = null, Lazy<Func<PieceInstance, string?>>? sides = null)
+    {
+        var t = TableNamed(pack, tableName);
+        var (r, c) = TableLookup.Locate(t, row, col);
+        return CellOverrides.Read(t, r, c, piece, s, pack, model, filters, sides).Value;
+    }
+
     /// <summary>lookuprange(): the column key of the first cell of the row that holds the value (<see cref="TableLookup.RangeColumn"/>).</summary>
     internal static Value LookupRangeTable(RulesPack pack, string tableName, Value row, Value value) =>
         TableLookup.RangeColumn(TableNamed(pack, tableName), row, value);
@@ -263,7 +272,7 @@ public static class PieceFilter
             finally { _checking.Remove(def.Id); }
         }
 
-        public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
+        public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col, p, s, filters.Model, filters, sides);
         public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
         public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
         public bool Has(string property) =>

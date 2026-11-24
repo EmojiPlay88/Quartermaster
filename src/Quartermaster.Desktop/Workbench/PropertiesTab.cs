@@ -23,6 +23,10 @@ public sealed class PropertiesTab : UserControl
     internal const string ComputedIgnoredTip = "Ignored: the property is computed from its Expression.";
     /// <summary>Column index of Expression (after Notes, so the older columns keep their places).</summary>
     internal const int ExpressionColumn = 7;
+    /// <summary>Column index of "Overrides table" and its "Column" (after Expression).</summary>
+    internal const int OverridesTableColumn = 8, OverridesColumnColumn = 9;
+    const string OverridesTableTip = "A table this property overrides: a formula, filter or warning reading that table at the row named like the piece reads the piece's own value instead of the printed cell. Blank = none.";
+    const string OverridesColumnTip = "The column of the table it overrides. A one-dimension table has no column.";
 
     readonly ModuleSession _s;
     readonly IDialogs _dialogs;
@@ -49,11 +53,15 @@ public sealed class PropertiesTab : UserControl
             new EditColumn("Outliner", EditColumnKind.Combo, Weight: 60, Items: Enum.GetNames<OutlinerAggregate>()),
             new EditColumn("Notes", Weight: 160),
             new EditColumn("Expression", Weight: 120),
+            new EditColumn("Overrides table", EditColumnKind.Combo, Weight: 90),
+            new EditColumn("Column", EditColumnKind.Combo, Weight: 70),
         ]);
         _holders.SetColumns([new EditColumn("Name", Weight: 80), new EditColumn("Notes", Weight: 200)]);
         _props.SetHeaderToolTip(3, SheetTip);
         _props.SetHeaderToolTip(5, OutlinerTip);
         _props.SetHeaderToolTip(ExpressionColumn, ExpressionTip);
+        _props.SetHeaderToolTip(OverridesTableColumn, OverridesTableTip);
+        _props.SetHeaderToolTip(OverridesColumnColumn, OverridesColumnTip);
 
         var propsBox = Box("Properties", _props, Bar(_bAddProp, _bDelProp));
         var holdersBox = Box("Holders (the built-in \"global\" holder always exists)", _holders, Bar(_bAddHolder, _bDelHolder));
@@ -197,7 +205,11 @@ public sealed class PropertiesTab : UserControl
         {
             p.Name, p.Scope.ToString(), p.Default.ToString("R", CultureInfo.InvariantCulture), p.SheetField ?? "", p.AppliesTo ?? "", p.Outliner.ToString(), p.Notes ?? "",
             p.Expr ?? "",
+            string.IsNullOrWhiteSpace(p.OverridesTable) ? "" : pack!.ById<TableDef>(p.OverridesTable!)?.Name ?? p.OverridesTable!,   // a deleted table shows its id
+            p.OverridesColumn ?? "",
         }).ToList());
+        var tableNames = new List<string> { "" };
+        tableNames.AddRange((pack?.Tables ?? new List<TableDef>()).Select(t => t.Name));
         for (var i = 0; i < props.Count; i++)
         {
             _propIds.Add(props[i].Id);
@@ -207,6 +219,9 @@ public sealed class PropertiesTab : UserControl
             _props.SetCellToolTip(i, ExpressionColumn, ExpressionTip);
             _props.SetCellError(i, ExpressionColumn, FormulaEdit.SyntaxProblem(props[i].Expr));
             ShowComputed(i, PropertyFacts.IsComputed(props[i]));
+            _props.SetCellItems(i, OverridesTableColumn, tableNames);
+            _props.SetCellToolTip(i, OverridesTableColumn, OverridesTableTip);
+            ShowOverrideColumn(i, pack!, props[i]);
         }
         ApplySheetItems();
         var rows = new List<IReadOnlyList<string>> { new[] { HolderDef.GlobalId, "Built in; always exists." } };
@@ -226,6 +241,18 @@ public sealed class PropertiesTab : UserControl
         _props.SetCellReadOnly(row, 3, computed);
         _props.SetCellToolTip(row, 2, computed ? ComputedIgnoredTip : null);
         _props.SetCellToolTip(row, 3, computed ? ComputedIgnoredTip : SheetTip);
+    }
+
+    /// <summary>The Column picker lists the overridden table's columns; it is closed when there is no table or a one-dimension one.</summary>
+    void ShowOverrideColumn(int row, RulesPack pack, PropertyDef p)
+    {
+        var t = string.IsNullOrWhiteSpace(p.OverridesTable) ? null : pack.ById<TableDef>(p.OverridesTable!);
+        var twoD = t is { Kind: TableKind.TwoD };
+        var items = new List<string> { "" };
+        if (twoD) items.AddRange(t!.ColumnKeys);
+        _props.SetCellItems(row, OverridesColumnColumn, items);
+        _props.SetCellReadOnly(row, OverridesColumnColumn, !twoD && string.IsNullOrEmpty(p.OverridesColumn));   // a stale column can still be cleared
+        _props.SetCellToolTip(row, OverridesColumnColumn, OverridesColumnTip);
     }
 
     IReadOnlyList<string> SafeFields()
@@ -301,6 +328,26 @@ public sealed class PropertiesTab : UserControl
                 if (exprProblem != null) _status.Text = "Expression: " + exprProblem;
                 _props.SetCellError(row, ExpressionColumn, exprProblem);
                 ShowComputed(row, expr != null);
+                break;
+            case OverridesTableColumn:
+            {
+                var name = text.Trim();
+                var t = name.Length == 0 ? null : pack.Tables.FirstOrDefault(x => x.Name == name);
+                if (name.Length > 0 && t == null) return;   // the shown id of a deleted table, picked again: nothing to change
+                Commit(p => Edit(p, id, x => x with
+                {
+                    OverridesTable = t?.Id,
+                    // Keep the column only when the new table has it (two dimensions); a one-dimension table has none.
+                    OverridesColumn = t is { Kind: TableKind.TwoD } && x.OverridesColumn is { } c
+                        && t.ColumnKeys.Any(k => Rules.Tables.TableLookup.Normalise(k) == Rules.Tables.TableLookup.Normalise(c)) ? c : null,
+                }));
+                Rebuild();   // the Column picker follows the table
+                _props.SelectCell(row, col);
+                break;
+            }
+            case OverridesColumnColumn:
+                Commit(p => Edit(p, id, x => x with { OverridesColumn = text.Trim().Length == 0 ? null : text.Trim() }));
+                if (_s.Rules is { } after && after.Properties.FirstOrDefault(x => x.Id == id) is { } edited) ShowOverrideColumn(row, after, edited);
                 break;
         }
     }

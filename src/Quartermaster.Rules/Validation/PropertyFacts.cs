@@ -11,7 +11,8 @@ public static class PropertyFacts
 
     /// <summary>
     /// True when the computed property's expression reads something a player who does not hold every side may not see: a property that is not
-    /// <see cref="IsPublic"/> (directly or through another computed one), holder(), or any piece aggregate. An expression that does not parse
+    /// <see cref="IsPublic"/> (directly or through another computed one), holder(), any piece aggregate, or lookup() of a table that a property
+    /// which is not Public overrides (<see cref="Tables.CellOverrideFacts"/>). An expression that does not parse
     /// reads hidden, and so does a cycle (fail closed).
     /// </summary>
     public static bool ReadsHidden(RulesPack pack, PropertyDef p) => ReadsHidden(pack, p, new HashSet<string>(StringComparer.Ordinal));
@@ -27,6 +28,12 @@ public static class PropertyFacts
             if (ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0) return true;
             foreach (var v in Parser.Variables(e))
                 if (pack.PropertyByName(v) is { } q && !IsPublic(pack, q, path)) return true;
+            // lookup() of a table some property overrides reads that property on the piece it is read for. An overrider already being decided
+            // (on the path: a computed override reading its own cell reads the printed cell) adds nothing beyond what that decision finds.
+            foreach (var t in ExprFacts.LookupTables(e))
+                if (t != null && pack.TableByName(t) is { } table
+                    && Tables.CellOverrideFacts.Overriders(pack, table.Id).Any(q => !path.Contains(q.Id) && !IsPublic(pack, q, path)))
+                    return true;
             return false;
         }
         finally { path.Remove(p.Id); }

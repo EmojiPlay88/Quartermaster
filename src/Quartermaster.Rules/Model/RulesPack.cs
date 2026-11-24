@@ -39,6 +39,12 @@ public sealed record PropertyDef
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Expr { get; init; }
+    /// <summary>Id of a table whose cell this property replaces for the piece that holds it. Omitted from the pack JSON when null or empty.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OverridesTable { get; init; }
+    /// <summary>Column key of <see cref="OverridesTable"/> (null for a 1-D table). Omitted from the pack JSON when null or empty.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OverridesColumn { get; init; }
     /// <summary>How the outliner aggregates this property per group.</summary>
     public OutlinerAggregate Outliner { get; init; } = OutlinerAggregate.None;
     /// <summary>New properties are Private; packs of format 1-3 load with every property Public.</summary>

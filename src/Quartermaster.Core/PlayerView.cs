@@ -22,6 +22,9 @@ namespace Quartermaster.Core;
 /// about a deleted piece (no held side stamp) are redacted or dropped. Ledger/formula/calc lines are linked to their ledger entry (same
 /// order, same text) and become "{Side} ledger changed" when the value is hidden or the owner is not held or unknown (a manual line
 /// showing a visible value needs no owner).</item>
+/// <item>A table read that a non-Public property overrides (<c>CellOverrideFacts.HiddenOverride</c>) shows that property's value only for the
+/// piece the formula runs on, so it is hidden exactly as a Private Unit input is: a run on a piece of a side not held is owned by that side
+/// (its PieceId), so its lines are redacted and its entries lose their working; a run on the viewer's own piece shows its own value.</item>
 /// <item>Dice of a formula with PrivateRolls follow the line's owner; hidden rolls lose their results and read "{Side} rolled dice".</item>
 /// <item>Pending runs lose units of other sides (and removed pieces); runs left empty are dropped. Unit-less runs follow the current phase's side.</item>
 /// <item>If filtering fails, the view is emptied (fail closed) and its log holds one System line, <see cref="FilterErrorText"/>.</item>

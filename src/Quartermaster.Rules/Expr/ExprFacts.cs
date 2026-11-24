@@ -37,6 +37,30 @@ public static class ExprFacts
         }
     }
 
+    /// <summary>
+    /// The table named by every lookup(Table, ...) call in the expression, in text order (<c>lookuprange</c> is not one: it searches a row's
+    /// values, never a piece's own cell). A call whose first argument is not a bare name gives null.
+    /// </summary>
+    public static List<string?> LookupTables(AstExpr e)
+    {
+        var found = new List<string?>();
+        Walk(e);
+        return found;
+
+        void Walk(AstExpr x)
+        {
+            switch (x)
+            {
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (c.Function == "lookup") found.Add(c.Args.Count > 0 && c.Args[0] is VarRef t ? t.Name : null);
+                    foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
+    }
+
     private static readonly HashSet<string> WholeGameAggregates = new() { "sum", "countof", "maxof", "minof" };
     private static readonly HashSet<string> HexAggregates = new() { "hexsum", "hexcount", "hexmax", "hexmin" };
     private static readonly HashSet<string> AttachedAggregates = new() { "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
