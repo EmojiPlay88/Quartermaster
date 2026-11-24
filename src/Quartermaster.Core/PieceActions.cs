@@ -92,7 +92,7 @@ public static class PieceActions
                     var count = TypeOf(src.TypeString).Traits.Count;
                     var states = Enumerable.Range(0, count).Select(k => k < src.TraitStates.Count ? src.TraitStates[k] : "").ToList();
                     var state = states.All(x => x.Length == 0) ? "" : PieceTypeParser.EncodeState(states);
-                    return new GameCommand[] { new AddPiece(newId(), src.TypeString, state, src.MapId, src.Pos, src.StackId) };
+                    return new GameCommand[] { new AddPiece(newId(), src.TypeString, state, src.MapId, src.Pos, src.StackId, CloneOf: id) };
                 }));
                 break;
 

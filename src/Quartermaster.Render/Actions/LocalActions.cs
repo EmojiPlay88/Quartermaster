@@ -19,7 +19,12 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
 
     private string BlockedText => s.IsReplaying ? ModuleSession.ReplayingText : ModuleSession.ViewerCopyText;
 
-    private void Exec(GameSession g, GameCommand cmd) => g.Execute(_prepare(cmd, g.State));
+    private void Exec(GameSession g, GameCommand cmd)
+    {
+        var prepared = _prepare(cmd, g.State);
+        g.Execute(prepared);
+        if (prepared is AddPiece add) s.SeedAfterAdd(add);   // inside the caller's action: a clone's copied values undo with it
+    }
 
     public void Move(IReadOnlyList<MovePieces> moves)
     {
@@ -32,8 +37,9 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
     public void PieceCommand(GameCommand command)
     {
         if (Blocked || s.Game is not { } g || command == null) return;
+        // An add and its seeds (a clone's copied values) are one undoable action; anything else keeps its own (a folding command none).
+        using var scope = command is AddPiece ? g.BeginAction() : null;
         Exec(g, command);
-        if (command is AddPiece) s.SeedLedgers();
     }
 
     public void PieceCommands(IReadOnlyList<GameCommand> commands)

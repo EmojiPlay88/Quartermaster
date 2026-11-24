@@ -471,6 +471,29 @@ public sealed class ModuleSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Seeds after a piece was added: when <paramref name="added"/> is a clone (<see cref="AddPiece.CloneOf"/>) of a piece that still exists,
+    /// first a SeedLedger copying the source's stored values (<see cref="LedgerSeeder.BuildCloneSeeds"/>), then <see cref="SeedLedgers"/>.
+    /// Same guards as <see cref="SeedLedgers"/>. Callers run it inside the add's action scope: the clone seed is not folding. Never throws.
+    /// </summary>
+    public void SeedAfterAdd(AddPiece added)
+    {
+        if (Game == null || Rules == null || IsGuest || IsViewerCopy || IsReplaying || added == null) return;
+        if (added.CloneOf is { } source && added.PieceId != null && Game.State.Pieces.ContainsKey(source))
+        {
+            try
+            {
+                var copy = LedgerSeeder.BuildCloneSeeds(Game.State, Rules, Model, added.PieceId, source, Log);
+                if (copy != null) Game.Execute(copy);
+            }
+            catch (Exception ex)
+            {
+                Log.Add(DiagnosticSeverity.Warning, "rules", $"Could not copy the clone's values: {ex.Message}");
+            }
+        }
+        SeedLedgers();
+    }
+
     /// <summary>Starts a game from a freshly built state. The builders log one "placed" row per piece; replace those with a single summary entry.</summary>
     private void Replace(GameState state, string summary)
     {
