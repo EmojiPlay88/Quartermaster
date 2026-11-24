@@ -34,7 +34,8 @@ public class EvaluatorRegistryTests
         "sum" or "maxof" or "minof" => new AstExpr[] { new VarRef("P", 0, 1), new TextLit("f", 0, 1) },
         "countof" => new AstExpr[] { new TextLit("f", 0, 1) },
         "hexsum" or "hexmax" or "hexmin" => new AstExpr[] { new VarRef("P", 0, 1) },
-        "hexcount" => Array.Empty<AstExpr>(),
+        "hexcount" or "attachedcount" => Array.Empty<AstExpr>(),
+        "attachedsum" or "attachedmax" or "attachedmin" => new AstExpr[] { new VarRef("P", 0, 1) },
         "dice" => new[] { Num(1), Num(6) },
         "has" => new AstExpr[] { new VarRef("p", 0, 1) },
         "startswith" or "contains" => new AstExpr[] { new TextLit("a", 0, 1), new TextLit("a", 0, 1) },
@@ -48,7 +49,7 @@ public class EvaluatorRegistryTests
     [Fact]
     public void Read_functions_are_listed()
     {
-        foreach (var n in new[] { "side", "phaseside", "map", "holder", "lookuprange", "count", "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin" })
+        foreach (var n in new[] { "side", "phaseside", "map", "holder", "lookuprange", "count", "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" })
             Assert.Contains(n, Evaluator.FunctionNames);
     }
 

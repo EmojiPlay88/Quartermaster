@@ -41,6 +41,10 @@ public static class Parser
         ["hexcount"] = (0, 1),
         ["hexmax"] = (1, 2),
         ["hexmin"] = (1, 2),
+        ["attachedsum"] = (1, 2),
+        ["attachedcount"] = (0, 1),
+        ["attachedmax"] = (1, 2),
+        ["attachedmin"] = (1, 2),
     };
 
     public static Expr Parse(string text)
@@ -286,7 +290,7 @@ public static class Parser
                 throw new ParseError(args[0].Start, "count needs a roll name");
             if (ExprFacts.IsAggregate(lower))
             {
-                bool hasProperty = lower is not ("countof" or "hexcount");
+                bool hasProperty = lower is not ("countof" or "hexcount" or "attachedcount");
                 if (hasProperty && args[0] is not VarRef) throw new ParseError(args[0].Start, $"{lower} needs a property name");
                 for (int i = hasProperty ? 1 : 0; i < args.Count; i++)
                     if (args[i] is not TextLit) throw new ParseError(args[i].Start, $"{lower} needs a text filter");

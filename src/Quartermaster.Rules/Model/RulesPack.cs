@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Quartermaster.Rules;
 
 public enum PropertyScope { Pieces, Holders, Both }
@@ -31,6 +33,12 @@ public sealed record PropertyDef
     /// <summary>Optional boolean expression limiting which pieces get the property.</summary>
     public string? AppliesTo { get; init; }
     public string? Notes { get; init; }
+    /// <summary>
+    /// When set, the property is computed: its value is this expression, evaluated on read (never stored), and its Default and SheetField are ignored.
+    /// Omitted from the pack JSON when null or empty.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Expr { get; init; }
     /// <summary>How the outliner aggregates this property per group.</summary>
     public OutlinerAggregate Outliner { get; init; } = OutlinerAggregate.None;
     /// <summary>New properties are Private; packs of format 1-3 load with every property Public.</summary>

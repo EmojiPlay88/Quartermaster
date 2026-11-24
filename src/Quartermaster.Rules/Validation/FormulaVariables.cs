@@ -126,12 +126,12 @@ public static class FormulaVariables
     public static bool AggregateCallHidden(RulesPack pack, string function, string? property, string? filter, bool piecesMayHide)
     {
         if (piecesMayHide || ExprFacts.IsCountAggregate(function)) return true;
-        if (property == null || pack.PropertyByName(property)?.Visibility != Visibility.Public) return true;
+        if (property == null || !PropertyFacts.IsPublic(pack, pack.PropertyByName(property))) return true;
         if (string.IsNullOrWhiteSpace(filter)) return false;   // "" matches every piece
         Quartermaster.Rules.Expr.Expr e;
         try { e = Parser.Parse(filter); }
         catch (ParseError) { return true; }   // fail closed
         return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
-            || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && p.Visibility != Visibility.Public);
+            || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p));
     }
 }
