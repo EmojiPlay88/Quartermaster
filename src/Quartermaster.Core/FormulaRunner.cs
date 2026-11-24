@@ -221,6 +221,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public RulesPack Pack => owner._pack;
         /// <summary>The side map, compiled once per run on the first side() call.</summary>
         public Lazy<Func<PieceInstance, string?>> Sides { get; } = PieceFilter.SideMap(s, owner._pack);
+        public ModuleModel Model => owner._model;
+        /// <summary>The compiled filters of this run's aggregate calls, each filter text compiled once per run.</summary>
+        public AggregateFilters Filters => _filters ??= new(s, owner._pack, owner._model);
+        private AggregateFilters? _filters;
         private readonly Dictionary<string, IReadOnlyList<int>> _byKey = byKey;
         private int _inlineDice;
         public IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey => _byKey;
@@ -267,7 +271,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var before = _noRolls;
             _noRolls = before || !rolls;
             try { return Evaluator.Evaluate(test, new RunContext(this)).Bool; }
-            catch (Exception ex) when (ex is Missing or Waits) { return null; }
+            catch (Exception ex) when (ex is Missing or Waits or EvalError { HiddenData: true }) { return null; }   // hidden in this view: undecided
             finally { _noRolls = before; }
         }
 
@@ -490,5 +494,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public Value PhaseSide() => PieceFilter.PhaseSideValue(run.Pack, Sequencer.Current(run.Pack, run.State));
         public Value MapName() => PieceFilter.MapValue(run.Piece);
         public Value HolderValue(string holder, string property) => PieceFilter.HolderRead(run.State, run.Pack, holder, property);
+        public Value Aggregate(string fn, string? property, string? filter) =>
+            PieceAggregates.Evaluate(fn, property, filter, run.Piece, run.Filters);
     }
 }

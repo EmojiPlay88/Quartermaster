@@ -29,6 +29,9 @@ public static class RulesValidator
                     else
                         foreach (var u in FilterRefProblems(p.AppliesTo!, pack))
                             Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": applies-to {u}");
+                    // Seeding evaluates applies-to without the module's grid, so there is no hex to read.
+                    foreach (var fn in HexAggregatesIn(p.AppliesTo))
+                        Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": {fn}() is not available in a property's applies-to");
                 }
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
             foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues));
@@ -72,6 +75,7 @@ public static class RulesValidator
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
                     else if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]) found.AddRange(HolderCallProblems(hn.Name, hp.Name, pack));
+                    else if (ExprFacts.IsAggregate(c.Function)) found.AddRange(AggregateProblems(c, pack));
                     else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
@@ -87,7 +91,53 @@ public static class RulesValidator
         else if (prop.Scope == PropertyScope.Pieces) yield return $"refers to \"{prop.Name}\", which is not a holder property";
     }
 
+    /// <summary>
+    /// Problems in a piece-sum call, as message tails: a property that does not exist, a filter that does not parse (the same parse the unit filters get),
+    /// a filter that names an unknown property or table. The filter is a separate expression run per piece, so its names are not the formula's variables.
+    /// </summary>
+    private static IEnumerable<string> AggregateProblems(Call c, RulesPack pack)
+    {
+        var (property, filter) = ExprFacts.AggregateArgs(c);
+        var prop = property is null ? null : pack.PropertyByName(property);
+        if (property is not null && prop is null) yield return $"{c.Function}() names unknown property \"{property}\"";
+        else if (prop is { Scope: PropertyScope.Holders }) yield return $"{c.Function}() needs a piece property, not \"{property}\"";
+        if (string.IsNullOrWhiteSpace(filter)) yield break;
+        if (ParseProblem(filter) is { } pe) yield return $"the filter of {c.Function}() does not parse: {pe}";
+        else foreach (var u in FilterRefProblems(filter, pack)) yield return $"the filter of {c.Function}() {u}";
+    }
+
     private static string UnknownPropertyTail(string name) => $"refers to unknown property \"{name}\"";
+
+    /// <summary>
+    /// The hex aggregates (hexsum() ...) an expression text calls, also inside the filters of its aggregate calls, distinct in text order. Empty when
+    /// the text does not parse (that is reported elsewhere).
+    /// </summary>
+    private static List<string> HexAggregatesIn(string? text)
+    {
+        var found = new List<string>();
+        Scan(text);
+        return found.Distinct(StringComparer.Ordinal).ToList();
+
+        void Scan(string? t)
+        {
+            if (string.IsNullOrWhiteSpace(t)) return;
+            try { Walk(Parser.Parse(t)); }
+            catch (ParseError) { }
+        }
+        void Walk(AstExpr e)
+        {
+            switch (e)
+            {
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (ExprFacts.IsHexAggregate(c.Function)) found.Add(c.Function);
+                    if (ExprFacts.IsAggregate(c.Function)) Scan(ExprFacts.AggregateArgs(c).Filter);
+                    foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
+    }
 
     /// <summary>True when the expression text parses and contains a side() call.</summary>
     private static bool UsesSide(string text)
@@ -130,6 +180,9 @@ public static class RulesValidator
         // A side's filter decides who owns a piece, so it cannot depend on the owning side.
         if (!string.IsNullOrWhiteSpace(s.UnitFilter) && UsesSide(s.UnitFilter!))
             Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": unit filter may not use side()");
+        // Ownership evaluates side filters without the module's grid, so there is no hex to read.
+        foreach (var fn in HexAggregatesIn(s.UnitFilter))
+            Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": {fn}() is not available in a side's unit filter");
     }
 
     private static void CheckPhase(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -198,7 +251,7 @@ public static class RulesValidator
         catch (ParseError) { return false; }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder" };
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder", "hexsum", "hexcount", "hexmax", "hexmin" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -215,10 +268,12 @@ public static class RulesValidator
         var forbidden = new List<string>();
         bool dynamic = false;   // reads something that can change: turn(), stage() or a table
         var unknownTables = new List<string>();
+        var aggregateProblems = new List<string>();
         Walk(ast);
 
         foreach (var fn in forbidden.Distinct()) Err($"{who}: condition may not use {fn}()");
         foreach (var t in unknownTables.Distinct(StringComparer.Ordinal)) Err($"{who}: condition refers to unknown table \"{t}\"");
+        foreach (var m in aggregateProblems.Distinct(StringComparer.Ordinal)) Err($"{who}: condition {m}");
         foreach (var v in vars.Distinct(StringComparer.Ordinal))
         {
             var p = pack.PropertyByName(v);
@@ -246,7 +301,8 @@ public static class RulesValidator
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
                     if (ForbiddenConditionFunctions.Contains(c.Function)) forbidden.Add(c.Function);
-                    if (c.Function is "turn" or "stage" or "lookup" or "lookuprange") dynamic = true;
+                    if (c.Function is "turn" or "stage" or "lookup" or "lookuprange" || ExprFacts.IsAggregate(c.Function)) dynamic = true;
+                    if (ExprFacts.IsAggregate(c.Function)) { aggregateProblems.AddRange(AggregateProblems(c, pack)); break; }
                     if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
                     {
                         if (pack.TableByName(tv.Name) is null) unknownTables.Add(tv.Name);
@@ -536,6 +592,11 @@ public static class RulesValidator
                     err($"count() needs a roll binding, not {rv.Name}");
                 if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp])
                     foreach (var u in HolderCallProblems(hn.Name, hp.Name, pack)) err(u);
+                if (ExprFacts.IsAggregate(c.Function))
+                {
+                    foreach (var u in AggregateProblems(c, pack)) err(u);
+                    break;
+                }
                 foreach (var a in c.Args) CheckLookups(a, pack, err, f);
                 break;
         }

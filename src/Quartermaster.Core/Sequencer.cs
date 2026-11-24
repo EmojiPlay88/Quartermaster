@@ -1,4 +1,5 @@
 using Quartermaster.Rules;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Core;
 
@@ -75,12 +76,14 @@ public static class Sequencer
     public static SideDef? ActingSide(RulesPack pack, PhaseDef phase) =>
         phase.SideId == null ? null : pack.Sides.FirstOrDefault(x => x.Id == phase.SideId);
 
-    public static IReadOnlyList<PieceInstance> UnitsFor(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, string? entryFilter)
+    /// <param name="model">For grid locations, so the filters can use the hex aggregates (hexsum() ...); without it they are not available.</param>
+    public static IReadOnlyList<PieceInstance> UnitsFor(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, string? entryFilter,
+        ModuleModel? model = null)
     {
         var side = ActingSide(pack, phase);
-        var fs = PieceFilter.Compile(side?.UnitFilter, s, pack);
-        var ff = PieceFilter.Compile(formula?.AppliesTo, s, pack);
-        var ef = PieceFilter.Compile(entryFilter, s, pack);
+        var fs = PieceFilter.Compile(side?.UnitFilter, s, pack, model);
+        var ff = PieceFilter.Compile(formula?.AppliesTo, s, pack, model);
+        var ef = PieceFilter.Compile(entryFilter, s, pack, model);
         return s.Pieces.Values.Where(p => fs(p) && ff(p) && ef(p)).ToList();
     }
 
@@ -90,16 +93,17 @@ public static class Sequencer
     /// (a piece of no side counts as other; Acting and Other never overlap). Any: every piece. Formula applies-to and the entry filter apply in all modes; a phase
     /// without a (known) side behaves as Acting in every mode.
     /// </summary>
-    public static IReadOnlyList<PieceInstance> MovedUnitsFor(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, MoveEntry e)
+    public static IReadOnlyList<PieceInstance> MovedUnitsFor(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, MoveEntry e,
+        ModuleModel? model = null)
     {
         var side = ActingSide(pack, phase);
-        if (side == null || e.FiresFor == MoveSide.Acting) return UnitsFor(pack, s, phase, formula, e.UnitFilter);
-        var ff = PieceFilter.Compile(formula?.AppliesTo, s, pack);
-        var ef = PieceFilter.Compile(e.UnitFilter, s, pack);
+        if (side == null || e.FiresFor == MoveSide.Acting) return UnitsFor(pack, s, phase, formula, e.UnitFilter, model);
+        var ff = PieceFilter.Compile(formula?.AppliesTo, s, pack, model);
+        var ef = PieceFilter.Compile(e.UnitFilter, s, pack, model);
         var units = s.Pieces.Values.Where(p => ff(p) && ef(p));
         if (e.FiresFor == MoveSide.Other)
         {
-            var acting = PieceFilter.Compile(side.UnitFilter, s, pack);
+            var acting = PieceFilter.Compile(side.UnitFilter, s, pack, model);
             units = units.Where(p => !acting(p));
         }
         return units.ToList();

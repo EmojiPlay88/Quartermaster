@@ -62,7 +62,35 @@ public static class ModuleModelBuilder
 
             var expander = new PrototypeExpander(_protos, log, _protoStates);
             return new ModuleModel(root.Attr("name"), root.Attr("version"), root.Attr("VassalVersion"), _maps, _slots, _protos,
-                _charts, _docs, _setups, _dice, _sides, BuildTree(root.Attr("name")), expander);
+                _charts, _docs, _setups, _dice, _sides, BuildTree(root.Attr("name")), expander, SetupPieceTypes(out var unreadable), unreadable);
+        }
+
+        /// <summary>Distinct piece type strings added by the predefined setups' saves ("+/id/type/state"; stacks skipped).</summary>
+        private List<string> SetupPieceTypes(out bool unreadable)
+        {
+            unreadable = false;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var types = new List<string>();
+            foreach (var s in _setups)
+            {
+                if (s.FileEntry == null) continue;
+                try
+                {
+                    using var entry = archive.OpenEntry(s.FileEntry);
+                    foreach (var cmd in SaveFileReader.Read(entry).Commands)
+                    {
+                        if (!cmd.StartsWith("+/", StringComparison.Ordinal)) continue;
+                        var t = SequenceEncoder.Decode(cmd, '/');
+                        if (t.Count > 2 && t[2] != "stack" && t[2].Length > 0 && seen.Add(t[2])) types.Add(t[2]);
+                    }
+                }
+                catch (Exception e)
+                {
+                    unreadable = true;
+                    log.AddOnce("setup-unreadable:" + s.FileEntry, DiagnosticSeverity.Warning, "component", $"Setup '{s.Name}' file '{s.FileEntry}' could not be read: {e.Message}", s.Name);
+                }
+            }
+            return types;
         }
 
         private void Unknown(ModuleNode n) => _unknown[n.ClassName] = _unknown.GetValueOrDefault(n.ClassName) + 1;

@@ -116,7 +116,16 @@ How the formula window behaves:
 
 ## Where we stopped / next steps
 
-**CURRENT STATE (2026-11-23, formula outputs; read this first):**
+**CURRENT STATE (2026-11-23, piece sums; read this first):**
+
+- **Branch `piece-sums` (cut from master 9f541e5), not pushed; all three tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-23-piece-sums-design.md` (engine wishlist #17, #67). The user picked "everything": aggregates read all pieces and values, hidden or not.
+  - **Rules:** `sum(P, "f")`, `countof("f")`, `maxof(P, "f")`, `minof(P, "f")` (whole game) and `hexsum(P[, "f"])`, `hexcount(["f"])`, `hexmax(P[, "f"])`, `hexmin(P[, "f"])` (this piece's hex); P bare, filter a text literal in unit-filter syntax (`""` = every piece). Helpers `ExprFacts.IsAggregate/IsHexAggregate/IsCountAggregate/AggregateArgs/AggregateReads`, `FormulaVariables.AggregateReads/AggregateReadsHidden`. Validator: unknown property, holder-scope property, filter that does not parse or names unknowns; hex aggregates refused in side unit filters and property applies-to. No model change; `CurrentFormat` stays 4.
+  - **Core:** `PieceAggregates` behind `IEvalContext.Aggregate` in every context (model threaded so hex works in unit filters); errors `No piece matches "{filter}"`, `{piece} is not in a hex`, `{fn}() is not available here`; a missing value or marker inside a filter is no match; compiled filters cached.
+  - **Masking:** for a viewer not holding every side, a formula with a count, an aggregate over a non-public property, or a filter reading a non-public property (or holder()/an aggregate, or not parsing) is hidden: `FormulaMasking.AggregateCallInput` ("aggregate()") in `HiddenVariables`, guards/preconditions using an aggregate are host-decided (`GuardsOnHidden`), and `PlayerView` redacts the working. A public-property sum with a public filter is shown.
+  - **Wiki:** Formula-Reference (eight functions, errors, hidden-data note, phase conditions may use the whole-game ones), Making-a-Rules-Pack (recipes: engineer in the stack, a side's trucks, fuel in a hex; inline code).
+  - **Tests:** see the task 3 report for the full-run numbers.
+
+**Previous CURRENT STATE (2026-11-23, formula outputs; history):**
 
 - **Branch `formula-outputs` (cut from master af9c12e), not pushed; all three tasks done; next: final review, user review, merge/PR (ask).** Spec `specs/2026-11-23-formula-outputs-design.md` (engine wishlist #19, #39).
   - **Rules:** `FormulaOutput.Expr` (value expression; blank = the formula's result), `PropertyChoice` (property ids) with `PropertySelect` (a number picks the Nth, 1-based; text picks by property name, trimmed, case-insensitive). All omitted when null; `CurrentFormat` stays 4, an unchanged pack keeps its SHA-256. Validator: `Formula "{name}": output {n} has a property list but no "Pick by"`. `FormulaVariables.Used`/`HolderReads` include output expressions, so masking covers hidden reads there (tested, no code change needed).

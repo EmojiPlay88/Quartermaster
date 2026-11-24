@@ -14,6 +14,7 @@ public class EvaluatorRegistryTests
         public bool Has(string property) => true;
         public Value PieceName() => Value.Of("x");
         public Value Marker(string key) => Value.Of("x");
+        public Value Aggregate(string fn, string? property, string? filter) => Value.Of(1);
     }
 
     private static AstExpr Num(double d) => new NumberLit(d, 0, 1);
@@ -30,6 +31,10 @@ public class EvaluatorRegistryTests
         "lookup" => new AstExpr[] { new VarRef("T", 0, 1), Num(1) },
         "lookuprange" => new AstExpr[] { new VarRef("T", 0, 1), Num(1), Num(2) },
         "count" => new AstExpr[] { new VarRef("R", 0, 1), Num(1), Num(2) },
+        "sum" or "maxof" or "minof" => new AstExpr[] { new VarRef("P", 0, 1), new TextLit("f", 0, 1) },
+        "countof" => new AstExpr[] { new TextLit("f", 0, 1) },
+        "hexsum" or "hexmax" or "hexmin" => new AstExpr[] { new VarRef("P", 0, 1) },
+        "hexcount" => Array.Empty<AstExpr>(),
         "dice" => new[] { Num(1), Num(6) },
         "has" => new AstExpr[] { new VarRef("p", 0, 1) },
         "startswith" or "contains" => new AstExpr[] { new TextLit("a", 0, 1), new TextLit("a", 0, 1) },
@@ -43,7 +48,7 @@ public class EvaluatorRegistryTests
     [Fact]
     public void Read_functions_are_listed()
     {
-        foreach (var n in new[] { "side", "phaseside", "map", "holder", "lookuprange", "count" })
+        foreach (var n in new[] { "side", "phaseside", "map", "holder", "lookuprange", "count", "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin" })
             Assert.Contains(n, Evaluator.FunctionNames);
     }
 

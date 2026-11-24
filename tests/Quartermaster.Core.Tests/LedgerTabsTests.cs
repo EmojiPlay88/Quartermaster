@@ -235,6 +235,9 @@ public class LedgerTabsTests
         Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("not (abs(Gone) > 1)", Pack()));
         Assert.Null(LedgerTabs.FilterError("holder(Rail, Tonnage) > 1", Pack()));
         Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("holder(Rail, Tonnage) > Gone", Pack()));
+        Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("sum(Gone, \"\") > 1", Pack()));
+        Assert.Equal("Unknown property: Gone", LedgerTabs.FilterError("countof(\"Gone > 1\") > 1", Pack()));
+        Assert.Null(LedgerTabs.FilterError("sum(Fuel, \"Fuel > 1\") > 1 and hexcount() > 0", Pack()));
     }
 
     [Fact]

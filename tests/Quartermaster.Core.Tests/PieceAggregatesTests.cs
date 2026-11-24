@@ -1,0 +1,462 @@
+using Quartermaster.Core;
+using Quartermaster.Rules;
+using Quartermaster.Rules.Expr;
+using Quartermaster.TestFixtures;
+using Quartermaster.Vassal;
+
+namespace Quartermaster.Core.Tests;
+
+/// <summary>Piece sums (sum, countof, maxof, minof and the hex* ones) in every evaluation context. Invented Riverland-style data.</summary>
+public class PieceAggregatesTests
+{
+    private const string GridPrefix = "VASSAL.build.module.map.boardPicker.board.";
+
+    /// <summary>Two maps with the same square grid (so the same location names): "Main Map" and "Side Map".</summary>
+    private static readonly Lazy<ModuleModel> LazyTwoMaps = new(() =>
+    {
+        var xml = FixtureModule.MinimalBuildFile().Replace("y0=\"25\"/>",
+            $"y0=\"25\"><{GridPrefix}mapgrid.SquareGridNumbering first=\"H\" hType=\"N\" vType=\"N\" sep=\"\" hLeading=\"1\" vLeading=\"1\" hOff=\"1\" vOff=\"1\"/></{GridPrefix}SquareGrid>");
+        const string end = "</VASSAL.build.module.Map>";
+        var from = xml.IndexOf("<VASSAL.build.module.Map ", StringComparison.Ordinal);
+        var to = xml.IndexOf(end, StringComparison.Ordinal) + end.Length;
+        var second = xml[from..to].Replace("mapName=\"Main Map\"", "mapName=\"Side Map\"");
+        xml = xml.Insert(to, second);
+        using var fx = new FixtureModule().WithBuildFile(xml).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        return ModuleModelBuilder.Build(arch, new DiagnosticLog());
+    });
+
+    private static ModuleModel Model => LazyTwoMaps.Value;
+
+    private static RulesPack Pack(params FormulaDef[] formulas) => new()
+    {
+        Properties = new()
+        {
+            new PropertyDef { Id = "str", Name = "Strength", Scope = PropertyScope.Pieces, Default = 2 },
+            new PropertyDef { Id = "trucks", Name = "Trucks", Scope = PropertyScope.Pieces, Default = 0 },
+            new PropertyDef { Id = "flag", Name = "Flag", Scope = PropertyScope.Holders, Default = 0 },
+        },
+        Phases = new() { new PhaseDef { Id = "P", Name = "Movement" } },
+        Formulas = formulas.ToList(),
+    };
+
+    private static FormulaDef Formula(string text) => new() { Id = "f", Name = "Probe", Text = text };
+
+    private static void Add(GameState s, string id, string name, double? str, string map = "Main Map", double x = 60, double y = 40)
+    {
+        s.Pieces[id] = new PieceInstance
+        {
+            Id = id, MapId = map, Pos = new PointD(x, y), TraitStates = new() { "" },
+            TypeString = SequenceEncoder.Encode(new[] { "piece;;;unit.svg;" + name }, '\t'),
+        };
+        if (str != null) s.Ledgers[LedgerKey.Piece(id)] = new() { ["str"] = str.Value };
+    }
+
+    /// <summary>Riverland: two Red units stacked at (60,40), one Red unit in the next square, one Blue unit at the same spot on the side map.</summary>
+    private static GameState Riverland()
+    {
+        var s = new GameState();
+        Add(s, "r1", "Red Rifles", 3);
+        Add(s, "r2", "Red Guns", 4, x: 62, y: 42);
+        Add(s, "r3", "Red Scouts", 5, x: 160, y: 40);
+        Add(s, "b1", "Blue Rifles", 10, map: "Side Map");
+        return s;
+    }
+
+    private static Value Eval(string expr, GameState s, RulesPack pack, PieceInstance? self = null)
+    {
+        var call = Assert.IsType<Call>(Parser.Parse(expr));
+        var (property, filter) = ExprFacts.AggregateArgs(call);
+        return PieceAggregates.Evaluate(call.Function, property, filter, self, new AggregateFilters(s, pack, Model));
+    }
+
+    private static FormulaTrace Run(GameState s, string text, string? piece = "r1")
+    {
+        var pack = Pack(Formula(text));
+        return new FormulaRunner(pack, Model, (n, _) => Enumerable.Repeat(1, n).ToList())
+            .Run(s, new RunRequest("f", piece, new Dictionary<string, string>(), new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+    }
+
+    [Fact]
+    public void Sum_over_filter()
+    {
+        var s = Riverland();
+        var pack = Pack();
+        Assert.Equal(12, Eval("sum(Strength, \"startsWith(name(), \\\"Red\\\")\")", s, pack).Number);
+        Assert.True(PieceFilter.EvaluateGameLevel("sum(Strength, \"startsWith(name(), \\\"Red\\\")\") == 12", s, pack));
+        Assert.Equal(0, Eval("sum(Strength, \"name() == \\\"Nobody\\\"\")", s, pack).Number);
+    }
+
+    [Fact]
+    public void Sum_uses_defaults()
+    {
+        var s = Riverland();
+        Add(s, "r4", "Red Militia", null);   // no ledger row: Strength reads its Default 2
+        var pack = Pack();
+        Assert.Equal(14, Eval("sum(Strength, \"startsWith(name(), \\\"Red\\\")\")", s, pack).Number);
+        Assert.Equal(2, Eval("minof(Strength, \"\")", s, pack).Number);
+        Assert.Equal(10, Eval("maxof(Strength, \"\")", s, pack).Number);
+        Assert.Equal(0, Eval("sum(Trucks, \"\")", s, pack).Number);
+    }
+
+    [Fact]
+    public void Countof_empty_filter_counts_all()
+    {
+        var s = Riverland();
+        var pack = Pack();
+        Assert.Equal(4, Eval("countof(\"\")", s, pack).Number);
+        Assert.Equal(2, Eval("countof(\"Strength > 4\")", s, pack).Number);   // r3 (5) and b1 (10)
+        Assert.Equal(0, Eval("countof(\"name() == \\\"Nobody\\\"\")", s, pack).Number);
+    }
+
+    [Fact]
+    public void Maxof_no_match_error()
+    {
+        var s = Riverland();
+        var t = Run(s, "maxof(Strength, \"name() == \\\"Nobody\\\"\")");
+        Assert.Equal("No piece matches \"name() == \"Nobody\"\"", t.Error);
+        var min = Run(s, "minof(Strength, \"Strength > 99\")");
+        Assert.Equal("No piece matches \"Strength > 99\"", min.Error);
+        var hex = Run(s, "hexmax(Strength, \"Strength > 99\")");
+        Assert.Equal("No piece matches \"Strength > 99\"", hex.Error);
+    }
+
+    [Fact]
+    public void Hexsum_same_map_same_hex_only()
+    {
+        var s = Riverland();
+        var pack = Pack();
+        var self = s.Pieces["r1"];
+        Assert.Equal(PieceInfo.Location(self, Model), PieceInfo.Location(s.Pieces["b1"], Model));   // same location name, other map
+        Assert.NotEqual(PieceInfo.Location(self, Model), PieceInfo.Location(s.Pieces["r3"], Model));
+        Assert.Equal(7, Eval("hexsum(Strength)", s, pack, self).Number);   // r1 3 + r2 4; not r3 (next square), not b1 (side map)
+        Assert.Equal(4, Eval("hexsum(Strength, \"name() != \\\"Red Rifles\\\"\")", s, pack, self).Number);
+        Assert.Equal(4, Eval("hexmax(Strength)", s, pack, self).Number);
+        Assert.Equal(3, Eval("hexmin(Strength)", s, pack, self).Number);
+        Assert.Equal(10, Eval("hexsum(Strength)", s, pack, s.Pieces["b1"]).Number);
+        Assert.Equal(7, Run(s, "hexsum(Strength)").Result!.Value.Number);
+    }
+
+    [Fact]
+    public void Hexcount_includes_self()
+    {
+        var s = Riverland();
+        Assert.Equal(2, Run(s, "hexcount()").Result!.Value.Number);
+        Assert.Equal(1, Run(s, "hexcount()", "r3").Result!.Value.Number);
+        Assert.Equal(1, Run(s, "hexcount(\"name() != \\\"Red Rifles\\\"\")").Result!.Value.Number);
+    }
+
+    [Fact]
+    public void Hex_piece_off_grid_error()
+    {
+        var s = Riverland();
+        Add(s, "r5", "Red Reserve", 1, x: 900, y: 900);   // off the board
+        Assert.Equal("Red Reserve is not in a hex", Run(s, "hexcount()", "r5").Error);
+        Add(s, "x1", "", 1, map: "Nowhere");   // nameless piece on no map: labelled as the log labels it
+        Assert.Equal("piece is not in a hex", Run(s, "hexsum(Strength)", "x1").Error);
+    }
+
+    [Fact]
+    public void Hex_not_available_in_phase_condition()
+    {
+        var pack = Pack();
+        var s = Riverland();
+        var at = new PhasePosition(1, 1, "P", 0);
+        pack.Phases[0] = pack.Phases[0] with { Condition = "hexcount() > 0" };
+        Assert.True(PhaseConditions.Runs(pack, s, pack.Phases[0], at, out var err));
+        Assert.Equal("hexcount() is not available here", err);
+        pack.Phases[0] = pack.Phases[0] with { Condition = "hexsum(Strength, \"\") > 0" };
+        PhaseConditions.Runs(pack, s, pack.Phases[0], at, out err);
+        Assert.Equal("hexsum() is not available here", err);
+        // Whole-game aggregates work there.
+        pack.Phases[0] = pack.Phases[0] with { Condition = "countof(\"startsWith(name(), \\\"Blue\\\")\") == 0" };
+        Assert.False(PhaseConditions.Runs(pack, s, pack.Phases[0], at, out err));
+        Assert.Null(err);
+        pack.Phases[0] = pack.Phases[0] with { Condition = "sum(Strength, \"\") == 22" };
+        Assert.True(PhaseConditions.Runs(pack, s, pack.Phases[0], at, out err));
+        Assert.Null(err);
+        // A game-level context (no piece) refuses the hex ones too.
+        Assert.False(PieceFilter.EvaluateGameLevel("hexcount() >= 0", s, pack));
+        Assert.True(PieceFilter.EvaluateGameLevel("countof(\"\") == 4", s, pack));
+    }
+
+    [Fact]
+    public void Aggregate_in_filter_compiles_once()
+    {
+        var s = Riverland();
+        var pack = Pack();
+        PieceAggregates.FilterCompiles = 0;
+        var strongest = PieceFilter.Compile("Strength == maxof(Strength, \"startsWith(name(), \\\"Red\\\")\")", s, pack, Model);
+        Assert.Equal(new[] { "r3" }, s.Pieces.Values.Where(strongest).Select(p => p.Id));
+        Assert.Equal(1, PieceAggregates.FilterCompiles);
+        PieceAggregates.FilterCompiles = 0;
+        var stacked = PieceFilter.Compile("hexcount(\"Strength > 0\") > 1", s, pack, Model);
+        Assert.Equal(new[] { "r1", "r2" }, s.Pieces.Values.Where(stacked).Select(p => p.Id));
+        Assert.Equal(1, PieceAggregates.FilterCompiles);
+    }
+
+    [Fact]
+    public void Aggregate_in_warning_and_alert()
+    {
+        var phase = new PhaseDef
+        {
+            Id = "P", Name = "Movement",
+            Warnings = new()
+            {
+                new PhaseWarning { Condition = "hexcount() > 1", Message = "{unit} is stacked" },
+                new PhaseWarning { Condition = "countof(\"startsWith(name(), \\\"Red\\\")\") > 2", Message = "Red is crowded" },
+            },
+        };
+        var pack = Pack();
+        pack.Phases[0] = phase;
+        pack.Alerts.AddRange(new[]
+        {
+            new AlertDef { Id = "a1", Name = "Overstacked", Condition = "hexsum(Strength) > 6 and hexcount() > 1", Message = "{unit} overstacked" },
+            new AlertDef { Id = "a2", Name = "Big army", Condition = "sum(Strength, \"\") > 20", Message = "Big army" },
+        });
+        var s = Riverland();
+        s.Position = new PhasePosition(1, 1, "P", 0);
+        var w = Decisions.Warnings(pack, s, phase, Model);
+        Assert.Equal(2, w.Count);
+        Assert.Equal(new[] { "r1", "r2" }, w[0].PieceIds);
+        Assert.Equal(new[] { "Red Rifles is stacked", "Red Guns is stacked" }, w[0].UnitTexts);
+        Assert.Empty(w[1].PieceIds);   // whole-game: one game-level hit
+        Assert.Equal(new[] { "Red is crowded" }, w[1].UnitTexts);
+        var hits = AlertEngine.Evaluate(s, pack, Model, phase, null);
+        var over = hits.Single(h => h.Id == "a1");
+        Assert.Equal(new[] { "r1", "r2" }, over.Matches.Select(m => m.PieceId));
+        var big = hits.Single(h => h.Id == "a2");
+        Assert.Single(big.Matches);
+        Assert.Null(big.Matches[0].PieceId);
+    }
+
+    [Fact]
+    public void Formula_aggregate_in_text()
+    {
+        var s = Riverland();
+        var t = Run(s, "sum(Strength, \"startsWith(name(), \\\"Red\\\")\") * 2 + hexcount() + countof(\"\")");
+        Assert.Null(t.Error);
+        Assert.Equal(12 * 2 + 2 + 4, t.Result!.Value.Number);
+        // Run without a piece: whole-game aggregates still work, the hex ones are not available.
+        Assert.Equal(12, Run(s, "sum(Strength, \"startsWith(name(), \\\"Red\\\")\")", null).Result!.Value.Number);
+        Assert.Equal("hexcount() is not available here", Run(s, "hexcount()", null).Error);
+    }
+
+    [Fact]
+    public void Game_level_counts_whole_game_aggregates_only()
+    {
+        var pack = Pack();
+        Assert.True(ExprFacts.IsGameLevel(Parser.Parse("sum(Strength, \"\") > 3 and countof(\"Strength > 1\") > 0"), pack));
+        Assert.True(ExprFacts.IsGameLevel(Parser.Parse("maxof(Strength, \"\") > minof(Strength, \"\")"), pack));
+        Assert.False(ExprFacts.IsGameLevel(Parser.Parse("hexcount() > 1"), pack));
+        Assert.False(ExprFacts.IsGameLevel(Parser.Parse("hexsum(Strength) > 1 or Flag == 0"), pack));
+    }
+
+    [Fact]
+    public void Sequencer_queues_stacked_units_by_hex_aggregate()
+    {
+        var s = Riverland();
+        var formula = Formula("1") with { AppliesTo = "hexcount(\"startsWith(name(), \\\"Red\\\")\") > 1" };
+        var pack = Pack(formula);
+        var phase = pack.Phases[0];
+        Assert.Equal(new[] { "r1", "r2" }, Sequencer.UnitsFor(pack, s, phase, formula, null, Model).Select(p => p.Id));
+        Assert.Equal(new[] { "r1", "r2" }, Sequencer.UnitsFor(pack, s, phase, null, "hexcount() > 1 and hexsum(Strength) > 6", Model).Select(p => p.Id));
+        var any = new MoveEntry { FormulaId = "f", UnitFilter = "hexcount() > 1", FiresFor = MoveSide.Any };
+        Assert.Equal(new[] { "r1", "r2" }, Sequencer.MovedUnitsFor(pack, s, phase, null, any, Model).Select(p => p.Id));
+        // Warnings use the phase's units, so a hex aggregate there sees the model too.
+        phase = phase with { Warnings = new() { new PhaseWarning { Condition = "hexcount() > 1", Message = "{unit}" } } };
+        Assert.Equal(new[] { "r1", "r2" }, Decisions.Warnings(pack, s, phase, Model).Single().PieceIds);
+    }
+
+    [Fact]
+    public void Holder_property_is_not_a_piece_property()
+    {
+        var s = Riverland();
+        Assert.Equal("Flag is not a piece property", Run(s, "sum(Flag, \"\")").Error);
+        Assert.Equal("Flag is not a piece property", Run(s, "hexmax(Flag)").Error);
+    }
+
+    [Fact]
+    public void Inner_filter_error_fails_the_aggregate()
+    {
+        var s = Riverland();
+        var pack = Pack();
+        Assert.Equal("Unknown property 'Nope'", Run(s, "countof(\"Nope > 1\")").Error);
+        Assert.Equal("Unknown property 'Nope'", Run(s, "hexsum(Strength, \"Nope > 1\")").Error);
+        Assert.NotNull(Run(s, "countof(\"1 +\")").Error);   // a filter that does not parse fails too
+        var ex = Assert.Throws<EvalError>(() => Eval("sum(Strength, \"Nope > 1\")", s, pack));
+        Assert.Equal("Unknown property 'Nope'", ex.Message);
+        // A plain filter still reads an error as no match, and so does a filter whose aggregate fails.
+        Assert.False(PieceFilter.Compile("Nope > 1", s, pack, Model)(s.Pieces["r1"]));
+        Assert.False(PieceFilter.Compile("countof(\"Nope > 1\") >= 0", s, pack, Model)(s.Pieces["r1"]));
+        Assert.Contains("Unknown property 'Nope'", PhaseErr("countof(\"Nope > 1\") > 0"));
+
+        string? PhaseErr(string cond)
+        {
+            var pk = Pack();
+            pk.Phases[0] = pk.Phases[0] with { Condition = cond };
+            PhaseConditions.Runs(pk, s, pk.Phases[0], new PhasePosition(1, 1, "P", 0), out var err);
+            return err;
+        }
+    }
+
+    [Fact]
+    public void Missing_value_in_filter_is_no_match()
+    {
+        var s = Riverland();
+        var pack = Pack();
+        // Fuel applies to Red units only: Blue Rifles has no Fuel, so the filter does not match it (no error).
+        pack.Properties.Add(new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, AppliesTo = "startsWith(name(), \"Red\")" });
+        Assert.Equal(12, Eval("sum(Strength, \"Fuel >= 0\")", s, pack).Number);
+        Assert.Equal(3, Eval("countof(\"Fuel >= 0\")", s, pack).Number);
+        Assert.Equal(7, Eval("hexsum(Strength, \"Fuel >= 0\")", s, pack, s.Pieces["r1"]).Number);
+        Assert.Equal(0, Eval("countof(\"marker(\\\"Kind\\\") == \\\"Truck\\\"\")", s, pack).Number);   // no such marker: no match
+    }
+
+    [Fact]
+    public void Runtime_error_in_filter_fails_the_aggregate()
+    {
+        var s = Riverland();
+        Assert.Equal("'>' needs numbers, got text", Run(s, "sum(Strength, \"name() > 1\")").Error);
+        Assert.Equal("Division by zero", Run(s, "countof(\"Strength / 0 > 1\")").Error);
+        Assert.Equal("No table named 'Nope'", Run(s, "hexcount(\"lookup(Nope, 1) > 0\")").Error);
+    }
+
+    // ---- player views (a player who does not hold every side) ----
+
+    private const string HiddenText = "reads data this player cannot see";
+
+    /// <summary>Red and Blue sides by name; Strength is Public. With <paramref name="ownedSideMap"/>, Red owns the side map.</summary>
+    private static RulesPack SidedPack(bool ownedSideMap)
+    {
+        var pack = Pack(Formula("0"));
+        pack.Properties[0] = pack.Properties[0] with { Visibility = Visibility.Public };
+        return pack with
+        {
+            Sides = new()
+            {
+                new SideDef { Id = "red", Name = "Red", UnitFilter = "startsWith(name(), \"Red\")" },
+                new SideDef { Id = "blue", Name = "Blue", UnitFilter = "startsWith(name(), \"Blue\")" },
+            },
+            MapOwners = ownedSideMap ? new() { new MapOwner { MapId = "Side Map", SideId = "red" } } : new(),
+        };
+    }
+
+    private static readonly IReadOnlySet<string> BlueOnly = new HashSet<string> { "blue" };
+
+    [Fact]
+    public void View_aggregate_that_may_read_hidden_pieces_is_an_error()
+    {
+        var pack = SidedPack(ownedSideMap: true);
+        var full = Riverland();
+        Add(full, "b2", "Blue Guns", 6);
+        var view = PlayerView.For(full, pack, Model, BlueOnly);
+        Assert.True(view.IsPlayerView);
+        var runner = new FormulaRunner(pack with { Formulas = new() { Formula("sum(Strength, \"\")") } }, Model, (n, _) => Enumerable.Repeat(1, n).ToList());
+        var t = runner.Run(view, new RunRequest("f", "b2", new Dictionary<string, string>(), new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.Equal("sum() " + HiddenText, t.Error);
+        // An "Only when" over it is undecided there (the host decides), not an error.
+        var guarded = new FormulaDef
+        {
+            Id = "g", Name = "Guarded", Text = "B",
+            Bindings = new() { new VariableBinding { Variable = "B", Kind = BindingKind.Input, When = "sum(Strength, \"\") > 0" } },
+        };
+        var g = new FormulaRunner(pack with { Formulas = new() { guarded } }, Model, (n, _) => Enumerable.Repeat(1, n).ToList())
+            .Run(view, new RunRequest("g", "b2", new Dictionary<string, string> { ["B"] = "3" }, new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.Null(g.Error);
+        Assert.Null(g.Result);
+        Assert.True(Assert.Single(g.Variables).Waiting);
+        // Filters, warnings, alerts and Ledger filters read it as false; on the full state the same filter matches.
+        var inView = PieceFilter.Compile("sum(Strength, \"\") > 0", view, pack, Model);
+        Assert.Equal(0, view.Pieces.Values.Count(inView));
+        var inFull = PieceFilter.Compile("sum(Strength, \"\") > 0", full, pack, Model);
+        Assert.Equal(full.Pieces.Count, full.Pieces.Values.Count(inFull));
+        Assert.False(PieceFilter.EvaluateGameLevel("sum(Strength, \"\") >= 0", view, pack, Model));
+        Assert.True(PieceFilter.EvaluateGameLevel("sum(Strength, \"\") >= 0", full, pack, Model));
+        // A count, or an aggregate over a hidden property, is an error in a view even when nothing can hide.
+        var open = SidedPack(ownedSideMap: false);
+        var openView = PlayerView.For(full, open, Model, BlueOnly);
+        Assert.False(PieceFilter.EvaluateGameLevel("countof(\"\") >= 0", openView, open, Model));
+        Assert.True(PieceFilter.EvaluateGameLevel("countof(\"\") >= 0", full, open, Model));
+    }
+
+    [Fact]
+    public void View_public_aggregate_when_nothing_can_hide()
+    {
+        var pack = SidedPack(ownedSideMap: false);
+        var full = Riverland();
+        var view = PlayerView.For(full, pack, Model, BlueOnly);
+        Assert.True(view.IsPlayerView);
+        Assert.True(PieceFilter.EvaluateGameLevel("sum(Strength, \"\") == 22", view, pack, Model));
+        Assert.True(PieceFilter.EvaluateGameLevel("maxof(Strength, \"startsWith(name(), \\\"Red\\\")\") == 5", view, pack, Model));
+    }
+
+    [Fact]
+    public void Pieces_may_hide_from_pack_and_module()
+    {
+        var all = new HashSet<string> { "red", "blue" };
+        Assert.False(PieceAccess.PiecesMayHide(SidedPack(false), Model, BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(true), Model, BlueOnly));
+        Assert.False(PieceAccess.PiecesMayHide(SidedPack(true), Model, all));   // every side held
+        Assert.False(PieceAccess.PiecesMayHide(SidedPack(true), Model, new HashSet<string> { "red" }));   // the owner's own map
+        var ghost = SidedPack(false) with { MapOwners = new() { new MapOwner { MapId = "Side Map", SideId = "ghost" } } };
+        Assert.False(PieceAccess.PiecesMayHide(ghost, Model, BlueOnly));   // an owner that is no side owns nothing
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), TraitModel("hide;I;Hide it;;;0.3;;false"), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), TraitModel("obs;M;m.png;Mask it;I;?"), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), null, BlueOnly));   // no module: fail closed
+    }
+
+    [Fact]
+    public void Pieces_may_hide_when_only_a_predefined_setup_has_a_hide_or_mask_trait()
+    {
+        Assert.False(PieceAccess.PiecesMayHide(SidedPack(false), SetupModel("piece;;;unit.svg;A"), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), SetupModel(PieceTypeParser.EncodeState(new[] { "hide;I;Hide it;;;0.3;;false", "piece;;;unit.svg;A" })), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), SetupModel(PieceTypeParser.EncodeState(new[] { "obs;M;m.png;Mask it;I;?", "piece;;;unit.svg;A" })), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), SetupModel(null), BlueOnly));   // setup file unreadable: fail closed
+    }
+
+    /// <summary>The fixture module plus a predefined setup "Start" whose save adds one piece of <paramref name="type"/> (null = a broken save file).</summary>
+    private static ModuleModel SetupModel(string? type)
+    {
+        var xml = FixtureModule.MinimalBuildFile().Replace("</VASSAL.build.GameModule>",
+            "<VASSAL.build.module.PredefinedSetup name=\"Start\" file=\"s.vsav\" useFile=\"true\" isMenu=\"false\"/></VASSAL.build.GameModule>");
+        using var fx = new FixtureModule().WithBuildFile(xml);
+        if (type == null) fx.AddFile("s.vsav", new byte[] { 1, 2, 3 });
+        else fx.AddSave("s.vsav", new[] { "begin_save", "", "+/" + SequenceEncoder.Encode(new[] { "p1", type, "Main Map;100;50;1;0" }, '/'), "end_save" });
+        using var arch = VmodArchive.Open(fx.Build());
+        return ModuleModelBuilder.Build(arch, new DiagnosticLog());
+    }
+
+    /// <summary>The fixture module with <paramref name="trait"/> added to its prototype "Proto".</summary>
+    private static ModuleModel TraitModel(string trait)
+    {
+        var proto = "+/null/" + PieceTypeParser.EncodeState(new[] { trait, "mark;Side" }) + "/null";
+        var xml = FixtureModule.MinimalBuildFile().Replace("+/null/mark;Side/null", proto);
+        using var fx = new FixtureModule().WithBuildFile(xml).AddImage("board.png", 200, 100).AddSvg("unit.svg");
+        using var arch = VmodArchive.Open(fx.Build());
+        return ModuleModelBuilder.Build(arch, new DiagnosticLog());
+    }
+
+    [Fact]
+    public void Hex_aggregate_in_whole_game_filter_at_game_level()
+    {
+        // countof("hexcount() > 1") reads each piece's hex: r1 and r2 share a square.
+        var pack = Pack();
+        var s = Riverland();
+        var at = new PhasePosition(1, 1, "P", 0);
+        pack.Phases[0] = pack.Phases[0] with { Condition = "countof(\"hexcount() > 1\") == 3" };
+        Assert.False(PhaseConditions.Runs(pack, s, pack.Phases[0], at, out var err, Model));
+        Assert.Null(err);
+        pack.Phases[0] = pack.Phases[0] with { Condition = "countof(\"hexcount() > 1\") == 2" };
+        Assert.True(PhaseConditions.Runs(pack, s, pack.Phases[0], at, out err, Model));
+        Assert.Null(err);
+        Assert.True(PieceFilter.EvaluateGameLevel("countof(\"hexcount() > 1\") == 2", s, pack, Model));
+        // Game-level warnings and alerts get the model from their callers.
+        var phase = new PhaseDef { Id = "P", Name = "Movement", Warnings = new() { new PhaseWarning { Condition = "countof(\"hexcount() > 1\") > 1", Message = "Stacks" } } };
+        pack.Phases[0] = phase;
+        pack.Alerts.Add(new AlertDef { Id = "a3", Name = "Stacks", Condition = "countof(\"hexcount() > 1\") > 1", Message = "Stacks" });
+        s.Position = at;
+        Assert.Equal(new[] { "Stacks" }, Assert.Single(Decisions.Warnings(pack, s, phase, Model)).UnitTexts);
+        Assert.Contains(AlertEngine.Evaluate(s, pack, Model, phase, null), h => h.Id == "a3");
+    }
+}

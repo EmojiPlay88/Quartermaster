@@ -352,6 +352,9 @@ Short formulas for common needs. Each uses the invented Riverland names; adapt t
 - **A capacity warning.** On a phase, add a warning with the condition `holder(Rail, Tonnage) > holder(Rail, Capacity)` and the message `Rail line is overloaded`. It reads no unit, so it shows once in the [phase panel](Window-Phases), with no units under it. Use the same condition in an alert to get one chip.
 - **A phasing modifier.** In a formula, `if(side() == phaseside(), 1, 0)` is 1 for the units of the side whose phase it is, and 0 for the rest.
 - **Upkeep on the main map only.** Set a formula's **Applies to** to `map() == "Main Map"` so units on other maps are left alone.
+- **The stack has an engineer.** Say your units carry a marker Type, and engineers have the Type `Engineer`. In a formula run on a unit, `if(hexcount("marker(\"Type\") == \"Engineer\"") > 0, 1, 0)` is 1 when an engineer shares the unit's hex (the unit itself included), so the player no longer types it in. The filter is quoted text, so quotes inside it are written `\"`.
+- **A side's total trucks.** `countof("marker(\"Type\") == \"Truck\" and side() == \"Southern Compact\"")` counts the Southern Compact's trucks wherever they are. Use it in a formula, or in a phase warning such as `countof("marker(\"Type\") == \"Truck\" and side() == \"Southern Compact\"") < 3`; that condition reads no single unit, so it shows once.
+- **All the fuel in a hex.** `hexsum(Fuel, "marker(\"Kind\") == \"Unit\"")` adds up the Fuel of every unit in the unit's hex. `sum`, `maxof` and `minof` do the same over the whole game. Counts and sums of Private values count as hidden data in online play; see [Formula Reference](Formula-Reference#sumproperty-filter).
 
 ## Step 7: Visibility (who may see what)
 

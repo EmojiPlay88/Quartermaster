@@ -1,5 +1,6 @@
 using Quartermaster.Rules;
 using Quartermaster.Rules.Expr;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Core;
 
@@ -18,11 +19,12 @@ public static class PhaseConditions
     /// True when the phase runs at <paramref name="at"/>: an empty condition, a true one, or one that fails to parse or evaluate
     /// (fail-open, with <paramref name="error"/> set).
     /// </summary>
-    public static bool Runs(RulesPack pack, GameState s, PhaseDef phase, PhasePosition at, out string? error)
+    /// <param name="model">Gives grid locations to a hex aggregate inside a whole-game aggregate's filter; without it those are errors.</param>
+    public static bool Runs(RulesPack pack, GameState s, PhaseDef phase, PhasePosition at, out string? error, ModuleModel? model = null)
     {
         error = null;
         if (string.IsNullOrWhiteSpace(phase.Condition)) return true;
-        try { return Evaluator.Evaluate(Parser.Parse(phase.Condition), new PhaseContext(pack, s, at)).IsTruthy; }
+        try { return Evaluator.Evaluate(Parser.Parse(phase.Condition), new PhaseContext(pack, s, at, model)).IsTruthy; }
         catch (Exception ex) when (ex is EvalError or ParseError)
         {
             error = ex.Message;
@@ -31,18 +33,18 @@ public static class PhaseConditions
     }
 
     /// <summary>The first position of the game, skipping phases whose condition is false. Null when the pack has no phases.</summary>
-    public static PhaseStep? First(RulesPack pack, GameState s) =>
-        Sequencer.First(pack) is { } first ? Walk(pack, s, first, first) : null;
+    public static PhaseStep? First(RulesPack pack, GameState s, ModuleModel? model = null) =>
+        Sequencer.First(pack) is { } first ? Walk(pack, s, first, first, model) : null;
 
     /// <summary>The position after <paramref name="cur"/>, skipping phases whose condition is false. Null when the pack has no phases.</summary>
-    public static PhaseStep? Next(RulesPack pack, GameState s, PhasePosition cur) =>
-        Sequencer.Next(pack, cur) is { } next ? Walk(pack, s, next, cur) : null;
+    public static PhaseStep? Next(RulesPack pack, GameState s, PhasePosition cur, ModuleModel? model = null) =>
+        Sequencer.Next(pack, cur) is { } next ? Walk(pack, s, next, cur, model) : null;
 
     /// <summary>
     /// Tests candidates from <paramref name="candidate"/> onward. Stops after one full turn of candidates (on reaching the phase and repeat of
     /// <paramref name="origin"/> one turn later, or after every repeat of every phase plus one): then the first candidate is used, with the guard notice.
     /// </summary>
-    private static PhaseStep Walk(RulesPack pack, GameState s, PhasePosition candidate, PhasePosition origin)
+    private static PhaseStep Walk(RulesPack pack, GameState s, PhasePosition candidate, PhasePosition origin, ModuleModel? model)
     {
         var start = candidate;
         var skipped = new List<SkippedPhase>();
@@ -50,7 +52,7 @@ public static class PhaseConditions
         for (var i = 0; i < limit; i++)
         {
             var phase = pack.Phases[candidate.PhaseIndex];
-            if (Runs(pack, s, phase, candidate, out var error))
+            if (Runs(pack, s, phase, candidate, out var error, model))
                 return new PhaseStep(candidate, skipped, error == null ? null : $"Condition of {phase.Name} failed: {error}; phase not skipped");
             skipped.Add(new SkippedPhase(phase.Id, phase.Name, candidate.Turn, candidate.Repeat));
             if (candidate.PhaseId == origin.PhaseId && candidate.Repeat == origin.Repeat && candidate.Turn > origin.Turn) break;
@@ -73,8 +75,10 @@ public static class PhaseConditions
     }
 
     /// <summary>Reads global properties (Default when unset) and the candidate's turn, stage and side. No pieces, no dice.</summary>
-    private sealed class PhaseContext(RulesPack pack, GameState s, PhasePosition at) : IEvalContext
+    private sealed class PhaseContext(RulesPack pack, GameState s, PhasePosition at, ModuleModel? model) : IEvalContext
     {
+        private AggregateFilters? _filters;
+
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
@@ -93,5 +97,8 @@ public static class PhaseConditions
         public Value PhaseSide() =>
             PieceFilter.PhaseSideValue(pack, pack.Phases.FirstOrDefault(p => p.Id == at.PhaseId)
                 ?? (at.PhaseIndex >= 0 && at.PhaseIndex < pack.Phases.Count ? pack.Phases[at.PhaseIndex] : null));
+        /// <summary>Whole-game aggregates only: there is no piece, so the hex ones are not available (inside a filter they are, given the model).</summary>
+        public Value Aggregate(string fn, string? property, string? filter) =>
+            PieceAggregates.Evaluate(fn, property, filter, null, _filters ??= new(s, pack, model));
     }
 }

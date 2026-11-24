@@ -30,12 +30,12 @@ public static class AlertEngine
         Guarded(() => Negative(s, pack, hits, hidden));
         Guarded(() => Pending(s, hits, hidden));
         if (pack != null && current != null)
-            Guarded(() => Warnings(s, pack, current, Add));
+            Guarded(() => Warnings(s, pack, model, current, Add));
         if (pack != null)
             foreach (var a in pack.Alerts ?? new())
             {
                 if (a == null || hidden.Contains(a.Id)) continue;
-                Guarded(() => { var h = User(s, pack, a, actingSideId); if (h != null) Add(h); });
+                Guarded(() => { var h = User(s, pack, model, a, actingSideId); if (h != null) Add(h); });
             }
 
         return hits
@@ -118,10 +118,10 @@ public static class AlertEngine
             hits.Add(new AlertHit(PendingId, "Formula not applied", AlertSeverity.Info, "A formula has not been applied to these units yet.", open, null));
     }
 
-    private static void Warnings(GameState s, RulesPack pack, PhaseDef phase, Action<AlertHit> add)
+    private static void Warnings(GameState s, RulesPack pack, ModuleModel? model, PhaseDef phase, Action<AlertHit> add)
     {
         var matches = new List<AlertMatch>();
-        foreach (var w in Decisions.Warnings(pack, s, phase))
+        foreach (var w in Decisions.Warnings(pack, s, phase, model))
         {
             if (!w.IsDecision || w.Acknowledged) continue;
             // A game-level warning matches no unit: one row with its text, as the Pending alert lists a unit-less run.
@@ -132,7 +132,7 @@ public static class AlertEngine
         add(new AlertHit(WarningId, "Unacknowledged warning", AlertSeverity.Warning, "The current phase has warnings you have not acknowledged.", matches, null));
     }
 
-    private static AlertHit? User(GameState s, RulesPack pack, AlertDef a, string? actingSideId)
+    private static AlertHit? User(GameState s, RulesPack pack, ModuleModel? model, AlertDef a, string? actingSideId)
     {
         if (string.IsNullOrWhiteSpace(a.Condition)) return null;
         string? sideFilter = null;
@@ -147,13 +147,13 @@ public static class AlertEngine
         if (PieceFilter.ParseGameLevel(a.Condition, pack) is { } game)
         {
             // Reads nothing about a piece: one match for the whole game; the side's unit filter does not apply.
-            var one = PieceFilter.EvaluateGameLevel(game, s, pack)
+            var one = PieceFilter.EvaluateGameLevel(game, s, pack, model)
                 ? new List<AlertMatch> { new(null, HolderDef.GlobalId, Decisions.WithoutUnit(msg) is { Length: > 0 } txt ? txt : a.Name) }
                 : new List<AlertMatch>();
             return new AlertHit(a.Id, a.Name, a.Severity, msg.Contains(Token) ? a.Name : msg, one, a.Notes);
         }
-        var inSide = PieceFilter.Compile(sideFilter, s, pack);
-        var cond = PieceFilter.Compile(a.Condition, s, pack);
+        var inSide = PieceFilter.Compile(sideFilter, s, pack, model);
+        var cond = PieceFilter.Compile(a.Condition, s, pack, model);
         var matches = new List<AlertMatch>();
         foreach (var p in s.Pieces.Values)
         {

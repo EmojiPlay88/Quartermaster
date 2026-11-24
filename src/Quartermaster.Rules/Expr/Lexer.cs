@@ -12,6 +12,9 @@ internal readonly record struct Token(TokKind Kind, string Text, int Start, int 
 
 internal static class Lexer
 {
+    /// <summary>A text literal as the formula language writes it: in double quotes, with \ and " escaped (reads back as the same text).</summary>
+    public static string Quote(string text) => "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+
     public static List<Token> Tokenize(string s)
     {
         var toks = new List<Token>();

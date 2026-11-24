@@ -1,6 +1,7 @@
 using Quartermaster.Core;
 using Quartermaster.Rules;
 using Quartermaster.Rules.Expr;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Render;
 
@@ -35,7 +36,7 @@ public static class AlertEdit
         pack with { Alerts = pack.Alerts.Select(a => a.Id == id ? edit(a) : a).ToList() };
 
     /// <summary>"N matches now" for one alert's condition against the open game; the parser's message when it does not parse. Never throws.</summary>
-    public static string MatchStatus(AlertDef alert, GameState? state, RulesPack pack)
+    public static string MatchStatus(AlertDef alert, GameState? state, RulesPack pack, ModuleModel? model = null)
     {
         try
         {
@@ -51,11 +52,11 @@ public static class AlertEdit
             }
             int n;
             if (ExprFacts.IsGameLevel(Parser.Parse(alert.Condition), pack))
-                n = PieceFilter.EvaluateGameLevel(alert.Condition, state, pack) ? 1 : 0;   // shows once (Alerts): one match for the game
+                n = PieceFilter.EvaluateGameLevel(alert.Condition, state, pack, model) ? 1 : 0;   // shows once (Alerts): one match for the game
             else
             {
-                var inSide = PieceFilter.Compile(sideFilter, state, pack);
-                var cond = PieceFilter.Compile(alert.Condition, state, pack);
+                var inSide = PieceFilter.Compile(sideFilter, state, pack, model);
+                var cond = PieceFilter.Compile(alert.Condition, state, pack, model);
                 n = state.Pieces.Values.Count(p => inSide(p) && cond(p));
             }
             return n == 1 ? "1 match now" : n + " matches now";

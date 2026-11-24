@@ -28,7 +28,7 @@ public static class WorkingLine
         switch (e)
         {
             case NumberLit n: sb.Append(Value.FormatNumber(n.Value)); break;
-            case TextLit t: sb.Append('"').Append(t.Value).Append('"'); break;
+            case TextLit t: sb.Append(Lexer.Quote(t.Value)); break;
             case BoolLit b: sb.Append(b.Value ? "true" : "false"); break;
             case VarRef v:
             {
@@ -60,6 +60,15 @@ public static class WorkingLine
                 {
                     sb.Append(", ");
                     Write(c.Args[i], src, values, sb);
+                }
+                sb.Append(')');
+                break;
+            case Call c when ExprFacts.IsAggregate(c.Function):
+                sb.Append(c.Function).Append('(');
+                for (int i = 0; i < c.Args.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(c.Args[i] is VarRef pn ? pn.Name : Lexer.Quote(((TextLit)c.Args[i]).Value));
                 }
                 sb.Append(')');
                 break;

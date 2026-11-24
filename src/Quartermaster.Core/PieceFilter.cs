@@ -10,19 +10,41 @@ public static class PieceFilter
 {
     /// <summary>Null or empty matches every piece. Parse and evaluation errors give false.</summary>
     public static bool Matches(string? appliesTo, PieceInstance p, GameState s, ModuleModel model, RulesPack pack) =>
-        Compile(appliesTo, s, pack)(p);
+        Compile(appliesTo, s, pack, model)(p);
 
-    /// <summary>Parses once. Null or empty matches every piece. A parse error, or an evaluation error on a piece, gives false.</summary>
-    public static Func<PieceInstance, bool> Compile(string? expr, GameState s, RulesPack pack)
+    /// <summary>
+    /// Parses once. Null or empty matches every piece. A parse error, or an evaluation error on a piece, gives false. The hex aggregates
+    /// (hexsum() ...) need <paramref name="model"/> for grid locations; without it they are not available (an error, so false).
+    /// </summary>
+    public static Func<PieceInstance, bool> Compile(string? expr, GameState s, RulesPack pack, ModuleModel? model = null)
     {
         if (string.IsNullOrWhiteSpace(expr)) return _ => true;
         var e = TryParse(expr);
         if (e == null) return _ => false;
         var sides = SideMap(s, pack);
+        var filters = new AggregateFilters(s, pack, model);   // shared by every piece this filter is evaluated on
         return p =>
         {
-            try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides)).IsTruthy; }
+            try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides, filters)).IsTruthy; }
             catch (Exception) { return false; }
+        };
+    }
+
+    /// <summary>
+    /// The filter of an aggregate call (sum(P, "filter") ...): like <see cref="Compile"/>, but a parse error (here) or an evaluation error on a piece
+    /// (when matching) is thrown, so the aggregate fails instead of skipping pieces. A missing value (<see cref="EvalError.MissingValue"/>: a
+    /// property not applicable to the piece or hidden, no such marker) is no match, as in any unit filter. Empty matches every piece.
+    /// </summary>
+    internal static Func<PieceInstance, bool> CompileStrict(string text, GameState s, RulesPack pack, ModuleModel? model)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return _ => true;
+        var e = Parser.Parse(text);
+        var sides = SideMap(s, pack);
+        var filters = new AggregateFilters(s, pack, model);
+        return p =>
+        {
+            try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides, filters)).IsTruthy; }
+            catch (EvalError ex) when (ex.MissingValue) { return false; }
         };
     }
 
@@ -35,7 +57,7 @@ public static class PieceFilter
         if (string.IsNullOrWhiteSpace(appliesTo)) return true;
         var e = TryParse(appliesTo);
         if (e == null) return false;
-        try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), pending)).IsTruthy; }
+        try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), new AggregateFilters(s, pack, null), pending)).IsTruthy; }
         catch (Exception) { return false; }
     }
 
@@ -47,16 +69,19 @@ public static class PieceFilter
         return e != null && ExprFacts.IsGameLevel(e, pack) ? e : null;
     }
 
-    /// <summary>Evaluates a game-level expression with no piece: piece functions throw, so an error (or a hidden value in a player view) gives false.</summary>
-    internal static bool EvaluateGameLevel(Quartermaster.Rules.Expr.Expr e, GameState s, RulesPack pack)
+    /// <summary>
+    /// Evaluates a game-level expression with no piece: piece functions throw, so an error (or a hidden value in a player view) gives false.
+    /// <paramref name="model"/> gives grid locations to a hex aggregate inside a whole-game aggregate's filter (countof("hexcount() > 1")).
+    /// </summary>
+    internal static bool EvaluateGameLevel(Quartermaster.Rules.Expr.Expr e, GameState s, RulesPack pack, ModuleModel? model = null)
     {
-        try { return Evaluator.Evaluate(e, new GameContext(s, pack)).IsTruthy; }
+        try { return Evaluator.Evaluate(e, new GameContext(s, pack, model)).IsTruthy; }
         catch (Exception) { return false; }
     }
 
     /// <summary>Parses and evaluates an expression that reads no piece, once. A parse or evaluation error gives false.</summary>
-    public static bool EvaluateGameLevel(string expr, GameState s, RulesPack pack) =>
-        TryParse(expr) is { } e && EvaluateGameLevel(e, s, pack);
+    public static bool EvaluateGameLevel(string expr, GameState s, RulesPack pack, ModuleModel? model = null) =>
+        TryParse(expr) is { } e && EvaluateGameLevel(e, s, pack, model);
 
     private static Quartermaster.Rules.Expr.Expr? TryParse(string text)
     {
@@ -84,7 +109,7 @@ public static class PieceFilter
     internal static Value MarkerValue(PieceInstance? p, string key)
     {
         if (p == null) throw new EvalError("This formula needs a unit");
-        return PieceInfo.Markers(p).TryGetValue(key, out var v) ? Value.Of(v) : throw new EvalError($"No marker '{key}'");
+        return PieceInfo.Markers(p).TryGetValue(key, out var v) ? Value.Of(v) : throw new EvalError($"No marker '{key}'") { MissingValue = true };
     }
 
     internal static Value NameValue(PieceInstance? p) =>
@@ -129,7 +154,7 @@ public static class PieceFilter
         if (v != null) return Value.Of(v.Value);
         if (s.IsPlayerView && Ownership.SideOfHolder(h.Id, pack) is { } side && !s.Ledgers.ContainsKey(key)
             && s.ViewSides?.Contains(side) != true)
-            throw new EvalError($"{def.Name} has no value on {h.Name}");
+            throw new EvalError($"{def.Name} has no value on {h.Name}") { MissingValue = true };
         return Value.Of(def.Default);
     }
 
@@ -155,7 +180,7 @@ public static class PieceFilter
     private sealed class ParsedAppliesTo(Quartermaster.Rules.Expr.Expr? expr) { public Quartermaster.Rules.Expr.Expr? Expr { get; } = expr; }
 
     private sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack, Lazy<Func<PieceInstance, string?>> sides,
-        IReadOnlyDictionary<string, double>? pending = null) : IEvalContext
+        AggregateFilters filters, IReadOnlyDictionary<string, double>? pending = null) : IEvalContext
     {
         private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
         private readonly Dictionary<string, bool> _declared = new(StringComparer.Ordinal);
@@ -171,7 +196,7 @@ public static class PieceFilter
             var v = Stored(def);
             if (v != null) return Value.Of(v.Value);
             if (!HiddenInView(def) && Declared(def)) return Value.Of(def.Default);
-            throw new EvalError($"{name} has no value on this piece");
+            throw new EvalError($"{name} has no value on this piece") { MissingValue = true };
         }
 
         /// <summary>
@@ -215,11 +240,15 @@ public static class PieceFilter
         public Value PhaseSide() => PhaseSideValue(pack, Sequencer.Current(pack, s));
         public Value MapName() => MapValue(p);
         public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property);
+        public Value Aggregate(string fn, string? property, string? filter) =>
+            PieceAggregates.Evaluate(fn, property, filter, p, filters);
     }
 
     /// <summary>The context of an expression read once for the whole game: globals, holder(), turn, stage and phaseside; nothing of a piece.</summary>
-    private sealed class GameContext(GameState s, RulesPack pack) : IEvalContext
+    private sealed class GameContext(GameState s, RulesPack pack, ModuleModel? model) : IEvalContext
     {
+        private AggregateFilters? _filters;
+
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
@@ -239,5 +268,7 @@ public static class PieceFilter
         public Value PhaseSide() => PhaseSideValue(pack, Sequencer.Current(pack, s));
         public Value MapName() => MapValue(null);
         public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property);
+        public Value Aggregate(string fn, string? property, string? filter) =>
+            PieceAggregates.Evaluate(fn, property, filter, null, _filters ??= new(s, pack, model));
     }
 }

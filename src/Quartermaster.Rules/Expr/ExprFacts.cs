@@ -37,6 +37,53 @@ public static class ExprFacts
         }
     }
 
+    private static readonly HashSet<string> WholeGameAggregates = new() { "sum", "countof", "maxof", "minof" };
+    private static readonly HashSet<string> HexAggregates = new() { "hexsum", "hexcount", "hexmax", "hexmin" };
+
+    /// <summary>True for the piece-sum functions: sum, countof, maxof, minof and the hex* ones (lower-case name).</summary>
+    public static bool IsAggregate(string function) => WholeGameAggregates.Contains(function) || HexAggregates.Contains(function);
+
+    /// <summary>True for the aggregates over this piece's hex (hexsum, hexcount, hexmax, hexmin): they need a piece being evaluated.</summary>
+    public static bool IsHexAggregate(string function) => HexAggregates.Contains(function);
+
+    /// <summary>
+    /// The property name (bare first argument, none for countof/hexcount) and the filter text (the text literal argument, null when omitted)
+    /// of an aggregate call. The parser guarantees these shapes; for a hand-built call a misplaced argument reads as absent.
+    /// </summary>
+    public static (string? Property, string? Filter) AggregateArgs(Call c) =>
+        (c.Args.Count > 0 ? (c.Args[0] as VarRef)?.Name : null, c.Args.OfType<TextLit>().FirstOrDefault()?.Value);
+
+    /// <summary>
+    /// Every aggregate call (see <see cref="IsAggregate"/>) in the expression, in text order, as (function, property, filter) from
+    /// <see cref="AggregateArgs"/>. Aggregates nested in another call's arguments are found too; a filter's text is not parsed.
+    /// </summary>
+    public static List<(string Function, string? Property, string? Filter)> AggregateReads(AstExpr e)
+    {
+        var found = new List<(string, string?, string?)>();
+        Walk(e);
+        return found;
+
+        void Walk(AstExpr x)
+        {
+            switch (x)
+            {
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (IsAggregate(c.Function))
+                    {
+                        var (property, filter) = AggregateArgs(c);
+                        found.Add((c.Function, property, filter));
+                    }
+                    foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>True for the aggregates that count pieces (countof, hexcount) rather than read a property.</summary>
+    public static bool IsCountAggregate(string function) => function is "countof" or "hexcount";
+
     /// <summary>True when the expression calls the named function anywhere.</summary>
     public static bool CallsFunction(AstExpr e, string function) => e switch
     {
@@ -57,6 +104,8 @@ public static class ExprFacts
             case Binary b: return Check(b.Left, pack) && Check(b.Right, pack);
             case Call c:
                 if (c.Function is "name" or "marker" or "has" or "side" or "map") return false;
+                if (IsHexAggregate(c.Function)) return false;
+                if (IsAggregate(c.Function)) return true;   // the property and filter are read per piece, whatever they name
                 int skip = c.Function is "lookup" or "lookuprange" ? 1 : c.Function == "holder" ? 2 : 0;
                 for (int i = skip; i < c.Args.Count; i++)
                     if (!Check(c.Args[i], pack)) return false;

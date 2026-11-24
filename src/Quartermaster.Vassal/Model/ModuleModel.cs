@@ -8,10 +8,12 @@ public sealed class ModuleModel
 
     internal ModuleModel(string name, string version, string vassalVersion, IReadOnlyList<MapDef> maps, IReadOnlyList<PieceSlotDef> slots,
         IReadOnlyDictionary<string, PieceType> prototypes, IReadOnlyList<ChartDef> charts, IReadOnlyList<DocumentDef> documents,
-        IReadOnlyList<SetupDef> setups, IReadOnlyList<DieDef> dice, IReadOnlyList<string> sides, WindowTreeNode tree, PrototypeExpander expander)
+        IReadOnlyList<SetupDef> setups, IReadOnlyList<DieDef> dice, IReadOnlyList<string> sides, WindowTreeNode tree, PrototypeExpander expander,
+        IReadOnlyList<string>? setupPieceTypes = null, bool setupsUnreadable = false)
     {
         Name = name; Version = version; VassalVersion = vassalVersion; Maps = maps; Slots = slots; Prototypes = prototypes;
         Charts = charts; Documents = documents; Setups = setups; Dice = dice; Sides = sides; Tree = tree; Expander = expander;
+        SetupPieceTypes = setupPieceTypes ?? Array.Empty<string>(); SetupsUnreadable = setupsUnreadable;
         foreach (var s in slots) Index(s);
         foreach (var s in maps.SelectMany(m => m.SetupStacks).SelectMany(st => st.Pieces)) Index(s);
     }
@@ -36,6 +38,10 @@ public sealed class ModuleModel
     public IReadOnlyList<string> Sides { get; }
     public WindowTreeNode Tree { get; }
     public PrototypeExpander Expander { get; }
+    /// <summary>Distinct type strings of the pieces the module's predefined setup saves (.vsav) add, in first-seen order.</summary>
+    public IReadOnlyList<string> SetupPieceTypes { get; }
+    /// <summary>True when a predefined setup's save file is missing or could not be read (its piece types are unknown).</summary>
+    public bool SetupsUnreadable { get; }
 
     /// <summary>Slot by gpid; palette slots win over setup-stack pieces.</summary>
     public PieceSlotDef? SlotByGpid(string gpid) => gpid != null && _byGpid.TryGetValue(gpid, out var s) ? s : null;

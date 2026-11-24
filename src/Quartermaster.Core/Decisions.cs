@@ -1,5 +1,6 @@
 using Quartermaster.Rules;
 using Quartermaster.Rules.Expr;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Core;
 
@@ -38,12 +39,13 @@ public static class Decisions
         return rest.Replace(Token, "").Trim();
     }
 
-    public static IReadOnlyList<WarningHit> Warnings(RulesPack pack, GameState s, PhaseDef phase)
+    /// <param name="model">For grid locations, so a condition can use the hex aggregates (hexsum() ...); without it they are not available.</param>
+    public static IReadOnlyList<WarningHit> Warnings(RulesPack pack, GameState s, PhaseDef phase, ModuleModel? model = null)
     {
         var res = new List<WarningHit>();
         var warnings = phase.Warnings ?? new();
         if (warnings.Count == 0) return res;
-        var units = Sequencer.UnitsFor(pack, s, phase, null, null);
+        var units = Sequencer.UnitsFor(pack, s, phase, null, null, model);
         for (var i = 0; i < warnings.Count; i++)
         {
             var w = warnings[i];
@@ -52,11 +54,11 @@ public static class Decisions
             if (PieceFilter.ParseGameLevel(w.Condition, pack) is { } game)
             {
                 // Reads nothing about a piece: true or false once, never once per unit.
-                if (PieceFilter.EvaluateGameLevel(game, s, pack))
+                if (PieceFilter.EvaluateGameLevel(game, s, pack, model))
                     res.Add(new WarningHit(i, msg, Array.Empty<string>(), new[] { WithoutUnit(msg) is { Length: > 0 } txt ? txt : w.Condition!.Trim() }, w.IsDecision, s.Acknowledged?.Contains(i) == true));
                 continue;
             }
-            var match = PieceFilter.Compile(w.Condition, s, pack);
+            var match = PieceFilter.Compile(w.Condition, s, pack, model);
             var ids = new List<string>();
             var texts = new List<string>();
             foreach (var p in units)
@@ -72,7 +74,7 @@ public static class Decisions
         return res;
     }
 
-    public static IReadOnlyList<Decision> Compute(RulesPack pack, GameState s)
+    public static IReadOnlyList<Decision> Compute(RulesPack pack, GameState s, ModuleModel? model = null)
     {
         var res = new List<Decision>();
         var phase = Sequencer.Current(pack, s);
@@ -96,7 +98,7 @@ public static class Decisions
             res.Add(new Decision(DecisionKind.Pending, text, -1, r.Id, ids));
         }
 
-        foreach (var w in Warnings(pack, s, phase))
+        foreach (var w in Warnings(pack, s, phase, model))
         {
             if (!w.IsDecision || w.Acknowledged) continue;
             var n = w.PieceIds.Count;

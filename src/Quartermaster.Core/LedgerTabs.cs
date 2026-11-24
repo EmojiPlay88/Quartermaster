@@ -71,7 +71,7 @@ public static class LedgerTabs
 
         var baseRows = LedgerTable.Rows(view, p, m, "", includeEmpty);
         var sideOf = Ownership.PieceSides(view, p);
-        Func<PieceInstance, bool> userFilter = tab.Kind == LedgerTabKind.User ? PieceFilter.Compile(tab.User?.Filter, view, p) : _ => true;
+        Func<PieceInstance, bool> userFilter = tab.Kind == LedgerTabKind.User ? PieceFilter.Compile(tab.User?.Filter, view, p, m) : _ => true;
 
         var holders = new List<LedgerRowEx>();
         var units = new List<LedgerRowEx>();
@@ -179,6 +179,14 @@ public static class LedgerTabs
                 return c.Args.Skip(1).Select(a => UnknownProperty(a, pack)).FirstOrDefault(x => x != null);
             case Call { Function: "holder" }:
                 return null;
+            case Call c when ExprFacts.IsAggregate(c.Function):
+            {
+                // The property name is read as has() reads it; the filter text is its own expression, checked the same way.
+                var (property, filter) = ExprFacts.AggregateArgs(c);
+                if (property != null && !Known(property)) return property;
+                try { return string.IsNullOrWhiteSpace(filter) ? null : UnknownProperty(Parser.Parse(filter), pack); }
+                catch (ParseError) { return null; }
+            }
             case Call c:
                 return c.Args.Select(a => UnknownProperty(a, pack)).FirstOrDefault(x => x != null);
             default: return null;

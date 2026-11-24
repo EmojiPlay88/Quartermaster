@@ -150,16 +150,16 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var st = s.Game!.State;
         if (Resolved(out _) is not { } pos)
         {
-            var first = PhaseConditions.First(pack, st);
-            var willSkip0 = WillSkip(pack, st, first, 1);
+            var first = PhaseConditions.First(pack, st, s.Model);
+            var willSkip0 = WillSkip(pack, st, s.Model, first, 1);
             var chips0 = pack.Phases.Select(p => Chip(p, willSkip0.Contains(p.Id) ? ChipState.WillSkip : ChipState.Upcoming)).ToList();
             var firstName = first == null ? pack.Phases[0].Name : pack.Phases.ElementAtOrDefault(first.To.PhaseIndex)?.Name;
             return new PhaseView(false, true, 1, null, null, chips0, null, firstName, none, Array.Empty<WarningHit>(), Notice);
         }
         var cur = pack.Phases[pos.PhaseIndex];
-        var next = PhaseConditions.Next(pack, st, pos);
+        var next = PhaseConditions.Next(pack, st, pos, s.Model);
         var skippedBefore = SkippedBefore(pack, st, pos);
-        var willSkip = WillSkip(pack, st, next, pos.Turn);
+        var willSkip = WillSkip(pack, st, s.Model, next, pos.Turn);
         var chips = pack.Phases.Select((p, i) => Chip(p,
             i < pos.PhaseIndex ? (skippedBefore.Contains(p.Id) ? ChipState.Skipped : ChipState.Done)
             : i == pos.PhaseIndex ? ChipState.Current
@@ -172,7 +172,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
         var seen = s.View ?? st;   // decisions and warnings over what this player may see
         return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
-            Decisions.Compute(pack, seen), Decisions.Warnings(pack, seen, cur), Notice);
+            Decisions.Compute(pack, seen, s.Model), Decisions.Warnings(pack, seen, cur, s.Model), Notice);
     }
 
     private const string SkippedTip = "Skipped this pass (condition false)";
@@ -210,7 +210,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// Ids of the phases a walk from <paramref name="step"/> to the end of turn <paramref name="turn"/> skips and never reaches. A preview
     /// only: it evaluates conditions against the current state and applies nothing. Empty when the walk hits the loop guard.
     /// </summary>
-    private static HashSet<string> WillSkip(RulesPack pack, GameState st, PhaseStep? step, int turn)
+    private static HashSet<string> WillSkip(RulesPack pack, GameState st, ModuleModel? model, PhaseStep? step, int turn)
     {
         var skipped = new HashSet<string>();
         var reached = new HashSet<string>();
@@ -221,7 +221,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 if (k.Turn == turn) skipped.Add(k.PhaseId);
             if (step.To.Turn != turn) break;
             reached.Add(step.To.PhaseId);
-            var n = PhaseConditions.Next(pack, st, step.To);
+            var n = PhaseConditions.Next(pack, st, step.To, model);
             if (n == null || n.To == step.To) break;
             step = n;
         }
@@ -245,7 +245,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         if (!HasPhases || s.Game!.State.Position != null) return;
         var pack = s.Rules!;
-        var step = PhaseConditions.First(pack, s.Game.State);
+        var step = PhaseConditions.First(pack, s.Game.State, s.Model);
         if (step == null) return;
         var to = pack.Phases[step.To.PhaseIndex];
         var startNotice = Join(SkippedText(step), step.Notice);
@@ -291,7 +291,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             {
                 // Conditions are evaluated here, against the state before the step (after any end entries); the command records the
                 // outcome (replay never re-evaluates).
-                var step = PhaseConditions.Next(pack, s.Game.State, cur);
+                var step = PhaseConditions.Next(pack, s.Game.State, cur, s.Model);
                 if (step == null) return null;
                 var to = pack.Phases[step.To.PhaseIndex];
                 SetNotice(relocated);
@@ -409,7 +409,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             if (BadFilter(phase, f, e.UnitFilter)) continue;
             var units = e.ForEach == ForEachMode.Once
                 ? new List<Unit> { new(null, f.Name, null) }
-                : Sequencer.UnitsFor(pack, s.Game.State, phase, f, e.UnitFilter).Select(p => new Unit(p.Id, PieceInfo.Name(p), null)).ToList();
+                : Sequencer.UnitsFor(pack, s.Game.State, phase, f, e.UnitFilter, s.Model).Select(p => new Unit(p.Id, PieceInfo.Name(p), null)).ToList();
             Apply(f, trigger, units, queued);
         }
         return queued;
@@ -449,7 +449,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             var f = FindFormula(phase, e.FormulaId);
             if (f == null) continue;
             if (BadFilter(phase, f, e.UnitFilter)) continue;
-            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e).Where(p => records.ContainsKey(p.Id)).ToList();
+            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model).Where(p => records.ContainsKey(p.Id)).ToList();
             if (!bySide || e.FiresFor == MoveSide.Acting)
             {
                 Apply(f, "move", MovedUnits(moved, records, distances), queued);

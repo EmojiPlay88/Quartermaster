@@ -61,34 +61,77 @@ public static class FormulaVariables
     }
 
     /// <summary>
-    /// Every holder(H, P) call (see <see cref="ExprFacts.HolderReads"/>) in the formula text, the precondition, every output's value and pick-by expression, every binding's auto value
-    /// and "Only when" condition and dice count expression and every Table binding's row/column expression, used or not. Expressions that do not parse are skipped (they never run).
+    /// The formula text, the precondition, every output's value and pick-by expression, every binding's auto value and "Only when" condition
+    /// and dice count expression and every Table binding's row/column expression, used or not: every expression a run may evaluate.
     /// </summary>
-    public static List<(string? Holder, string? Property)> HolderReads(FormulaDef f)
+    private static IEnumerable<string?> ExpressionSources(FormulaDef? f)
     {
-        var found = new List<(string?, string?)>();
-        void Add(string? src)
-        {
-            if (string.IsNullOrWhiteSpace(src)) return;
-            try { found.AddRange(ExprFacts.HolderReads(Parser.Parse(src))); }
-            catch (ParseError) { }
-        }
-        Add(f?.Text);
-        Add(f?.Precondition);
+        yield return f?.Text;
+        yield return f?.Precondition;
         foreach (var o in f?.Outputs ?? new List<FormulaOutput>())
         {
             if (o == null) continue;
-            Add(o.Expr);
-            if (o.PropertyChoice is { Count: > 0 }) Add(o.PropertySelect);   // only a list uses its selector, as OutputSources
+            yield return o.Expr;
+            if (o.PropertyChoice is { Count: > 0 }) yield return o.PropertySelect;   // only a list uses its selector, as OutputSources
         }
         foreach (var b in f?.Bindings ?? new List<VariableBinding>())
         {
             if (b == null) continue;
-            Add(b.AutoValue);
-            Add(b.When);
-            Add(b.DiceCountExpr);
-            if (b.Kind == BindingKind.Table) { Add(b.RowExpr); Add(b.ColExpr); }
+            yield return b.AutoValue;
+            yield return b.When;
+            yield return b.DiceCountExpr;
+            if (b.Kind == BindingKind.Table) { yield return b.RowExpr; yield return b.ColExpr; }
+        }
+    }
+
+    /// <summary>Collects <paramref name="facts"/> over every parsing expression of the formula (<see cref="ExpressionSources"/>); those that do not parse are skipped (they never run).</summary>
+    private static List<T> Collect<T>(FormulaDef? f, Func<Quartermaster.Rules.Expr.Expr, List<T>> facts)
+    {
+        var found = new List<T>();
+        foreach (var src in ExpressionSources(f))
+        {
+            if (string.IsNullOrWhiteSpace(src)) continue;
+            try { found.AddRange(facts(Parser.Parse(src))); }
+            catch (ParseError) { }
         }
         return found;
+    }
+
+    /// <summary>
+    /// Every holder(H, P) call (see <see cref="ExprFacts.HolderReads"/>) in the formula text, the precondition, every output's value and pick-by expression, every binding's auto value
+    /// and "Only when" condition and dice count expression and every Table binding's row/column expression, used or not. Expressions that do not parse are skipped (they never run).
+    /// </summary>
+    public static List<(string? Holder, string? Property)> HolderReads(FormulaDef f) => Collect(f, ExprFacts.HolderReads);
+
+    /// <summary>
+    /// Every piece aggregate call (see <see cref="ExprFacts.AggregateReads"/>) as (function, property, filter), from the same expressions as
+    /// <see cref="HolderReads(FormulaDef)"/>. Expressions that do not parse are skipped (they never run).
+    /// </summary>
+    public static List<(string Function, string? Property, string? Filter)> AggregateReads(FormulaDef f) => Collect(f, ExprFacts.AggregateReads);
+
+    /// <summary>
+    /// True when an aggregate in the formula may read data a viewer who does not hold every side cannot see (see <see cref="AggregateCallHidden"/>).
+    /// Depends on the pack and <paramref name="piecesMayHide"/> alone, so the host and a guest agree.
+    /// </summary>
+    public static bool AggregateReadsHidden(RulesPack pack, FormulaDef f, bool piecesMayHide) =>
+        AggregateReads(f).Any(r => AggregateCallHidden(pack, r.Function, r.Property, r.Filter, piecesMayHide));
+
+    /// <summary>
+    /// True when one aggregate call may read data a viewer who does not hold every side cannot see (aggregates read every piece, hidden or not):
+    /// any aggregate when <paramref name="piecesMayHide"/> (the viewer's view may lack pieces or their values: a map owned by a side it does not
+    /// hold, a Hideable or Obscurable trait), any count (countof, hexcount), an aggregate over a property that is not Public (or unknown), or
+    /// one whose filter reads a property that is not Public, calls holder() or another aggregate, or does not parse. Otherwise (a Public
+    /// property, with no filter, "", or a filter over Public properties and piece facts) it is not hidden.
+    /// </summary>
+    public static bool AggregateCallHidden(RulesPack pack, string function, string? property, string? filter, bool piecesMayHide)
+    {
+        if (piecesMayHide || ExprFacts.IsCountAggregate(function)) return true;
+        if (property == null || pack.PropertyByName(property)?.Visibility != Visibility.Public) return true;
+        if (string.IsNullOrWhiteSpace(filter)) return false;   // "" matches every piece
+        Quartermaster.Rules.Expr.Expr e;
+        try { e = Parser.Parse(filter); }
+        catch (ParseError) { return true; }   // fail closed
+        return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
+            || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && p.Visibility != Visibility.Public);
     }
 }
