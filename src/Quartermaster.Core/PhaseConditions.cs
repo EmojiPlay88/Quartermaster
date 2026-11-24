@@ -61,6 +61,10 @@ public static class PhaseConditions
         return new PhaseStep(start, Array.Empty<SkippedPhase>(), GuardNotice);
     }
 
+    /// <summary>The phase of a position: by id, else by index; null when neither exists.</summary>
+    internal static PhaseDef? PhaseAt(RulesPack pack, PhasePosition at) =>
+        pack.Phases.FirstOrDefault(p => p.Id == at.PhaseId) ?? (at.PhaseIndex >= 0 && at.PhaseIndex < pack.Phases.Count ? pack.Phases[at.PhaseIndex] : null);
+
     /// <summary>How many positions one turn has: each phase once, times its block's count.</summary>
     private static int TurnLength(RulesPack pack)
     {
@@ -78,13 +82,14 @@ public static class PhaseConditions
     private sealed class PhaseContext(RulesPack pack, GameState s, PhasePosition at, ModuleModel? model) : IEvalContext
     {
         private AggregateFilters? _filters;
-        private AggregateFilters Filters => _filters ??= new(s, pack, model);
+        /// <summary>Carries the candidate position, so a computed global read here sees its turn, stage and phase side.</summary>
+        private AggregateFilters Filters => _filters ??= new(s, pack, model) { At = at };
 
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
             if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{name} is not a global property");
-            return Value.Of(PropertyValues.GetOrDefault(s, pack, model, LedgerKey.Holder(HolderDef.GlobalId), def, Filters));
+            return Value.Of(PropertyValues.GetOrDefault(s, pack, model, LedgerKey.Holder(HolderDef.GlobalId), def, PropertyFacts.IsComputed(def) ? Filters : null));
         }
 
         public Value Lookup(string tableName, Value row, Value? col) => PieceFilter.LookupTable(pack, tableName, row, col);
@@ -95,9 +100,7 @@ public static class PhaseConditions
         public Value Marker(string key) => throw new EvalError("marker() is not available in a phase condition");
         public double Turn() => at.Turn;
         public double Stage() => at.Repeat;
-        public Value PhaseSide() =>
-            PieceFilter.PhaseSideValue(pack, pack.Phases.FirstOrDefault(p => p.Id == at.PhaseId)
-                ?? (at.PhaseIndex >= 0 && at.PhaseIndex < pack.Phases.Count ? pack.Phases[at.PhaseIndex] : null));
+        public Value PhaseSide() => PieceFilter.PhaseSideValue(pack, PhaseAt(pack, at));
         /// <summary>Whole-game aggregates only: there is no piece, so the hex ones are not available (inside a filter they are, given the model).</summary>
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, null, Filters);

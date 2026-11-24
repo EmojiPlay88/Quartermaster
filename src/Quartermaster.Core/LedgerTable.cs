@@ -26,6 +26,7 @@ public static class LedgerTable
     public static IReadOnlyList<LedgerRow> Rows(GameState s, RulesPack p, ModuleModel m, string filter, bool includeEmpty = false)
     {
         var cols = Columns(p);
+        AggregateFilters? filters = null;   // shared by every computed cell of this call
         LedgerRow Make(string key, string name, string kind)
         {
             var vals = new double?[cols.Count];
@@ -33,7 +34,7 @@ public static class LedgerTable
             for (var i = 0; i < cols.Count; i++)
             {
                 if (!PropertyFacts.IsComputed(cols[i])) { vals[i] = Ledger.Get(s, key, cols[i].Id); continue; }
-                try { vals[i] = PropertyValues.Get(s, p, m, key, cols[i]); }
+                try { vals[i] = PropertyValues.Get(s, p, m, key, cols[i], filters ??= new(s, p, m)); }
                 catch (EvalError ex) { (errors ??= new())[i] = ex.Message; }
             }
             return new LedgerRow(key, name, kind, vals, errors);

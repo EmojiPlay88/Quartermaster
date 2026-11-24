@@ -23,6 +23,12 @@ public static class PropertyValues
     /// <summary>Marks an error already named after the computed property that raised it, so the properties reading it do not rename it.</summary>
     private const string NamedKey = "Quartermaster.ComputedProperty";
 
+    /// <summary>Marks the error of a cycle (or nesting too deep): an applies-to check reports it rather than reading it as "does not apply".</summary>
+    private const string CycleKey = "Quartermaster.ComputedCycle";
+
+    /// <summary>True for the "{name} is computed from itself" error.</summary>
+    internal static bool IsCycle(Exception ex) => ex.Data.Contains(CycleKey);
+
     /// <summary>Parsed expression per property record (records are replaced on edit, so this never goes stale).</summary>
     private static readonly ConditionalWeakTable<PropertyDef, ParsedExpr> ExprCache = new();
 
@@ -48,12 +54,14 @@ public static class PropertyValues
     public static double GetOrDefault(GameState s, RulesPack pack, ModuleModel? model, string key, PropertyDef def) => GetOrDefault(s, pack, model, key, def, null);
 
     /// <param name="filters">The caller's aggregate state (same game state), so an aggregate in the expression reuses its compiled filters.</param>
-    internal static double? Get(GameState s, RulesPack pack, ModuleModel? model, string key, PropertyDef def, AggregateFilters? filters) =>
-        PropertyFacts.IsComputed(def) ? Computed(s, pack, model, key, def, filters) : Ledger.Get(s, key, def.Id);
+    /// <param name="pending">Values about to be seeded on the piece, read as if stored (seeding's applies-to checks).</param>
+    internal static double? Get(GameState s, RulesPack pack, ModuleModel? model, string key, PropertyDef def, AggregateFilters? filters,
+        IReadOnlyDictionary<string, double>? pending = null) =>
+        PropertyFacts.IsComputed(def) ? Computed(s, pack, model, key, def, filters, pending) : Ledger.Get(s, key, def.Id);
 
     internal static double GetOrDefault(GameState s, RulesPack pack, ModuleModel? model, string key, PropertyDef def, AggregateFilters? filters) =>
         !PropertyFacts.IsComputed(def) ? Ledger.GetOrDefault(s, key, def)
-        : Computed(s, pack, model, key, def, filters) ?? throw new EvalError($"{def.Name} has no value on this piece") { MissingValue = true };
+        : Computed(s, pack, model, key, def, filters, null) ?? throw new EvalError($"{def.Name} has no value on this piece") { MissingValue = true };
 
     /// <summary>
     /// True when a computed property applies to the piece (its scope holds pieces and its applies-to is empty or matches): what has() reads,
@@ -62,14 +70,20 @@ public static class PropertyValues
     internal static bool AppliesTo(GameState s, RulesPack pack, ModuleModel? model, PieceInstance p, PropertyDef def) =>
         def.Scope != PropertyScope.Holders && PieceFilter.PieceContext(p, s, pack, filters: new AggregateFilters(s, pack, model)).Declared(def);
 
-    private static double? Computed(GameState s, RulesPack pack, ModuleModel? model, string key, PropertyDef def, AggregateFilters? filters)
+    private static double? Computed(GameState s, RulesPack pack, ModuleModel? model, string key, PropertyDef def, AggregateFilters? filters,
+        IReadOnlyDictionary<string, double>? pending)
     {
         if (!LedgerKey.TryParse(key, out var isPiece, out var id)) return null;
         PieceInstance? piece = null;
         if (isPiece ? def.Scope == PropertyScope.Holders || !s.Pieces.TryGetValue(id, out piece) : def.Scope == PropertyScope.Pieces) return null;
 
         var active = _active ??= new();
-        if (_depth >= MaxDepth || !active.Add((key, def.Id))) throw Named(new EvalError($"{def.Name} is computed from itself"));
+        if (_depth >= MaxDepth || !active.Add((key, def.Id)))
+        {
+            var cycle = Named(new EvalError($"{def.Name} is computed from itself"));
+            cycle.Data[CycleKey] = true;
+            throw cycle;
+        }
         _depth++;
         try
         {
@@ -79,7 +93,7 @@ public static class PropertyValues
             Value v;
             if (piece != null)
             {
-                var ctx = PieceFilter.PieceContext(piece, s, pack, filters);
+                var ctx = PieceFilter.PieceContext(piece, s, pack, filters, pending);
                 if (!ctx.Declared(def)) return null;
                 v = Evaluator.Evaluate(parsed.Expr, ctx);
             }

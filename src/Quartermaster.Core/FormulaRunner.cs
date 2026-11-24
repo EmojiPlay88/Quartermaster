@@ -504,7 +504,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public Value Side() => PieceFilter.SideValue(run.Piece, run.Pack, run.Sides);
         public Value PhaseSide() => PieceFilter.PhaseSideValue(run.Pack, Sequencer.Current(run.Pack, run.State));
         public Value MapName() => PieceFilter.MapValue(run.Piece);
-        public Value HolderValue(string holder, string property) => PieceFilter.HolderRead(run.State, run.Pack, holder, property, run.Filters);
+        public Value HolderValue(string holder, string property) => PieceFilter.HolderRead(run.State, run.Pack, holder, property, run.Model, run.Filters);
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, run.Piece, run.Filters);
     }

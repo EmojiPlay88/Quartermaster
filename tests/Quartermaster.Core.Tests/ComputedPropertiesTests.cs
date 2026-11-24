@@ -96,6 +96,12 @@ public class ComputedPropertiesTests
         s.Ledgers[LedgerKey.Holder(HolderDef.GlobalId)]["supply"] = 3;
         Assert.True(PhaseConditions.Runs(pack, s, pack.Phases[0], at, out error, Model));   // Stock 30
         Assert.Null(error);
+
+        // turn() and stage() inside a computed global read the candidate position, as the condition itself does (the game is at turn 1)
+        var timed = Pack(new PropertyDef { Id = "when", Name = "When", Scope = PropertyScope.Holders, Expr = "turn() * 10 + stage()" });
+        var phase = new PhaseDef { Id = "P", Name = "Supply Phase", Condition = "When == 32 and When == turn() * 10 + stage()" };
+        Assert.True(PhaseConditions.Runs(timed, s, phase, new PhasePosition(3, 2, "P", 0), out error, Model));
+        Assert.Null(error);
     }
 
     [Fact]
@@ -126,6 +132,42 @@ public class ComputedPropertiesTests
         var (s, pack) = (State(), Pack());
         Assert.True(PieceFilter.EvaluateGameLevel("sum(Cohesion, \"\") == 10 and maxof(Double, \"\") == 14", s, pack, Model));
         Assert.True(PieceFilter.EvaluateGameLevel("countof(\"Cohesion > 5\") == 1", s, pack, Model));
+
+        // a piece where the computed property does not apply is skipped (Veteran applies to u1 only: Morale 4)
+        var vet = Pack(new PropertyDef { Id = "vet", Name = "Veteran", Scope = PropertyScope.Pieces, Expr = "Strength * 10", AppliesTo = "Morale > 3" });
+        Assert.Equal(30, Agg("sum(Veteran, \"\")", s, vet).Number);
+        Assert.Equal(30, Agg("minof(Veteran, \"\")", s, vet).Number);
+        Assert.Equal(0, Agg("sum(Veteran, \"name() == \\\"Scout\\\"\")", s, vet).Number);
+        var none = Assert.Throws<EvalError>(() => Agg("maxof(Veteran, \"name() == \\\"Scout\\\"\")", s, vet));
+        Assert.Equal("No piece matches \"name() == \"Scout\"\"", none.Message);
+        // an error is still an error
+        s.Ledgers[LedgerKey.Piece("u1")]["mor"] = 0;
+        var ratio = Pack(new PropertyDef { Id = "ratio", Name = "Ratio", Scope = PropertyScope.Pieces, Expr = "Strength / Morale" });
+        Assert.Equal("Ratio: Division by zero", Assert.Throws<EvalError>(() => Agg("sum(Ratio, \"\")", s, ratio)).Message);
+    }
+
+    private static Value Agg(string expr, GameState s, RulesPack pack)
+    {
+        var call = Assert.IsType<Call>(Parser.Parse(expr));
+        var (property, filter) = ExprFacts.AggregateArgs(call);
+        return PieceAggregates.Evaluate(call.Function, property, filter, null, new AggregateFilters(s, pack, Model));
+    }
+
+    [Fact]
+    public void Computed_seeding_applies_to_reads_pending_sheet_values()
+    {
+        var s = new GameState();
+        s.Pieces["u3"] = new PieceInstance
+        {
+            Id = "u3", MapId = "Main Map", Pos = new PointD(60, 40), TraitStates = new() { "3~4~1", "" },
+            TypeString = PieceTypeParser.EncodeState(new[] { "propertysheet;0Strength~0Morale~0Elite;Sheet;", "piece;;;unit.svg;Sheeted" }),
+        };
+        var pack = Pack(new PropertyDef { Id = "elite", Name = "Elite", Scope = PropertyScope.Pieces, SheetField = "Elite", AppliesTo = "Cohesion > 5" });
+        Replace(pack, "str", d => d with { SheetField = "Strength" });
+        Replace(pack, "mor", d => d with { SheetField = "Morale" });
+        // Cohesion from the sheet values is 7 (from the Defaults it would be 3)
+        var seed = LedgerSeeder.BuildSeeds(s, pack, _ => true, Model);
+        Assert.Equal(new[] { ("str", 3.0), ("mor", 4.0), ("elite", 1.0) }, seed!.Seeds.Select(x => (x.PropertyId, x.Value)).ToArray());
     }
 
     [Fact]
@@ -173,8 +215,9 @@ public class ComputedPropertiesTests
         var pack = Pack(
             new PropertyDef { Id = "a", Name = "Alpha", Scope = PropertyScope.Pieces, Expr = "1", AppliesTo = "Beta > 0" },
             new PropertyDef { Id = "b", Name = "Beta", Scope = PropertyScope.Pieces, Expr = "Alpha + 1" });
-        Assert.Null(Get(s, pack, LedgerKey.Piece("u1"), "a"));
-        Assert.Throws<EvalError>(() => Get(s, pack, LedgerKey.Piece("u1"), "b"));
+        // the cycle is reported, not read as "does not apply"
+        Assert.EndsWith("is computed from itself", Assert.Throws<EvalError>(() => Get(s, pack, LedgerKey.Piece("u1"), "a")).Message);
+        Assert.EndsWith("is computed from itself", Assert.Throws<EvalError>(() => Get(s, pack, LedgerKey.Piece("u1"), "b")).Message);
         Assert.False(PieceFilter.Matches("Alpha > 0 or Beta > 0", s.Pieces["u1"], s, Model, pack));
         Assert.False(PieceFilter.Matches("has(Alpha)", s.Pieces["u1"], s, Model, pack));
 
