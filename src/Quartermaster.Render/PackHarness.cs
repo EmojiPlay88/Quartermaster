@@ -110,8 +110,11 @@ public sealed class PackHarness : IDisposable
     /// <summary>Runs waiting for input (every side's, in full).</summary>
     public IReadOnlyList<PendingRun> Pending => _session.Game?.State.Pending ?? (IReadOnlyList<PendingRun>)Array.Empty<PendingRun>();
 
-    /// <summary>The value of a property as the rules read it (computed properties evaluated now); null when there is none.</summary>
-    /// <param name="holderOrPieceName">A holder's name, <c>Global</c> for the global holder, else a unique piece name.</param>
+    /// <summary>
+    /// The effective value of a property. A stored property reads its stored value, or its Default when nothing was written (as the rules
+    /// read it); a computed property is evaluated now and is null when it does not apply.
+    /// </summary>
+    /// <param name="holderOrPieceName">A holder's name or <c>Global</c> for the global holder (both ignore case), else a unique piece name (ordinal: exact case).</param>
     /// <exception cref="InvalidOperationException">No such holder or piece (or the piece name is not unique), or no such property.</exception>
     public double? Value(string holderOrPieceName, string propertyName)
     {
@@ -125,7 +128,8 @@ public sealed class PackHarness : IDisposable
         else throw new InvalidOperationException($"No holder or piece named \"{holderOrPieceName}\"");
         var def = pack.Properties.FirstOrDefault(p => string.Equals(p.Name, propertyName, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"No property named \"{propertyName}\"");
-        return DisplayValues.Get(game.State, pack, _session.Model, key, def);
+        if (PropertyFacts.IsComputed(def)) return DisplayValues.Get(game.State, pack, _session.Model, key, def);
+        return Ledger.Get(game.State, key, def.Id) ?? def.Default;
     }
 
     /// <summary>The full host log (every side's lines, nothing masked).</summary>

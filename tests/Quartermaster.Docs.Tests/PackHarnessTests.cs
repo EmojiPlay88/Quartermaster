@@ -43,6 +43,7 @@ public class PackHarnessTests : IDisposable
         Assert.Equal("5", run.Result);
         Assert.Empty(run.Missing);
         Assert.Equal(5, h.Value("NL 1 Rifles", "Fuel"));
+        Assert.Equal(20, h.Value("North Depot", "Stores"));   // unset: its Default, as the rules read it
         var delivery = h.Run("f-north-delivery", dice: new[] { 4 });   // the depot starts at its default, 20
         Assert.True(delivery.Applied, delivery.Error);
         Assert.Equal(24, h.Value("North Depot", "Stores"));
