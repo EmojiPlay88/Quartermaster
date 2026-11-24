@@ -59,6 +59,8 @@ public static class RulesValidator
             Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": the expression does not parse: {pe}");
             return;
         }
+        foreach (var u in FilterRefProblems(p.Expr!, pack))   // unknown property, table and holder names, as an applies-to is checked
+            Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": {u}");
         if (p.Default != 0 || !string.IsNullOrWhiteSpace(p.SheetField))
             Add(issues, RulesIssueSeverity.Warning, p.Id, p.Name, $"Property \"{p.Name}\" is computed; its Default and Sheet field are ignored");
         if (p.Visibility == Visibility.Public && PropertyFacts.ReadsHidden(pack, p))

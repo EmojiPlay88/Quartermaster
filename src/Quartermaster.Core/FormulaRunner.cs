@@ -444,11 +444,14 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             return (int)v.Number;
         }
 
-        /// <summary>A Unit, Global or Holder binding's value (<see cref="PropertyValues"/>); a computed value that is missing leaves the binding missing.</summary>
+        /// <summary>
+        /// A Unit, Global or Holder binding's value (<see cref="PropertyValues"/>); a computed value that is missing, or that reads data this
+        /// player view cannot see (<see cref="EvalError.HiddenData"/>), leaves the binding missing (the host fills it in).
+        /// </summary>
         private double Read(string key, PropertyDef prop)
         {
             try { return PropertyValues.GetOrDefault(s, owner._pack, owner._model, key, prop, PropertyFacts.IsComputed(prop) ? Filters : null); }
-            catch (EvalError ex) when (ex.MissingValue) { throw new Missing(ex.Message); }
+            catch (EvalError ex) when (ex.MissingValue || ex.HiddenData) { throw new Missing(ex.Message); }
         }
 
         private PropertyDef Prop(VariableBinding b) =>

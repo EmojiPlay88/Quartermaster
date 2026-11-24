@@ -11,10 +11,15 @@ public class AttachedAggregatesTests
 {
     private const string Unit = "piece;;;unit.svg;";
 
-    /// <summary>Main Map, an ordinary "Holding Box" map, and two organisation displays (WidgetMap): "Red Chart" and "Blue Chart".</summary>
+    /// <summary>
+/// Main Map, an ordinary "Holding Box" map, and two organisation displays (WidgetMap): "Red Chart" and "Blue Chart"; the prototype
+/// "Corps HQ" holds only a SendTo to Red Chart.
+/// </summary>
     private static readonly Lazy<ModuleModel> LazyModel = new(() =>
     {
-        var xml = FixtureModule.MinimalBuildFile().Replace("</VASSAL.build.GameModule>",
+        var xml = FixtureModule.MinimalBuildFile().Replace("<VASSAL.build.module.PrototypeDefinition name=\"Proto\">",
+            "<VASSAL.build.module.PrototypeDefinition name=\"Corps HQ\">+/null/" + SendTo("Red Chart") + "/null</VASSAL.build.module.PrototypeDefinition>" +
+            "<VASSAL.build.module.PrototypeDefinition name=\"Proto\">").Replace("</VASSAL.build.GameModule>",
             "<VASSAL.build.module.Map mapName=\"Holding Box\"/>" +
             "<VASSAL.build.module.WidgetMap mapName=\"Red Chart\"/>" +
             "<VASSAL.build.module.WidgetMap mapName=\"Blue Chart\"/></VASSAL.build.GameModule>");
@@ -126,6 +131,24 @@ public class AttachedAggregatesTests
         Assert.Equal(1, Eval("attachedcount()", s, pack, s.Pieces["x"]).Number);   // Blue Chart, not the holding box or Red Chart
         Assert.Equal(50, Eval("attachedsum(Strength)", s, pack, s.Pieces["x"]).Number);
         Assert.Equal("Red Chart", PieceAggregates.FormationDisplay(s.Pieces["hq"], Model)!.Id);
+    }
+
+    [Fact]
+    public void Attached_sendto_from_prototype_expanded_at_creation()
+    {
+        var s = Riverland();
+        var unexpanded = PieceTypeParser.EncodeState(new[] { "prototype;Corps HQ", Unit + "Red Corps HQ" });
+        var (type, state) = PieceFactory.FromTypeAndState(Model, unexpanded, "", "", "Main Map", new PointD(60, 40));
+        var count = PieceTypeParser.Parse(type, new DiagnosticLog(), null).Traits.Count;
+        s.Pieces["phq"] = new PieceInstance
+        {
+            Id = "phq", MapId = "Main Map", Pos = new PointD(60, 40), TypeString = type, TraitStates = PieceTypeParser.SplitState(state, count).ToList(),
+        };
+        Assert.Equal("Red Chart", PieceAggregates.FormationDisplay(s.Pieces["phq"], Model)!.Id);   // the SendTo lives only in the prototype
+        Assert.Equal(3, Eval("attachedcount()", s, Pack(), s.Pieces["phq"]).Number);
+        // FormationDisplay reads the piece's own (already expanded) type: an unexpanded prototype reference is no chart.
+        var raw = new PieceInstance { Id = "raw", MapId = "Main Map", Pos = new PointD(60, 40), TypeString = unexpanded, TraitStates = new() { "", "" } };
+        Assert.Null(PieceAggregates.FormationDisplay(raw, Model));
     }
 
     [Fact]

@@ -70,8 +70,10 @@ public static class PieceAggregates
     }
 
     /// <summary>
-    /// The organisation display of a piece's formation: the map named by its first SendTo trait (prototypes expanded, as
-    /// <see cref="PieceActions"/> sees them) that is an organisation display; null when it has none.
+    /// The organisation display of a piece's formation: the map named by its first SendTo trait that is an organisation display; null when
+    /// it has none. Reads the piece's own type, whose prototypes were expanded when the piece was created (<see cref="PieceFactory.FromTypeAndState"/>
+    /// and <see cref="SaveImporter"/>'s ReadPiece, through the model's Expander), so a SendTo defined only in a prototype counts, as
+    /// <see cref="PieceActions"/> sees it.
     /// </summary>
     public static MapDef? FormationDisplay(PieceInstance p, ModuleModel model)
     {
@@ -114,6 +116,11 @@ internal sealed class AggregateFilters(GameState s, RulesPack pack, ModuleModel?
     public ModuleModel? Model => model;
 
     public Func<string, Func<PieceInstance, bool>> Compile => _compile ??= CompileOnce;
+
+    private Func<PieceInstance, string?>? _sides;
+
+    /// <summary>The side owning a piece (<see cref="Ownership.PieceSides"/>, compiled on first use and then shared); null when none.</summary>
+    public string? SideOf(PieceInstance p) => (_sides ??= Ownership.PieceSides(s, pack))(p);
 
     private Func<PieceInstance, bool> CompileOnce(string text)
     {

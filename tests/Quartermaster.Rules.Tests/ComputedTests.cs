@@ -140,6 +140,19 @@ public class ComputedTests
     }
 
     [Fact]
+    public void Validator_expr_unknown_names()
+    {
+        var pack = Pack(P("Fuel"), P("Reach", "Fuell * 2 + lookup(Nowhere, Fuel) + holder(Depot, Fuel) + sum(Speed, \"Weight > 1\")"));
+        var errors = Issues(pack).Where(i => i.Severity == RulesIssueSeverity.Error && i.EntityId == "idReach").Select(i => i.Message).ToList();
+        Assert.Contains("Property \"Reach\": refers to unknown property \"Fuell\"", errors);
+        Assert.Contains("Property \"Reach\": refers to unknown table \"Nowhere\"", errors);
+        Assert.Contains("Property \"Reach\": refers to unknown holder \"Depot\"", errors);
+        Assert.Contains("Property \"Reach\": sum() names unknown property \"Speed\"", errors);
+        Assert.Contains("Property \"Reach\": the filter of sum() refers to unknown property \"Weight\"", errors);
+        Assert.DoesNotContain(Issues(Pack(P("Fuel"), P("Fine", "Fuel * 2"))), i => i.Severity == RulesIssueSeverity.Error);
+    }
+
+    [Fact]
     public void Validator_cycle_text()
     {
         var errors = Issues(Pack(P("A", "B"), P("B", "A"))).Where(i => i.Severity == RulesIssueSeverity.Error).ToList();

@@ -355,6 +355,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         if (s.Game == null || s.Runner == null) return false;
         if (trace.Error != null || trace.Result == null) return false;   // a failed trace changes nothing and keeps the run pending
+        if (WritesComputed(s.Rules, trace)) return false;   // a computed value is never stored: the whole trace is refused
         // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
         if (runId != null && !IsPending(runId, pieceId, trace.Formula.Id)) return false;
         if (!s.CanActFor(pieceId, ActorSides)) return false;   // hot-seat: only the units of the sides held (or of no side)
@@ -367,6 +368,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }));
         return true;
     }
+
+    /// <summary>True when an output of the trace writes a computed property (a trace built elsewhere, or from a pack edited by hand).</summary>
+    public static bool WritesComputed(RulesPack? pack, FormulaTrace trace) =>
+        (trace.Outputs ?? Array.Empty<OutputPreview>()).Any(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null);
 
     /// <summary>True while the run exists and the unit for this piece is not yet applied.</summary>
     public bool IsPending(string runId, string? pieceId, string? formulaId = null) =>

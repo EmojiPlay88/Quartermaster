@@ -181,6 +181,28 @@ public class ActionPortTests : IDisposable
     }
 
     [Fact]
+    public void ApplyTrace_with_computed_output_writes_nothing()
+    {
+        // A trace whose output names a computed property (built elsewhere, or by a pack edited by hand) is refused whole.
+        var (s, c, h, p) = Open();
+        s.UpdateRules(r => r with
+        {
+            Properties = r.Properties.Append(new PropertyDef { Id = "reach", Name = "Reach", Scope = PropertyScope.Pieces, Expr = "Water + 2" }).ToList(),
+        });
+        var good = s.Runner!.Run(s.Game!.State, new RunRequest("f-water", PhaseFixture.RedOne, new Dictionary<string, string>(),
+            new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()));
+        Assert.Null(good.Error);
+        var bad = good with { Outputs = good.Outputs.Append(new OutputPreview(LedgerKey.Piece(PhaseFixture.RedOne), "reach", "Reach", 12, 99)).ToList() };
+        var history = s.Game.State.LedgerHistory.Count;
+        var water = Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.RedOne), "water");
+        Assert.False(new LocalActions(s, c, h, p).ApplyTrace(null, PhaseFixture.RedOne, bad, false));
+        Assert.Null(Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.RedOne), "reach"));
+        Assert.Equal(water, Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.RedOne), "water"));
+        Assert.Equal(history, s.Game.State.LedgerHistory.Count);
+        Assert.True(new LocalActions(s, c, h, p).ApplyTrace(null, PhaseFixture.RedOne, good, false));   // the same run without it applies
+    }
+
+    [Fact]
     public void LocalActions_Chat_IsLoggedAsChat()
     {
         var (s, c, h, p) = Open();

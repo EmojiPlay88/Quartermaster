@@ -77,6 +77,9 @@ public static class PropertyValues
         PieceInstance? piece = null;
         if (isPiece ? def.Scope == PropertyScope.Holders || !s.Pieces.TryGetValue(id, out piece) : def.Scope == PropertyScope.Pieces) return null;
 
+        filters ??= new AggregateFilters(s, pack, model);
+        if (s.IsPlayerView && !PropertyFacts.IsPublic(pack, def)) HiddenInView(s, pack, def, piece, id, filters);
+
         var active = _active ??= new();
         if (_depth >= MaxDepth || !active.Add((key, def.Id)))
         {
@@ -89,7 +92,6 @@ public static class PropertyValues
         {
             var parsed = ExprCache.GetValue(def, Parse);
             if (parsed.Expr == null) throw new EvalError(parsed.Error!);
-            filters ??= new AggregateFilters(s, pack, model);
             Value v;
             if (piece != null)
             {
@@ -111,6 +113,25 @@ public static class PropertyValues
             _depth--;
             active.Remove((key, def.Id));
         }
+    }
+
+    /// <summary>
+    /// In a player view, a computed property that is not Public has no value where a stored Private value would have been removed
+    /// (<see cref="PlayerView"/>): on the placeholder of a masked piece, on a piece of a side the view was not made for
+    /// (<see cref="GameState.ViewSides"/>), and on a holder owned by such a side (as <see cref="PieceFilter.HolderRead"/>). Evaluating it
+    /// from the view's public inputs would show what the side keeps private. Inside a side's unit filter the side is not known yet: hidden.
+    /// </summary>
+    private static void HiddenInView(GameState s, RulesPack pack, PropertyDef def, PieceInstance? piece, string id, AggregateFilters filters)
+    {
+        if (piece != null)
+        {
+            if (PlayerView.IsPlaceholder(piece) || Ownership.InUnitFilter
+                || (filters.SideOf(piece) is { } side && s.ViewSides?.Contains(side) != true))
+                throw new EvalError($"{def.Name} has no value on this piece") { MissingValue = true };
+            return;
+        }
+        if (Ownership.SideOfHolder(id, pack) is { } owner && s.ViewSides?.Contains(owner) != true)
+            throw new EvalError($"{def.Name} has no value on {pack.ById<HolderDef>(id)?.Name ?? id}") { MissingValue = true };
     }
 
     private static ParsedExpr Parse(PropertyDef def)
