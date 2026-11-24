@@ -133,9 +133,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var outputs = new List<OutputPreview>();
         var parts = new List<string>();
         // Every output is computed (value and property) before the trace is returned, so a failing output writes nothing.
-        foreach (var o in formula.Outputs)
+        for (var oi = 0; oi < formula.Outputs.Count; oi++)
         {
+            var o = formula.Outputs[oi];
             var prop = OutputProperty(o, run);
+            // an old pack edited by hand (the validator not run): a computed value is never written
+            if (PropertyFacts.IsComputed(prop))
+                throw new EvalError($"Formula \"{formula.Name}\": output {oi + 1} writes computed property \"{prop.Name}\"");
             string key;
             switch (o.Target)
             {
@@ -353,13 +357,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 {
                     if (piece == null) throw new Missing("Needs a unit");
                     var prop = Prop(b);
-                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Piece(piece.Id), prop)), true, false, null,
+                    return new(name, Value.Of(Read(LedgerKey.Piece(piece.Id), prop)), true, false, null,
                         $"{prop.Name} of {PieceInfo.Name(piece)}");
                 }
                 case BindingKind.Global:
                 {
                     var prop = Prop(b);
-                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), prop)), true, false, null,
+                    return new(name, Value.Of(Read(LedgerKey.Holder(HolderDef.GlobalId), prop)), true, false, null,
                         $"{prop.Name} (global)");
                 }
                 case BindingKind.Holder:
@@ -368,7 +372,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     if (hid == null || (hid != HolderDef.GlobalId && owner._pack.ById<HolderDef>(hid) == null)) throw new Missing("Unknown holder");
                     var prop = Prop(b);
                     var hname = hid == HolderDef.GlobalId ? "global" : owner._pack.ById<HolderDef>(hid)!.Name;
-                    return new(name, Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(hid), prop)), true, false, null,
+                    return new(name, Value.Of(Read(LedgerKey.Holder(hid), prop)), true, false, null,
                         $"{prop.Name} of {hname}");
                 }
                 case BindingKind.Table:
@@ -440,6 +444,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             return (int)v.Number;
         }
 
+        /// <summary>A Unit, Global or Holder binding's value (<see cref="PropertyValues"/>); a computed value that is missing leaves the binding missing.</summary>
+        private double Read(string key, PropertyDef prop)
+        {
+            try { return PropertyValues.GetOrDefault(s, owner._pack, owner._model, key, prop, PropertyFacts.IsComputed(prop) ? Filters : null); }
+            catch (EvalError ex) when (ex.MissingValue) { throw new Missing(ex.Message); }
+        }
+
         private PropertyDef Prop(VariableBinding b) =>
             (b.Property == null ? null : owner._pack.ById<PropertyDef>(b.Property)) ?? throw new Missing("Unknown property");
 
@@ -485,7 +496,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public Value LookupRange(string table, Value row, Value value) => PieceFilter.LookupRangeTable(run.Pack, table, row, value);
         public IReadOnlyList<int> DiceOf(string variable) => run.DiceOf(variable);
         public IReadOnlyList<int> RollDice(int n, int sides) => run.Roll(n, sides);
-        public bool Has(string property) => PieceFilter.HasProperty(run.State, run.Pack, run.Piece, property);
+        public bool Has(string property) => PieceFilter.HasProperty(run.State, run.Pack, run.Piece, property, run.Model);
         public Value PieceName() => PieceFilter.NameValue(run.Piece);
         public Value Marker(string key) => PieceFilter.MarkerValue(run.Piece, key);
         public double Turn() => run.State.Position?.Turn ?? run.State.Turn.Turn;
@@ -493,7 +504,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public Value Side() => PieceFilter.SideValue(run.Piece, run.Pack, run.Sides);
         public Value PhaseSide() => PieceFilter.PhaseSideValue(run.Pack, Sequencer.Current(run.Pack, run.State));
         public Value MapName() => PieceFilter.MapValue(run.Piece);
-        public Value HolderValue(string holder, string property) => PieceFilter.HolderRead(run.State, run.Pack, holder, property);
+        public Value HolderValue(string holder, string property) => PieceFilter.HolderRead(run.State, run.Pack, holder, property, run.Filters);
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, run.Piece, run.Filters);
     }

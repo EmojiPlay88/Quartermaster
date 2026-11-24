@@ -20,7 +20,7 @@ public static class PieceAggregates
     /// The value of an aggregate call over the state of <paramref name="ctx"/>. <paramref name="self"/> is the piece being evaluated (null where there
     /// is none: the hex ones then throw "{fn}() is not available here", as they do without a module model). "" matches every piece; an error the
     /// filter raises on a piece fails the whole aggregate (no piece is skipped silently). A piece's value is its ledger value of the property,
-    /// else the property's Default (as a Unit binding reads it); a holder-only property is an error. In a player view, a call that may read
+    /// else the property's Default (as a Unit binding reads it; a computed one is evaluated, see <see cref="PropertyValues"/>); a holder-only property is an error. In a player view, a call that may read
     /// data the viewer cannot see (<see cref="FormulaVariables.AggregateCallHidden"/>) is the error "{fn}() reads data this player cannot see":
     /// the view lacks pieces or values, so any answer would be wrong.
     /// </summary>
@@ -49,7 +49,7 @@ public static class PieceAggregates
 
         var def = (property == null ? null : pack.PropertyByName(property)) ?? throw new EvalError($"Unknown property '{property}'");
         if (def.Scope == PropertyScope.Holders) throw new EvalError($"{def.Name} is not a piece property");
-        var values = pieces.Select(p => Ledger.GetOrDefault(s, LedgerKey.Piece(p.Id), def));
+        var values = pieces.Select(p => PropertyValues.GetOrDefault(s, pack, model, LedgerKey.Piece(p.Id), def, ctx));
         switch (fn)
         {
             case "sum" or "hexsum" or "attachedsum":

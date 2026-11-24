@@ -78,12 +78,13 @@ public static class PhaseConditions
     private sealed class PhaseContext(RulesPack pack, GameState s, PhasePosition at, ModuleModel? model) : IEvalContext
     {
         private AggregateFilters? _filters;
+        private AggregateFilters Filters => _filters ??= new(s, pack, model);
 
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
             if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{name} is not a global property");
-            return Value.Of(Ledger.GetOrDefault(s, LedgerKey.Holder(HolderDef.GlobalId), def));
+            return Value.Of(PropertyValues.GetOrDefault(s, pack, model, LedgerKey.Holder(HolderDef.GlobalId), def, Filters));
         }
 
         public Value Lookup(string tableName, Value row, Value? col) => PieceFilter.LookupTable(pack, tableName, row, col);
@@ -99,6 +100,6 @@ public static class PhaseConditions
                 ?? (at.PhaseIndex >= 0 && at.PhaseIndex < pack.Phases.Count ? pack.Phases[at.PhaseIndex] : null));
         /// <summary>Whole-game aggregates only: there is no piece, so the hex ones are not available (inside a filter they are, given the model).</summary>
         public Value Aggregate(string fn, string? property, string? filter) =>
-            PieceAggregates.Evaluate(fn, property, filter, null, _filters ??= new(s, pack, model));
+            PieceAggregates.Evaluate(fn, property, filter, null, Filters);
     }
 }
