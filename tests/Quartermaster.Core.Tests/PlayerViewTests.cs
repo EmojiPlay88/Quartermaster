@@ -284,6 +284,33 @@ public class PlayerViewTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void PlayerView_redacts_public_computed_from_private()
+    {
+        // Range is declared Public but computed from the Private Fuel; Spirit is computed from the Public Morale. Values stored under them
+        // (written before the pack made them computed) follow the effective visibility: Range's is Private.
+        var pack = Pack() with
+        {
+            Properties = Pack().Properties.Concat(new[]
+            {
+                new PropertyDef { Id = "range", Name = "Range", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Fuel * 2" },
+                new PropertyDef { Id = "spirit", Name = "Spirit", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Morale + 1" },
+            }).ToList(),
+        };
+        var s = NewState();
+        Add(s, "r1", "Rifle", "Red");
+        Delta(s, LedgerKey.Piece("r1"), "fuel", 0, 3131);
+        Delta(s, LedgerKey.Piece("r1"), "range", 0, 4242);
+        Delta(s, LedgerKey.Piece("r1"), "spirit", 0, 5353);
+
+        var blue = PlayerView.For(s, pack, Model, Blue);
+        Assert.Null(Ledger.Get(blue, LedgerKey.Piece("r1"), "range"));
+        Assert.DoesNotContain(blue.LedgerHistory, e => e.PropertyId == "range");
+        Assert.DoesNotContain("4242", Json(blue));
+        Assert.Equal(5353, Ledger.Get(blue, LedgerKey.Piece("r1"), "spirit"));
+        Assert.Equal(4242, Ledger.Get(PlayerView.For(s, pack, Model, Red), LedgerKey.Piece("r1"), "range"));
+    }
+
+    [Fact]
     public void StampAndPieceSide_BothMustBeHeld()
     {
         var pack = Pack();

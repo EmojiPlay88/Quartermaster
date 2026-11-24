@@ -44,7 +44,7 @@ public static class InventoryQuery
                     group = Markers(p).TryGetValue(keyName!.Trim(), out var v) ? Or(v) : NoneGroup;
                     break;
                 case InventoryKey.LedgerProperty:
-                    if (Ledger.Get(s, LedgerKey.Piece(p.Id), prop!.Id) is not { } val) continue;
+                    if (DisplayValues.Get(s, pack!, m, LedgerKey.Piece(p.Id), prop!) is not { } val) continue;   // a computed one that fails: no value
                     add = val;
                     group = Or(name);
                     break;

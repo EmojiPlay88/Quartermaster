@@ -125,7 +125,7 @@ sealed class VisibilityTab : UserControl
             _props.Rows.Clear();
             foreach (var p in pack?.Properties ?? new List<PropertyDef>())
             {
-                var i = _props.Rows.Add(p.Name, p.Visibility.ToString());
+                var i = _props.Rows.Add(VisibilityEdit.PropertyLabel(pack!, p), p.Visibility.ToString());
                 _props.Rows[i].Tag = p.Id;
             }
 
@@ -193,6 +193,10 @@ sealed class VisibilityTab : UserControl
         if (_loading || row < 0 || col != 1 || _props.Rows[row].Tag is not string id) return;
         if (!Enum.TryParse<Visibility>(_props.Rows[row].Cells[1].Value as string, out var v)) return;
         Commit(p => VisibilityEdit.SetPropertyVisibility(p, id, v));
+        // A computed property's "(computed from hidden data)" may change with any property's visibility.
+        if (_s.Rules is { } pack)
+            foreach (DataGridViewRow r in _props.Rows)
+                if (r.Tag is string pid && pack.Properties.FirstOrDefault(x => x.Id == pid) is { } def) r.Cells[0].Value = VisibilityEdit.PropertyLabel(pack, def);
     }
 
     void OnOwnerChanged(DataGridView grid, int row, int col, Func<RulesPack, string, string?, RulesPack> set)

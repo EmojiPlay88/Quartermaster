@@ -81,7 +81,7 @@ public static class FormulaMasking
         if ((pack.Sides ?? new List<SideDef>()).All(x => x == null || sides.Contains(x.Id))) return hidden;   // as PlayerView.For
         var access = new PieceAccess(state, pack, model, sides);
         bool PropPrivate(string? prop) =>
-            prop == null || (pack.Properties ?? new List<PropertyDef>()).FirstOrDefault(p => p != null && p.Id == prop)?.Visibility != Visibility.Public;
+            !PropertyFacts.IsPublic(pack, (pack.Properties ?? new List<PropertyDef>()).FirstOrDefault(p => p != null && p.Id == prop));   // computed from hidden data: Private
         bool UnitHidden(string? prop)
         {
             if (pieceId == null) return false;   // a unit-less run has no unit values to read

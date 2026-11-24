@@ -5,6 +5,13 @@ namespace Quartermaster.Render;
 /// <summary>UI-free edits for the workbench Visibility tab. Pure; a no-op returns the same pack instance.</summary>
 public static class VisibilityEdit
 {
+    public const string ComputedFromHiddenSuffix = "  (computed from hidden data)";
+
+    /// <summary>The property's name in the Visibility tab; a Public computed property that reads hidden data gets
+    /// <see cref="ComputedFromHiddenSuffix"/> (players who do not hold every side see it as Private).</summary>
+    public static string PropertyLabel(RulesPack pack, PropertyDef p) =>
+        p.Visibility == Visibility.Public && PropertyFacts.IsComputed(p) && PropertyFacts.ReadsHidden(pack, p) ? p.Name + ComputedFromHiddenSuffix : p.Name;
+
     public static RulesPack SetPropertyVisibility(RulesPack p, string id, Visibility v)
     {
         var i = p.Properties.FindIndex(x => x.Id == id);

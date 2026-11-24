@@ -441,6 +441,31 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
+    public void Guest_formula_reading_public_computed_from_private_is_masked()
+    {
+        // Thirst is declared Public but computed from the Private Water; Spirit is computed from the Public Morale only.
+        var (host, _) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });
+        FormulaDef F(string id, string prop) => new()
+        {
+            Id = id, Name = id, Text = "W + 1",
+            Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = prop } },
+        };
+        host.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Concat(new[]
+            {
+                new PropertyDef { Id = "morale", Name = "Morale", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Default = 5 },
+                new PropertyDef { Id = "thirst", Name = "Thirst", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Water * 2" },
+                new PropertyDef { Id = "spirit", Name = "Spirit", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Morale + 1" },
+            }).ToList(),
+            Formulas = p.Formulas.Concat(new[] { F("f-thirst", "thirst"), F("f-spirit", "spirit") }).ToList(),
+        });
+        var guest = Guest(host);
+        Assert.Equal(new[] { "W" }, Dialog(guest, "f-thirst", PhaseFixture.RedOne, check: false).Hidden.ToArray());
+        Assert.Empty(Dialog(guest, "f-spirit", PhaseFixture.RedOne, check: false).Hidden);
+    }
+
+    [Fact]
     public void Host_aggregate_not_masked()
     {
         var (s, c) = Open(Difficulty.SemiAuto, new[] { Alice, Bob });

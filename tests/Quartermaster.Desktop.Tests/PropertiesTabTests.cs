@@ -160,6 +160,39 @@ public sealed class PropertiesTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void PropertiesTab_expression_column_greys_default()
+    {
+        var s = Session();
+        var tab = Tab(s);
+        var g = tab.PropertyGrid;
+        var ex = PropertiesTab.ExpressionColumn;
+        Assert.Equal("", g.Cell(1, ex));
+        Assert.False(g.IsCellReadOnly(1, 2));
+        Assert.False(g.IsCellReadOnly(1, 3));
+
+        Type(g, 1, ex, "Fuel * 2");
+        Assert.Equal("Fuel * 2", s.Rules!.Properties[1].Expr);
+        Assert.Equal("Fuel * 2", g.Cell(1, ex));
+        Assert.True(g.IsCellReadOnly(1, 2));   // Default and Sheet field are ignored while it is computed
+        Assert.True(g.IsCellReadOnly(1, 3));
+        Assert.Same(EditGrid.ReadOnlyBrush, g.CellBackground(1, 2));
+        Assert.Equal(PropertiesTab.ComputedIgnoredTip, g.CellToolTip(1, 2));
+        Assert.False(g.IsCellReadOnly(0, 2));   // the other property is still stored
+
+        Type(g, 1, ex, "Fuel *");   // kept, flagged
+        var problem = FormulaEdit.SyntaxProblem("Fuel *");
+        Assert.NotNull(problem);
+        Assert.Equal("Fuel *", s.Rules.Properties[1].Expr);
+        Assert.Same(EditGrid.ErrorBrush, g.CellBackground(1, ex));
+        Assert.Equal("Expression: " + problem, tab.Status.Text);
+
+        Type(g, 1, ex, "  ");   // cleared: stored again
+        Assert.Null(s.Rules.Properties[1].Expr);
+        Assert.False(g.IsCellReadOnly(1, 2));
+        Assert.False(g.IsCellReadOnly(1, 3));
+    }
+
+    [AvaloniaFact]
     public void Applies_to_error_cell_pink_with_tooltip()
     {
         var s = Session();

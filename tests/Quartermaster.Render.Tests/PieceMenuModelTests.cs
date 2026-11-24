@@ -193,6 +193,19 @@ public class PieceMenuModelTests : IDisposable
     }
 
     [Fact]
+    public void Computed_property_does_not_manage_a_sheet_row()
+    {
+        var s = Open(rules: true);
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef
+                { Id = "reach", Name = "Reach", Scope = PropertyScope.Pieces, SheetField = "Other", Expr = "Fuel * 2" }).ToList(),
+        });
+        Assert.Null(PieceMenuModel.ManagedSheetValue(s, s.Game!.State.Pieces[PhaseFixture.RedOne], "Other"));   // its Sheet field is ignored
+        Assert.Equal("40", PieceMenuModel.ManagedSheetValue(s, s.Game.State.Pieces[PhaseFixture.RedOne], "Fuel"));
+    }
+
+    [Fact]
     public async Task Async_hooks_ask_then_run_and_sync_run_refuses_a_pending_dialog()
     {
         var s = Open(rules: false);

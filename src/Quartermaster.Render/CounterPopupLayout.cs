@@ -90,7 +90,7 @@ public sealed class CounterPopupLayout
             if (!state.Pieces.TryGetValue(id, out var p)) continue;
             var t = pieces.Types.Get(p.TypeString);
             var size = s.Images.SizeOf(t.Basic.Image);
-            picked.Add((p, t, PieceDetails.For(p, t, state, s.Rules), new SKSizeI(Math.Clamp(size.Width, 24, 120), Math.Clamp(size.Height, 24, 120))));
+            picked.Add((p, t, PieceDetails.For(p, t, state, s.Rules, s.Model), new SKSizeI(Math.Clamp(size.Width, 24, 120), Math.Clamp(size.Height, 24, 120))));
         }
         var extra = stack.PieceIds.Count - picked.Count;
 

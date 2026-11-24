@@ -73,6 +73,7 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
     {
         if (Blocked || s.Game is not { } g || !s.CanEditLedger(key)) return;
         var prop = s.Rules?.Properties.FirstOrDefault(p => p != null && p.Id == propertyId);
+        if (prop != null && Quartermaster.Rules.PropertyFacts.IsComputed(prop)) return;   // never stored (the Ledger refuses it with LedgerViewRules.ComputedRefusal)
         var before = prop != null ? Ledger.GetOrDefault(g.State, key, prop) : Ledger.Get(g.State, key, propertyId) ?? 0;
         Exec(g, new LedgerDelta(key, propertyId, before, after, "manual", null, null, (note ?? "").Trim(), null));
     }

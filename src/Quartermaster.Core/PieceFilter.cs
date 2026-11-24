@@ -239,7 +239,7 @@ public static class PieceFilter
         /// another side's masked piece (its whole ledger was removed). Those do not fall back to the Default.
         /// </summary>
         private bool HiddenInView(PropertyDef def) =>
-            s.IsPlayerView && (def.Visibility == Visibility.Private || PlayerView.IsPlaceholder(p));
+            s.IsPlayerView && (!PropertyFacts.IsPublic(pack, def) || PlayerView.IsPlaceholder(p));
 
         /// <summary>True when the property is declared on this piece: not Holders-scoped, and its applies-to is empty or matches. Re-entry counts as not declared.</summary>
         internal bool Declared(PropertyDef def)

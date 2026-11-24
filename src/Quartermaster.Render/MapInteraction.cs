@@ -175,7 +175,7 @@ public sealed record PieceDetail(string PieceId, string Name, IReadOnlyList<(str
 public static class PieceDetails
 {
     /// <summary>The piece's name plus its mark (static), PROP (dynamic) and label properties.</summary>
-    public static PieceDetail For(PieceInstance p, PieceType type, GameState? state = null, Quartermaster.Rules.RulesPack? pack = null)
+    public static PieceDetail For(PieceInstance p, PieceType type, GameState? state = null, Quartermaster.Rules.RulesPack? pack = null, ModuleModel? model = null)
     {
         var props = new List<(string, string)>();
         for (var i = 0; i < type.Traits.Count; i++)
@@ -197,10 +197,10 @@ public static class PieceDetails
             }
         }
         var name = type.Basic.Name; // same value as PieceInfo.Name(p) without reparsing
-        return new PieceDetail(p.Id, name.Length > 0 ? name : "piece", props) { Ledger = LedgerLines(p, state, pack) };
+        return new PieceDetail(p.Id, name.Length > 0 ? name : "piece", props) { Ledger = LedgerLines(p, state, pack, model) };
     }
 
-    static IReadOnlyList<(string, string, double)> LedgerLines(PieceInstance p, GameState? state, Quartermaster.Rules.RulesPack? pack)
+    static IReadOnlyList<(string, string, double)> LedgerLines(PieceInstance p, GameState? state, Quartermaster.Rules.RulesPack? pack, ModuleModel? model)
     {
         var lines = new List<(string, string, double)>();
         if (state == null || pack == null) return lines;
@@ -210,7 +210,7 @@ public static class PieceDetails
             foreach (var prop in pack.Properties)
             {
                 if (prop.Scope == Quartermaster.Rules.PropertyScope.Holders) continue;
-                if (Ledger.Get(state, key, prop.Id) is not { } v) continue;
+                if (DisplayValues.Get(state, pack, model, key, prop) is not { } v) continue;   // a computed one is evaluated; one that fails is left out
                 if (!PieceFilter.Compile(prop.AppliesTo, state, pack)(p)) continue;
                 lines.Add((prop.Id, prop.Name, v));
             }

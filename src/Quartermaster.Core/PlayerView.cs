@@ -116,7 +116,8 @@ public static class PlayerView
         {
             _pack = pack; _held = held;
             _access = new PieceAccess(full, pack, model, held);
-            foreach (var p in pack.Properties ?? new()) if (p != null) _visibility.TryAdd(p.Id ?? "", p.Visibility);
+            foreach (var p in pack.Properties ?? new())   // a computed property reading hidden data counts as Private
+                if (p != null) _visibility.TryAdd(p.Id ?? "", PropertyFacts.IsPublic(pack, p) ? Visibility.Public : Visibility.Private);
             foreach (var ph in pack.Phases ?? new())
             {
                 if (ph == null) continue;

@@ -117,6 +117,22 @@ public class LedgerViewRulesTests : IDisposable
     }
 
     [Fact]
+    public void Manual_edit_of_computed_refused()
+    {
+        var s = Make();
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef { Id = "reach", Name = "Reach", Scope = PropertyScope.Pieces, Expr = "Water + 2" }).ToList(),
+        });
+        var c = LedgerViewRules.CheckManualEdit(s, LedgerKey.Piece("b1"), "reach", null, "4", "Reach");
+        Assert.False(c.Ok);
+        Assert.True(c.Reload);
+        Assert.Null(c.NotePrompt);
+        Assert.Equal("Reach is computed (= Water + 2) and cannot be edited", c.Error);
+        Assert.True(LedgerViewRules.CheckManualEdit(s, LedgerKey.Piece("b1"), "water", 10, "4", "Water").Ok);   // a stored one still edits
+    }
+
+    [Fact]
     public void Csv_file_name_sanitised()
     {
         Assert.Equal("ledger-units.csv", LedgerViewRules.CsvFileName("Units"));

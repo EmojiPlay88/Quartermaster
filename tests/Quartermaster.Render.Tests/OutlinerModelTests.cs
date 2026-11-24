@@ -145,4 +145,27 @@ public class OutlinerModelTests
         Assert.Equal(30, orgA.Children[0].Values[1]);
         Assert.Equal("Red One", t.Roots[1].Children.Single().Name);
     }
+
+    [Fact]
+    public void Outliner_shows_computed_values()
+    {
+        // Reach = Fuel * 2, computed on read; a failing read (Ammo / 0 is fine, Fuel / Ammo where Ammo is missing is not) shows no value.
+        var pack = Pack() with
+        {
+            Properties = Pack().Properties.Concat(new[]
+            {
+                new PropertyDef { Id = "reach", Name = "Reach", Scope = PropertyScope.Pieces, Outliner = OutlinerAggregate.Sum, Expr = "Fuel * 2" },
+                new PropertyDef { Id = "ratio", Name = "Ratio", Scope = PropertyScope.Pieces, Outliner = OutlinerAggregate.Min, Expr = "Fuel / Ammo" },
+            }).ToList(),
+        };
+        var t = OutlinerModel.Build(State(), pack, Model(), OutlinerGrouping.OrgDisplays, new List<AlertHit>());
+        var reach = t.Columns.Select(c => c.Name).ToList().IndexOf("Reach");
+        var ratio = t.Columns.Select(c => c.Name).ToList().IndexOf("Ratio");
+        var orgA = t.Roots[0].Children.Single().Children[0];
+        Assert.Equal(new[] { "Blue One", "Red Two" }, orgA.Children.Select(c => c.Name));
+        Assert.Equal(60, orgA.Children[0].Values[reach]);
+        Assert.Null(orgA.Children[0].Values[ratio]);           // Blue One has no Ammo: an error, no value (never 0)
+        Assert.Equal(20.0 / 3, orgA.Children[1].Values[ratio]);
+        Assert.Equal(100, orgA.Values[reach]);
+    }
 }

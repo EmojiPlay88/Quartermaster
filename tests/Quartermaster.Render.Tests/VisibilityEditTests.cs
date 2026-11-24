@@ -24,6 +24,24 @@ public class VisibilityEditTests
     }
 
     [Fact]
+    public void PropertyLabel_marks_public_computed_from_hidden_data()
+    {
+        var p = Pack() with
+        {
+            Properties = Pack().Properties.Concat(new[]
+            {
+                new PropertyDef { Id = "p2", Name = "Range", Visibility = Visibility.Public, Expr = "Fuel * 2" },
+                new PropertyDef { Id = "p3", Name = "Reach", Visibility = Visibility.Public, Expr = "3 + 1" },
+                new PropertyDef { Id = "p4", Name = "Spare", Visibility = Visibility.Private, Expr = "Fuel * 2" },
+            }).ToList(),
+        };
+        Assert.Equal("Fuel", VisibilityEdit.PropertyLabel(p, p.Properties[0]));
+        Assert.Equal("Range  (computed from hidden data)", VisibilityEdit.PropertyLabel(p, p.Properties[1]));
+        Assert.Equal("Reach", VisibilityEdit.PropertyLabel(p, p.Properties[2]));
+        Assert.Equal("Spare", VisibilityEdit.PropertyLabel(p, p.Properties[3]));   // already Private
+    }
+
+    [Fact]
     public void SetHolderOwner_SetsAndClears()
     {
         var q = VisibilityEdit.SetHolderOwner(Pack(), "h1", "red");

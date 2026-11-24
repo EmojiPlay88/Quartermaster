@@ -167,6 +167,20 @@ public class ActionPortTests : IDisposable
     }
 
     [Fact]
+    public void LocalActions_edit_of_computed_writes_nothing()
+    {
+        var (s, c, h, p) = Open();
+        s.UpdateRules(r => r with
+        {
+            Properties = r.Properties.Append(new PropertyDef { Id = "reach", Name = "Reach", Scope = PropertyScope.Pieces, Expr = "Water + 2" }).ToList(),
+        });
+        var history = s.Game!.State.LedgerHistory.Count;
+        new LocalActions(s, c, h, p).EditLedger(LedgerKey.Piece(PhaseFixture.RedOne), "reach", 4, "set");
+        Assert.Null(Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.RedOne), "reach"));
+        Assert.Equal(history, s.Game.State.LedgerHistory.Count);
+    }
+
+    [Fact]
     public void LocalActions_Chat_IsLoggedAsChat()
     {
         var (s, c, h, p) = Open();

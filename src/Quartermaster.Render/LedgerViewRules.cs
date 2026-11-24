@@ -58,10 +58,11 @@ public static class LedgerViewRules
         return false;
     }
 
-    /// <summary>Checks a typed value: a number, an editable side, a real change; then yields the note prompt.
+    /// <summary>Checks a typed value: not a computed property, a number, an editable side, a real change; then yields the note prompt.
     /// <paramref name="old"/> is the current stored value (null when none); <paramref name="propertyName"/> is shown in the prompt (default: the id).</summary>
     public static ManualEditCheck CheckManualEdit(ModuleSession s, string key, string propertyId, double? old, string text, string? propertyName = null)
     {
+        if (ComputedRefusal(s.Rules, propertyId) is { } refused) return new ManualEditCheck(false, 0, false, refused, null, Reload: true);
         if (!TryParseNumber(text, out var after))
             return new ManualEditCheck(false, 0, false, $"'{text}' is not a number.", null);
         if (s.Game == null) return new ManualEditCheck(false, after, false, null, null);
@@ -70,6 +71,12 @@ public static class LedgerViewRules
         if (old is { } cur && cur == after) return new ManualEditCheck(true, after, true, null, null, Reload: true);
         return new ManualEditCheck(true, after, false, null, $"Why is {propertyName ?? propertyId} being set to {LedgerTable.FormatNumber(after)}? (required)");
     }
+
+    /// <summary>"{name} is computed (= {expr}) and cannot be edited" when the property is computed (its value is never stored), else null.</summary>
+    public static string? ComputedRefusal(Quartermaster.Rules.RulesPack? pack, string? propertyId) =>
+        pack?.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is { } def && Quartermaster.Rules.PropertyFacts.IsComputed(def)
+            ? $"{def.Name} is computed (= {def.Expr!.Trim()}) and cannot be edited"
+            : null;
 
     /// <summary>Default file name of a CSV export: <c>ledger-{tab}.csv</c> with invalid characters and spaces turned into dashes.</summary>
     public static string CsvFileName(string tabTitle)

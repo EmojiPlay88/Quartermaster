@@ -517,6 +517,49 @@ public sealed class LedgerWindowTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Ledger_computed_cell_read_only_with_tooltip()
+    {
+        var w = Game();
+        var s = w.Session!;
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Concat(new[]
+            {
+                new Quartermaster.Rules.PropertyDef { Id = "reach", Name = "Reach", Scope = Quartermaster.Rules.PropertyScope.Pieces, Expr = "Fuel * 2" },
+                new Quartermaster.Rules.PropertyDef { Id = "broken", Name = "Broken", Scope = Quartermaster.Rules.PropertyScope.Pieces, Expr = "Fuel / 0" },
+            }).ToList(),
+        });
+        Pump();
+        var lw = Open(w);
+        var row = UnitRow(lw, r => Ledger.Get(s.Game!.State, r.Row.Key, "fuel") is > 0);
+        var key = lw.Rows[row].Row.Key;
+        var fuel = Ledger.Get(s.Game!.State, key, "fuel")!.Value;
+        var reach = Col(lw, "Reach");
+        Assert.Equal(LedgerTable.FormatNumber(fuel * 2), lw.CellText(row, reach));
+        lw.MouseMove(lw.CellBounds(row, reach).Center);
+        Pump();
+        Assert.Contains("= Fuel * 2", lw.TipText);
+
+        // Not editable: double-click, F2 or typing explains why and opens no editor; nothing is written.
+        var history = s.Game.State.LedgerHistory.Count;
+        Assert.False(lw.BeginEdit(row, reach));
+        Assert.Null(lw.Editor);
+        Pump();
+        Assert.Contains(("Reach is computed (= Fuel * 2) and cannot be edited", "Ledger"), _dialogs.Warnings);
+        Assert.Equal(history, s.Game.State.LedgerHistory.Count);
+        Assert.Null(Ledger.Get(s.Game.State, key, "reach"));
+
+        // A failing read shows "error"; its tooltip has the message.
+        var broken = Col(lw, "Broken");
+        Assert.Equal("error", lw.CellText(row, broken));
+        var message = lw.Rows[row].Row.Errors![broken - LedgerViewRules.FixedCols];
+        Assert.StartsWith("Broken: ", message);
+        lw.MouseMove(lw.CellBounds(row, broken).Center);
+        Pump();
+        Assert.Contains(message, lw.TipText);
+    }
+
+    [AvaloniaFact]
     public void Manual_edit_not_a_number_warns()
     {
         var w = Game();
