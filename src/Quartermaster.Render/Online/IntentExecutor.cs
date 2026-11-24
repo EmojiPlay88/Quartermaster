@@ -325,6 +325,8 @@ internal static class FormulaIntentRunner
             return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
         if (i.Typed is { Count: > MaxTyped } || (i.Typed ?? new Dictionary<string, string>()).Any(kv => kv.Key == null || kv.Key.Length > MaxTypedValue || (kv.Value?.Length ?? 0) > MaxTypedValue))
             return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
+        if (i.Picks is { Count: > MaxTyped } || (i.Picks ?? new Dictionary<string, string>()).Any(kv => kv.Key == null || kv.Key.Length > MaxTypedValue || (kv.Value?.Length ?? 0) > IntentExecutor.MaxId))
+            return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
         if (pack.ById<FormulaDef>(i.FormulaId) is not { } f) return FormulaVerdict.Refused("That formula no longer exists.");
         var full = g.State;
         PieceInstance? piece = null;
@@ -366,6 +368,17 @@ internal static class FormulaIntentRunner
         if (guest && i.RunId == null && i.PieceId != null
             && full.Pending.Any(r => r != null && r.FormulaId == f.Id && (r.Units ?? Array.Empty<PendingUnit>()).Any(u => u is { Applied: false } && u.PieceId == i.PieceId)))
             return FormulaVerdict.Refused(UsePendingText);
+        // A pick sent with the piece it was picked as: the label must still resolve, among the sender's own candidates, to that piece. Any
+        // mismatch (the list moved on, a piece the sender cannot see, no such piece) gets the same neutral refusal; nothing is run or written.
+        foreach (var (variable, id) in i.Picks ?? new Dictionary<string, string>())
+        {
+            if (variable == null || f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable) is not { Kind: BindingKind.Piece } pb) continue;
+            if (i.Typed?.GetValueOrDefault(variable) is not { } label || string.IsNullOrWhiteSpace(label)) continue;   // nothing picked: waits
+            var hit = Quartermaster.Core.PieceChoices.For(full, pack, s.Model, pb, sides)
+                .FirstOrDefault(x => string.Equals(x.Label, label.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (hit == null || id == null || !string.Equals(hit.PieceId, id, StringComparison.Ordinal))
+                return FormulaVerdict.Refused(Quartermaster.Core.PieceChoices.Unknown);
+        }
         // Every die of a guest's run is pinned per (sender, formula, unit) and dice configuration before anything is answered: a preview,
         // a refused Apply and a retry all see the same roll, so nothing can be re-rolled by asking again.
         var pinKey = new FormulaPins.Key(who ?? "", f.Id, i.PieceId);

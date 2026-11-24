@@ -312,6 +312,21 @@ public class FormulaDialogModelTests
     }
 
     [Fact]
+    public void Intent_carries_picked_piece_id()
+    {
+        var s = TwoRifles();
+        var m = MakePick();
+        m.SetBoxText("P", LabelOfPiece(s, "a2"));
+        Assert.Null(m.Intent(null, false).Picks);   // no list yet: label only
+        m.Evaluate(s);
+        var i = m.Intent(null, false);
+        Assert.Equal(LabelOfPiece(s, "a2"), i.Typed["P"]);
+        Assert.Equal("a2", i.Picks!["P"]);
+        m.SetBoxText("P", "not a listed piece");
+        Assert.Null(m.Intent(null, false).Picks);
+    }
+
+    [Fact]
     public void Pick_cleared_when_picked_piece_leaves_candidates()
     {
         var s = TwoRifles();

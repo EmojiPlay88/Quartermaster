@@ -321,7 +321,9 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         foreach (var row in rows)
         {
             if (s.Game == null || Unit(row) is not { Applied: false } u || !s.CanAct(u.PieceId)) continue;
-            var v = await FormulaMasking.SendAsync(_port, ModelFor(row), runId, calculate, preview).ConfigureAwait(true);
+            var model = ModelFor(row);
+            model.Run(s.Game.State);   // re-evaluated first: each pick is sent with its current label and piece
+            var v = await FormulaMasking.SendAsync(_port, model, runId, calculate, preview).ConfigureAwait(true);
             _views.Remove(row);
             if (v.Applied) applied++;
             else if (v.Message != null) message = v.Message;

@@ -535,7 +535,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             if (IsTypedKind(b.Kind) && _typed.TryGetValue(b.Variable, out var t)) typed[b.Variable] = t;
             else if (Checked && IsCheckedKind(b.Kind) && _overrides.TryGetValue(b.Variable, out var o)) typed[b.Variable] = o;
         }
-        return new FormulaIntent(formula.Id, pieceId, runId, typed, calculate, preview);
+        // The piece each sent pick stands for: the host refuses the run if the label now resolves to another piece.
+        Dictionary<string, string>? picks = null;
+        foreach (var b in formula.Bindings)
+            if (b is { Kind: BindingKind.Piece, Variable: { } v } && typed.ContainsKey(v) && _pickedId.TryGetValue(v, out var id))
+                (picks ??= new(StringComparer.Ordinal))[v] = id;
+        return new FormulaIntent(formula.Id, pieceId, runId, typed, calculate, preview, picks);
     }
 
     /// <summary>The host's verdict: its wrong boxes are marked (until edited) and its message becomes the status. States only, never values.</summary>

@@ -1483,6 +1483,94 @@ public class FormulaMaskingTests : IDisposable
         Assert.Equal(17, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
     }
 
+    private static FormulaVerdict SendPick(IntentExecutor x, string label, IReadOnlyDictionary<string, string>? picks) =>
+        x.Execute("p2", Blue, new FormulaIntent("f-cmp", PhaseFixture.BlueOne, null, new Dictionary<string, string> { ["M"] = label }, false,
+            Picks: picks)).Verdict!;
+
+    private static IReadOnlyDictionary<string, string> PickOf(string id) => new Dictionary<string, string> { ["M"] = id };
+
+    /// <summary>Red 2 becomes a second "Red 1" on Red 1's spot (after it in state order): labels "{Red 1 label}" (r1) and "... #2" (r2).</summary>
+    private static string TwinRedOne(ModuleSession host)
+    {
+        var st = host.Game!.State;
+        var r1 = st.Pieces[PhaseFixture.RedOne];
+        var r2 = st.Pieces[PhaseFixture.RedTwo];
+        r2.TypeString = r1.TypeString;
+        r2.TraitStates = r1.TraitStates?.ToList() ?? new();
+        r2.MapId = r1.MapId;
+        r2.Pos = r1.Pos;
+        var labels = Quartermaster.Core.PieceChoices.For(st, host.Rules!, host.Model, PieceBinding(host, "f-cmp", "M"), Blue);
+        Assert.EndsWith(" #2", labels.Single(c => c.PieceId == PhaseFixture.RedTwo).Label);
+        return labels.Single(c => c.PieceId == PhaseFixture.RedOne).Label;
+    }
+
+    [Fact]
+    public void Guest_pick_with_matching_id_applies()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddPieceBindings(host);
+        var label = LabelOf(Labels(host, "f-cmp", "M", Blue), "Red 1");
+        var ok = SendPick(new IntentExecutor(host, hc), label, PickOf(PhaseFixture.RedOne));
+        Assert.True(ok.Applied, ok.Message);
+        Assert.Equal(17, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+
+    [Fact]
+    public void Guest_stale_label_resolving_to_another_piece_is_refused()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddPieceBindings(host);
+        var label = TwinRedOne(host);   // the guest picked r1 under the plain label
+        host.Game!.State.Pieces.Remove(PhaseFixture.RedOne);   // r1 leaves on the host: the plain label is now r2's
+        var refused = SendPick(new IntentExecutor(host, hc), label, PickOf(PhaseFixture.RedOne));
+        Assert.False(refused.Applied);
+        Assert.Equal(Quartermaster.Core.PieceChoices.Unknown, refused.Message);
+        Assert.DoesNotContain(host.Game!.State.LedgerHistory, e => e.FormulaId == "f-cmp");
+        Assert.Null(Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+
+    [Fact]
+    public void Guest_intent_without_picks_still_resolves_by_label()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddPieceBindings(host);
+        var label = LabelOf(Labels(host, "f-cmp", "M", Blue), "Red 1");
+        // An older guest's message has no "Picks" member: it still deserializes (the member is optional) and resolves by label.
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize<GameIntent>(
+            new FormulaIntent("f-cmp", PhaseFixture.BlueOne, null, new Dictionary<string, string> { ["M"] = label }, false), QuartermasterJson.Options))!.AsObject();
+        Assert.True(node.Remove("picks"));
+        var json = node.ToJsonString();
+        Assert.DoesNotContain("picks", json);
+        var intent = Assert.IsType<FormulaIntent>(JsonSerializer.Deserialize<GameIntent>(json, QuartermasterJson.Options));
+        Assert.Null(intent.Picks);
+        var ok = new IntentExecutor(host, hc).Execute("p2", Blue, intent).Verdict!;
+        Assert.True(ok.Applied, ok.Message);
+        Assert.Equal(17, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+        // And a new message round-trips its picks.
+        var sent = new FormulaIntent("f-cmp", PhaseFixture.BlueOne, null, new Dictionary<string, string> { ["M"] = label }, false, Picks: PickOf("r1"));
+        var back = (FormulaIntent)JsonSerializer.Deserialize<GameIntent>(JsonSerializer.Serialize<GameIntent>(sent, QuartermasterJson.Options), QuartermasterJson.Options)!;
+        Assert.Equal("r1", back.Picks!["M"]);
+    }
+
+    [Fact]
+    public void Guest_pick_id_of_hidden_piece_is_refused_neutrally()
+    {
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });
+        AddPieceBindings(host, hideRedTwo: true);
+        var executor = new IntentExecutor(host, hc);
+        var label = LabelOf(Labels(host, "f-cmp", "M", Blue), "Red 1");
+        var hidden = SendPick(executor, label, PickOf(PhaseFixture.RedTwo));   // Red 2 is hidden from Blue
+        var missing = SendPick(executor, label, PickOf("no-such-piece"));
+        var hiddenLabel = SendPick(executor, LabelOf(Labels(host, "f-cmp", "M", null), "Red 2"), PickOf(PhaseFixture.RedTwo));
+        foreach (var v in new[] { hidden, missing, hiddenLabel })
+        {
+            Assert.False(v.Applied);
+            Assert.Equal(Quartermaster.Core.PieceChoices.Unknown, v.Message);
+            Assert.Empty(v.Boxes);
+        }
+        Assert.DoesNotContain(host.Game!.State.LedgerHistory, e => e.FormulaId == "f-cmp");
+    }
+
     /// <summary>A port whose formula intents are answered by the given host function; nothing else is used by these tests.</summary>
     private sealed class HostPort(Func<FormulaIntent, FormulaVerdict> host) : IActionPort
     {
