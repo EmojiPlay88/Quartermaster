@@ -139,8 +139,21 @@ public static class FormulaVariables
     /// The variables of the formula's Piece bindings whose property is not Public (<see cref="PropertyFacts.IsPublic"/>; an unknown property counts as not public):
     /// a hidden input for a viewer who does not hold every side, like a hidden computed read. Depends on the pack alone, so the host and a guest agree.
     /// </summary>
-    public static IEnumerable<string> PieceBindingsHidden(RulesPack pack, FormulaDef f)
+    public static IEnumerable<string> PieceBindingsHidden(RulesPack pack, FormulaDef f) => PieceBindingsHidden(pack, f, false);
+
+    /// <summary>
+    /// As <see cref="PieceBindingsHidden(RulesPack, FormulaDef)"/>, and with <paramref name="piecesMayHide"/> (the viewer's view may lack pieces
+    /// or values: <c>PieceAccess.PiecesMayHide</c>, from the pack and module, so host and guest agree) every Piece binding: a masked pick of a
+    /// Public property is read on the full state, where the viewer's own view has no value. Same rule as the piece aggregates.
+    /// </summary>
+    public static IEnumerable<string> PieceBindingsHidden(RulesPack pack, FormulaDef f, bool piecesMayHide)
     {
+        if (piecesMayHide)
+        {
+            foreach (var b in f?.Bindings ?? new List<VariableBinding>())
+                if (b is { Kind: BindingKind.Piece }) yield return b.Variable;
+            yield break;
+        }
         var props = pack.Properties ?? new List<PropertyDef>();
         foreach (var b in f?.Bindings ?? new List<VariableBinding>())
             if (b is { Kind: BindingKind.Piece } && !PropertyFacts.IsPublic(pack, b.Property == null ? null : props.FirstOrDefault(p => p != null && p.Id == b.Property)))

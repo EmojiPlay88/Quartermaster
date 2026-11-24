@@ -342,15 +342,37 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <summary>Shown on a typed dice box that may hold several dice (what count() reads).</summary>
     public const string TypeEachDieHint = "Type each die, separated by spaces";
 
-    /// <summary>The candidate labels of each Piece binding on the last run's state, as the viewer sees them (<see cref="PickSides"/>).</summary>
+    /// <summary>
+    /// The candidate labels of each Piece binding on the last run's state, as the viewer sees them (<see cref="PickSides"/>). Cached while the
+    /// state's pieces, ledger history, log, the formula and the sides are unchanged, so typing in a box does not rebuild a player view.
+    /// </summary>
     private Dictionary<string, IReadOnlyList<string>> PieceLabels()
     {
+        if (_state == null || !formula.Bindings.Any(b => b is { Kind: BindingKind.Piece })) return new(StringComparer.Ordinal);
+        var key = LabelsKey(_state);
+        if (_labels != null && _labelsKey == key) return _labels;
         var labels = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-        if (_state == null) return labels;
         foreach (var b in formula.Bindings)
             if (b is { Kind: BindingKind.Piece, Variable: not null })
                 labels[b.Variable] = PieceCandidates.For(_state, runner.Pack, runner.Model, b, PickSides).Select(c => c.Label).ToList();
-        return labels;
+        _labelsKey = key;
+        return _labels = labels;
+    }
+
+    private Dictionary<string, IReadOnlyList<string>>? _labels;
+    private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, int, int, int, int)? _labelsKey;
+
+    /// <summary>What the candidate lists depend on: the state object, its pieces (place, type, trait states), the ledger and log lengths.</summary>
+    private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, int, int, int, int) LabelsKey(GameState st)
+    {
+        var h = new HashCode();
+        foreach (var p in st.Pieces.Values)
+        {
+            if (p == null) continue;
+            h.Add(p.Id); h.Add(p.MapId); h.Add(p.Pos); h.Add(p.TypeString);
+            foreach (var t in p.TraitStates ?? new List<string>()) h.Add(t);
+        }
+        return (st, formula, runner, PickSides, h.ToHashCode(), st.Pieces.Count, st.LedgerHistory.Count, st.Log.Count);
     }
 
     private BoxView Box(VariableState v, FormulaTrace t, IReadOnlySet<string> hostGuards, IReadOnlyDictionary<string, IReadOnlyList<string>> picks)

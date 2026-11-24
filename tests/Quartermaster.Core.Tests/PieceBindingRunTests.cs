@@ -309,4 +309,19 @@ public class PieceBindingRunTests
         // Blue's own piece reads its Private value as usual.
         Assert.Equal(0, Run(view, pack, $"Blue Guns ({Loc(s, "b1")})", Blue).Result!.Value.Number);
     }
+
+    [Fact]
+    public void View_drops_public_piece_binding_working_when_pieces_may_hide()
+    {
+        // A Public property read through a pick: shown to Blue when no piece can hide from it, hidden once one may (a masked pick reads the real value on the host).
+        var s = Two();
+        s.LedgerHistory.Add(new LedgerEntry(1, LedgerKey.Piece("b1"), "str", 7, 3, "formula", "f", null, null, "Strength of Red Rifles 3"));
+        s.Log.Add(new LogEntry(1, LogKind.Formula, "Compare: Strength of Red Rifles 3", null, "b1", "Main Map", DateTimeOffset.UnixEpoch, FormulaId: "f"));
+        var open = Pack(Pick("str"), sides: true);
+        Assert.Contains(PlayerView.For(s, open, Model, Blue).LedgerHistory, e => e.FormulaId == "f" && e.Working != null);
+        var mayHide = open with { MapOwners = new() { new MapOwner { MapId = "Red Map", SideId = "red" } } };
+        Assert.True(PieceAccess.PiecesMayHide(mayHide, Model, Blue));
+        Assert.DoesNotContain(PlayerView.For(s, mayHide, Model, Blue).LedgerHistory, e => e.FormulaId == "f" && e.Working != null);
+        Assert.Contains(PlayerView.For(s, mayHide, Model, new HashSet<string> { "red", "blue" }).LedgerHistory, e => e.FormulaId == "f" && e.Working != null);
+    }
 }

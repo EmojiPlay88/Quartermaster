@@ -1405,6 +1405,44 @@ public class FormulaMaskingTests : IDisposable
     }
 
     [Fact]
+    public async Task HotSeat_masked_pick_of_public_property_is_hidden()
+    {
+        // Red 1 masked from Blue (Obscurable on): Blue picks "Unknown piece (...)"; its Public Morale is not on Blue's screen.
+        var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob }, hideable: true);
+        AddPieceBindings(host);
+        var r1 = host.Game!.State.Pieces[PhaseFixture.RedOne];
+        r1.TypeString = PieceTypeParser.EncodeState(new[] { "obs;M;m.png;Mask it;I;?", "piece;;;unit.svg;Red 1" });
+        r1.TraitStates = new() { "red", "" };
+        var f = host.Rules!.ById<FormulaDef>("f-cmp")!;
+        Assert.Contains("M", FormulaMasking.HiddenVariables(host.Rules!, host.Model, host.Game!.State, f, PhaseFixture.BlueOne, Blue));
+        Assert.DoesNotContain("M", FormulaMasking.HiddenVariables(host.Rules!, host.Model, host.Game!.State, f, PhaseFixture.BlueOne,
+            new HashSet<string> { "red", "blue" }));
+
+        host.SetViewSides(Blue);
+        var m = Dialog(host, "f-cmp", PhaseFixture.BlueOne, check: false);
+        Assert.Contains("M", m.Hidden);
+        var label = Assert.Single(m.Evaluate(host.Game!.State).Boxes.Single(b => b.Variable == "M").Choices!,
+            l => l.StartsWith(Quartermaster.Core.PieceChoices.UnknownName, StringComparison.Ordinal));
+        m.SetBoxText("M", label);
+        var v = m.Evaluate(host.Game!.State);
+        var box = v.Boxes.Single(b => b.Variable == "M");
+        Assert.Equal(label, box.Text);
+        Assert.Equal(FormulaMasking.HiddenText, box.Tooltip);
+        Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
+        Assert.DoesNotContain("Red 1", Shown(v));
+        Assert.True(v.CanApply, v.Status);
+
+        // Through the host for a guest (Bob holding Blue): applied, and Blue's view never shows the working.
+        var applied = new IntentExecutor(host, hc).Execute("p2", Blue,
+            new FormulaIntent("f-cmp", PhaseFixture.BlueOne, null, new Dictionary<string, string> { ["M"] = label }, false)).Verdict!;
+        Assert.True(applied.Applied, applied.Message);
+        Assert.Equal(FormulaBox.Hidden, applied.Boxes.Single(b => b.Var == "M").State);
+        var blue = PlayerView.For(host.Game!.State, host.Rules, host.Model, Blue);
+        Assert.DoesNotContain(blue.LedgerHistory, e => e.FormulaId == "f-cmp" && e.Working != null);
+        await Task.CompletedTask;
+    }
+
+    [Fact]
     public void Host_resolves_guest_pick_with_guest_sides()
     {
         var (host, hc) = Open(Difficulty.FullyAuto, new[] { Alice, Bob });

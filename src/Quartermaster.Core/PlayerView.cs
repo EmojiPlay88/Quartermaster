@@ -137,7 +137,7 @@ public static class PlayerView
                         || ValueHidden(LedgerKey.Holder(h.Id), pack.PropertyByName(r.Property ?? "")?.Id, out _))
                     || FormulaVariables.AggregateReadsHidden(pack, f, piecesMayHide)
                     || FormulaVariables.ComputedReadsHidden(pack, f)   // a computed value built from hidden data, even on a held piece or the global holder
-                    || FormulaVariables.PieceBindingsHidden(pack, f).Any()))   // a picked piece's non-Public value
+                    || FormulaVariables.PieceBindingsHidden(pack, f, piecesMayHide).Any()))   // a picked piece's non-Public value, or any once a pick may be masked
                     _hiddenInputFormulas.Add(f.Id);
 
             foreach (var p in full.Pieces.Values)

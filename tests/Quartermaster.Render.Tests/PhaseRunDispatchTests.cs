@@ -175,6 +175,40 @@ public class PhaseRunDispatchTests : IDisposable
         Assert.Equal("That calculation is no longer waiting.", r.Ui.Statuses[^1]);
     }
 
+    /// <summary>The weather roll also reads a picked piece's Water (times zero): a pick is per unit, never auto-filled.</summary>
+    private static RulesPack PickInWeather(RulesPack p) => p with
+    {
+        Formulas = p.Formulas.Select(f => f.Id != "f-weather" ? f : f with
+        {
+            Text = "R + P * 0",
+            Bindings = f.Bindings.Append(new VariableBinding { Variable = "P", Kind = BindingKind.Piece, Property = "water" }).ToList(),
+        }).ToList(),
+    };
+
+    [Fact]
+    public async Task Fully_auto_piece_binding_opens_the_unit_dialog()
+    {
+        var r = Make(Difficulty.FullyAuto, PickInWeather);
+        r.C.Start();
+        var run = Assert.Single(r.S.Game!.State.Pending);
+        r.Ui.Calls.Clear();
+        r.Order.Clear();
+        await r.D.OpenPendingRun(run.Id);
+        Assert.Equal(new[] { $"unit f-weather - {run.Id} -" }, r.Ui.Calls);   // straight to the dialog: no missing-input question
+        Assert.DoesNotContain("apply-missing", r.Order);
+        Assert.Single(r.S.Game!.State.Pending);
+
+        // The player picks in that dialog and the run applies.
+        var m = new FormulaDialogModel(r.S.Runner!, r.S.Rules!.ById<FormulaDef>("f-weather")!, null);
+        FormulaMasking.Configure(m, r.S);
+        var label = m.Evaluate(r.S.Game!.State).Boxes.Single(b => b.Variable == "P").Choices![0];
+        m.SetBoxText("P", label);
+        var v = m.Evaluate(r.S.Game!.State);
+        Assert.True(v.CanApply, v.Status);
+        Assert.True(r.Port.ApplyTrace(run.Id, null, v.Trace, false));
+        Assert.Empty(r.S.Game!.State.Pending);
+    }
+
     [Fact]
     public async Task Fully_auto_missing_input_asks_then_per_unit_opens_units()
     {

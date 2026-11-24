@@ -125,7 +125,8 @@ public static class FormulaMasking
         // unit and the global holder included) or a variable, which is hidden itself, and through holder(H, P), which hides like a hidden holder.
         hidden.UnionWith(FormulaVariables.ComputedHiddenVariables(pack, f));
         // A picked piece's non-Public property: the pick is the viewer's own, its value is the host's (the cheapest safe rule).
-        hidden.UnionWith(FormulaVariables.PieceBindingsHidden(pack, f));
+        // A masked pick (any property) once the viewer's view may lack pieces or values: the same static rule as the aggregates.
+        hidden.UnionWith(FormulaVariables.PieceBindingsHidden(pack, f, PieceAccess.PiecesMayHide(pack, model, sides)));
         if (FormulaVariables.ComputedHolderCallHidden(pack, f)) hidden.Add(HolderCallInput);
         if (hidden.Count > 0)
             foreach (var b in f.Bindings ?? new List<VariableBinding>())

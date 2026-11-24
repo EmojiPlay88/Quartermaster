@@ -132,7 +132,8 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
 
     /// <summary>
     /// Opens the calculation UI of a pending run in the CURRENT difficulty, whatever mode it was queued in (spec 7.3).
-    /// Fully automatic: the run is finished from the auto values, asking once (missing-input dialog) only for what has no auto value.
+    /// Fully automatic: the run is finished from the auto values, asking once (missing-input dialog) only for what has no auto value; a run
+    /// with a Piece binding to pick opens per unit instead.
     /// Hardcore / semi-auto: the checked dialog for one unit or the checked batch grid for several (semi-auto adds the cheat sheet).
     /// </summary>
     public async Task OpenPendingRun(string runId)
@@ -154,6 +155,13 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
 
     private async Task OpenPendingRunAutomatic(PendingRun run)
     {
+        // A Piece binding is picked per unit: straight to the unit dialog or batch grid (the missing-input dialog asks only Inputs).
+        if (MissingInputs.NeedsPick(s, run))
+        {
+            if (s.Game?.State.Pending.FirstOrDefault(r => r.Id == run.Id) is { } current && current.Units.Where(u => !u.Applied).ToList() is { Count: > 0 } open)
+                OpenPendingRunAsUnits(current, open);
+            return;
+        }
         if (MissingInputs.For(s, run).Count == 0)
         {
             // Nothing to ask (for example a run left over from a manual mode): finish it from the auto values, no window.
