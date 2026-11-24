@@ -6,7 +6,7 @@ namespace Quartermaster.Core;
 
 /// <summary>
 /// Piece sums: sum, countof, maxof and minof over every piece, and hexsum, hexcount, hexmax and hexmin over the pieces in the hex of the piece
-/// being evaluated. Shared by every evaluation context (<see cref="IEvalContext.Aggregate"/>).
+/// being evaluated, and attachedsum, attachedcount, attachedmax and attachedmin over the pieces on its organisation chart. Shared by every evaluation context (<see cref="IEvalContext.Aggregate"/>).
 /// </summary>
 public static class PieceAggregates
 {
@@ -35,22 +35,28 @@ public static class PieceAggregates
             var here = PieceInfo.Location(self, model) ?? throw new EvalError($"{Label(self)} is not in a hex");
             pieces = ctx.InHex(self.MapId, here);
         }
+        else if (ExprFacts.IsAttachedAggregate(fn))
+        {
+            if (self == null || model == null) throw new EvalError($"{fn}() is not available here");
+            var display = FormationDisplay(self, model) ?? throw new EvalError($"{Label(self)} has no organisation chart");
+            pieces = ctx.OnMap(display.Id);
+        }
         else pieces = s.Pieces.Values;
         var text = filter ?? "";
         var match = ctx.Compile(text);
         pieces = pieces.Where(match);
-        if (fn is "countof" or "hexcount") return Value.Of(pieces.Count());
+        if (fn is "countof" or "hexcount" or "attachedcount") return Value.Of(pieces.Count());
 
         var def = (property == null ? null : pack.PropertyByName(property)) ?? throw new EvalError($"Unknown property '{property}'");
         if (def.Scope == PropertyScope.Holders) throw new EvalError($"{def.Name} is not a piece property");
         var values = pieces.Select(p => Ledger.GetOrDefault(s, LedgerKey.Piece(p.Id), def));
         switch (fn)
         {
-            case "sum" or "hexsum":
+            case "sum" or "hexsum" or "attachedsum":
                 return Value.Of(values.Sum());
-            case "maxof" or "hexmax":
-            case "minof" or "hexmin":
-                var max = fn is "maxof" or "hexmax";
+            case "maxof" or "hexmax" or "attachedmax":
+            case "minof" or "hexmin" or "attachedmin":
+                var max = fn is "maxof" or "hexmax" or "attachedmax";
                 double? best = null;
                 foreach (var v in values)
                     if (best == null || (max ? v > best : v < best)) best = v;
@@ -58,6 +64,21 @@ public static class PieceAggregates
             default:
                 throw new EvalError($"{fn}() is not available here");
         }
+    }
+
+    /// <summary>
+    /// The organisation display of a piece's formation: the map named by its first SendTo trait (prototypes expanded, as
+    /// <see cref="PieceActions"/> sees them) that is an organisation display; null when it has none.
+    /// </summary>
+    public static MapDef? FormationDisplay(PieceInstance p, ModuleModel model)
+    {
+        foreach (var d in PieceInfo.TypeOf(p).Traits.OfType<SendToDef>())
+        {
+            if (d.MapName.Length == 0) continue;
+            var map = model.Maps.FirstOrDefault(m => m.Name == d.MapName || m.Id == d.MapName);
+            if (map is { IsOrgDisplay: true }) return map;
+        }
+        return null;
     }
 
     /// <summary>A piece as the log names it: its name, else "piece".</summary>
@@ -78,6 +99,7 @@ internal sealed class AggregateFilters(GameState s, RulesPack pack, ModuleModel?
     private Dictionary<string, Func<PieceInstance, bool>>? _cache;
     private Func<string, Func<PieceInstance, bool>>? _compile;
     private Dictionary<(string?, string), List<PieceInstance>>? _hexes;
+    private Dictionary<string, List<PieceInstance>>? _maps;
     private bool? _piecesMayHide;
     private Dictionary<(string, string?, string?), bool>? _hidden;
 
@@ -109,6 +131,28 @@ internal sealed class AggregateFilters(GameState s, RulesPack pack, ModuleModel?
             }
         }
         return _hexes.TryGetValue((mapId, location), out var found) ? found : Array.Empty<PieceInstance>();
+    }
+
+    /// <summary>The pieces on this map (<see cref="PieceInstance.MapId"/> is its id or its name), in state order; the index is built once.</summary>
+    public IReadOnlyList<PieceInstance> OnMap(string mapId)
+    {
+        if (_maps == null)
+        {
+            _maps = new(StringComparer.Ordinal);
+            foreach (var p in s.Pieces.Values)
+            {
+                if (p.MapId == null) continue;
+                if (!_maps.TryGetValue(p.MapId, out var list)) _maps[p.MapId] = list = new();
+                list.Add(p);
+            }
+        }
+        var name = model?.Maps.FirstOrDefault(m => m.Id == mapId)?.Name;
+        var byId = _maps.TryGetValue(mapId, out var a) ? a : null;
+        var byName = name != null && name != mapId && _maps.TryGetValue(name, out var b) ? b : null;
+        if (byName == null) return byId ?? (IReadOnlyList<PieceInstance>)Array.Empty<PieceInstance>();
+        if (byId == null) return byName;
+        var ids = new HashSet<PieceInstance>(byId.Concat(byName));
+        return s.Pieces.Values.Where(ids.Contains).ToList();   // keep state order
     }
 
     /// <summary>
