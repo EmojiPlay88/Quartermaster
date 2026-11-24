@@ -140,6 +140,37 @@ public class CloneSeedTests
     }
 
     [Fact]
+    public void Clone_side_judged_after_normal_seeding()
+    {
+        // Team (a Default property) is seeded from the sheet right after the copy: the clone's side is judged with that seed. The source
+        // printed Team 1 but now stores 2 (Blue); a clone would read the pack Default 2 before seeding (Blue) but the sheet's 1 after it (Red).
+        var pack = Pack("Team == 1", "Team == 2") with
+        {
+            Properties = new()
+            {
+                new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, Visibility = Visibility.Private },
+                new PropertyDef { Id = "team", Name = "Team", Scope = PropertyScope.Pieces, Default = 2, SheetField = "Team", CloneAs = CloneValue.Default },
+            },
+        };
+        var type = PieceTypeParser.EncodeState(new[] { "propertysheet;0Team;Sheet;", "piece;;;unit.svg;TEST Scout" });
+        var s = new GameState { GameId = "g1" };
+        s.MapOrder.Add(Main);
+        s.Apply(new AddPiece("s1", type, PieceTypeParser.EncodeState(new[] { "1", "" }), Main, new PointD(50, 50), null));
+        Set(s, "p:s1", "team", 2);
+        Set(s, "p:s1", "fuel", 5151);
+        Assert.Equal("blue", Ownership.SideOfPiece(s.Pieces["s1"], s, pack));
+        s.Apply(CloneOf(s, "s1", "c1"));
+
+        var log = new DiagnosticLog();
+        Assert.Null(LedgerSeeder.BuildCloneSeeds(s, pack, RunnerFx.Model, "c1", "s1", log));
+        Assert.Equal("Clone of \"TEST Scout\" belongs to another side, so its values were not copied", Assert.Single(log.Items).Message);
+        s.Apply(LedgerSeeder.BuildSeeds(s, pack, _ => true, RunnerFx.Model)!);
+        Assert.Equal("red", Ownership.SideOfPiece(s.Pieces["c1"], s, pack));
+        Assert.Null(Ledger.Get(s, "p:c1", "fuel"));
+        Assert.DoesNotContain("5151", Json(PlayerView.For(s, pack, RunnerFx.Model, Red)));
+    }
+
+    [Fact]
     public void Clone_action_sets_CloneOf()
     {
         var s = new GameState();

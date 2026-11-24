@@ -192,7 +192,12 @@ public static class PieceMenuModel
         if (s.Game is not { } game) return;
         if (actions != null) { actions.PieceCommands(commands.ToList()); return; }
         using var scope = game.BeginAction();
-        foreach (var c in commands) game.Execute(CommandLog.Prepare(c, game.State, s));
+        foreach (var c in commands)
+        {
+            var prepared = CommandLog.Prepare(c, game.State, s);
+            game.Execute(prepared);
+            if (prepared is AddPiece a) s.SeedAfterAdd(a);   // seeds (a clone's copied values) join the action, as through the port
+        }
     }
 
     // With sync hooks every await below completes at once, so the command runs inside the caller's Run (and its error guard), as before.

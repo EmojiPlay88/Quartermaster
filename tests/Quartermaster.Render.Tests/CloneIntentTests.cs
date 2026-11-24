@@ -115,6 +115,20 @@ public class CloneIntentTests : IDisposable
     }
 
     [Fact]
+    public void Menu_without_action_port_clone_copies()
+    {
+        var (s, _, h, _, _) = Open();
+        var g = s.Game!;
+        AddFlag(s, "rf", "Red", 17, 3);
+        PieceMenuModel.Execute(s, null, CloneCommands(s, "rf", "c1"));
+        Assert.Equal(17, Value(s, "c1", "fuel"));
+        Assert.Equal(3, Value(s, "c1", "water"));
+        h.Undo();   // one action
+        Assert.False(g.State.Pieces.ContainsKey("c1"));
+        Assert.Equal(17, Value(s, "rf", "fuel"));
+    }
+
+    [Fact]
     public void Undo_redo_of_clone_keeps_copied_values()
     {
         var (s, _, h, port, _) = Open();

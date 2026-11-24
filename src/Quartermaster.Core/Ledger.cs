@@ -122,7 +122,7 @@ public static class LedgerSeeder
     /// <summary>
     /// Seeds that copy the source piece's stored values to its clone (the Clone command, spec #20): piece properties (Pieces or Both) that
     /// are not computed and whose <see cref="PropertyDef.CloneAs"/> is Copy, in pack order. Null when there is nothing to copy, either piece
-    /// is missing, or the clone's side worked out with the copied values differs from the source's side; then nothing is copied (so another
+    /// is missing, or the clone's side worked out with the copied values (and the normal seeding that follows them) differs from the source's side; then nothing is copied (so another
     /// side's hidden values never move to a counter a different side sees) and a "rules" warning is added to <paramref name="log"/>.
     /// The clone's other properties get the normal seeding afterwards. <paramref name="model"/> is not read today (sides need no module);
     /// it keeps the shape of <see cref="BuildSeeds"/>. Never throws.
@@ -146,6 +146,8 @@ public static class LedgerSeeder
 
             var probe = s.DeepClone();
             probe.Apply(result);
+            // The normal seeding that follows (sheet values of Default properties) can change the side too: judge the clone after it.
+            if (BuildSeeds(probe, pack, p => p.Id == newPieceId, model) is { } normal) probe.Apply(normal);
             var sourceSide = Ownership.PieceSides(s, pack)(source);
             var cloneSide = Ownership.PieceSides(probe, pack)(probe.Pieces[newPieceId]);
             if (sourceSide == cloneSide) return result;
