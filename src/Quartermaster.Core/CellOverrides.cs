@@ -11,6 +11,10 @@ namespace Quartermaster.Core;
 /// </summary>
 internal static class CellOverrides
 {
+    /// <summary>The cells (piece id, table id, column) whose computed override is being evaluated on this thread: a read of one of them
+    /// inside that evaluation is the printed cell, not a cycle. Other cells' overrides still apply.</summary>
+    [ThreadStatic] private static HashSet<(string Piece, string Table, int Col)>? _resolving;
+
     /// <summary>
     /// The value read at (<paramref name="row"/>, <paramref name="col"/>): the first overriding property the piece has a value for
     /// (<see cref="PropertyValues.Get(GameState, RulesPack, ModuleModel?, string, PropertyDef)"/> non-null: stored, or computed and applying;
@@ -25,10 +29,20 @@ internal static class CellOverrides
         if (piece == null || row < 0 || row >= t.RowKeys.Count) return (printed, null, printed);
         var props = CellOverrideFacts.For(pack, t.Id, t.Kind == TableKind.TwoD && col >= 0 && col < t.ColumnKeys.Count ? t.ColumnKeys[col] : null);
         if (props.Count == 0 || !SameRow(t.RowKeys[row], PieceInfo.Name(piece))) return (printed, null, printed);
+        var cell = (piece.Id, t.Id, col);
+        if (_resolving?.Contains(cell) == true) return (printed, null, printed);   // an override's own expression reads its printed cell
         var key = LedgerKey.Piece(piece.Id);
         foreach (var p in props)
         {
-            var v = PropertyValues.Get(s, pack, model, key, p, PropertyFacts.IsComputed(p) ? filters ?? new AggregateFilters(s, pack, model) : null);
+            double? v;
+            if (PropertyFacts.IsComputed(p))
+            {
+                _resolving ??= new();
+                _resolving.Add(cell);
+                try { v = PropertyValues.Get(s, pack, model, key, p, filters ?? new AggregateFilters(s, pack, model)); }
+                finally { _resolving.Remove(cell); }
+            }
+            else v = PropertyValues.Get(s, pack, model, key, p, null);
             if (v != null) return (Value.Of(v.Value), p, printed);
             if (HiddenInView(s, pack, piece, p, sides))
                 throw new EvalError($"{p.Name} of {PieceInfo.Name(piece)} {PieceAggregates.HiddenText}") { HiddenData = true };

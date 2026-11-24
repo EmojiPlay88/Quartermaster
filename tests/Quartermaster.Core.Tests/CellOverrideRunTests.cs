@@ -200,4 +200,41 @@ public class CellOverrideRunTests
         s.ViewSides = new() { "red" };
         Assert.Equal(3, Result(pack, s, "f-inline", "u3"));   // own side: no value, the cell
     }
+
+    [Fact]
+    public void Computed_override_reads_printed_cell()
+    {
+        var plus = new PropertyDef { Id = "pl", Name = "Plus", Scope = PropertyScope.Pieces, Expr = "lookup(Units, name(), \"Speed\") + 2", OverridesTable = "tu", OverridesColumn = "Speed" };
+        var pack = Pack(plus);
+        pack.Properties.RemoveAt(0);   // no stored Fast Speed ahead of it
+        var s = State();
+        Assert.Equal(5, Result(pack, s, "f-bind", "u1"));     // printed 3 + 2
+        Assert.Equal(5, Result(pack, s, "f-inline", "u1"));
+        Assert.Equal(7, Result(pack, s, "f-bind", "u2"));     // Raft B: printed 5 + 2
+        Assert.Equal("Units, row Raft A, column Speed: Plus of Raft A (printed 3)", Run(pack, s, "f-bind", "u1").Variables.Single().Source);
+        Assert.True(PieceFilter.Matches("lookup(Units, name(), \"Speed\") == 5", s.Pieces["u1"], s, RunnerFx.Model, pack));
+        Assert.Equal(4, Result(pack, s, "f-load", "u1"));     // other column untouched
+    }
+
+    [Fact]
+    public void Computed_override_reads_other_overrides()
+    {
+        var load = new PropertyDef { Id = "ld", Name = "Big Load", Scope = PropertyScope.Pieces, Expr = "10", OverridesTable = "tu", OverridesColumn = "Load" };
+        var plus = new PropertyDef { Id = "pl", Name = "Plus", Scope = PropertyScope.Pieces, Expr = "lookup(Units, name(), \"Speed\") + lookup(Units, name(), \"Load\")", OverridesTable = "tu", OverridesColumn = "Speed" };
+        var pack = Pack(load, plus);
+        pack.Properties.RemoveAt(0);
+        Assert.Equal(13, Result(pack, State(), "f-inline", "u1"));   // printed Speed 3 + overridden Load 10
+    }
+
+    [Fact]
+    public void Cycle_between_computed_properties_still_errors()
+    {
+        var a = new PropertyDef { Id = "ca", Name = "Alpha", Scope = PropertyScope.Pieces, Expr = "Beta + 1", OverridesTable = "tu", OverridesColumn = "Speed" };
+        var b = new PropertyDef { Id = "cb", Name = "Beta", Scope = PropertyScope.Pieces, Expr = "Alpha + 1" };
+        var pack = Pack(a, b);
+        pack.Properties.RemoveAt(0);
+        var t = RunnerFx.Runner(pack).Run(State(), RunnerFx.Req("f-inline", "u1"));
+        Assert.Null(t.Result);
+        Assert.Contains("computed from itself", t.Error ?? "");
+    }
 }
