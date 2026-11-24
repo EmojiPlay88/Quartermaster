@@ -396,7 +396,7 @@ The lowest ammo of the units in the hex. The filter matters: without it, every o
 
 - it is a count (`countof`, `hexcount`);
 - its property is Private, or its filter reads a Private property, calls `holder()` or another piece sum, or does not parse;
-- or some pieces may be hidden from that player at all: a map or organisation display belongs to a side they do not hold (the Visibility tab of the Rules Workbench), or a piece of the module can be hidden or masked (a VASSAL Invisible or Mask trait). Then every piece sum counts, even of a Public property.
+- or some pieces may be hidden from that player at all: a map or organisation display belongs to a side they do not hold (the Visibility tab of the Rules Workbench), or a piece of the module, including one placed by a predefined setup, can be hidden or masked (a VASSAL Invisible or Mask trait). Then every piece sum counts, even of a Public property.
 
 A formula that uses such a piece sum (in its text, an output, a precondition, an "Only when", an auto value or a table key) does not show its working or errors to that player; a guest's Formula dialog leaves the calculation to the host, and an "Only when" or precondition that uses one is decided by the host. A sum, maximum or minimum of a Public property whose filter reads only Public values, in a game where no piece can be hidden, is shown as usual.
 

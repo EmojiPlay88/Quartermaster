@@ -57,7 +57,7 @@ public sealed class PieceAccess
     /// <summary>
     /// True when a <see cref="PlayerView"/> for a viewer holding <paramref name="held"/> may lack pieces or their values: the viewer does not hold
     /// every side and the pack gives a map to an existing side it does not hold, or a piece type of the module (palette slot, setup stack piece,
-    /// prototype, or a marker they place) has a Hideable or Obscurable trait. Read from the pack and module only, never the state, so the host
+    /// piece of a predefined setup save, prototype, or a marker they place; an unreadable setup save counts) has a Hideable or Obscurable trait. Read from the pack and module only, never the state, so the host
     /// and a guest agree. Without a module it is true (fail closed). Then every piece aggregate reads hidden data
     /// (<see cref="FormulaVariables.AggregateCallHidden"/>).
     /// </summary>
@@ -100,7 +100,8 @@ public sealed class PieceAccess
         {
             return model.Prototypes.Values.Any(p => Traits(p, 0))
                 || model.Slots.Any(s => Hides(s.TypeString, 0))
-                || model.Maps.SelectMany(m => m.SetupStacks).SelectMany(st => st.Pieces).Any(s => Hides(s.TypeString, 0));
+                || model.Maps.SelectMany(m => m.SetupStacks).SelectMany(st => st.Pieces).Any(s => Hides(s.TypeString, 0))
+                || model.SetupsUnreadable || model.SetupPieceTypes.Any(t => Hides(t, 0));
         }
         catch (Exception)
         {

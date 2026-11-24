@@ -406,6 +406,27 @@ public class PieceAggregatesTests
         Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), null, BlueOnly));   // no module: fail closed
     }
 
+    [Fact]
+    public void Pieces_may_hide_when_only_a_predefined_setup_has_a_hide_or_mask_trait()
+    {
+        Assert.False(PieceAccess.PiecesMayHide(SidedPack(false), SetupModel("piece;;;unit.svg;A"), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), SetupModel(PieceTypeParser.EncodeState(new[] { "hide;I;Hide it;;;0.3;;false", "piece;;;unit.svg;A" })), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), SetupModel(PieceTypeParser.EncodeState(new[] { "obs;M;m.png;Mask it;I;?", "piece;;;unit.svg;A" })), BlueOnly));
+        Assert.True(PieceAccess.PiecesMayHide(SidedPack(false), SetupModel(null), BlueOnly));   // setup file unreadable: fail closed
+    }
+
+    /// <summary>The fixture module plus a predefined setup "Start" whose save adds one piece of <paramref name="type"/> (null = a broken save file).</summary>
+    private static ModuleModel SetupModel(string? type)
+    {
+        var xml = FixtureModule.MinimalBuildFile().Replace("</VASSAL.build.GameModule>",
+            "<VASSAL.build.module.PredefinedSetup name=\"Start\" file=\"s.vsav\" useFile=\"true\" isMenu=\"false\"/></VASSAL.build.GameModule>");
+        using var fx = new FixtureModule().WithBuildFile(xml);
+        if (type == null) fx.AddFile("s.vsav", new byte[] { 1, 2, 3 });
+        else fx.AddSave("s.vsav", new[] { "begin_save", "", "+/" + SequenceEncoder.Encode(new[] { "p1", type, "Main Map;100;50;1;0" }, '/'), "end_save" });
+        using var arch = VmodArchive.Open(fx.Build());
+        return ModuleModelBuilder.Build(arch, new DiagnosticLog());
+    }
+
     /// <summary>The fixture module with <paramref name="trait"/> added to its prototype "Proto".</summary>
     private static ModuleModel TraitModel(string trait)
     {
