@@ -372,10 +372,11 @@ public static class RulesValidator
                     Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: checklist item {itemNo} names formula \"{id}\", which does not exist");
             }
         }
-        foreach (var w in ph.Warnings)
+        for (int wi = 0; wi < ph.Warnings.Count; wi++)
         {
+            var w = ph.Warnings[wi];
             CheckPhaseExpr(pack, w.Condition, who, "warning condition", Err);
-            DanglingRef(pack, w.RuleRefId, $"{who}: warning {ph.Warnings.IndexOf(w) + 1}", ph.Id, ph.Name, issues);
+            DanglingRef(pack, w.RuleRefId, $"{who}: warning {wi + 1}", ph.Id, ph.Name, issues);
             if (string.IsNullOrWhiteSpace(w.Message)) Err($"{who}: warning message is empty");
             else if (ShowsOnceWithUnit(pack, w.Condition, w.Message))
                 Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: warning {ShowsOnceText}");

@@ -250,6 +250,15 @@ public class AuthoringFieldsTests : IDisposable
     }
 
     [Fact]
+    public void Validator_identical_warnings_are_numbered_by_position()
+    {
+        var w = new PhaseWarning { Condition = "Fuel < 1", Message = "m", RuleRefId = "gone" };
+        var pack = Pack(p => p with { Phases = new() { new PhaseDef { Id = "ph1", Name = "Supply", Warnings = new() { w, w } } } });
+        Assert.NotNull(Find(pack, "Phase \"Supply\": warning 1: rule reference \"gone\" does not exist"));
+        Assert.NotNull(Find(pack, "Phase \"Supply\": warning 2: rule reference \"gone\" does not exist"));
+    }
+
+    [Fact]
     public void Validator_checklist_unusable_and_duplicate_ids()
     {
         var pack = Pack(p => p with

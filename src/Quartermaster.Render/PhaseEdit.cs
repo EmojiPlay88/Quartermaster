@@ -28,7 +28,7 @@ public static class PhaseEdit
         {
             Id = Guid.NewGuid().ToString("N"),
             Name = src.Name + " (copy)",
-            Checklist = src.Checklist.ToList(),
+            Checklist = src.Checklist.Select(c => c with { Id = null }).ToList(),
             OnStart = src.OnStart.ToList(),
             OnEnd = src.OnEnd?.ToList(),
             OnMove = src.OnMove.ToList(),
