@@ -143,6 +143,22 @@ public static class PieceFilter
         return PieceInfo.Markers(p).TryGetValue(key, out var v) ? Value.Of(v) : throw new EvalError($"No marker '{key}'") { MissingValue = true };
     }
 
+    /// <summary>
+    /// layer("name"): the level of the piece's layer of that name (trimmed, case-insensitive; the first match), 0 when the layer is inactive.
+    /// A piece without such a layer is a missing value (as marker()); a layer that follows a property is an error; another side's masked
+    /// placeholder in a player view is hidden data.
+    /// </summary>
+    internal static double LayerValue(PieceInstance? p, GameState s, string name)
+    {
+        if (p == null) throw new EvalError("This formula needs a unit");
+        if (s.IsPlayerView && PlayerView.IsPlaceholder(p)) throw new EvalError("layer() cannot be read in this view") { HiddenData = true };
+        var (index, def) = PieceInfo.FindLayer(PieceInfo.TypeOf(p), name)
+            ?? throw new EvalError($"{PieceInfo.Name(p)} has no layer \"{(name ?? "").Trim()}\"") { MissingValue = true };
+        if (def.FollowProperty) throw new EvalError($"Layer \"{def.Name.Trim()}\" follows a property; read the property instead");
+        var (level, active) = TraitState.LayerLevel(def, index < p.TraitStates.Count ? p.TraitStates[index] : "");
+        return active ? level : 0;
+    }
+
     internal static Value NameValue(PieceInstance? p) =>
         p == null ? throw new EvalError("This formula needs a unit") : Value.Of(PieceInfo.Name(p));
 
@@ -310,6 +326,7 @@ public static class PieceFilter
             pack.PropertyByName(property) is { } def && (PropertyFacts.IsComputed(def) ? Declared(def) : Stored(def) != null);
         public Value PieceName() => NameValue(p);
         public Value Marker(string key) => MarkerValue(p, key);
+        public double Layer(string name) => LayerValue(p, s, name);
         public double Turn() => TurnAt(s, filters);
         public double Stage() => StageAt(s, filters);
         public Value Side() => SideValue(p, pack, sides);

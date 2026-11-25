@@ -35,7 +35,12 @@ public abstract record GameCommand;
 public sealed record AddPiece(string PieceId, string TypeString, string StateString, string MapId, PointD Pos, string? StackOnto, string? LogText = null, DateTimeOffset? At = null, string? Who = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CloneOf = null) : GameCommand;
 public sealed record MovePieces(IReadOnlyList<string> PieceIds, string MapId, PointD Pos, string? StackOnto, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
-public sealed record RemovePiece(string PieceId, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+public sealed record RemovePiece(string PieceId, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand
+{
+    /// <summary>The removed piece's side, stamped on its log line so only that side reads it (a formula's Remove, B3); omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SideId { get; init; }
+}
 public sealed record SetTraitState(string PieceId, int StateIndex, string NewState) : GameCommand;
 public sealed record SetStackExpanded(string StackId, bool Expanded) : GameCommand;
 public sealed record ClearMoved(string MapId) : GameCommand;

@@ -120,6 +120,10 @@ public static class TraitState
     public static string ObscuredToggle(ObscurableDef def, string? state, string playerId)
         => IsObscured(def, state) ? "null" : SequenceEncoder.Encode(new[] { playerId, "" }, ';');
 
+    /// <summary>Obscurable: sets not obscured ("null") or obscured by <paramref name="obscurer"/> (no display options), whatever the state was.</summary>
+    public static string ObscuredSet(ObscurableDef def, string? state, bool on, string obscurer)
+        => on ? SequenceEncoder.Encode(new[] { obscurer, "" }, ';') : "null";
+
     /// <summary>DynamicProperty: the state is the value itself.</summary>
     public static string DynamicValue(DynamicPropertyDef def, string? state) => state ?? "";
 

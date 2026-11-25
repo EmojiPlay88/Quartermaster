@@ -37,6 +37,10 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
     /// <summary>The working before the output parts ("{text} = {result}"), so the acting side's lines can leave out Piece parts. Null = a
     /// trace not made by the runner (its <see cref="Working"/> is used as it is).</summary>
     internal string? Calc { get; init; }
+
+    /// <summary>The run's effects (place, remove, layer and mask changes) in command order: Place, layer/mask changes in output order, then
+    /// removals in output order. Empty for a run with none.</summary>
+    public IReadOnlyList<PieceEffect> Effects { get; init; } = Array.Empty<PieceEffect>();
 }
 
 /// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
@@ -92,6 +96,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
     private Pass? _pass;
 
+    /// <summary>Makes the id of a piece a Place output adds, when the trace is made (so previews and the placed piece's ledger keys agree).</summary>
+    public Func<string> NewPieceId { get; set; } = () => "p:" + Guid.NewGuid().ToString("N");
+
+    /// <summary>How many times an open pass dropped its side map and aggregate state after piece commands (tests read it).</summary>
+    [ThreadStatic] internal static int PassRefreshes;
+
+
     /// <summary>The pass open on this thread for <paramref name="s"/> (<see cref="BeginPass"/>), else null.</summary>
     private Pass? PassFor(GameState s) =>
         _pass is { } p && ReferenceEquals(p.State, s) && p.Thread == Environment.CurrentManagedThreadId ? p : null;
@@ -99,9 +110,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// <summary>
     /// Opens a pass over <paramref name="s"/> (spec #31): until disposed, runs on that same state instance, on this thread, share one side map
     /// and one aggregate state (compiled filters, hex and map indexes) instead of building them per run. Values are always read live, so a
-    /// unit sees the ledger writes of the units before it. Invariant: while a pass is open the commands executed write only ledgers, rolls and
-    /// log lines (no piece is added, removed or moved; B3 must close or refresh the pass on piece commands). A nested call on the same state
-    /// joins the open pass; on another state, or another thread, it opens nothing.
+    /// unit sees the ledger writes of the units before it. Invariant: the commands of a run executed while a pass is open must be followed by
+    /// <see cref="AfterApply(IReadOnlyList{GameCommand})"/>, which drops the side map and aggregate state when any of them adds, removes or
+    /// moves a piece or changes a trait state (a Place, Remove, SetLayer or SetMask output), so later units see the change. Ledger writes,
+    /// rolls and log lines keep them. A nested call on the same state joins the open pass; on another state, or another thread, it opens nothing.
     /// </summary>
     public IDisposable BeginPass(GameState s)
     {
@@ -124,15 +136,35 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         if (_pass is { } p && p.Thread == Environment.CurrentManagedThreadId) p.AfterApply();
     }
 
+    /// <summary>
+    /// Called after a unit's commands were executed inside a pass, with those commands. When any adds, removes or moves a piece or changes a
+    /// trait state (<see cref="AddPiece"/>, <see cref="RemovePiece"/>, <see cref="MovePieces"/>, <see cref="SetTraitState"/>), the open pass
+    /// drops its side map and aggregate state (hex and map indexes, compiled filters); the next run rebuilds them. Ledger-only commands keep them.
+    /// </summary>
+    public void AfterApply(IReadOnlyList<GameCommand> executed)
+    {
+        if (_pass is not { } p || p.Thread != Environment.CurrentManagedThreadId) return;
+        p.AfterApply();
+        if (executed != null && executed.Any(c => c is AddPiece or RemovePiece or MovePieces or SetTraitState)) p.Refresh();
+    }
+
     private sealed class Pass(FormulaRunner owner, GameState state)
     {
         public GameState State => state;
         public int Thread { get; } = Environment.CurrentManagedThreadId;
         public int Depth = 1;
-        public Lazy<Func<PieceInstance, string?>> Sides { get; } = PieceFilter.SideMap(state, owner._pack);
+        public Lazy<Func<PieceInstance, string?>> Sides { get; private set; } = PieceFilter.SideMap(state, owner._pack);
         private AggregateFilters? _filters;
         public AggregateFilters Filters => _filters ??= new(state, owner._pack, owner._model) { SharedSides = Sides };
         public void AfterApply() { }
+
+        /// <summary>Drops the side map and the aggregate state (a piece was added, removed, moved or changed its trait states).</summary>
+        public void Refresh()
+        {
+            Sides = PieceFilter.SideMap(state, owner._pack);
+            _filters = null;
+            PassRefreshes++;
+        }
     }
 
     private sealed class PassScope(FormulaRunner owner, Pass? pass) : IDisposable
@@ -259,36 +291,168 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var outputs = new List<OutputPreview>();
         var parts = new List<string>();
         var calc = working;
+        string OutputError(int oi, string detail) => $"Formula \"{formula.Name}\": output {oi + 1}{detail}";
+
+        // The placed piece first, so a Placed output listed before its Place still acts on it. At most one Place per formula.
+        Placed? placed = null;
+        PieceEffect? place = null;
+        for (var oi = 0; oi < formula.Outputs.Count; oi++)
+        {
+            var o = formula.Outputs[oi];
+            if (o.Action != OutputAction.Place) continue;
+            if (placed != null) throw new EvalError(OutputError(oi, " places a second piece; only one output may place a piece"));
+            var anchor = o.Target switch
+            {
+                OutputTarget.Unit => piece!,
+                OutputTarget.Piece => targets[o.PieceVariable!].Piece,
+                _ => throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}")),
+            };
+            var slotText = (o.Slot ?? "").Trim();
+            var slot = (slotText.Length == 0 ? null : _model.SlotByPath(slotText) ?? _model.SlotByGpid(slotText))
+                ?? throw new EvalError($"Palette entry \"{slotText}\" was not found in the module");
+            var (type, state) = PieceFactory.FromSlot(_model, slot, anchor.MapId, anchor.Pos);
+            var id = NewPieceId();
+            var inst = new PieceInstance { Id = id, TypeString = type, MapId = anchor.MapId, Pos = anchor.Pos, TraitStates = GameState.DecodeState(type, state) };
+            var name = PieceInfo.Name(inst)?.Trim() is { Length: > 0 } n ? n : slot.EntryName;
+            placed = new Placed(inst, name, run.Sides.Value(inst));
+            place = new PieceEffect(PieceEffectKind.Place, id, $"placed {name}")
+            {
+                LogText = $"{formula.Name}: placed {name}", Name = name, TypeString = type, StateString = state, MapId = anchor.MapId,
+                Pos = anchor.Pos, StackOnto = anchor.StackId, SideId = placed.Side,
+            };
+        }
+
+        // The piece an effect acts on: its instance (the placed piece's is not in the state yet), its real name, the name the requester sees.
+        (PieceInstance Piece, string Real, string Shown, string? Side) EffectTarget(FormulaOutput o, int oi)
+        {
+            switch (o.Target)
+            {
+                case OutputTarget.Unit: { var real = RealName(piece!); return (piece!, real, real, run.Sides.Value(piece!)); }
+                case OutputTarget.Piece: { var tp = targets[o.PieceVariable!]; return (tp.Piece, RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece)); }
+                case OutputTarget.Placed when o.Action is OutputAction.SetLayer or OutputAction.SetMask:
+                    return placed is { } pl ? (pl.Piece, pl.Name, pl.Name, pl.Side) : throw new EvalError(NothingPlaced);
+                default: throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
+            }
+        }
+        Value EffectValue(FormulaOutput o) => string.IsNullOrWhiteSpace(o.Expr) ? result : Evaluator.Evaluate(Parse(formula, o.Expr), new RunContext(run));
+
+        var traitEffects = new List<PieceEffect>();
+        var removals = new List<PieceEffect>();
+        var pending = new Dictionary<(string, int), string>();   // trait states this run already set (a second change reads the first)
         // Every output is computed (value and property) before the trace is returned, so a failing output writes nothing.
         for (var oi = 0; oi < formula.Outputs.Count; oi++)
         {
             var o = formula.Outputs[oi];
-            if (o.Action != OutputAction.Write) throw new EvalError("not supported yet");
+            switch (o.Action)
+            {
+                case OutputAction.Write: break;
+                case OutputAction.Place: continue;
+                case OutputAction.Remove:
+                {
+                    if (o.Target == OutputTarget.Placed) throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
+                    var tg = EffectTarget(o, oi);
+                    if (string.IsNullOrWhiteSpace(o.ToMapId))
+                    {
+                        removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"removed {tg.Shown}")
+                            { LogText = $"{formula.Name}: removed {tg.Real}", Name = tg.Real, SideId = tg.Side });
+                        continue;
+                    }
+                    var mapId = o.ToMapId.Trim();
+                    var map = _model.Maps.FirstOrDefault(m => m.Id == mapId) ?? _model.Maps.FirstOrDefault(m => m.Name == mapId)
+                        ?? throw new EvalError($"Map \"{mapId}\" was not found in the module");
+                    if (map.Boards.Count == 0) throw new EvalError($"Map \"{map.Name}\" has no board");
+                    var board = map.Boards[0];
+                    var centre = new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0);
+                    removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"moved {tg.Shown} to {map.Name}")
+                    {
+                        LogText = $"{formula.Name}: moved {tg.Real} to {map.Name}", Name = tg.Real, ToMapId = map.Id, Pos = centre, SideId = tg.Side,
+                    });
+                    continue;
+                }
+                case OutputAction.SetLayer:
+                case OutputAction.SetMask:
+                {
+                    var tg = EffectTarget(o, oi);
+                    var traits = PieceInfo.TypeOf(tg.Piece).Traits;
+                    string Current(int i) => pending.TryGetValue((tg.Piece.Id, i), out var st) ? st
+                        : i < tg.Piece.TraitStates.Count ? tg.Piece.TraitStates[i] ?? "" : "";
+                    var setTo = EffectValue(o);
+                    var whole = setTo.Kind == ValueKind.Number && double.IsFinite(setTo.Number) && setTo.Number == Math.Floor(setTo.Number);
+                    int index;
+                    string newState, shown, logged;
+                    if (o.Action == OutputAction.SetLayer)
+                    {
+                        var (li, def) = PieceInfo.FindLayer(PieceInfo.TypeOf(tg.Piece), o.Layer ?? "")
+                            ?? throw new EvalError($"{tg.Shown} has no layer \"{(o.Layer ?? "").Trim()}\"");
+                        var layer = def.Name.Trim();
+                        if (def.FollowProperty) throw new EvalError($"Layer \"{layer}\" follows a property, so it cannot be set");
+                        var levels = Math.Max(Math.Max(def.Images.Count, def.LevelNames.Count), 1);
+                        if (!whole || setTo.Number < (def.AlwaysActive ? 1 : 0) || setTo.Number > levels)
+                            throw new EvalError($"Layer \"{layer}\" has no level {setTo.Display()}");
+                        var n = (int)setTo.Number;
+                        var cur = Current(li);
+                        newState = n > 0 ? TraitState.LayerSetLevel(def, cur, n, true)
+                            : TraitState.LayerSetLevel(def, cur, TraitState.LayerLevel(def, cur).Level, false);   // 0: off, the level kept
+                        var level = n >= 1 && n <= def.LevelNames.Count && def.LevelNames[n - 1]?.Trim() is { Length: > 0 } ln
+                            ? ln : n.ToString(CultureInfo.InvariantCulture);
+                        index = li;
+                        shown = $"{layer} of {tg.Shown} = {level}";
+                        logged = $"{layer} of {tg.Real} = {level}";
+                    }
+                    else
+                    {
+                        index = -1;
+                        for (var i = 0; i < traits.Count && index < 0; i++) if (traits[i] is ObscurableDef) index = i;
+                        if (index < 0) throw new EvalError($"{tg.Shown} has no mask");
+                        if (!whole || setTo.Number is not (0 or 1)) throw new EvalError("The mask value must be 0 or 1");
+                        var on = setTo.Number == 1;
+                        newState = TraitState.ObscuredSet((ObscurableDef)traits[index], Current(index), on, MaskObscurer);
+                        var verb = on ? "masked" : "unmasked";
+                        shown = $"{tg.Shown} {verb}";
+                        logged = $"{tg.Real} {verb}";
+                    }
+                    pending[(tg.Piece.Id, index)] = newState;
+                    traitEffects.Add(new PieceEffect(o.Action == OutputAction.SetLayer ? PieceEffectKind.SetLayer : PieceEffectKind.SetMask, tg.Piece.Id, shown)
+                        { LogText = $"{formula.Name}: {logged}", Name = tg.Real, TraitIndex = index, NewState = newState, SideId = tg.Side });
+                    continue;
+                }
+                default:
+                    throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
+            }
+            if (o.Target == OutputTarget.Placed && placed == null) throw new EvalError(NothingPlaced);
             var prop = OutputProperty(o, run);
             // an old pack edited by hand (the validator not run): a computed value is never written
             if (PropertyFacts.IsComputed(prop))
                 throw new EvalError($"Formula \"{formula.Name}\": output {oi + 1} writes computed property \"{prop.Name}\"");
             string key;
-            (PieceInstance Piece, string Name)? target = null;
+            (string Real, string Shown, string? Side)? target = null;
+            double? before = null;
             switch (o.Target)
             {
                 case OutputTarget.Unit: key = LedgerKey.Piece(piece!.Id); break;
                 case OutputTarget.Global: key = LedgerKey.Holder(HolderDef.GlobalId); EnsureKept(_pack, HolderDef.GlobalId, prop); break;
                 case OutputTarget.Piece:
+                case OutputTarget.Placed:
                 {
                     // the scope rule of a Unit output (the validator's text): a holder-only property is never written to a piece
                     if (prop.Scope == PropertyScope.Holders)
                         throw new EvalError($"Formula \"{formula.Name}\": output property \"{prop.Name}\" cannot be written to a piece (its scope is {prop.Scope})");
+                    if (o.Target == OutputTarget.Placed)
+                    {
+                        // the new piece has no ledger yet: Before is the property's Default (its seeds run after it is added, before this write)
+                        target = (placed!.Name, placed.Name, placed.Side);
+                        key = LedgerKey.Piece(placed.Piece.Id);
+                        before = prop.Default;
+                        break;
+                    }
                     var tp = targets[o.PieceVariable!];
                     // on a player view, a non-Public value of a side the view was not made for is hidden (as the binding reads it)
                     if (s.IsPlayerView && !PropertyFacts.IsPublic(_pack, prop) && run.Sides.Value(tp.Piece) is { } tside && s.ViewSides?.Contains(tside) != true)
                         return Unresolved(o.PieceVariable!, HiddenText);
-                    target = tp;
+                    target = (RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece));
                     key = LedgerKey.Piece(tp.Piece.Id);
                     break;
                 }
-                case OutputTarget.Placed:
-                    throw new EvalError("not supported yet");
                 case OutputTarget.Holder:
                 default:
                     if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
@@ -309,10 +473,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 if (value.Kind != ValueKind.Number) throw new EvalError($"The value for {prop.Name} is not a number");
             }
             var x = value.Number;
-            var before = Ledger.GetOrDefault(s, key, prop);
-            var after = o.Op switch { OutputOp.Subtract => before - x, OutputOp.Add => before + x, _ => x };
+            var was = before ?? Ledger.GetOrDefault(s, key, prop);
+            var after = o.Op switch { OutputOp.Subtract => was - x, OutputOp.Add => was + x, _ => x };
             if (double.IsNaN(after) || double.IsInfinity(after)) throw new EvalError("Result is not a finite number");
-            var b = Value.Of(before).Display();
+            var b = Value.Of(was).Display();
             var xs = value.Display();
             var a = Value.Of(after).Display();
             string Part(string what) => o.Op switch
@@ -322,20 +486,36 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 _ => $"{what} = {PropertyLabels.Text(_pack, prop, after)}",
             };
             var part = Part(prop.Name);
-            outputs.Add(new OutputPreview(key, prop.Id, prop.Name, before, after)
+            outputs.Add(new OutputPreview(key, prop.Id, prop.Name, was, after)
             {
                 Target = o.Target,
                 Part = part,
-                SideId = target is { } tg ? run.Sides.Value(tg.Piece) : null,
-                Subject = target?.Name,
-                TargetName = target is { } tn ? (PieceInfo.Name(tn.Piece)?.Trim() is { Length: > 0 } real ? real : PieceChoices.UnknownName) : null,
+                SideId = target?.Side,
+                Subject = target?.Shown,
+                TargetName = target?.Real,
             });
             // the dialog's working names the target as its binding does ("Fuel of Blue Barge 4 + 2 = 6")
-            parts.Add(target is { } named ? Part($"{prop.Name} of {named.Name}") : part);
+            parts.Add(target is { } named ? Part($"{prop.Name} of {named.Shown}") : part);
         }
+        // Effects in command order: the Place, the layer and mask changes (output order), then the removals (output order).
+        var effects = new List<PieceEffect>();
+        if (place != null) effects.Add(place);
+        effects.AddRange(traitEffects);
+        effects.AddRange(removals);
+        parts.AddRange(effects.Select(e => e.Text));
         if (parts.Count > 0) working += " → " + string.Join("; ", parts);
-        return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey) { Calc = calc };
+        return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey) { Calc = calc, Effects = effects };
     }
+
+    private const string NothingPlaced = "An output writes the placed piece, but nothing was placed";
+    /// <summary>The obscurer a SetMask output writes (as the Mask menu does; <see cref="PieceAccess.Masking"/> ignores it).</summary>
+    private const string MaskObscurer = "local";
+
+    /// <summary>The piece a Place output adds (not in the state until its AddPiece executes), its name and its side.</summary>
+    private sealed record Placed(PieceInstance Piece, string Name, string? Side);
+
+    /// <summary>A piece's name on its own log lines: its real name, else "Unknown piece".</summary>
+    private static string RealName(PieceInstance p) => PieceInfo.Name(p)?.Trim() is { Length: > 0 } real ? real : PieceChoices.UnknownName;
 
     /// <summary>The name a run failure gives a holder: "Global" for the global holder, else the holder's name (its id when deleted).</summary>
     private static string HolderText(RulesPack pack, string holderId) =>
@@ -366,18 +546,26 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
     /// <summary>
     /// The commands applying a trace. Each carries the unit the formula ran on (<see cref="FormulaTrace.PieceId"/>) and, when given, the side
-    /// it was run for, so PlayerView can attribute rolls and working explicitly.
+    /// it was run for, so PlayerView can attribute rolls and working explicitly. Whatever the listed output order, the order is fixed: rolls;
+    /// the Place (<see cref="AddPiece"/>); own writes (Unit, Global, Holder); Piece writes; Placed writes; each layer or mask change with its
+    /// System line (output order); the working line when no own write carries it; then removals and moves (output order), so every line
+    /// before a removal is logged against a piece that still exists. The caller seeds the placed piece right after its AddPiece executes.
     /// </summary>
     public IReadOnlyList<GameCommand> Commands(FormulaTrace t, string? note, string? tag = null, string? subject = null, string? sideId = null)
     {
         var list = new List<GameCommand>();
         if (t.Result == null || t.Error != null) return list;
         foreach (var d in t.Rolls) list.Add(new RollDice(d.Purpose, d.Count, d.Sides, d.Results, PieceId: t.PieceId, SideId: sideId));
-        var own = t.Outputs.Where(o => o.Target != OutputTarget.Piece).ToList();
+        var own = t.Outputs.Where(o => o.Target is not (OutputTarget.Piece or OutputTarget.Placed)).ToList();
         var onPieces = t.Outputs.Where(o => o.Target == OutputTarget.Piece).ToList();
-        // The acting side's working leaves out the Piece parts: those go on the targets' own lines, which the target's side reads.
-        var working = onPieces.Count == 0 || t.Calc == null ? t.Working
-            : t.Calc + (own.Count == 0 ? "" : " → " + string.Join("; ", own.Select(o => o.Part)));
+        var onPlaced = t.Outputs.Where(o => o.Target == OutputTarget.Placed).ToList();
+        var effects = t.Effects ?? Array.Empty<PieceEffect>();
+        // The acting side's working leaves out the Piece and Placed parts (those go on the targets' own lines, which the target's side reads)
+        // and lists the effects by the names the acting player sees.
+        var working = t.Calc == null ? t.Working
+            : t.Calc + (own.Count + effects.Count == 0 ? "" : " → " + string.Join("; ", own.Select(o => o.Part).Concat(effects.Select(e => e.Text))));
+        foreach (var e in effects.Where(e => e.Kind == PieceEffectKind.Place))
+            list.Add(new AddPiece(e.PieceId, e.TypeString!, e.StateString ?? "", e.MapId!, e.Pos, e.StackOnto, e.LogText));
         var first = true;
         foreach (var o in own)
         {
@@ -386,17 +574,28 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 Subject: subject, PieceId: t.PieceId, SideId: sideId) { AppliedRun = first ? t.Formula.Id : null });
             first = false;
         }
-        // A Piece write is the target's line: keyed on it, stamped with its side, subject its real name, working "{formula}: {part}".
-        foreach (var o in onPieces)
+        // A Piece (or Placed) write is the target's line: keyed on it, stamped with its side, subject its real name, working "{formula}: {part}".
+        foreach (var o in onPieces.Concat(onPlaced))
         {
             LedgerKey.TryParse(o.Key, out _, out var targetId);
             list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note,
                 $"{t.Formula.Name}: {o.Part}", Tag: tag, Subject: o.TargetName ?? o.Subject, PieceId: targetId, SideId: o.SideId));
         }
+        // A layer or mask change: the trait state, then a System line by the piece's real name, stamped with its side.
+        foreach (var e in effects.Where(e => e.Kind is PieceEffectKind.SetLayer or PieceEffectKind.SetMask))
+        {
+            list.Add(new SetTraitState(e.PieceId, e.TraitIndex, e.NewState ?? ""));
+            list.Add(new AddLogLine(LogKind.System, e.LogText, e.PieceId, SideId: e.SideId));
+        }
         // With no own line, the run's working (and its run stamp) goes on a line of its own, on the run piece, for the acting side.
-        if (own.Count == 0 && onPieces.Count > 0)
+        if (own.Count == 0 && (onPieces.Count + onPlaced.Count > 0 || effects.Count > 0))
             list.Add(new AddLogLine(LogKind.Calc, $"{subject ?? t.Formula.Name}: {working}" + (tag == null ? "" : $" ({tag})"), t.PieceId,
                 SideId: sideId, FormulaId: t.Formula.Id) { AppliedRun = t.Formula.Id });
+        // Removals last: a delete line is stamped with the removed piece's side (its owner keeps it, other sides drop it).
+        foreach (var e in effects.Where(e => e.Kind == PieceEffectKind.Remove))
+            list.Add(e.ToMapId == null
+                ? new RemovePiece(e.PieceId, e.LogText) { SideId = e.SideId }
+                : new MovePieces(new[] { e.PieceId }, e.ToMapId, e.Pos, null, e.LogText));
         return list;
     }
 
@@ -748,6 +947,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public bool Has(string property) => PieceFilter.HasProperty(run.State, run.Pack, run.Piece, property, run.Model);
         public Value PieceName() => PieceFilter.NameValue(run.Piece);
         public Value Marker(string key) => PieceFilter.MarkerValue(run.Piece, key);
+        public double Layer(string name) => PieceFilter.LayerValue(run.Piece, run.State, name);
         public double Turn() => run.State.Position?.Turn ?? run.State.Turn.Turn;
         public double Stage() => run.State.Position?.Repeat ?? 1;
         public Value Side() => PieceFilter.SideValue(run.Piece, run.Pack, run.Sides);

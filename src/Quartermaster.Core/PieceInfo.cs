@@ -48,6 +48,16 @@ public static class PieceInfo
         return d;
     }
 
+    /// <summary>The first layer trait named <paramref name="name"/> (trimmed, case-insensitive) and its trait-state index; null when none.</summary>
+    public static (int Index, LayerDef Def)? FindLayer(PieceType type, string? name)
+    {
+        var want = (name ?? "").Trim();
+        if (want.Length == 0) return null;
+        for (var i = 0; i < type.Traits.Count; i++)
+            if (type.Traits[i] is LayerDef l && string.Equals(l.Name.Trim(), want, StringComparison.OrdinalIgnoreCase)) return (i, l);
+        return null;
+    }
+
     /// <summary>Grid location name of the piece in board-local coordinates; null when there is no board or grid under it.</summary>
     public static string? Location(PieceInstance p, ModuleModel model)
     {
