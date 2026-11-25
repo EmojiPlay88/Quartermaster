@@ -220,6 +220,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         for (var oi = 0; oi < formula.Outputs.Count; oi++)
         {
             var o = formula.Outputs[oi];
+            if (o.Action != OutputAction.Write) throw new EvalError("not supported yet");
             var prop = OutputProperty(o, run);
             // an old pack edited by hand (the validator not run): a computed value is never written
             if (PropertyFacts.IsComputed(prop))
@@ -229,6 +230,9 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             {
                 case OutputTarget.Unit: key = LedgerKey.Piece(piece!.Id); break;
                 case OutputTarget.Global: key = LedgerKey.Holder(HolderDef.GlobalId); EnsureKept(_pack, HolderDef.GlobalId, prop); break;
+                case OutputTarget.Piece:
+                case OutputTarget.Placed:
+                    throw new EvalError("not supported yet");
                 default:
                     if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
                         throw new EvalError("An output refers to a deleted holder");

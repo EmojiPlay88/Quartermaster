@@ -242,6 +242,14 @@ marker("Kind") == "Unit" and marker("Side") == "Northern League"
 
 True for the Northern League's fighting units, not its depot or the turn marker.
 
+### layer("name")
+
+The level of a named layer on the counter, as a number (0 when the layer is off). The name goes in quotes. If the counter has no such layer, it is an error. (Full wording comes with the B3 wiki pass.)
+
+```
+layer("Levels") >= 2
+```
+
 ### turn()
 
 The turn number, as a number. Takes 0 arguments. Before the game starts it is 1.

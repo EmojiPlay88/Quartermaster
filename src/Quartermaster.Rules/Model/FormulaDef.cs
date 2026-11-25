@@ -3,7 +3,10 @@ using System.Text.Json.Serialization;
 namespace Quartermaster.Rules;
 
 public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll, Moved, Piece }
-public enum OutputTarget { Unit, Global, Holder }
+/// <summary>What an output does. Write (the default, omitted from the pack) changes a property; the others act on a counter: Place adds a palette counter, Remove deletes or moves it, SetLayer sets a layer's level, SetMask masks or reveals it.</summary>
+public enum OutputAction { Write, Place, Remove, SetLayer, SetMask }
+/// <summary>Where an output acts. Piece = the counter a Piece variable picked; Placed = the counter this formula's Place output added.</summary>
+public enum OutputTarget { Unit, Global, Holder, Piece, Placed }
 public enum OutputOp { Subtract, Add, Set }
 
 public sealed record VariableBinding
@@ -35,6 +38,9 @@ public sealed record VariableBinding
     /// <summary>Piece only: unit-filter text choosing which pieces may be picked ("which pieces"). Null = every piece (the Workbench stores null, never "").</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PieceFilter { get; init; }
+    /// <summary>Piece only: list just the other counters in the run piece's hex ("same hex"). False (default) is omitted from the pack.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool SameHex { get; init; }
 }
 
 public sealed record FormulaOutput
@@ -52,6 +58,21 @@ public sealed record FormulaOutput
     /// <summary>Expression picking from <see cref="PropertyChoice"/>: a number N is the Nth listed property (1-based), a text its property name. Null = none (an error with a non-empty list; never "").</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PropertySelect { get; init; }
+    /// <summary>What the output does; Write (the default) is omitted from the pack.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public OutputAction Action { get; init; }
+    /// <summary>Target Piece: the name of the Piece variable whose picked counter the output acts on. Null = none (the Workbench stores null, never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PieceVariable { get; init; }
+    /// <summary>Place: the palette entry (slot) whose counter is placed in the hex. Null = none (never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Slot { get; init; }
+    /// <summary>SetLayer: the layer's name on the counter; the output's value is the level (0 = off). Null = none (never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Layer { get; init; }
+    /// <summary>Remove: the id of the map the counter moves to instead of being deleted. Null = delete (never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ToMapId { get; init; }
 }
 
 public sealed record FormulaDef

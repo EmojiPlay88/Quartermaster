@@ -24,6 +24,7 @@ public static class Parser
         ["has"] = (1, 1),
         ["name"] = (0, 0),
         ["marker"] = (1, 1),
+        ["layer"] = (1, 1),
         ["startswith"] = (2, 2),
         ["contains"] = (2, 2),
         ["turn"] = (0, 0),

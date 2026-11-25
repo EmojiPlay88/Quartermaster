@@ -138,7 +138,7 @@ public static class ExprFacts
             case Unary u: return Check(u.Operand, pack);
             case Binary b: return Check(b.Left, pack) && Check(b.Right, pack);
             case Call c:
-                if (c.Function is "name" or "marker" or "has" or "side" or "map") return false;
+                if (c.Function is "name" or "marker" or "layer" or "has" or "side" or "map") return false;
                 if (NeedsPiece(c.Function)) return false;
                 if (IsAggregate(c.Function)) return true;   // the property and filter are read per piece, whatever they name
                 if (c.Function == "runs" && c.Args.Count > 0 && c.Args[0] is TextLit id && NeedsUnit(pack.ById<FormulaDef>(id.Value)))
