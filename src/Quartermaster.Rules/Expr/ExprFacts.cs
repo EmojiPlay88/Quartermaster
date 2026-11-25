@@ -124,9 +124,9 @@ public static class ExprFacts
         _ => false,
     };
 
-    /// <summary>A formula that needs a unit (a Unit binding or a Unit output), as <c>PieceFilter.FormulasFor</c> tests it.</summary>
+    /// <summary>A formula that needs a unit (a Unit binding, a same-hex Piece binding or a Unit output), as <c>PieceFilter.FormulasFor</c> tests it.</summary>
     private static bool NeedsUnit(FormulaDef? f) =>
-        f != null && ((f.Bindings ?? new()).Any(b => b?.Kind == BindingKind.Unit) || (f.Outputs ?? new()).Any(o => o?.Target == OutputTarget.Unit));
+        f != null && ((f.Bindings ?? new()).Any(b => b?.Kind == BindingKind.Unit || (b?.Kind == BindingKind.Piece && b.SameHex)) || (f.Outputs ?? new()).Any(o => o?.Target == OutputTarget.Unit));
 
     private static bool Check(AstExpr e, RulesPack pack)
     {

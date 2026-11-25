@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Quartermaster.Render;
+using Quartermaster.Render.Workbench;
 using Quartermaster.Rules;
 
 namespace Quartermaster.Desktop.Workbench;
@@ -28,7 +29,9 @@ public sealed partial class FormulasTab
             new EditColumn("Caption", Weight: 70),
             new EditColumn("Only when", Weight: 90),
             new EditColumn("Dice count", Weight: 80),
+            new EditColumn("Same hex", EditColumnKind.Check, Weight: 50),
         ]);
+        _bind.SetHeaderToolTip(7, SameHexHint);
         _bind.CellCommitted += (r, c, text) => Run(() => OnBindingCell(r, c, text));
         _removeUnused.Click += (_, _) => Run(() => { FlushPending(final: false); Commit(FormulaEdit.RemoveUnused); RebuildBindings(); });
         var bar = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
@@ -46,6 +49,13 @@ public sealed partial class FormulasTab
     };
 
     const string DiceCountHint = "Blank = the fixed number.";
+    const string SameHexHint = "Piece binding: list only the other counters in this unit's hex.";
+    const string ActionHint = "Write a value (default), place a palette counter, remove the counter, or set its layer or mask.";
+    const string PieceHint = "The Piece variable whose picked counter this output acts on (target Piece).";
+    const string PaletteHint = "Place: the palette counter to place in the hex.";
+    const string LayerHint = "Set layer: the layer's name on the counter; the value is the level (0 = off).";
+    const string ToMapHint = "Remove: move the counter to this map instead of deleting it.";
+    internal const string DeleteText = "(delete)";
 
     Control BuildOutputsBox()
     {
@@ -58,7 +68,17 @@ public sealed partial class FormulasTab
             new EditColumn("Value", Weight: 90),
             new EditColumn("Choose from", Weight: 100),
             new EditColumn("Pick by", Weight: 80),
+            new EditColumn("Action", EditColumnKind.Combo, Weight: 70, Items: Enum.GetNames<OutputAction>()),
+            new EditColumn("Piece", EditColumnKind.Combo, Weight: 60),
+            new EditColumn("Palette entry", EditColumnKind.EditableCombo, Weight: 100),
+            new EditColumn("Layer", Weight: 70),
+            new EditColumn("To map", EditColumnKind.Combo, Weight: 80),
         ]);
+        _out.SetHeaderToolTip(7, ActionHint);
+        _out.SetHeaderToolTip(8, PieceHint);
+        _out.SetHeaderToolTip(9, PaletteHint);
+        _out.SetHeaderToolTip(10, LayerHint);
+        _out.SetHeaderToolTip(11, ToMapHint);
         _out.SetHeaderToolTip(4, OutputValueHint);
         _out.SetHeaderToolTip(5, ChooseFromHint);
         _out.SetHeaderToolTip(6, PickByHint);
@@ -87,7 +107,7 @@ public sealed partial class FormulasTab
         var unused = FormulaEdit.Unused(f).Select(b => b.Variable).ToHashSet(StringComparer.Ordinal);
         var rows = new List<IReadOnlyList<string>>();
         foreach (var b in f.Bindings)
-            rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? "", b.When ?? "", b.DiceCountExpr ?? ""]);
+            rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? "", b.When ?? "", b.DiceCountExpr ?? "", b.SameHex ? "True" : "False"]);
         _bind.SetRows(rows);   // resets per-cell items, read-only state and hints: they go on afterwards
         for (var r = 0; r < f.Bindings.Count; r++)
         {
@@ -102,6 +122,8 @@ public sealed partial class FormulasTab
             _bind.SetCellToolTip(r, 3, DetailsHint(b.Kind));
             _bind.SetCellReadOnly(r, 6, b.Kind != BindingKind.Roll);
             _bind.SetCellToolTip(r, 6, b.Kind == BindingKind.Roll ? DiceCountHint : "");
+            _bind.SetCellReadOnly(r, 7, b.Kind != BindingKind.Piece);
+            _bind.SetCellToolTip(r, 7, b.Kind == BindingKind.Piece ? SameHexHint : "");
         }
     }
 
@@ -153,6 +175,11 @@ public sealed partial class FormulasTab
                 again = true;
                 if (TryExpression(text, "Dice count", out var count)) Commit(x => SyncAfter(FormulaEdit.SetBinding(x, v, z => z with { DiceCountExpr = count })));
                 break;
+            case 7:
+                if (b.Kind != BindingKind.Piece) return;
+                var on = string.Equals(text, "True", StringComparison.OrdinalIgnoreCase);
+                Commit(x => FormulaEdit.SetBinding(x, v, z => FormulaEdit.WithSameHex(z, on)));
+                break;
             case 5:
                 again = true;
                 if (TryExpression(text, "Only when", out var when)) Commit(x => SyncAfter(FormulaEdit.SetBinding(x, v, z => z with { When = when })));
@@ -192,6 +219,10 @@ public sealed partial class FormulasTab
         if (Current is not { } f || _s.Rules is not { } pack) { _out.SetRows([]); return; }
         var holders = pack.Holders.Select(h => h.Name).ToList();
         var props = pack.Properties.Select(p => p.Name).ToList();
+        var pieceVars = f.Bindings.Where(b => b.Kind == BindingKind.Piece).Select(b => b.Variable).ToList();
+        var mapNames = new List<string> { DeleteText };
+        mapNames.AddRange(_s.Model.Maps.Select(m => m.Name));
+        var slots = WorkbenchRules.SlotPaths(_s.Model);
         var rows = new List<IReadOnlyList<string>>();
         foreach (var o in f.Outputs)
         {
@@ -200,7 +231,9 @@ public sealed partial class FormulasTab
                 : o.Target == OutputTarget.Global ? HolderDef.GlobalId : "";
             var prop = pack.ById<PropertyDef>(o.Property)?.Name ?? (o.Property.Length == 0 ? "" : FormulaEdit.Missing);
             var choice = FormulaEdit.FormatNameList((o.PropertyChoice ?? new()).Select(id => pack.ById<PropertyDef>(id)?.Name ?? FormulaEdit.Missing));
-            rows.Add([o.Target.ToString(), holder, prop, o.Op.ToString(), o.Expr ?? "", choice, o.PropertySelect ?? ""]);
+            var toMap = o.ToMapId == null ? DeleteText : _s.Model.Maps.FirstOrDefault(m => m.Id == o.ToMapId)?.Name ?? FormulaEdit.Missing;
+            rows.Add([o.Target.ToString(), holder, prop, o.Op.ToString(), o.Expr ?? "", choice, o.PropertySelect ?? "",
+                o.Action.ToString(), o.PieceVariable ?? "", o.Slot ?? "", o.Layer ?? "", toMap]);
         }
         _out.SetRows(rows);
         for (var r = 0; r < f.Outputs.Count; r++)
@@ -215,6 +248,19 @@ public sealed partial class FormulasTab
             _out.SetCellToolTip(r, 4, OutputValueHint);
             _out.SetCellToolTip(r, 5, ChooseFromHint);
             _out.SetCellToolTip(r, 6, PickByHint);
+            // A Piece, palette, layer or map cell is open only for the target or action that uses it.
+            _out.SetCellItems(r, 8, pieceVars);
+            _out.SetCellReadOnly(r, 8, o.Target != OutputTarget.Piece);
+            _out.SetCellItems(r, 9, slots);
+            _out.SetCellReadOnly(r, 9, o.Action != OutputAction.Place);
+            _out.SetCellReadOnly(r, 10, o.Action != OutputAction.SetLayer);
+            _out.SetCellItems(r, 11, mapNames);
+            _out.SetCellReadOnly(r, 11, o.Action != OutputAction.Remove);
+            _out.SetCellToolTip(r, 7, ActionHint);
+            _out.SetCellToolTip(r, 8, PieceHint);
+            _out.SetCellToolTip(r, 9, PaletteHint);
+            _out.SetCellToolTip(r, 10, LayerHint);
+            _out.SetCellToolTip(r, 11, ToMapHint);
         }
     }
 
@@ -266,6 +312,25 @@ public sealed partial class FormulasTab
             case 6:
                 again = true;
                 if (TryExpression(text, "Pick by", out var pick)) Commit(x => SyncAfter(FormulaEdit.SetOutputPick(x, row, pick)));
+                break;
+            case 7:
+                if (!Enum.TryParse<OutputAction>(text, out var act)) return;
+                Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithOutputAction(o, act)));
+                again = true;   // the cells the action does not use close
+                break;
+            case 8:
+                Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithPieceVariable(o, text)));
+                break;
+            case 9:
+                Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithSlot(o, text)));
+                break;
+            case 10:
+                Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithLayer(o, text)));
+                break;
+            case 11:
+                var map = text == DeleteText ? null : _s.Model.Maps.FirstOrDefault(m => m.Name == text);
+                if (text != DeleteText && map == null) { again = true; break; }
+                Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithToMap(o, map?.Id)));
                 break;
         }
         if (again) Dispatcher.UIThread.Post(() => Run(RebuildOutputs));

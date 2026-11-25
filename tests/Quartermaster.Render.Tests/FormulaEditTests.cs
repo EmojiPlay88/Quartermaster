@@ -548,4 +548,44 @@ public class FormulaEditQuotedChoiceTests
         Assert.Equal(["\"a|b\"", "auto: 1"], FormulaEdit.SplitOutsideQuotes("\"a|b\" | auto: 1", '|'));
         Assert.Equal("\"always ask\"", FormulaEdit.QuoteChoice("always ask"));
     }
+
+    [Fact]
+    public void FormulaEdit_with_action_clears_fields()
+    {
+        var o = new FormulaOutput
+        {
+            Target = OutputTarget.Piece, PieceVariable = "T", Property = "fuel", PropertyChoice = new() { "fuel" }, PropertySelect = "1",
+            Action = OutputAction.Write, Slot = "Wreck", Layer = "Levels", ToMapId = "map-b",
+        };
+        var place = FormulaEdit.WithOutputAction(o, OutputAction.Place);
+        Assert.Equal(OutputAction.Place, place.Action);
+        Assert.Equal("Wreck", place.Slot);
+        Assert.Null(place.Layer);
+        Assert.Null(place.ToMapId);
+        Assert.Null(place.PropertyChoice);
+        Assert.Null(place.PropertySelect);
+
+        var remove = FormulaEdit.WithOutputAction(o, OutputAction.Remove);
+        Assert.Null(remove.Slot);
+        Assert.Equal("map-b", remove.ToMapId);
+
+        var layer = FormulaEdit.WithOutputAction(o, OutputAction.SetLayer);
+        Assert.Equal("Levels", layer.Layer);
+        Assert.Null(layer.Slot);
+        Assert.Null(layer.ToMapId);
+
+        Assert.Null(FormulaEdit.WithOutputAction(place, OutputAction.Write).Slot);
+
+        // A target change drops the Piece variable unless the target is Piece.
+        Assert.Null(FormulaEdit.WithOutputTarget(o, OutputTarget.Unit).PieceVariable);
+        Assert.Equal("T", FormulaEdit.WithOutputTarget(o, OutputTarget.Piece).PieceVariable);
+
+        // Blank is null, never "".
+        Assert.Null(FormulaEdit.WithSlot(o, "  ").Slot);
+        Assert.Null(FormulaEdit.WithLayer(o, "").Layer);
+        Assert.Null(FormulaEdit.WithToMap(o, " ").ToMapId);
+        Assert.Null(FormulaEdit.WithPieceVariable(o, "").PieceVariable);
+        Assert.Equal("Fort", FormulaEdit.WithLayer(o, " Fort ").Layer);
+        Assert.True(FormulaEdit.WithSameHex(new VariableBinding { Kind = BindingKind.Piece }, true).SameHex);
+    }
 }

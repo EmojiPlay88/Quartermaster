@@ -415,9 +415,44 @@ public static class FormulaEdit
     public static FormulaDef RemoveOutput(FormulaDef f, int index) =>
         f with { Outputs = f.Outputs.Where((_, i) => i != index).ToList() };
 
-    /// <summary>Changing the target drops a holder that no longer applies.</summary>
+    /// <summary>Changing the target drops a holder that no longer applies, and a Piece variable unless the target is Piece.</summary>
     public static FormulaOutput WithOutputTarget(FormulaOutput o, OutputTarget t) =>
-        o with { Target = t, HolderId = t == OutputTarget.Holder ? o.HolderId : null };
+        o with
+        {
+            Target = t,
+            HolderId = t == OutputTarget.Holder ? o.HolderId : null,
+            PieceVariable = t == OutputTarget.Piece ? o.PieceVariable : null,
+        };
+
+    /// <summary>Changing the action drops the fields only another action uses: palette entry unless Place, layer unless SetLayer, map unless Remove, the property fields unless Write.</summary>
+    public static FormulaOutput WithOutputAction(FormulaOutput o, OutputAction a) =>
+        o with
+        {
+            Action = a,
+            Slot = a == OutputAction.Place ? o.Slot : null,
+            Layer = a == OutputAction.SetLayer ? o.Layer : null,
+            ToMapId = a == OutputAction.Remove ? o.ToMapId : null,
+            PropertyChoice = a == OutputAction.Write ? o.PropertyChoice : null,
+            PropertySelect = a == OutputAction.Write ? o.PropertySelect : null,
+            Property = a == OutputAction.Write ? o.Property : "",
+        };
+
+    private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    /// <summary>The Piece variable the output acts on; blank is null.</summary>
+    public static FormulaOutput WithPieceVariable(FormulaOutput o, string? variable) => o with { PieceVariable = Blank(variable) };
+
+    /// <summary>The palette entry a Place output places; blank is null.</summary>
+    public static FormulaOutput WithSlot(FormulaOutput o, string? slot) => o with { Slot = Blank(slot) };
+
+    /// <summary>The layer a SetLayer output sets; blank is null.</summary>
+    public static FormulaOutput WithLayer(FormulaOutput o, string? layer) => o with { Layer = Blank(layer) };
+
+    /// <summary>The map a Remove output moves the counter to; blank is null (delete).</summary>
+    public static FormulaOutput WithToMap(FormulaOutput o, string? mapId) => o with { ToMapId = Blank(mapId) };
+
+    /// <summary>A Piece binding's "same hex" switch.</summary>
+    public static VariableBinding WithSameHex(VariableBinding b, bool sameHex) => b with { SameHex = sameHex };
 
     /// <summary>Sets the output's value expression; blank is null (the formula's result), never "".</summary>
     public static FormulaDef SetOutputValue(FormulaDef f, int index, string? expr) =>

@@ -49,4 +49,19 @@ public class FormulaReferenceTests
         Assert.Contains("not run:", File.ReadAllText(Path.Combine(wiki, "Window-Phases.md")));
         Assert.Contains("Starting value", File.ReadAllText(Path.Combine(wiki, "Window-Rules-Workbench.md")));
     }
+
+    [Fact]
+    public void Wiki_mentions_layer_function()
+    {
+        var wiki = Path.Combine(DemoModuleTests.RepoRoot(), "docs", "wiki");
+        Assert.Contains("### layer(\"name\")", Page);
+        Assert.DoesNotContain("B3 wiki pass", Page);
+        var making = File.ReadAllText(Path.Combine(wiki, "Making-a-Rules-Pack.md"));
+        Assert.Contains("layer(\"Levels\")", making);
+        Assert.Contains("## Acting on other pieces", making);
+        var wb = File.ReadAllText(Path.Combine(wiki, "Window-Rules-Workbench.md"));
+        Assert.Contains("Palette entry", wb);
+        Assert.Contains("Same hex", wb);
+        Assert.Contains("same hex", File.ReadAllText(Path.Combine(wiki, "Window-Formula-Dialog.md")), StringComparison.OrdinalIgnoreCase);
+    }
 }
