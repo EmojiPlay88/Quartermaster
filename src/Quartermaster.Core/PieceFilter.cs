@@ -265,8 +265,11 @@ public static class PieceFilter
     private sealed class ParsedAppliesTo(Quartermaster.Rules.Expr.Expr? expr) { public Quartermaster.Rules.Expr.Expr? Expr { get; } = expr; }
 
     internal sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack, Lazy<Func<PieceInstance, string?>> sides,
-        AggregateFilters filters, IReadOnlyDictionary<string, double>? pending = null, bool startingValue = false) : IEvalContext
+        AggregateFilters filters, IReadOnlyDictionary<string, double>? pending = null, bool startingValue = false, Value? row = null) : IEvalContext
     {
+        /// <summary>The row key a choices filter is testing (B4, <see cref="InputChoices"/>); without one row() fails as by default.</summary>
+        public Value Row() => row ?? throw new EvalError("row() can only be used in a choices filter");
+
         /// <summary>In a starting value (<see cref="EvaluateWithPending"/>) these calls fail.</summary>
         private static EvalError NotInStartingValue(string fn) => new($"{fn}() is not available in a starting value");
 

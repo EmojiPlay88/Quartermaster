@@ -29,7 +29,8 @@ namespace Quartermaster.Core;
 /// keeps it (the viewer already holds that line's owner). The run stamp (<see cref="LogEntry.AppliedRun"/>, <see cref="LogEntry.Stage"/>) is
 /// cleared the same way, so <c>runs()</c> cannot count another side's runs from the view (it refuses such counts in a view anyway).</item>
 /// <item>Dice of a formula with PrivateRolls follow the line's owner; hidden rolls lose their results and read "{Side} rolled dice".</item>
-/// <item>Pending runs lose units of other sides (and removed pieces); runs left empty are dropped. Unit-less runs follow the current phase's side.</item>
+/// <item>Pending runs lose units of other sides (and removed pieces); runs left empty are dropped. Unit-less runs follow the current phase's side.
+/// Every run loses its group dice (<see cref="PendingRun.GroupRolls"/>); an ask run's units of other sides lose their group.</item>
 /// <item>If filtering fails, the view is emptied (fail closed) and its log holds one System line, <see cref="FilterErrorText"/>.</item>
 /// </list>
 /// </summary>
@@ -372,12 +373,22 @@ public static class PlayerView
             {
                 if (r == null) continue;
                 // An ask run (spec #72) is the asked side's alone, whatever the phase.
-                if (!string.IsNullOrEmpty(r.AskSideId)) { if (_held.Contains(r.AskSideId)) runs.Add(r); continue; }
-                var units = r.Units ?? Array.Empty<PendingUnit>();
-                if (units.Count == 0) { if (phaseVisible) runs.Add(r); continue; }
+                // The host draws every group die (B4): a view never holds them. A unit's group stays only on units of the viewer's sides.
+                var plain = r.GroupRolls == null ? r : r with { GroupRolls = null };
+                if (!string.IsNullOrEmpty(r.AskSideId))
+                {
+                    if (!_held.Contains(r.AskSideId)) continue;
+                    var all = plain.Units ?? Array.Empty<PendingUnit>();
+                    runs.Add(all.Any(u => u?.Group != null && !UnitVisible(u.PieceId))
+                        ? plain with { Units = all.Select(u => u?.Group != null && !UnitVisible(u.PieceId) ? u with { Group = null } : u!).ToList() }
+                        : plain);
+                    continue;
+                }
+                var units = plain.Units ?? Array.Empty<PendingUnit>();
+                if (units.Count == 0) { if (phaseVisible) runs.Add(plain); continue; }
                 var mine = units.Where(u => u != null && UnitVisible(u.PieceId)).ToList();
                 if (mine.Count == 0) continue;
-                runs.Add(mine.Count == units.Count ? r : r with { Units = mine });
+                runs.Add(mine.Count == units.Count ? plain : plain with { Units = mine });
             }
             v.Pending = runs;
         }

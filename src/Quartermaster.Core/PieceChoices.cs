@@ -40,10 +40,14 @@ public static class PieceChoices
         string? runPieceId) =>
         Named(s, pack, model, b, sides, runPieceId).Select(c => new PieceChoice(c.Label, c.PieceId)).ToList();
 
+    /// <summary>How many viewer states <see cref="Named"/> built on this thread (<see cref="PlayerView.For"/>; tests read it).</summary>
+    [ThreadStatic] internal static int ViewBuilds;
+
     /// <summary>The candidates with each piece's name as the viewer sees it (for the working description).</summary>
     internal static List<(string Label, string PieceId, string Name)> Named(GameState s, RulesPack pack, ModuleModel model, VariableBinding b,
         IReadOnlySet<string>? sides, string? runPieceId = null)
     {
+        if (sides != null) ViewBuilds++;
         var shown = sides == null ? s : PlayerView.For(s, pack, model, sides);
         // The run piece's hex, as the viewer's state places it (null: no run piece, not shown, or off grid).
         var run = runPieceId != null && shown.Pieces.TryGetValue(runPieceId, out var rp) ? rp : null;
