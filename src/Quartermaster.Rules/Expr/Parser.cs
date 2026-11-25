@@ -35,6 +35,7 @@ public static class Parser
         ["map"] = (0, 0),
         ["holder"] = (2, 2),
         ["runs"] = (1, 2),
+        ["row"] = (0, 0),
         ["sum"] = (2, 2),
         ["countof"] = (1, 1),
         ["maxof"] = (2, 2),

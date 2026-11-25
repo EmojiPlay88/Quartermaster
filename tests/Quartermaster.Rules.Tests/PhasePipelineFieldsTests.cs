@@ -43,17 +43,133 @@ public class PhasePipelineFieldsTests : IDisposable
 
     // ---- serialisation ----
 
+    // Written by the pre-B2 code (commit 1d1f727) from an invented pack; a regression in how any existing field is written changes these bytes.
+    private const string OldPackJson = """
+        {
+          "format": 4,
+          "id": "t",
+          "name": "TEST",
+          "moduleSha256": "",
+          "properties": [
+            {
+              "id": "p1",
+              "name": "Fuel",
+              "scope": "both",
+              "default": 0,
+              "sheetField": null,
+              "appliesTo": null,
+              "notes": null,
+              "outliner": "none",
+              "visibility": "public"
+            },
+            {
+              "id": "p2",
+              "name": "Steps",
+              "scope": "pieces",
+              "default": 0,
+              "sheetField": null,
+              "appliesTo": null,
+              "notes": null,
+              "outliner": "none",
+              "visibility": "public"
+            }
+          ],
+          "holders": [
+            {
+              "id": "h1",
+              "name": "Depot",
+              "notes": null,
+              "sideId": null
+            }
+          ],
+          "ruleRefs": [],
+          "sides": [
+            {
+              "id": "s1",
+              "name": "North",
+              "unitFilter": null
+            }
+          ],
+          "phases": [
+            {
+              "id": "ph1",
+              "name": "Supply",
+              "sideId": null,
+              "instructions": "",
+              "ruleRefId": null,
+              "checklist": [],
+              "onStart": [
+                {
+                  "formulaId": "f1",
+                  "forEach": "once",
+                  "unitFilter": null
+                }
+              ],
+              "onEnd": [
+                {
+                  "formulaId": "f1",
+                  "forEach": "once",
+                  "unitFilter": null
+                }
+              ],
+              "onMove": [],
+              "warnings": [],
+              "notes": null
+            }
+          ],
+          "blocks": [],
+          "alerts": [],
+          "mapOwners": []
+        }
+        """;
+
+    private const string OldFormulaJson = """
+        {
+          "id": "f1",
+          "name": "Fuel Use",
+          "text": "1",
+          "bindings": [],
+          "outputs": [],
+          "appliesTo": null,
+          "ruleRefId": null,
+          "notes": null,
+          "privateRolls": false
+        }
+        """;
+
+    private const string OldPackSha256 = "bd7fefe14d22370e37d60f9e442152a66626b13311a714c3f3b90bd9fdfcc248";
+
+    /// <summary>The literals follow the checkout's line endings (CRLF on Windows with autocrlf); the pack is written with LF.</summary>
+    private static string Lf(string s) => s.Replace("\r\n", "\n");
+
+    private static byte[] OldZip()
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+            foreach (var (name, text) in new[] { ("pack.json", Lf(OldPackJson)), ("formulas/f1.json", Lf(OldFormulaJson)) })
+            {
+                using var s = zip.CreateEntry(name).Open();
+                s.Write(Encoding.UTF8.GetBytes(text + "\n"));
+            }
+        return ms.ToArray();
+    }
+
+    private static string Entry(byte[] zipBytes, string name)
+    {
+        using var zip = new ZipArchive(new MemoryStream(zipBytes), ZipArchiveMode.Read);
+        using var r = new StreamReader(zip.GetEntry(name)!.Open(), Encoding.UTF8);
+        return r.ReadToEnd();
+    }
+
     [Fact]
     public void B2_absent_fields_keep_bytes()
     {
-        var pack = Base() with { Phases = new() { new PhaseDef { Id = "ph1", Name = "Supply", OnStart = new() { new StartEntry { FormulaId = "f1" } }, OnEnd = new() { new StartEntry { FormulaId = "f1" } } } } };
-        var json = PackJsonOf(pack);
-        Assert.DoesNotContain("defaultExpr", json);
-        Assert.DoesNotContain("resetAt", json);
-        Assert.DoesNotContain("askSideId", json);
-        var again = RoundTrip(pack);
-        Assert.Equal(json, PackJsonOf(again));
-        Assert.Equal(RulesPackIo.ComputeSha256(pack), RulesPackIo.ComputeSha256(again));
+        var loaded = RulesPackIo.FromBytes(OldZip());
+        var again = RulesPackIo.ToBytes(loaded);
+        Assert.Equal(Lf(OldPackJson) + "\n", Entry(again, "pack.json"));
+        Assert.Equal(Lf(OldFormulaJson) + "\n", Entry(again, "formulas/f1.json"));
+        Assert.Equal(OldPackSha256, RulesPackIo.ComputeSha256(loaded));
+        Assert.Equal(OldPackSha256, RulesPackIo.ComputeSha256(RulesPackIo.FromBytes(again)));
         Assert.Equal(4, RulesPackIo.CurrentFormat);
     }
 

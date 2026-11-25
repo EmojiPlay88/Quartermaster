@@ -237,7 +237,10 @@ public static class RulesValidator
 
     /// <summary>Problems in an applies-to/filter expression, as message tails: property names (variables and has() arguments) that no property has,
     /// and lookup() table names that no table has. The table name of a lookup is not a property; its other arguments are walked as usual.</summary>
-    private static IEnumerable<string> FilterRefProblems(string text, RulesPack pack)
+    private const string RowOutsideFilterTail = "row() can only be used in a choices filter";
+
+    /// <param name="allowRow">True only for a choices filter, where row() is the row key being tested; anywhere else row() is a problem.</param>
+    private static IEnumerable<string> FilterRefProblems(string text, RulesPack pack, bool allowRow = false)
     {
         var found = new List<string>();
         try { Walk(Parser.Parse(text)); }
@@ -263,6 +266,7 @@ public static class RulesValidator
                     }
                     else if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]) found.AddRange(HolderCallProblems(hn.Name, hp.Name, pack));
                     else if (c.Function == "runs") found.AddRange(RunsProblems(c, pack));
+                    else if (c.Function == "row") { if (!allowRow) found.Add(RowOutsideFilterTail); }
                     else if (ExprFacts.IsAggregate(c.Function)) found.AddRange(AggregateProblems(c, pack));
                     else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
@@ -487,7 +491,7 @@ public static class RulesValidator
         catch (ParseError) { return false; }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "layer", "has", "dice", "side", "map", "holder", "runs", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "layer", "has", "dice", "side", "map", "holder", "runs", "row", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -748,6 +752,12 @@ public static class RulesValidator
         {
             if (!bindingNames.Add(b.Variable)) Err($"variable \"{b.Variable}\" is bound more than once");
             CheckBinding(pack, f, b, Err);
+            if (!string.IsNullOrWhiteSpace(b.ChoicesFilter))
+            {
+                if (string.IsNullOrWhiteSpace(b.ChoicesTable)) Warn($"variable \"{b.Variable}\" has a choices filter but no choices table");
+                if (ParseProblem(b.ChoicesFilter!) is { } cfe) Err($"variable \"{b.Variable}\" choices filter {cfe}");
+                else foreach (var u in FilterRefProblems(b.ChoicesFilter!, pack, allowRow: true)) Err($"variable \"{b.Variable}\" choices filter {u}");
+            }
             if (b.SameHex && b.Kind != BindingKind.Piece) Warn($"variable \"{b.Variable}\" has \"same hex\" but is not a Piece binding");
             if (!string.IsNullOrWhiteSpace(b.AutoValue))
             {
@@ -802,6 +812,11 @@ public static class RulesValidator
         foreach (var b in f.Bindings)
             if (!used.Contains(b.Variable)) Warn($"variable \"{b.Variable}\" is bound but not used in the formula");
 
+        if (f.GroupRoll && !f.Bindings.Any(b => b.Kind == BindingKind.Roll)
+            && !new[] { f.Text }.Concat(f.Bindings.SelectMany(FormulaVariables.Sources)).Concat(FormulaVariables.OutputSources(f))
+                    .Any(src => !string.IsNullOrWhiteSpace(src) && ParseProblem(src!) is null && ExprFacts.CallsFunction(Parser.Parse(src!), "dice")))
+            Warn("rolls once for the group but has no dice");
+
         var outputNo = 0;
         var hasPlace = f.Outputs.Any(x => x.Action == OutputAction.Place);
         var placeSeen = false;
@@ -846,6 +861,7 @@ public static class RulesValidator
                     foreach (var u in RunsProblems(c, pack)) err(u);
                     break;
                 }
+                if (c.Function == "row") err(RowOutsideFilterTail);
                 if (ExprFacts.IsAggregate(c.Function))
                 {
                     foreach (var u in AggregateProblems(c, pack)) err(u);
@@ -859,6 +875,17 @@ public static class RulesValidator
     private static void CheckBinding(RulesPack pack, FormulaDef f, VariableBinding b, Action<string> err)
     {
         string v = $"variable \"{b.Variable}\"";
+        if (!string.IsNullOrWhiteSpace(b.ChoicesTable))
+        {
+            if (b.Kind != BindingKind.Input) err($"{v} has a choices table but is not an Input");
+            else
+            {
+                if (b.Choices is { Count: > 0 }) err($"{v} has both choices and a choices table");
+                if (pack.ById<TableDef>(b.ChoicesTable!) is not { } ct) err($"{v} draws its choices from unknown table \"{b.ChoicesTable}\"");
+                else if (ct.RowKeys.Any(k => TableLookup.ParseKey(TableLookup.Normalise(k)).Kind is TableKeyKind.Range or TableKeyKind.AtLeast or TableKeyKind.AtMost))
+                    err($"{v} draws its choices from table \"{ct.Name}\", whose row keys are ranges");
+            }
+        }
         switch (b.Kind)
         {
             case BindingKind.Unit:

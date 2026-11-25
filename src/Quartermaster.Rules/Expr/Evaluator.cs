@@ -51,6 +51,8 @@ public interface IEvalContext
     Value Aggregate(string fn, string? property, string? filter) => throw new EvalError($"{fn}() is not available here");
     /// <summary>How many times a formula has run in a period ("stage", "turn" or "game", lower-case).</summary>
     double Runs(string formulaId, string period) => throw new EvalError("runs() is not available here");
+    /// <summary>The row key being tested by a choices filter (a number when the key is numeric, else text).</summary>
+    Value Row() => throw new EvalError("row() can only be used in a choices filter");
 }
 
 public static class Evaluator
@@ -180,7 +182,7 @@ public static class Evaluator
     {
         "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup", "lookuprange", "count",
         "dice", "has", "startswith", "contains", "name", "marker", "layer", "turn", "stage", "mod",
-        "side", "phaseside", "map", "holder", "runs",
+        "side", "phaseside", "map", "holder", "runs", "row",
         "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin",
         "attachedsum", "attachedcount", "attachedmax", "attachedmin",
     };
@@ -277,6 +279,7 @@ public static class Evaluator
                 if (a[0] is not VarRef h || a[1] is not VarRef hp) throw new EvalError("holder needs a holder name and a property name", c);
                 return ctx.HolderValue(h.Name, hp.Name);
             }
+            case "row": return ctx.Row();
             case "runs":
             {
                 if (a[0] is not TextLit id) throw new EvalError("runs() needs a formula id in quotes", c);

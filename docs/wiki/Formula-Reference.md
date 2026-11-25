@@ -293,6 +293,16 @@ True when Bridge repair has not yet been applied to this counter this turn: as a
 
 It works in formulas, bindings, preconditions, outputs, entry filters, warnings and alerts, but not in a property's applies-to, a computed property, a starting value, a side's unit filter or a phase condition. The validator reports `runs() needs a formula id in quotes`, `runs() names formula "{id}", which does not exist` and `runs() period must be "stage", "turn" or "game"`. In a player's view of the game, `runs()` on a counter the player does not hold (or with no counter) cannot be counted (`runs() cannot be counted in this view`): a guest's condition that uses it is decided by the host.
 
+### row()
+
+The row key being tested, for an Input's **Choices filter**. It is a number when the key is numeric, otherwise text. It has no arguments and works only in a choices filter, where the counter's own values can be read as well (formula variables cannot). Anywhere else the validator reports `row() can only be used in a choices filter`.
+
+```formula
+lookup(Cargo, row(), "Min size") <= Size
+```
+
+Offers only the rows of table Cargo whose Min size is within the counter's Size.
+
 ### mod(a, b)
 
 The remainder after dividing `a` by `b`, floored: the result has the sign of `b`, so it is never negative when `b` is positive. If `b` is 0 it is an error ("mod: division by zero").
