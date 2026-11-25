@@ -208,7 +208,11 @@ public class FormulaGuardsRenderTests : IDisposable
         var (s, c) = Make(Difficulty.SemiAuto);
         c.Start();
         c.Advance();
-        var run = s.Game!.State.Pending.Single();
+        // Supply's units are refused, so the entry queues none of them (B2 I1); a run queued earlier (an old save) still holds one.
+        Assert.Empty(s.Game!.State.Pending);
+        s.Game.Execute(new QueueRuns(new[] { new PendingRun("old", "f-water", "Daily water", "start",
+            new[] { new PendingUnit("r1", "Red 1", null, false), new PendingUnit("r2", "Red 2", null, false) }, false) }));
+        var run = s.Game.State.Pending.Single();
         var trace = s.Runner!.Run(s.Game.State, new RunRequest("f-water", "r1", new Dictionary<string, string>(),
             new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>(), null, true));
         Assert.True(trace.Refused);

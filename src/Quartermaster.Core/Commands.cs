@@ -27,6 +27,8 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(SteppedBack), "steppedBack")]
 [JsonDerivedType(typeof(HideAlert), "hideAlert")]
 [JsonDerivedType(typeof(EndPhase), "endPhase")]
+[JsonDerivedType(typeof(ResetProperties), "resetProperties")]
+[JsonDerivedType(typeof(SetStartCursor), "setStartCursor")]
 public abstract record GameCommand;
 
 /// <summary>CloneOf: the piece this one is a copy of (the Clone command); its stored ledger values are copied (<see cref="LedgerSeeder.BuildCloneSeeds"/>). Omitted when null.</summary>
@@ -43,7 +45,13 @@ public sealed record ToggleTrail(string PieceId) : GameCommand;
 /// Sets a ledger value to After (absolute, so replay is deterministic). Source is "formula", "manual" or "seed". PieceId: the unit a formula
 /// ran on (its log line carries it even for holder outputs); SideId: the side it was run for, when the caller knows it. Both drive PlayerView.
 /// </summary>
-public sealed record LedgerDelta(string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, DateTimeOffset? At = null, string? Who = null, string? Tag = null, string? Subject = null, string? PieceId = null, string? SideId = null) : GameCommand;
+public sealed record LedgerDelta(string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, DateTimeOffset? At = null, string? Who = null, string? Tag = null, string? Subject = null, string? PieceId = null, string? SideId = null) : GameCommand
+{
+    /// <summary>The formula id when this delta is the one line that records an applied run (its first output; spec #71, <c>runs()</c>).
+    /// Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AppliedRun { get; init; }
+}
 public sealed record LedgerSeed(string Key, string PropertyId, double Value);
 /// <summary>CloneOf: set when the seeds copy a cloned piece's values from this source piece; such a seed is its own undoable step (never folding). Omitted when null.</summary>
 public sealed record SeedLedger(IReadOnlyList<LedgerSeed> Seeds,
@@ -68,7 +76,12 @@ public sealed record ResolveRun(string RunId, IReadOnlyList<string?> PieceIds, D
 /// Error: the line reports a failed or refused run (see <see cref="LogEntry.Error"/>); omitted when false.</summary>
 public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null, string? SideId = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Error = false) : GameCommand;
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Error = false) : GameCommand
+{
+    /// <summary>The formula id when this line records an applied run that has no outputs (its working line; spec #71). Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AppliedRun { get; init; }
+}
 
 /// <summary>Log line recorded after stepping back to a checkpoint. Folding: never an undoable action of its own.</summary>
 public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone, string Target, DateTimeOffset? At = null, string? Who = null) : GameCommand;
@@ -82,3 +95,13 @@ public sealed record HideAlert(string AlertId, DateTimeOffset? At = null, string
 /// <summary>Marks the phase at <paramref name="At"/> as having run its end-of-phase entries this pass (<see cref="GameState.EndedAt"/>), so the
 /// next Next Phase press advances without re-running them. Logs nothing; <see cref="AdvancePhase"/> clears it.</summary>
 public sealed record EndPhase(PhasePosition At) : GameCommand;
+
+/// <summary>
+/// Deletes the listed properties from every ledger (pieces and holders) and drops a ledger left empty; ledger history is kept. Logs one
+/// System line, <paramref name="Text"/> (<c>{phase}: reset {names}</c>: property names only, no counts, no pieces). Spec #56.
+/// </summary>
+public sealed record ResetProperties(IReadOnlyList<string> PropertyIds, string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+
+/// <summary>Records where the phase's start entries stopped (<see cref="GameState.StartCursor"/>; null = none left). Logs nothing;
+/// <see cref="AdvancePhase"/> clears it. Spec #32.</summary>
+public sealed record SetStartCursor(StartCursor? Cursor) : GameCommand;

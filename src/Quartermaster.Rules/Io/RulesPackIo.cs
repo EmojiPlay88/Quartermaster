@@ -256,7 +256,8 @@ public static class RulesPackIo
         // Packs older than format 4 had no visibility setting: everything stays visible.
         Properties = (p.Properties ?? new()).Where(x => x != null)
             .Select(x => x with { Name = x.Name ?? "", Expr = string.IsNullOrWhiteSpace(x.Expr) ? null : x.Expr, OverridesTable = string.IsNullOrWhiteSpace(x.OverridesTable) ? null : x.OverridesTable, OverridesColumn = string.IsNullOrWhiteSpace(x.OverridesColumn) ? null : x.OverridesColumn, Visibility = p.Format < 4 ? Visibility.Public : x.Visibility,
-                RuleRefId = Blank(x.RuleRefId), Labels = Blank(x.Labels),
+                RuleRefId = Blank(x.RuleRefId), Labels = Blank(x.Labels), DefaultExpr = Blank(x.DefaultExpr),
+                ResetAt = x.ResetAt?.Select(h => h?.Trim()).Where(h => !string.IsNullOrEmpty(h)).Select(h => h!).Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } rs ? rs : null,
                 Holders = x.Holders?.Select(h => h?.Trim()).Where(h => !string.IsNullOrEmpty(h)).Select(h => h!).Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } hs ? hs : null }).ToList(),
         MapOwners = (p.MapOwners ?? new()).Where(x => x != null)
             .Select(x => x with { MapId = x.MapId ?? "", SideId = x.SideId ?? "" }).ToList(),
@@ -273,8 +274,8 @@ public static class RulesPackIo
             Name = x.Name ?? "",
             Instructions = x.Instructions ?? "",
             Checklist = (x.Checklist ?? new()).Select(c => (c ?? new ChecklistItem()) with { Text = c?.Text ?? "", Id = Blank(c?.Id), RuleRefId = Blank(c?.RuleRefId), Notes = Blank(c?.Notes) }).ToList(),
-            OnStart = (x.OnStart ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
-            OnEnd = x.OnEnd?.Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
+            OnStart = (x.OnStart ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "", AskSideId = Blank(e.AskSideId) }).ToList(),
+            OnEnd = x.OnEnd?.Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "", AskSideId = Blank(e.AskSideId) }).ToList(),
             OnMove = (x.OnMove ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
             Warnings = (x.Warnings ?? new()).Where(w => w != null)
                 .Select(w => w with { Condition = w.Condition ?? "", Message = w.Message ?? "", RuleRefId = Blank(w.RuleRefId) }).ToList(),

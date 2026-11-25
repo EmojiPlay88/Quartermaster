@@ -105,16 +105,19 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private bool _inTrigger;
     private string? _triggerSide;
 
-    private string? Stamp() => _inTrigger ? _triggerSide : s.ActorSideFor(ActorSides);
+    private string? _askStamp;   // while an ask run is applied: the asked side (spec #72)
 
-    private string? TriggerSide(PhaseDef phase) =>
-        ActorSides == null || s.Rules is not { } pack ? null : Sequencer.ActingSide(pack, phase)?.Id ?? s.ActorSideFor(ActorSides);
+    private string? Stamp() => _inTrigger ? _triggerSide : _askStamp ?? s.ActorSideFor(ActorSides);
 
-    /// <summary>Runs an automatic trigger with the phase's stamp (nested calls keep the outer one).</summary>
-    private T AsTrigger<T>(PhaseDef phase, Func<T> run)
+    private string? TriggerSide(PhaseDef phase, IReadOnlySet<string>? sides) =>
+        sides == null || s.Rules is not { } pack ? null : Sequencer.ActingSide(pack, phase)?.Id ?? s.ActorSideFor(sides);
+
+    /// <summary>Runs an automatic trigger with the phase's stamp (nested calls keep the outer one). <paramref name="hostView"/>: the stamp is
+    /// worked out from the session's view, as Next Phase works it out, even while a guest's intent is run (entries continued after an answer).</summary>
+    private T AsTrigger<T>(PhaseDef phase, Func<T> run, bool hostView = false)
     {
         if (_inTrigger) return run();
-        _triggerSide = TriggerSide(phase);
+        _triggerSide = TriggerSide(phase, hostView ? s.ViewSides : ActorSides);
         _inTrigger = true;
         try { return run(); }
         finally { _inTrigger = false; _triggerSide = null; }
@@ -171,10 +174,19 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (s.ViewSides is { } held && side != null && !held.Contains(side.Id))
             return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
                 Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
+        // Hot-seat or online: a phase without a side whose ask run another player answers shows who is answering, as a side's phase does.
+        if (s.ViewSides is { } holds && side == null && OpenAskSide(st) is { } ask && !holds.Contains(ask)
+            && Players.Holding(st, pack, ask) != null && pack.ById<SideDef>(ask) is { } asked)
+            return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), null, chips, cur, nextName, none,
+                Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(asked.Name) ? asked.Id : asked.Name)} is playing {cur.Name}");
         var seen = s.View ?? st;   // decisions and warnings over what this player may see
         return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
             Decisions.Compute(pack, seen, s.Model), Decisions.Warnings(pack, seen, cur, s.Model), Notice);
     }
+
+    /// <summary>The side asked by the first pending ask run with a unit still open (spec #72), else null.</summary>
+    public static string? OpenAskSide(GameState st) =>
+        st.Pending.FirstOrDefault(r => !string.IsNullOrEmpty(r.AskSideId) && r.Units.Any(u => !u.Applied))?.AskSideId;
 
     private const string SkippedTip = "Skipped this pass (condition false)";
     private const int MaxWalk = 10_000;   // a bound for the preview walks; a turn of a real pack is far shorter
@@ -256,7 +268,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         {
             Exec(new AdvancePhase(null, step.To, "", to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
             SetNotice(startNotice);
-            queued = OnEnter(to);   // only the destination's OnStart runs; skipped phases trigger nothing
+            queued = EnterPhase(to);   // only the destination's OnStart runs; skipped phases trigger nothing
         }
         RaiseQueued(queued);
         PhaseBoundary?.Invoke();
@@ -296,12 +308,13 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 if (step == null) return null;
                 var to = pack.Phases[step.To.PhaseIndex];
                 SetNotice(relocated);
+                LogNotRun(from, cur);
                 Exec(new AdvancePhase(cur, step.To, from.Name, to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
                 // The prompt compares the destination with the phase left; skipped phases in between never act.
                 var toSide = Sequencer.ActingSide(pack, to);
                 pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
                 SetNotice(Join(relocated, SkippedText(step), step.Notice, pass));
-                queued = OnEnter(to);
+                queued = EnterPhase(to);
             }
         }
         RaiseQueued(queued);
@@ -361,14 +374,51 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         // A linked apply needs its run (and that unit) still pending: the phase may have moved on or another game been loaded.
         if (runId != null && !IsPending(runId, pieceId, trace.Formula.Id)) return false;
         if (!s.CanActFor(pieceId, ActorSides)) return false;   // hot-seat: only the units of the sides held (or of no side)
+        var ask = runId == null ? null : s.Game.State.Pending.FirstOrDefault(r => r.Id == runId)?.AskSideId;
+        if (!string.IsNullOrEmpty(ask) && ActorSides is { } held && !held.Contains(ask)) return false;   // an ask run is the asked side's (solo: anyone's)
         var name = UnitName(pieceId);
         var unit = name ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
-        using var action = s.Game.BeginAction(string.IsNullOrWhiteSpace(name) ? trace.Formula.Name : $"{trace.Formula.Name} on {name}");
-        foreach (var c in s.Runner.Commands(trace, null, tag, unit, Stamp())) Exec(c);
-        LogWorking(trace, unit, tag);
-        if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }));
+        List<PendingRun> queued = new();
+        using (s.Game.BeginAction(string.IsNullOrWhiteSpace(name) ? trace.Formula.Name : $"{trace.Formula.Name} on {name}"))
+        {
+            _askStamp = string.IsNullOrEmpty(ask) ? null : ask;   // its rolls and working follow the asked side's privacy
+            try
+            {
+                foreach (var c in s.Runner.Commands(trace, null, tag, unit, Stamp())) Exec(c);
+                LogWorking(trace, unit, tag);
+            }
+            finally { _askStamp = null; }
+            if (runId != null)
+            {
+                Exec(new ResolveRun(runId, new[] { pieceId }));
+                queued = ContinueEntries();   // inside the answer's action: one undo takes back the answer and what it released
+            }
+        }
+        RaiseQueued(queued);
         return true;
+    }
+
+    /// <summary>
+    /// After an answer (spec #32): when the start entries stopped at this position and no start run is left waiting, runs the entries from the
+    /// cursor on, stamped as Next Phase stamps them (the session's view, not a guest's sides). Host only.
+    /// </summary>
+    private List<PendingRun> ContinueEntries()
+    {
+        if (s.Game?.State is not { StartCursor: { } cursor } st || cursor.At != st.Position) return new();
+        if (st.Pending.Any(r => r is { Trigger: "start" })) return new();
+        if (s.IsGuest || s.IsViewerCopy || s.IsReplaying || CurrentPhase() is not { } phase || phase.Id != cursor.At.PhaseId) return new();
+        return AsTrigger(phase, () => RunEntries(phase, phase.OnStart, "start", cursor.Next), hostView: true);
+    }
+
+    /// <summary>Before leaving a phase whose start entries stopped: names the entries that never ran (Calc, no working, trigger stamp).</summary>
+    private void LogNotRun(PhaseDef phase, PhasePosition at)
+    {
+        if (s.Game?.State.StartCursor is not { } cursor || cursor.At != s.Game.State.Position || cursor.At.PhaseId != at.PhaseId) return;
+        var left = (phase.OnStart ?? new()).Skip(Math.Max(0, cursor.Next)).Where(e => e != null)
+            .Select(e => s.Rules!.ById<FormulaDef>(e.FormulaId)?.Name ?? e.FormulaId).ToList();
+        if (left.Count == 0) return;   // a cursor past the end (a rules edit) counts as done
+        AsTrigger(phase, () => { Calc("not run: " + string.Join(", ", left), formulaId: LogKind.NoWorking); return 0; });
     }
 
     /// <summary>True when an output of the trace writes a computed property (a trace built elsewhere, or from a pack edited by hand).</summary>
@@ -380,16 +430,37 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         s.Game?.State.Pending.FirstOrDefault(r => r.Id == runId) is { } run && (formulaId == null || run.FormulaId == formulaId) && run.Units.Any(u => u.PieceId == pieceId && !u.Applied);
 
     /// <summary>A run with no ledger outputs has no ledger line carrying its working; log it so every calculation is visible (spec 9).</summary>
+    /// <remarks>That line records the applied run (<see cref="AddLogLine.AppliedRun"/>, <c>runs()</c>), as the first ledger line does for a run
+    /// with outputs, so every applied run is counted exactly once.</remarks>
     private void LogWorking(FormulaTrace trace, string unit, string? tag)
     {
         if (trace.Outputs.Count > 0 || string.IsNullOrWhiteSpace(trace.Working)) return;
-        Calc($"{unit}: {trace.Working}" + (tag == null ? "" : $" ({tag})"), trace.PieceId, trace.Formula.Id);
+        Exec(new AddLogLine(LogKind.Calc, $"{unit}: {trace.Working}" + (tag == null ? "" : $" ({tag})"), trace.PieceId, SideId: Stamp(),
+            FormulaId: trace.Formula.Id) { AppliedRun = trace.Formula.Id });
     }
 
     private string? UnitName(string? pieceId) =>
         pieceId != null && s.Game!.State.Pieces.TryGetValue(pieceId, out var p) ? PieceInfo.Name(p) : null;
 
     // ---- triggers ----
+
+    /// <summary>Entering a phase (Start, Next Phase): resets the properties that reset there (spec #56), seeds again, then runs the start entries.</summary>
+    /// <returns>The runs queued (the caller raises <see cref="RunsQueued"/> once its action has closed).</returns>
+    private List<PendingRun> EnterPhase(PhaseDef phase)
+    {
+        ResetAtEntry(phase);
+        return OnEnter(phase);
+    }
+
+    private void ResetAtEntry(PhaseDef phase)
+    {
+        if (s.Rules is not { } pack || s.IsGuest || s.IsViewerCopy || s.IsReplaying) return;   // host only
+        var props = (pack.Properties ?? new()).Where(p => p?.ResetAt != null && p.ResetAt.Contains(phase.Id, StringComparer.Ordinal)).ToList();
+        if (props.Count == 0) return;
+        Exec(new ResetProperties(props.Select(p => p.Id).ToList(),
+            $"{phase.Name}: reset {string.Join(", ", props.Select(p => string.IsNullOrWhiteSpace(p.Name) ? p.Id : p.Name))}"));
+        s.SeedLedgers();   // sheet and starting value properties start again from their starting value
+    }
 
     /// <returns>The runs queued (the caller raises <see cref="RunsQueued"/> once its action has closed).</returns>
     private List<PendingRun> OnEnter(PhaseDef phase) => AsTrigger(phase, () => RunEntries(phase, phase.OnStart, "start"));
@@ -403,13 +474,20 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         return queued;
     }
 
-    /// <summary>OnStart / OnEnd entries: once, or for each unit of the phase's side.</summary>
-    private List<PendingRun> RunEntries(PhaseDef phase, List<StartEntry>? entries, string trigger)
+    /// <summary>
+    /// OnStart / OnEnd entries from index <paramref name="from"/>: once, or for each unit of the phase's side. Start entries run strictly in
+    /// order (spec #32): after the first entry that queued a run the rest wait and <see cref="GameState.StartCursor"/> records where; once
+    /// every entry has run a set cursor is cleared. OnEnd entries all run at once.
+    /// </summary>
+    private List<PendingRun> RunEntries(PhaseDef phase, List<StartEntry>? entries, string trigger, int from = 0)
     {
         var queued = new List<PendingRun>();
         if (s.Game == null || s.Rules is not { } pack) return queued;
-        foreach (var e in entries ?? new())
+        var list = entries ?? new();
+        var start = trigger == "start";
+        for (var i = Math.Max(0, from); i < list.Count; i++)
         {
+            var e = list[i];
             if (e == null) continue;
             var f = FindFormula(phase, e.FormulaId);
             if (f == null) continue;
@@ -417,8 +495,13 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             var units = e.ForEach == ForEachMode.Once
                 ? new List<Unit> { new(null, f.Name, null) }
                 : Sequencer.UnitsFor(pack, s.Game.State, phase, f, e.UnitFilter, s.Model).Select(p => new Unit(p.Id, PieceInfo.Name(p), null)).ToList();
-            Apply(f, trigger, units, queued);
+            if (Apply(f, trigger, units, queued, e.AskSideId) && start && i + 1 < list.Count)
+            {
+                Exec(new SetStartCursor(new StartCursor(s.Game.State.Position!, i + 1)));
+                return queued;
+            }
         }
+        if (start && s.Game.State.StartCursor != null) Exec(new SetStartCursor(null));
         return queued;
     }
 
@@ -524,39 +607,80 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         return false;
     }
 
-    private void Apply(FormulaDef f, string trigger, List<Unit> units, List<PendingRun> queued)
+    /// <summary>A roll attempted while a start unit's precondition is checked (<see cref="Applicable"/>): the unit is kept.</summary>
+    private sealed class NoRollsHere() : Exception("Rolls are not made here");
+
+    /// <summary>
+    /// Semi-automatic and Hardcore start entries (spec #32): leaves out the units whose precondition is decided false, logging the refusal
+    /// as Fully automatic does, so a unit that can never be applied does not hold the later entries. The check uses no inputs and no auto
+    /// values and never rolls; a unit whose precondition is undecided (or whose run fails for another reason) stays in the run.
+    /// </summary>
+    private List<Unit> Applicable(FormulaDef f, List<Unit> units)
     {
-        if (units.Count == 0 || s.Game == null) return;
+        if (s.Runner is not { } runner || s.Game is not { } g || string.IsNullOrWhiteSpace(f.Precondition)) return units;
+        var none = new Dictionary<string, string>();
+        var noRolls = new Dictionary<string, IReadOnlyList<int>>();
+        Func<string, int, int, IReadOnlyList<int>> dice = (_, _, _) => throw new NoRollsHere();
+        var kept = new List<Unit>();
+        using (runner.BeginPass(g.State))
+            foreach (var u in units)
+            {
+                var trace = runner.Run(g.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, false, dice));
+                if (trace.Refused) Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true);   // as Fully automatic logs it
+                else kept.Add(u);
+            }
+        return kept;
+    }
+
+    /// <param name="askSideId">An entry that asks a side (spec #72): its run is always queued, for that side, in every difficulty.</param>
+    /// <returns>True when a run was queued.</returns>
+    private bool Apply(FormulaDef f, string trigger, List<Unit> units, List<PendingRun> queued, string? askSideId = null)
+    {
+        if (units.Count == 0 || s.Game == null) return false;
         var mode = s.Game.State.Difficulty;
-        if (mode != Difficulty.FullyAuto || s.Runner == null)
+        var ask = string.IsNullOrWhiteSpace(askSideId) ? null : askSideId;
+        if (mode != Difficulty.FullyAuto || s.Runner == null || ask != null)
         {
+            if (mode != Difficulty.FullyAuto && trigger == "start") units = Applicable(f, units);
+            if (units.Count == 0) return false;   // every unit refused: the entry counts as done
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,
-                units.Select(u => new PendingUnit(u.PieceId, u.Label, u.Moved, false)).ToList(), false);
+                units.Select(u => new PendingUnit(u.PieceId, u.Label, u.Moved, false)).ToList(), false) { AskSideId = ask };
             Exec(new QueueRuns(new[] { run }));
             queued.Add(run);
-            return;
+            return true;
         }
 
         var none = new Dictionary<string, string>();
         var noRolls = new Dictionary<string, IReadOnlyList<int>>();
         var applied = 0;
         var needInput = new List<Unit>();
-        foreach (var u in units)
+        var g = s.Game;
+        var state = g.State;
+        // One pass (spec #31): the units share one side map and one aggregate state, and the entry raises Changed once. The commands
+        // inside write only ledgers, rolls and log lines (the pass's invariant); each unit still reads the writes of the units before it.
+        using (g.DeferChanged())
         {
-            var trace = s.Runner.Run(s.Game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
-            if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true); continue; }   // hidden like its working
-            if (trace.Result == null) { needInput.Add(u); continue; }
-            foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, Stamp())) Exec(c);
-            LogWorking(trace, u.Label, "auto");
-            applied++;
+            using (s.Runner.BeginPass(state))
+                foreach (var u in units)
+                {
+                    var trace = s.Runner.Run(state, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
+                    if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true); continue; }   // hidden like its working
+                    if (trace.Result == null) { needInput.Add(u); continue; }
+                    foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, Stamp())) Exec(c);
+                    LogWorking(trace, u.Label, "auto");
+                    s.Runner.AfterApply();
+                    applied++;
+                }
+            if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied", formulaId: LogKind.NoWorking);
         }
-        if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied", formulaId: LogKind.NoWorking);
         if (needInput.Count > 0)
         {
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,
                 needInput.Select(u => new PendingUnit(u.PieceId, u.Label, u.Moved, false)).ToList(), true);
             Exec(new QueueRuns(new[] { run }));
             queued.Add(run);
+            return true;
         }
+        return false;
     }
 }

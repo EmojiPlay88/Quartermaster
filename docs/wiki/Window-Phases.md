@@ -39,9 +39,23 @@ The two notices about a problem (every phase skipped, a condition that failed) a
 
 Loading a game or changing the rules never moves the game because of a condition. (If the rules no longer have the phase the game was in, the game is still moved to the phase now in that place.) Online, a guest may press Next Phase in their own phase; the host works out the conditions and everyone gets the result.
 
+### Start formulas run in order
+
+The rows of **On start** run strictly from top to bottom, in every difficulty. The next row's units are chosen only after the runs queued by the row above have all been answered, so a row can read what the row above wrote. In Semi-automatic and Hardcore a row with units always waits for you; in Fully automatic it waits only when a unit needs a value from you. The rows after it then continue when you apply the last waiting run, in the same action, so Undo takes back the answer and everything it released.
+
+If you press **Next Phase** while rows have not run yet, the game moves on and the log says `not run: {formula names}`, in row order, for example `not run: Fuel supply, Ammo supply`. Runs that were open are logged as skipped, as before.
+
+### Asked runs
+
+A phase with no side can give a start (or end) row **Asks side**. The run is queued for that side in every difficulty and shows in the open list as `{formula} — {side name} answers`. Only a player holding that side sees and applies it (in a solo game, anyone); another player who tries is told `That calculation belongs to a side you don't hold.` The rows after it wait for the answer.
+
+### Reset lines
+
+When a phase is entered, properties that reset there are cleared first and the log says `{phase}: reset {property names}`; counters then start again from their starting value, and the start rows run. All of it is one Next Phase step for Undo. See [Values that reset at a phase](Making-a-Rules-Pack#values-that-reset-at-a-phase).
+
 ### End-of-phase formulas
 
-A phase can run formulas when it is left, listed under **On end: run formulas** in the Workbench. They have the same columns as **On start** (Formula, For each, Filter (units)). In the log they are tagged `end`, as start formulas are tagged `start`.
+A phase can run formulas when it is left, listed under **On end: run formulas** in the Workbench. They have the same columns as **On start** (Formula, For each, Filter (units), Asks side). In the log they are tagged `end`, as start formulas are tagged `start`.
 
 When you press **Next Phase** in a phase that has end formulas:
 

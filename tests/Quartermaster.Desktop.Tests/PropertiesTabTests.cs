@@ -582,6 +582,60 @@ public sealed class PropertiesTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void PropertiesTab_starting_value_and_resets_at_commit()
+    {
+        var s = Session(p => p with { Phases = PhaseFixture.Pack("x").Phases });
+        var tab = Tab(s);
+        var g = tab.PropertyGrid;
+        Assert.Equal("Starting value", g.HeaderText(PropertiesTab.StartingValueColumn));
+        Assert.Equal("Resets at", g.HeaderText(PropertiesTab.ResetsAtColumn));
+        Assert.Equal("An expression worked out once for each counter that gets this property and has no sheet value, e.g. lookup(CrewSizes, marker(\"Kind\")). It may read the counter, globals and tables; no dice. Blank = Default.", PropertiesTab.StartingValueTip);
+        Assert.Equal("Phases that clear this property's values when they begin, comma-separated names. Counters then start again from their starting value. Blank = never.", PropertiesTab.ResetsAtTip);
+        Assert.Equal(PropertiesTab.StartingValueTip, g.HeaderToolTip(PropertiesTab.StartingValueColumn));
+        Assert.Equal(PropertiesTab.ResetsAtTip, g.HeaderToolTip(PropertiesTab.ResetsAtColumn));
+        Assert.Equal(PropertiesTab.ResetsAtTip, g.CellToolTip(0, PropertiesTab.ResetsAtColumn));
+
+        Type(g, 0, PropertiesTab.StartingValueColumn, " 2 + 3 ");
+        Assert.Equal("2 + 3", s.Rules!.Properties[0].DefaultExpr);
+        Type(g, 0, PropertiesTab.ResetsAtColumn, "supply, Weather");
+        Assert.Equal(["ph-supply", "ph-weather"], s.Rules!.Properties[0].ResetAt);
+        Assert.Equal("", tab.Status.Text);
+        Type(g, 0, PropertiesTab.StartingValueColumn, " ");
+        Assert.Null(s.Rules!.Properties[0].DefaultExpr);
+        Type(g, 0, PropertiesTab.ResetsAtColumn, "");
+        Assert.Null(s.Rules!.Properties[0].ResetAt);
+    }
+
+    [AvaloniaFact]
+    public void PropertiesTab_unknown_reset_phase_refused()
+    {
+        var s = Session(p => p with
+        {
+            Phases = PhaseFixture.Pack("x").Phases,
+            Properties = p.Properties.Select((x, i) => i == 0 ? x with { ResetAt = new() { "ph-supply" } } : x).ToList(),
+        });
+        var tab = Tab(s);
+        Type(tab.PropertyGrid, 0, PropertiesTab.ResetsAtColumn, "Weather, Harbour");
+        Assert.Equal("No phase named \"Harbour\"", tab.Status.Text);
+        Assert.Equal(["ph-supply"], s.Rules!.Properties[0].ResetAt);   // unchanged
+        Assert.Equal("Supply", tab.PropertyGrid.Cell(0, PropertiesTab.ResetsAtColumn));
+    }
+
+    [AvaloniaFact]
+    public void PropertiesTab_old_columns_keep_places()
+    {
+        Assert.Equal(10, PropertiesTab.RuleRefColumn);
+        Assert.Equal(11, PropertiesTab.LabelsColumn);
+        Assert.Equal(12, PropertiesTab.HoldersColumn);
+        Assert.Equal(13, PropertiesTab.CloneAsColumn);
+        Assert.Equal(14, PropertiesTab.StartingValueColumn);
+        Assert.Equal(15, PropertiesTab.ResetsAtColumn);
+        var tab = Tab(Session());
+        Assert.Equal("Clone as", tab.PropertyGrid.HeaderText(13));
+        Assert.Equal("Name", tab.PropertyGrid.HeaderText(0));
+    }
+
+    [AvaloniaFact]
     public void PropertiesTab_unknown_holder_refused()
     {
         var s = Session(p => B1(p) with

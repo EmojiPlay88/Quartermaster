@@ -262,6 +262,18 @@ stage() == 2
 
 True on the second pass through a block.
 
+### runs("formula-id") or runs("formula-id", "period")
+
+How many times a formula has been applied. The first argument is the formula's id in quotes (the **Id** shown on the Formulas tab). The optional second argument is the period, in quotes: `"stage"` (the same turn and the same pass of a repeating block; outside a block, the same as the turn), `"turn"` (the same turn) or `"game"` (every turn; the default). On a counter it counts the runs of that formula on this counter; with no counter in play it counts the runs made without a unit. A warning or alert whose condition calls `runs()` of a formula that needs a unit is checked for each counter. Only applied runs count: a run that failed, was refused or was undone is not counted, and the run being checked is not counted yet. A run with no outputs counts once.
+
+```formula
+runs("f-bridge-repair", "turn") < 1
+```
+
+True when Bridge repair has not yet been applied to this counter this turn: as an **Only runs when** condition it allows one run a turn.
+
+It works in formulas, bindings, preconditions, outputs, entry filters, warnings and alerts, but not in a property's applies-to, a computed property, a starting value, a side's unit filter or a phase condition. The validator reports `runs() needs a formula id in quotes`, `runs() names formula "{id}", which does not exist` and `runs() period must be "stage", "turn" or "game"`. In a player's view of the game, `runs()` on a counter the player does not hold (or with no counter) cannot be counted (`runs() cannot be counted in this view`): a guest's condition that uses it is decided by the host.
+
 ### mod(a, b)
 
 The remainder after dividing `a` by `b`, floored: the result has the sign of `b`, so it is never negative when `b` is positive. If `b` is 0 it is an error ("mod: division by zero").
@@ -455,7 +467,7 @@ A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-
 - constants and the pure functions (`if`, `min`, `max`, `round`, `floor`, `ceil`, `abs`, `clamp`, `mod`, `startswith`, `contains`).
 - the whole-game piece sums `sum`, `countof`, `maxof` and `minof` (their filters test each piece, so they may read pieces, and even use the `hex` ones: `countof("hexcount() > 1") > 0` is true when any hex holds a stack).
 
-It may not use `name()`, `marker()`, `has()`, `side()`, `map()`, `holder()`, `dice()`, the `hex` and `attached` functions (outside a piece sum's filter) or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
+It may not use `name()`, `marker()`, `has()`, `side()`, `map()`, `holder()`, `runs()`, `dice()`, the `hex` and `attached` functions (outside a piece sum's filter) or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
 
 ## Where names get their values
 

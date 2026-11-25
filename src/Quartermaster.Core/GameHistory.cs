@@ -30,6 +30,7 @@ public static class ActionLabels
             case RemovePiece: return "remove piece";
             case SetNotes: return "notes edit";
             case SetTurn: return "turn change";
+            case ResetProperties: return "Reset values";
             default: return SplitWords(first.GetType().Name);
         }
     }

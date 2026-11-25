@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Quartermaster.Rules;
 using Quartermaster.Rules.Expr;
 using Quartermaster.Rules.Tables;
@@ -47,6 +49,85 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// <summary>A variable that waits on another (an "Only when" not yet known, or a roll held until the precondition is decided).</summary>
     private sealed class Waits() : Exception("Waiting");
 
+    /// <summary>
+    /// The parsed expressions of each formula record (text, precondition, output sources, binding expressions), keyed by source text: a value
+    /// is an <see cref="AstExpr"/> or the <see cref="ParseError"/> it gave. Records are replaced on edit, so an edited formula parses again.
+    /// </summary>
+    private static readonly ConditionalWeakTable<FormulaDef, ConcurrentDictionary<string, object>> ParseCache = new();
+
+    /// <summary>How many expressions the runner parsed on this thread (cache misses; tests read it).</summary>
+    [ThreadStatic] internal static int Parses;
+
+    /// <summary>The parsed <paramref name="text"/> of <paramref name="f"/>, parsed once per record; throws the <see cref="ParseError"/> it gives.</summary>
+    private static AstExpr Parse(FormulaDef f, string text)
+    {
+        var map = ParseCache.GetValue(f, _ => new ConcurrentDictionary<string, object>(StringComparer.Ordinal));
+        if (!map.TryGetValue(text, out var hit))
+        {
+            Parses++;
+            try { hit = Parser.Parse(text); }
+            catch (ParseError pe) { hit = pe; }
+            hit = map.GetOrAdd(text, hit);
+        }
+        return hit is ParseError err ? throw new ParseError(err.Position, err.Detail) : (AstExpr)hit;
+    }
+
+    private Pass? _pass;
+
+    /// <summary>The pass open on this thread for <paramref name="s"/> (<see cref="BeginPass"/>), else null.</summary>
+    private Pass? PassFor(GameState s) =>
+        _pass is { } p && ReferenceEquals(p.State, s) && p.Thread == Environment.CurrentManagedThreadId ? p : null;
+
+    /// <summary>
+    /// Opens a pass over <paramref name="s"/> (spec #31): until disposed, runs on that same state instance, on this thread, share one side map
+    /// and one aggregate state (compiled filters, hex and map indexes) instead of building them per run. Values are always read live, so a
+    /// unit sees the ledger writes of the units before it. Invariant: while a pass is open the commands executed write only ledgers, rolls and
+    /// log lines (no piece is added, removed or moved; B3 must close or refresh the pass on piece commands). A nested call on the same state
+    /// joins the open pass; on another state, or another thread, it opens nothing.
+    /// </summary>
+    public IDisposable BeginPass(GameState s)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        if (_pass is { } open)
+        {
+            if (!ReferenceEquals(open.State, s) || open.Thread != Environment.CurrentManagedThreadId) return new PassScope(this, null);
+            open.Depth++;
+            return new PassScope(this, open);
+        }
+        var pass = new Pass(this, s);
+        _pass = pass;
+        return new PassScope(this, pass);
+    }
+
+    /// <summary>Called after a unit's commands were executed inside a pass: drops any value the pass memoised. No value is memoised today
+    /// (filters, the side map and aggregates read the state live), so it keeps the contract for later caches.</summary>
+    public void AfterApply()
+    {
+        if (_pass is { } p && p.Thread == Environment.CurrentManagedThreadId) p.AfterApply();
+    }
+
+    private sealed class Pass(FormulaRunner owner, GameState state)
+    {
+        public GameState State => state;
+        public int Thread { get; } = Environment.CurrentManagedThreadId;
+        public int Depth = 1;
+        public Lazy<Func<PieceInstance, string?>> Sides { get; } = PieceFilter.SideMap(state, owner._pack);
+        private AggregateFilters? _filters;
+        public AggregateFilters Filters => _filters ??= new(state, owner._pack, owner._model) { SharedSides = Sides };
+        public void AfterApply() { }
+    }
+
+    private sealed class PassScope(FormulaRunner owner, Pass? pass) : IDisposable
+    {
+        private bool _done;
+        public void Dispose()
+        {
+            if (_done || pass == null) return;
+            _done = true;
+            if (--pass.Depth == 0 && ReferenceEquals(owner._pass, pass)) owner._pass = null;
+        }
+    }
+
     public FormulaTrace Run(GameState s, RunRequest r)
     {
         var formula = _pack.ById<FormulaDef>(r.FormulaId);
@@ -70,20 +151,20 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula, Dictionary<string, IReadOnlyList<int>> produced)
     {
         AstExpr expr;
-        try { expr = Parser.Parse(formula.Text ?? ""); }
+        try { expr = Parse(formula, formula.Text ?? ""); }
         catch (ParseError pe) { return Fail(formula, pe.Message, produced); }
 
         var piece = r.PieceId != null && s.Pieces.TryGetValue(r.PieceId, out var pi) ? pi : null;
         var run = new RunScope(this, s, r, formula, piece, produced);
 
-        AstExpr? pre = string.IsNullOrWhiteSpace(formula.Precondition) ? null : Parser.Parse(formula.Precondition);
+        AstExpr? pre = string.IsNullOrWhiteSpace(formula.Precondition) ? null : Parse(formula, formula.Precondition);
 
         // Variables of the text, then of the precondition, then of the outputs' value and pick-by expressions, then any used only inside
         // Table binding row/column expressions, "Only when" conditions or Roll binding dice count expressions.
         var names = new List<string>(Parser.Variables(expr));
         if (pre != null) foreach (var v in Parser.Variables(pre)) if (!names.Contains(v)) names.Add(v);
         foreach (var src in FormulaVariables.OutputSources(formula))
-            foreach (var v in Parser.Variables(Parser.Parse(src))) if (!names.Contains(v)) names.Add(v);
+            foreach (var v in Parser.Variables(Parse(formula, src))) if (!names.Contains(v)) names.Add(v);
         for (var i = 0; i < names.Count; i++)
         {
             var b = formula.Bindings.FirstOrDefault(x => x.Variable == names[i]);
@@ -97,7 +178,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             foreach (var src in srcs)
             {
                 if (string.IsNullOrWhiteSpace(src)) continue;
-                foreach (var v in Parser.Variables(Parser.Parse(src)))
+                foreach (var v in Parser.Variables(Parse(formula, src)))
                     if (v != b.Variable && !names.Contains(v)) names.Add(v);
             }
         }
@@ -163,7 +244,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             }
             else
             {
-                value = Evaluator.Evaluate(Parser.Parse(o.Expr), new RunContext(run));
+                value = Evaluator.Evaluate(Parse(formula, o.Expr), new RunContext(run));
                 if (value.Kind != ValueKind.Number) throw new EvalError($"The value for {prop.Name} is not a number");
             }
             var x = value.Number;
@@ -201,7 +282,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     {
         PropertyDef Def(string id) => _pack.ById<PropertyDef>(id) ?? throw new EvalError("An output refers to a deleted property");
         if (o.PropertyChoice is not { Count: > 0 } list) return Def(o.Property);
-        var pick = Evaluator.Evaluate(Parser.Parse(o.PropertySelect ?? ""), new RunContext(run));
+        var pick = Evaluator.Evaluate(Parse(run.Formula, o.PropertySelect ?? ""), new RunContext(run));
         var props = list.Select(Def).ToList();
         PropertyDef? hit = pick.Kind switch
         {
@@ -221,9 +302,14 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var list = new List<GameCommand>();
         if (t.Result == null || t.Error != null) return list;
         foreach (var d in t.Rolls) list.Add(new RollDice(d.Purpose, d.Count, d.Sides, d.Results, PieceId: t.PieceId, SideId: sideId));
+        var first = true;
         foreach (var o in t.Outputs)
+        {
+            // The first output's line records the applied run (runs(), spec #71): exactly one stamped line per run.
             list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note, t.Working, Tag: tag,
-                Subject: subject, PieceId: t.PieceId, SideId: sideId));
+                Subject: subject, PieceId: t.PieceId, SideId: sideId) { AppliedRun = first ? t.Formula.Id : null });
+            first = false;
+        }
         return list;
     }
 
@@ -235,13 +321,16 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private readonly List<DiceEntry> _rolls = new();
         public IReadOnlyList<DiceEntry> Rolls => _rolls;
         public PieceInstance? Piece => piece;
+        public FormulaDef Formula => formula;
+        private readonly Pass? _pass = owner.PassFor(s);
         public GameState State => s;
         public RulesPack Pack => owner._pack;
-        /// <summary>The side map, compiled once per run on the first side() call.</summary>
-        public Lazy<Func<PieceInstance, string?>> Sides { get; } = PieceFilter.SideMap(s, owner._pack);
+        /// <summary>The side map, compiled once per run (or per pass, <see cref="BeginPass"/>) on the first side() call.</summary>
+        public Lazy<Func<PieceInstance, string?>> Sides => _sides ??= _pass?.Sides ?? PieceFilter.SideMap(s, owner._pack);
+        private Lazy<Func<PieceInstance, string?>>? _sides;
         public ModuleModel Model => owner._model;
-        /// <summary>The compiled filters of this run's aggregate calls, each filter text compiled once per run.</summary>
-        public AggregateFilters Filters => _filters ??= new(s, owner._pack, owner._model);
+        /// <summary>The compiled filters of this run's aggregate calls, each filter text compiled once per run (or per pass), sharing <see cref="Sides"/>.</summary>
+        public AggregateFilters Filters => _filters ??= _pass?.Filters ?? new(s, owner._pack, owner._model) { SharedSides = Sides };
         private AggregateFilters? _filters;
         private readonly Dictionary<string, IReadOnlyList<int>> _byKey = byKey;
         private int _inlineDice;
@@ -341,7 +430,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 var auto = b is { Kind: not (BindingKind.Input or BindingKind.Piece) };
                 try
                 {
-                    var use = b == null || string.IsNullOrWhiteSpace(b.When) ? true : Condition(Parser.Parse(b.When));
+                    var use = b == null || string.IsNullOrWhiteSpace(b.When) ? true : Condition(Parse(formula, b.When));
                     st = use == false ? new(name, null, auto, false, null, Skipped: true)
                         : use == null ? throw new Waits()
                         : b == null ? new(name, null, false, false, "No binding for " + name) : Bind(b);
@@ -409,8 +498,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     var table = (b.TableId == null ? null : owner._pack.ById<TableDef>(b.TableId))
                         ?? throw new EvalError($"The table for {name} was deleted");
                     var ctx = new RunContext(this);
-                    var row = Evaluator.Evaluate(Parser.Parse(b.RowExpr ?? ""), ctx);
-                    Value? col = string.IsNullOrWhiteSpace(b.ColExpr) ? null : Evaluator.Evaluate(Parser.Parse(b.ColExpr), ctx);
+                    var row = Evaluator.Evaluate(Parse(formula, b.RowExpr ?? ""), ctx);
+                    Value? col = string.IsNullOrWhiteSpace(b.ColExpr) ? null : Evaluator.Evaluate(Parse(formula, b.ColExpr), ctx);
                     var (ri, ci) = TableLookup.Locate(table, row, col);
                     var src = $"{table.Name}, row {TableLookup.Normalise(table.RowKeys[ri])}"
                         + (table.Kind == TableKind.TwoD ? $", column {TableLookup.Normalise(table.ColumnKeys[ci])}" : "");
@@ -473,7 +562,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private int DiceCount(VariableBinding b)
         {
             if (string.IsNullOrWhiteSpace(b.DiceCountExpr)) return b.DiceCount ?? 1;
-            var v = Evaluator.Evaluate(Parser.Parse(b.DiceCountExpr!), new RunContext(this));
+            var v = Evaluator.Evaluate(Parse(formula, b.DiceCountExpr!), new RunContext(this));
             if (v.Kind != ValueKind.Number || v.Number != Math.Floor(v.Number) || v.Number < 1 || v.Number > 100)
                 throw new EvalError($"'{b.Variable}' dice count must be a whole number from 1 to 100");
             return (int)v.Number;
@@ -522,7 +611,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             if (!r.Typed.TryGetValue(name, out var raw) || string.IsNullOrWhiteSpace(raw))
             {
                 if (!r.UseAutoValues || b.AlwaysAsk || string.IsNullOrWhiteSpace(b.AutoValue)) return new(name, null, false, false, "Waiting for input");
-                try { raw = Evaluator.Evaluate(Parser.Parse(b.AutoValue), new RunContext(this)).Display(); }
+                try { raw = Evaluator.Evaluate(Parse(formula, b.AutoValue), new RunContext(this)).Display(); }
                 catch (Exception ex) when (ex is EvalError or ParseError) { return new(name, null, false, false, ex.Message); }
                 source = "default";
             }
@@ -575,5 +664,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, run.Piece, run.Filters);
+        /// <summary>The applied runs of a formula on this run's unit (none: its runs without a unit); the run itself is not counted yet.</summary>
+        public double Runs(string formulaId, string period) => RunIndex.Count(run.State, run.Pack, formulaId, run.Piece?.Id, period, run.Sides);
     }
 }

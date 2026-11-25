@@ -33,6 +33,7 @@ public static class Parser
         ["phaseside"] = (0, 0),
         ["map"] = (0, 0),
         ["holder"] = (2, 2),
+        ["runs"] = (1, 2),
         ["sum"] = (2, 2),
         ["countof"] = (1, 1),
         ["maxof"] = (2, 2),

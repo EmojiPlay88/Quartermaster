@@ -35,12 +35,14 @@ public static class PieceFilter
     /// (when matching) is thrown, so the aggregate fails instead of skipping pieces. A missing value (<see cref="EvalError.MissingValue"/>: a
     /// property not applicable to the piece or hidden, no such marker) is no match, as in any unit filter. Empty matches every piece.
     /// </summary>
-    internal static Func<PieceInstance, bool> CompileStrict(string text, GameState s, RulesPack pack, ModuleModel? model)
+    /// <param name="sides">The caller's side map for this state (shared), or null for the filter's own.</param>
+    internal static Func<PieceInstance, bool> CompileStrict(string text, GameState s, RulesPack pack, ModuleModel? model,
+        Lazy<Func<PieceInstance, string?>>? sides = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return _ => true;
         var e = Parser.Parse(text);
-        var sides = SideMap(s, pack);
-        var filters = new AggregateFilters(s, pack, model);
+        sides ??= SideMap(s, pack);
+        var filters = new AggregateFilters(s, pack, model) { SharedSides = sides };
         return p =>
         {
             try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides, filters)).IsTruthy; }
@@ -59,6 +61,31 @@ public static class PieceFilter
         if (e == null) return false;
         try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), new AggregateFilters(s, pack, null), pending)).IsTruthy; }
         catch (Exception) { return false; }
+    }
+
+    /// <summary>
+    /// Evaluates a starting value expression (<see cref="PropertyDef.DefaultExpr"/>, spec #4) on a piece, with values about to be seeded read as
+    /// if already in its ledger (see <see cref="MatchesWithPending"/>). dice(), holder(), runs() and the piece aggregates are not available
+    /// (an <see cref="EvalError"/>), so a seed is deterministic and never copies another side's values. Throws on any error.
+    /// </summary>
+    /// <remarks>The ban holds however the call is reached: directly, or inside a computed property or computed global the expression reads
+    /// (<see cref="InStartingValue"/> is set on this thread while it is evaluated), so a seed never stores a value derived from them.</remarks>
+    internal static Value EvaluateWithPending(Quartermaster.Rules.Expr.Expr e, PieceInstance p, GameState s, RulesPack pack, IReadOnlyDictionary<string, double> pending)
+    {
+        _startingValueDepth++;
+        try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), new AggregateFilters(s, pack, null), pending, startingValue: true)); }
+        finally { _startingValueDepth--; }
+    }
+
+    [ThreadStatic] private static int _startingValueDepth;
+
+    /// <summary>True while a starting value expression is evaluated on this thread (<see cref="EvaluateWithPending"/>).</summary>
+    internal static bool InStartingValue => _startingValueDepth > 0;
+
+    /// <summary>Throws <c>{fn}() is not available in a starting value</c> while a starting value is evaluated on this thread.</summary>
+    internal static void RefuseInStartingValue(string fn)
+    {
+        if (InStartingValue) throw new EvalError($"{fn}() is not available in a starting value");
     }
 
     /// <summary>The parsed expression when it parses and reads nothing about a piece (<see cref="ExprFacts.IsGameLevel"/>); else null.</summary>
@@ -151,6 +178,7 @@ public static class PieceFilter
     /// <remarks>A computed property is evaluated for the holder (<see cref="PropertyValues"/>); <paramref name="filters"/> is the caller's aggregate state.</remarks>
     internal static Value HolderRead(GameState s, RulesPack pack, string holder, string property, ModuleModel? model = null, AggregateFilters? filters = null)
     {
+        RefuseInStartingValue("holder");
         var h = pack.HolderByName(holder) ?? throw new EvalError($"No holder named '{holder}'");
         var def = pack.PropertyByName(property) ?? throw new EvalError($"Unknown property '{property}'");
         if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{def.Name} is not a holder property");
@@ -181,7 +209,7 @@ public static class PieceFilter
     /// <param name="pending">Values about to be seeded on the piece (see <see cref="MatchesWithPending"/>), read as if already in its ledger.</param>
     internal static FilterContext PieceContext(PieceInstance p, GameState s, RulesPack pack, AggregateFilters filters,
         IReadOnlyDictionary<string, double>? pending = null) =>
-        new(p, s, pack, SideMap(s, pack), filters, pending);
+        new(p, s, pack, ReferenceEquals(filters.State, s) ? filters.Sides : SideMap(s, pack), filters, pending);
 
     /// <summary>The turn, stage and phase an expression reads: the phase condition's candidate (<see cref="AggregateFilters.At"/>), else the game's.</summary>
     private static double TurnAt(GameState s, AggregateFilters? f) => f?.At is { } at ? at.Turn : TurnOf(s);
@@ -221,8 +249,11 @@ public static class PieceFilter
     private sealed class ParsedAppliesTo(Quartermaster.Rules.Expr.Expr? expr) { public Quartermaster.Rules.Expr.Expr? Expr { get; } = expr; }
 
     internal sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack, Lazy<Func<PieceInstance, string?>> sides,
-        AggregateFilters filters, IReadOnlyDictionary<string, double>? pending = null) : IEvalContext
+        AggregateFilters filters, IReadOnlyDictionary<string, double>? pending = null, bool startingValue = false) : IEvalContext
     {
+        /// <summary>In a starting value (<see cref="EvaluateWithPending"/>) these calls fail.</summary>
+        private static EvalError NotInStartingValue(string fn) => new($"{fn}() is not available in a starting value");
+
         private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
         private readonly Dictionary<string, bool> _declared = new(StringComparer.Ordinal);
 
@@ -274,7 +305,7 @@ public static class PieceFilter
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col, p, s, filters.Model, filters, sides);
         public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
-        public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
+        public IReadOnlyList<int> RollDice(int n, int sides) => throw (startingValue || InStartingValue ? NotInStartingValue("dice") : new EvalError("Dice are not allowed here"));
         public bool Has(string property) =>
             pack.PropertyByName(property) is { } def && (PropertyFacts.IsComputed(def) ? Declared(def) : Stored(def) != null);
         public Value PieceName() => NameValue(p);
@@ -284,9 +315,12 @@ public static class PieceFilter
         public Value Side() => SideValue(p, pack, sides);
         public Value PhaseSide() => PhaseSideAt(s, pack, filters);
         public Value MapName() => MapValue(p);
-        public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property, filters.Model, filters);
+        public Value HolderValue(string holder, string property) =>
+            startingValue ? throw NotInStartingValue("holder") : HolderRead(s, pack, holder, property, filters.Model, filters);
         public Value Aggregate(string fn, string? property, string? filter) =>
-            PieceAggregates.Evaluate(fn, property, filter, p, filters);
+            startingValue ? throw NotInStartingValue(fn) : PieceAggregates.Evaluate(fn, property, filter, p, filters);
+        public double Runs(string formulaId, string period) =>
+            startingValue ? throw NotInStartingValue("runs") : RunIndex.Count(s, pack, formulaId, p.Id, period, sides);
     }
 
     /// <summary>
@@ -312,7 +346,11 @@ public static class PieceFilter
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
         public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
-        public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
+        public IReadOnlyList<int> RollDice(int n, int sides)
+        {
+            RefuseInStartingValue("dice");
+            throw new EvalError("Dice are not allowed here");
+        }
         public bool Has(string property) => false;
         public Value PieceName() => NameValue(null);
         public Value Marker(string key) => MarkerValue(null, key);
@@ -324,5 +362,7 @@ public static class PieceFilter
         public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property, model, _filters);
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, null, Filters);
+        /// <summary>No piece: the formula's runs made without a unit (hidden in a player view).</summary>
+        public double Runs(string formulaId, string period) => RunIndex.Count(s, pack, formulaId, null, period);
     }
 }

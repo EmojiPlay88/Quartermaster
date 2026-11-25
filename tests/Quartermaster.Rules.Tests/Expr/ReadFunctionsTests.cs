@@ -55,6 +55,12 @@ public class ReadFunctionsTests
             new PropertyDef { Id = "pb", Name = "Both1", Scope = PropertyScope.Both },
             new PropertyDef { Id = "pp", Name = "Fuel", Scope = PropertyScope.Pieces },
         },
+        Formulas = new()
+        {
+            new FormulaDef { Id = "f-unit", Name = "U", Text = "1", Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "pp" } } },
+            new FormulaDef { Id = "f-bound", Name = "B", Text = "X", Bindings = new() { new VariableBinding { Variable = "X", Kind = BindingKind.Unit, Property = "pp" } } },
+            new FormulaDef { Id = "f-game", Name = "G", Text = "1" },
+        },
     };
 
     [Theory]
@@ -71,6 +77,11 @@ public class ReadFunctionsTests
     [InlineData("has(Flag)", false)]
     [InlineData("marker(\"k\") == 1", false)]
     [InlineData("1 + 2", true)]
+    [InlineData("runs(\"f-unit\", \"turn\") < 1", false)]
+    [InlineData("runs(\"f-bound\") < 1", false)]
+    [InlineData("runs(\"f-game\", \"turn\") < 1", true)]
+    [InlineData("runs(\"f-ghost\") < 1", true)]
+    [InlineData("Flag == 1 and runs(\"f-unit\") == 0", false)]
     public void IsGameLevel(string f, bool expected)
     {
         Assert.Equal(expected, ExprFacts.IsGameLevel(Parser.Parse(f), Pack()));

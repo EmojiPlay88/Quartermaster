@@ -16,6 +16,8 @@ public sealed class GameSession
     bool _scopeActionOpen;
     bool _scopeSettle;
     bool _redoing;
+    int _deferDepth;
+    GameCommand? _deferred;
     readonly List<Checkpoint> _checkpoints = new();
     bool _cpPending;
     string? _cpAdvanceName;
@@ -115,6 +117,37 @@ public sealed class GameSession
         _scopeSettle = false;
     }
 
+    /// <summary>
+    /// Until the outermost scope is disposed, <see cref="Changed"/> is not raised per command: it is raised once, with the last command
+    /// executed, when that scope closes, and not at all when none ran (spec #31: one notification per start entry). Commands execute, log,
+    /// group into actions and record checkpoints exactly as without the scope. Nested scopes join the outermost. A rewind while deferring
+    /// drops the pending notification (<see cref="Rewound"/> is raised instead).
+    /// </summary>
+    public IDisposable DeferChanged()
+    {
+        _deferDepth++;
+        return new DeferScope(this);
+    }
+
+    sealed class DeferScope(GameSession s) : IDisposable
+    {
+        bool _done;
+        public void Dispose()
+        {
+            if (_done) return;
+            _done = true;
+            s.EndDefer();
+        }
+    }
+
+    void EndDefer()
+    {
+        if (--_deferDepth > 0) return;
+        var last = _deferred;
+        _deferred = null;
+        if (last != null) Changed?.Invoke(last);
+    }
+
     /// <summary>The single entry point for changing game state.</summary>
     public void Execute(GameCommand c)
     {
@@ -135,7 +168,8 @@ public sealed class GameSession
         _log.Add(c);
         NoteCheckpoint(c);
         if (oneShot) CloseAction();
-        Changed?.Invoke(c);
+        if (_deferDepth > 0) _deferred = c;
+        else Changed?.Invoke(c);
     }
 
     void ClearPendingCheckpoint() { _cpPending = false; _cpAdvanceName = null; _cpAt = null; }
@@ -252,6 +286,7 @@ public sealed class GameSession
         foreach (var k in _cacheOrder.Where(k => k > logIndex).ToList()) { _cache.Remove(k); _cacheOrder.Remove(k); }
         if (TurnBase > logIndex) TurnBase = logIndex;
         State = state;
+        _deferred = null;
     }
 
     /// <summary>A fresh copy of the state at <paramref name="logIndex"/>, rebuilt from the nearest snapshot; the session is not changed.</summary>
@@ -316,6 +351,7 @@ public sealed class GameSession
         _actions.Clear();
         _redo.Clear();
         TurnBase = 0;
+        _deferred = null;
         ResetCache();
         ResetCheckpoints();
     }

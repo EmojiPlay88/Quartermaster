@@ -39,4 +39,14 @@ public class FormulaReferenceTests
                      + Diff("operators", Evaluator.OperatorNames, DocumentedOperators(text));
         Assert.True(problems.Length == 0, problems);
     }
+
+    [Fact]
+    public void Wiki_mentions_runs_function()
+    {
+        var wiki = Path.Combine(DemoModuleTests.RepoRoot(), "docs", "wiki");
+        Assert.Contains("### runs(\"formula-id\") or runs(\"formula-id\", \"period\")", Page);
+        Assert.Contains("runs(\"f-bridge-repair\", \"turn\") < 1", File.ReadAllText(Path.Combine(wiki, "Making-a-Rules-Pack.md")));
+        Assert.Contains("not run:", File.ReadAllText(Path.Combine(wiki, "Window-Phases.md")));
+        Assert.Contains("Starting value", File.ReadAllText(Path.Combine(wiki, "Window-Rules-Workbench.md")));
+    }
 }

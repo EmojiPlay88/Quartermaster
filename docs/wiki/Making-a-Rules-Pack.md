@@ -331,6 +331,28 @@ Recipes:
 
 If a condition is always false, the Workbench warns that the phase never runs. If every phase is skipped, Quartermaster checks one full turn, then stops at the very next phase and shows a notice saying so.
 
+### Start entries run in order
+
+The **On start** rows of a phase run strictly from top to bottom, in every difficulty. Quartermaster works out the next row's units only after the row above has nothing left waiting, so a row can read what the row above wrote. In North Supply the order is Weather roll, North Depot delivery, then Fuel supply: Fuel supply reads the depot after the delivery has landed. When a row has runs that wait for you (always in Semi-automatic and Hardcore, and in Fully automatic when a unit needs a value from you), the later rows wait too, and they continue as soon as you have answered the last of those runs. Undo on the answer takes back the answer and everything it released.
+
+If you press Next Phase while rows have not run yet, the log says `not run: Fuel supply, Ammo supply` (the formula names, in row order), next to the usual `skipped:` line for runs left open. See [Phases](Window-Phases#start-formulas-run-in-order).
+
+### Asking a side at the start of a phase
+
+Give a phase with **no side** a first row that a particular player must answer. Add a phase `Dawn` (leave **Side:** empty) and put the formula `River level roll` in **On start** with **For each** set to **Once** and **Asks side** set to **Northern League**. The run is always queued for the Northern League, in every difficulty, and the host never applies it by itself. It reads `River level roll — Northern League answers` in the open list. Only a player holding the Northern League sees and answers it; another player who tries gets `That calculation belongs to a side you don't hold.` When the League answers, its rolls and working follow that side's privacy, and the rows after it continue. Make the next row read the global that `River level roll` wrote (for example `Fuel supply` using `RiverLevel`). In hot-seat play the screen is passed to the League's player, and until the run is answered another player sees `Northern League is playing Dawn` and cannot use Next Phase. In a solo game in Fully automatic, an asked run that only rolls dice finishes by itself, with no window; one with a value to type still asks for it.
+
+Rules for **Asks side** (the same column is on **On end**): it needs a phase without a side and **For each** = Once. The validator reports `Phase "Dawn": start entry 1 asks side "{id}", which does not exist`, `Phase "Dawn": start entry 1 asks a side, so it must run once, not for each unit` and `Phase "Dawn": start entry 1 asks a side, but only a phase without a side may ask one`. **(none)** means no one is asked.
+
+### Values that reset at a phase
+
+Some counters keep a value only for part of a turn. Add a piece property `Ferry used` (Default 0) and type `North Supply, South Supply` in its **Resets at** cell. Every time the game enters one of those phases, Quartermaster deletes the stored `Ferry used` values on every counter and holder, before the phase's start rows run. Starting the game enters the first phase, so it resets that phase's properties too. Counters then start again from their starting value (a sheet value, or the **Starting value** below), and other counters read the Default. The log shows one System line, `North Supply: reset Ferry used` (several properties are separated by commas, in the pack's order; it names no counts and no counters). Ledger history stays. A phase that is skipped by its condition is not entered and resets nothing; a repeating block resets on every pass. Reset, re-seed and the start rows are all part of the Next Phase action, so one undo takes them back.
+
+An unknown phase name is refused with `No phase named "{name}"` and the cell goes back to what it was. The validator reports `Property "Ferry used" resets at phase "{id}", which does not exist` and `Property "{name}" is computed, so it has nothing to reset`.
+
+### How often a formula has run
+
+`runs()` counts how many times a formula has been applied, so a precondition can allow it only so many times. Give the formula `Bridge repair` the **Only runs when** condition `runs("f-bridge-repair", "turn") < 1`. Now each counter can run Bridge repair once a turn: the second try is refused with the refusal message. The formula id is the one in the formula's **Id** (here `f-bridge-repair`). The period is `"stage"` (this pass of a repeating block), `"turn"` or `"game"` (the default). Only applied runs count; failed, refused and undone runs do not, and the run being checked is not counted yet. See [`runs()`](Formula-Reference#runsformula-id-or-runsformula-id-period).
+
 ## Step 6: An alert
 
 Open the **Alerts** tab and choose **Add**. Set **Name:** to `Low fuel`, the **Condition** to
@@ -429,6 +451,14 @@ A value can show a word next to its number. Say Riverland's weather had three ki
 Then on the Properties & Holders tab set Weather's **Labels** to Weather names. A Weather of 3 now shows as `3 (Fog)` in the Ledger, the outliner, the counter popup, the breakdown title and the working of a formula (a variable's value and the `Weather = 3 (Fog)` part of a Set output; Add and Subtract outputs stay bare numbers). The value is still the number 3 everywhere it is stored or used: formulas, filters and the CSV export see 3. A value with no row in the table, or a blank cell, shows only the number. In the outliner a group's total or average stays a bare number; a lowest value shows its label.
 
 The labels table must have one column (one dimension or dice). The Problems list reports `Property "Weather" takes its labels from a table that no longer exists`, or `Property "Weather" takes its labels from table "{t}", which has more than one column`. Labels never show anything a player could not already see: a label sits next to a value the player already has, and hidden working stays hidden.
+
+## Starting values from an expression
+
+A counter's first value normally comes from its sheet field or the property's Default. A **Starting value** works one out instead. Riverland's boats carry a marker `Kind`; add a piece property `Boat crew` and type this in its **Starting value** cell: `lookup(CrewSizes, marker("Kind"))` (`CrewSizes` is a table with one row key per Kind. Table names are one word.) When the game seeds the ledger, each counter that has this property and no sheet value gets the expression worked out once, in the counter's own context, in pack order, so the expression may read the counter (`name()`, `marker()`, `side()`, `map()`), its earlier values, globals, tables, `turn()`, `stage()` and `phaseside()`. A sheet value always wins. It may not use `dice()`, `holder()`, `runs()` or a piece sum (`sum`, `countof`, `maxof`, `minof`, `hexsum`, `attachedsum` and the rest), directly or through a computed property or global: the starting values must come out the same every time the game is replayed.
+
+If the expression fails or does not give a number, the counter starts at the property's Default, and the log warns once per property: `Starting value of "Boat crew" failed on "{piece}": {error}; it starts at 0`. A function that is not allowed shows as `{fn}() is not available in a starting value`; a result that is not a number as `the starting value is not a number`.
+
+The validator reports, as errors: `Property "{name}" has a starting value expression and is computed; remove one`, `Property "{name}": the starting value expression does not parse: {message}`, `Property "{name}": starting value {problem}`, `Property "{name}": {fn}() is not available in a starting value` and `Property "{name}" has a starting value expression but is not a piece property`. Combine it with **Resets at** (above) to start a value afresh at a phase.
 
 ## Properties some holders keep
 

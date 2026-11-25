@@ -351,6 +351,9 @@ internal static class FormulaIntentRunner
         if (i.RunId != null)
         {
             if (!c.IsPending(i.RunId, i.PieceId, f.Id)) return FormulaVerdict.Refused(NotWaitingText);
+            // An ask run (spec #72) is the asked side's: a sender without it is refused.
+            if (full.Pending.First(r => r.Id == i.RunId).AskSideId is { Length: > 0 } ask && sides != null && !sides.Contains(ask))
+                return FormulaVerdict.Refused("That calculation " + ModuleSession.OtherSideText + ".");
             moved = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied).Moved;
         }
         else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))

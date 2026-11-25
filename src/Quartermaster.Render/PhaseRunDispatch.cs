@@ -127,7 +127,12 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
         ui.Status($"{runs.Count} calculation(s) waiting in the phase panel");
         // Hot-seat: the phase belongs to the next player; their calculations open once they are at the screen.
         if (HoldRuns?.Invoke(runs) == true) return;
-        foreach (var r in runs) Observe(OpenPendingRun(r.Id));
+        foreach (var r in runs)
+        {
+            // An ask run (spec #72) for a side this player does not hold is the asked player's: it waits in their phase panel.
+            if (!string.IsNullOrEmpty(r.AskSideId) && s.ViewSides is { } held && !held.Contains(r.AskSideId)) continue;
+            Observe(OpenPendingRun(r.Id));
+        }
     }
 
     /// <summary>
@@ -145,6 +150,9 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
         if (open.Count == 0) return;
         // Hot-seat: a run with no unit of a held side (or of no side) is not this player's to calculate.
         if (!open.Any(u => s.CanAct(u.PieceId))) { ui.Status("That calculation " + ModuleSession.OtherSideText + "."); return; }
+        // An ask run (spec #72) is answered only by a player holding the asked side (solo: anyone).
+        if (!string.IsNullOrEmpty(run.AskSideId) && s.ViewSides is { } held && !held.Contains(run.AskSideId))
+        { ui.Status("That calculation " + ModuleSession.OtherSideText + "."); return; }
         if (game.State.Difficulty == Difficulty.FullyAuto)
         {
             await OpenPendingRunAutomatic(run);

@@ -133,11 +133,12 @@ public class PhaseLimitTests : IDisposable
     [Fact]
     public void Host_refuses_limited_formula_with_other_formulas_run_id()
     {
-        // Supply also queues an unlimited "f-free" run per unit; a guest names that run but asks for the limited f-water.
+        // Supply first queues an unlimited "f-free" run per unit (start entries run in order: f-water waits); a guest names that run but asks
+        // for the limited f-water.
         var (s, c) = Open(p => p with
         {
             Formulas = p.Formulas.Concat(new[] { p.Formulas.Single(f => f.Id == "f-water") with { Id = "f-free", Name = "Free water", Phases = null } }).ToList(),
-            Phases = p.Phases.Select(x => x.Id == "ph-supply" ? x with { OnStart = x.OnStart!.Concat(new[] { new StartEntry { FormulaId = "f-free", ForEach = ForEachMode.Units } }).ToList() } : x).ToList(),
+            Phases = p.Phases.Select(x => x.Id == "ph-supply" ? x with { OnStart = new[] { new StartEntry { FormulaId = "f-free", ForEach = ForEachMode.Units } }.Concat(x.OnStart!).ToList() } : x).ToList(),
         }, Difficulty.SemiAuto);
         var x = new IntentExecutor(s, c);
         c.Start(); c.Advance();   // Supply
