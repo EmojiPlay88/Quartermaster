@@ -235,6 +235,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (s.Rules?.Properties.FirstOrDefault(p => p != null && p.Id == l.PropertyId) is not { } prop)
             return IntentResult.Refused("That value no longer exists.");
         if (LedgerViewRules.ComputedRefusal(s.Rules, prop.Id) is { } computed) return IntentResult.Refused(computed);
+        if (LedgerViewRules.NotKeptRefusal(s.Rules, l.Key, prop.Id) is { } notKept) return IntentResult.Refused(notKept);
         if (LedgerKey.TryParse(l.Key, out var isPiece, out var id) && isPiece && !Exists(g, Access(g, sides), id))
             return IntentResult.Refused(GoneText);
         if (!s.CanEditLedgerFor(l.Key, sides)) return IntentResult.Refused(OtherSide("That value"));

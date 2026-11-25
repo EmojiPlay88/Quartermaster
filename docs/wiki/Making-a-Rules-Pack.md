@@ -440,6 +440,8 @@ Then:
 - In the Formulas tab, a Holder binding's Target and a Holder or Global output's Property offer each holder only the properties it keeps.
 - A run that reads or writes a value its holder does not keep fails with `{holder} does not keep {property}`.
 
+Filters, alerts, phase conditions and computed properties do not fail for a holder that does not keep a value. A bare global property name there (for example `Ferry tolls` in an alert, when the global holder does not keep it) reads whatever is stored for the global holder, or the property's Default, which can differ from the blank cell the Ledger shows. The Problems list does not flag a bare name. Prefer `holder(North Depot, Ferry tolls)`: it names the holder, and the Problems list checks it.
+
 The Problems list reports `Property "Ferry tolls" names holder "{id}", which does not exist`, `Property "{name}" lists holders but is not a holder property` (a Pieces property), and formulas that use a value a holder does not keep: a binding `{variable} reads "Ferry tolls", which holder "South Depot" does not keep`, an output `output {n} writes "Ferry tolls", which holder "Global" does not keep`, or, for `holder(South Depot, Ferry tolls)`, `refers to "Ferry tolls", which holder "South Depot" does not keep`.
 
 ## Clone and ledger values

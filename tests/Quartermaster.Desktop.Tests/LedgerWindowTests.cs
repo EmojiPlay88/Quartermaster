@@ -862,6 +862,49 @@ public sealed class LedgerWindowTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void LedgerWindow_dropping_a_column_keeps_sort_and_width_by_property()
+    {
+        var w = Game();
+        var s = w.Session!;
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties
+                .Append(new Quartermaster.Rules.PropertyDef { Id = "tolls", Name = "Ferry tolls", Scope = Quartermaster.Rules.PropertyScope.Holders, Holders = new() { "h-north-depot" } })
+                .ToList(),
+        });
+        Pump();
+        var lw = Open(w);
+        lw.SelectTab("holders");
+        lw.Flush();
+        Pump();
+        Assert.Equal(new[] { "Name", "Kind", "Ferry tolls", "Stores", "Weather" }, lw.Headers);
+        lw.ClickHeader(Col(lw, "Stores"));
+        lw.SetColumnWidth(Col(lw, "Stores"), 180);
+        Pump();
+        Assert.Equal("▲", lw.SortGlyph(Col(lw, "Stores")));
+
+        lw.FilterBox.Text = "South";   // only South Depot is left; it does not keep Ferry tolls, so that column goes
+        lw.Flush();
+        Pump();
+        Assert.Equal(new[] { "Name", "Kind", "Stores", "Weather" }, lw.Headers);
+        Assert.Equal("▲", lw.SortGlyph(Col(lw, "Stores")));      // still sorted by Stores, not by whatever sits at the old index
+        Assert.Equal("", lw.SortGlyph(Col(lw, "Weather")));
+        Assert.Equal(180, lw.ColumnWidths[Col(lw, "Stores")]);
+
+        lw.FilterBox.Text = "";   // the column comes back; the sort follows its property again
+        lw.Flush();
+        Pump();
+        Assert.Equal("▲", lw.SortGlyph(Col(lw, "Stores")));
+        Assert.Equal(180, lw.ColumnWidths[Col(lw, "Stores")]);
+
+        lw.ClickHeader(Col(lw, "Ferry tolls"));   // sorted by the column that then goes: the sort is cleared
+        lw.FilterBox.Text = "South";
+        lw.Flush();
+        Pump();
+        Assert.All(Enumerable.Range(0, lw.Headers.Count), c => Assert.Equal("", lw.SortGlyph(c)));
+    }
+
+    [AvaloniaFact]
     public void LedgerWindow_label_and_not_kept_cell()
     {
         var w = Game();

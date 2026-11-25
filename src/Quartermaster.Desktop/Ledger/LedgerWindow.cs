@@ -339,6 +339,8 @@ public sealed partial class LedgerWindow : Window
             ? LedgerTable.FormatNumber(v) : "";
 
     bool _rebuildingColumns;
+    string? _builtTabKey;                     // the tab and the property ids of the columns last built
+    IReadOnlyList<string> _builtColIds = Array.Empty<string>();
 
     /// <summary>The header row and the column widths: Name (with the picture's room), Kind, then one right-aligned column per property.</summary>
     void RebuildColumns()
@@ -346,8 +348,30 @@ public sealed partial class LedgerWindow : Window
         _rebuildingColumns = true;
         try
         {
+            // Within one tab the column set can change (a holder-only column drops out): the sort and the widths follow the
+            // property, not the column index. A tab change starts fresh (sort reset, stored widths).
+            var sameTab = _builtTabKey == _tab.Key;
+            var oldIds = _builtColIds;
+            var oldWidths = _widths;
+            var sortedId = sameTab && _sortCol >= FixedCols && _sortCol - FixedCols < oldIds.Count ? oldIds[_sortCol - FixedCols] : null;
             _widths = new[] { NameWidth + NameImagePad, KindWidth }.Concat(_cols.Select(_ => ValueWidth)).ToArray();
             ApplyColumnWidths();
+            if (sameTab)
+            {
+                for (var i = 0; i < FixedCols && i < oldWidths.Length; i++) _widths[i] = oldWidths[i];
+                for (var c = 0; c < _cols.Count; c++)
+                {
+                    var o = oldIds.ToList().IndexOf(_cols[c].Id);
+                    if (o >= 0 && o + FixedCols < oldWidths.Length) _widths[c + FixedCols] = oldWidths[o + FixedCols];
+                }
+                if (_sortCol >= FixedCols)
+                {
+                    var n = sortedId == null ? -1 : _cols.ToList().FindIndex(c => c.Id == sortedId);
+                    _sortCol = n < 0 ? -1 : n + FixedCols;
+                }
+            }
+            _builtTabKey = _tab.Key;
+            _builtColIds = _cols.Select(c => c.Id).ToList();
             if (_sortCol >= _widths.Length) _sortCol = -1;
             _header.Children.Clear();
             _header.ColumnDefinitions = Columns(_widths);
