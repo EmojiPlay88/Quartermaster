@@ -153,7 +153,7 @@ public static class PieceFilter
         if (p == null) throw new EvalError("This formula needs a unit");
         if (s.IsPlayerView && PlayerView.IsPlaceholder(p)) throw new EvalError("layer() cannot be read in this view") { HiddenData = true };
         var (index, def) = PieceInfo.FindLayer(PieceInfo.TypeOf(p), name)
-            ?? throw new EvalError($"{PieceInfo.Name(p)} has no layer \"{(name ?? "").Trim()}\"") { MissingValue = true };
+            ?? throw new EvalError($"{(PieceInfo.Name(p)?.Trim() is { Length: > 0 } n ? n : PieceChoices.UnknownName)} has no layer \"{(name ?? "").Trim()}\"") { MissingValue = true };
         if (def.FollowProperty) throw new EvalError($"Layer \"{def.Name.Trim()}\" follows a property; read the property instead");
         var (level, active) = TraitState.LayerLevel(def, index < p.TraitStates.Count ? p.TraitStates[index] : "");
         return active ? level : 0;

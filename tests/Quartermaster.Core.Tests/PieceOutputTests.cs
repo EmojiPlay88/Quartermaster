@@ -110,6 +110,27 @@ public class PieceOutputTests
     }
 
     [Fact]
+    public void Skipped_target_binding_skips_its_outputs()
+    {
+        // "Only when" false: the target is not asked and the outputs naming it do nothing, typed label or not.
+        var s = Field();
+        var f = PieceOutFx.Shell(new FormulaOutput { Target = OutputTarget.Unit, Property = "str", Op = OutputOp.Subtract }, PieceOutFx.ToPiece(op: OutputOp.Add),
+            new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "T", Action = OutputAction.Remove });
+        f = f with { Bindings = new() { PieceOutFx.Pick() with { When = "1 > 2" } } };
+        var pack = PieceOutFx.Pack(f);
+        foreach (var typed in new[] { null, PieceOutFx.Typed(RiflesLabel(s)) })
+        {
+            var t = PieceOutFx.Run(s, pack, "b1", typed);
+            Assert.Null(t.Error);
+            Assert.NotNull(t.Result);
+            Assert.True(Assert.Single(t.Variables, v => v.Variable == "T").Skipped);
+            var o = Assert.Single(t.Outputs);
+            Assert.Equal(LedgerKey.Piece("b1"), o.Key);
+            Assert.Empty(t.Effects);
+        }
+    }
+
+    [Fact]
     public void Transfer_subtracts_and_adds_in_one_trace()
     {
         var s = new GameState();

@@ -256,6 +256,100 @@ public class OtherPiecesApplyTests : OtherPiecesTestBase
     }
 
     [Fact]
+    public void Removing_a_pending_unit_resolves_it_and_continues_start_entries()
+    {
+        // n1's run removes n2 (a same-hex Piece Remove): n2's pending unit is resolved in the same action and the next start entry runs.
+        var merge = F("Merge", "0", new[] { Pick(sameHex: true) }, Remove(OutputTarget.Piece));
+        var muster = F("Muster", "1", Array.Empty<VariableBinding>()) with { Id = "g" };
+        var phases = new[]
+        {
+            new PhaseDef
+            {
+                Id = "ph-n", Name = "Northern muster", SideId = "red",
+                OnStart = new() { new StartEntry { FormulaId = "f", ForEach = ForEachMode.Units }, new StartEntry { FormulaId = "g", ForEach = ForEachMode.Units } },
+            },
+        };
+        var (s, c) = Open(Difficulty.SemiAuto, new[] { merge, muster }, phases: phases);
+        var g = s.Game!;
+        c.Start();
+        var run = Assert.Single(g.State.Pending);
+        Assert.Equal("f", run.FormulaId);
+        Assert.Equal(new[] { "n1", "n2" }, run.Units.Select(u => u.PieceId).Order().ToArray());
+
+        var t = Run(s, "n1", new Dictionary<string, string> { ["T"] = Label(s, "n2") });
+        Assert.Null(t.Error);
+        Assert.True(c.ApplyFormula(run.Id, "n1", t, false));
+        Assert.False(g.State.Pieces.ContainsKey("n2"));
+        Assert.DoesNotContain(g.State.Pending, r => r.Id == run.Id);   // n2's unit went with its piece
+        var next = Assert.Single(g.State.Pending);   // the cursor continued: the second start entry ran
+        Assert.Equal("g", next.FormulaId);
+        Assert.Equal(new[] { "n1" }, next.Units.Select(u => u.PieceId).ToArray());
+
+        g.Undo();   // one step: n2, the pending unit and the stopped cursor come back
+        Assert.True(g.State.Pieces.ContainsKey("n2"));
+        var back = Assert.Single(g.State.Pending);
+        Assert.Equal(run.Id, back.Id);
+        Assert.All(back.Units, u => Assert.False(u.Applied));
+    }
+
+    [Fact]
+    public void Adhoc_run_removing_a_pending_unit_resolves_it()
+    {
+        var f = F("Merge", "0", new[] { Pick(sameHex: true) }, Remove(OutputTarget.Piece));
+        var (s, c) = Open(Difficulty.SemiAuto, new[] { f }, phases: NorthStart());
+        var g = s.Game!;
+        c.Start();
+        var run = Assert.Single(g.State.Pending);
+        Assert.True(c.ApplyFormula(null, "n1", Run(s, "n1", new Dictionary<string, string> { ["T"] = Label(s, "n2") }), false));
+        Assert.False(g.State.Pieces.ContainsKey("n2"));
+        var units = Assert.Single(g.State.Pending).Units;
+        Assert.True(units.Single(u => u.PieceId == "n2").Applied);   // the gone unit is resolved
+        Assert.False(units.Single(u => u.PieceId == "n1").Applied);   // an ad-hoc run does not answer its own unit
+        g.Undo();
+        Assert.True(g.State.Pieces.ContainsKey("n2"));
+        Assert.All(Assert.Single(g.State.Pending).Units, u => Assert.False(u.Applied));
+    }
+
+    [Fact]
+    public void Step_back_and_redo_replays_placed_and_removed_pieces()
+    {
+        // A run places a Wreck (seeded, then set) and deletes the picked same-hex Gunboat; stepping back and redoing (and rebuilding the
+        // state from the log) gives the same piece ids, seeds and values: nothing is recomputed or drawn again.
+        var f = F("Wreck", "1", new[] { Pick(sameHex: true) }, Place(), PlacedSet("salvage", "9"), Remove(OutputTarget.Piece));
+        var (s, c) = Open(Difficulty.SemiAuto, new[] { f }, phases: NorthStart());
+        var g = s.Game!;
+        var ids = 0;
+        s.Runner!.NewPieceId = () => "p:w" + ++ids;
+        var h = new HistoryController(s, c, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        c.Start();
+        var run = Assert.Single(g.State.Pending);
+        var t = Run(s, "n1", new Dictionary<string, string> { ["T"] = Label(s, "s1") });
+        Assert.Null(t.Error);
+        Assert.True(c.ApplyFormula(run.Id, "n1", t, false));
+        Assert.Equal(1, ids);
+        Assert.True(g.State.Pieces.ContainsKey("p:w1"));
+        Assert.False(g.State.Pieces.ContainsKey("s1"));
+        static string Json(GameState st) => System.Text.Json.JsonSerializer.Serialize(st, QuartermasterJson.Options);
+        var played = Json(g.State);
+        var pieces = g.State.Pieces.Keys.Order(StringComparer.Ordinal).ToArray();
+        var seeds = g.State.LedgerHistory.Where(e => e.Key == LedgerKey.Piece("p:w1")).Select(e => (e.PropertyId, e.After)).ToArray();
+        Assert.Equal(new[] { ("salvage", 5.0), ("salvage", 9.0) }, seeds.Where(x => x.PropertyId == "salvage").ToArray());
+        Assert.Equal(played, Json(g.StateAt(g.Log.Count)));   // rebuilt from the snapshot and the logged commands
+
+        h.StepBack(h.Checkpoints().First());
+        Assert.False(g.State.Pieces.ContainsKey("p:w1"));
+        Assert.True(g.State.Pieces.ContainsKey("s1"));
+        for (var i = 0; i < 20 && h.CanRedo; i++) h.Redo();
+        Assert.False(h.CanRedo);
+
+        Assert.Equal(1, ids);   // no new id drawn
+        Assert.Equal(pieces, g.State.Pieces.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(seeds, g.State.LedgerHistory.Where(e => e.Key == LedgerKey.Piece("p:w1")).Select(e => (e.PropertyId, e.After)).ToArray());
+        Assert.Equal(9, Ledger.Get(g.State, LedgerKey.Piece("p:w1"), "salvage"));
+        Assert.Equal(played, Json(g.State));
+    }
+
+    [Fact]
     public void FullyAuto_entry_with_effects_matches_one_by_one()
     {
         // Each unit counts its hex, writes the count and moves to the Dead pile: the second unit must see the first one gone.

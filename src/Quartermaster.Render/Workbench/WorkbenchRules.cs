@@ -29,7 +29,10 @@ public static class WorkbenchRules
     public static IReadOnlyList<string> SlotKeys(ModuleModel model) =>
         SlotPaths(model).Concat(model.Slots.Select(s => s.Gpid).Where(g => !string.IsNullOrEmpty(g))).Distinct(StringComparer.Ordinal).ToList();
 
-    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds, IReadOnlyCollection<string>? slotKeys = null)
+    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds) => Issues(pack, mapIds, null);
+
+    /// <param name="slotKeys">The palette entries a Place output may name (<see cref="SlotKeys"/>); null = not checked.</param>
+    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds, IReadOnlyCollection<string>? slotKeys)
     {
         var list = RulesValidator.Validate(pack, mapIds, slotKeys);
         if (list.Count == 0) return [new IssueRow("", "", NoProblemsText, null)];

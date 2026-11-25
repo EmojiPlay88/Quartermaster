@@ -680,17 +680,16 @@ These come from the bindings and outputs rather than the formula text.
 |---|---|---|
 | Unknown property: x | A Ledger tab filter names a property that is not in the rules pack. | Fix the name when you edit the tabs. |
 | Waiting for input | An Input variable has no value yet. | Type one in the Formula dialog, or give the binding an automatic value. |
-| Needs a unit | A Unit or Location variable has no counter to read. | Run the formula on a counter. |
+| Needs a unit | A Unit or Location variable, or a **Same hex** Piece binding, has no counter to read. | Run the formula on a counter. |
 | Only known when a unit is moved | A Moved variable was used where nothing has moved. | Use the formula as an on-move step of a phase, or type a distance. |
 | Choose one of the listed pieces | A Piece binding's pick is not on the list (the counter moved, was deleted or was hidden after the list was shown). | Pick again from the list. |
 | No piece matches "Speed > 3" | A Piece binding's which-pieces filter matches no counter the player can see (with a blank filter, `No piece to choose`). | Widen the filter, or run the formula when a counter matches. |
 | Upgraded Speed of Raft A reads data this player cannot see | A table read on a player's own view would use the piece's non-Public override (see "A piece's own value for a table rating"), and the piece is of a side that player does not hold. A Table binding is left without a value; an inline `lookup` stops the run. | Nothing to fix: the host (or a player holding every side) works it out. |
-| Hidden from this player | A Piece binding reads a non-Public property of another side's counter on a player's own view. | Nothing to fix: the host (or a player holding every side) works it out. |
+| Hidden from this player | A Piece binding reads a non-Public property of another side's counter on a player's own view, or a Piece output's target is another side's masked counter there. | Nothing to fix: the host (or a player holding every side) works it out. |
 | No piece in this hex | A **Same hex** Piece binding found no other counter in the hex of the counter the formula runs on. | Run the formula when another counter is there, or untick **Same hex**. |
 | An output refers to a deleted Piece variable | A Piece output names a variable that is no longer a Piece binding. | Pick the variable again in the output's **Piece** column. |
 | An output writes the placed piece, but nothing was placed | A Placed output ran but the formula's Place output did not place a counter. | Give the formula one Place output. |
 | Palette entry "Markers/Wreck" was not found in the module | A Place output names a palette entry the module does not have. | Pick a name from the **Palette entry** list. |
-| Hidden from this player | (also) A Piece output's target is another side's masked counter on a player's own view. | Nothing to fix: the host works it out. |
 | Fort has no layer "Levels" | A Set layer output, or `layer()`, names a layer the counter lacks. | Check the layer's name in the module (the Set layer output's **Layer** column). |
 | Layer "Levels" has no level 4 | A Set layer value is outside 0 to the layer's number of levels (0 only when the layer can be switched off). | Fix the output's **Value**. |
 | Layer "Levels" follows a property, so it cannot be set | A Set layer output names a layer whose level comes from a property. | Write the property instead. |

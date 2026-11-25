@@ -280,6 +280,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var targets = new Dictionary<string, (PieceInstance Piece, string Name)>(StringComparer.Ordinal);
         foreach (var v in pieceVars)
         {
+            if (states.First(x => x.Variable == v).Skipped) continue;   // "Only when" false: not asked; the outputs naming it do nothing
             try { targets[v] = run.Pick(formula.Bindings.First(x => x.Variable == v)); }
             catch (Missing m) { return Unresolved(v, m.Message); }
             if (s.IsPlayerView && PlayerView.IsPlaceholder(targets[v].Piece)) return Unresolved(v, HiddenText);
@@ -293,6 +294,12 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var calc = working;
         string OutputError(int oi, string detail) => $"Formula \"{formula.Name}\": output {oi + 1}{detail}";
 
+        // An output acting on a Piece binding skipped by its "Only when" condition does nothing (no write, no effect, no part); so do the
+        // Placed outputs of a Place skipped that way.
+        var placeSkipped = false;
+        bool SkippedTarget(FormulaOutput o) => (o.Target == OutputTarget.Piece && o.PieceVariable != null && !targets.ContainsKey(o.PieceVariable))
+            || (o.Target == OutputTarget.Placed && placeSkipped);
+
         // The placed piece first, so a Placed output listed before its Place still acts on it. At most one Place per formula.
         Placed? placed = null;
         PieceEffect? place = null;
@@ -300,6 +307,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             var o = formula.Outputs[oi];
             if (o.Action != OutputAction.Place) continue;
+            if (SkippedTarget(o)) { placeSkipped = true; continue; }
             if (placed != null) throw new EvalError(OutputError(oi, " places a second piece; only one output may place a piece"));
             var anchor = o.Target switch
             {
@@ -343,6 +351,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         for (var oi = 0; oi < formula.Outputs.Count; oi++)
         {
             var o = formula.Outputs[oi];
+            if (SkippedTarget(o)) continue;
             switch (o.Action)
             {
                 case OutputAction.Write: break;

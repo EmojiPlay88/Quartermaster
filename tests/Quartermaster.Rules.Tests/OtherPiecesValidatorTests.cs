@@ -188,4 +188,20 @@ public class OtherPiecesValidatorTests
         Assert.Equal(RulesValidator.Validate(p).Select(i => i.Message), RulesValidator.Validate(p, null, null).Select(i => i.Message));
         Assert.DoesNotContain(two, m => m.Contains("palette entry \"wreck\", which"));
     }
+
+    [Fact]
+    public void Target_only_piece_binding_is_used()
+    {
+        var f = new FormulaDef
+        {
+            Id = "f1", Name = "Shelling", Text = "X",
+            Bindings = new() { new VariableBinding { Variable = "X", Kind = BindingKind.Input }, Piece("T") with { When = "W > 0" }, new VariableBinding { Variable = "W", Kind = BindingKind.Input } },
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "T", Action = OutputAction.Remove } },
+        };
+        Assert.Equal(new[] { "X", "T", "W" }, FormulaVariables.Used(f));
+        var p = PackWith("X", f.Bindings.ToArray(), f.Outputs.ToArray());
+        Assert.DoesNotContain(RulesValidator.Validate(p), i => i.Message.Contains("bound but not used"));
+        // a name that is not a Piece binding is not added (its output error is enough)
+        Assert.Equal(new[] { "X" }, FormulaVariables.Used(f with { Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Nope", Action = OutputAction.Remove } } }));
+    }
 }

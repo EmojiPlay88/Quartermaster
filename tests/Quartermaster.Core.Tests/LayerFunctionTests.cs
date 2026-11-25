@@ -66,4 +66,12 @@ public class LayerFunctionTests
         Assert.Equal("Layer \"Damage\" follows a property; read the property instead", Read(Fort("1"), "b1", "layer(\"Damage\")").Error);
         Assert.Equal("This formula needs a unit", Read(Fort("1"), null!).Error);
     }
+
+    [Fact]
+    public void Layer_missing_on_nameless_piece_says_unknown_piece()
+    {
+        var s = Fort("1");
+        EffectFx.Add(s, "b4", "", x: 210);
+        Assert.Equal("Unknown piece has no layer \"Levels\"", Read(s, "b4").Error);
+    }
 }

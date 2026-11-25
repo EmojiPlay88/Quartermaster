@@ -59,11 +59,16 @@ public static class PieceChoices
         {
             if (p?.Id == null) continue;
             if (b.SameHex && p.Id == runPieceId) continue;   // "same hex": the other pieces only
-            var loc = PieceInfo.Location(p, model);
-            var here = InHex(p, loc);
-            if (b.SameHex && !here) continue;
+            // The location only for pieces that can be listed (a "same hex" binding rejects by hex first; otherwise the filter first).
+            string? loc = null;
+            if (b.SameHex)
+            {
+                loc = PieceInfo.Location(p, model);
+                if (!InHex(p, loc)) continue;
+            }
             if (!match(p)) continue;
-            if (here) inHex.Add(p.Id);
+            if (!b.SameHex) loc = PieceInfo.Location(p, model);
+            if (InHex(p, loc)) inHex.Add(p.Id);
             var name = PieceInfo.Name(p)?.Trim() is { Length: > 0 } n ? n : UnknownName;   // a masked placeholder has no name
             plain.Add(((loc == null ? name : $"{name} ({loc})").Trim(), p.Id, name));
         }

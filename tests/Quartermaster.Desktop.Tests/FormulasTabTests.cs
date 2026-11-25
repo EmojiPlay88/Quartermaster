@@ -582,6 +582,17 @@ public sealed class FormulasTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Piece_target_binding_is_not_unused()
+    {
+        var f = PieceFormula() with { Text = "a", Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "R", Action = OutputAction.Remove } } };
+        var s = Session(true, f);
+        var tab = Tab(s);
+        Assert.Equal(["R", "a"], Enumerable.Range(0, tab.Bindings.RowCount).Select(r => tab.Bindings.Cell(r, 0)).ToList());   // used: no "(unused)"
+        Click(tab.RemoveUnusedButton);
+        Assert.Contains(F(s, "f-att").Bindings, b => b.Variable == "R");
+    }
+
+    [AvaloniaFact]
     public void Unused_question_asked_once_per_variable()
     {
         var f = Attack() with { Text = "a", Bindings = new() { new() { Variable = "a", Kind = BindingKind.Input }, new() { Variable = "z", Kind = BindingKind.Global, Property = "p-str" } } };

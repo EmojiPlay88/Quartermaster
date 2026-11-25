@@ -588,4 +588,17 @@ public class FormulaEditQuotedChoiceTests
         Assert.Equal("Fort", FormulaEdit.WithLayer(o, " Fort ").Layer);
         Assert.True(FormulaEdit.WithSameHex(new VariableBinding { Kind = BindingKind.Piece }, true).SameHex);
     }
+
+    [Fact]
+    public void Target_only_piece_binding_is_not_unused()
+    {
+        var f = new FormulaDef
+        {
+            Id = "f", Name = "F", Text = "A",
+            Bindings = new() { new VariableBinding { Variable = "A", Kind = BindingKind.Input }, new VariableBinding { Variable = "T", Kind = BindingKind.Piece, Property = "p2" } },
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "T", Action = OutputAction.Remove } },
+        };
+        Assert.Empty(FormulaEdit.Unused(f));
+        Assert.Equal(new[] { "A", "T" }, FormulaEdit.RemoveUnused(f).Bindings.Select(b => b.Variable));
+    }
 }
