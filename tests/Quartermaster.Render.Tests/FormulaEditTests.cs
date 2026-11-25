@@ -601,4 +601,24 @@ public class FormulaEditQuotedChoiceTests
         Assert.Empty(FormulaEdit.Unused(f));
         Assert.Equal(new[] { "A", "T" }, FormulaEdit.RemoveUnused(f).Bindings.Select(b => b.Variable));
     }
+
+    [Fact]
+    public void FormulaEdit_choices_and_group_roll()
+    {
+        var b = new VariableBinding { Variable = "C", Kind = BindingKind.Input };
+        var t = FormulaEdit.WithChoicesTable(b, "t-cargo");
+        Assert.Equal("t-cargo", t.ChoicesTable);
+        Assert.True(FormulaEdit.IsConfigured(t));
+        var f = FormulaEdit.WithChoicesFilter(t, " row() != \"Grain\" ");
+        Assert.Equal("row() != \"Grain\"", f.ChoicesFilter);
+        Assert.Null(FormulaEdit.WithChoicesFilter(f, "  ").ChoicesFilter);
+        var cleared = FormulaEdit.WithChoicesTable(f, " ");
+        Assert.Null(cleared.ChoicesTable);
+        Assert.Null(cleared.ChoicesFilter);
+        Assert.Null(FormulaEdit.WithChoicesTable(f, null).ChoicesFilter);
+
+        var fd = new FormulaDef { Id = "f", Name = "F", Text = "1" };
+        Assert.True(FormulaEdit.WithGroupRoll(fd, true).GroupRoll);
+        Assert.False(FormulaEdit.WithGroupRoll(FormulaEdit.WithGroupRoll(fd, true), false).GroupRoll);
+    }
 }

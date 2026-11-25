@@ -204,7 +204,7 @@ public sealed class MenuBatchGridTests : IDisposable
         Assert.Equal("Applied 3 run(s) as one step.", win.StatusText);
         Assert.True(Fuel(w, PhaseFixture.RedOne) < 40);
         Assert.True(Fuel(w, PhaseFixture.RedTwo) < 40);
-        Assert.True(win.IsVisible);   // the grid stays open with its status
+        Assert.False(win.IsVisible);   // a full apply closes the grid, so a second click cannot apply the batch again
     }
 
     [AvaloniaFact]
@@ -214,6 +214,7 @@ public sealed class MenuBatchGridTests : IDisposable
         var win = Menu(w, PhaseFixture.RedOne, PhaseFixture.RedTwo);
         Click(ButtonOf(win, "Apply all"));   // hardcore, nothing typed: the first row cannot apply
         Pump();
+        Assert.True(win.IsVisible);   // nothing applied: the grid stays open so the player can finish
         Assert.Equal("Nothing applied: row 1 cannot be applied yet.", win.StatusText);
         Assert.Equal(40, Fuel(w, PhaseFixture.RedOne));
         Assert.Equal(40, Fuel(w, PhaseFixture.RedTwo));

@@ -201,8 +201,6 @@ public sealed class BatchGridWindow : Window
     int Off => _menu != null ? 1 : 0;
     /// <summary>The selected run row (-1 = the All rows line or nothing).</summary>
     internal int SelectedRow => _list.SelectedIndex - Off;
-    internal string TitleText => Title ?? "";
-    internal string? TipOf(string button) => ToolTip.GetTip(button == FormulaWindowRules.AddRowText ? _addRow : _removeRow) as string;
     internal bool HasButton(string label) => this.GetVisualDescendants().OfType<Button>().Any(b => b.Content is string t && t == label);
     internal string StatusText => _status.Text ?? "";
     internal IReadOnlyList<string> Headers => _headers;
@@ -510,10 +508,12 @@ public sealed class BatchGridWindow : Window
         var n = _model.ApplyAll();
         if (_menu != null)
         {
-            // One step for the whole batch; the window stays open with the status (the model says what applied or which row blocks).
+            // One step for the whole batch. A full apply closes the grid (a second click would apply the batch again); a partial stop or a
+            // refusal keeps it open with the status so the player can finish.
             _status.Text = _menu.Status ?? FormulaWindowRules.AppliedRunsText(n);
             _debounce.Stop();
             Refresh();
+            if (n > 0 && _status.Text == FormulaWindowRules.AppliedRunsText(n)) Dispatcher.UIThread.Post(() => { if (!_closing) Close(); });
             return;
         }
         // The run may be gone now (all applied): the refresh closes the window.

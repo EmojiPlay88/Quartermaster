@@ -41,6 +41,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     readonly TextBox _refusal = new() { Width = 360 };
     readonly RuleRefRow _refRow = new();
     readonly WrapPanel _phaseChecks = new();
+    readonly CheckBox _groupRoll = new() { Content = "Roll once for the group", Margin = new Thickness(0, 0, 0, 2) };
     readonly FormulaPreview _preview;
     readonly Button _bNew = new() { Content = "New…", Width = 50 }, _bRename = new() { Content = "Rename…", Width = 62 }, _bDel = new() { Content = "Delete", Width = 50 };
     readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
@@ -94,7 +95,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         rows.RowDefinitions.Add(new RowDefinition(40, GridUnitType.Star));
         var cells = new Control[]
         {
-            _text, errRow, appliesRow, guardRows, BuildPhasesBox(), _refRow,
+            _text, errRow, appliesRow, guardRows, BuildPhasesBox(), BuildGroupRollBox(), _refRow,
             Group("Notes (shown as a tooltip on the formula title)", _notes),
             BuildBindingsBox(), BuildOutputsBox(),
             Group("Preview (sample values are not saved)", _preview),
@@ -149,6 +150,19 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
         if (bar != null) { DockPanel.SetDock(bar, Dock.Top); d.Children.Add(bar); }
         d.Children.Add(body);
         return d;
+    }
+
+    Control BuildGroupRollBox()
+    {
+        ToolTip.SetTip(_groupRoll, "Roll the dice once for the group: in a batch the first run rolls and the others reuse its dice; for a phase entry, one roll per hex and side.");
+        _groupRoll.IsCheckedChanged += (_, _) => Run(() =>
+        {
+            if (_loadingUi || Current is not { } f) return;
+            FlushPending(final: false);
+            var on = _groupRoll.IsChecked == true;
+            if (f.GroupRoll != on) Commit(x => FormulaEdit.WithGroupRoll(x, on));
+        });
+        return _groupRoll;
     }
 
     Control BuildPhasesBox()
@@ -353,6 +367,8 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
             if ((_refusal.Text ?? "") != (f?.RefusalMessage ?? "")) _refusal.Text = f?.RefusalMessage ?? "";
             if (Norm(_notes.Text ?? "") != Norm(f?.Notes ?? "")) _notes.Text = f?.Notes ?? "";
             LoadPhaseChecks(f);
+            _groupRoll.IsEnabled = on;
+            _groupRoll.IsChecked = f?.GroupRoll == true;
             ShowRefLabel(f);
         }
         finally { _loadingUi = false; }
@@ -503,6 +519,7 @@ public sealed partial class FormulasTab : UserControl, IRuleRefEditor
     internal bool GoToErrorVisible => _goto.IsVisible;
     internal RuleRefRow RefRow => _refRow;
     internal IReadOnlyList<CheckBox> PhaseChecks => _phaseChecks.Children.OfType<CheckBox>().ToList();
+    internal CheckBox GroupRollCheck => _groupRoll;
     internal Button NewButton => _bNew;
     internal Button RenameButton => _bRename;
     internal Button DeleteButton => _bDel;

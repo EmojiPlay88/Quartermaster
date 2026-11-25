@@ -930,4 +930,73 @@ public sealed class FormulasTabTests : IDisposable
         Pick(tab.Outputs, 0, 1, "Depot");
         Assert.Equal(["Tolls", "Stores"], tab.Outputs.CellItems(0, 2)!.ToList());
     }
+
+    static FormulaDef ChoiceFormula() => Attack() with
+    {
+        Bindings = new() { new VariableBinding { Variable = "a", Kind = BindingKind.Input }, new VariableBinding { Variable = "R", Kind = BindingKind.Piece, Property = "p-str" } },
+    };
+
+    [AvaloniaFact]
+    public void FormulasTab_group_roll_checkbox_commits()
+    {
+        var s = Session(true, Attack(), Defend());
+        var tab = Tab(s);
+        Assert.NotEqual(true, tab.GroupRollCheck.IsChecked);
+        Assert.Equal("Roll once for the group", (string)tab.GroupRollCheck.Content!);
+        Assert.False(F(s, "f-att").GroupRoll);
+        tab.GroupRollCheck.IsChecked = true;
+        Pump();
+        Assert.True(F(s, "f-att").GroupRoll);
+        Assert.False(F(s, "f-def").GroupRoll);
+        tab.SelectFormula("f-def");
+        Pump();
+        Assert.NotEqual(true, tab.GroupRollCheck.IsChecked);
+        tab.SelectFormula("f-att");
+        Pump();
+        Assert.Equal(true, tab.GroupRollCheck.IsChecked);
+        tab.GroupRollCheck.IsChecked = false;
+        Pump();
+        Assert.False(F(s, "f-att").GroupRoll);
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_choices_columns_commit()
+    {
+        var s = Session(true, ChoiceFormula());
+        var tab = Tab(s);
+        Assert.Equal("Choices table", tab.Bindings.HeaderText(8));
+        Assert.Equal("Choices filter", tab.Bindings.HeaderText(9));
+        Assert.True(tab.Bindings.IsCellReadOnly(1, 8));   // a Piece binding has no choices table
+        Assert.True(tab.Bindings.IsCellReadOnly(0, 9));   // no table yet: no filter
+        Pick(tab.Bindings, 0, 8, "Cost");
+        Assert.Equal("t-cost", B(s, "f-att", "a").ChoicesTable);
+        Assert.False(tab.Bindings.IsCellReadOnly(0, 9));
+        Type(tab.Bindings, 0, 9, " row() != \"x\" ");
+        Assert.Equal("row() != \"x\"", B(s, "f-att", "a").ChoicesFilter);
+        Type(tab.Bindings, 0, 9, "row() !=");   // a syntax error is refused
+        Assert.Equal("row() != \"x\"", B(s, "f-att", "a").ChoicesFilter);
+        Type(tab.Bindings, 0, 9, "");
+        Assert.Null(B(s, "f-att", "a").ChoicesFilter);
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_old_binding_columns_keep_places()
+    {
+        var s = Session(true, PieceFormula());
+        var tab = Tab(s);
+        string[] old = ["Variable", "Kind", "Target", "Details", "Caption", "Only when", "Dice count", "Same hex"];
+        for (var i = 0; i < old.Length; i++) Assert.Equal(old[i], tab.Bindings.HeaderText(i));
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_clear_choices_table_clears_filter()
+    {
+        var f = Attack() with { Bindings = new() { new VariableBinding { Variable = "a", Kind = BindingKind.Input, ChoicesTable = "t-cost", ChoicesFilter = "row() != \"x\"" }, new VariableBinding { Variable = "b", Kind = BindingKind.Input } } };
+        var s = Session(true, f);
+        var tab = Tab(s);
+        Assert.Equal("Cost", tab.Bindings.Cell(0, 8));
+        Pick(tab.Bindings, 0, 8, "");
+        Assert.Null(B(s, "f-att", "a").ChoicesTable);
+        Assert.Null(B(s, "f-att", "a").ChoicesFilter);
+    }
 }
