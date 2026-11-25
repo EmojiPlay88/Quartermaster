@@ -10,7 +10,8 @@ public sealed record PieceChoice(string Label, string PieceId);
 /// The candidate pieces of a Piece binding (<see cref="BindingKind.Piece"/>): every piece matching its "which pieces" filter that the viewer
 /// sees, labelled "{name} ({location})" ("{name}" off grid; a nameless one, a masked placeholder, named "Unknown piece"), a repeated label
 /// (case-insensitive) suffixed " #2", " #3" ... in state order (the first keeps the plain label; a suffix that is another candidate's plain
-/// label is skipped), sorted by label (ordinal, ignoring case). The runner resolves a typed label against the same list.
+/// label is skipped), sorted by label (ordinal, ignoring case); with a run piece, the candidates in its hex come first (B3). The runner
+/// resolves a typed label against the same list.
 /// </summary>
 public static class PieceChoices
 {
@@ -27,20 +28,43 @@ public static class PieceChoices
     /// piece of another side under its nameless placeholder name, the filter answered as the viewer's own list answers it), so the host and the
     /// guest get the same labels. Null = every piece of <paramref name="s"/>, real names.</param>
     public static IReadOnlyList<PieceChoice> For(GameState s, RulesPack pack, ModuleModel model, VariableBinding b, IReadOnlySet<string>? sides) =>
-        Named(s, pack, model, b, sides).Select(c => new PieceChoice(c.Label, c.PieceId)).ToList();
+        For(s, pack, model, b, sides, null);
+
+    /// <summary>A "same hex" binding (<see cref="VariableBinding.SameHex"/>) with no other candidate in the run piece's hex.</summary>
+    public const string NoPieceInHex = "No piece in this hex";
+
+    /// <param name="runPieceId">The piece the formula runs on: candidates in its hex (same map and grid location, located on the viewer's
+    /// state) come first, each group sorted by label; a "same hex" binding lists only those, never the run piece itself (none without a run
+    /// piece, or with one off grid or not in the viewer's state). Null = today's order.</param>
+    public static IReadOnlyList<PieceChoice> For(GameState s, RulesPack pack, ModuleModel model, VariableBinding b, IReadOnlySet<string>? sides,
+        string? runPieceId) =>
+        Named(s, pack, model, b, sides, runPieceId).Select(c => new PieceChoice(c.Label, c.PieceId)).ToList();
 
     /// <summary>The candidates with each piece's name as the viewer sees it (for the working description).</summary>
     internal static List<(string Label, string PieceId, string Name)> Named(GameState s, RulesPack pack, ModuleModel model, VariableBinding b,
-        IReadOnlySet<string>? sides)
+        IReadOnlySet<string>? sides, string? runPieceId = null)
     {
         var shown = sides == null ? s : PlayerView.For(s, pack, model, sides);
+        // The run piece's hex, as the viewer's state places it (null: no run piece, not shown, or off grid).
+        var run = runPieceId != null && shown.Pieces.TryGetValue(runPieceId, out var rp) ? rp : null;
+        var hexLoc = run == null ? null : PieceInfo.Location(run, model);
+        var hexMap = hexLoc == null ? null : run!.MapId;
+        if (b.SameHex && hexLoc == null) return new();
+        bool InHex(PieceInstance p, string? loc) =>
+            hexLoc != null && loc != null && string.Equals(p.MapId, hexMap, StringComparison.Ordinal) && string.Equals(loc, hexLoc, StringComparison.Ordinal);
+        var inHex = new HashSet<string>(StringComparer.Ordinal);
         var match = PieceFilter.Compile(b.PieceFilter, shown, pack, model);
         var plain = new List<(string Label, string PieceId, string Name)>();
         foreach (var p in shown.Pieces.Values)
         {
-            if (p?.Id == null || !match(p)) continue;
-            var name = PieceInfo.Name(p)?.Trim() is { Length: > 0 } n ? n : UnknownName;   // a masked placeholder has no name
+            if (p?.Id == null) continue;
+            if (b.SameHex && p.Id == runPieceId) continue;   // "same hex": the other pieces only
             var loc = PieceInfo.Location(p, model);
+            var here = InHex(p, loc);
+            if (b.SameHex && !here) continue;
+            if (!match(p)) continue;
+            if (here) inHex.Add(p.Id);
+            var name = PieceInfo.Name(p)?.Trim() is { Length: > 0 } n ? n : UnknownName;   // a masked placeholder has no name
             plain.Add(((loc == null ? name : $"{name} ({loc})").Trim(), p.Id, name));
         }
         // A repeated label gets " #2", " #3" ... in state order, skipping any suffixed label that is another candidate's plain label.
@@ -61,6 +85,6 @@ public static class PieceChoices
             }
             list.Add((label, c.PieceId, c.Name));
         }
-        return list.OrderBy(c => c.Label, StringComparer.OrdinalIgnoreCase).ToList();
+        return list.OrderBy(c => inHex.Contains(c.PieceId) ? 0 : 1).ThenBy(c => c.Label, StringComparer.OrdinalIgnoreCase).ToList();
     }
 }
