@@ -43,6 +43,12 @@ public sealed class PieceMenuHooks
     /// <summary>Opens the formula dialog: (formula id, piece id).</summary>
     public Action<string, string>? ShowFormula { get; init; }
 
+    /// <summary>
+    /// Opens a menu batch grid (B4): (formula id, the rows' piece ids in order). Null leaves "Calculate on selection" and "Calculate on
+    /// stack" out.
+    /// </summary>
+    public Action<string, IReadOnlyList<string>>? ShowFormulaBatch { get; init; }
+
     /// <summary>Asks for a prompt action's text: (title, prompt) → text, or null when cancelled.</summary>
     public Func<string, string, string?>? AskInput { get; init; }
 
@@ -108,6 +114,7 @@ public static class PieceMenuModel
             }
         }
         AddCalculate(menu, s, game, piece, hooks);
+        AddCalculateBatch(menu, s, game, piece, hooks, selected);
         if (hooks.GameMaster)
         {
             if (menu.Count > 0) menu.Add(MenuEntry.Separator);
@@ -156,6 +163,52 @@ public static class PieceMenuModel
             return MenuEntry.Item(f.Name, () => hooks.ShowFormula?.Invoke(id, piece.Id), allowed, why);
         }).ToList();
         menu.Add(MenuEntry.Submenu("Calculate", children));
+    }
+
+    /// <summary>
+    /// "Calculate on selection" (the clicked counter is in a selection of two or more) or "Calculate on stack" (otherwise: its stack, bottom
+    /// to top): the formulas that apply to the clicked counter and to at least two counters of that set the viewer may act on, each opening a
+    /// menu batch over those counters (game order for a selection). Phase-limited formulas are greyed with the reason, as under Calculate.
+    /// Left out without <see cref="PieceMenuHooks.ShowFormulaBatch"/>, a rules pack, or two counters the viewer may act on.
+    /// </summary>
+    private static void AddCalculateBatch(List<MenuEntry> menu, ModuleSession s, GameSession game, PieceInstance piece, PieceMenuHooks hooks,
+        IReadOnlySet<string> selected)
+    {
+        if (hooks.ShowFormulaBatch is not { } show || s.Rules is not { } rules || s.Runner == null || !s.CanAct(piece.Id)) return;
+        var st = game.State;
+        var onSelection = selected.Contains(piece.Id) && selected.Count >= 2;
+        IEnumerable<string> set;
+        if (onSelection) set = st.Pieces.Keys.Where(selected.Contains);
+        else if (piece.StackId != null && st.Stacks.TryGetValue(piece.StackId, out var stack) && stack != null) set = stack.PieceIds;
+        else return;
+        // Only counters this viewer may act on, as its own view shows them (hot-seat: never one drawn masked or not shown at all).
+        var ids = set.Where(id => id != null && st.Pieces.TryGetValue(id, out var p) && s.CanAct(id)
+                && (s.ViewSides == null || (s.View?.Pieces.TryGetValue(id, out var seen) == true && seen!.TypeString == p!.TypeString)))
+            .Distinct().ToList();
+        if (ids.Count < 2) return;
+        Dictionary<string, HashSet<string>> formulasOf;
+        IReadOnlyList<Quartermaster.Rules.FormulaDef> mine;
+        try
+        {
+            formulasOf = ids.ToDictionary(id => id, id => PieceFilter.FormulasFor(rules, st.Pieces[id], st, s.Model).Select(f => f.Id).ToHashSet(StringComparer.Ordinal));
+            mine = PieceFilter.FormulasFor(rules, piece, st, s.Model);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            s.Log.Add(DiagnosticSeverity.Warning, "rules", "Could not list formulas for a piece: " + ex.Message);
+            return;
+        }
+        var children = new List<MenuEntry>();
+        foreach (var f in mine)
+        {
+            var id = f.Id;
+            var rows = ids.Where(x => formulasOf[x].Contains(id)).ToList();
+            if (rows.Count < 2) continue;
+            var allowed = FormulaPhases.Allowed(rules, st, f, out var why);
+            children.Add(MenuEntry.Item(f.Name, () => show(id, rows), allowed, why));
+        }
+        if (children.Count == 0) return;
+        menu.Add(MenuEntry.Submenu(onSelection ? FormulaWindowRules.CalculateOnSelectionText : FormulaWindowRules.CalculateOnStackText, children));
     }
 
     /// <summary>The counters a command acts on: the selection (in game order) when the clicked counter is part of it, otherwise just the clicked counter.</summary>

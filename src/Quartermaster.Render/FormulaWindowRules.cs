@@ -95,6 +95,38 @@ public static class FormulaWindowRules
         new(index >= 0 && index < row.Cells.Count ? row.Cells[index] : "",
             index >= 0 && index < row.Wrong.Count && row.Wrong[index] ? CellTone.Wrong : row.Applied ? CellTone.Applied : CellTone.Normal);
 
+    // ---- menu batch (B4) ----
+
+    /// <summary>Counter menu submenus: the clicked counter in a selection of two or more, else its stack.</summary>
+    public const string CalculateOnSelectionText = "Calculate on selection", CalculateOnStackText = "Calculate on stack";
+
+    /// <summary>The formula window's button of a menu run (no run link) and its tooltip.</summary>
+    public const string SeveralRunsText = "Several runs…";
+    public const string SeveralRunsTip = "Open a batch grid for this counter: one row per run, applied in order as one step.";
+
+    /// <summary>The menu batch grid's first line: its Input and Piece cells fill every row whose own cell is blank.</summary>
+    public const string AllRowsText = "All rows";
+
+    public const string AddRowText = "Add row", AddRowTip = "Add a run of the selected row's counter.";
+    public const string RemoveRowText = "Remove row", RemoveRowTip = "Remove the selected row (not the All rows line).";
+    public const string CalculateAllText = "Calculate all", ApplyAllText = "Apply all";
+
+    /// <summary>Exceptions cell of a menu batch row whose counter an earlier row removes (the row is skipped; it does not block).</summary>
+    public const string RemovedByEarlierRowText = "removed by an earlier row";
+
+    /// <summary>Status when a row would make the batch longer than <see cref="MenuBatchModel.MaxBatchRows"/>.</summary>
+    public const string MaxRowsText = "A batch holds at most 100 rows.";
+
+    /// <summary>The menu batch grid's title.</summary>
+    public static string MenuBatchTitle(string formula, int runs) => $"{formula} — {runs} runs";
+
+    public static string AppliedRunsText(int runs) => $"Applied {runs} run(s) as one step.";
+    public static string NothingAppliedRowText(int row) => $"Nothing applied: row {row} cannot be applied yet.";
+    public static string HostAppliedRunsText(int runs) => $"The host applied {runs} run(s) as one step.";
+
+    /// <summary>The host's message for a refused menu batch row (1-based), with the single run's neutral text.</summary>
+    public static string RowMessage(int row, string message) => $"Row {row}: {message}";
+
     // ---- missing-input dialog ----
 
     /// <summary>Head line: the values asked for (singular/plural), or the per-unit fallback when nothing can be asked.</summary>

@@ -69,6 +69,10 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
 
     public Task<FormulaVerdict> ApplyFormulaAsync(FormulaIntent intent) => Task.FromResult(ApplyFormula(intent));
 
+    /// <summary>A menu batch as a guest's would run, checked for the session's own view (no pins: the host's own grid pins in its models).</summary>
+    public Task<FormulaBatchVerdict> ApplyFormulaBatchAsync(FormulaBatchIntent intent) =>
+        Task.FromResult(Blocked ? FormulaBatchVerdict.Refused(BlockedText) : FormulaBatchRunner.Run(s, c, s.ViewSides, intent, guest: false));
+
     public bool ApplyTrace(string? runId, string? pieceId, FormulaTrace trace, bool calculated) =>
         !Blocked && c.ApplyFormula(runId, pieceId, trace, calculated);
 

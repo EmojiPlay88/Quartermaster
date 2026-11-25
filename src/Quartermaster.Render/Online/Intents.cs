@@ -11,6 +11,7 @@ namespace Quartermaster.Render;
 [JsonDerivedType(typeof(MoveIntent), "move")]
 [JsonDerivedType(typeof(PieceCommandIntent), "piece")]
 [JsonDerivedType(typeof(FormulaIntent), "formula")]
+[JsonDerivedType(typeof(FormulaBatchIntent), "formulaBatch")]
 [JsonDerivedType(typeof(LedgerEditIntent), "ledgerEdit")]
 [JsonDerivedType(typeof(DiceIntent), "dice")]
 [JsonDerivedType(typeof(TickIntent), "tick")]
@@ -36,6 +37,27 @@ public sealed record PieceCommandIntent(GameCommand Command) : GameIntent;
 /// </summary>
 public sealed record FormulaIntent(string FormulaId, string? PieceId, string? RunId, IReadOnlyDictionary<string, string> Typed, bool Calculate,
     bool Preview = false, IReadOnlyDictionary<string, string>? Picks = null) : GameIntent;
+
+/// <summary>
+/// A guest's menu batch (B4): formula X run once per row, in order, each row on its own counter (a counter may repeat), applied by the host
+/// as one undoable action only when every row can apply. The guest merges its "All rows" line into each row before sending. With
+/// <paramref name="Preview"/> the host only runs the chain (nothing is executed) and answers with each row's visible values and dice; those
+/// dice stay pinned for the sender's Apply of the same batch. At most <see cref="MenuBatchModel.MaxBatchRows"/> rows.
+/// </summary>
+public sealed record FormulaBatchIntent(string FormulaId, IReadOnlyList<FormulaBatchRow> Rows, bool Calculate, bool Preview) : GameIntent;
+
+/// <summary>One row of a <see cref="FormulaBatchIntent"/>: its counter, typed values and picks, as a <see cref="FormulaIntent"/> carries them.</summary>
+public sealed record FormulaBatchRow(string? PieceId, IReadOnlyDictionary<string, string> Typed, IReadOnlyDictionary<string, string>? Picks);
+
+/// <summary>
+/// The host's answer to a <see cref="FormulaBatchIntent"/>: <paramref name="Applied"/> when every row was applied, each row's verdict in
+/// row order (states, visible values and dice only, as <see cref="FormulaVerdict"/>), and the message (<c>Row {n}: {message}</c>) of a
+/// refused batch. Never carries a hidden value.
+/// </summary>
+public sealed record FormulaBatchVerdict(bool Applied, IReadOnlyList<FormulaVerdict> Rows, string? Message)
+{
+    public static FormulaBatchVerdict Refused(string message) => new(false, Array.Empty<FormulaVerdict>(), message);
+}
 
 /// <summary>A manual ledger change with its (required) note.</summary>
 public sealed record LedgerEditIntent(string Key, string PropertyId, double After, string Note) : GameIntent;
@@ -77,6 +99,9 @@ public sealed record FormulaVerdict(bool Applied, IReadOnlyList<FormulaBox> Boxe
 /// <summary>What the host replies to an intent: accepted or not, a message for the sender, and the verdict of a formula intent.</summary>
 public sealed record IntentResult(bool Ok, string? Message, FormulaVerdict? Verdict = null)
 {
+    /// <summary>The verdict of a menu batch intent (<see cref="FormulaBatchIntent"/>); sent as the result's verdict JSON when <see cref="Verdict"/> is null.</summary>
+    public FormulaBatchVerdict? BatchVerdict { get; init; }
+
     public static IntentResult Done() => new(true, null);
     public static IntentResult Refused(string message) => new(false, message);
 }

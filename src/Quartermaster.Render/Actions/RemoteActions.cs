@@ -93,6 +93,25 @@ public sealed class RemoteActions(GuestSession g) : IActionPort
         return v with { Boxes = (v.Boxes ?? Array.Empty<FormulaBox>()).Where(b => b != null).ToList(), Message = v.Message ?? r.Message };
     }
 
+    /// <summary>The host's verdict on a menu batch; <see cref="GuestSession.NoAnswerText"/> after the timeout.</summary>
+    public async Task<FormulaBatchVerdict> ApplyFormulaBatchAsync(FormulaBatchIntent intent)
+    {
+        if (intent == null) return FormulaBatchVerdict.Refused(IntentExecutor.NotUnderstoodText);
+        var r = await _g.SendIntent(intent, notify: false);
+        if (r == null) return FormulaBatchVerdict.Refused(GuestSession.NoAnswerText);
+        FormulaBatchVerdict? v = null;
+        if (!string.IsNullOrEmpty(r.VerdictJson))
+        {
+            try { v = JsonSerializer.Deserialize<FormulaBatchVerdict>(r.VerdictJson, QuartermasterJson.Options); }
+            catch (Exception e) when (e is JsonException or NotSupportedException or InvalidOperationException or ArgumentException) { v = null; }
+        }
+        if (v == null) return new FormulaBatchVerdict(r.Ok, Array.Empty<FormulaVerdict>(), r.Message);
+        var rows = (v.Rows ?? Array.Empty<FormulaVerdict>())
+            .Select(x => x == null ? FormulaVerdict.Refused("") : x with { Boxes = (x.Boxes ?? Array.Empty<FormulaBox>()).Where(b => b != null).ToList() })
+            .ToList();
+        return v with { Rows = rows, Message = v.Message ?? r.Message };
+    }
+
     public bool ApplyTrace(string? runId, string? pieceId, FormulaTrace trace, bool calculated)
     {
         Refuse(LocalOnlyText);

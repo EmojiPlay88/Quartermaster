@@ -14,7 +14,7 @@ public sealed record BatchRowView(string? PieceId, string Label, IReadOnlyList<s
 /// <see cref="PhaseController.ApplyFormula"/> (or the action port's <see cref="IActionPort.ApplyTrace"/>) with the row's expected engine
 /// run, so a wrong typed value never reaches the ledger.
 /// </summary>
-public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTrace, bool, bool> apply, string runId)
+public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTrace, bool, bool> apply, string runId) : IBatchRows
 {
     public BatchModel(ModuleSession s, PhaseController phases, string runId) : this(s, phases.ApplyFormula, runId) { }
 
