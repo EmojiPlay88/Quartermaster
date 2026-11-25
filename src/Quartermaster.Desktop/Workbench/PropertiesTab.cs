@@ -28,11 +28,13 @@ public sealed class PropertiesTab : UserControl
     const string OverridesTableTip = "A table this property overrides: a formula, filter or warning reading that table at the row named like the piece reads the piece's own value instead of the printed cell. Blank = none.";
     const string OverridesColumnTip = "The column of the table it overrides. A one-dimension table has no column.";
     /// <summary>Column indexes of "Rule ref", "Labels", "Holders" and "Clone as" (after Column, so the older columns keep their places).</summary>
-    internal const int RuleRefColumn = 10, LabelsColumn = 11, HoldersColumn = 12, CloneAsColumn = 13;
+    internal const int RuleRefColumn = 10, LabelsColumn = 11, HoldersColumn = 12, CloneAsColumn = 13, StartingValueColumn = 14, ResetsAtColumn = 15;
     /// <summary>Column index of the holder grid's "Rule ref" (after Notes).</summary>
     internal const int HolderRuleRefColumn = 2;
     internal const string LabelsTip = "A one-column table whose row for a value gives the text shown next to it, e.g. \"3 (Fog)\". Values stay numbers. Blank = none.";
     internal const string HoldersTip = "Holders that keep this property, comma-separated names. Blank = every holder.";
+    internal const string StartingValueTip = "An expression worked out once for each counter that gets this property and has no sheet value, e.g. lookup(CrewSizes, marker(\"Kind\")). It may read the counter, globals and tables; no dice. Blank = Default.";
+    internal const string ResetsAtTip = "Phases that clear this property's values when they begin, comma-separated names. Counters then start again from their starting value. Blank = never.";
     internal const string CloneAsTip = "What a copy made with the counter's Clone command gets: Copy = this counter's current value; Default = what a new counter starts with.";
 
     readonly ModuleSession _s;
@@ -66,6 +68,8 @@ public sealed class PropertiesTab : UserControl
             new EditColumn("Labels", EditColumnKind.Combo, Weight: 80),
             new EditColumn("Holders", Weight: 90),
             new EditColumn("Clone as", EditColumnKind.Combo, Weight: 60, Items: Enum.GetNames<CloneValue>()),
+            new EditColumn("Starting value", Weight: 120),
+            new EditColumn("Resets at", Weight: 90),
         ]);
         _holders.SetColumns([new EditColumn("Name", Weight: 80), new EditColumn("Notes", Weight: 200), new EditColumn("Rule ref", EditColumnKind.Combo, Weight: 100)]);
         _props.SetHeaderToolTip(3, SheetTip);
@@ -76,6 +80,8 @@ public sealed class PropertiesTab : UserControl
         _props.SetHeaderToolTip(LabelsColumn, LabelsTip);
         _props.SetHeaderToolTip(HoldersColumn, HoldersTip);
         _props.SetHeaderToolTip(CloneAsColumn, CloneAsTip);
+        _props.SetHeaderToolTip(StartingValueColumn, StartingValueTip);
+        _props.SetHeaderToolTip(ResetsAtColumn, ResetsAtTip);
 
         var propsBox = Box("Properties", _props, Bar(_bAddProp, _bDelProp));
         var holdersBox = Box("Holders (the built-in \"global\" holder always exists)", _holders, Bar(_bAddHolder, _bDelHolder));
@@ -225,6 +231,8 @@ public sealed class PropertiesTab : UserControl
             string.IsNullOrWhiteSpace(p.Labels) ? "" : pack!.ById<TableDef>(p.Labels!)?.Name ?? p.Labels!,   // a deleted table shows its id
             HoldersText(pack!, p.Holders),
             p.CloneAs.ToString(),
+            p.DefaultExpr ?? "",
+            ResetAtText(pack!, p.ResetAt),
         }).ToList());
         var tableNames = new List<string> { "" };
         tableNames.AddRange((pack?.Tables ?? new List<TableDef>()).Select(t => t.Name));
@@ -251,6 +259,9 @@ public sealed class PropertiesTab : UserControl
             _props.SetCellToolTip(i, HoldersColumn, HoldersTip);
             _props.SetCellItems(i, CloneAsColumn, Enum.GetNames<CloneValue>());
             _props.SetCellToolTip(i, CloneAsColumn, CloneAsTip);
+            _props.SetCellToolTip(i, StartingValueColumn, StartingValueTip);
+            _props.SetCellError(i, StartingValueColumn, FormulaEdit.SyntaxProblem(props[i].DefaultExpr));
+            _props.SetCellToolTip(i, ResetsAtColumn, ResetsAtTip);
         }
         ApplySheetItems();
         var rows = new List<IReadOnlyList<string>> { new[] { HolderDef.GlobalId, "Built in; always exists.", "" } };
@@ -270,6 +281,28 @@ public sealed class PropertiesTab : UserControl
     /// <summary>The Holders cell: holder names, comma-separated ("global" for the built-in holder; an id that no longer resolves shows as it is).</summary>
     static string HoldersText(RulesPack pack, List<string>? ids) =>
         ids is not { Count: > 0 } ? "" : FormulaEdit.FormatNameList(ids.Select(id => id == HolderDef.GlobalId ? HolderDef.GlobalId : pack.ById<HolderDef>(id)?.Name ?? id));
+
+    /// <summary>The Resets at cell: phase names, comma-separated (an id that no longer resolves shows as it is).</summary>
+    static string ResetAtText(RulesPack pack, List<string>? ids) =>
+        ids is not { Count: > 0 } ? "" : FormulaEdit.FormatNameList(ids.Select(id => pack.ById<PhaseDef>(id)?.Name ?? id));
+
+    /// <summary>Phase ids from the Resets at cell text (case-insensitive names); an unknown name gives its status text instead. Blank = null.</summary>
+    static (List<string>? Ids, string? Error) ParseResetAt(RulesPack pack, string text, List<string>? current)
+    {
+        var (names, err) = FormulaEdit.ParseNameList(text);
+        if (err != null) return (null, err);
+        var ids = new List<string>();
+        foreach (var raw in names!)
+        {
+            var name = raw.Trim();
+            if (name.Length == 0) continue;
+            var id = pack.Phases.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase))?.Id
+                ?? (current?.Contains(name) == true ? name : null);   // a stale id shown as it is may stay
+            if (id == null) return (null, $"No phase named \"{name}\"");
+            if (!ids.Contains(id)) ids.Add(id);
+        }
+        return (ids.Count == 0 ? null : ids, null);
+    }
 
     /// <summary>Holder ids from the Holders cell text; an unknown name gives its status text instead. Blank = null (every holder).</summary>
     static (List<string>? Ids, string? Error) ParseHolders(RulesPack pack, string text, List<string>? current)
@@ -436,6 +469,28 @@ public sealed class PropertiesTab : UserControl
                 if (!Enum.TryParse<CloneValue>(text, out var cv)) return;
                 Commit(p => Edit(p, id, x => x with { CloneAs = cv }));
                 break;
+            case StartingValueColumn:
+            {
+                var sv = text.Trim().Length == 0 ? null : text.Trim();
+                Commit(p => Edit(p, id, x => x with { DefaultExpr = sv }));
+                var svProblem = FormulaEdit.SyntaxProblem(sv);
+                if (svProblem != null) _status.Text = "Starting value: " + svProblem;
+                _props.SetCellError(row, StartingValueColumn, svProblem);
+                break;
+            }
+            case ResetsAtColumn:
+            {
+                var (rids, rerror) = ParseResetAt(pack, text, pack.ById<PropertyDef>(id)?.ResetAt);
+                if (rerror != null)
+                {
+                    Rebuild();
+                    _status.Text = rerror;
+                    return;
+                }
+                Commit(p => Edit(p, id, x => x with { ResetAt = rids }));
+                Rebuild();   // the cell shows the names as stored
+                break;
+            }
         }
     }
 

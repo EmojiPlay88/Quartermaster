@@ -22,6 +22,8 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     const string None = "(none)";
     const string MissingText = "(missing)";
     const string PhasesTitle = "Phases";
+    internal const string AsksSideTip = "The side whose player answers this run, in every difficulty. Only in a phase without a side, with For each = Once. (none) = no one is asked.";
+    const string NoSide = "(none)";
     static readonly string[] FiresForNames = ["Acting side", "Other side", "Any side"];   // in MoveSide order
 
     internal sealed record PhaseRow(string Text, string Side);
@@ -158,10 +160,12 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         DetailRow(3, "Links:", _checkLinks);
         rows.Children.Add(Box("Checklist (double-click to edit)", checkInner));
 
-        _start.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("For each", EditColumnKind.Combo, Weight: 40), new EditColumn("Filter (units)", Weight: 90)]);
-        _end.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("For each", EditColumnKind.Combo, Weight: 40), new EditColumn("Filter (units)", Weight: 90)]);
+        _start.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("For each", EditColumnKind.Combo, Weight: 40), new EditColumn("Filter (units)", Weight: 90), new EditColumn("Asks side", EditColumnKind.Combo, Weight: 60)]);
+        _end.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("For each", EditColumnKind.Combo, Weight: 40), new EditColumn("Filter (units)", Weight: 90), new EditColumn("Asks side", EditColumnKind.Combo, Weight: 60)]);
         _move.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("Filter (units)", Weight: 90), new EditColumn("Fires for", EditColumnKind.Combo, Weight: 40, Items: FiresForNames)]);
         _warn.SetColumns([new EditColumn("Condition", Weight: 90), new EditColumn("Message ({unit} = unit name)", Weight: 90), new EditColumn("Decision", EditColumnKind.Check, Weight: 30), new EditColumn("Rule ref", EditColumnKind.Combo, Weight: 60)]);
+        _start.SetHeaderToolTip(3, AsksSideTip);
+        _end.SetHeaderToolTip(3, AsksSideTip);
         rows.Children.Add(GridBox("On start: run formulas", _start, _startAdd, _startDel));
         rows.Children.Add(GridBox("On end: run formulas", _end, _endAdd, _endDel));
         rows.Children.Add(GridBox("On move: run formulas for moved units", _move, _moveAdd, _moveDel));
@@ -913,8 +917,8 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         var end = ph?.OnEnd ?? new List<StartEntry>();
         var move = ph?.OnMove ?? new List<MoveEntry>();
         var warn = ph?.Warnings ?? new List<PhaseWarning>();
-        _start.SetRows(start.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.ForEach.ToString(), e.UnitFilter ?? "" }).ToList());
-        _end.SetRows(end.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.ForEach.ToString(), e.UnitFilter ?? "" }).ToList());
+        _start.SetRows(start.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.ForEach.ToString(), e.UnitFilter ?? "", AskSideText(e) }).ToList());
+        _end.SetRows(end.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.ForEach.ToString(), e.UnitFilter ?? "", AskSideText(e) }).ToList());
         _move.SetRows(move.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.UnitFilter ?? "", FiresForNames[(int)e.FiresFor] }).ToList());
         _warn.SetRows(warn.Select(w => (IReadOnlyList<string>)new[] { w.Condition, w.Message, w.IsDecision ? "True" : "False", RuleRefPicker.Text(_s.Rules, w.RuleRefId) }).ToList());
         // SetRows resets per-cell state: items and errors go on afterwards
@@ -923,12 +927,16 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             _start.SetCellItems(i, 0, formulas);
             _start.SetCellItems(i, 1, modes);
             SetExprError(_start, i, 2);
+            _start.SetCellItems(i, 3, SideChoices(start[i]));
+            _start.SetCellToolTip(i, 3, AsksSideTip);
         }
         for (var i = 0; i < end.Count; i++)
         {
             _end.SetCellItems(i, 0, formulas);
             _end.SetCellItems(i, 1, modes);
             SetExprError(_end, i, 2);
+            _end.SetCellItems(i, 3, SideChoices(end[i]));
+            _end.SetCellToolTip(i, 3, AsksSideTip);
         }
         for (var i = 0; i < move.Count; i++)
         {
@@ -941,6 +949,26 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             SetExprError(_warn, i, 0);
             _warn.SetCellItems(i, 3, RuleRefPicker.Items(_s.Rules, warn[i].RuleRefId).Items);
         }
+    }
+
+    string AskSideText(StartEntry e) =>
+        e.AskSideId is not { Length: > 0 } id ? NoSide : _s.Rules?.Sides.FirstOrDefault(x => x.Id == id)?.Name ?? MissingText;
+
+    List<string> SideChoices(StartEntry e)
+    {
+        var items = new List<string> { NoSide };
+        items.AddRange(_s.Rules?.Sides.Select(x => x.Name) ?? []);
+        if (AskSideText(e) == MissingText) items.Add(MissingText);
+        return items;
+    }
+
+    /// <summary>The side id for a picked name; "(none)" gives null. False for a name that is no side.</summary>
+    bool TryAskSide(string text, out string? id)
+    {
+        id = null;
+        if (text == NoSide) return true;
+        id = _s.Rules?.Sides.FirstOrDefault(x => x.Name == text)?.Id;
+        return id != null;
     }
 
     static void SetExprError(EditGrid g, int row, int col) => g.SetCellError(row, col, FormulaEdit.SyntaxProblem(g.Cell(row, col)));
@@ -966,6 +994,10 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
                 var filter = NullIfBlank(text);
                 edit = e => e with { UnitFilter = filter };
                 break;
+            case 3:
+                if (!TryAskSide(text, out var ask)) return;
+                edit = e => e with { AskSideId = ask };
+                break;
             default: return;
         }
         CommitPhase(p => p with { OnStart = p.OnStart.Select((e, i) => i == row ? edit(e) : e).ToList() });
@@ -989,6 +1021,10 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
                 SetExprError(_end, row, col);
                 var filter = NullIfBlank(text);
                 edit = e => e with { UnitFilter = filter };
+                break;
+            case 3:
+                if (!TryAskSide(text, out var ask)) return;
+                edit = e => e with { AskSideId = ask };
                 break;
             default: return;
         }

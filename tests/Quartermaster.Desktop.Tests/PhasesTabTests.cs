@@ -344,6 +344,44 @@ public sealed class PhasesTabTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void PhasesTab_asks_side_column_start_and_end()
+    {
+        var s = Session(tweak: p => p with { Phases = p.Phases.Select(x => x.Id == "ph-weather"
+            ? x with { OnStart = new() { new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once } }, OnEnd = new() { new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once } } } : x).ToList() });
+        var tab = Tab(s);
+        tab.SelectPhase("ph-weather");
+        Pump();
+        const string tip = "The side whose player answers this run, in every difficulty. Only in a phase without a side, with For each = Once. (none) = no one is asked.";
+        Assert.Equal("Asks side", tab.StartGrid.HeaderText(3));
+        Assert.Equal("Asks side", tab.EndGrid.HeaderText(3));
+        Assert.Equal(tip, tab.StartGrid.HeaderToolTip(3));
+        Assert.Equal(tip, tab.EndGrid.HeaderToolTip(3));
+        Assert.Equal(["(none)", "Red", "Blue"], tab.StartGrid.CellItems(0, 3)!.ToList());
+        Assert.Equal("(none)", tab.StartGrid.Cell(0, 3));
+        Pick(tab.StartGrid, 0, 3, "Blue");
+        Assert.Equal("blue", Ph(s, "ph-weather").OnStart[0].AskSideId);
+        Pick(tab.EndGrid, 0, 3, "Red");
+        Assert.Equal("red", Ph(s, "ph-weather").OnEnd![0].AskSideId);
+        Assert.Equal("Blue", tab.StartGrid.Cell(0, 3));
+        Assert.Equal("Red", tab.EndGrid.Cell(0, 3));
+    }
+
+    [AvaloniaFact]
+    public void PhasesTab_asks_side_none_clears()
+    {
+        var s = Session(tweak: p => p with { Phases = p.Phases.Select(x => x.Id == "ph-weather"
+            ? x with { OnStart = new() { new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once, AskSideId = "red" } }, OnEnd = new() { new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once, AskSideId = "blue" } } } : x).ToList() });
+        var tab = Tab(s);
+        tab.SelectPhase("ph-weather");
+        Pump();
+        Assert.Equal("Red", tab.StartGrid.Cell(0, 3));
+        Pick(tab.StartGrid, 0, 3, "(none)");
+        Assert.Null(Ph(s, "ph-weather").OnStart[0].AskSideId);
+        Pick(tab.EndGrid, 0, 3, "(none)");
+        Assert.Null(Ph(s, "ph-weather").OnEnd![0].AskSideId);
+    }
+
+    [AvaloniaFact]
     public void Grid_cells_commit_and_pick_formulas()
     {
         var s = Session();
