@@ -30,6 +30,8 @@ public interface IEvalContext
     bool Has(string property);
     Value PieceName();
     Value Marker(string key);
+    /// <summary>The level of the named layer on the piece being evaluated.</summary>
+    double Layer(string name) => throw new EvalError("layer() is not available here");
     /// <summary>The current turn number (1 when the context has no turn).</summary>
     double Turn() => 1;
     /// <summary>The current stage: how many times the turn's phase span has repeated (1 when unknown).</summary>
@@ -177,7 +179,7 @@ public static class Evaluator
     public static IReadOnlyList<string> FunctionNames { get; } = new[]
     {
         "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup", "lookuprange", "count",
-        "dice", "has", "startswith", "contains", "name", "marker", "turn", "stage", "mod",
+        "dice", "has", "startswith", "contains", "name", "marker", "layer", "turn", "stage", "mod",
         "side", "phaseside", "map", "holder", "runs",
         "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin",
         "attachedsum", "attachedcount", "attachedmax", "attachedmin",
@@ -311,6 +313,9 @@ public static class Evaluator
                 return ctx.Aggregate(c.Function, property, filter);
             }
             case "marker": return ctx.Marker(TextArg(a[0], ctx, "marker"));
+            case "layer":
+                if (a[0] is not TextLit ln) throw new EvalError("layer() needs a layer name in quotes", c);
+                return Num(ctx.Layer(ln.Value), c);
             default: throw new EvalError($"Unknown function '{c.Function}'", c);
         }
     }

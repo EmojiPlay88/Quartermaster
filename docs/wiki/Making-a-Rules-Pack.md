@@ -460,6 +460,78 @@ If the expression fails or does not give a number, the counter starts at the pro
 
 The validator reports, as errors: `Property "{name}" has a starting value expression and is computed; remove one`, `Property "{name}": the starting value expression does not parse: {message}`, `Property "{name}": starting value {problem}`, `Property "{name}": {fn}() is not available in a starting value` and `Property "{name}" has a starting value expression but is not a piece property`. Combine it with **Resets at** (above) to start a value afresh at a phase.
 
+## Acting on other pieces
+
+A formula normally changes only the counter it runs on, a holder or the global holder. Outputs can also write another counter, put a new counter on the map, remove one, or set a layer or a mask. Everything below is optional; a pack that does not use it works as before. The columns are described in the [Formula Reference](Formula-Reference#acting-on-other-counters) and the [Workbench](Window-Rules-Workbench#formulas-tab).
+
+### Writing to another counter
+
+Riverland's barges carry fuel for others. Make a formula `Barge transfer` whose text is `Amount`, with these bindings:
+
+| Variable | Kind | Target | Details |
+|---|---|---|---|
+| Amount | Input | | `1..10` |
+| Fuel | Unit | Fuel | |
+| Receiver | Piece | Fuel | which pieces: `marker("Kind") == "Unit"`, with **Same hex** ticked |
+
+**Outputs:** the first has Target **Unit**, Property **Fuel**, Op **Subtract** (the barge gives). The second has Target **Piece**, **Piece** `Receiver`, Property **Fuel**, Op **Add** (the receiver takes).
+
+Run it on the Blue Barge: the Receiver list holds only the other counters in the barge's hex (without **Same hex** the list holds every counter you can see, with the ones in the barge's hex first). Both changes happen in one run and one Undo takes both back. Add `Amount <= Fuel` as the formula's **Only runs when** (with `Refusal message` `The barge has too little fuel`) so a barge cannot give more than it has.
+
+A formula whose only link to a counter is a Same hex Piece binding is offered on counters in the counter menu, like a formula with a Unit binding.
+
+### Results on the other side's counters
+
+The Northern League shells a Southern Compact unit. `Shelling` has the Input `Hits` (`0..6`) and a Piece binding `Target` of Strength, with the filter `side() == "Southern Compact"`; the one output has Target **Piece**, **Piece** `Target`, Property **Strength**, Op **Subtract**, Value `Hits`.
+
+The result lands at once, with no confirmation from the other player, and one Undo takes it back. What each log shows:
+
+- The Southern Compact player sees `Rifle 3: Shelling: Strength 7 - 2 = 5` (the counter's name, then the formula and the change).
+- The Northern League player, who ran the formula, sees `Southern Compact ledger changed`, not the value, and its own working line for the run.
+- A counter that belongs to no side shows the full line to everyone.
+
+Online, the host works out a guest's `Shelling` and tells the guest only what the guest may see. If the target's value is hidden from the guest, the guest's formula dialog leaves the calculation to the host.
+
+### Placing a counter
+
+`Wreck` is a palette entry (a counter in the module's palette, in a folder `Markers`). A formula `Sink` runs on a barge and has the outputs:
+
+1. Action **Place**, Target **Unit**, **Palette entry** `Markers/Wreck`. The wreck appears in the barge's hex, on top of its stack. The log reads `Sink: placed Wreck`.
+2. Action **Write**, Target **Placed**, Property **Salvage**, Op **Set**, Value `3`. The new wreck's Salvage is 3. A Placed write must be Set: the counter is new.
+
+A formula may place one counter. **Palette entry** is the palette path or the gpid; the cell offers the module's paths. With Target **Piece** instead of Unit, the wreck goes in the hex of the counter a Piece binding picked.
+
+### Removing a counter
+
+`Demolish` removes a `Bridge` when its Strength falls to 0. Give it a Piece binding `Span` and an output with Action **Remove**, Target **Piece**, **Piece** `Span`. The counter and its ledger values are deleted; the log reads `Demolish: removed Bridge`, and only the side that owned the bridge keeps that line. Removals always run last, so a Strength write to the same bridge in the same run is logged first.
+
+To keep the counter, set **To map** to `Dead pile` (a map with a board): the counter moves to the middle of that map's first board and keeps all its values. The log reads `Demolish: moved Bridge to Dead pile`. `(delete)` in the **To map** cell means delete.
+
+In Fully automatic play, a counter that an earlier run in the same pass removed is skipped without a message.
+
+### Layers and masks
+
+A fort counter carries a layer `Levels` (three pictures: Fort level 1 to 3; switched off while the fort is unbuilt). A formula `Build fort` with Input `Level` (`0..3`) has one output: Action **Set layer**, Target **Unit**, **Layer** `Levels`, Value `Level`. Level 0 switches the layer off. The log reads `Build fort: Levels of Fort 2 = 2` (a layer with named levels shows the level's name).
+
+To read the level in another formula, use `layer("Levels")`: Applies to `layer("Levels") >= 2` offers a formula only on forts of level 2 or more. A level that comes from a property cannot be set (read the property).
+
+A minefield counter has a Mask trait, so players cannot see what it is. A formula `Sweep` with a Piece binding `Field` and the output Action **Set mask**, Target **Piece**, **Piece** `Field`, Value `0` reveals it: the log reads `Sweep: Minefield 4 unmasked`. Value `1` masks it again (`masked`). Players who cannot see the counter do not get the line.
+
+### What the Problems list says
+
+Each message begins `Formula "{name}": `.
+
+- `output {n} acts on another piece but names no Piece variable`; `output {n} names variable "{v}", which is not a Piece binding`; `output {n} names a Piece variable but its target is not Piece`.
+- `output {n}: {action} cannot target {target}` (for example `output 2: Remove cannot target Global`).
+- `output {n} places a piece but names no palette entry`; `output {n} places palette entry "{slot}", which does not exist in the module`; `output {n} names a palette entry but does not place a piece`.
+- `output {n} places a second piece; only one output may place a piece`; `output {n} writes the placed piece, but no output places one`; `output {n} writes the placed piece, so its operation must be Set`.
+- `output {n} sets a layer but names none`; `output {n} names a layer but does not set one`.
+- `output {n} moves the piece to map "{id}", which does not exist in the module`; `output {n} names a map but does not remove a piece`.
+- `output {n} has a property list but does not write a value`.
+- `output property "{p}" cannot be written to a piece (its scope is {scope})`.
+- Warning: `variable "{v}" has "same hex" but is not a Piece binding`.
+- `layer() needs a layer name in quotes`, and `layer` in a phase condition is refused like the other counter functions.
+
 ## Properties some holders keep
 
 By default every holder keeps every holder property. Some values belong to one holder only. Say only the North Depot takes ferry tolls: add a property **Ferry tolls** with scope Holders and type `North Depot` in its **Holders** cell (several names are separated by commas; `global` is the built-in holder; blank means every holder). An unknown name is refused with `No holder named "{name}"`.

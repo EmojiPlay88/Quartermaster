@@ -6,7 +6,7 @@ namespace Quartermaster.Rules;
 public static class FormulaVariables
 {
     /// <summary>
-    /// The variables of the formula text in text order, then those of the precondition, then those of the outputs' value and pick-by expressions, then (transitively, only from bindings that are
+    /// The variables of the formula text in text order, then those of the precondition, then those of the outputs' value and pick-by expressions, then the Piece variables the outputs act on (<see cref="PieceTargets"/>), then (transitively, only from bindings that are
     /// themselves used) those named in a used binding's Table row/column expression, auto value, "Only when" condition or dice count expression, never counting a
     /// binding's own variable in its own expressions. Empty when the text does not parse; expressions that do not parse are skipped.
     /// </summary>
@@ -15,7 +15,16 @@ public static class FormulaVariables
         IReadOnlyList<string> textVars;
         try { textVars = Parser.Variables(Parser.Parse(f.Text ?? "")); }
         catch (ParseError) { return new List<string>(); }
-        return Reach(f, textVars.Concat(VarsOf(f.Precondition)).Concat(OutputSources(f).SelectMany(VarsOf)));
+        return Reach(f, textVars.Concat(VarsOf(f.Precondition)).Concat(OutputSources(f).SelectMany(VarsOf)).Concat(PieceTargets(f)));
+    }
+
+    /// <summary>The Piece variables the outputs act on (<see cref="FormulaOutput.PieceVariable"/> of each Target = Piece output naming a Piece binding), in output order: the run asks them even when nothing reads their value.</summary>
+    public static IEnumerable<string> PieceTargets(FormulaDef f)
+    {
+        foreach (var o in f?.Outputs ?? new List<FormulaOutput>())
+            if (o is { Target: OutputTarget.Piece } && !string.IsNullOrWhiteSpace(o.PieceVariable)
+                && f!.Bindings.Any(b => b != null && b.Variable == o.PieceVariable && b.Kind == BindingKind.Piece))
+                yield return o.PieceVariable!;
     }
 
     /// <summary>The expressions the outputs evaluate, in output order: each non-blank value expression, and the selector of an output with a property list.</summary>

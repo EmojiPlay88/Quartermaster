@@ -273,7 +273,7 @@ public sealed class BatchGridWindow : Window
                     var v = w._model.Variables[c - 1];
                     if (w._model.IsChoiceColumn(v))
                     {
-                        var keys = w._model.ChoicesFor(v) ?? Array.Empty<string>();
+                        var keys = w._model.ChoicesFor(v, index) ?? Array.Empty<string>();   // this row's unit: its hex first
                         var combo = new ComboBox { IsEditable = true, ItemsSource = new[] { "" }.Concat(keys).ToList(), HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(2, 0) };
                         combo.PropertyChanged += (_, e) => { if (e.Property == ComboBox.TextProperty) Edited(col, combo.Text ?? ""); };
                         inner = combo;
@@ -375,7 +375,7 @@ public sealed class BatchGridWindow : Window
                             break;
                         case ComboBox cb:
                             // A Piece column's candidates follow the game (and the viewer): the items are refreshed when the list changed.
-                            var items = new[] { "" }.Concat(_w._model.ChoicesFor(_w._model.Variables[c - 1]) ?? Array.Empty<string>()).ToList();
+                            var items = new[] { "" }.Concat(_w._model.ChoicesFor(_w._model.Variables[c - 1], Index) ?? Array.Empty<string>()).ToList();
                             if (cb.ItemsSource is not IEnumerable<string> shown || !shown.SequenceEqual(items))
                             {
                                 cb.ItemsSource = items;

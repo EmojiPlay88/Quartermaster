@@ -88,6 +88,10 @@ Double-click a row to open that unit's formula dialog. In Semi-automatic mode a 
 
 There is no screenshot of the batch grid yet.
 
+## Picking another counter
+
+A **Piece** variable shows as a list of the counters you can see. The counters in the same hex as the counter the formula runs on are listed first, then the rest, each part sorted by name. A variable marked **Same hex** lists only the other counters in that hex. A masked enemy counter shows as `Unknown piece`. See [Reading another counter](Formula-Reference#where-names-get-their-values).
+
 ## Missing values
 
 In **Fully automatic** mode the game calculates everything itself. When a formula needs a value it cannot work out (an input such as Riverland's "Hexes from this unit to its depot"), a small dialog named after the formula asks for it once, with one box per missing value. The answer is used for every unit of that run. Inputs marked "(always asked)" open this dialog every time, even though they have an automatic value.

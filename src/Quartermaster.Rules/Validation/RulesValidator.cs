@@ -11,7 +11,11 @@ public sealed record RulesIssue(RulesIssueSeverity Severity, string EntityId, st
 /// <summary>Checks a rules pack for problems. Never throws on bad user data.</summary>
 public static class RulesValidator
 {
-    public static IReadOnlyList<RulesIssue> Validate(RulesPack pack, IReadOnlyCollection<string>? knownMapIds = null)
+    public static IReadOnlyList<RulesIssue> Validate(RulesPack pack, IReadOnlyCollection<string>? knownMapIds = null) =>
+        Validate(pack, knownMapIds, null);
+
+    /// <summary>As the two-argument form; <paramref name="knownSlots"/> are the module's palette entries a Place output may name (null = not known, so none is checked).</summary>
+    public static IReadOnlyList<RulesIssue> Validate(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, IReadOnlyCollection<string>? knownSlots)
     {
         var issues = new List<RulesIssue>();
         try
@@ -43,7 +47,7 @@ public static class RulesValidator
             CheckRuleRefs(pack, issues);
             CheckChecklists(pack, issues);
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
-            foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues));
+            foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues, knownMapIds, knownSlots));
             foreach (var s in pack.Sides) Guarded(issues, s.Id, s.Name, () => CheckSide(s, pack, issues));
             foreach (var ph in pack.Phases) Guarded(issues, ph.Id, ph.Name, () => CheckPhase(pack, ph, issues));
             CheckBlocks(pack, issues);
@@ -249,7 +253,8 @@ public static class RulesValidator
                 case Unary u: Walk(u.Operand); break;
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
-                    if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is TextLit t) Prop(t.Value);
+                    if (c.Function == "layer") { if (c.Args.Count != 1 || c.Args[0] is not TextLit) found.Add("layer() needs a layer name in quotes"); }
+                    else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is TextLit t) Prop(t.Value);
                     else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is VarRef hv) Prop(hv.Name);
                     else if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
                     {
@@ -482,7 +487,7 @@ public static class RulesValidator
         catch (ParseError) { return false; }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder", "runs", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "layer", "has", "dice", "side", "map", "holder", "runs", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -712,7 +717,7 @@ public static class RulesValidator
 
     // ---- formulas ----
 
-    private static void CheckFormula(RulesPack pack, FormulaDef f, List<RulesIssue> issues)
+    private static void CheckFormula(RulesPack pack, FormulaDef f, List<RulesIssue> issues, IReadOnlyCollection<string>? knownMapIds = null, IReadOnlyCollection<string>? knownSlots = null)
     {
         string who = $"Formula \"{f.Name}\"";
         void Err(string m) => Add(issues, RulesIssueSeverity.Error, f.Id, f.Name, $"{who}: {m}");
@@ -743,6 +748,7 @@ public static class RulesValidator
         {
             if (!bindingNames.Add(b.Variable)) Err($"variable \"{b.Variable}\" is bound more than once");
             CheckBinding(pack, f, b, Err);
+            if (b.SameHex && b.Kind != BindingKind.Piece) Warn($"variable \"{b.Variable}\" has \"same hex\" but is not a Piece binding");
             if (!string.IsNullOrWhiteSpace(b.AutoValue))
             {
                 if (ParseProblem(b.AutoValue!) is { } ae) Err($"variable \"{b.Variable}\" auto value {ae}");
@@ -797,12 +803,16 @@ public static class RulesValidator
             if (!used.Contains(b.Variable)) Warn($"variable \"{b.Variable}\" is bound but not used in the formula");
 
         var outputNo = 0;
+        var hasPlace = f.Outputs.Any(x => x.Action == OutputAction.Place);
+        var placeSeen = false;
         foreach (var o in f.Outputs)
         {
             outputNo++;
-            CheckOutput(pack, o, outputNo, Err);
+            var secondPlace = o.Action == OutputAction.Place && placeSeen;
+            if (o.Action == OutputAction.Place) placeSeen = true;
+            CheckOutput(pack, f, o, outputNo, Err, knownMapIds, knownSlots, secondPlace, hasPlace);
             ParseGuard(o.Expr, $"output {outputNo} value");
-            if (o.PropertyChoice is { Count: > 0 })
+            if (o.Action == OutputAction.Write && o.PropertyChoice is { Count: > 0 })
             {
                 if (string.IsNullOrWhiteSpace(o.PropertySelect)) Err($"output {outputNo} has a property list but no \"Pick by\"");
                 else ParseGuard(o.PropertySelect, $"output {outputNo} pick-by");
@@ -918,11 +928,62 @@ public static class RulesValidator
         else if (pack.ById<PropertyDef>(name!) is null) err($"{v} refers to a property that no longer exists");
     }
 
-    private static void CheckOutput(RulesPack pack, FormulaOutput o, int outputNo, Action<string> err)
+    private static bool TargetAllowed(OutputAction a, OutputTarget t) => a switch
+    {
+        OutputAction.Write => true,
+        OutputAction.Place or OutputAction.Remove => t is OutputTarget.Unit or OutputTarget.Piece,
+        _ => t is OutputTarget.Unit or OutputTarget.Piece or OutputTarget.Placed,
+    };
+
+    private static void CheckOutput(RulesPack pack, FormulaDef f, FormulaOutput o, int outputNo, Action<string> err,
+        IReadOnlyCollection<string>? knownMapIds, IReadOnlyCollection<string>? knownSlots, bool secondPlace, bool formulaPlaces)
     {
         var gone = Once(err);   // one "no longer exists" per output, however many of its ids are gone
         if (o.Target == OutputTarget.Holder && o.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(o.HolderId ?? "") is null)
             err($"output refers to unknown holder \"{o.HolderId}\"");
+
+        if (!TargetAllowed(o.Action, o.Target)) err($"output {outputNo}: {o.Action} cannot target {o.Target}");
+        if (o.Target == OutputTarget.Piece)
+        {
+            if (string.IsNullOrWhiteSpace(o.PieceVariable)) err($"output {outputNo} acts on another piece but names no Piece variable");
+            else if (!f.Bindings.Any(b => b.Variable == o.PieceVariable && b.Kind == BindingKind.Piece))
+                err($"output {outputNo} names variable \"{o.PieceVariable}\", which is not a Piece binding");
+        }
+        else if (!string.IsNullOrWhiteSpace(o.PieceVariable)) err($"output {outputNo} names a Piece variable but its target is not Piece");
+
+        if (o.Action == OutputAction.Place)
+        {
+            if (string.IsNullOrWhiteSpace(o.Slot)) err($"output {outputNo} places a piece but names no palette entry");
+            else if (knownSlots != null && !knownSlots.Contains(o.Slot!))
+                err($"output {outputNo} places palette entry \"{o.Slot}\", which does not exist in the module");
+            if (secondPlace) err($"output {outputNo} places a second piece; only one output may place a piece");
+        }
+        else if (!string.IsNullOrWhiteSpace(o.Slot)) err($"output {outputNo} names a palette entry but does not place a piece");
+
+        if (o.Target == OutputTarget.Placed)
+        {
+            if (!formulaPlaces) err($"output {outputNo} writes the placed piece, but no output places one");
+            if (o.Action == OutputAction.Write && o.Op != OutputOp.Set) err($"output {outputNo} writes the placed piece, so its operation must be Set");
+        }
+
+        if (o.Action == OutputAction.SetLayer)
+        {
+            if (string.IsNullOrWhiteSpace(o.Layer)) err($"output {outputNo} sets a layer but names none");
+        }
+        else if (!string.IsNullOrWhiteSpace(o.Layer)) err($"output {outputNo} names a layer but does not set one");
+
+        if (o.Action == OutputAction.Remove)
+        {
+            if (!string.IsNullOrWhiteSpace(o.ToMapId) && knownMapIds != null && !knownMapIds.Contains(o.ToMapId!))
+                err($"output {outputNo} moves the piece to map \"{o.ToMapId}\", which does not exist in the module");
+        }
+        else if (!string.IsNullOrWhiteSpace(o.ToMapId)) err($"output {outputNo} names a map but does not remove a piece");
+
+        if (o.Action != OutputAction.Write)
+        {
+            if (o.PropertyChoice is { Count: > 0 }) err($"output {outputNo} has a property list but does not write a value");
+            return;
+        }
         // With a property list the fixed Property is not used; every listed id must suit the target as Property must.
         if (o.PropertyChoice is { Count: > 0 } ids) foreach (var id in ids) CheckOutputProperty(pack, o, id, outputNo, err, gone);
         else CheckOutputProperty(pack, o, o.Property, outputNo, err, gone);
@@ -932,7 +993,8 @@ public static class RulesValidator
     {
         var p = pack.ById<PropertyDef>(id ?? "");
         if (p is null) { gone($"output {outputNo} refers to a property that no longer exists"); return; }
-        bool ok = o.Target == OutputTarget.Unit
+        bool onPiece = o.Target is OutputTarget.Unit or OutputTarget.Piece or OutputTarget.Placed;
+        bool ok = onPiece
             ? p.Scope is PropertyScope.Pieces or PropertyScope.Both
             : p.Scope is PropertyScope.Holders or PropertyScope.Both;
         if (PropertyFacts.IsComputed(p)) { err($"output {outputNo} writes computed property \"{p.Name}\""); return; }
@@ -940,6 +1002,6 @@ public static class RulesValidator
         else if (o.Target == OutputTarget.Holder && (o.HolderId == HolderDef.GlobalId || pack.ById<HolderDef>(o.HolderId ?? "") is not null))
             CheckKept(pack, id, o.HolderId!, $"output {outputNo} writes", err);
         if (!ok)
-            err($"output property \"{p.Name}\" cannot be written to {(o.Target == OutputTarget.Unit ? "a unit" : "a holder")} (its scope is {p.Scope})");
+            err($"output property \"{p.Name}\" cannot be written to {(o.Target == OutputTarget.Unit ? "a unit" : onPiece ? "a piece" : "a holder")} (its scope is {p.Scope})");
     }
 }

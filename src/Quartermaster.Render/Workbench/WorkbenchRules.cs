@@ -1,5 +1,6 @@
 using Quartermaster.Render.Ocr;
 using Quartermaster.Rules;
+using Quartermaster.Vassal;
 
 namespace Quartermaster.Render.Workbench;
 
@@ -20,9 +21,20 @@ public static class WorkbenchRules
     public static string Title(RulesPack? pack, bool guest) =>
         pack != null ? $"Rules Workbench — {pack.Name}" + (guest ? " (read-only)" : "") : "Rules Workbench";
 
-    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds)
+    /// <summary>The module's palette entries as a Place output names them: the path (folders and entry name joined with "/").</summary>
+    public static IReadOnlyList<string> SlotPaths(ModuleModel model) =>
+        model.Slots.Select(s => string.Join('/', s.NavPath.Append(s.EntryName))).Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>Every key a Place output may name a palette entry by: its path or its gpid.</summary>
+    public static IReadOnlyList<string> SlotKeys(ModuleModel model) =>
+        SlotPaths(model).Concat(model.Slots.Select(s => s.Gpid).Where(g => !string.IsNullOrEmpty(g))).Distinct(StringComparer.Ordinal).ToList();
+
+    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds) => Issues(pack, mapIds, null);
+
+    /// <param name="slotKeys">The palette entries a Place output may name (<see cref="SlotKeys"/>); null = not checked.</param>
+    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds, IReadOnlyCollection<string>? slotKeys)
     {
-        var list = RulesValidator.Validate(pack, mapIds);
+        var list = RulesValidator.Validate(pack, mapIds, slotKeys);
         if (list.Count == 0) return [new IssueRow("", "", NoProblemsText, null)];
         return list.Select(i => new IssueRow(i.Severity.ToString(), i.EntityName, i.Message, i)).ToList();
     }

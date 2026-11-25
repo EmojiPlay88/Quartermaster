@@ -141,6 +141,18 @@ public class PieceFilterTests
     }
 
     [Fact]
+    public void FormulasFor_counts_a_same_hex_piece_binding_as_a_unit_link()
+    {
+        var pack = RunnerFx.Pack();
+        pack.Formulas.Add(new FormulaDef { Id = "sh", Name = "Same hex only", Text = "1", Bindings = new() { new VariableBinding { Variable = "T", Kind = BindingKind.Piece, Property = "fuel", SameHex = true } } });
+        pack.Formulas.Add(new FormulaDef { Id = "ap", Name = "Any piece only", Text = "1", Bindings = new() { new VariableBinding { Variable = "T", Kind = BindingKind.Piece, Property = "fuel" } } });
+        var s = RunnerFx.State();
+        var names = PieceFilter.FormulasFor(pack, s.Pieces["u1"], s, RunnerFx.Model).Select(f => f.Name).ToList();
+        Assert.Contains("Same hex only", names);
+        Assert.DoesNotContain("Any piece only", names);
+    }
+
+    [Fact]
     public void Filter_reads_turn_and_stage()
     {
         var s = RunnerFx.State();

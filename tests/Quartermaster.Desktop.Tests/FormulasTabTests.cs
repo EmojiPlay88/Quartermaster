@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -253,6 +254,111 @@ public sealed class FormulasTabTests : IDisposable
         Assert.Equal(new[] { "p-dsl" }, F(s, "f-att").Outputs[0].PropertyChoice);
     }
 
+    static void Toggle(EditGrid g, int row, int col)
+    {
+        g.SelectCell(row, col);
+        g.Focus();
+        var w = (Window)TopLevel.GetTopLevel(g)!;
+        w.KeyPress(Avalonia.Input.Key.Space, Avalonia.Input.RawInputModifiers.None, (Avalonia.Input.PhysicalKey)0, null);
+        Pump();
+    }
+
+    static FormulaDef PieceFormula() => Attack() with
+    {
+        Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Piece, Property = "p-str" }, new VariableBinding { Variable = "a", Kind = BindingKind.Input } },
+        Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "p-str", Op = OutputOp.Subtract } },
+    };
+
+    [AvaloniaFact]
+    public void FormulasTab_output_action_columns_commit()
+    {
+        var s = Session(true, PieceFormula());
+        var tab = Tab(s);
+        Assert.Equal("Action", tab.Outputs.HeaderText(7));
+        Assert.Equal("Piece", tab.Outputs.HeaderText(8));
+        Assert.Equal("Palette entry", tab.Outputs.HeaderText(9));
+        Assert.Equal("Layer", tab.Outputs.HeaderText(10));
+        Assert.Equal("To map", tab.Outputs.HeaderText(11));
+        Assert.Equal("Write", tab.Outputs.Cell(0, 7));
+
+        Pick(tab.Outputs, 0, 0, "Piece");
+        Pick(tab.Outputs, 0, 8, "R");
+        Assert.Equal("R", F(s, "f-att").Outputs[0].PieceVariable);
+        Assert.Equal(OutputTarget.Piece, F(s, "f-att").Outputs[0].Target);
+
+        Pick(tab.Outputs, 0, 7, "Place");
+        Type(tab.Outputs, 0, 9, "Wreck");
+        Assert.Equal(OutputAction.Place, F(s, "f-att").Outputs[0].Action);
+        Assert.Equal("Wreck", F(s, "f-att").Outputs[0].Slot);
+        Type(tab.Outputs, 0, 9, "  ");
+        Assert.Null(F(s, "f-att").Outputs[0].Slot);   // blank is null
+
+        Pick(tab.Outputs, 0, 7, "SetLayer");
+        Type(tab.Outputs, 0, 10, " Levels ");
+        Assert.Equal("Levels", F(s, "f-att").Outputs[0].Layer);
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_old_output_columns_keep_places()
+    {
+        var s = Session(true, OneOutput());
+        var tab = Tab(s);
+        string[] old = ["Target", "Holder", "Property", "Op", "Value", "Choose from", "Pick by"];
+        for (var i = 0; i < old.Length; i++) Assert.Equal(old[i], tab.Outputs.HeaderText(i));
+        Assert.Equal("Unit", tab.Outputs.Cell(0, 0));
+        Assert.Equal("Strength", tab.Outputs.Cell(0, 2));
+        Assert.Equal("Subtract", tab.Outputs.Cell(0, 3));
+        Assert.Equal("Dice count", tab.Bindings.HeaderText(6));
+        Assert.Equal("Same hex", tab.Bindings.HeaderText(7));
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_action_change_clears_unused_fields()
+    {
+        var f = PieceFormula() with
+        {
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "R", Action = OutputAction.Remove, ToMapId = "m-two" } },
+        };
+        var s = Session(true, f);
+        var tab = Tab(s);
+        Pick(tab.Outputs, 0, 7, "SetMask");
+        var o = F(s, "f-att").Outputs[0];
+        Assert.Equal(OutputAction.SetMask, o.Action);
+        Assert.Null(o.ToMapId);
+        Pick(tab.Outputs, 0, 0, "Unit");
+        Assert.Null(F(s, "f-att").Outputs[0].PieceVariable);
+        Pick(tab.Outputs, 0, 7, "Write");
+        Assert.Equal(OutputAction.Write, F(s, "f-att").Outputs[0].Action);
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_same_hex_column()
+    {
+        var s = Session(true, PieceFormula());
+        var tab = Tab(s);
+        Assert.Equal("False", tab.Bindings.Cell(0, 7));
+        Assert.False(tab.Bindings.IsCellReadOnly(0, 7));
+        Assert.True(tab.Bindings.IsCellReadOnly(1, 7));   // an Input binding has no same hex
+        Toggle(tab.Bindings, 0, 7);
+        Assert.True(B(s, "f-att", "R").SameHex);
+        Toggle(tab.Bindings, 0, 7);
+        Assert.False(B(s, "f-att", "R").SameHex);
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_to_map_delete_is_null()
+    {
+        var s = Session(true, PieceFormula() with { Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "R", Action = OutputAction.Remove } } });
+        var tab = Tab(s);
+        Assert.Equal("(delete)", tab.Outputs.Cell(0, 11));
+        var map = s.Model.Maps[0];
+        Pick(tab.Outputs, 0, 11, map.Name);
+        Assert.Equal(map.Id, F(s, "f-att").Outputs[0].ToMapId);
+        Assert.Equal(map.Name, tab.Outputs.Cell(0, 11));
+        Pick(tab.Outputs, 0, 11, "(delete)");
+        Assert.Null(F(s, "f-att").Outputs[0].ToMapId);
+    }
+
     [AvaloniaFact]
     public void FormulasTab_dice_count_is_closed_for_a_non_roll()
     {
@@ -473,6 +579,17 @@ public sealed class FormulasTabTests : IDisposable
         Click(tab.RemoveUnusedButton);
         Assert.Equal(["a"], F(s, "f-att").Bindings.Select(b => b.Variable).ToList());
         Assert.Equal(1, tab.Bindings.RowCount);
+    }
+
+    [AvaloniaFact]
+    public void Piece_target_binding_is_not_unused()
+    {
+        var f = PieceFormula() with { Text = "a", Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "R", Action = OutputAction.Remove } } };
+        var s = Session(true, f);
+        var tab = Tab(s);
+        Assert.Equal(["R", "a"], Enumerable.Range(0, tab.Bindings.RowCount).Select(r => tab.Bindings.Cell(r, 0)).ToList());   // used: no "(unused)"
+        Click(tab.RemoveUnusedButton);
+        Assert.Contains(F(s, "f-att").Bindings, b => b.Variable == "R");
     }
 
     [AvaloniaFact]

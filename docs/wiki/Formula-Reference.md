@@ -242,6 +242,25 @@ marker("Kind") == "Unit" and marker("Side") == "Northern League"
 
 True for the Northern League's fighting units, not its depot or the turn marker.
 
+### layer("name")
+
+The level of a named layer on the counter, as a number: 1 for the first level, 2 for the second and so on, and 0 when the layer is switched off. The name goes in quotes, and capitals and spaces at the ends do not matter. It reads the counter the formula runs on, or the counter a filter is testing (in an Applies to, an alert, a warning, a Ledger filter or a property's starting value). It cannot be used in a phase condition, which reads no counter.
+
+Riverland's forts carry a layer named `Levels` (Fort level 1 to 3, switched off when the fort is not built):
+
+```formula
+layer("Levels") >= 2
+```
+
+True for a fort at level 2 or 3. The level is what the map shows, so reading it is not hidden information. The exceptions:
+
+- A counter without a layer of that name has no value (the same as a marker it lacks): in a filter it simply does not match, and a formula stops with `{name} has no layer "{layer}"`.
+- A layer that follows a property (its level comes from a property's value) cannot be read this way: read the property instead (`Layer "{layer}" follows a property; read the property instead`).
+- In a player's view, another side's masked counter shows no layer: `layer() cannot be read in this view`, and the host works it out.
+- The name must be quoted text: `layer() needs a layer name in quotes`.
+
+To change a layer from a formula, give the formula a **Set layer** output; see [Outputs](#outputs).
+
 ### turn()
 
 The turn number, as a number. Takes 0 arguments. Before the game starts it is 1.
@@ -491,7 +510,8 @@ Every name used in the formula needs a binding, and every binding should be used
 
 **Reading another counter (Piece bindings).** A formula reads the counter it runs on; a **Piece** binding reads a property of a second counter instead, chosen by the player each time the formula runs. Its Target is the property (one that pieces hold: scope Pieces or Both; a stored or computed property) and its Details are the **which pieces** filter, a unit filter such as `startsWith(name(), "Blue")` (blank = every piece).
 
-- **Picking.** In the Formula dialog the binding is a list of every counter the player can see that matches the filter. Each entry reads `{name} ({location})`, or just `{name}` for a counter that is not on a grid. Two entries with the same text get ` #2`, ` #3` and so on, in the order the counters were placed (the first keeps the plain text); the list is sorted by that text. A masked enemy counter shows as `Unknown piece` (with its location, if it has one), never its real name. The value is read when the formula runs, like a Unit binding: the property's default when it has no value yet, and no value for a computed property that does not apply to that counter.
+- **Same hex.** Tick **Same hex** on the binding to list only the other counters in the hex of the counter the formula runs on (never that counter itself). With nobody else there the message is `No piece in this hex`; run from nowhere (no counter) it is `Needs a unit`. A formula whose only link to a counter is a Same hex binding is offered on counters in the counter menu, like one with a Unit binding. It only works for counters on a grid.
+- **Picking.** In the Formula dialog the binding is a list of every counter the player can see that matches the filter. Each entry reads `{name} ({location})`, or just `{name}` for a counter that is not on a grid. Two entries with the same text get ` #2`, ` #3` and so on, in the order the counters were placed (the first keeps the plain text); the list is sorted by that text, but the counters in the same hex as the counter the formula runs on come first, so a transfer to a neighbour on the same hex is the first thing offered. A masked enemy counter shows as `Unknown piece` (with its location, if it has one), never its real name. The value is read when the formula runs, like a Unit binding: the property's default when it has no value yet, and no value for a computed property that does not apply to that counter.
 - **The pick follows the counter.** Once picked, the entry stays with that counter while the dialog is open: if the list changes (say an earlier counter with the same text is removed, so `Rifle (0302) #2` becomes `Rifle (0302)`), the box shows the counter's new text. If the picked counter leaves the list, the box is cleared and the formula waits for a new pick; it never moves to another counter. On a shared (hot-seat) screen, a new player at the screen starts with no picks.
 - **Always asked.** A Piece binding is never filled in automatically, so Fully automatic stops and opens the formula for each unit so you can pick (the formula dialog for one unit, the batch grid for several; in the grid the Piece column is a list too, the same for every row) instead of asking once for the whole run. The working line names the counter, such as `Speed of Blue Lancers`.
 - **Errors.** Text that is not on the list, or a pick that is no longer on it when the formula runs (for example a counter moved, deleted or hidden before the host ran a player's formula), is `Choose one of the listed pieces`, and nothing is changed. With no counter to pick, the message is `No piece matches "{filter}"` (with a blank filter, `No piece to choose`).
@@ -520,7 +540,7 @@ True for units that have Readiness 3 or more.
 
 ## Outputs
 
-A formula's **Outputs** say what its result changes. Two optional columns in the outputs grid change what each output does.
+A formula's **Outputs** say what its result changes. Optional columns in the outputs grid change what each output does: **Value**, **Choose from** and **Pick by** (below), and **Action**, **Piece**, **Palette entry**, **Layer** and **To map** ([Acting on other counters](#acting-on-other-counters)).
 
 **A value per output.** Normally every output gets the formula's result. Type an expression in **Value** and that output gets its own value instead, worked out in the same run (the same dice, inputs and bindings as the text). The formula's result is not a variable there. A blank **Value** means the formula's result. The working line shows each output's own value, such as `Fuel 140 - 12 = 128; Ammo 30 - 6 = 24`. If the value is not a number the run stops with `The value for Fuel is not a number`.
 
@@ -529,6 +549,30 @@ An invented example: a convoy loses supplies to one roll of `Loss` (a Roll of `1
 **A property picked at run time.** In **Choose from**, list properties separated by commas (for example `Fuel, Ammo, Rations`), with a name that holds a comma in "double quotes" and give **Pick by** an expression. A number picks the Nth property in the list (1 is the first); text picks the property with that name (capitals and spaces at the ends do not matter). Anything else stops the run with `Medicine is not one of the output's properties`. With a list but no **Pick by**, the Workbench reports `Formula "Raid": output 1 has a property list but no "Pick by"`. An empty list means the output's own **Property** is used. If you delete a property that a list names, the list keeps it (so a number pick still means the same position) and the Workbench reports `Formula "Raid": output 1 refers to a property that no longer exists` until you fix the list.
 
 For example, an Input `Slot` of `1..3` and Pick by `Slot` lets the player choose which of Fuel, Ammo or Rations the output changes, with one formula instead of three. Values and the picked property are all worked out before anything is written, so a run that fails changes nothing.
+
+### Acting on other counters
+
+**Target** says whose value an output writes: **Unit** (the counter the formula runs on), **Global**, **Holder**, **Piece** (the counter a Piece binding picked; name the binding in the **Piece** column) or **Placed** (the counter this formula's Place output just put on the map). **Action** says what the output does; blank means Write.
+
+| Action | Does | Targets | Value |
+|---|---|---|---|
+| Write (default) | Writes a property, as every output always did | Unit, Global, Holder, Piece, Placed (Placed: Op Set only) | the number written |
+| Place | Puts the counter named in **Palette entry** (a path in the module's palette, such as `Markers/Wreck`, or its gpid) in a hex, on top of that hex's stack | Unit (this counter's hex), Piece (the picked counter's hex) | not used |
+| Remove | Deletes the counter, or with **To map** moves it to the middle of that map's first board and keeps its ledger values | Unit, Piece | not used |
+| Set layer | Sets the layer named in **Layer** to the level (1 = first level, 0 = off) | Unit, Piece, Placed | the level, a whole number |
+| Set mask | Masks (1) or unmasks (0) the counter | Unit, Piece, Placed | 1 or 0 |
+
+How a run with these outputs behaves:
+
+- **One step.** The whole run, placements, writes, layer and mask changes and removals, is one undo step.
+- **Order.** Whatever order the outputs are listed in, a run does: rolls, the placement, writes to the counter itself, a global or a holder, writes to a picked counter, writes to the placed counter, layer and mask changes, and last the removals. So a value is always written and logged before its counter goes.
+- **Only one placement.** A formula may have one Place output. Outputs that write the placed counter come from the same formula and must be **Set**: a new counter starts from the property's default.
+- **The placed counter's own values.** It is seeded as any new counter is (its sheet values and starting values), and then the Placed outputs run, so a Set overrides the seed.
+- **The picked counter is asked for.** A Piece output uses the counter the player picked in the Piece binding, so it is always asked (Fully automatic stops for it). A Piece output may act on a counter of any side, including one you do not hold; an online guest's formula that has a Piece output is worked out by the host.
+- **The log.** A write to a picked counter is logged on that counter's side: its owner sees `{counter}: {formula}: Strength 7 - 2 = 5`, the side that ran the formula sees `{Side} ledger changed`, and a counter of no side is public. The effects read `{formula}: placed {name}`, `{formula}: removed {name}`, `{formula}: moved {name} to {map}`, `{formula}: {layer} of {name} = {level}` and `{formula}: {name} masked` or `{formula}: {name} unmasked`. A line is dropped for a player who cannot see that counter.
+- **The working** on the formula's own lines leaves out the parts about a picked counter (the owner sees them on their line), and names an effect's counter as the player sees it: `Unknown piece` for a masked counter.
+
+Examples are in [Acting on other pieces](Making-a-Rules-Pack#acting-on-other-pieces).
 
 ## Computed properties
 
@@ -636,12 +680,26 @@ These come from the bindings and outputs rather than the formula text.
 |---|---|---|
 | Unknown property: x | A Ledger tab filter names a property that is not in the rules pack. | Fix the name when you edit the tabs. |
 | Waiting for input | An Input variable has no value yet. | Type one in the Formula dialog, or give the binding an automatic value. |
-| Needs a unit | A Unit or Location variable has no counter to read. | Run the formula on a counter. |
+| Needs a unit | A Unit or Location variable, or a **Same hex** Piece binding, has no counter to read. | Run the formula on a counter. |
 | Only known when a unit is moved | A Moved variable was used where nothing has moved. | Use the formula as an on-move step of a phase, or type a distance. |
 | Choose one of the listed pieces | A Piece binding's pick is not on the list (the counter moved, was deleted or was hidden after the list was shown). | Pick again from the list. |
 | No piece matches "Speed > 3" | A Piece binding's which-pieces filter matches no counter the player can see (with a blank filter, `No piece to choose`). | Widen the filter, or run the formula when a counter matches. |
 | Upgraded Speed of Raft A reads data this player cannot see | A table read on a player's own view would use the piece's non-Public override (see "A piece's own value for a table rating"), and the piece is of a side that player does not hold. A Table binding is left without a value; an inline `lookup` stops the run. | Nothing to fix: the host (or a player holding every side) works it out. |
-| Hidden from this player | A Piece binding reads a non-Public property of another side's counter on a player's own view. | Nothing to fix: the host (or a player holding every side) works it out. |
+| Hidden from this player | A Piece binding reads a non-Public property of another side's counter on a player's own view, or a Piece output's target is another side's masked counter there. | Nothing to fix: the host (or a player holding every side) works it out. |
+| No piece in this hex | A **Same hex** Piece binding found no other counter in the hex of the counter the formula runs on. | Run the formula when another counter is there, or untick **Same hex**. |
+| An output refers to a deleted Piece variable | A Piece output names a variable that is no longer a Piece binding. | Pick the variable again in the output's **Piece** column. |
+| An output writes the placed piece, but nothing was placed | A Placed output ran but the formula's Place output did not place a counter. | Give the formula one Place output. |
+| Palette entry "Markers/Wreck" was not found in the module | A Place output names a palette entry the module does not have. | Pick a name from the **Palette entry** list. |
+| Fort has no layer "Levels" | A Set layer output, or `layer()`, names a layer the counter lacks. | Check the layer's name in the module (the Set layer output's **Layer** column). |
+| Layer "Levels" has no level 4 | A Set layer value is outside 0 to the layer's number of levels (0 only when the layer can be switched off). | Fix the output's **Value**. |
+| Layer "Levels" follows a property, so it cannot be set | A Set layer output names a layer whose level comes from a property. | Write the property instead. |
+| Layer "Levels" follows a property; read the property instead | `layer()` names such a layer. | Read the property. |
+| Minefield has no mask | A Set mask output ran on a counter without a Mask trait. | Use a counter that has one. |
+| The mask value must be 0 or 1 | A Set mask output's value is something else. | Use 1 to mask, 0 to unmask. |
+| Map "Dead pile" was not found in the module / Map "Dead pile" has no board | A Remove output's **To map** names a map that is missing or has no board. | Pick a map from the **To map** list that has a board. |
+| layer() needs a layer name in quotes | `layer` was given something other than quoted text. | Write `layer("Levels")`. |
+| layer() is not available here | `layer()` was used where no counter is being read. | Use it in a formula run on a counter, or in a filter. |
+| layer() cannot be read in this view | A player's view shows another side's masked counter, which has no readable layer. | Nothing to fix: the host works it out. |
 | Variable x depends on itself | Variables refer to each other in a circle. | Break the circle. |
 | variable "x" has no binding | The Workbench: the formula uses a name that has no row under Bindings. | Add the binding. |
 | variable "x" is bound but not used in the formula | A warning: a binding is not used. | Remove the binding or use it. |

@@ -56,6 +56,18 @@ public class WorkbenchRulesTests
     }
 
     [Fact]
+    public void Issues_two_argument_signature_kept()
+    {
+        // additive API: the pre-B3 two-parameter method still exists (binary compatible), the slot keys come in an overload
+        var two = typeof(WorkbenchRules).GetMethod(nameof(WorkbenchRules.Issues), new[] { typeof(RulesPack), typeof(IReadOnlyList<string>) });
+        Assert.NotNull(two);
+        Assert.Equal(2, two!.GetParameters().Length);
+        var three = typeof(WorkbenchRules).GetMethod(nameof(WorkbenchRules.Issues), new[] { typeof(RulesPack), typeof(IReadOnlyList<string>), typeof(IReadOnlyCollection<string>) });
+        Assert.NotNull(three);
+        Assert.DoesNotContain(three!.GetParameters(), p => p.IsOptional);
+    }
+
+    [Fact]
     public void Issue_target_order_and_map_owner_goes_to_visibility()
     {
         var pack = Pack(new TableDef { Id = "t" }, new FormulaDef { Id = "f" }, new PhaseDef { Id = "ph" }, new AlertDef { Id = "al" },

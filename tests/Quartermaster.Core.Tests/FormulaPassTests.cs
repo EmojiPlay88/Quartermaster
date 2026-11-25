@@ -153,4 +153,112 @@ public class FormulaPassTests
         Assert.Equal(5, FormulaRunner.Parses);
         Assert.Equal(6, Strength(s, "u1"));
     }
+
+    // ---- B3: piece commands inside a pass ----
+
+    private static RulesPack FlagPack() => new()
+    {
+        Format = 4,
+        Sides = new()
+        {
+            new SideDef { Id = "red", Name = "Red", UnitFilter = "layer(\"Flag\") == 1" },
+            new SideDef { Id = "blue", Name = "Blue", UnitFilter = "layer(\"Flag\") == 2" },
+        },
+        Properties = new() { new PropertyDef { Id = "strength", Name = "Strength", Scope = PropertyScope.Pieces } },
+        Formulas = new()
+        {
+            new FormulaDef
+            {
+                Id = "f-turn", Name = "Turn coat", Text = "1",
+                Bindings = new()
+                {
+                    new VariableBinding { Variable = "T", Kind = BindingKind.Piece, Property = "strength" },
+                    new VariableBinding { Variable = "V", Kind = BindingKind.Piece, Property = "strength" },
+                },
+                Outputs = new()
+                {
+                    new FormulaOutput { Action = OutputAction.SetLayer, Target = OutputTarget.Piece, PieceVariable = "T", Layer = "Flag", Expr = "2" },
+                    new FormulaOutput { Action = OutputAction.Remove, Target = OutputTarget.Piece, PieceVariable = "V" },
+                },
+            },
+            new FormulaDef
+            {
+                Id = "f-check", Name = "Check", Text = "if(side() == \"Blue\", 10, 0) + hexcount()",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "strength", Op = OutputOp.Set } },
+            },
+            new FormulaDef
+            {
+                Id = "f-plus", Name = "Plus", Text = "1",
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "strength", Op = OutputOp.Add } },
+            },
+        },
+    };
+
+    private static GameState Flags()
+    {
+        var s = new GameState { GameId = "g" };
+        void Add(string id, double x, bool flag)
+        {
+            var traits = flag ? new[] { EffectFx.Flag, "piece;;;unit.svg;Boat " + id } : new[] { "piece;;;unit.svg;Boat " + id };
+            var states = flag ? new[] { "1", "" } : new[] { "" };
+            s.Apply(new AddPiece(id, PieceTypeParser.EncodeState(traits), PieceTypeParser.EncodeState(states), "Main Map", new PointD(x, 40), null, id + " placed"));
+        }
+        Add("u1", 60, true);
+        Add("u2", 160, true);
+        Add("x1", 160, false);
+        return s;
+    }
+
+    /// <summary>One unit of a Fully automatic entry: run, execute the commands, then tell the runner what was executed.</summary>
+    private static FormulaTrace Unit(FormulaRunner runner, GameState s, string formula, string piece, Dictionary<string, string>? typed = null)
+    {
+        var none = new Dictionary<string, string>();
+        var t = runner.Run(s, new RunRequest(formula, piece, typed ?? none, none, new Dictionary<string, IReadOnlyList<int>>(), null, true));
+        Assert.Null(t.Error);
+        var cmds = runner.Commands(t, null);
+        foreach (var c in cmds) s.Apply(c);
+        runner.AfterApply(cmds);
+        return t;
+    }
+
+    private static string Label(GameState s, string id) => $"Boat {id} ({PieceInfo.Location(s.Pieces[id], EffectFx.Model)})";
+
+    [Fact]
+    public void Pass_refreshes_after_piece_commands()
+    {
+        var pack = FlagPack();
+        var runner = new FormulaRunner(pack, EffectFx.Model, (n, _) => Enumerable.Repeat(1, n).ToList());
+        var s = Flags();
+        FormulaRunner.PassRefreshes = 0;
+        using (runner.BeginPass(s))
+        {
+            Assert.Equal(1, Unit(runner, s, "f-check", "u1").Result!.Value.Number);   // Red, alone in its hex; the pass indexes the hexes
+            // unit 1's run turns u2 Blue and removes x1 from u2's hex
+            Unit(runner, s, "f-turn", "u1", new() { ["T"] = Label(s, "u2"), ["V"] = Label(s, "x1") });
+            Assert.Equal(1, FormulaRunner.PassRefreshes);
+            Assert.False(s.Pieces.ContainsKey("x1"));
+            // unit 2 sees both: side() is Blue and its hex holds only itself
+            Assert.Equal(11, Unit(runner, s, "f-check", "u2").Result!.Value.Number);
+        }
+        Assert.Equal(11, Ledger.Get(s, LedgerKey.Piece("u2"), "strength"));
+    }
+
+    [Fact]
+    public void Pass_not_refreshed_by_ledger_only_commands()
+    {
+        var pack = FlagPack();
+        var runner = new FormulaRunner(pack, EffectFx.Model, (n, _) => Enumerable.Repeat(1, n).ToList());
+        var s = Flags();
+        FormulaRunner.PassRefreshes = 0;
+        Ownership.SideMapBuilds = 0;
+        using (runner.BeginPass(s))
+        {
+            foreach (var id in new[] { "u1", "u2", "x1" }) Unit(runner, s, "f-plus", id);
+            foreach (var id in new[] { "u1", "u2" }) Unit(runner, s, "f-check", id);
+        }
+        Assert.Equal(0, FormulaRunner.PassRefreshes);
+        Assert.Equal(1, Ownership.SideMapBuilds);
+        runner.AfterApply(new GameCommand[] { new RemovePiece("x1") });   // no pass open: nothing to refresh
+        Assert.Equal(0, FormulaRunner.PassRefreshes);
+    }
 }

@@ -55,6 +55,14 @@ public static class FormulaMasking
     /// </summary>
     public const string TableCallInput = "lookup()";
 
+    /// <summary>
+    /// The entry <see cref="HiddenVariables"/> adds when the formula acts on a picked piece (a <c>Target = Piece</c> output) that may hold data
+    /// the viewer cannot see: an output writes a property that is not Public, or the viewer's view may lack pieces or values
+    /// (<see cref="PieceAccess.PiecesMayHide"/>) and the formula has any Piece output (a write or an effect). Like <see cref="HolderCallInput"/>,
+    /// it hides no box but masks the formula's working and errors (the target's values before and after, its name and layer levels).
+    /// </summary>
+    public const string PieceOutputInput = "piece output";
+
     private static readonly IReadOnlySet<string> NoSides = new HashSet<string>();
 
     /// <summary>
@@ -150,8 +158,14 @@ public static class FormulaMasking
         hidden.UnionWith(FormulaVariables.ComputedHiddenVariables(pack, f));
         // A picked piece's non-Public property: the pick is the viewer's own, its value is the host's (the cheapest safe rule).
         // A masked pick (any property) once the viewer's view may lack pieces or values: the same static rule as the aggregates.
-        hidden.UnionWith(FormulaVariables.PieceBindingsHidden(pack, f, PieceAccess.PiecesMayHide(pack, model, sides)));
+        var mayHide = PieceAccess.PiecesMayHide(pack, model, sides);
+        hidden.UnionWith(FormulaVariables.PieceBindingsHidden(pack, f, mayHide));
         if (FormulaVariables.ComputedHolderCallHidden(pack, f)) hidden.Add(HolderCallInput);
+        // An output acting on a picked piece (B3): its working and errors show the target's values, name and layer levels. Hidden when an
+        // output writes a non-Public property, or (the viewer's view may lack pieces or values) the formula has any Piece output, write or effect.
+        var pieceOutputs = (f.Outputs ?? new List<FormulaOutput>()).Where(o => o is { Target: OutputTarget.Piece }).ToList();
+        if (pieceOutputs.Count > 0 && (mayHide || pieceOutputs.Any(o => o.Action == OutputAction.Write && PropPrivate(o.Property))))
+            hidden.Add(PieceOutputInput);
         if (hidden.Count > 0)
             foreach (var b in f.Bindings ?? new List<VariableBinding>())
                 if (b is { Kind: BindingKind.Table, Variable: not null }) hidden.Add(b.Variable);
@@ -165,7 +179,8 @@ public static class FormulaMasking
     /// The bindings whose "Only when" condition depends on data the viewer may not see, plus <see cref="PreconditionGuard"/> when the
     /// precondition does: the condition reads a <paramref name="hidden"/> variable, or one whose own guard, auto value or table key does
     /// (transitively), or (when <see cref="HolderCallInput"/> is hidden) any holder(H, P) call along the way, or (when
-    /// <see cref="AggregateCallInput"/> is hidden) any piece aggregate along the way, or (when <see cref="TableCallInput"/> is hidden) any lookup() call. A viewer without the data cannot decide such a guard,
+    /// <see cref="AggregateCallInput"/> is hidden) any piece aggregate along the way, or (when <see cref="TableCallInput"/> is hidden) any lookup() call,
+    /// or (when <see cref="PieceOutputInput"/> is hidden) any Piece variable a Piece output acts on. A viewer without the data cannot decide such a guard,
     /// so an online guest's dialog leaves it to the host. Conservative: any holder() call, aggregate or lookup() counts once one is hidden.
     /// Empty when nothing is hidden.
     /// </summary>
@@ -176,6 +191,12 @@ public static class FormulaMasking
         var holderHidden = hidden.Contains(HolderCallInput);
         var aggregateHidden = hidden.Contains(AggregateCallInput);
         var tableHidden = hidden.Contains(TableCallInput);
+        // A Piece output whose data may be hidden: the variables naming its target are read on the host (a guest's view may lack the target or
+        // its values), so a guard reaching one is the host's to decide, as a guard reaching a holder() call is when HolderCallInput is hidden.
+        var targetVars = hidden.Contains(PieceOutputInput)
+            ? new HashSet<string>((f.Outputs ?? new List<FormulaOutput>()).Where(o => o is { Target: OutputTarget.Piece, PieceVariable: not null })
+                .Select(o => o.PieceVariable!), StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
         bool HasHiddenCall(string? src)
         {
             if (string.IsNullOrWhiteSpace(src) || !(holderHidden || aggregateHidden || tableHidden)) return false;
@@ -196,7 +217,7 @@ public static class FormulaMasking
             if (HasHiddenCall(cond)) return true;
             foreach (var v in FormulaVariables.Reach(f, vars))
             {
-                if (hidden.Contains(v)) return true;
+                if (hidden.Contains(v) || targetVars.Contains(v)) return true;
                 if ((f.Bindings ?? new List<VariableBinding>()).FirstOrDefault(b => b?.Variable == v) is { } b && FormulaVariables.Sources(b).Any(HasHiddenCall))
                     return true;
             }

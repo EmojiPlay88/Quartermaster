@@ -383,7 +383,8 @@ public sealed class FormulaWindow : Window
             var fname = _s.Rules?.ById<FormulaDef>(_formulaId)?.Name ?? "Formula";
             var unit = _pieceId != null && game.State.Pieces.TryGetValue(_pieceId, out var up) ? PieceInfo.Name(up) : null;
             using var scope = game.BeginAction(string.IsNullOrWhiteSpace(unit) ? fname : $"{fname} on {unit}");
-            foreach (var c in runner.Commands(v.Trace, null, sideId: _s.ActorSide())) game.Execute(CommandLog.Stamp(c));
+            // The whole run in this one action; a placed piece is seeded right after it is added (before the run's writes to it).
+            FormulaApply.Execute(_s, runner.Commands(v.Trace, null, sideId: _s.ActorSide()), c => game.Execute(CommandLog.Stamp(c)));
         }
         Close();
     }

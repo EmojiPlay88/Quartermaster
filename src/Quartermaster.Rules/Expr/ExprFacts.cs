@@ -124,9 +124,9 @@ public static class ExprFacts
         _ => false,
     };
 
-    /// <summary>A formula that needs a unit (a Unit binding or a Unit output), as <c>PieceFilter.FormulasFor</c> tests it.</summary>
+    /// <summary>A formula that needs a unit (a Unit binding, a same-hex Piece binding or a Unit output), as <c>PieceFilter.FormulasFor</c> tests it.</summary>
     private static bool NeedsUnit(FormulaDef? f) =>
-        f != null && ((f.Bindings ?? new()).Any(b => b?.Kind == BindingKind.Unit) || (f.Outputs ?? new()).Any(o => o?.Target == OutputTarget.Unit));
+        f != null && ((f.Bindings ?? new()).Any(b => b?.Kind == BindingKind.Unit || (b?.Kind == BindingKind.Piece && b.SameHex)) || (f.Outputs ?? new()).Any(o => o?.Target == OutputTarget.Unit));
 
     private static bool Check(AstExpr e, RulesPack pack)
     {
@@ -138,7 +138,7 @@ public static class ExprFacts
             case Unary u: return Check(u.Operand, pack);
             case Binary b: return Check(b.Left, pack) && Check(b.Right, pack);
             case Call c:
-                if (c.Function is "name" or "marker" or "has" or "side" or "map") return false;
+                if (c.Function is "name" or "marker" or "layer" or "has" or "side" or "map") return false;
                 if (NeedsPiece(c.Function)) return false;
                 if (IsAggregate(c.Function)) return true;   // the property and filter are read per piece, whatever they name
                 if (c.Function == "runs" && c.Args.Count > 0 && c.Args[0] is TextLit id && NeedsUnit(pack.ById<FormulaDef>(id.Value)))

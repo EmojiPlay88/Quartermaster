@@ -62,7 +62,7 @@ static class LogBuilder
         Make(s, LogKind.Move, m.LogText ?? $"{movedCount} piece(s) moved", m.Who, m.At, firstId, m.MapId);
 
     public static LogEntry Delete(GameState s, RemovePiece r, string? mapId) =>
-        Make(s, LogKind.Delete, r.LogText ?? $"piece {r.PieceId} removed", r.Who, r.At, r.PieceId, mapId);
+        Make(s, LogKind.Delete, r.LogText ?? $"piece {r.PieceId} removed", r.Who, r.At, r.PieceId, mapId, r.SideId);
 
     public static LogEntry Dice(GameState s, RollDice d)
     {
