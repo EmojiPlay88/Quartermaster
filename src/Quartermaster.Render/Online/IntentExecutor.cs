@@ -348,13 +348,16 @@ internal static class FormulaIntentRunner
         if (!s.CanActFor(i.PieceId, sides)) return FormulaVerdict.Refused($"That unit {ModuleSession.OtherSideText}.");
         if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides) is { } why) return FormulaVerdict.Refused(why);
         double? moved = null;
+        string? group = null;
         if (i.RunId != null)
         {
             if (!c.IsPending(i.RunId, i.PieceId, f.Id)) return FormulaVerdict.Refused(NotWaitingText);
             // An ask run (spec #72) is the asked side's: a sender without it is refused.
             if (full.Pending.First(r => r.Id == i.RunId).AskSideId is { Length: > 0 } ask && sides != null && !sides.Contains(ask))
                 return FormulaVerdict.Refused("That calculation " + ModuleSession.OtherSideText + ".");
-            moved = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied).Moved;
+            var unit = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied);
+            moved = unit.Moved;
+            group = f.GroupRoll ? unit.Group : null;
         }
         else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))
             return FormulaVerdict.Refused("That formula does not apply to this unit.");
@@ -366,6 +369,8 @@ internal static class FormulaIntentRunner
         // A Piece binding's label is resolved among the candidates the sender sees (its sides' view of the full state).
         var model = new FormulaDialogModel(runner, f, i.PieceId)
             { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden, PickSides = sides };
+        // A grouped unit (B4) reuses the dice its roll group already drew on the run: read from the full state (a view never carries them).
+        if (i.RunId != null) model.SharedRolls = RollGroups.SharedFor(full, i.RunId, i.PieceId);
         foreach (var (variable, text) in i.Typed ?? new Dictionary<string, string>())
         {
             if (variable == null) continue;
@@ -394,7 +399,9 @@ internal static class FormulaIntentRunner
         }
         // Every die of a guest's run is pinned per (sender, formula, unit) and dice configuration before anything is answered: a preview,
         // a refused Apply and a retry all see the same roll, so nothing can be re-rolled by asking again.
-        var pinKey = new FormulaPins.Key(who ?? "", f.Id, i.PieceId);
+        // A grouped pending unit pins per group, so the sender's previews of two rows of one group show the same dice (until the group's
+        // dice are on the run: those win).
+        var pinKey = new FormulaPins.Key(who ?? "", f.Id, group != null ? $"group:{i.RunId}:{group}" : i.PieceId);
         FormulaPins.Scope? scope = null;
         if (pins != null)
         {
@@ -471,6 +478,10 @@ internal static class FormulaIntentRunner
     /// <summary>The dialog's status when it names only variables; an evaluation error is passed on only when no input is hidden.</summary>
     private static string SafeStatus(DialogView dv, HashSet<string> hidden)
     {
+        // A typed value that is not among this counter's choices (or no choice left): the neutral text, never the list (B4).
+        if (dv.Trace.Variables.FirstOrDefault(v => v?.Variable != null && !hidden.Contains(v.Variable)
+                && v.MissingReason is InputChoices.NotOneText or InputChoices.NoChoiceText) is { } choice)
+            return choice.MissingReason!;
         if (dv.Status.StartsWith("Doesn't match: ", StringComparison.Ordinal) || dv.Status.StartsWith("Waiting for: ", StringComparison.Ordinal))
             return dv.Status;
         if (hidden.Count == 0 && dv.Trace.Error is { Length: > 0 } err) return err;

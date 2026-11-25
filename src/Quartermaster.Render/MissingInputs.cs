@@ -54,7 +54,8 @@ public static class MissingInputs
                     if (v.Value != null || v.MissingReason != "Waiting for input" || !seen.Add(v.Variable)) continue;
                     var b = f.Bindings.FirstOrDefault(x => x.Variable == v.Variable);
                     if (b is not { Kind: BindingKind.Input }) continue;
-                    result.Add(new MissingInput(v.Variable, KeyChoices.For(s.Rules, f, v.Variable), b.Min, b.Max));
+                    // One answer for every unit: a choices table offers all its keys (each unit's run checks its own).
+                    result.Add(new MissingInput(v.Variable, InputChoices.For(game.State, s.Rules, s.Model, f, v.Variable, null), b.Min, b.Max));
                 }
             }
         }
@@ -86,7 +87,9 @@ public static class MissingInputs
             }
             try
             {
-                var trace = runner.Run(s.Game.State, new RunRequest(run.FormulaId, u.PieceId, typed, none, noRolls, u.Moved, true));
+                // The group's dice are read again for each unit: an earlier unit of its group may just have drawn them (B4).
+                var trace = runner.Run(s.Game.State, new RunRequest(run.FormulaId, u.PieceId, typed, none, noRolls, u.Moved, true)
+                    { SharedRolls = RollGroups.SharedFor(s.Game.State, run.Id, u.PieceId) });
                 if (trace.Error != null || trace.Result == null)
                 {
                     failed.Add($"{u.Label}: {trace.Error ?? "still missing input"}");

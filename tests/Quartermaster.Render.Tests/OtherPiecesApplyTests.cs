@@ -392,7 +392,7 @@ public class OtherPiecesApplyTests : OtherPiecesTestBase
         Assert.False(g.State.Pieces.ContainsKey("n2"));
         Assert.True(g.State.Pieces.ContainsKey("n1"));
         Assert.DoesNotContain(g.State.Log, l => l.Text.StartsWith("Scuttle: North Bridge", StringComparison.Ordinal));
-        Assert.Contains(g.State.Log, l => l.Text == "Scuttle: 2 units, 1 applied");
+        Assert.Contains(g.State.Log, l => l.Text == "Scuttle: 2 units, 1 applied, 1 removed");
     }
 
     [Fact]

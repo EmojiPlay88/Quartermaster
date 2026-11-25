@@ -120,6 +120,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         }
     }
 
+    /// <summary>
+    /// A roll group's dice already drawn (key → dice; B4), passed into every run as <see cref="RunRequest.SharedRolls"/>: a shared key's box
+    /// shows the dice, is not editable and cannot be re-rolled. Null = none (the run rolls its own).
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<int>>? SharedRolls { get; set; }
+
     /// <summary>Distance moved, for Moved variables (null = unknown).</summary>
     public double? Moved { get; set; }
 
@@ -196,8 +202,18 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     public void Reroll(string key)
     {
         if (HostCalculates) return;   // a guest's dice are the host's: no re-rolling
+        if (IsShared(key)) return;    // a group's dice are rolled once for the group
         _fixedRolls.Remove(key);
     }
+
+    /// <summary>True when the group's dice already hold this key (<see cref="SharedRolls"/>).</summary>
+    private bool IsShared(string key) => SharedRolls?.ContainsKey(key) == true;
+
+    /// <summary>Caption suffix of a Roll box whose dice are the group's (B4).</summary>
+    public const string GroupRollSuffix = " (group roll)";
+
+    /// <summary>Tooltip of a Roll box whose dice are the group's (B4).</summary>
+    public const string GroupRollTooltip = "Rolled once for the group";
 
     /// <summary>The pinned dice by roll key (what the next run reuses).</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<int>> PinnedRolls => _fixedRolls;
@@ -243,7 +259,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         var ov = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!PhysicalDice) return ov;
-        foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll))
+        foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && !IsShared(b.Variable)))
             ov[b.Variable] = _overrides.GetValueOrDefault(b.Variable) ?? "";
         return ov;
     }
@@ -269,7 +285,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         {
             // (The runner call only gives the view its variable list; its dice are not pinned and nothing is applied.)
             // Outside the formula's phases nothing is run: the trace carries no result, so nothing can be applied.
-            var idle = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), new Dictionary<string, string>(StringComparer.Ordinal), _fixedRolls, Moved, false, DiceSource, PickSides));
+            var idle = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), new Dictionary<string, string>(StringComparer.Ordinal), _fixedRolls, Moved, false, DiceSource, PickSides) { SharedRolls = SharedRolls });
             return idle with { Result = null, Working = "", Outputs = Array.Empty<OutputPreview>() };
         }
         var typed = new Dictionary<string, string>(_typed);
@@ -278,11 +294,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         foreach (var kv in _overrides)
         {
             if (IsHidden(kv.Key)) continue;   // a hidden input is never overridden: the engine reads it
+            if (IsShared(kv.Key) && Binding(kv.Key)?.Kind == BindingKind.Roll) continue;   // the group's dice stand
             if (!Checked || Binding(kv.Key)?.Kind == BindingKind.Roll) ov[kv.Key] = kv.Value; // checked: typed text only gates, never feeds the run
         }
-        foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice))
+        foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice && !IsShared(b.Variable)))
             ov.TryAdd(b.Variable, "");
-        var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource, PickSides));
+        var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource, PickSides) { SharedRolls = SharedRolls });
         MergePins(trace);
         if (!Checked) return trace;
         // Checked: this is the EXPECTED engine run, the only source of ledger commands. Until every box matches it carries no result.
@@ -297,7 +314,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         SyncPicks();
         if (PhaseReasonFor(state) != null) return;
         var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed),
-            PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource, PickSides));
+            PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource, PickSides) { SharedRolls = SharedRolls });
         MergePins(trace);
         foreach (var v in trace.Variables)
         {
@@ -471,8 +488,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (v.Skipped && !hostGuard) return new BoxView(v.Variable, NotUsedText, BoxBackground.Auto, "", false, null, null);
         if (IsUndecided(v) && !hostGuard && !IsCheckedBox(v.Variable)) return new BoxView(v.Variable, "", BoxBackground.Auto, "", false, null, null);
         if (IsCheckedBox(v.Variable)) return CheckedBox(v);
+        // A group's dice (B4): shown, never typed, overridden or re-rolled. A guest shows them once they are the host's.
+        if (binding?.Kind == BindingKind.Roll && t.SharedRollKeys.Contains(v.Variable) && t.RollsByKey.TryGetValue(v.Variable, out var groupDice)
+            && !(HostCalculates && !HostRolled(v.Variable, t)))
+            return new BoxView(v.Variable, DiceText(groupDice), BoxBackground.Auto, GroupRollSuffix, false, GroupRollTooltip, null);
         var typedBox = binding?.Kind is BindingKind.Input or BindingKind.Piece || IsPhysicalRoll(v.Variable);
-        var choices = binding?.Kind == BindingKind.Input ? KeyChoices.For(runner.Pack, formula, v.Variable)
+        var choices = binding?.Kind == BindingKind.Input ? InputChoices.For(_state ?? new GameState(), runner.Pack, runner.Model, formula, v.Variable, pieceId)
             : binding?.Kind == BindingKind.Piece ? picks.GetValueOrDefault(v.Variable) ?? Array.Empty<string>() : null;
         var reason = v.MissingReason == "Waiting for input" || (v.MissingReason != null && typedBox && Raw(v.Variable) == "")
             ? "Waiting for input" : v.MissingReason;

@@ -36,6 +36,13 @@ public static class FormulaWindowRules
         return (manual, d == Difficulty.SemiAuto, manual);
     }
 
+    /// <summary>
+    /// The group dice a dialog linked to a pending run uses (<see cref="FormulaDialogModel.SharedRolls"/>, B4): those the unit's roll group
+    /// already drew (<see cref="RollGroups.SharedFor"/>). Null for a menu run (a group of one), a unit without a group or before its group rolled.
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<int>>? SharedRolls(ModuleSession s, string? runId, string? pieceId) =>
+        runId == null || s?.Game?.State is not { } st ? null : RollGroups.SharedFor(st, runId, pieceId);
+
     /// <summary>True when a dialog is a player-started run, so the formula's phase limit applies (not a waiting run, not a Workbench preview).</summary>
     public static bool EnforcesPhaseLimit(string? runId, bool previewOnly) => runId == null && !previewOnly;
 

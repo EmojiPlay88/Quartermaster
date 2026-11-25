@@ -302,6 +302,7 @@ public sealed class FormulaWindow : Window
         _debounce.Stop();
         // A preview on the host: fills the boxes, applies nothing. Re-evaluated first, so each pick is sent with its current label.
         if (_s.IsGuest) { Recalc(); SendToHost(calculate: true, preview: true); return; }
+        _model.SharedRolls = FormulaWindowRules.SharedRolls(_s, _link?.RunId, _pieceId);   // a pending unit's group dice (B4)
         _model.Calculate(_s.Game?.State ?? new GameState());
         Recalc();
     }
@@ -313,6 +314,7 @@ public sealed class FormulaWindow : Window
         {
             SyncMode();
             FormulaMasking.Configure(_model, _s);   // the viewer may have changed (hot-seat) or a snapshot arrived (guest)
+            _model.SharedRolls = FormulaWindowRules.SharedRolls(_s, _link?.RunId, _pieceId);   // re-read: the group may just have rolled
             var v = _model.Evaluate(_s.Game?.State ?? new GameState());
             _last = v;
             _view.Apply(v);
