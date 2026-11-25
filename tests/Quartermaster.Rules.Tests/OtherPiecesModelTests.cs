@@ -29,16 +29,151 @@ public class OtherPiecesModelTests
         return r.ReadToEnd();
     }
 
+    // Written by the pre-B3 code (commit b11b79e) from an invented pack; a regression in how any existing field is written changes these bytes.
+    private const string OldPackJson = """
+        {
+          "format": 4,
+          "id": "riverland",
+          "name": "Riverland",
+          "moduleSha256": "abc123",
+          "properties": [
+            {
+              "id": "fuel",
+              "name": "Fuel",
+              "scope": "both",
+              "default": 0,
+              "sheetField": null,
+              "appliesTo": null,
+              "notes": null,
+              "outliner": "none",
+              "visibility": "private"
+            }
+          ],
+          "holders": [
+            {
+              "id": "depot",
+              "name": "Depot",
+              "notes": null,
+              "sideId": null
+            }
+          ],
+          "ruleRefs": [],
+          "sides": [],
+          "phases": [],
+          "blocks": [],
+          "alerts": [],
+          "mapOwners": []
+        }
+        """;
+
+    private const string OldFormulaJson = """
+        {
+          "id": "f1",
+          "name": "Barge transfer",
+          "text": "A \u002B R \u002B H",
+          "bindings": [
+            {
+              "variable": "A",
+              "kind": "input",
+              "property": null,
+              "holderId": null,
+              "tableId": null,
+              "rowExpr": null,
+              "colExpr": null,
+              "min": 0,
+              "max": 9,
+              "choices": null,
+              "diceCount": null,
+              "diceSides": null,
+              "caption": null,
+              "autoValue": null
+            },
+            {
+              "variable": "R",
+              "kind": "piece",
+              "property": "fuel",
+              "holderId": null,
+              "tableId": null,
+              "rowExpr": null,
+              "colExpr": null,
+              "min": null,
+              "max": null,
+              "choices": null,
+              "diceCount": null,
+              "diceSides": null,
+              "caption": null,
+              "autoValue": null,
+              "pieceFilter": "Fuel \u003E 0"
+            },
+            {
+              "variable": "H",
+              "kind": "holder",
+              "property": "fuel",
+              "holderId": "depot",
+              "tableId": null,
+              "rowExpr": null,
+              "colExpr": null,
+              "min": null,
+              "max": null,
+              "choices": null,
+              "diceCount": null,
+              "diceSides": null,
+              "caption": null,
+              "autoValue": null
+            }
+          ],
+          "outputs": [
+            {
+              "target": "unit",
+              "holderId": null,
+              "property": "fuel",
+              "op": "subtract"
+            },
+            {
+              "target": "global",
+              "holderId": null,
+              "property": "fuel",
+              "op": "add",
+              "expr": "A"
+            },
+            {
+              "target": "holder",
+              "holderId": "depot",
+              "property": "fuel",
+              "op": "set",
+              "expr": "H"
+            }
+          ],
+          "appliesTo": null,
+          "ruleRefId": null,
+          "notes": null,
+          "privateRolls": false
+        }
+        """;
+
+    private const string OldPackSha256 = "3c098df952ff15bc1ac6a01060c7b36aa89471e40ebee26f4749b75d95c26da4";
+
+    private static byte[] OldZip()
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+            foreach (var (name, text) in new[] { ("pack.json", OldPackJson), ("formulas/f1.json", OldFormulaJson) })
+            {
+                using var s = zip.CreateEntry(name).Open();
+                s.Write(Encoding.UTF8.GetBytes(text + "\n"));
+            }
+        return ms.ToArray();
+    }
+
     [Fact]
     public void B3_absent_fields_keep_bytes()
     {
-        var bytes = RulesPackIo.ToBytes(OldPack());
-        var formula = Entry(bytes, "formulas/f1.json");
-        foreach (var key in new[] { "\"action\"", "\"pieceVariable\"", "\"slot\"", "\"layer\"", "\"toMapId\"", "\"sameHex\"" })
-            Assert.DoesNotContain(key, formula);
-        var loaded = RulesPackIo.FromBytes(bytes);
-        Assert.Equal(bytes, RulesPackIo.ToBytes(loaded));
-        Assert.Equal(RulesPackIo.ComputeSha256(loaded), RulesPackIo.ComputeSha256(RulesPackIo.FromBytes(RulesPackIo.ToBytes(loaded))));
+        var loaded = RulesPackIo.FromBytes(OldZip());
+        var again = RulesPackIo.ToBytes(loaded);
+        Assert.Equal(OldPackJson + "\n", Entry(again, "pack.json"));
+        Assert.Equal(OldFormulaJson + "\n", Entry(again, "formulas/f1.json"));
+        Assert.Equal(OldPackSha256, RulesPackIo.ComputeSha256(loaded));
+        Assert.Equal(OldPackSha256, RulesPackIo.ComputeSha256(RulesPackIo.FromBytes(again)));
     }
 
     [Fact]
