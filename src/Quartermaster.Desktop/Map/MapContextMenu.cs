@@ -24,6 +24,10 @@ public sealed class MapMenuServices
     /// <summary>Opens the formula window for (formula id, piece id): the counter menu's Calculate entries. Null = they open nothing.</summary>
     public Action<string, string>? ShowFormula { get; init; }
 
+    /// <summary>Opens a menu batch grid for (formula id, the counters in order): the counter menu's Calculate on selection / on stack entries.
+    /// Null = they are left out.</summary>
+    public Action<string, IReadOnlyList<string>>? ShowFormulaBatch { get; init; }
+
     /// <summary>Show in Ledger for the counters (WinForms MainForm.ShowInLedger through MapWindow.Host). Null = the counter menu leaves the
     /// entry out (as a WinForms map window without a main window).</summary>
     public Action<IReadOnlyList<string>>? ShowInLedger { get; init; }
@@ -76,6 +80,7 @@ public static class MapContextMenu
                 : Task.FromResult(false),
             EditSheet = (action, pieceId) => view.RunMenuCommand(() => EditSheetAsync(view, action, pieceId)),
             ShowFormula = services?.ShowFormula,
+            ShowFormulaBatch = services?.ShowFormulaBatch,
             ShowInLedger = services?.ShowInLedger,
         };
     }

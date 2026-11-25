@@ -39,6 +39,33 @@ public static class FormulaWindows
         return win;
     }
 
+    /// <summary>
+    /// Opens a menu batch grid (B4): one row per counter in <paramref name="pieceIds"/> (a counter may repeat; only those the viewer may act on
+    /// and the formula applies to are taken), keyed <c>menu:{guid}</c>, so every call opens a new grid. <paramref name="firstRowTyped"/> is what
+    /// was typed into the first row's Input and Piece cells (variable to text). Null, with the refusal in the host's status bar, when no row
+    /// is left.
+    /// </summary>
+    public static BatchGridWindow? ShowMenuBatch(MainWindow host, ModuleSession s, IActionPort port, string formulaId,
+        IReadOnlyList<string> pieceIds, IReadOnlyDictionary<string, string>? firstRowTyped)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(s);
+        ArgumentNullException.ThrowIfNull(port);
+        var model = new MenuBatchModel(s, port, formulaId, pieceIds ?? Array.Empty<string>());
+        if (model.RowCount == 0)
+        {
+            host.SetStatus(FormulaWindowRules.Refusal(s, pieceIds?.FirstOrDefault()) ?? "Nothing to calculate.");
+            return null;
+        }
+        if (firstRowTyped != null)
+            foreach (var (variable, text) in firstRowTyped)
+                if (!string.IsNullOrWhiteSpace(text)) model.SetCell(0, variable, text);
+        var win = new BatchGridWindow(host, s, model, "menu:" + Guid.NewGuid().ToString("N"));
+        Batches.Add(win);
+        win.Show(host);
+        return win;
+    }
+
     /// <summary>Shows a non-modal formula window owned by <paramref name="host"/>, or activates the one already open for the same formula, unit
     /// and run. Null when the viewer may not act on the unit (the refusal goes to the host's status bar).</summary>
     public static FormulaWindow? Show(MainWindow host, ModuleSession s, string formulaId, string? pieceId, RunLink? link)

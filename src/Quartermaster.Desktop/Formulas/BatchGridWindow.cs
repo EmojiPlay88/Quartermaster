@@ -7,6 +7,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Quartermaster.Core;
 using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Shell;
@@ -35,13 +36,18 @@ public sealed class BatchGridWindow : Window
 
     readonly MainWindow _host;
     readonly ModuleSession _s;
-    readonly BatchModel _model;
+    readonly IBatchRows _model;
+    readonly BatchModel? _pending;      // a pending run's grid
+    readonly MenuBatchModel? _menu;     // a menu batch (B4): All rows line, Add row / Remove row
     readonly string _runId;
+    readonly string _key;
     readonly Action<int>? _openRow;
     readonly ListBox _list = new() { SelectionMode = SelectionMode.Single };
     readonly Button _calcAll = Btn("Calculate all");
     readonly Button _applyAll = Btn("Apply all");
     readonly Button _applyRow = Btn("Apply row");
+    readonly Button _addRow = Btn(FormulaWindowRules.AddRowText);
+    readonly Button _removeRow = Btn(FormulaWindowRules.RemoveRowText);
     readonly TextBlock _status = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
     readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
     readonly BreakdownTip _tip = new();
@@ -61,12 +67,22 @@ public sealed class BatchGridWindow : Window
     bool _updating;
 
     internal BatchGridWindow(MainWindow host, ModuleSession s, IActionPort port, string runId, Action<int>? openRow)
+        : this(host, s, new BatchModel(s, port, runId), runId, FormulaWindows.BatchKey(runId), openRow) { }
+
+    /// <summary>A menu batch grid (B4): the All rows line on top, then one row per run.</summary>
+    internal BatchGridWindow(MainWindow host, ModuleSession s, MenuBatchModel model, string key)
+        : this(host, s, model, "", key, null) { }
+
+    BatchGridWindow(MainWindow host, ModuleSession s, IBatchRows model, string runId, string key, Action<int>? openRow)
     {
         _host = host;
         _s = s;
         _runId = runId;
+        _key = key;
         _openRow = openRow;
-        _model = new BatchModel(s, port, runId);
+        _model = model;
+        _pending = model as BatchModel;
+        _menu = model as MenuBatchModel;
         _thumbs = new CounterThumbnails(s) { Shown = () => _rows.Select(r => r.Picture) };
         _preview = new CounterPreview(s);
         _pictureReady = id => Safe(() => { foreach (var r in _rows.Where(r => r.PieceId == id).ToList()) r.UpdatePicture(); });
@@ -106,7 +122,14 @@ public sealed class BatchGridWindow : Window
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(6, 4) };
         bar.Children.Add(_calcAll);
         bar.Children.Add(_applyAll);
-        bar.Children.Add(_applyRow);
+        if (_menu == null) bar.Children.Add(_applyRow);
+        else
+        {
+            bar.Children.Add(_addRow);
+            bar.Children.Add(_removeRow);
+            ToolTip.SetTip(_addRow, FormulaWindowRules.AddRowTip);
+            ToolTip.SetTip(_removeRow, FormulaWindowRules.RemoveRowTip);
+        }
         bar.Children.Add(_status);
 
         var body = new Grid { ColumnDefinitions = new ColumnDefinitions("*") };
@@ -136,6 +159,9 @@ public sealed class BatchGridWindow : Window
         _calcAll.Click += (_, _) => Safe(CalculateAll);
         _applyAll.Click += (_, _) => Safe(ApplyAll);
         _applyRow.Click += (_, _) => Safe(ApplyRow);
+        _addRow.Click += (_, _) => Safe(AddRow);
+        _removeRow.Click += (_, _) => Safe(RemoveRow);
+        if (_menu?.Status is { } first) _status.Text = first;   // e.g. the over-100 cut
         _debounce.Tick += (_, _) => { _debounce.Stop(); Safe(Refresh); };
         Deactivated += (_, _) => { _tip.Hide(); _preview.Hide(); };
         // WinForms: scrolling or a click hides the counter preview.
@@ -167,8 +193,17 @@ public sealed class BatchGridWindow : Window
     // ---- what the registry and tests read ----
 
     internal ModuleSession Session => _s;
-    internal string Key => FormulaWindows.BatchKey(_runId);
+    internal string Key => _key;
     internal string RunId => _runId;
+    /// <summary>True for a menu batch grid (B4).</summary>
+    internal bool IsMenuBatch => _menu != null;
+    /// <summary>The list items before the first run: 1 for a menu batch (its All rows line, row -1), else 0.</summary>
+    int Off => _menu != null ? 1 : 0;
+    /// <summary>The selected run row (-1 = the All rows line or nothing).</summary>
+    internal int SelectedRow => _list.SelectedIndex - Off;
+    internal string TitleText => Title ?? "";
+    internal string? TipOf(string button) => ToolTip.GetTip(button == FormulaWindowRules.AddRowText ? _addRow : _removeRow) as string;
+    internal bool HasButton(string label) => this.GetVisualDescendants().OfType<Button>().Any(b => b.Content is string t && t == label);
     internal string StatusText => _status.Text ?? "";
     internal IReadOnlyList<string> Headers => _headers;
     internal CheatSheetView? CheatSheet => _cheat;
@@ -191,14 +226,16 @@ public sealed class BatchGridWindow : Window
     /// <summary>True when the variable column is a dropdown: table keys, or a Piece binding's candidates.</summary>
     internal bool IsChoiceColumn(int col) => col >= 1 && col <= VarCount && _model.IsChoiceColumn(_model.Variables[col - 1]);
 
-    BatchRow? Live(int row) => _rows.FirstOrDefault(r => r.Index == row);
+    BatchRow? Live(int row) => _rows.FirstOrDefault(r => r.Row == row);
 
     /// <summary>The text shown in a cell (read from the row control; rows not on screen are read from the model).</summary>
     internal string CellText(int row, int col) => Live(row)?.TextOf(col) ?? ModelText(row, col);
 
+    BatchRowView ViewOf(int row) => row < 0 && _menu != null ? _menu.AllRows : _model.Row(row);
+
     string ModelText(int row, int col)
     {
-        var r = _model.Row(row);
+        var r = ViewOf(row);
         return col == 0 ? FormulaWindowRules.CellOf(r, FormulaWindowRules.BatchUnit).Text
             : col <= VarCount ? FormulaWindowRules.VariableCell(r, col - 1).Text
             : col == ResultCol ? FormulaWindowRules.CellOf(r, FormulaWindowRules.BatchResult).Text
@@ -206,12 +243,12 @@ public sealed class BatchGridWindow : Window
             : FormulaWindowRules.CellOf(r, FormulaWindowRules.BatchExceptions).Text;
     }
 
-    internal bool CellWrong(int row, int col) => FormulaWindowRules.VariableCell(_model.Row(row), col - 1).Tone == CellTone.Wrong;
+    internal bool CellWrong(int row, int col) => FormulaWindowRules.VariableCell(ViewOf(row), col - 1).Tone == CellTone.Wrong;
 
     /// <summary>Types into a variable cell as the user would.</summary>
     internal void TypeCell(int row, int col, string text) => (Live(row) ?? throw new InvalidOperationException("Row is not on screen.")).Type(col, text);
 
-    internal void SelectRow(int row) => _list.SelectedIndex = row;
+    internal void SelectRow(int row) => _list.SelectedIndex = row + Off;
 
     /// <summary>The items of a dropdown cell on screen (the first is the blank item); null for a free-text cell.</summary>
     internal IReadOnlyList<string>? ChoicesOf(int row, int col) => (Live(row) ?? throw new InvalidOperationException("Row is not on screen.")).ItemsOf(col);
@@ -238,6 +275,8 @@ public sealed class BatchGridWindow : Window
         };
         readonly Border _pictureBox;
         public int Index { get; }
+        /// <summary>The model row (-1 = the All rows line of a menu batch).</summary>
+        public int Row => Index - _w.Off;
         public string? PieceId { get; private set; }
         public Control UnitCell => _boxes[0];
         public Control UnitText => _content[0];
@@ -273,7 +312,7 @@ public sealed class BatchGridWindow : Window
                     var v = w._model.Variables[c - 1];
                     if (w._model.IsChoiceColumn(v))
                     {
-                        var keys = w._model.ChoicesFor(v, index) ?? Array.Empty<string>();   // this row's unit: its hex first
+                        var keys = w._model.ChoicesFor(v, Row) ?? Array.Empty<string>();   // this row's unit: its hex first
                         var combo = new ComboBox { IsEditable = true, ItemsSource = new[] { "" }.Concat(keys).ToList(), HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(2, 0) };
                         combo.PropertyChanged += (_, e) => { if (e.Property == ComboBox.TextProperty) Edited(col, combo.Text ?? ""); };
                         inner = combo;
@@ -286,6 +325,9 @@ public sealed class BatchGridWindow : Window
                     }
                 }
                 else inner = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+                // The All rows line fills only the Input and Piece columns; its other cells stay empty.
+                if (Row < 0 && inner is not TextBlock && !(w._menu?.IsAllRowsColumn(w._model.Variables[c - 1]) ?? false)) inner.IsEnabled = false;
+                if (Row < 0 && c == 0) ((TextBlock)inner).FontWeight = FontWeight.Bold;
                 var cell = new Border { BorderThickness = new Thickness(0, 0, 1, 1), Padding = new Thickness(4, 0) };
                 if (c == 0)
                 {
@@ -302,9 +344,9 @@ public sealed class BatchGridWindow : Window
                 _content[c] = inner;
             }
             // The Unit cell opens the unit dialog on double-click (WinForms: CellDoubleClick on column 0).
-            _boxes[0].DoubleTapped += (_, e) => { _w.Safe(() => _w._openRow?.Invoke(Index)); e.Handled = true; };
+            _boxes[0].DoubleTapped += (_, e) => { _w.Safe(() => { if (Row >= 0) _w._openRow?.Invoke(Row); }); e.Handled = true; };
             var ledger = _boxes[w.ResultCol + 1];
-            ledger.PointerEntered += (_, _) => _w.Safe(() => _w.ShowLedgerTip(Index, ledger));
+            ledger.PointerEntered += (_, _) => _w.Safe(() => _w.ShowLedgerTip(Row, ledger));
             ledger.PointerExited += (_, _) => _w._tip.Hide();
             GotFocus += (_, _) => { if (_w._list.SelectedIndex != Index) _w._list.SelectedIndex = Index; };
             AttachedToVisualTree += (_, _) => { if (!_w._rows.Contains(this)) _w._rows.Add(this); Update(); _w.PrioritiseShown(); };
@@ -337,9 +379,11 @@ public sealed class BatchGridWindow : Window
             if (_w._updating || _w._closing) return;
             _w.Safe(() =>
             {
-                if (Index >= _w._model.RowCount) return;
-                _w._model.SetCell(Index, _w._model.Variables[col - 1], text);
-                Update();
+                if (Row >= _w._model.RowCount) return;
+                if (Row < 0) _w._menu!.SetAllRowsCell(_w._model.Variables[col - 1], text);
+                else _w._model.SetCell(Row, _w._model.Variables[col - 1], text);
+                // In a menu batch a cell changes the rows after it (and the All rows line every row): redraw them all.
+                if (_w._menu != null) _w.UpdateRows(); else Update();
                 _w.UpdateCheat();
             });
         }
@@ -347,8 +391,8 @@ public sealed class BatchGridWindow : Window
         /// <summary>Redraws the row from the model: texts, and the red / grey / firebrick tones.</summary>
         public void Update()
         {
-            if (Index >= _w._model.RowCount) return;
-            var row = _w._model.Row(Index);
+            if (Row >= _w._model.RowCount) return;
+            var row = _w.ViewOf(Row);
             var was = _w._updating;
             _w._updating = true;
             try
@@ -371,11 +415,11 @@ public sealed class BatchGridWindow : Window
                         case TextBox b:
                             if ((b.Text ?? "") != cell.Text) b.Text = cell.Text;
                             Style(b, fore);
-                            ToolTip.SetTip(b, wrong ? _w.WrongTip(Index, c) : null);
+                            ToolTip.SetTip(b, wrong ? _w.WrongTip(Row, c) : null);
                             break;
                         case ComboBox cb:
                             // A Piece column's candidates follow the game (and the viewer): the items are refreshed when the list changed.
-                            var items = new[] { "" }.Concat(_w._model.ChoicesFor(_w._model.Variables[c - 1], Index) ?? Array.Empty<string>()).ToList();
+                            var items = new[] { "" }.Concat(_w._model.ChoicesFor(_w._model.Variables[c - 1], Row) ?? Array.Empty<string>()).ToList();
                             if (cb.ItemsSource is not IEnumerable<string> shown || !shown.SequenceEqual(items))
                             {
                                 cb.ItemsSource = items;
@@ -383,7 +427,7 @@ public sealed class BatchGridWindow : Window
                             }
                             if ((cb.Text ?? "") != cell.Text) cb.Text = cell.Text;
                             Style(cb, fore);
-                            ToolTip.SetTip(cb, wrong ? _w.WrongTip(Index, c) : null);
+                            ToolTip.SetTip(cb, wrong ? _w.WrongTip(Row, c) : null);
                             break;
                     }
                     _boxes[c].Background = wrong ? WrongBrush : Brushes.Transparent;   // transparent, not null: the cell must take clicks
@@ -413,7 +457,7 @@ public sealed class BatchGridWindow : Window
 
     string? WrongTip(int row, int col)
     {
-        if (_s.Game == null) return FormulaWindowRules.DoesntMatchTip;
+        if (_s.Game == null || row < 0) return FormulaWindowRules.DoesntMatchTip;
         var v = _model.Variables[col - 1];
         return _model.ModelFor(row).Evaluate(_s.Game.State).Boxes.FirstOrDefault(b => b.Variable == v)?.Tooltip ?? FormulaWindowRules.DoesntMatchTip;
     }
@@ -421,7 +465,7 @@ public sealed class BatchGridWindow : Window
     /// <summary>History of the first ledger value this row would change (what happened before, never the pending result).</summary>
     void ShowLedgerTip(int row, Control anchor)
     {
-        if (row >= _model.RowCount || _s.Game == null) return;
+        if (row < 0 || row >= _model.RowCount || _s.Game == null) return;
         var o = _model.OutputsOf(row);
         if (o.Count == 0) return;
         if (LedgerBreakdown.For(_s.View ?? _s.Game.State, _s.Rules, _s.Model, o[0].Key, o[0].PropertyId) is { } b)
@@ -434,8 +478,8 @@ public sealed class BatchGridWindow : Window
     /// <summary>The big preview of the row's counter at the pointer (WinForms OnHoverImage); hidden for hidden or gone units.</summary>
     void ShowPreview(BatchRow r, Point at)
     {
-        if (_closing || r.Index >= _model.RowCount) { _preview.Hide(); return; }
-        var row = _model.Row(r.Index);
+        if (_closing || r.Row < 0 || r.Row >= _model.RowCount) { _preview.Hide(); return; }
+        var row = _model.Row(r.Row);
         if (row.PieceId == null || _s.View?.Pieces.TryGetValue(row.PieceId, out var p) != true || p == null) { _preview.Hide(); return; }
         _preview.Show(r.PictureBox, at, row.PieceId, row.Label);
     }
@@ -464,6 +508,14 @@ public sealed class BatchGridWindow : Window
         if (_model.HostCalculates) { SendToHost(_model.OpenRows(), calculate: false); return; }
         var before = _model.RowCount;
         var n = _model.ApplyAll();
+        if (_menu != null)
+        {
+            // One step for the whole batch; the window stays open with the status (the model says what applied or which row blocks).
+            _status.Text = _menu.Status ?? FormulaWindowRules.AppliedRunsText(n);
+            _debounce.Stop();
+            Refresh();
+            return;
+        }
         // The run may be gone now (all applied): the refresh closes the window.
         _status.Text = FormulaWindowRules.AppliedRowsText(n);
         _debounce.Stop();
@@ -471,12 +523,36 @@ public sealed class BatchGridWindow : Window
         if (!_closing && before > 0 && n == 0) _status.Text = FormulaWindowRules.NothingAppliedText;
     }
 
+    void AddRow()
+    {
+        if (_menu == null) return;
+        var sel = SelectedRow;
+        var ok = _menu.AddRow(sel >= 0 ? sel : null);
+        _status.Text = ok ? "" : _menu.Status ?? "";
+        _debounce.Stop();
+        Refresh();
+        if (ok) _list.SelectedIndex = (sel >= 0 ? sel + 1 : _menu.RowCount - 1) + Off;
+    }
+
+    void RemoveRow()
+    {
+        if (_menu == null) return;
+        var sel = SelectedRow;
+        if (sel < 0) { _status.Text = FormulaWindowRules.SelectRowText; return; }
+        if (!_menu.RemoveRow(sel)) return;
+        _status.Text = "";
+        _debounce.Stop();
+        Refresh();
+        _list.SelectedIndex = Math.Min(sel, _menu.RowCount - 1) + Off;
+    }
+
     void ApplyRow()
     {
+        if (_pending == null) return;
         var r = _list.SelectedIndex;
         if (r < 0 || r >= _model.RowCount) { _status.Text = FormulaWindowRules.SelectRowText; return; }
         if (_model.HostCalculates) { SendToHost(new[] { r }, calculate: false); return; }
-        var ok = _model.ApplyRow(r);
+        var ok = _pending.ApplyRow(r);
         _status.Text = ok ? FormulaWindowRules.RowAppliedText : FormulaWindowRules.RowNotMatchingText;
         _debounce.Stop();
         Refresh();
@@ -487,11 +563,18 @@ public sealed class BatchGridWindow : Window
     {
         if (_sending || _closing) return;
         _sending = true;
-        _calcAll.IsEnabled = _applyAll.IsEnabled = _applyRow.IsEnabled = false;
+        _calcAll.IsEnabled = _applyAll.IsEnabled = _applyRow.IsEnabled = _addRow.IsEnabled = _removeRow.IsEnabled = false;
         _status.Text = FormulaWindowRules.AskingHostText;
         try
         {
-            var (applied, message) = await _model.SendRowsAsync(rows, calculate, preview);
+            if (_menu != null)
+            {
+                // One batch intent; the model shows each row's verdict and sets the status (the host's message or the applied count).
+                await _menu.SendAsync(calculate, preview);
+                if (!_closing) _status.Text = _menu.Status ?? "";
+                return;
+            }
+            var (applied, message) = await _pending!.SendRowsAsync(rows, calculate, preview);
             if (_closing) return;
             _status.Text = (preview ? FormulaWindowRules.HostCalculatedText(rows.Count) : FormulaWindowRules.HostAppliedText(applied, rows.Count))
                 + (message != null ? " " + message : "");
@@ -504,9 +587,9 @@ public sealed class BatchGridWindow : Window
         finally
         {
             _sending = false;
-            if (!_closing) _calcAll.IsEnabled = _applyAll.IsEnabled = _applyRow.IsEnabled = true;
+            if (!_closing) _calcAll.IsEnabled = _applyAll.IsEnabled = _applyRow.IsEnabled = _addRow.IsEnabled = _removeRow.IsEnabled = true;
+            if (!_closing) { _debounce.Stop(); Safe(Refresh); }
         }
-        if (!_closing) { _debounce.Stop(); Safe(Refresh); }
     }
 
     // ---- refresh and lifetime ----
@@ -518,13 +601,18 @@ public sealed class BatchGridWindow : Window
         if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += QueueRefresh; }
     }
 
-    void OnGameReplaced() { HookGame(); QueueRefresh(); }
+    void OnGameReplaced()
+    {
+        HookGame();
+        if (_menu != null) Dispatcher.UIThread.Post(() => { if (!_closing) Close(); });   // a menu batch belongs to its game
+        else QueueRefresh();
+    }
     void OnGameChanged(GameCommand _) => QueueRefresh();
 
     /// <summary>Game events may come from any thread and in bursts (Apply all): one debounced refresh on the UI thread.</summary>
     void QueueRefresh() => Dispatcher.UIThread.Post(() => { if (!_closing) { _debounce.Stop(); _debounce.Start(); } });
 
-    bool RunExists => _s.Game?.State.Pending.Any(r => r != null && r.Id == _runId) == true;
+    bool RunExists => _menu != null ? _s.Game != null : _s.Game?.State.Pending.Any(r => r != null && r.Id == _runId) == true;
 
     void Refresh()
     {
@@ -533,7 +621,7 @@ public sealed class BatchGridWindow : Window
         _model.Invalidate();
         _tip.Hide();
         _preview.Hide();   // the viewed state may have changed (pictures follow in UpdateRows)
-        var n = _model.RowCount;
+        var n = _model.RowCount + Off;
         if (n != _shownRows)
         {
             _shownRows = n;
@@ -554,7 +642,7 @@ public sealed class BatchGridWindow : Window
     void UpdateCheat()
     {
         if (_cheat == null) return;
-        var r = _list.SelectedIndex;
+        var r = SelectedRow;
         if (r < 0 || r >= _model.RowCount || _s.Rules is not { } rules) { _cheat.Render(Array.Empty<CheatRow>()); return; }
         _model.Row(r); // makes sure the row has been evaluated (LastExpected)
         var m = _model.ModelFor(r);
