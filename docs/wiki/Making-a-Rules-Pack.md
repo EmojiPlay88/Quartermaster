@@ -389,6 +389,93 @@ The `.qrules` file is all another player needs, together with the same module fi
 
 A rules pack holds only what you typed in. It never contains the module's rulebooks, pictures or counters, so you can share your own work without sharing anyone else's.
 
+## Rule references
+
+A rule reference ("rule ref") points at a page of the module's rulebook, so a player can open the rule behind a value, a warning or a checklist item. Tables, formulas and phases get one with **Link to current page** in the Workbench ([Rule references](Window-Rules-Workbench#rule-references)); that also adds the ref to the pack. Properties, holders, alerts, phase warnings and checklist items then pick one of the pack's refs from a list that reads **(none)**, then each ref as `{label}, page {page}`, for example "Ferry rules, page 4".
+
+Say Riverland's ferry rules are on page 4. Link the **North Depot delivery** formula to that page, then pick "Ferry rules, page 4" as the rule ref of the North Depot holder and of the Stores property.
+
+If a ref is deleted while something still points at it, the Problems list warns, for example `Property "Stores": rule reference "r-ferry" does not exist`, and the picker shows `r-ferry (missing)` so you can pick **(none)**. The same warning can name a `Holder "{name}"`, an `Alert "{name}"`, `Phase "{name}": warning {n}` or `Phase "{name}": checklist item {n}` (counting from 1).
+
+## Checklist item ids and links
+
+A checklist item can have an **Id:** (letters, digits, `-`, `_` or `.`), set below the checklist on the Phases tab. Ids are unique across the whole pack. An item with an id stays ticked when you reorder the items during a game; an item without one is ticked by its place in the list.
+
+With ids, one item can point at another. In North Supply, add an item "Count the spare boats at the ferry landing" with the id `spare`, then write a second item:
+
+`Load the ferry once {item:spare} is done, then run {formula:f-north-delivery}`
+
+The phase panel shows `{item:spare}` as the linked item's text in double quotes, cut to 40 characters with `…`, and `{formula:f-north-delivery}` as the formula's name, "North Depot delivery". A link whose target does not exist is shown as written. A link to an item of a phase whose checklist a player may not see is also shown as written, so its text never reaches that player. In the Workbench the list row reads `{id}: {shown text}`, and the **Links:** line under it lists each link's target, or `{token} (missing)`.
+
+The Problems list checks ids and links:
+
+- error: `Phase "North Supply": checklist item 2 has an unusable id "two words"; use letters, digits, '-', '_' or '.'`
+- error: `Phase "North Supply": checklist item id "spare" is used more than once`
+- warning: `Phase "{p}": checklist item {n} names item "{id}", which does not exist`
+- warning: `Phase "{p}": checklist item {n} names formula "{id}", which does not exist`
+
+A pack whose items are only text keeps exactly the same file when you save it.
+
+## Labels for numbers
+
+A value can show a word next to its number. Say Riverland's weather had three kinds: 1 is clear, 2 is rain and 3 is fog. Make a one-dimension table **Weather names**:
+
+| Row key | Name |
+|---|---|
+| 1 | Clear |
+| 2 | Rain |
+| 3 | Fog |
+
+Then on the Properties & Holders tab set Weather's **Labels** to Weather names. A Weather of 3 now shows as `3 (Fog)` in the Ledger, the outliner, the counter popup, the breakdown title and the working of a formula (a variable's value and the `Weather = 3 (Fog)` part of a Set output; Add and Subtract outputs stay bare numbers). The value is still the number 3 everywhere it is stored or used: formulas, filters and the CSV export see 3. A value with no row in the table, or a blank cell, shows only the number. In the outliner a group's total or average stays a bare number; a lowest value shows its label.
+
+The labels table must have one column (one dimension or dice). The Problems list reports `Property "Weather" takes its labels from a table that no longer exists`, or `Property "Weather" takes its labels from table "{t}", which has more than one column`. Labels never show anything a player could not already see: a label sits next to a value the player already has, and hidden working stays hidden.
+
+## Properties some holders keep
+
+By default every holder keeps every holder property. Some values belong to one holder only. Say only the North Depot takes ferry tolls: add a property **Ferry tolls** with scope Holders and type `North Depot` in its **Holders** cell (several names are separated by commas; `global` is the built-in holder; blank means every holder). An unknown name is refused with `No holder named "{name}"`.
+
+Then:
+
+- In the Ledger the South Depot and Global show a blank, read-only Ferry tolls cell. Typing there is refused with `South Depot does not keep Ferry tolls`. On the **Depots & Global** tab and on your own tabs a column is left out when none of the rows shown keeps it.
+- In the Formulas tab, a Holder binding's Target and a Holder or Global output's Property offer each holder only the properties it keeps.
+- A run that reads or writes a value its holder does not keep fails with `{holder} does not keep {property}`.
+
+The Problems list reports `Property "Ferry tolls" names holder "{id}", which does not exist`, `Property "{name}" lists holders but is not a holder property` (a Pieces property), and formulas that use a value a holder does not keep: a binding `{variable} reads "Ferry tolls", which holder "South Depot" does not keep`, an output `output {n} writes "Ferry tolls", which holder "Global" does not keep`, or, for `holder(South Depot, Ferry tolls)`, `refers to "Ferry tolls", which holder "South Depot" does not keep`.
+
+## Clone and ledger values
+
+The VASSAL **Clone** command copies a counter. By default the copy gets the counter's current ledger values. A property's **Clone as** column on the Properties & Holders tab chooses: **Copy** (the default) gives the copy this counter's current value; **Default** gives it what a new counter starts with (its sheet value or Default). Computed properties are never stored, so they are worked out for the copy as for any counter.
+
+If the copy, with the copied values, would belong to another side than the original, nothing is copied and the log warns `Clone of "{name}" belongs to another side, so its values were not copied`. In an online game a guest may clone only a counter it may act on.
+
+## Testing a pack outside the engine (stable)
+
+`PackHarness` (in `Quartermaster.Render`) runs a pack without any window, so you can keep automated tests for your own pack. Its members keep their names and meaning across releases (except `Session`, which is there for tests that need more and may change).
+
+| Member | What it does |
+|---|---|
+| `PackHarness.Open(vmod, rules, cacheDir?)` | Opens the module and the pack. Without `cacheDir` a temp folder is used and deleted on `Dispose()` |
+| `NewGame(setup?, difficulty)` | Starts a game from the named setup (case does not matter), or from the module's setup stacks. An unknown name throws `No setup named "{name}"` |
+| `Run(formulaId, pieceName?, inputs?, dice?)` | Runs a formula on a unit (a unique piece name), with typed inputs by variable name and dice served in order, and applies it when it produced a result. Returns `Applied`, `Refused`, `Error`, `Result`, `Working`, `Missing` and `DiceUsed`. Running out of dice throws `The harness ran out of dice (formula "{name}")` |
+| `Advance()` | Presses Next Phase |
+| `Value(name, property)` | The value of a property on a holder (`Global` for the global holder) or a unique piece; an unset stored value reads its Default. Errors: `No holder or piece named "{name}"`, `No piece named "{name}"`, `{n} pieces are named "{name}"; use a unique name`, `No property named "{name}"` |
+| `Log` | The full host log, every side's lines |
+| `Phase`, `Pending` | The current phase's name, and the runs waiting for input |
+| `ViewFor(sides)` | What those sides see (`PlayerView.For`), to check that hidden values stay hidden |
+| `Dispose()` | Closes everything |
+
+The harness plays every side with the full game, so a test sees everything; use `ViewFor` to check a side's view. A short test with the Riverland demo:
+
+```csharp
+using var h = PackHarness.Open("Riverland-Demo.vmod", "Riverland-Demo.qrules").NewGame();
+var run = h.Run("f-fuel-supply", "NL 1 Rifles", new Dictionary<string, string> { ["Hexes"] = "0" });
+Assert.True(run.Applied, run.Error);
+Assert.Equal(6, h.Value("NL 1 Rifles", "Fuel"));
+Assert.Equal(20, h.Value("North Depot", "Stores"));
+```
+
+A log line of a run that failed or was refused carries an error flag (`LogEntry.Error`), so a test can look for failures with `h.Log.Where(l => l.Error)`.
+
 ## Do it for your own module
 
 - [ ] Open your module, start a game, and choose **File > New Rules Pack...**. Open **Tools > Rules Workbench**.

@@ -360,6 +360,7 @@ public sealed class EditGrid : UserControl
     internal Control CellControl(int row, int col) => _rows[row][col].Block;
     internal IBrush? HeaderBackground(int col) => _headerCells[col].Background;
     internal object? HeaderToolTip(int col) => ToolTip.GetTip(_headerCells[col]);
+    internal string HeaderText(int col) => (_headerCells[col].Child as TextBlock)?.Text ?? "";
 
     // ---------- selection ----------
 

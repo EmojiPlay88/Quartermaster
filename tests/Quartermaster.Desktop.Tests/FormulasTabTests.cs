@@ -773,4 +773,44 @@ public sealed class FormulasTabTests : IDisposable
         Assert.Equal(Defend().Bindings, F(s, "f-def").Bindings);
         Assert.Null(F(s, "f-def").Bindings[0].Caption);
     }
+    [AvaloniaFact]
+    public void FormulasTab_holder_property_items_filtered()
+    {
+        var f = new FormulaDef
+        {
+            Id = "f-toll", Name = "Toll", Text = "a + b",
+            Bindings = new() { new() { Variable = "a", Kind = BindingKind.Holder }, new() { Variable = "b", Kind = BindingKind.Global } },
+            Outputs = new()
+            {
+                new FormulaOutput { Target = OutputTarget.Holder, HolderId = "h-yard", Property = "" },
+                new FormulaOutput { Target = OutputTarget.Global, Property = "" },
+                new FormulaOutput { Target = OutputTarget.Unit, Property = "" },
+            },
+        };
+        var s = Session(true, f);
+        s.UpdateRules(p => p with
+        {
+            Properties = new()
+            {
+                new PropertyDef { Id = "p-toll", Name = "Tolls", Scope = PropertyScope.Holders, Holders = new() { "h-depot" } },
+                new PropertyDef { Id = "p-wx", Name = "Weather", Scope = PropertyScope.Holders, Holders = new() { HolderDef.GlobalId } },
+                new PropertyDef { Id = "p-sto", Name = "Stores", Scope = PropertyScope.Holders },
+            },
+            Holders = new() { new HolderDef { Id = "h-depot", Name = "Depot" }, new HolderDef { Id = "h-yard", Name = "Yard" } },
+        });
+        var tab = Tab(s);
+        tab.SelectFormula("f-toll");
+        Pump();
+        // Holder binding: each holder with only the properties it keeps.
+        Assert.Equal(["Depot: Tolls", "Depot: Stores", "Yard: Stores"], tab.Bindings.CellItems(0, 2)!.ToList());
+        // Global binding: only what the global holder keeps.
+        Assert.Equal(["Weather", "Stores"], tab.Bindings.CellItems(1, 2)!.ToList());
+        // Outputs: the Yard keeps Stores only; Global keeps Weather and Stores; a unit output lists every property.
+        Assert.Equal(["Stores"], tab.Outputs.CellItems(0, 2)!.ToList());
+        Assert.Equal(["Weather", "Stores"], tab.Outputs.CellItems(1, 2)!.ToList());
+        Assert.Equal(["Tolls", "Weather", "Stores"], tab.Outputs.CellItems(2, 2)!.ToList());
+        // Choosing another holder offers its properties.
+        Pick(tab.Outputs, 0, 1, "Depot");
+        Assert.Equal(["Tolls", "Stores"], tab.Outputs.CellItems(0, 2)!.ToList());
+    }
 }

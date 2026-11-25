@@ -17,6 +17,7 @@ using Quartermaster.Desktop.Map;
 using Quartermaster.Desktop.Shell;
 using Quartermaster.Render;
 using Quartermaster.Rules;
+using Quartermaster.Rules.Tables;
 using CoreLedger = Quartermaster.Core.Ledger;
 
 namespace Quartermaster.Desktop.Ledgers;
@@ -319,14 +320,23 @@ public sealed partial class LedgerWindow : Window
         Restore(keepKeys, firstKey);
     }
 
-    static string TextOf(LedgerRowEx r, int col) => col switch
+    /// <summary>A cell's text: the value with its label when the property has one ("3 (Fog)"); blank for no value and for a holder that
+    /// does not keep the property. The rows come from the viewer's state, so a label shows nothing new.</summary>
+    string TextOf(LedgerRowEx r, int col) => col switch
     {
         0 => r.Row.Name,
         1 => r.Row.Kind,
+        _ when r.Row.NotKept?.Contains(col - FixedCols) == true => "",
         _ when r.Row.Errors?.ContainsKey(col - FixedCols) == true => ErrorText,   // a computed cell whose read failed; the hover tip has the message
-        _ when col - FixedCols < r.Row.Values.Count && r.Row.Values[col - FixedCols] is { } v => LedgerTable.FormatNumber(v),
+        _ when col - FixedCols < r.Row.Values.Count && r.Row.Values[col - FixedCols] is { } v =>
+            _s.Rules is { } pack && col - FixedCols < _cols.Count ? PropertyLabels.Text(pack, _cols[col - FixedCols], v) : LedgerTable.FormatNumber(v),
         _ => "",
     };
+
+    /// <summary>The text an editor of a value cell starts with: the bare number (a label is display only).</summary>
+    string EditText(int row, int col) =>
+        row >= 0 && row < _rows.Count && col >= FixedCols && col - FixedCols < _rows[row].Row.Values.Count && _rows[row].Row.Values[col - FixedCols] is { } v
+            ? LedgerTable.FormatNumber(v) : "";
 
     bool _rebuildingColumns;
 
@@ -490,6 +500,7 @@ public sealed partial class LedgerWindow : Window
     {
         if (rowIndex < 0 || rowIndex >= _rows.Count || colIndex < FixedCols || colIndex - FixedCols >= _cols.Count || _rows[rowIndex].IsGroupHeader) return null;
         if (_s.Game is not { } game) return null;
+        if (_rows[rowIndex].Row.NotKept?.Contains(colIndex - FixedCols) == true) return null;   // blank: no stale value or history behind it
         return LedgerBreakdown.For(_s.View ?? game.State, _s.Rules, _s.Model, _rows[rowIndex].Row.Key, _cols[colIndex - FixedCols].Id);
     }
 
@@ -537,9 +548,16 @@ public sealed partial class LedgerWindow : Window
             Dispatcher.UIThread.Post(() => { if (!_closing) RunAsync(() => WarnAsync(refused)); });
             return false;
         }
+        if (_rows[row].Row.NotKept?.Contains(col - FixedCols) == true)
+        {
+            // a holder that does not keep the property: the cell stays blank and read-only
+            var notKept = LedgerViewRules.NotKeptRefusal(_s.Rules, _rows[row].Row.Key, _cols[col - FixedCols].Id) ?? "";
+            if (notKept.Length > 0) Dispatcher.UIThread.Post(() => { if (!_closing) RunAsync(() => WarnAsync(notKept)); });
+            return false;
+        }
         ScrollToRow(row);
         if (Live(row) is not { } view) return false;
-        var box = view.BeginEdit(col, typed ?? CellText(row, col));
+        var box = view.BeginEdit(col, typed ?? EditText(row, col));
         if (box == null) return false;
         _editing = new Editing(view, col, box);
         box.KeyDown += (_, e) =>
@@ -689,7 +707,7 @@ public sealed partial class LedgerWindow : Window
                 var col = c;
                 var text = new TextBlock
                 {
-                    Text = TextOf(Data, c), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
+                    Text = w.TextOf(Data, c), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
                     HorizontalAlignment = c >= FixedCols ? HorizontalAlignment.Right : HorizontalAlignment.Left,
                     FontWeight = Data.IsGroupHeader ? FontWeight.Bold : FontWeight.Normal,
                 };

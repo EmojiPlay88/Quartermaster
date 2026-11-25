@@ -63,6 +63,7 @@ public static class LedgerViewRules
     public static ManualEditCheck CheckManualEdit(ModuleSession s, string key, string propertyId, double? old, string text, string? propertyName = null)
     {
         if (ComputedRefusal(s.Rules, propertyId) is { } refused) return new ManualEditCheck(false, 0, false, refused, null, Reload: true);
+        if (NotKeptRefusal(s.Rules, key, propertyId) is { } notKept) return new ManualEditCheck(false, 0, false, notKept, null, Reload: true);
         if (!TryParseNumber(text, out var after))
             return new ManualEditCheck(false, 0, false, $"'{text}' is not a number.", null);
         if (s.Game == null) return new ManualEditCheck(false, after, false, null, null);
@@ -77,6 +78,17 @@ public static class LedgerViewRules
         pack?.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is { } def && Quartermaster.Rules.PropertyFacts.IsComputed(def)
             ? $"{def.Name} is computed (= {def.Expr!.Trim()}) and cannot be edited"
             : null;
+
+    /// <summary>"{holder} does not keep {property}" when <paramref name="key"/> is a holder that does not keep the property (its
+    /// <see cref="Quartermaster.Rules.PropertyDef.Holders"/> list leaves the holder out), else null. The holder is "Global" for the global holder.</summary>
+    public static string? NotKeptRefusal(Quartermaster.Rules.RulesPack? pack, string key, string? propertyId)
+    {
+        if (pack == null || !LedgerKey.TryParse(key, out var isPiece, out var holderId) || isPiece) return null;
+        if (pack.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is not { } def || def.Scope == Quartermaster.Rules.PropertyScope.Pieces) return null;
+        if (Quartermaster.Rules.PropertyFacts.KeptBy(def, holderId)) return null;
+        var holder = holderId == Quartermaster.Rules.HolderDef.GlobalId ? "Global" : pack.ById<Quartermaster.Rules.HolderDef>(holderId)?.Name ?? holderId;
+        return $"{holder} does not keep {def.Name}";
+    }
 
     /// <summary>Default file name of a CSV export: <c>ledger-{tab}.csv</c> with invalid characters and spaces turned into dashes.</summary>
     public static string CsvFileName(string tabTitle)

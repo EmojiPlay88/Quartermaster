@@ -35,6 +35,8 @@ The Ledger lists every tracked value of the game, one row per unit or depot and 
 - Hover a value to see its breakdown: how it got to where it is, change by change.
 - Type in a value cell to change it by hand. Quartermaster asks why ("Manual change"); the reason is required and is kept with the change. You cannot change a value that belongs to a side you do not hold.
 - A [computed property](Formula-Reference#computed-properties) cannot be changed by hand: its tooltip shows `= {expression}`, and a cell whose expression fails shows `error` with the message in its tooltip.
+- A property with [labels](Making-a-Rules-Pack#labels-for-numbers) shows the label next to the number, for example `3 (Fog)` for a Weather of 3. The value is still the number: typing in the cell starts from `3`, the CSV export holds `3`, and a value with no row in the labels table shows only the number. The breakdown title shows the label too.
+- A holder that does not keep a property ([Properties some holders keep](Making-a-Rules-Pack#properties-some-holders-keep)) shows a blank, read-only cell for it, even if an old value is stored. Typing in it is refused with `{holder} does not keep {property}`, for example "South Depot does not keep Ferry tolls". On the **Depots & Global** tab and on your own tabs, such a column is left out when none of the rows shown keeps it.
 - With **Show counters** on, hover a counter picture to see it large, and double-click it to find the counter on the map.
 
 ![The large counter preview over NL 1 Rifles](images/ledger-tabs-preview.png)

@@ -314,4 +314,27 @@ public sealed class AlertsTabTests : IDisposable
         Click(tab.AddButton);
         Assert.Null(s.Rules);
     }
+    [AvaloniaFact]
+    public void AlertsTab_rule_ref_picker()
+    {
+        var s = Session();
+        s.UpdateRules(p => p with
+        {
+            RuleRefs = new() { new RuleRef { Id = "r-ferry", Label = "Ferry rules", Page = 4 } },
+            Alerts = p.Alerts.Select(a => a.Id == "a-blue" ? a with { RuleRefId = "r-gone" } : a).ToList(),
+        });
+        var tab = Tab(s);
+        Assert.Equal(["(none)", "Ferry rules, page 4"], ((IEnumerable<string>)tab.RuleRefBox.ItemsSource!).ToList());
+        Assert.Equal("(none)", tab.RuleRefBox.SelectedItem);
+        tab.RuleRefBox.SelectedItem = "Ferry rules, page 4";
+        Pump();
+        Assert.Equal("r-ferry", s.Rules!.ById<AlertDef>("a-red")!.RuleRefId);
+        tab.SelectAlert("a-blue");
+        Pump();
+        Assert.Equal("r-gone (missing)", tab.RuleRefBox.SelectedItem);   // a dangling ref shows, so it can be cleared
+        tab.RuleRefBox.SelectedItem = "(none)";
+        Pump();
+        Assert.Null(s.Rules!.ById<AlertDef>("a-blue")!.RuleRefId);
+        Assert.Equal("r-ferry", s.Rules!.ById<AlertDef>("a-red")!.RuleRefId);
+    }
 }

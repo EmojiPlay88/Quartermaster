@@ -513,4 +513,103 @@ public sealed class PropertiesTabTests : IDisposable
         Assert.Equal(["fuel"], s.Rules.Properties.Select(x => x.Id).ToList());
         Assert.DoesNotContain(s.Log.Items, e => e.Message.StartsWith("Property edit failed"));
     }
+    static void Pick(EditGrid g, int row, int col, string item)
+    {
+        g.BeginEdit(row, col);
+        ((ComboBox)g.Editor!).SelectedItem = item;
+        g.CommitEdit();
+        Pump();
+    }
+
+    /// <summary>Rule refs "Ferry rules" p.4 and "Weather rules" p.7; tables "Weather names" (1-D) and "Grid" (2-D); a holder property Tolls.</summary>
+    static RulesPack B1(RulesPack p) => p with
+    {
+        RuleRefs = new() { new RuleRef { Id = "r-ferry", Label = "Ferry rules", Page = 4 }, new RuleRef { Id = "r-wx", Label = "Weather rules", Page = 7 } },
+        Tables = new()
+        {
+            new TableDef { Id = "t-wx", Name = "Weather names", Kind = TableKind.OneD, RowKeys = new() { "1" }, ColumnKeys = new() { "Value" }, Cells = new() { new() { "Clear" } } },
+            new TableDef { Id = "t-grid", Name = "Grid", Kind = TableKind.TwoD, RowKeys = new() { "1" }, ColumnKeys = new() { "a", "b" }, Cells = new() { new() { "1", "2" } } },
+        },
+        Properties = p.Properties.Append(new PropertyDef { Id = "tolls", Name = "Tolls", Scope = PropertyScope.Holders }).ToList(),
+    };
+
+    [AvaloniaFact]
+    public void PropertiesTab_new_columns_commit()
+    {
+        var s = Session(B1);
+        var tab = Tab(s);
+        var g = tab.PropertyGrid;
+        Assert.Equal("Rule ref", g.HeaderText(PropertiesTab.RuleRefColumn));
+        Assert.Equal("Labels", g.HeaderText(PropertiesTab.LabelsColumn));
+        Assert.Equal("Holders", g.HeaderText(PropertiesTab.HoldersColumn));
+        Assert.Equal("Clone as", g.HeaderText(PropertiesTab.CloneAsColumn));
+        Assert.Equal(PropertiesTab.LabelsTip, g.HeaderToolTip(PropertiesTab.LabelsColumn));
+        Assert.Equal(PropertiesTab.HoldersTip, g.HeaderToolTip(PropertiesTab.HoldersColumn));
+        Assert.Equal(PropertiesTab.CloneAsTip, g.HeaderToolTip(PropertiesTab.CloneAsColumn));
+        Assert.Equal("A one-column table whose row for a value gives the text shown next to it, e.g. \"3 (Fog)\". Values stay numbers. Blank = none.", PropertiesTab.LabelsTip);
+        Assert.Equal("Holders that keep this property, comma-separated names. Blank = every holder.", PropertiesTab.HoldersTip);
+        Assert.Equal("What a copy made with the counter's Clone command gets: Copy = this counter's current value; Default = what a new counter starts with.", PropertiesTab.CloneAsTip);
+
+        // Rule ref: "(none)" then every ref as "{label}, page {page}".
+        Assert.Equal(["(none)", "Ferry rules, page 4", "Weather rules, page 7"], g.CellItems(2, PropertiesTab.RuleRefColumn)!.ToList());
+        Assert.Equal("(none)", g.Cell(2, PropertiesTab.RuleRefColumn));
+        Pick(g, 2, PropertiesTab.RuleRefColumn, "Ferry rules, page 4");
+        Assert.Equal("r-ferry", s.Rules!.ById<PropertyDef>("tolls")!.RuleRefId);
+        Pick(g, 2, PropertiesTab.RuleRefColumn, "(none)");
+        Assert.Null(s.Rules!.ById<PropertyDef>("tolls")!.RuleRefId);
+
+        // Labels: only one-column tables.
+        Assert.Equal(["", "Weather names"], g.CellItems(0, PropertiesTab.LabelsColumn)!.ToList());
+        Pick(g, 0, PropertiesTab.LabelsColumn, "Weather names");
+        Assert.Equal("t-wx", s.Rules!.Properties[0].Labels);
+        Assert.Equal("Weather names", g.Cell(0, PropertiesTab.LabelsColumn));
+        Pick(g, 0, PropertiesTab.LabelsColumn, "");
+        Assert.Null(s.Rules!.Properties[0].Labels);
+
+        // Holders: names, comma-separated; "global" is the built-in holder; blank = every holder.
+        Type(g, 2, PropertiesTab.HoldersColumn, "Depot, global");
+        Assert.Equal(["depot", HolderDef.GlobalId], s.Rules!.ById<PropertyDef>("tolls")!.Holders);
+        Assert.Equal("Depot, global", g.Cell(2, PropertiesTab.HoldersColumn));
+        Type(g, 2, PropertiesTab.HoldersColumn, " ");
+        Assert.Null(s.Rules!.ById<PropertyDef>("tolls")!.Holders);
+
+        // Clone as: Copy / Default.
+        Assert.Equal(["Copy", "Default"], g.CellItems(0, PropertiesTab.CloneAsColumn)!.ToList());
+        Assert.Equal("Copy", g.Cell(0, PropertiesTab.CloneAsColumn));
+        Pick(g, 0, PropertiesTab.CloneAsColumn, "Default");
+        Assert.Equal(CloneValue.Default, s.Rules!.Properties[0].CloneAs);
+        Assert.Equal(PropertiesTab.CloneAsTip, g.CellToolTip(0, PropertiesTab.CloneAsColumn));
+    }
+
+    [AvaloniaFact]
+    public void PropertiesTab_unknown_holder_refused()
+    {
+        var s = Session(p => B1(p) with
+        {
+            Properties = B1(p).Properties.Select(x => x.Id == "tolls" ? x with { Holders = new() { "yard" } } : x).ToList(),
+        });
+        var tab = Tab(s);
+        Type(tab.PropertyGrid, 2, PropertiesTab.HoldersColumn, "Depot, Harbour");
+        Assert.Equal("No holder named \"Harbour\"", tab.Status.Text);
+        Assert.Equal(["yard"], s.Rules!.ById<PropertyDef>("tolls")!.Holders);   // unchanged
+        Assert.Equal("Yard", tab.PropertyGrid.Cell(2, PropertiesTab.HoldersColumn));
+    }
+
+    [AvaloniaFact]
+    public void HolderGrid_rule_ref_column()
+    {
+        var s = Session(p => B1(p) with { Holders = p.Holders.Select(h => h.Id == "yard" ? h with { RuleRefId = "r-gone" } : h).ToList() });
+        var tab = Tab(s);
+        var g = tab.HolderGrid;
+        Assert.Equal("Rule ref", g.HeaderText(PropertiesTab.HolderRuleRefColumn));
+        Assert.True(g.IsCellReadOnly(0, PropertiesTab.HolderRuleRefColumn));   // the built-in global holder
+        Assert.Equal("(none)", g.Cell(1, PropertiesTab.HolderRuleRefColumn));
+        Assert.Equal("r-gone (missing)", g.Cell(2, PropertiesTab.HolderRuleRefColumn));
+        Assert.Equal(["(none)", "Ferry rules, page 4", "Weather rules, page 7"], g.CellItems(1, PropertiesTab.HolderRuleRefColumn)!.ToList());
+        Pick(g, 1, PropertiesTab.HolderRuleRefColumn, "Weather rules, page 7");
+        Assert.Equal("r-wx", s.Rules!.ById<HolderDef>("depot")!.RuleRefId);
+        Assert.Equal("Main stock", s.Rules!.ById<HolderDef>("depot")!.Notes);
+        Pick(g, 2, PropertiesTab.HolderRuleRefColumn, "(none)");
+        Assert.Null(s.Rules!.ById<HolderDef>("yard")!.RuleRefId);
+    }
 }

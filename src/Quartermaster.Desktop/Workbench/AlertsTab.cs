@@ -33,6 +33,8 @@ public sealed class AlertsTab : UserControl
     readonly TextBox _message = new();
     readonly ComboBox _severity = new() { Width = 120 };
     readonly ComboBox _side = new() { Width = 200 };
+    readonly ComboBox _ruleRef = new() { Width = 260 };
+    readonly List<string> _ruleRefIds = new();
     readonly TextBox _notes = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 66 };
     readonly TextBlock _issues = new() { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap };
     readonly Button _bAdd = new() { Content = "Add", Width = 50 }, _bDel = new() { Content = "Remove", Width = 56 },
@@ -98,6 +100,11 @@ public sealed class AlertsTab : UserControl
         pick.Children.Add(_side);
         rows.Children.Add(pick);
 
+        var refRow = new StackPanel { Orientation = Orientation.Horizontal };
+        refRow.Children.Add(new TextBlock { Text = "Rule ref:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) });
+        refRow.Children.Add(_ruleRef);
+        rows.Children.Add(refRow);
+
         rows.Children.Add(Box("Notes (shown as a tooltip on the alert)", _notes));
         rows.Children.Add(_issues);
         _right = new ScrollViewer { Content = rows, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
@@ -122,6 +129,7 @@ public sealed class AlertsTab : UserControl
         _timer.Tick += (_, _) => Run(Flush);
         _severity.SelectionChanged += (_, _) => Run(OnSeverityChosen);
         _side.SelectionChanged += (_, _) => Run(OnSideChosen);
+        _ruleRef.SelectionChanged += (_, _) => Run(OnRuleRefChosen);
 
         AttachedToVisualTree += (_, _) =>
         {
@@ -281,6 +289,11 @@ public sealed class AlertsTab : UserControl
             }
             _side.ItemsSource = names;
             _side.SelectedIndex = a == null ? -1 : idx;
+            var (refItems, refIds) = RuleRefPicker.Items(pack, a?.RuleRefId);
+            _ruleRefIds.Clear();
+            _ruleRefIds.AddRange(refIds);
+            _ruleRef.ItemsSource = refItems;
+            _ruleRef.SelectedIndex = a == null ? -1 : _ruleRefIds.IndexOf(a.RuleRefId ?? "");
         }
         finally { _loading = prev; }
         ShowStatus();
@@ -359,6 +372,17 @@ public sealed class AlertsTab : UserControl
         ShowIssues();
     }
 
+    void OnRuleRefChosen()
+    {
+        if (_loading || Current == null) return;
+        var i = _ruleRef.SelectedIndex;
+        if (i < 0 || i >= _ruleRefIds.Count) return;
+        var id = _ruleRefIds[i];
+        if ((Current.RuleRefId ?? "") == id) return;
+        CommitAlert(x => x with { RuleRefId = id.Length == 0 ? null : id });
+        ShowIssues();
+    }
+
     void AddAlert()
     {
         Flush();
@@ -396,6 +420,7 @@ public sealed class AlertsTab : UserControl
     internal TextBox NotesBox => _notes;
     internal ComboBox SeverityBox => _severity;
     internal ComboBox SideBox => _side;
+    internal ComboBox RuleRefBox => _ruleRef;
     internal TextBlock MatchStatusText => _status;
     internal TextBlock IssuesText => _issues;
     internal Button AddButton => _bAdd;

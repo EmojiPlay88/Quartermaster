@@ -736,4 +736,112 @@ public sealed class PhasesTabTests : IDisposable
         Pump();
         Assert.Empty(s.Rules!.Blocks);
     }
+    const string Spare = "Count the spare boats at the ferry landing before loading";   // 59 characters: cut to 40
+
+    /// <summary>B1: rule refs; the Weather phase holds "spare" and a linking item; End holds a plain item.</summary>
+    static RulesPack B1(RulesPack p) => p with
+    {
+        RuleRefs = new() { new RuleRef { Id = "r-ferry", Label = "Ferry rules", Page = 4 } },
+        Phases = p.Phases.Select(ph => ph.Id switch
+        {
+            "ph-weather" => ph with
+            {
+                Checklist = new()
+                {
+                    new ChecklistItem { Id = "spare", Text = Spare },
+                    new ChecklistItem { Id = "load", Text = "Load once {item:spare} is done; run {formula:f-water}, not {item:ghost}", RuleRefId = "r-ferry", Notes = "Ferry notes" },
+                    "Plain item",
+                },
+                Warnings = new() { new PhaseWarning { Condition = "Fuel < 1", Message = "{unit} is dry", RuleRefId = "r-gone" } },
+            },
+            "ph-end" => ph with { Checklist = new() { new ChecklistItem { Id = "tally", Text = "Tally" } } },
+            _ => ph,
+        }).ToList(),
+    };
+
+    [AvaloniaFact]
+    public void PhasesTab_warning_rule_ref_column()
+    {
+        var s = Session(tweak: B1);
+        var tab = Tab(s);
+        var g = tab.WarnGrid;
+        Assert.Equal("Rule ref", g.HeaderText(3));
+        Assert.Equal("r-gone (missing)", g.Cell(0, 3));
+        Assert.Equal(["(none)", "Ferry rules, page 4", "r-gone (missing)"], g.CellItems(0, 3)!.ToList());
+        Pick(g, 0, 3, "Ferry rules, page 4");
+        Assert.Equal("r-ferry", Ph(s, "ph-weather").Warnings[0].RuleRefId);
+        Assert.Equal("{unit} is dry", Ph(s, "ph-weather").Warnings[0].Message);
+        Pick(g, 0, 3, "(none)");
+        Assert.Null(Ph(s, "ph-weather").Warnings[0].RuleRefId);
+    }
+
+    [AvaloniaFact]
+    public void PhasesTab_checklist_details_and_links()
+    {
+        var s = Session(tweak: B1);
+        var tab = Tab(s);
+        var cut = "\"" + Spare[..40] + "…\"";
+        Assert.Equal(
+            ["spare: " + Spare, "load: Load once " + cut + " is done; run Daily water, not {item:ghost}", "Plain item"],
+            ((IEnumerable<string>)tab.Checklist.ItemsSource!).ToList());
+        Assert.False(tab.ChecklistDetails.IsEnabled);   // nothing selected
+        tab.Checklist.SelectedIndex = 1;
+        Pump();
+        Assert.True(tab.ChecklistDetails.IsEnabled);
+        Assert.Equal("load", tab.ChecklistIdBox.Text);
+        Assert.Equal("Ferry notes", tab.ChecklistNotesBox.Text);
+        Assert.Equal("Ferry rules, page 4", tab.ChecklistRuleRefBox.SelectedItem);
+        Assert.Equal(cut + ", Daily water, {item:ghost} (missing)", tab.ChecklistLinksText.Text);
+        Assert.Equal(["Id:", "Rule ref:", "Notes:", "Links:"], tab.ChecklistDetailLabels);
+
+        // Edit the notes and the rule ref; the id and text stay.
+        tab.ChecklistNotesBox.Text = "New notes";
+        tab.CommitPending();
+        tab.ChecklistRuleRefBox.SelectedItem = "(none)";
+        Pump();
+        var item = Ph(s, "ph-weather").Checklist[1];
+        Assert.Equal(("load", "New notes", (string?)null), (item.Id, item.Notes, item.RuleRefId));
+        Assert.StartsWith("Load once {item:spare}", item.Text);
+
+        // Rename the id of the plain item.
+        tab.Checklist.SelectedIndex = 2;
+        Pump();
+        Assert.Equal("", tab.ChecklistIdBox.Text);
+        Assert.Equal("", tab.ChecklistLinksText.Text);
+        tab.ChecklistIdBox.Text = "plain.1";
+        tab.CommitPending();
+        Assert.Equal("plain.1", Ph(s, "ph-weather").Checklist[2].Id);
+        Assert.Equal("plain.1: Plain item", ((IEnumerable<string>)tab.Checklist.ItemsSource!).ToList()[2]);
+        tab.ChecklistIdBox.Text = "";
+        tab.CommitPending();
+        Assert.Null(Ph(s, "ph-weather").Checklist[2].Id);
+        Assert.True(Ph(s, "ph-weather").Checklist[2].IsTextOnly);
+    }
+
+    [AvaloniaFact]
+    public void PhasesTab_checklist_id_statuses()
+    {
+        var s = Session(tweak: B1);
+        var tab = Tab(s);
+        tab.Checklist.SelectedIndex = 2;
+        Pump();
+        tab.ChecklistIdBox.Text = "two words";
+        tab.CommitPending();
+        Assert.Equal("Use letters, digits, '-', '_' or '.' in an id", tab.ChecklistIdStatus.Text);
+        Assert.Null(Ph(s, "ph-weather").Checklist[2].Id);
+        tab.ChecklistIdBox.Text = "tally";   // used in another phase: ids are unique across the pack
+        tab.CommitPending();
+        Assert.Equal("Another checklist item already has the id \"tally\"", tab.ChecklistIdStatus.Text);
+        Assert.Null(Ph(s, "ph-weather").Checklist[2].Id);
+        tab.ChecklistIdBox.Text = "fuel-check";
+        tab.CommitPending();
+        Assert.Equal("", tab.ChecklistIdStatus.Text);
+        Assert.Equal("fuel-check", Ph(s, "ph-weather").Checklist[2].Id);
+        // The item's own id is no clash.
+        tab.Checklist.SelectedIndex = 0;
+        Pump();
+        tab.ChecklistIdBox.Text = "spare";
+        tab.CommitPending();
+        Assert.Equal("", tab.ChecklistIdStatus.Text);
+    }
 }
