@@ -11,15 +11,18 @@ namespace Quartermaster.Render.Tests;
 [Collection(AppDataRootEnv.Name)]
 public class ChoicesTableDialogTests : OtherPiecesTestBase
 {
-    private static FormulaDef Cargo() => F("Barge cargo", "C", new[]
+    private const string SizeFilter = "lookup(Cargo, row(), \"Min size\") <= Strength";
+
+    private static FormulaDef Cargo(string filter = SizeFilter) => F("Barge cargo", "C", new[]
     {
         new VariableBinding { Variable = "S", Kind = BindingKind.Unit, Property = "str" },
-        new VariableBinding { Variable = "C", Kind = BindingKind.Input, ChoicesTable = "t-cargo", ChoicesFilter = "lookup(Cargo, row(), \"Min size\") <= Strength" },
+        new VariableBinding { Variable = "C", Kind = BindingKind.Input, ChoicesTable = "t-cargo", ChoicesFilter = filter },
     });
 
-    private (ModuleSession S, PhaseController C) Make(Difficulty d = Difficulty.SemiAuto, IEnumerable<PhaseDef>? phases = null)
+    private (ModuleSession S, PhaseController C) Make(Difficulty d = Difficulty.SemiAuto, IEnumerable<PhaseDef>? phases = null,
+        string filter = SizeFilter, Visibility strength = Visibility.Public, string iron = "6")
     {
-        var (s, c) = Open(d, new[] { Cargo() }, phases: phases);
+        var (s, c) = Open(d, new[] { Cargo(filter) }, strength: strength, phases: phases);
         s.UpdateRules(p => p with
         {
             Tables = new()
@@ -27,7 +30,7 @@ public class ChoicesTableDialogTests : OtherPiecesTestBase
                 new TableDef
                 {
                     Id = "t-cargo", Name = "Cargo", Kind = TableKind.TwoD, RowKeys = new() { "Grain", "Timber", "Iron" },
-                    ColumnKeys = new() { "Min size" }, Cells = new() { new() { "1" }, new() { "4" }, new() { "6" } },
+                    ColumnKeys = new() { "Min size" }, Cells = new() { new() { "1" }, new() { "4" }, new() { iron } },
                 },
             },
         });
@@ -57,6 +60,27 @@ public class ChoicesTableDialogTests : OtherPiecesTestBase
         Assert.Equal(new[] { "Grain", "Timber" }, b.ChoicesFor("C", Row("n1")));
         Assert.Equal(new[] { "Grain" }, b.ChoicesFor("C", Row("n2")));
         Assert.Equal(new[] { "Grain", "Timber", "Iron" }, b.ChoicesFor("C"));   // no row: every key
+    }
+
+    [Fact]
+    public void Hot_seat_dropdown_never_reflects_hidden_values()
+    {
+        // The filter reads the Southern Compact's private Strength (s1 7 + s2 5): on the full state Iron (10) is offered while the total is
+        // 12 and not once s1 drops to 0. The Northern League's seat must list the same choices either way.
+        var (s, c) = Make(phases: NorthStart(), filter: "lookup(Cargo, row(), \"Min size\") <= sum(Strength, \"startsWith(name(), \\\"South\\\")\")",
+            strength: Visibility.Private, iron: "10");
+        c.Start();
+        var run = Assert.Single(s.Game!.State.Pending);
+        var row = run.Units.ToList().FindIndex(u => u.PieceId == "n1");
+        s.SetViewSides(North);
+        IReadOnlyList<string>? DialogChoices() => Dialog(s, "n1").Evaluate(s.Game!.State).Boxes.Single(b => b.Variable == "C").Choices;
+        IReadOnlyList<string>? GridChoices() => new BatchModel(s, c, run.Id).ChoicesFor("C", row);
+        var dialog = DialogChoices();
+        var grid = GridChoices();
+        s.Game.Execute(new LedgerDelta(LedgerKey.Piece("s1"), "str", 7, 0, "test", null, null, null, null));
+        Assert.Equal(dialog, DialogChoices());
+        Assert.Equal(grid, GridChoices());
+        Assert.Equal(dialog, grid);
     }
 
     [Fact]

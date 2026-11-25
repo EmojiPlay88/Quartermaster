@@ -85,9 +85,15 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         if (Formula is not { } f || s.Rules is not { } pack) return null;
         var binding = f.Bindings.FirstOrDefault(b => b?.Variable == variable);
         if (binding is { Kind: BindingKind.Piece } pick) return PieceLabels(pack, f, pick, runPieceId);
-        // A choices table (B4): the keys left by its filter for this row's counter (every key without a row).
+        // A choices table (B4): the keys left by its filter for this row's counter (every key without a row), listed on the seat's own view
+        // (as Piece candidates are), so the list never reflects data that seat cannot see.
         if (binding is { Kind: BindingKind.Input } input && !string.IsNullOrWhiteSpace(input.ChoicesTable) && s.Game?.State is { } st)
-            return Cached(pack, f, variable, runPieceId, () => InputChoices.For(st, pack, s.Model, f, variable, runPieceId));
+            return Cached(pack, f, variable, runPieceId, () =>
+            {
+                var sides = FormulaMasking.PickSides(s);
+                var shown = sides == null || st.IsPlayerView ? st : PlayerView.For(st, pack, s.Model, sides);
+                return InputChoices.For(shown, pack, s.Model, f, variable, runPieceId);
+            });
         return KeyChoices.For(pack, f, variable);
     }
 

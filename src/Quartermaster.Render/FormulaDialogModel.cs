@@ -415,6 +415,24 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         return _choices = choices;
     }
 
+    /// <summary>
+    /// The state a choices table's filter is listed on (B4): the viewer's own view (<see cref="PlayerView.For"/> for <see cref="PickSides"/>)
+    /// when the dialog runs on the full state for a seat, as Piece candidates are, so the list never reflects data that seat cannot see (a
+    /// filter reading hidden data keeps the row; the run decides). Cached while the state and the sides are unchanged.
+    /// </summary>
+    private GameState ChoicesState()
+    {
+        var st = _state ?? new GameState();
+        if (PickSides is not { } sides || st.IsPlayerView) return st;
+        var key = (st, StateFingerprint(st), runner.Pack, sides);
+        if (_choicesView != null && Equals(_choicesViewKey, key)) return _choicesView;
+        _choicesViewKey = key;
+        return _choicesView = PlayerView.For(st, runner.Pack, runner.Model, sides);
+    }
+
+    private GameState? _choicesView;
+    private object? _choicesViewKey;
+
     private Dictionary<string, IReadOnlyList<string>>? _labels;
     private Dictionary<string, IReadOnlyList<PieceChoice>>? _choices;
     private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, string?, int, int, int, int)? _labelsKey;
@@ -493,7 +511,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             && !(HostCalculates && !HostRolled(v.Variable, t)))
             return new BoxView(v.Variable, DiceText(groupDice), BoxBackground.Auto, GroupRollSuffix, false, GroupRollTooltip, null);
         var typedBox = binding?.Kind is BindingKind.Input or BindingKind.Piece || IsPhysicalRoll(v.Variable);
-        var choices = binding?.Kind == BindingKind.Input ? InputChoices.For(_state ?? new GameState(), runner.Pack, runner.Model, formula, v.Variable, pieceId)
+        var choices = binding?.Kind == BindingKind.Input
+            ? InputChoices.For(string.IsNullOrWhiteSpace(binding.ChoicesTable) ? _state ?? new GameState() : ChoicesState(), runner.Pack, runner.Model, formula, v.Variable, pieceId)
             : binding?.Kind == BindingKind.Piece ? picks.GetValueOrDefault(v.Variable) ?? Array.Empty<string>() : null;
         var reason = v.MissingReason == "Waiting for input" || (v.MissingReason != null && typedBox && Raw(v.Variable) == "")
             ? "Waiting for input" : v.MissingReason;
