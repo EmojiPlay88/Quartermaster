@@ -204,17 +204,33 @@ public class MenuBatchOnlineTests : OtherPiecesTestBase
     public void Group_batch_re_preview_same_dice()
     {
         var (s, _, x) = Host(group: true);
-        var single = Single(x, "n2", preview: true).Rolls!["D"];
-        var first = Send(x, North, Batch(new[] { "n1", "n2" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"];
+        // One live group draw per sender and formula: single runs (each a group of one) and group batches all show it.
+        var first = Single(x, "n2", preview: true).Rolls!["D"];
+        Assert.Equal(first, Send(x, North, Batch(new[] { "n1", "n2" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"]);
+        Assert.Equal(first, Single(x, "n1", preview: true).Rolls!["D"]);
         Assert.Equal(first, Send(x, North, Batch(new[] { "n2", "n1" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"]);
         Assert.Equal(first, Send(x, North, Batch(new[] { "n2" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"]);
-        // The group's dice are the first counter's own pinned roll: a single run on it shows the same dice.
-        Assert.Equal(first, Single(x, "n1", preview: true).Rolls!["D"]);
-        Assert.NotEqual(single, first);   // n2's own single roll is its own (a single run is a group of one)
         var r = Send(x, North, Batch(new[] { "n2", "n1" }));
         Assert.True(r.Ok, r.Message);
         Assert.Equal(first.Sum(), Str(s, "n1"));
         Assert.Equal(first.Sum(), Str(s, "n2"));
+    }
+
+    [Fact]
+    public void Group_draw_after_apply_is_one_new_draw()
+    {
+        var (s, _, x) = Host(group: true);
+        var offered = Single(x, "n1", preview: true).Rolls!["D"];   // n1 is offered the group draw
+        Assert.True(Send(x, North, Batch(new[] { "n2" })).Ok);      // applying any group run consumes that draw
+        Assert.Equal(offered.Sum(), Str(s, "n2"));
+        // The next draw is one draw again, whichever way it is asked for: n1 never holds two live offers.
+        var next = Send(x, North, Batch(new[] { "n2", "n1" }, preview: true)).BatchVerdict!.Rows[1].Rolls!["D"];
+        Assert.Equal(next, Single(x, "n1", preview: true).Rolls!["D"]);
+        Assert.Equal(next, Send(x, North, Batch(new[] { "n1" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"]);
+        var v = Single(x, "n1", preview: false);
+        Assert.True(v.Applied, v.Message);
+        Assert.Equal(next.Sum(), Str(s, "n1"));
+        Assert.NotEqual(offered.Sum(), next.Sum());
     }
 
     [Fact]
