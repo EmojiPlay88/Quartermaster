@@ -175,6 +175,73 @@ public class MenuBatchOnlineTests : OtherPiecesTestBase
         Assert.Equal(IntentExecutor.NotUnderstoodText, tooLong.Message);
     }
 
+    // ---- fix round 1: nothing re-rolled by asking again ----
+
+    private static FormulaVerdict Single(IntentExecutor x, string pieceId, bool preview) =>
+        x.Execute("p1", North, new FormulaIntent("f", pieceId, null, None, false, preview)).Verdict!;
+
+    [Fact]
+    public void Single_preview_then_batch_apply_same_dice()
+    {
+        var (s, _, x) = Host();
+        var d = Single(x, "n1", preview: true).Rolls!["D"].Sum();
+        var r = Send(x, North, Batch(new[] { "n2", "n1" }));
+        Assert.True(r.Ok, r.Message);
+        Assert.Equal(d, Str(s, "n1"));
+    }
+
+    [Fact]
+    public void Batch_preview_then_single_apply_same_dice()
+    {
+        var (s, _, x) = Host();
+        var preview = Send(x, North, Batch(new[] { "n1", "n2" }, preview: true)).BatchVerdict!;
+        var v = Single(x, "n1", preview: false);
+        Assert.True(v.Applied, v.Message);
+        Assert.Equal(preview.Rows[0].Rolls!["D"].Sum(), Str(s, "n1"));
+    }
+
+    [Fact]
+    public void Group_batch_re_preview_same_dice()
+    {
+        var (s, _, x) = Host(group: true);
+        var single = Single(x, "n2", preview: true).Rolls!["D"];
+        var first = Send(x, North, Batch(new[] { "n1", "n2" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"];
+        Assert.Equal(first, Send(x, North, Batch(new[] { "n2", "n1" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"]);
+        Assert.Equal(first, Send(x, North, Batch(new[] { "n2" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"]);
+        // The group's dice are the first counter's own pinned roll: a single run on it shows the same dice.
+        Assert.Equal(first, Single(x, "n1", preview: true).Rolls!["D"]);
+        Assert.NotEqual(single, first);   // n2's own single roll is its own (a single run is a group of one)
+        var r = Send(x, North, Batch(new[] { "n2", "n1" }));
+        Assert.True(r.Ok, r.Message);
+        Assert.Equal(first.Sum(), Str(s, "n1"));
+        Assert.Equal(first.Sum(), Str(s, "n2"));
+    }
+
+    [Fact]
+    public void Removed_row_pins_released()
+    {
+        var scuttle = F("Scuttle", "D", new[] { new VariableBinding { Variable = "D", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 }, Own(), Pick() },
+            Remove(OutputTarget.Piece));
+        var (s, c) = Open(Difficulty.FullyAuto, new[] { scuttle }, players: new[] { Alice, Bob });
+        var x = new IntentExecutor(s, c);
+        var intent = new FormulaBatchIntent("f", new[]
+        {
+            new FormulaBatchRow("n1", new Dictionary<string, string> { ["T"] = Label(s, "n2") }, new Dictionary<string, string> { ["T"] = "n2" }),
+            new FormulaBatchRow("n2", None, null),
+        }, false, false);
+        var r = x.Execute("p1", North, intent);
+        Assert.True(r.Ok, r.Message);
+        Assert.False(s.Game!.State.Pieces.ContainsKey("n2"));
+        Assert.Equal(0, x.Pins.Count("p1"));
+    }
+
+    [Fact]
+    public void Stopped_text_counts_earlier_rows()
+    {
+        Assert.Equal("Nothing applied: row 1 cannot be applied yet.", FormulaWindowRules.StoppedText(0, 1));
+        Assert.Equal("Applied 2 run(s) as one step. Row 3: cannot be applied yet.", FormulaWindowRules.StoppedText(2, 3));
+    }
+
     [Fact]
     public async Task Old_port_default_refuses()
     {

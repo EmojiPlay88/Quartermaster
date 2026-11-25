@@ -59,7 +59,6 @@ public sealed class MenuBatchModel : IBatchRows
         var applies = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var id in pieceIds ?? Array.Empty<string>())
         {
-            if (_rows.Count >= MaxBatchRows) break;
             if (id == null || !st.Pieces.TryGetValue(id, out var p) || !s.CanAct(id)) continue;
             if (!applies.TryGetValue(id, out var ok))
             {
@@ -67,7 +66,13 @@ public sealed class MenuBatchModel : IBatchRows
                 catch (Exception ex) when (ex is not OutOfMemoryException) { ok = false; }
                 applies[id] = ok;
             }
-            if (ok) _rows.Add(new Slot(id));
+            if (!ok) continue;
+            if (_rows.Count >= MaxBatchRows)
+            {
+                Status = FormulaWindowRules.CutRowsText;   // only counters this viewer may act on are counted
+                break;
+            }
+            _rows.Add(new Slot(id));
         }
     }
 
@@ -231,11 +236,9 @@ public sealed class MenuBatchModel : IBatchRows
         _choices.Clear();
     }
 
-    public void Invalidate()
-    {
-        _chain = null;
-        _choices.Clear();
-    }
+    /// <summary>Drops the chain (typed values are kept). The dropdown lists stay: they depend only on the state and the viewer, which their
+    /// cache key holds, so a cell edit never rebuilds a player's view for them.</summary>
+    public void Invalidate() => _chain = null;
 
     // ---- the preview chain ----
 
@@ -348,6 +351,7 @@ public sealed class MenuBatchModel : IBatchRows
 
     private readonly Dictionary<(string Variable, string? Piece), IReadOnlyList<string>?> _choices = new();
     private object? _choicesKey;
+    private GameState? _shown;
 
     /// <summary>
     /// The dropdown of a column for a row (<paramref name="row"/> -1: the All rows line, listed without a run piece): a Piece binding's
@@ -359,14 +363,15 @@ public sealed class MenuBatchModel : IBatchRows
         var piece = SlotAt(row)?.PieceId;
         var sides = FormulaMasking.PickSides(s);
         var key = (st, FormulaDialogModel.StateFingerprint(st), pack, f, sides == null ? "" : string.Join("\n", sides.Order(StringComparer.Ordinal)));
-        if (!Equals(_choicesKey, key)) { _choices.Clear(); _choicesKey = key; }
+        if (!Equals(_choicesKey, key)) { _choices.Clear(); _choicesKey = key; _shown = null; }
         if (_choices.TryGetValue((variable, piece), out var cached)) return cached;
         IReadOnlyList<string>? list;
         if (b.Kind == BindingKind.Piece)
             list = Quartermaster.Core.PieceChoices.For(st, pack, s.Model, b, sides, piece).Select(c => c.Label).ToList();
         else if (b.Kind == BindingKind.Input && !string.IsNullOrWhiteSpace(b.ChoicesTable))
         {
-            var shown = sides == null || st.IsPlayerView ? st : PlayerView.For(st, pack, s.Model, sides);
+            // The seat's own view, built once per (state, viewer) for every row and column.
+            var shown = sides == null || st.IsPlayerView ? st : _shown ??= PlayerView.For(st, pack, s.Model, sides);
             list = InputChoices.For(shown, pack, s.Model, f, variable, piece);
         }
         else list = KeyChoices.For(pack, f, variable);
@@ -425,9 +430,7 @@ public sealed class MenuBatchModel : IBatchRows
                 if (f.GroupRoll) BatchChain.AddDrawn(group, trace);
             }
         }
-        Status = failed < 0 ? FormulaWindowRules.AppliedRunsText(applied)
-            : applied == 0 ? FormulaWindowRules.NothingAppliedRowText(failed + 1)
-            : FormulaWindowRules.AppliedRunsText(applied) + " " + FormulaWindowRules.RowMessage(failed + 1, "cannot be applied yet.");
+        Status = failed < 0 ? FormulaWindowRules.AppliedRunsText(applied) : FormulaWindowRules.StoppedText(applied, failed + 1);
         Invalidate();
         return applied;
     }
@@ -439,7 +442,7 @@ public sealed class MenuBatchModel : IBatchRows
     /// <param name="preview">Calculate all: the host only runs the chain (fills the cells, pins the dice); nothing is applied.</param>
     public async Task<(int Applied, string? Message)> SendAsync(bool calculate, bool preview = false)
     {
-        if (_port == null || Formula is not { } f || s.Game == null) return (0, null);
+        if (_port == null || !HostCalculates || Formula is not { } f || s.Game == null) return (0, null);   // guest only: the local grid uses ApplyAll
         Chain();   // every row's model synced and evaluated: each pick goes with its current label and piece
         var rows = Enumerable.Range(0, _rows.Count).Where(i => s.CanAct(_rows[i].PieceId)).ToList();
         if (rows.Count == 0) return (0, null);

@@ -523,9 +523,12 @@ internal static class FormulaIntentRunner
 /// A guest's menu batch on the host (B4, <see cref="FormulaBatchIntent"/>). Every row passes exactly the checks of a single run
 /// (<see cref="FormulaIntentRunner.Prepare"/>); a refused row refuses the batch with <c>Row {n}: {message}</c> (the single run's neutral text).
 /// The rows run in order as a chain on one clone of the full state (<see cref="GameState.DeepClone"/>), so each row sees the rows before it;
-/// a row whose counter an earlier row removes is skipped. Dice are pinned per sender: a row's under
-/// <c>batch:{pieceId}#{k}</c> (k = the occurrence of that counter among the rows, so reordering rows on different counters keeps every row's
-/// dice), a group roll's under <c>batch:group</c>; a <see cref="FormulaDef.GroupRoll"/> formula's dice are drawn once for the whole batch.
+/// a row whose counter an earlier row removes is skipped (no pin scope is opened for it). Dice are pinned per sender so that nothing can be
+/// re-rolled by asking again: a counter's first row uses the very pin of a single run on that counter (<c>{pieceId}</c>, both ways: a
+/// single run after a batch preview reuses the row's dice and the other way round), its k-th row (k &gt;= 2) <c>batch:{pieceId}#{k}</c>,
+/// so reordering rows on different counters keeps every row's dice. A <see cref="FormulaDef.GroupRoll"/> formula's dice are drawn once for
+/// the whole batch under <c>batch:group</c> (whatever the rows and their order), taken from the first row's counter pin (rolled and pinned
+/// there when it has none), so a group roll cannot be had twice either.
 /// A preview answers each row's visible values and dice; an Apply applies every row (in order, each its own run) in one action, and only
 /// when every row can. Never throws past its caller's guard; nothing hidden goes into a verdict.
 /// </summary>
@@ -551,11 +554,18 @@ internal static class FormulaBatchRunner
         var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
         var rows = new List<Row>();
         var verdicts = new List<FormulaVerdict>();
-        FormulaPins.Scope? groupScope = null;
-        var groupKey = new FormulaPins.Key(who ?? "", f.Id, "batch:group");
-        if (pins != null && f.GroupRoll && (groupScope = pins.Open(groupKey, g, pack, pins.MayRollHint(f))) == null)
-            return FormulaBatchVerdict.Refused(FormulaPins.FullText);
         var roller = s.Roll;
+        FormulaPins.Key KeyFor(string? pieceId, int occurrence) =>
+            new(who ?? "", f.Id, occurrence == 1 ? pieceId : $"batch:{pieceId}#{occurrence}");
+        // A group roll: one scope for the batch, whose dice come from (and are pinned in) the first row's counter pin.
+        FormulaPins.Scope? groupScope = null, leadScope = null;
+        var groupKey = new FormulaPins.Key(who ?? "", f.Id, "batch:group");
+        var leadKey = KeyFor(intents[0]!.PieceId, 1);
+        if (pins != null && f.GroupRoll)
+        {
+            if ((groupScope = pins.Open(groupKey, g, pack, pins.MayRollHint(f))) == null || (leadScope = pins.Open(leadKey, g, pack, pins.MayRollHint(f))) == null)
+                return FormulaBatchVerdict.Refused(FormulaPins.FullText);
+        }
         FormulaBatchVerdict Refuse(int row, string message) => new(false, verdicts, FormulaWindowRules.RowMessage(row + 1, message));
 
         for (var k = 0; k < intents.Count; k++)
@@ -567,26 +577,36 @@ internal static class FormulaBatchRunner
             var (prepared, why) = FormulaIntentRunner.Prepare(s, c, sides, i, guest, full, removed ? full : at);
             if (prepared == null) return Refuse(k, why!);
             var occurrence = occurrences[i.PieceId ?? ""] = occurrences.GetValueOrDefault(i.PieceId ?? "") + 1;
-            var pinKey = new FormulaPins.Key(who ?? "", f.Id, $"batch:{i.PieceId}#{occurrence}");
-            FormulaPins.Scope? scope = null;
-            if (pins != null)
-            {
-                scope = groupScope ?? pins.Open(pinKey, g, pack, pins.MayRollHint(f));
-                if (scope == null) return Refuse(k, FormulaPins.FullText);
-                var sc = scope;
-                prepared.Model.DiceSource = (key, n, sd) => sc.Roll(key, n, sd, roller);
-            }
-            rows.Add(new Row(i, prepared, groupScope == null ? pinKey : null, scope, removed));
             if (removed)
             {
+                rows.Add(new Row(i, prepared, null, null, true));   // skipped: no dice, no pin scope
                 verdicts.Add(new FormulaVerdict(false, Array.Empty<FormulaBox>(), FormulaWindowRules.RemovedByEarlierRowText));
                 continue;
             }
+            var pinKey = groupScope != null ? (k == 0 ? leadKey : (FormulaPins.Key?)null) : KeyFor(i.PieceId, occurrence);
+            FormulaPins.Scope? scope = null;
+            if (pins != null)
+            {
+                if (groupScope != null)
+                {
+                    scope = groupScope;
+                    var (gs, ls) = (groupScope, leadScope!);
+                    prepared.Model.DiceSource = (key, n, sd) => gs.Roll(key, n, sd, (n2, sd2) => ls.Roll(key, n2, sd2, roller));
+                }
+                else
+                {
+                    scope = pins.Open(pinKey!.Value, g, pack, pins.MayRollHint(f));
+                    if (scope == null) return Refuse(k, FormulaPins.FullText);
+                    var sc = scope;
+                    prepared.Model.DiceSource = (key, n, sd) => sc.Roll(key, n, sd, roller);
+                }
+            }
+            rows.Add(new Row(i, prepared, pinKey, scope, false));
             var (_, model, hidden, _) = prepared;
             model.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
             if (i.Calculate) model.Calculate(at);
             var dv = model.Evaluate(at);
-            if (scope is { Unpinned: true }) return Refuse(k, FormulaPins.FullText);
+            if (scope is { Unpinned: true } || leadScope is { Unpinned: true }) return Refuse(k, FormulaPins.FullText);
             var boxes = Boxes(dv, hidden);
             if (bi.Preview)
             {
@@ -631,7 +651,7 @@ internal static class FormulaBatchRunner
             {
                 var row = rows[k];
                 var pid = row.Intent.PieceId;
-                if (pid != null && !g.State.Pieces.ContainsKey(pid)) continue;   // removed by an earlier row
+                if (row.Removed || (pid != null && !g.State.Pieces.ContainsKey(pid))) continue;   // removed by an earlier row
                 var (_, model, hidden, _) = row.Prepared!;
                 model.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
                 var trace = model.Run(g.State);
@@ -640,8 +660,9 @@ internal static class FormulaBatchRunner
                     || !c.ApplyFormula(null, pid, trace, model.AutoCalculated || row.Scope?.Previewed == true))
                 {
                     // Only a placed piece's seeds can differ from the chain: the rows applied stay (still one undo step).
-                    message = FormulaWindowRules.RowMessage(k + 1, dv.CanApply ? FormulaIntentRunner.NotWaitingText : FormulaIntentRunner.SafeStatus(dv, hidden));
-                    verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes, message);
+                    // The guest is told how many earlier rows stay applied (counts only, as the local grid says it).
+                    message = FormulaWindowRules.StoppedText(applied, k + 1);
+                    verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden));
                     break;
                 }
                 verdicts[k] = new FormulaVerdict(true, verdicts[k].Boxes, null);

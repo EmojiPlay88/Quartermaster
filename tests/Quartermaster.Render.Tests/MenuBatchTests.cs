@@ -257,6 +257,32 @@ public class MenuBatchTests : OtherPiecesTestBase
     }
 
     [Fact]
+    public void Selection_over_100_says_so()
+    {
+        var (s, c) = Open(Difficulty.FullyAuto, new[] { GroupRollRunTests.Ford(group: false) });
+        var cut = new MenuBatchModel(s, c, "f", Enumerable.Repeat("n1", 150).ToList());
+        Assert.Equal(100, cut.RowCount);
+        Assert.Equal(FormulaWindowRules.CutRowsText, cut.Status);
+        Assert.Equal("A batch holds at most 100 rows: only the first 100 were taken.", cut.Status);
+        Assert.Null(new MenuBatchModel(s, c, "f", new[] { "n1", "n2" }).Status);
+    }
+
+    [Fact]
+    public void Cell_edit_keeps_dropdown_lists()
+    {
+        var f = F("Shore up", "S", new[] { Unit(), Pick() }, PieceWrite(OutputOp.Add));
+        var (s, c) = Open(Difficulty.FullyAuto, new[] { f }, players: new[] { Alice, Bob });
+        s.SetViewSides(North);
+        var b = new MenuBatchModel(s, c, "f", new[] { "n1", "n2" });
+        var list = b.ChoicesFor("T", 0);
+        b.SetCell(1, "T", Label(s, "n1"));
+        b.SetAllRowsCell("T", Label(s, "n2"));
+        Assert.Same(list, b.ChoicesFor("T", 0));   // a cell edit does not rebuild the viewer's lists
+        s.Game!.Execute(new MovePieces(new[] { "s1" }, "Main Map", new Quartermaster.Vassal.PointD(130, 50), null));
+        Assert.NotSame(list, b.ChoicesFor("T", 0));   // a state change does
+    }
+
+    [Fact]
     public void BatchModel_implements_IBatchRows_unchanged()
     {
         Assert.True(typeof(IBatchRows).IsAssignableFrom(typeof(BatchModel)));

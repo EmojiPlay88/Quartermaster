@@ -117,6 +117,16 @@ public static class FormulaWindowRules
     /// <summary>Status when a row would make the batch longer than <see cref="MenuBatchModel.MaxBatchRows"/>.</summary>
     public const string MaxRowsText = "A batch holds at most 100 rows.";
 
+    /// <summary>Status when a menu batch is opened on more counters than <see cref="MenuBatchModel.MaxBatchRows"/> (only the first are taken).</summary>
+    public const string CutRowsText = "A batch holds at most 100 rows: only the first 100 were taken.";
+
+    /// <summary>
+    /// Status of a menu batch whose live apply stopped at <paramref name="row"/> (1-based): nothing applied, or the earlier rows applied as
+    /// one step (they stay). Counts only, so a guest learns nothing hidden.
+    /// </summary>
+    public static string StoppedText(int applied, int row) =>
+        applied == 0 ? NothingAppliedRowText(row) : AppliedRunsText(applied) + " " + RowMessage(row, "cannot be applied yet.");
+
     /// <summary>The menu batch grid's title.</summary>
     public static string MenuBatchTitle(string formula, int runs) => $"{formula} — {runs} runs";
 
