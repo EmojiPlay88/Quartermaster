@@ -386,7 +386,8 @@ internal static class FormulaIntentRunner
         {
             if (variable == null || f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable) is not { Kind: BindingKind.Piece } pb) continue;
             if (i.Typed?.GetValueOrDefault(variable) is not { } label || string.IsNullOrWhiteSpace(label)) continue;   // nothing picked: waits
-            var hit = Quartermaster.Core.PieceChoices.For(full, pack, s.Model, pb, sides)
+            // The same list as the sender's dialog: its run piece's hex first ("same hex": only that hex).
+            var hit = Quartermaster.Core.PieceChoices.For(full, pack, s.Model, pb, sides, i.PieceId)
                 .FirstOrDefault(x => string.Equals(x.Label, label.Trim(), StringComparison.OrdinalIgnoreCase));
             if (hit == null || id == null || !string.Equals(hit.PieceId, id, StringComparison.Ordinal))
                 return FormulaVerdict.Refused(Quartermaster.Core.PieceChoices.Unknown);

@@ -490,12 +490,13 @@ public class PieceEffectTests
         // the guest's own view cannot act on the placeholder
         Assert.Equal("Hidden from this player", Assert.Single(EffectFx.Run(view, pack, "b1", EffectFx.Typed(label), EffectFx.South).Variables,
             v => v.Variable == "T").MissingReason);
-        // the host resolves the guest's pick; the guest's working names it as the guest sees it, the effect lines by its real name
+        // the host resolves the guest's pick; the guest's working names it as the guest sees it (and a level by its number, never its name:
+        // that would tell what the piece is), the effect lines by its real name
         var t = EffectFx.Run(s, pack, "b1", EffectFx.Typed(label), EffectFx.South);
         Assert.Null(t.Error);
-        Assert.Equal("1 = 1 → Levels of Unknown piece = Camp; removed Unknown piece", t.Working);
+        Assert.Equal("1 = 1 → Levels of Unknown piece = 1; removed Unknown piece", t.Working);
         var cmds = EffectFx.Runner(pack).Commands(t, null, sideId: "blue");
-        Assert.Equal("Shelling: 1 = 1 → Levels of Unknown piece = Camp; removed Unknown piece", cmds.OfType<AddLogLine>().Single(l => l.Kind == LogKind.Calc).Text);
+        Assert.Equal("Shelling: 1 = 1 → Levels of Unknown piece = 1; removed Unknown piece", cmds.OfType<AddLogLine>().Single(l => l.Kind == LogKind.Calc).Text);
         var sys = cmds.OfType<AddLogLine>().Single(l => l.Kind == LogKind.System);
         Assert.Equal(("Shelling: Levels of North Secret Battery = Camp", "red"), (sys.Text, sys.SideId));
         Assert.Equal("Shelling: removed North Secret Battery", cmds.OfType<RemovePiece>().Single().LogText);

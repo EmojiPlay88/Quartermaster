@@ -70,12 +70,20 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
 
     /// <summary>
     /// The dropdown of a column: an Input's keys (its own Choices, or the table keys it indexes), or a Piece binding's candidate labels as
-    /// the viewer sees them (<see cref="FormulaMasking.PickSides"/>; the list does not depend on the row). Null: free text (also for range keys).
+    /// the viewer sees them (<see cref="FormulaMasking.PickSides"/>; without a row in label order, see <see cref="ChoicesFor(string, int)"/>). Null: free text (also for range keys).
     /// </summary>
-    public IReadOnlyList<string>? ChoicesFor(string variable)
+    public IReadOnlyList<string>? ChoicesFor(string variable) => ChoicesFor(variable, null);
+
+    /// <summary>
+    /// As <see cref="ChoicesFor(string)"/> for one row: a Piece column's candidates are listed for that row's unit (its hex first; a "same hex"
+    /// binding only the other pieces in its hex), as the row's dialog model and the host list them.
+    /// </summary>
+    public IReadOnlyList<string>? ChoicesFor(string variable, int row) => ChoicesFor(variable, Unit(row)?.PieceId);
+
+    private IReadOnlyList<string>? ChoicesFor(string variable, string? runPieceId)
     {
         if (Formula is not { } f || s.Rules is not { } pack) return null;
-        if (f.Bindings.FirstOrDefault(b => b?.Variable == variable) is { Kind: BindingKind.Piece } pick) return PieceLabels(pack, f, pick);
+        if (f.Bindings.FirstOrDefault(b => b?.Variable == variable) is { Kind: BindingKind.Piece } pick) return PieceLabels(pack, f, pick, runPieceId);
         return KeyChoices.For(pack, f, variable);
     }
 
@@ -83,19 +91,20 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     public bool IsChoiceColumn(string variable) =>
         Formula is { } f && (f.Bindings.Any(b => b is { Kind: BindingKind.Piece } && b.Variable == variable) || ChoicesFor(variable) is { Count: > 0 });
 
-    private readonly Dictionary<string, IReadOnlyList<string>> _pieceLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Variable, string? RunPiece), IReadOnlyList<string>> _pieceLabels = new();
     private object? _pieceLabelsKey;
 
-    /// <summary>A Piece column's labels, cached per (state object, its fingerprint, rules pack, formula, viewer's sides).</summary>
-    private IReadOnlyList<string> PieceLabels(RulesPack pack, FormulaDef f, VariableBinding b)
+    /// <summary>A Piece column's labels for a run piece (null: the column's, in label order), cached per (state object, its fingerprint, rules
+    /// pack, formula, viewer's sides).</summary>
+    private IReadOnlyList<string> PieceLabels(RulesPack pack, FormulaDef f, VariableBinding b, string? runPieceId)
     {
         if (s.Game?.State is not { } st) return Array.Empty<string>();
         var sides = FormulaMasking.PickSides(s);
         var key = (st, FormulaDialogModel.StateFingerprint(st), pack, f, s.Model, sides == null ? "" : string.Join("\n", sides.Order(StringComparer.Ordinal)));
         if (!Equals(_pieceLabelsKey, key)) { _pieceLabels.Clear(); _pieceLabelsKey = key; }
-        if (_pieceLabels.TryGetValue(b.Variable, out var cached)) return cached;
-        var labels = Quartermaster.Core.PieceChoices.For(st, pack, s.Model, b, sides).Select(c => c.Label).ToList();
-        _pieceLabels[b.Variable] = labels;
+        if (_pieceLabels.TryGetValue((b.Variable, runPieceId), out var cached)) return cached;
+        var labels = Quartermaster.Core.PieceChoices.For(st, pack, s.Model, b, sides, runPieceId).Select(c => c.Label).ToList();
+        _pieceLabels[(b.Variable, runPieceId)] = labels;
         return labels;
     }
 

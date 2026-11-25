@@ -385,7 +385,8 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             _askStamp = string.IsNullOrEmpty(ask) ? null : ask;   // its rolls and working follow the asked side's privacy
             try
             {
-                foreach (var c in s.Runner.Commands(trace, null, tag, unit, Stamp())) Exec(c);
+                // The whole run (rolls, a placed piece and its seeds, ledger lines, effects, removals) inside this one action.
+                FormulaApply.Execute(s, s.Runner.Commands(trace, null, tag, unit, Stamp()), Exec);
                 LogWorking(trace, unit, tag);
             }
             finally { _askStamp = null; }
@@ -434,7 +435,8 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// with outputs, so every applied run is counted exactly once.</remarks>
     private void LogWorking(FormulaTrace trace, string unit, string? tag)
     {
-        if (trace.Outputs.Count > 0 || string.IsNullOrWhiteSpace(trace.Working)) return;
+        // A run with any output or effect logs its working itself (FormulaRunner.Commands: on its first own write, else on a line of its own).
+        if (trace.Outputs.Count > 0 || (trace.Effects?.Count ?? 0) > 0 || string.IsNullOrWhiteSpace(trace.Working)) return;
         Exec(new AddLogLine(LogKind.Calc, $"{unit}: {trace.Working}" + (tag == null ? "" : $" ({tag})"), trace.PieceId, SideId: Stamp(),
             FormulaId: trace.Formula.Id) { AppliedRun = trace.Formula.Id });
     }
@@ -656,19 +658,21 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var needInput = new List<Unit>();
         var g = s.Game;
         var state = g.State;
-        // One pass (spec #31): the units share one side map and one aggregate state, and the entry raises Changed once. The commands
-        // inside write only ledgers, rolls and log lines (the pass's invariant); each unit still reads the writes of the units before it.
+        // One pass (spec #31): the units share one side map and one aggregate state, and the entry raises Changed once; each unit reads the
+        // writes of the units before it. A unit whose commands add, remove or move a piece or change a trait state drops the pass's side map
+        // and aggregate state (AfterApply), so the next unit sees the change. A placed piece never joins this entry's units (the list is fixed).
         using (g.DeferChanged())
         {
             using (s.Runner.BeginPass(state))
                 foreach (var u in units)
                 {
+                    if (u.PieceId != null && !g.State.Pieces.ContainsKey(u.PieceId)) continue;   // removed by an earlier unit: skipped, no line
                     var trace = s.Runner.Run(state, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
                     if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true); continue; }   // hidden like its working
                     if (trace.Result == null) { needInput.Add(u); continue; }
-                    foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, Stamp())) Exec(c);
+                    var executed = FormulaApply.Execute(s, s.Runner.Commands(trace, null, "auto", u.Label, Stamp()), Exec);
                     LogWorking(trace, u.Label, "auto");
-                    s.Runner.AfterApply();
+                    s.Runner.AfterApply(executed);
                     applied++;
                 }
             if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied", formulaId: LogKind.NoWorking);

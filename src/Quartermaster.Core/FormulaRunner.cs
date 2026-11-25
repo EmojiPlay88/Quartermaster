@@ -396,7 +396,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                         var level = n >= 1 && n <= def.LevelNames.Count && def.LevelNames[n - 1]?.Trim() is { Length: > 0 } ln
                             ? ln : n.ToString(CultureInfo.InvariantCulture);
                         index = li;
-                        shown = $"{layer} of {tg.Shown} = {level}";
+                        // A piece the requester sees masked (its name differs from the real one) shows the level as its number: a level's
+                        // name would tell what the piece is.
+                        var maskedToViewer = !string.Equals(tg.Shown, tg.Real, StringComparison.Ordinal);
+                        shown = $"{layer} of {tg.Shown} = {(maskedToViewer ? n.ToString(CultureInfo.InvariantCulture) : level)}";
                         logged = $"{layer} of {tg.Real} = {level}";
                     }
                     else

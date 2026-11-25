@@ -324,8 +324,11 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         // A guest's local run rolls its own dice; until the host's are in, no result built on them is shown.
         var localDice = HostCalculates && t.RollsByKey.Keys.Any(k => !HostRolled(k, t));
         var masked = _hidden.Count > 0;
-        // A hidden pick still waits for the viewer's own choice (the reason comes from the viewer's list, never from the value).
-        var missing = vars.Where(v => v.MissingReason != null && (!IsHidden(v.Variable) || (IsPick(v.Variable) && IsPickReason(v.MissingReason))))
+        // A hidden pick still waits for the viewer's own choice (the reason comes from the viewer's list, never from the value). On a guest, a
+        // pick whose target its view cannot read ("Hidden from this player": a masked piece, another side's private value a Piece output
+        // writes) is made: the host decides it.
+        var missing = vars.Where(v => v.MissingReason != null && (!IsHidden(v.Variable) || (IsPick(v.Variable) && IsPickReason(v.MissingReason)))
+                && !(HostCalculates && IsPick(v.Variable) && v.MissingReason == TargetHiddenText))
             .Select(v => v.Variable).ToList();
         var wrong = boxes.Where(b => b.Wrong).Select(b => b.Variable).ToList();
         var canApply = t.Result != null && t.Error == null && _phaseReason == null;
@@ -389,7 +392,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var choices = new Dictionary<string, IReadOnlyList<PieceChoice>>(StringComparer.Ordinal);
         foreach (var b in formula.Bindings)
             if (b is { Kind: BindingKind.Piece, Variable: not null })
-                choices[b.Variable] = PieceCandidates.For(_state, runner.Pack, runner.Model, b, PickSides);
+                choices[b.Variable] = PieceCandidates.For(_state, runner.Pack, runner.Model, b, PickSides, pieceId);   // the run piece's hex first
         _labelsKey = key;
         _labels = choices.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value.Select(c => c.Label).ToList(), StringComparer.Ordinal);
         return _choices = choices;
@@ -397,13 +400,13 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     private Dictionary<string, IReadOnlyList<string>>? _labels;
     private Dictionary<string, IReadOnlyList<PieceChoice>>? _choices;
-    private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, int, int, int, int)? _labelsKey;
+    private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, string?, int, int, int, int)? _labelsKey;
 
     /// <summary>What the candidate lists depend on: the state object, its pieces (place, type, trait states), the ledger and log lengths.</summary>
-    private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, int, int, int, int) LabelsKey(GameState st)
+    private (GameState, FormulaDef, FormulaRunner, IReadOnlySet<string>?, string?, int, int, int, int) LabelsKey(GameState st)
     {
         var (h, count, ledger, log) = StateFingerprint(st);
-        return (st, formula, runner, PickSides, h, count, ledger, log);
+        return (st, formula, runner, PickSides, pieceId, h, count, ledger, log);   // the run piece orders (and "same hex" limits) the lists
     }
 
     /// <summary>
@@ -511,6 +514,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         }
         return new BoxView(v.Variable, text, BoxBackground.Typed, "", true, tip, null, wrong);
     }
+
+    /// <summary>A pick's missing reason on a player view whose target (or the value a Piece output writes on it) the view cannot read.</summary>
+    private const string TargetHiddenText = "Hidden from this player";
 
     /// <summary>Status of a hot-seat run whose hidden inputs gave no result (which input is not said: that would tell whether it is set).</summary>
     public const string HiddenWaitText = "Some inputs are hidden and could not be calculated.";
