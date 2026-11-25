@@ -88,6 +88,9 @@ public sealed class MenuBatchModel : IBatchRows
     /// <summary>The last status line: applied, nothing applied (and the row that blocks), the row limit, or the host's answer.</summary>
     public string? Status { get; private set; }
 
+    /// <summary>True after the last Apply all (local, or the host's verdict for a guest) applied every row; false after a refusal, a stop, or a preview.</summary>
+    public bool FullyApplied { get; private set; }
+
     private FormulaDef? Formula => s.Rules?.ById<FormulaDef>(_formulaId);
 
     public IReadOnlyList<string> Variables => Formula is { } f ? f.Bindings.Select(b => b.Variable).ToList() : Array.Empty<string>();
@@ -401,6 +404,7 @@ public sealed class MenuBatchModel : IBatchRows
     public int ApplyAll()
     {
         Status = null;
+        FullyApplied = false;
         if (HostCalculates || s.Game is not { } g || Formula is not { } f || s.Runner == null) return 0;
         _chain = null;
         var links = Chain();
@@ -430,6 +434,7 @@ public sealed class MenuBatchModel : IBatchRows
                 if (f.GroupRoll) BatchChain.AddDrawn(group, trace);
             }
         }
+        FullyApplied = failed < 0 && applied > 0;
         Status = failed < 0 ? FormulaWindowRules.AppliedRunsText(applied) : FormulaWindowRules.StoppedText(applied, failed + 1);
         Invalidate();
         return applied;
@@ -442,6 +447,7 @@ public sealed class MenuBatchModel : IBatchRows
     /// <param name="preview">Calculate all: the host only runs the chain (fills the cells, pins the dice); nothing is applied.</param>
     public async Task<(int Applied, string? Message)> SendAsync(bool calculate, bool preview = false)
     {
+        FullyApplied = false;
         if (_port == null || !HostCalculates || Formula is not { } f || s.Game == null) return (0, null);   // guest only: the local grid uses ApplyAll
         Chain();   // every row's model synced and evaluated: each pick goes with its current label and piece
         var rows = Enumerable.Range(0, _rows.Count).Where(i => s.CanAct(_rows[i].PieceId)).ToList();
@@ -458,6 +464,7 @@ public sealed class MenuBatchModel : IBatchRows
         Status = preview ? v.Message ?? FormulaWindowRules.HostCalculatedText(rows.Count)
             : v.Applied ? FormulaWindowRules.HostAppliedRunsText(applied)
             : v.Message ?? FormulaMasking.ErrorHiddenText;
+        FullyApplied = !preview && v.Applied && applied > 0;
         Invalidate();
         return (applied, v.Applied ? null : v.Message);
     }

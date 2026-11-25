@@ -106,7 +106,7 @@ The undo entry reads `{formula} on {n} units` when every row is a different coun
 
 ### Several runs on one counter
 
-The formula dialog has a **Several runs…** button (tooltip `Open a batch grid for this counter: one row per run, applied in order as one step.`), shown when the dialog was opened from a counter's menu. It opens the same grid with one row for this counter, holding the values you have typed. Use **Add row** for each further run, for example to run Riverland's `Ford crossing` three times on one barge. Each row sees the result of the rows before it, so a counter's Fuel drops row by row. The button is not shown for a run started from a phase (use that run's own batch grid).
+The formula dialog has a **Several runs…** button (tooltip `Open a batch grid for this counter: one row per run, applied in order as one step.`), shown when the dialog is for a counter and was not opened from a phase run's link. It opens the same grid with one row for this counter, holding the values you have typed. Use **Add row** for each further run, for example to run Riverland's `Ford crossing` three times on one barge. Each row sees the result of the rows before it, so a counter's Fuel drops row by row. The button is not shown for a run started from a phase (use that run's own batch grid).
 
 ## Picking another counter
 

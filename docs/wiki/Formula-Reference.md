@@ -520,7 +520,7 @@ Every name used in the formula needs a binding, and every binding should be used
 
 **Choices from a table (Input bindings).** An Input can take its choices from a table instead of a list typed in Details: set its **Choices table**, and optionally a **Choices filter** (an expression, true for each row key to offer; see [`row()`](#row)). An Input with a choices table cannot also have typed choices. Each counter gets its own list; with no counter the list holds every key. See [Choices from a table](Making-a-Rules-Pack#choices-from-a-table).
 
-**Rolling once for a group.** A formula with **Roll once for the group** ticked shares one set of dice between the counters of a group (the same hex and side in a phase entry; the rows of a menu batch). See [Rolling once for a group](Making-a-Rules-Pack#rolling-once-for-a-group).
+**Rolling once for a group.** A formula with **Roll once for the group** ticked shares one set of dice between the counters of a group (the same hex and side in a phase entry; the rows of a menu batch); the Roll box of a shared roll reads `(group roll)` and its tooltip says `Rolled once for the group`. See [Rolling once for a group](Making-a-Rules-Pack#rolling-once-for-a-group).
 
 **Reading another counter (Piece bindings).** A formula reads the counter it runs on; a **Piece** binding reads a property of a second counter instead, chosen by the player each time the formula runs. Its Target is the property (one that pieces hold: scope Pieces or Both; a stored or computed property) and its Details are the **which pieces** filter, a unit filter such as `startsWith(name(), "Blue")` (blank = every piece).
 
@@ -719,7 +719,6 @@ These come from the bindings and outputs rather than the formula text.
 | Choices filter: {message} | The filter failed while it was tried (the message says why). | Fix the filter in the Workbench. |
 | The choices table for Cargo was deleted | The Input names a table that no longer exists, or whose row keys are ranges. | Pick another table. |
 | row() can only be used in a choices filter | `row()` was used in a formula, condition or other expression. | Use it only in an Input's **Choices filter**. |
-| Roll (group roll) | Not an error: the Roll box shows the dice shared by the group (tooltip `Rolled once for the group`). | Nothing to fix. |
 | Variable x depends on itself | Variables refer to each other in a circle. | Break the circle. |
 | variable "x" has no binding | The Workbench: the formula uses a name that has no row under Bindings. | Add the binding. |
 | variable "x" is bound but not used in the formula | A warning: a binding is not used. | Remove the binding or use it. |

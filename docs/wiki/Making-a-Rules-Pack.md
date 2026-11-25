@@ -541,7 +541,7 @@ Two things help when one formula runs for many counters, or many times: a roll s
 Riverland's `Ford crossing` formula rolls `1d6` to see whether a counter gets across the river, and it is run for every counter in a hex at the start of a phase. If each counter rolled its own die, two counters in the same hex could cross or fail on different dice. Tick **Roll once for the group** on the formula (in the Workbench, under the phase list). Now:
 
 - In a **phase entry** (a start entry that queues the formula for several units), the counters in the same hex and on the same side form one group. The group's dice are rolled once, by the first counter that is applied, and the others reuse them. Counters of another side in the same hex are a group of their own, and a counter off the grid has no group. Each counter still gets its own working line in the log, and the group's dice are logged once.
-- In a **menu batch** (see [Running on several counters](Window-Formula-Dialog#running-on-several-counters)), the first row rolls and the later rows reuse its dice. Dice are shared only when the later row asks for the same number of dice with the same sides; otherwise it rolls its own.
+- In a **menu batch** (see [Running on several counters](Window-Formula-Dialog#running-on-several-counters)), the first row rolls and the later rows reuse its dice. Dice are shared only when the later row asks for the same number of dice with the same sides; otherwise it rolls its own. A roll you type as a single number (a sum of physical dice) is never shared.
 - A formula without the tick rolls for every counter, as before.
 - Online, a guest never rolls a group's dice: the host draws them, and a guest who asks again does not get a new draw while the group's dice are still live.
 
@@ -559,7 +559,7 @@ Add a **Choices filter** to list only some rows. `row()` is the row key being te
 
 `lookup(Cargo, row(), "Min size") <= Size`
 
-lists only the cargo whose `Min size` is within the barge's `Size`. The list is worked out for each counter, so in a batch every row shows the choices for its own counter, and with no counter it shows every key. If the key is a number in the table (all keys numeric) the Input gives a number, otherwise text. A table whose row keys are ranges (`5+`) cannot be used as choices. See [`row()`](Formula-Reference#row).
+lists only the cargo whose `Min size` is within the barge's `Size`. The list is worked out for each counter, so in a batch every row shows the choices for its own counter, and with no counter it shows every key. If the key is a number in the table (all keys numeric) the Input gives a number, otherwise text. A table whose row keys are ranges (`5+`) cannot be used as choices. Table names should be unique: if two tables share a name, the Workbench's **Choices table** cell picks the first. See [`row()`](Formula-Reference#row).
 
 At run time a typed value that is not in the list is refused with `Not one of the choices for this piece`, and a counter for which the filter leaves nothing gets `No choice for this piece`. A filter that fails shows `Choices filter: {message}`. Neither message lists the choices, so a player cannot learn from a refusal what a hidden counter would offer. In a hot-seat game the list uses only what the seated player can see.
 

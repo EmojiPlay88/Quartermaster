@@ -74,6 +74,19 @@ public class MenuBatchOnlineTests : OtherPiecesTestBase
     }
 
     [Fact]
+    public async Task Guest_batch_refused_is_not_fully_applied()
+    {
+        var (host, _, _) = Host();
+        var guest = Guest(host, hiding: false);
+        var port = new LoopbackPort(_ => FormulaBatchVerdict.Refused("Row 2: cannot be applied yet."));
+        var b = new MenuBatchModel(guest, port, "f", new[] { "s1", "s2" });
+        var (applied, message) = await b.SendAsync(calculate: false);
+        Assert.Equal(0, applied);
+        Assert.NotNull(message);
+        Assert.False(b.FullyApplied);
+    }
+
+    [Fact]
     public async Task Guest_batch_through_menu_model()
     {
         var (host, _, x) = Host();
@@ -84,12 +97,14 @@ public class MenuBatchOnlineTests : OtherPiecesTestBase
         var d = b.Variables.ToList().IndexOf("D");
         var (n, _) = await b.SendAsync(calculate: true, preview: true);
         Assert.Equal(0, n);
+        Assert.False(b.FullyApplied);   // a preview applies nothing
         var shown = b.Row(0).Cells[d];
         Assert.Equal(FormulaWindowRules.HostCalculatedText(2), b.Status);
         var (applied, message) = await b.SendAsync(calculate: false);
         Assert.Equal(2, applied);
         Assert.Null(message);
         Assert.Equal("The host applied 2 run(s) as one step.", b.Status);
+        Assert.True(b.FullyApplied);   // the grid closes on this, for guests as for the host
         Assert.StartsWith(Str(host, "s1")!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), shown);
     }
 

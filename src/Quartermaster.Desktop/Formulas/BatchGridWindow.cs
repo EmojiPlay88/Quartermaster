@@ -501,6 +501,8 @@ public sealed class BatchGridWindow : Window
         UpdateCheat();
     }
 
+    void CloseAfterFullApply() => Dispatcher.UIThread.Post(() => { if (!_closing) Close(); });
+
     void ApplyAll()
     {
         if (_model.HostCalculates) { SendToHost(_model.OpenRows(), calculate: false); return; }
@@ -513,7 +515,7 @@ public sealed class BatchGridWindow : Window
             _status.Text = _menu.Status ?? FormulaWindowRules.AppliedRunsText(n);
             _debounce.Stop();
             Refresh();
-            if (n > 0 && _status.Text == FormulaWindowRules.AppliedRunsText(n)) Dispatcher.UIThread.Post(() => { if (!_closing) Close(); });
+            if (_menu.FullyApplied) CloseAfterFullApply();
             return;
         }
         // The run may be gone now (all applied): the refresh closes the window.
@@ -572,6 +574,7 @@ public sealed class BatchGridWindow : Window
                 // One batch intent; the model shows each row's verdict and sets the status (the host's message or the applied count).
                 await _menu.SendAsync(calculate, preview);
                 if (!_closing) _status.Text = _menu.Status ?? "";
+                if (_menu.FullyApplied) CloseAfterFullApply();   // a guest's applied batch closes the grid too: a second click would re-send it
                 return;
             }
             var (applied, message) = await _pending!.SendRowsAsync(rows, calculate, preview);
