@@ -118,17 +118,24 @@ internal sealed class AggregateFilters(GameState s, RulesPack pack, ModuleModel?
 
     public Func<string, Func<PieceInstance, bool>> Compile => _compile ??= CompileOnce;
 
-    private Func<PieceInstance, string?>? _sides;
+    private Lazy<Func<PieceInstance, string?>>? _sides;
 
-    /// <summary>The side owning a piece (<see cref="Ownership.PieceSides"/>, compiled on first use and then shared); null when none.</summary>
-    public string? SideOf(PieceInstance p) => (_sides ??= Ownership.PieceSides(s, pack))(p);
+    /// <summary>The side map (<see cref="Ownership.PieceSides"/>) of this state: <see cref="SharedSides"/> when given, else compiled on first use.
+    /// Every filter this state compiles, and the computed properties it evaluates, use it, so one evaluation builds the side map once.</summary>
+    public Lazy<Func<PieceInstance, string?>> Sides => _sides ??= SharedSides ?? PieceFilter.SideMap(s, pack);
+
+    /// <summary>A side map owned by the caller (a formula pass, <see cref="FormulaRunner.BeginPass"/>), for the same state; null = this object's own.</summary>
+    public Lazy<Func<PieceInstance, string?>>? SharedSides { get; init; }
+
+    /// <summary>The side owning a piece (<see cref="Sides"/>); null when none.</summary>
+    public string? SideOf(PieceInstance p) => Sides.Value(p);
 
     private Func<PieceInstance, bool> CompileOnce(string text)
     {
         _cache ??= new(StringComparer.Ordinal);
         if (_cache.TryGetValue(text, out var hit)) return hit;
         PieceAggregates.FilterCompiles++;
-        return _cache[text] = PieceFilter.CompileStrict(text, s, pack, model);
+        return _cache[text] = PieceFilter.CompileStrict(text, s, pack, model, Sides);
     }
 
     /// <summary>The pieces on this map at this grid location name, in state order (needs the model; the index is built once).</summary>

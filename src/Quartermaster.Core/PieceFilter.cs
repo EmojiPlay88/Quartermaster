@@ -35,12 +35,14 @@ public static class PieceFilter
     /// (when matching) is thrown, so the aggregate fails instead of skipping pieces. A missing value (<see cref="EvalError.MissingValue"/>: a
     /// property not applicable to the piece or hidden, no such marker) is no match, as in any unit filter. Empty matches every piece.
     /// </summary>
-    internal static Func<PieceInstance, bool> CompileStrict(string text, GameState s, RulesPack pack, ModuleModel? model)
+    /// <param name="sides">The caller's side map for this state (shared), or null for the filter's own.</param>
+    internal static Func<PieceInstance, bool> CompileStrict(string text, GameState s, RulesPack pack, ModuleModel? model,
+        Lazy<Func<PieceInstance, string?>>? sides = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return _ => true;
         var e = Parser.Parse(text);
-        var sides = SideMap(s, pack);
-        var filters = new AggregateFilters(s, pack, model);
+        sides ??= SideMap(s, pack);
+        var filters = new AggregateFilters(s, pack, model) { SharedSides = sides };
         return p =>
         {
             try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, sides, filters)).IsTruthy; }
@@ -207,7 +209,7 @@ public static class PieceFilter
     /// <param name="pending">Values about to be seeded on the piece (see <see cref="MatchesWithPending"/>), read as if already in its ledger.</param>
     internal static FilterContext PieceContext(PieceInstance p, GameState s, RulesPack pack, AggregateFilters filters,
         IReadOnlyDictionary<string, double>? pending = null) =>
-        new(p, s, pack, SideMap(s, pack), filters, pending);
+        new(p, s, pack, ReferenceEquals(filters.State, s) ? filters.Sides : SideMap(s, pack), filters, pending);
 
     /// <summary>The turn, stage and phase an expression reads: the phase condition's candidate (<see cref="AggregateFilters.At"/>), else the game's.</summary>
     private static double TurnAt(GameState s, AggregateFilters? f) => f?.At is { } at ? at.Turn : TurnOf(s);

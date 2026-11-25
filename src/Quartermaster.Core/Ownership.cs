@@ -14,6 +14,7 @@ public static class Ownership
     /// </summary>
     public static Func<PieceInstance, string?> PieceSides(GameState s, RulesPack pack)
     {
+        SideMapBuilds++;
         var sides = (pack.Sides ?? new List<SideDef>())
             .Where(x => x != null && !string.IsNullOrEmpty(x.Id))
             .Select(x => (x.Id, Match: PieceFilter.Compile(x.UnitFilter, s, pack)))
@@ -33,6 +34,9 @@ public static class Ownership
     }
 
     [ThreadStatic] private static int _inUnitFilter;
+
+    /// <summary>How many side maps (<see cref="PieceSides"/>) were built on this thread (tests read it).</summary>
+    [ThreadStatic] internal static int SideMapBuilds;
 
     /// <summary>
     /// True while this thread evaluates a side's unit filter (including any applies-to it reads). side() refuses there: it would ask

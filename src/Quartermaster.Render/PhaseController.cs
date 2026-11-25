@@ -618,16 +618,25 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var noRolls = new Dictionary<string, IReadOnlyList<int>>();
         var applied = 0;
         var needInput = new List<Unit>();
-        foreach (var u in units)
+        var g = s.Game;
+        var state = g.State;
+        // One pass (spec #31): the units share one side map and one aggregate state, and the entry raises Changed once. The commands
+        // inside write only ledgers, rolls and log lines (the pass's invariant); each unit still reads the writes of the units before it.
+        using (g.DeferChanged())
         {
-            var trace = s.Runner.Run(s.Game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
-            if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true); continue; }   // hidden like its working
-            if (trace.Result == null) { needInput.Add(u); continue; }
-            foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, Stamp())) Exec(c);
-            LogWorking(trace, u.Label, "auto");
-            applied++;
+            using (s.Runner.BeginPass(state))
+                foreach (var u in units)
+                {
+                    var trace = s.Runner.Run(state, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
+                    if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true); continue; }   // hidden like its working
+                    if (trace.Result == null) { needInput.Add(u); continue; }
+                    foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, Stamp())) Exec(c);
+                    LogWorking(trace, u.Label, "auto");
+                    s.Runner.AfterApply();
+                    applied++;
+                }
+            if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied", formulaId: LogKind.NoWorking);
         }
-        if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied", formulaId: LogKind.NoWorking);
         if (needInput.Count > 0)
         {
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,
