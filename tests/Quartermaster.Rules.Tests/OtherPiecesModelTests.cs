@@ -153,11 +153,14 @@ public class OtherPiecesModelTests
 
     private const string OldPackSha256 = "3c098df952ff15bc1ac6a01060c7b36aa89471e40ebee26f4749b75d95c26da4";
 
+    /// <summary>The literals follow the checkout's line endings (CRLF on Windows with autocrlf); the pack is written with LF.</summary>
+    private static string Lf(string s) => s.Replace("\r\n", "\n");
+
     private static byte[] OldZip()
     {
         using var ms = new MemoryStream();
         using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
-            foreach (var (name, text) in new[] { ("pack.json", OldPackJson), ("formulas/f1.json", OldFormulaJson) })
+            foreach (var (name, text) in new[] { ("pack.json", Lf(OldPackJson)), ("formulas/f1.json", Lf(OldFormulaJson)) })
             {
                 using var s = zip.CreateEntry(name).Open();
                 s.Write(Encoding.UTF8.GetBytes(text + "\n"));
@@ -170,8 +173,8 @@ public class OtherPiecesModelTests
     {
         var loaded = RulesPackIo.FromBytes(OldZip());
         var again = RulesPackIo.ToBytes(loaded);
-        Assert.Equal(OldPackJson + "\n", Entry(again, "pack.json"));
-        Assert.Equal(OldFormulaJson + "\n", Entry(again, "formulas/f1.json"));
+        Assert.Equal(Lf(OldPackJson) + "\n", Entry(again, "pack.json"));
+        Assert.Equal(Lf(OldFormulaJson) + "\n", Entry(again, "formulas/f1.json"));
         Assert.Equal(OldPackSha256, RulesPackIo.ComputeSha256(loaded));
         Assert.Equal(OldPackSha256, RulesPackIo.ComputeSha256(RulesPackIo.FromBytes(again)));
     }
