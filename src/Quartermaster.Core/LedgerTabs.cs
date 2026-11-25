@@ -82,7 +82,11 @@ public static class LedgerTabs
             if (r.Errors != null)
                 for (var j = 0; j < map.Length; j++)
                     if (r.Errors.TryGetValue(map[j], out var message)) (errors ??= new())[j] = message;
-            var projected = new LedgerRow(r.Key, r.Name, r.Kind, map.Select(i => i >= 0 && i < r.Values.Count ? r.Values[i] : null).ToList(), errors);
+            HashSet<int>? notKept = null;
+            if (r.NotKept != null)
+                for (var j = 0; j < map.Length; j++)
+                    if (r.NotKept.Contains(map[j])) (notKept ??= new()).Add(j);
+            var projected = new LedgerRow(r.Key, r.Name, r.Kind, map.Select(i => i >= 0 && i < r.Values.Count ? r.Values[i] : null).ToList(), errors, notKept);
             if (!isPiece) { holders.Add(new LedgerRowEx(projected, null, null, null, false)); continue; }
             if (!view.Pieces.TryGetValue(id, out var piece)) continue;
             var side = sideOf(piece);
@@ -107,6 +111,21 @@ public static class LedgerTabs
             ? chosen.ToList()
             : chosen.Where(r => r.Row.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || r.Row.Kind.Contains(f, StringComparison.OrdinalIgnoreCase)).ToList();
         var count = rows.Count;
+
+        // Depots & Global and user tabs: a holder-only column that names its holders is dropped when no row shown keeps it.
+        if (tab.Kind is LedgerTabKind.Holders or LedgerTabKind.User)
+        {
+            var keep = new List<int>();
+            for (var j = 0; j < cols.Count; j++)
+                if (cols[j].Scope != PropertyScope.Holders || cols[j].Holders is null
+                    || rows.Any(r => r.PieceId == null && r.Row.NotKept?.Contains(j) != true))
+                    keep.Add(j);
+            if (keep.Count < cols.Count)
+            {
+                cols = keep.Select(j => cols[j]).ToList();
+                rows = rows.Select(r => r with { Row = Pick(r.Row, keep) }).ToList();
+            }
+        }
 
         if (unitTab && group != LedgerGrouping.None)
         {
@@ -142,6 +161,19 @@ public static class LedgerTabs
             rows = outRows;
         }
         return new LedgerTabResult(cols, rows, count, null);
+    }
+
+    /// <summary>The row with only the columns <paramref name="keep"/> (old indexes, in order); values, errors and not-kept marks follow.</summary>
+    private static LedgerRow Pick(LedgerRow r, IReadOnlyList<int> keep)
+    {
+        Dictionary<int, string>? errors = null;
+        HashSet<int>? notKept = null;
+        for (var k = 0; k < keep.Count; k++)
+        {
+            if (r.Errors != null && r.Errors.TryGetValue(keep[k], out var m)) (errors ??= new())[k] = m;
+            if (r.NotKept?.Contains(keep[k]) == true) (notKept ??= new()).Add(k);
+        }
+        return new LedgerRow(r.Key, r.Name, r.Kind, keep.Select(j => j < r.Values.Count ? r.Values[j] : null).ToList(), errors, notKept);
     }
 
     /// <summary>Null when the expression is empty or parses; otherwise the parse error text.</summary>

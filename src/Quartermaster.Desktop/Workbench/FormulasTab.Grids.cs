@@ -92,7 +92,7 @@ public sealed partial class FormulasTab
         for (var r = 0; r < f.Bindings.Count; r++)
         {
             var b = f.Bindings[r];
-            var opts = FormulaEdit.TargetOptions(pack, b.Kind);
+            var opts = KeptOptions(pack, b.Kind, FormulaEdit.TargetOptions(pack, b.Kind));
             _targets.Add(opts);
             _bind.SetCellItems(r, 2, opts.Select(o => o.Display).ToList());
             if (opts.Count == 0 && b.Kind is not (BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Table or BindingKind.Piece))
@@ -104,6 +104,17 @@ public sealed partial class FormulasTab
             _bind.SetCellToolTip(r, 6, b.Kind == BindingKind.Roll ? DiceCountHint : "");
         }
     }
+
+    /// <summary>A Holder binding offers each holder only the properties it keeps; a Global binding only what the global holder keeps.</summary>
+    static IReadOnlyList<TargetOption> KeptOptions(RulesPack pack, BindingKind kind, IReadOnlyList<TargetOption> opts) => kind switch
+    {
+        BindingKind.Holder => opts.Where(o => o.HolderId == null || Kept(pack, o.Property, o.HolderId)).ToList(),
+        BindingKind.Global => opts.Where(o => Kept(pack, o.Property, HolderDef.GlobalId)).ToList(),
+        _ => opts,
+    };
+
+    static bool Kept(RulesPack pack, string? propertyId, string holderId) =>
+        propertyId == null || pack.ById<PropertyDef>(propertyId) is not { } p || PropertyFacts.KeptBy(p, holderId);
 
     void OnBindingCell(int row, int col, string text)
     {
@@ -194,9 +205,12 @@ public sealed partial class FormulasTab
         _out.SetRows(rows);
         for (var r = 0; r < f.Outputs.Count; r++)
         {
-            if (f.Outputs[r].Target == OutputTarget.Holder) _out.SetCellItems(r, 1, holders);
+            var o = f.Outputs[r];
+            if (o.Target == OutputTarget.Holder) _out.SetCellItems(r, 1, holders);
             else _out.SetCellReadOnly(r, 1, true);
-            _out.SetCellItems(r, 2, props);
+            // A holder or global output offers only the properties that holder keeps.
+            var keeper = o.Target == OutputTarget.Global ? HolderDef.GlobalId : o.Target == OutputTarget.Holder ? o.HolderId : null;
+            _out.SetCellItems(r, 2, keeper == null ? props : pack.Properties.Where(p => PropertyFacts.KeptBy(p, keeper)).Select(p => p.Name).ToList());
             _out.SetCellReadOnly(r, 2, f.Outputs[r].PropertyChoice is { Count: > 0 });   // the fixed Property is not used while a list is set
             _out.SetCellToolTip(r, 4, OutputValueHint);
             _out.SetCellToolTip(r, 5, ChooseFromHint);
@@ -219,6 +233,7 @@ public sealed partial class FormulasTab
                 var h = pack.HolderByName(text);
                 if (h == null) return;
                 Commit(x => FormulaEdit.SetOutput(x, row, o => o with { HolderId = h.Id }));
+                again = true;   // the Property picker follows the holder
                 break;
             case 2:
                 var p = pack.PropertyByName(text);

@@ -860,4 +860,103 @@ public sealed class LedgerWindowTests : IDisposable
         Assert.NotNull(lw.RowControl(lw.Rows.Count - 1));
         Assert.InRange(lw.LiveRowCount, 1, 60);
     }
+
+    [AvaloniaFact]
+    public void LedgerWindow_dropping_a_column_keeps_sort_and_width_by_property()
+    {
+        var w = Game();
+        var s = w.Session!;
+        s.UpdateRules(p => p with
+        {
+            Properties = p.Properties
+                .Append(new Quartermaster.Rules.PropertyDef { Id = "tolls", Name = "Ferry tolls", Scope = Quartermaster.Rules.PropertyScope.Holders, Holders = new() { "h-north-depot" } })
+                .ToList(),
+        });
+        Pump();
+        var lw = Open(w);
+        lw.SelectTab("holders");
+        lw.Flush();
+        Pump();
+        Assert.Equal(new[] { "Name", "Kind", "Ferry tolls", "Stores", "Weather" }, lw.Headers);
+        lw.ClickHeader(Col(lw, "Stores"));
+        lw.SetColumnWidth(Col(lw, "Stores"), 180);
+        Pump();
+        Assert.Equal("▲", lw.SortGlyph(Col(lw, "Stores")));
+
+        lw.FilterBox.Text = "South";   // only South Depot is left; it does not keep Ferry tolls, so that column goes
+        lw.Flush();
+        Pump();
+        Assert.Equal(new[] { "Name", "Kind", "Stores", "Weather" }, lw.Headers);
+        Assert.Equal("▲", lw.SortGlyph(Col(lw, "Stores")));      // still sorted by Stores, not by whatever sits at the old index
+        Assert.Equal("", lw.SortGlyph(Col(lw, "Weather")));
+        Assert.Equal(180, lw.ColumnWidths[Col(lw, "Stores")]);
+
+        lw.FilterBox.Text = "";   // the column comes back; the sort follows its property again
+        lw.Flush();
+        Pump();
+        Assert.Equal("▲", lw.SortGlyph(Col(lw, "Stores")));
+        Assert.Equal(180, lw.ColumnWidths[Col(lw, "Stores")]);
+
+        lw.ClickHeader(Col(lw, "Ferry tolls"));   // sorted by the column that then goes: the sort is cleared
+        lw.FilterBox.Text = "South";
+        lw.Flush();
+        Pump();
+        Assert.All(Enumerable.Range(0, lw.Headers.Count), c => Assert.Equal("", lw.SortGlyph(c)));
+    }
+
+    [AvaloniaFact]
+    public void LedgerWindow_label_and_not_kept_cell()
+    {
+        var w = Game();
+        var s = w.Session!;
+        s.UpdateRules(p => p with
+        {
+            Tables = p.Tables.Append(new Quartermaster.Rules.TableDef
+            {
+                Id = "t-wx", Name = "Weather names", Kind = Quartermaster.Rules.TableKind.OneD,
+                RowKeys = new() { "1", "2", "3" }, ColumnKeys = new() { "Name" }, Cells = new() { new() { "Clear" }, new() { "Rain" }, new() { "Fog" } },
+            }).ToList(),
+            Properties = p.Properties.Select(x => x.Id == "weather" ? x with { Labels = "t-wx" } : x)
+                .Append(new Quartermaster.Rules.PropertyDef { Id = "tolls", Name = "Ferry tolls", Scope = Quartermaster.Rules.PropertyScope.Holders, Holders = new() { "h-north-depot" } })
+                .ToList(),
+        });
+        var global = LedgerKey.Holder(Quartermaster.Rules.HolderDef.GlobalId);
+        s.Game!.Execute(new LedgerDelta(global, "weather", Ledger.Get(s.Game.State, global, "weather") ?? 0, 3, "manual", null, null, "test", null));
+        var south = LedgerKey.Holder("h-south-depot");
+        s.Game.Execute(new LedgerDelta(south, "tolls", 0, 9, "manual", null, null, "stale", null));   // a value South does not keep
+        Pump();
+        var lw = Open(w);
+        lw.SelectTab("holders");
+        lw.Flush();
+        Pump();
+        Assert.Equal(new[] { "Name", "Kind", "Ferry tolls", "Stores", "Weather" }, lw.Headers);   // North keeps Ferry tolls, so the column stays
+        var rows = lw.Rows.ToList();
+        var g = rows.FindIndex(r => r.Row.Key == global);
+        var so = rows.FindIndex(r => r.Row.Key == south);
+        var no = rows.FindIndex(r => r.Row.Key == LedgerKey.Holder("h-north-depot"));
+        var wx = Col(lw, "Weather");
+        var tolls = Col(lw, "Ferry tolls");
+        Assert.Equal("3 (Fog)", lw.CellText(g, wx));   // the value with its label
+        Assert.Equal("", lw.CellText(so, tolls));      // blank: the stale 9 never shows
+        Assert.Equal("", lw.CellText(g, tolls));
+
+        // A not-kept cell is read-only: no editor, the refusal is shown, nothing is written.
+        var history = s.Game.State.LedgerHistory.Count;
+        Assert.False(lw.BeginEdit(so, tolls));
+        Assert.Null(lw.Editor);
+        Pump();
+        Assert.Contains(("South Depot does not keep Ferry tolls", "Ledger"), _dialogs.Warnings);
+        Assert.Equal(history, s.Game.State.LedgerHistory.Count);
+
+        // A labelled cell edits the bare number; a kept cell opens its editor.
+        lw.ScrollToRow(g);
+        Pump();
+        Assert.True(lw.BeginEdit(g, wx));
+        Assert.Equal("3", lw.Editor!.Text);
+        lw.EndEdit(false);
+        lw.ScrollToRow(no);
+        Pump();
+        Assert.True(lw.BeginEdit(no, tolls));
+        lw.EndEdit(false);
+    }
 }

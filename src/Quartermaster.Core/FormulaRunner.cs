@@ -131,7 +131,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls, run.RollsByKey);
 
         var result = Evaluator.Evaluate(expr, new RunContext(run));
-        var working = WorkingLine.Render(expr, formula.Text ?? "", n => run.Cached(n)?.Value) + " = " + result.Display();
+        var working = WorkingLine.Render(expr, formula.Text ?? "", n => run.Cached(n)?.Value, run.Label) + " = " + result.Display();
 
         var outputs = new List<OutputPreview>();
         var parts = new List<string>();
@@ -147,10 +147,11 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             switch (o.Target)
             {
                 case OutputTarget.Unit: key = LedgerKey.Piece(piece!.Id); break;
-                case OutputTarget.Global: key = LedgerKey.Holder(HolderDef.GlobalId); break;
+                case OutputTarget.Global: key = LedgerKey.Holder(HolderDef.GlobalId); EnsureKept(_pack, HolderDef.GlobalId, prop); break;
                 default:
                     if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
                         throw new EvalError("An output refers to a deleted holder");
+                    EnsureKept(_pack, o.HolderId, prop);
                     key = LedgerKey.Holder(o.HolderId);
                     break;
             }
@@ -177,11 +178,21 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             {
                 OutputOp.Subtract => $"{prop.Name} {b} − {xs} = {a}",
                 OutputOp.Add => $"{prop.Name} {b} + {xs} = {a}",
-                _ => $"{prop.Name} = {a}",
+                _ => $"{prop.Name} = {PropertyLabels.Text(_pack, prop, after)}",
             });
         }
         if (parts.Count > 0) working += " → " + string.Join("; ", parts);
         return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey);
+    }
+
+    /// <summary>The name a run failure gives a holder: "Global" for the global holder, else the holder's name (its id when deleted).</summary>
+    private static string HolderText(RulesPack pack, string holderId) =>
+        holderId == HolderDef.GlobalId ? "Global" : pack.ById<HolderDef>(holderId)?.Name ?? holderId;
+
+    /// <summary>Fails the run with "{holder} does not keep {property}" when the property lists holders and this one is not among them.</summary>
+    private static void EnsureKept(RulesPack pack, string holderId, PropertyDef prop)
+    {
+        if (!PropertyFacts.KeptBy(prop, holderId)) throw new EvalError($"{HolderText(pack, holderId)} does not keep {prop.Name}");
     }
 
     /// <summary>The output's fixed property, or with a property list the one its pick-by expression names: a whole number N is the Nth listed
@@ -258,6 +269,19 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public IReadOnlyList<int> Roll(int n, int sides) => RollKey("dice#" + _inlineDice++, n, sides);
 
         public VariableState? Cached(string name) => _done.TryGetValue(name, out var v) ? v : null;
+
+        /// <summary>
+        /// The label of a variable's value in the working (<see cref="PropertyLabels"/>): only for a Unit, Global, Holder or Piece binding of a
+        /// property with a labels table, and only from the value this run already holds (so it shows nothing the working does not).
+        /// </summary>
+        public string? Label(string name, Value value)
+        {
+            if (value.Kind != ValueKind.Number) return null;
+            if (formula.Bindings.FirstOrDefault(x => x.Variable == name) is not { Kind: BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Piece } b)
+                return null;
+            if (b.Property == null || owner._pack.ById<PropertyDef>(b.Property) is not { Labels: { Length: > 0 } } prop) return null;
+            return PropertyLabels.Label(owner._pack, prop, value.Number);
+        }
 
         private bool _noRolls;
         private bool _holdRolls;
@@ -366,6 +390,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 case BindingKind.Global:
                 {
                     var prop = Prop(b);
+                    EnsureKept(owner._pack, HolderDef.GlobalId, prop);
                     return new(name, Value.Of(Read(LedgerKey.Holder(HolderDef.GlobalId), prop)), true, false, null,
                         $"{prop.Name} (global)");
                 }
@@ -374,6 +399,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     var hid = b.HolderId;
                     if (hid == null || (hid != HolderDef.GlobalId && owner._pack.ById<HolderDef>(hid) == null)) throw new Missing("Unknown holder");
                     var prop = Prop(b);
+                    EnsureKept(owner._pack, hid, prop);
                     var hname = hid == HolderDef.GlobalId ? "global" : owner._pack.ById<HolderDef>(hid)!.Name;
                     return new(name, Value.Of(Read(LedgerKey.Holder(hid), prop)), true, false, null,
                         $"{prop.Name} of {hname}");
@@ -540,7 +566,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public Value Side() => PieceFilter.SideValue(run.Piece, run.Pack, run.Sides);
         public Value PhaseSide() => PieceFilter.PhaseSideValue(run.Pack, Sequencer.Current(run.Pack, run.State));
         public Value MapName() => PieceFilter.MapValue(run.Piece);
-        public Value HolderValue(string holder, string property) => PieceFilter.HolderRead(run.State, run.Pack, holder, property, run.Model, run.Filters);
+        public Value HolderValue(string holder, string property)
+        {
+            // A holder that does not keep the property fails the run (filters and alerts read it as before).
+            if (run.Pack.HolderByName(holder) is { } h && run.Pack.PropertyByName(property) is { Scope: not PropertyScope.Pieces } p)
+                EnsureKept(run.Pack, h.Id, p);
+            return PieceFilter.HolderRead(run.State, run.Pack, holder, property, run.Model, run.Filters);
+        }
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, run.Piece, run.Filters);
     }

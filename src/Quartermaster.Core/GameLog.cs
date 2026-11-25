@@ -5,8 +5,11 @@ namespace Quartermaster.Core;
 /// <summary>One line of the human-readable game log. Kind is a <see cref="LogKind"/> value; unknown kinds are shown as system.</summary>
 /// <summary>SideId: the side the entry was explicitly made for (formula runs, stamped by the caller); null when not stamped.</summary>
 /// <summary>FormulaId: the formula whose working a calc line shows (so <see cref="PlayerView"/> can hide working with hidden inputs); null otherwise.</summary>
+/// <summary>Error: the line reports a failure (a run that failed or was refused, a missing formula, an invalid filter); omitted when false.
+/// <see cref="PlayerView"/> clears it on a line it redacts.</summary>
 public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At, int? Turn = null, string? Phase = null, string? SideId = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null);
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)] bool Error = false);
 
 public static class LogKind
 {
@@ -38,9 +41,9 @@ static class LogBuilder
     static string Num(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
     static LogEntry Make(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? mapId = null, string? sideId = null,
-        string? formulaId = null, int? turn = null, string? phase = null) =>
+        string? formulaId = null, int? turn = null, string? phase = null, bool error = false) =>
         new(s.Log.Count + 1, kind, text, who, pieceId, mapId, at ?? DateTimeOffset.UnixEpoch, turn ?? s.Position?.Turn, phase ?? (s.Position == null ? null : s.Turn.Phase),
-            string.IsNullOrWhiteSpace(sideId) ? null : sideId, string.IsNullOrWhiteSpace(formulaId) ? null : formulaId);
+            string.IsNullOrWhiteSpace(sideId) ? null : sideId, string.IsNullOrWhiteSpace(formulaId) ? null : formulaId, error);
 
     public static LogEntry Place(GameState s, AddPiece a) =>
         Make(s, LogKind.Place, a.LogText ?? $"piece {a.PieceId} placed", a.Who, a.At, a.PieceId, a.MapId);
@@ -83,8 +86,8 @@ static class LogBuilder
     }
 
     public static LogEntry Line(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? sideId = null,
-        string? formulaId = null) =>
-        Make(s, kind, text, who, at, pieceId, sideId: sideId, formulaId: formulaId);
+        string? formulaId = null, bool error = false) =>
+        Make(s, kind, text, who, at, pieceId, sideId: sideId, formulaId: formulaId, error: error);
 
     /// <summary>A line stamped with the given turn and phase instead of the game's current ones (a skipped phase's own place).</summary>
     public static LogEntry LineAt(GameState s, string kind, string text, string? who, DateTimeOffset? at, int turn, string? phase) =>

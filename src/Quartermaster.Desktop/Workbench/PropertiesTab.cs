@@ -27,6 +27,13 @@ public sealed class PropertiesTab : UserControl
     internal const int OverridesTableColumn = 8, OverridesColumnColumn = 9;
     const string OverridesTableTip = "A table this property overrides: a formula, filter or warning reading that table at the row named like the piece reads the piece's own value instead of the printed cell. Blank = none.";
     const string OverridesColumnTip = "The column of the table it overrides. A one-dimension table has no column.";
+    /// <summary>Column indexes of "Rule ref", "Labels", "Holders" and "Clone as" (after Column, so the older columns keep their places).</summary>
+    internal const int RuleRefColumn = 10, LabelsColumn = 11, HoldersColumn = 12, CloneAsColumn = 13;
+    /// <summary>Column index of the holder grid's "Rule ref" (after Notes).</summary>
+    internal const int HolderRuleRefColumn = 2;
+    internal const string LabelsTip = "A one-column table whose row for a value gives the text shown next to it, e.g. \"3 (Fog)\". Values stay numbers. Blank = none.";
+    internal const string HoldersTip = "Holders that keep this property, comma-separated names. Blank = every holder.";
+    internal const string CloneAsTip = "What a copy made with the counter's Clone command gets: Copy = this counter's current value; Default = what a new counter starts with.";
 
     readonly ModuleSession _s;
     readonly IDialogs _dialogs;
@@ -55,13 +62,20 @@ public sealed class PropertiesTab : UserControl
             new EditColumn("Expression", Weight: 120),
             new EditColumn("Overrides table", EditColumnKind.Combo, Weight: 90),
             new EditColumn("Column", EditColumnKind.Combo, Weight: 70),
+            new EditColumn("Rule ref", EditColumnKind.Combo, Weight: 90),
+            new EditColumn("Labels", EditColumnKind.Combo, Weight: 80),
+            new EditColumn("Holders", Weight: 90),
+            new EditColumn("Clone as", EditColumnKind.Combo, Weight: 60, Items: Enum.GetNames<CloneValue>()),
         ]);
-        _holders.SetColumns([new EditColumn("Name", Weight: 80), new EditColumn("Notes", Weight: 200)]);
+        _holders.SetColumns([new EditColumn("Name", Weight: 80), new EditColumn("Notes", Weight: 200), new EditColumn("Rule ref", EditColumnKind.Combo, Weight: 100)]);
         _props.SetHeaderToolTip(3, SheetTip);
         _props.SetHeaderToolTip(5, OutlinerTip);
         _props.SetHeaderToolTip(ExpressionColumn, ExpressionTip);
         _props.SetHeaderToolTip(OverridesTableColumn, OverridesTableTip);
         _props.SetHeaderToolTip(OverridesColumnColumn, OverridesColumnTip);
+        _props.SetHeaderToolTip(LabelsColumn, LabelsTip);
+        _props.SetHeaderToolTip(HoldersColumn, HoldersTip);
+        _props.SetHeaderToolTip(CloneAsColumn, CloneAsTip);
 
         var propsBox = Box("Properties", _props, Bar(_bAddProp, _bDelProp));
         var holdersBox = Box("Holders (the built-in \"global\" holder always exists)", _holders, Bar(_bAddHolder, _bDelHolder));
@@ -207,9 +221,16 @@ public sealed class PropertiesTab : UserControl
             p.Expr ?? "",
             string.IsNullOrWhiteSpace(p.OverridesTable) ? "" : pack!.ById<TableDef>(p.OverridesTable!)?.Name ?? p.OverridesTable!,   // a deleted table shows its id
             p.OverridesColumn ?? "",
+            RuleRefPicker.Text(pack, p.RuleRefId),
+            string.IsNullOrWhiteSpace(p.Labels) ? "" : pack!.ById<TableDef>(p.Labels!)?.Name ?? p.Labels!,   // a deleted table shows its id
+            HoldersText(pack!, p.Holders),
+            p.CloneAs.ToString(),
         }).ToList());
         var tableNames = new List<string> { "" };
         tableNames.AddRange((pack?.Tables ?? new List<TableDef>()).Select(t => t.Name));
+        // Labels come from a one-column table (one dimension or dice).
+        var labelTables = new List<string> { "" };
+        labelTables.AddRange((pack?.Tables ?? new List<TableDef>()).Where(t => t.Kind != TableKind.TwoD).Select(t => t.Name));
         for (var i = 0; i < props.Count; i++)
         {
             _propIds.Add(props[i].Id);
@@ -222,16 +243,50 @@ public sealed class PropertiesTab : UserControl
             _props.SetCellItems(i, OverridesTableColumn, tableNames);
             _props.SetCellToolTip(i, OverridesTableColumn, OverridesTableTip);
             ShowOverrideColumn(i, pack!, props[i]);
+            _props.SetCellItems(i, RuleRefColumn, RuleRefPicker.Items(pack, props[i].RuleRefId).Items);
+            var labels = labelTables;
+            if (_props.Cell(i, LabelsColumn) is { Length: > 0 } shownLabels && !labels.Contains(shownLabels)) labels = labels.Append(shownLabels).ToList();
+            _props.SetCellItems(i, LabelsColumn, labels);
+            _props.SetCellToolTip(i, LabelsColumn, LabelsTip);
+            _props.SetCellToolTip(i, HoldersColumn, HoldersTip);
+            _props.SetCellItems(i, CloneAsColumn, Enum.GetNames<CloneValue>());
+            _props.SetCellToolTip(i, CloneAsColumn, CloneAsTip);
         }
         ApplySheetItems();
-        var rows = new List<IReadOnlyList<string>> { new[] { HolderDef.GlobalId, "Built in; always exists." } };
+        var rows = new List<IReadOnlyList<string>> { new[] { HolderDef.GlobalId, "Built in; always exists.", "" } };
         foreach (var h in pack?.Holders ?? new List<HolderDef>())
         {
-            rows.Add(new[] { h.Name, h.Notes ?? "" });
+            rows.Add(new[] { h.Name, h.Notes ?? "", RuleRefPicker.Text(pack, h.RuleRefId) });
             _holderIds.Add(h.Id);
         }
         _holders.SetRows(pack == null ? [] : rows);
-        if (pack != null) { _holders.SetCellReadOnly(0, 0, true); _holders.SetCellReadOnly(0, 1, true); }
+        if (pack != null)
+        {
+            for (var c = 0; c <= HolderRuleRefColumn; c++) _holders.SetCellReadOnly(0, c, true);   // the built-in holder is never stored in a pack
+            for (var i = 0; i < pack.Holders.Count; i++) _holders.SetCellItems(i + 1, HolderRuleRefColumn, RuleRefPicker.Items(pack, pack.Holders[i].RuleRefId).Items);
+        }
+    }
+
+    /// <summary>The Holders cell: holder names, comma-separated ("global" for the built-in holder; an id that no longer resolves shows as it is).</summary>
+    static string HoldersText(RulesPack pack, List<string>? ids) =>
+        ids is not { Count: > 0 } ? "" : FormulaEdit.FormatNameList(ids.Select(id => id == HolderDef.GlobalId ? HolderDef.GlobalId : pack.ById<HolderDef>(id)?.Name ?? id));
+
+    /// <summary>Holder ids from the Holders cell text; an unknown name gives its status text instead. Blank = null (every holder).</summary>
+    static (List<string>? Ids, string? Error) ParseHolders(RulesPack pack, string text, List<string>? current)
+    {
+        var (names, err) = FormulaEdit.ParseNameList(text);
+        if (err != null) return (null, err);
+        var ids = new List<string>();
+        foreach (var raw in names!)
+        {
+            var name = raw.Trim();
+            if (name.Length == 0) continue;
+            string? id = string.Equals(name, HolderDef.GlobalId, StringComparison.OrdinalIgnoreCase) ? HolderDef.GlobalId
+                : pack.HolderByName(name)?.Id ?? (current?.Contains(name) == true ? name : null);   // a stale id shown as it is may stay
+            if (id == null) return (null, $"No holder named \"{name}\"");
+            if (!ids.Contains(id)) ids.Add(id);
+        }
+        return (ids.Count == 0 ? null : ids, null);
     }
 
     /// <summary>A computed property's Default and Sheet field are ignored: those cells are greyed and closed to editing.</summary>
@@ -349,6 +404,38 @@ public sealed class PropertiesTab : UserControl
                 Commit(p => Edit(p, id, x => x with { OverridesColumn = text.Trim().Length == 0 ? null : text.Trim() }));
                 if (_s.Rules is { } after && after.Properties.FirstOrDefault(x => x.Id == id) is { } edited) ShowOverrideColumn(row, after, edited);
                 break;
+            case RuleRefColumn:
+            {
+                var current = pack.ById<PropertyDef>(id)?.RuleRefId;
+                if (RuleRefPicker.IdOf(pack, text, current) is not { } refId) return;
+                Commit(p => Edit(p, id, x => x with { RuleRefId = refId.Length == 0 ? null : refId }));
+                break;
+            }
+            case LabelsColumn:
+            {
+                var name = text.Trim();
+                var t = name.Length == 0 ? null : pack.Tables.FirstOrDefault(x => x.Name == name && x.Kind != TableKind.TwoD);
+                if (name.Length > 0 && t == null) return;   // the shown id of a deleted table, picked again: nothing to change
+                Commit(p => Edit(p, id, x => x with { Labels = t?.Id }));
+                break;
+            }
+            case HoldersColumn:
+            {
+                var (ids, error) = ParseHolders(pack, text, pack.ById<PropertyDef>(id)?.Holders);
+                if (error != null)
+                {
+                    Rebuild();
+                    _status.Text = error;
+                    return;
+                }
+                Commit(p => Edit(p, id, x => x with { Holders = ids }));
+                Rebuild();   // the cell shows the names as stored
+                break;
+            }
+            case CloneAsColumn:
+                if (!Enum.TryParse<CloneValue>(text, out var cv)) return;
+                Commit(p => Edit(p, id, x => x with { CloneAs = cv }));
+                break;
         }
     }
 
@@ -360,6 +447,12 @@ public sealed class PropertiesTab : UserControl
         if (row < 1 || row - 1 >= _holderIds.Count || _s.Rules is not { } pack) return;
         var id = _holderIds[row - 1];
         _status.Text = "";
+        if (col == HolderRuleRefColumn)
+        {
+            if (RuleRefPicker.IdOf(pack, text, pack.ById<HolderDef>(id)?.RuleRefId) is not { } refId) return;
+            Commit(p => p with { Holders = p.Holders.Select(h => h.Id != id ? h : h with { RuleRefId = refId.Length == 0 ? null : refId }).ToList() });
+            return;
+        }
         if (col == 0 && NameRules.Problem(pack.Holders.Where(x => x.Id != id).Select(x => x.Name).Append(HolderDef.GlobalId), text, null) is { } bad)
         {
             _status.Text = bad + " The name was not changed.";

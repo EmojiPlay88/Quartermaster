@@ -191,7 +191,7 @@ public sealed class OutlinerPanel : UserControl
         if (col == UnitsCol) return n.Units.ToString(CultureInfo.InvariantCulture);
         var ci = col - FirstValueCol;
         if (ci >= _tree.Columns.Count) return null;
-        return ci < n.Values.Count && n.Values[ci] is { } v ? v.ToString("0.##", CultureInfo.InvariantCulture) : "";
+        return OutlinerViewRules.ValueText(_s.Rules, _tree.Columns[ci], n, ci);   // a piece's value (or a lowest value) with its label, "3 (Fog)"
     }
 
     /// <summary>The counter picture shown in a piece row, when it has one and it has been drawn.</summary>

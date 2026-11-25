@@ -409,4 +409,36 @@ public sealed class PhasePanelTests : IDisposable
         Pump();
         Assert.Empty(w.DocumentWindows);
     }
+
+    /// <summary>B1: Combat's item links to End's "spare" item, a formula, a missing item and Blue's End item "secret".</summary>
+    static RulesPack Linked(RulesPack p) => p with
+    {
+        Phases = p.Phases.Select(x => x.Id switch
+        {
+            "ph-combat" => x with { Checklist = new() { new ChecklistItem { Id = "fight", Text = "After {item:spare}, run {formula:f-water}; {item:ghost}; {item:secret}" } } },
+            "ph-end" => x with { SideId = "blue", Checklist = new() { new ChecklistItem { Id = "spare", Text = "Count the spare boats at the ferry landing before loading" }, new ChecklistItem { Id = "secret", Text = "Blue plan TEST" } } },
+            _ => x,
+        }).ToList(),
+    };
+
+    [AvaloniaFact]
+    public void PhasePanel_shows_rendered_links()
+    {
+        var w = PhaseGame(Linked);
+        ToCombat(w);
+        var cut = "\"" + "Count the spare boats at the ferry landing before loading"[..40] + "…\"";   // cut to 40 characters
+        Assert.Equal(new[] { "After " + cut + ", run Daily water; {item:ghost}; \"Blue plan TEST\"" }, w.Phases.ChecklistTexts);
+        // Ticking still works on the rendered row (by id).
+        w.Phases.SetChecked(0, true);
+        Pump();
+        Assert.Contains("fight", w.Session!.Game!.State.TickedIds ?? new());
+
+        // Hot-seat: Red's player sees no text of Blue's End checklist, so that link stays as written.
+        var h = PhaseGame(Linked);
+        h.Session!.Game!.Execute(new SetPlayers(new[] { new PlayerDef("p1", "Alice", new[] { "red" }), new PlayerDef("p2", "Bob", new[] { "blue" }) }));
+        ContinueHandover(h);
+        Assert.Equal(new[] { "red" }, h.Session.ViewSides!.ToArray());
+        ToCombat(h);
+        Assert.Equal(new[] { "After {item:spare}, run Daily water; {item:ghost}; {item:secret}" }, h.Phases.ChecklistTexts);
+    }
 }

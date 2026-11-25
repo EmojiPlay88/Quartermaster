@@ -73,6 +73,7 @@ public sealed class GameSession
     public static bool IsFolding(GameCommand c) => c switch
     {
         SetStackExpanded => true,
+        SeedLedger { CloneOf: not null } => false,   // copied clone values must replay on redo; a fresh seeding cannot rebuild them
         SeedLedger => true,
         SteppedBack => true,
         _ => false,

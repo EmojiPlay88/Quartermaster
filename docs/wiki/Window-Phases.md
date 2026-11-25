@@ -88,7 +88,7 @@ From top to bottom:
 | **Rule:** link | Shown when the phase has a rule reference: opens the rulebook at that page |
 | **Warnings** | Units that match one of the phase's warnings, for example "has no fuel and cannot move — 2 units". Double-click a unit to find it on the map. A warning that never reads a unit (for example `Weather == 2`) shows as a single line with no units under it |
 | **Acknowledge** | Marks the selected decision warning as dealt with |
-| **Decisions left**, checklist | The phase's checklist. Tick each item when it is done |
+| **Decisions left**, checklist | The phase's checklist. Tick each item when it is done. An item can link to another item or a formula ([Checklist item ids and links](Making-a-Rules-Pack#checklist-item-ids-and-links)): `{item:spare}` shows as that item's text in double quotes (cut to 40 characters with `…`), `{formula:f-water}` as the formula's name, and a link to nothing as written. A link to an item of a phase whose checklist you may not see also stays as written. An item with an id stays ticked when the pack's items are reordered |
 | **Decisions left**, open list | Calculations that are still waiting, for example "Fuel supply — 0 of 7 applied". Double-click one to open it |
 | **Next Phase ▶** | Moves to the next phase and names it, for example "Next Phase ▶ North Movement". Before turn 1 it reads **Start game ▶**. When it is greyed out, hover it to see why |
 | Count | How many decisions are left, for example "4 decisions left" |

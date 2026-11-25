@@ -1,4 +1,5 @@
 using Quartermaster.Core;
+using Quartermaster.Rules;
 using Quartermaster.Vassal;
 using SkiaSharp;
 
@@ -32,12 +33,14 @@ public sealed class CounterPopupLayout
     sealed record Row(PieceInstance Piece, PieceType Type, PieceDetail Detail, SKSizeI Cell, int Height);
 
     readonly PieceRenderer _pieces;
+    readonly RulesPack? _pack;
     readonly List<Row> _rows;
     readonly int _extra;
 
-    CounterPopupLayout(PieceRenderer pieces, List<Row> rows, int extra, int width, int height, List<CounterPopupHotLine> hot)
+    CounterPopupLayout(PieceRenderer pieces, RulesPack? pack, List<Row> rows, int extra, int width, int height, List<CounterPopupHotLine> hot)
     {
         _pieces = pieces;
+        _pack = pack;
         _rows = rows;
         _extra = extra;
         Width = width;
@@ -70,14 +73,18 @@ public sealed class CounterPopupLayout
             {
                 lines.Add(r.Detail.Name);
                 foreach (var (k, v) in r.Detail.Properties) lines.Add($"{k}: {v}");
-                foreach (var l in r.Detail.Ledger) lines.Add(LedgerText(l.Name, l.Value));
+                foreach (var l in r.Detail.Ledger) lines.Add(LedgerText(_pack, l));
             }
             if (_extra > 0) lines.Add($"+ {_extra} more");
             return lines;
         }
     }
 
-    static string LedgerText(string name, double value) => $"{name}: {LedgerTable.FormatNumber(value)}";
+    /// <summary>"name: value", the value with its label when the property has one ("Weather: 3 (Fog)"). The line is the viewer's own.</summary>
+    static string LedgerText(RulesPack? pack, (string PropertyId, string Name, double Value) l) =>
+        pack?.ById<PropertyDef>(l.PropertyId) is { } def
+            ? $"{l.Name}: {Rules.Tables.PropertyLabels.Text(pack, def, l.Value)}"
+            : $"{l.Name}: {LedgerTable.FormatNumber(l.Value)}";
 
     static SKFont Font() => new(SKTypeface.FromFamilyName("Tahoma") ?? SKTypeface.Default, 11);
     static SKFont Bold() => new(SKTypeface.FromFamilyName("Tahoma", SKFontStyle.Bold) ?? SKTypeface.Default, 11);
@@ -107,7 +114,7 @@ public sealed class CounterPopupLayout
             height += h;
             var tw = bold.MeasureText(r.Detail.Name);
             foreach (var (k, v) in r.Detail.Properties) tw = Math.Max(tw, font.MeasureText($"{k}: {v}"));
-            foreach (var l in r.Detail.Ledger) tw = Math.Max(tw, font.MeasureText(LedgerText(l.Name, l.Value)));
+            foreach (var l in r.Detail.Ledger) tw = Math.Max(tw, font.MeasureText(LedgerText(s.Rules, l)));
             width = Math.Max(width, Pad * 2 + r.Cell.Width + Pad + tw);
         }
         if (extra > 0) height += (int)Line + Pad;
@@ -124,12 +131,12 @@ public sealed class CounterPopupLayout
             foreach (var l in r.Detail.Ledger)
             {
                 ty += Line;
-                var w = font.MeasureText(LedgerText(l.Name, l.Value));
+                var w = font.MeasureText(LedgerText(s.Rules, l));
                 hot.Add(new CounterPopupHotLine(tx, ty - 11, w, LedgerBreakdown.For(state, s.Rules, s.Model, LedgerKey.Piece(r.Piece.Id), l.PropertyId)));
             }
             y += r.Height;
         }
-        return new CounterPopupLayout(pieces, rows, extra, (int)Math.Ceiling(width), Math.Max(height, 24), hot);
+        return new CounterPopupLayout(pieces, s.Rules, rows, extra, (int)Math.Ceiling(width), Math.Max(height, 24), hot);
     }
 
     /// <summary>
@@ -159,7 +166,7 @@ public sealed class CounterPopupLayout
             foreach (var l in r.Detail.Ledger)
             {
                 ty += Line;
-                var text = LedgerText(l.Name, l.Value);
+                var text = LedgerText(_pack, l);
                 c.DrawText(text, tx, ty, SKTextAlign.Left, font, ink);
                 var w = font.MeasureText(text);
                 c.DrawLine(tx, ty + 2, tx + w, ty + 2, dotted); // underline marks "hover for the breakdown"

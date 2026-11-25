@@ -29,7 +29,9 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(EndPhase), "endPhase")]
 public abstract record GameCommand;
 
-public sealed record AddPiece(string PieceId, string TypeString, string StateString, string MapId, PointD Pos, string? StackOnto, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+/// <summary>CloneOf: the piece this one is a copy of (the Clone command); its stored ledger values are copied (<see cref="LedgerSeeder.BuildCloneSeeds"/>). Omitted when null.</summary>
+public sealed record AddPiece(string PieceId, string TypeString, string StateString, string MapId, PointD Pos, string? StackOnto, string? LogText = null, DateTimeOffset? At = null, string? Who = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CloneOf = null) : GameCommand;
 public sealed record MovePieces(IReadOnlyList<string> PieceIds, string MapId, PointD Pos, string? StackOnto, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record RemovePiece(string PieceId, string? LogText = null, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetTraitState(string PieceId, int StateIndex, string NewState) : GameCommand;
@@ -43,7 +45,9 @@ public sealed record ToggleTrail(string PieceId) : GameCommand;
 /// </summary>
 public sealed record LedgerDelta(string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, DateTimeOffset? At = null, string? Who = null, string? Tag = null, string? Subject = null, string? PieceId = null, string? SideId = null) : GameCommand;
 public sealed record LedgerSeed(string Key, string PropertyId, double Value);
-public sealed record SeedLedger(IReadOnlyList<LedgerSeed> Seeds) : GameCommand;
+/// <summary>CloneOf: set when the seeds copy a cloned piece's values from this source piece; such a seed is its own undoable step (never folding). Omitted when null.</summary>
+public sealed record SeedLedger(IReadOnlyList<LedgerSeed> Seeds,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CloneOf = null) : GameCommand;
 public sealed record RollDice(string Purpose, int Count, int Sides, IReadOnlyList<int> Results, string? Expression = null, IReadOnlyList<string>? FaceTexts = null, int Modifier = 0, DateTimeOffset? At = null, string? Who = null, string? PieceId = null, string? SideId = null) : GameCommand;
 public sealed record SetNotes(string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetTurn(int Turn, string? Phase, DateTimeOffset? At = null, string? Who = null) : GameCommand;
@@ -54,13 +58,17 @@ public sealed record AdvancePhase(PhasePosition? From, PhasePosition To, string 
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SkippedPhase>? Skipped = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Notice = null) : GameCommand;
 public sealed record SetDifficulty(Difficulty Difficulty, DateTimeOffset? At = null, string? Who = null) : GameCommand;
-public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+/// <summary>ItemId: the item's stable id (ticked by id, <see cref="GameState.TickedIds"/>); null = ticked by <paramref name="Index"/>. Omitted when null.</summary>
+public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTimeOffset? At = null, string? Who = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ItemId = null) : GameCommand;
 public sealed record AcknowledgeWarning(int Index, string Message, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record QueueRuns(IReadOnlyList<PendingRun> Runs, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record ResolveRun(string RunId, IReadOnlyList<string?> PieceIds, DateTimeOffset? At = null, string? Who = null) : GameCommand;
-/// <summary>FormulaId: set on a calc line that shows a formula's working (see <see cref="LogEntry.FormulaId"/>).</summary>
+/// <summary>FormulaId: set on a calc line that shows a formula's working (see <see cref="LogEntry.FormulaId"/>).
+/// Error: the line reports a failed or refused run (see <see cref="LogEntry.Error"/>); omitted when false.</summary>
 public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null, string? SideId = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null) : GameCommand;
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Error = false) : GameCommand;
 
 /// <summary>Log line recorded after stepping back to a checkpoint. Folding: never an undoable action of its own.</summary>
 public sealed record SteppedBack(int ToIndex, int ActionsUndone, int DiceUndone, string Target, DateTimeOffset? At = null, string? Who = null) : GameCommand;

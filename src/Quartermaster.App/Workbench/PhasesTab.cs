@@ -435,7 +435,7 @@ sealed class PhasesTab : UserControl, IRuleRefEditor
             }
             _side.SelectedIndex = idx;
             _check.Items.Clear();
-            foreach (var c in ph?.Checklist ?? new List<string>()) _check.Items.Add(c);
+            foreach (var c in ph?.Checklist ?? new List<ChecklistItem>()) _check.Items.Add(c.Text);
             ShowRefLabel(ph);
         }
         finally { _loading = false; }
@@ -678,16 +678,16 @@ sealed class PhasesTab : UserControl, IRuleRefEditor
     {
         var i = _check.SelectedIndex;
         if (i < 0 || Current is not { } ph || i >= ph.Checklist.Count) return;
-        var text = InputDialog.Ask(this, "Checklist item", "Text of the item:", ph.Checklist[i]);
+        var text = InputDialog.Ask(this, "Checklist item", "Text of the item:", ph.Checklist[i].Text);
         if (string.IsNullOrWhiteSpace(text)) return;
-        CommitPhase(p => p with { Checklist = p.Checklist.Select((c, k) => k == i ? text.Trim() : c).ToList() });
+        CommitPhase(p => p with { Checklist = p.Checklist.Select((c, k) => k == i ? c with { Text = text.Trim() } : c).ToList() });
         LoadChecklist();
     }
 
     void LoadChecklist()
     {
         _check.Items.Clear();
-        foreach (var c in Current?.Checklist ?? new List<string>()) _check.Items.Add(c);
+        foreach (var c in Current?.Checklist ?? new List<ChecklistItem>()) _check.Items.Add(c.Text);
     }
 
     // ---------- grids ----------

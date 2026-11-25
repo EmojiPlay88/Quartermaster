@@ -96,8 +96,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         }
     }
 
-    private void Calc(string text, string? pieceId = null, string? formulaId = null) =>
-        Exec(new AddLogLine(LogKind.Calc, text, pieceId, SideId: Stamp(), FormulaId: formulaId));
+    /// <param name="error">Marks a failure line (LogEntry.Error): a failed or refused run, a missing formula, a bad filter.</param>
+    private void Calc(string text, string? pieceId = null, string? formulaId = null, bool error = false) =>
+        Exec(new AddLogLine(LogKind.Calc, text, pieceId, SideId: Stamp(), FormulaId: formulaId, Error: error));
 
     // Hot-seat stamps. Player-driven applies are run for the player at the table (ModuleSession.ActorSide). Automatic triggers
     // (OnStart, OnMove) are run for the phase: its acting side when it has one, held or not; else the player at the table.
@@ -339,8 +340,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     public void Tick(int index, bool ticked)
     {
         var items = CurrentPhase()?.Checklist;
-        if (items == null || index < 0 || index >= items.Count) return;
-        Exec(new TickChecklist(index, ticked, items[index]));
+        if (items == null || index < 0 || index >= items.Count || items[index] is not { } item) return;
+        // The raw text (links unrendered) is logged; an item with an id is ticked by id, so reordering items keeps the tick.
+        Exec(new TickChecklist(index, ticked, item.Text ?? "", ItemId: item.Id));
     }
 
     public void Acknowledge(int warningIndex)
@@ -502,7 +504,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private FormulaDef? FindFormula(PhaseDef phase, string id)
     {
         var f = s.Rules!.ById<FormulaDef>(id);
-        if (f == null) Calc($"{phase.Name}: formula \"{id}\" not found — skipped", formulaId: LogKind.NoWorking);
+        if (f == null) Calc($"{phase.Name}: formula \"{id}\" not found — skipped", formulaId: LogKind.NoWorking, error: true);
         return f;
     }
 
@@ -515,7 +517,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             try { Parser.Parse(src); }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Calc($"{phase.Name}: filter \"{src}\" is not valid — skipped", formulaId: LogKind.NoWorking);
+                Calc($"{phase.Name}: filter \"{src}\" is not valid — skipped", formulaId: LogKind.NoWorking, error: true);
                 return true;
             }
         }
@@ -542,7 +544,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         foreach (var u in units)
         {
             var trace = s.Runner.Run(s.Game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
-            if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id); continue; }   // hidden like its working
+            if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true); continue; }   // hidden like its working
             if (trace.Result == null) { needInput.Add(u); continue; }
             foreach (var c in s.Runner.Commands(trace, null, "auto", u.Label, Stamp())) Exec(c);
             LogWorking(trace, u.Label, "auto");

@@ -9,8 +9,11 @@ namespace Quartermaster.Core;
 /// <summary>
 /// One row of the ledger grid. Values align with <see cref="LedgerTable.Columns"/>; null means no ledger value (for a computed column: it
 /// does not apply, or its evaluation failed). Errors: column index to the error message of a computed cell that failed; null when none did.
+/// NotKept: column indexes of a holder row's properties that this holder does not keep (<see cref="PropertyDef.Holders"/>); their value is
+/// always null, so a stale stored value never shows. Null when the row keeps every column.
 /// </summary>
-public sealed record LedgerRow(string Key, string Name, string Kind, IReadOnlyList<double?> Values, IReadOnlyDictionary<int, string>? Errors = null);
+public sealed record LedgerRow(string Key, string Name, string Kind, IReadOnlyList<double?> Values, IReadOnlyDictionary<int, string>? Errors = null,
+    IReadOnlySet<int>? NotKept = null);
 
 /// <summary>Pure model behind the ledger window: columns, rows, filtering and CSV export.</summary>
 public static class LedgerTable
@@ -27,22 +30,28 @@ public static class LedgerTable
     {
         var cols = Columns(p);
         AggregateFilters? filters = null;   // shared by every computed cell of this call
-        LedgerRow Make(string key, string name, string kind)
+        LedgerRow Make(string key, string name, string kind, string? holderId = null)
         {
             var vals = new double?[cols.Count];
             Dictionary<int, string>? errors = null;
+            HashSet<int>? notKept = null;
             for (var i = 0; i < cols.Count; i++)
             {
+                if (holderId != null && cols[i].Scope != PropertyScope.Pieces && !PropertyFacts.KeptBy(cols[i], holderId))
+                {
+                    (notKept ??= new()).Add(i);   // blank: this holder does not keep the property
+                    continue;
+                }
                 if (!PropertyFacts.IsComputed(cols[i])) { vals[i] = Ledger.Get(s, key, cols[i].Id); continue; }
                 try { vals[i] = PropertyValues.Get(s, p, m, key, cols[i], filters ??= new(s, p, m)); }
                 catch (EvalError ex) { (errors ??= new())[i] = ex.Message; }
             }
-            return new LedgerRow(key, name, kind, vals, errors);
+            return new LedgerRow(key, name, kind, vals, errors, notKept);
         }
 
-        var rows = new List<LedgerRow> { Make(LedgerKey.Holder(HolderDef.GlobalId), "Global", "Holder") };
+        var rows = new List<LedgerRow> { Make(LedgerKey.Holder(HolderDef.GlobalId), "Global", "Holder", HolderDef.GlobalId) };
         foreach (var h in p.Holders)
-            if (h.Id != HolderDef.GlobalId) rows.Add(Make(LedgerKey.Holder(h.Id), h.Name, "Holder"));
+            if (h.Id != HolderDef.GlobalId) rows.Add(Make(LedgerKey.Holder(h.Id), h.Name, "Holder", h.Id));
 
         var mapIndex = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var i = 0; i < m.Maps.Count; i++)

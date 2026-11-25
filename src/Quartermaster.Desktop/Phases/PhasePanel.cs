@@ -223,8 +223,8 @@ public sealed class PhasePanel : UserControl
     void ShowDecisions(PhaseView v, bool checklistHidden)
     {
         // Hot-seat: another side's phase shows none of its decisions (its checklist included).
-        var items = checklistHidden ? new List<string>() : v.Current?.Checklist ?? new List<string>();
-        var ticked = _s.View?.Ticked;
+        var items = PhaseTexts.ChecklistLines(v, _s.Rules, _s.View, checklistHidden).ToList();   // links rendered as this viewer may see them
+        var ticked = ChecklistState.TickedIndexes(_s.View, v.Current?.Checklist);   // id-ticks by id, the rest by position
         var boxes = _checklist.Children.OfType<CheckBox>().ToList();
         if (boxes.Count == items.Count && boxes.Count == _checklist.Children.Count && boxes.Select(b => b.Content as string).SequenceEqual(items.Select(t => t ?? "")))
         {

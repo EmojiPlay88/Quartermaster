@@ -13,6 +13,30 @@ public class PhaseEditTests
     private static string[] Ids(RulesPack p) => p.Phases.Select(x => x.Id).ToArray();
 
     [Fact]
+    public void Duplicate_drops_checklist_ids()
+    {
+        var pack = new RulesPack { Phases = new() { new PhaseDef { Id = "a", Name = "A", Checklist = new() { new ChecklistItem { Id = "fuel", Text = "Pay", Notes = "n" }, "plain" } } } };
+        var (copy, err) = PhaseEdit.Duplicate(pack, 0);
+        Assert.Null(err);
+        var items = copy.Phases[1].Checklist;
+        Assert.All(items, i => Assert.Null(i.Id));
+        Assert.Equal("n", items[0].Notes);
+        Assert.Equal("fuel", copy.Phases[0].Checklist[0].Id);
+        Assert.DoesNotContain(RulesValidator.Validate(copy), i => i.Message.Contains("more than once"));
+    }
+
+    [Fact]
+    public void Duplicate_keeps_null_checklist_element()
+    {
+        // A hand-edited pack may hold a null checklist element; duplicating the phase must not throw.
+        var pack = new RulesPack { Phases = new() { new PhaseDef { Id = "a", Name = "A", Checklist = new() { null!, new ChecklistItem { Id = "fuel", Text = "Pay" } } } } };
+        var (copy, err) = PhaseEdit.Duplicate(pack, 0);
+        Assert.Null(err);
+        Assert.Null(copy.Phases[1].Checklist[0]);
+        Assert.Null(copy.Phases[1].Checklist[1].Id);
+    }
+
+    [Fact]
     public void Add_Duplicate_Remove_KeepOrder()
     {
         var pack = Pack(new[] { "a", "b", "c" });

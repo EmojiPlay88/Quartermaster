@@ -64,6 +64,19 @@ public static class OutlinerViewRules
 
     static string Num(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// The text of value column <paramref name="columnIndex"/> of a row: blank when it has no value, else the number. A piece's value, and a
+    /// group's lowest value (Min), carry the property's label, e.g. "3 (Fog)"; a total or an average is not a value of the property, so it
+    /// stays a bare number. The node's values are already the viewer's (built from the player's view), so a label shows nothing new.
+    /// </summary>
+    public static string ValueText(RulesPack? pack, OutlinerColumn col, OutlinerNode node, int columnIndex)
+    {
+        if (columnIndex < 0 || columnIndex >= node.Values.Count || node.Values[columnIndex] is not { } v) return "";
+        var labelled = node.Kind == OutlinerNodeKind.Piece || col.Aggregate == OutlinerAggregate.Min;
+        if (!labelled || pack?.ById<PropertyDef>(col.PropertyId) is not { } def) return Num(v);
+        return Rules.Tables.PropertyLabels.Text(pack, def, v);
+    }
+
     /// <summary>The heading of an aggregate number's explanation, e.g. "Fuel total 7  (Main Map)".</summary>
     public static string AggregateTitle(OutlinerColumn col, OutlinerNode node, double value, bool visibleOnly)
     {

@@ -28,7 +28,7 @@ public static class PhaseEdit
         {
             Id = Guid.NewGuid().ToString("N"),
             Name = src.Name + " (copy)",
-            Checklist = src.Checklist.ToList(),
+            Checklist = src.Checklist.Select(c => c is null ? null! : c with { Id = null }).ToList(),   // a null element (hand-edited pack) is kept as is
             OnStart = src.OnStart.ToList(),
             OnEnd = src.OnEnd?.ToList(),
             OnMove = src.OnMove.ToList(),

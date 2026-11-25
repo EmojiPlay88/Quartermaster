@@ -46,6 +46,18 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     readonly RuleRefRow _refRow = new();
     TextBox? _lastEdit;
     readonly ListBox _check = new() { Height = 90 };
+    // details of the selected checklist item
+    internal const string IdUnusableText = "Use letters, digits, '-', '_' or '.' in an id";
+    readonly Grid _checkDetails = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*"), RowDefinitions = new RowDefinitions("Auto,Auto,Auto,Auto,Auto"), Margin = new Thickness(0, 4, 0, 0) };
+    readonly TextBox _checkId = new() { Width = 180, HorizontalAlignment = HorizontalAlignment.Left };
+    readonly TextBlock _checkIdStatus = new() { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap };
+    readonly ComboBox _checkRef = new() { Width = 260 };
+    readonly TextBox _checkNotes = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 44 };
+    readonly TextBlock _checkLinks = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+    readonly List<string> _checkRefIds = new();
+    readonly List<string> _checkLabels = new();
+    int _checkIndex = -1;
+    string? _checkPhase;
     readonly EditGrid _start = new() { Height = 110 };
     readonly EditGrid _end = new() { Height = 110 };
     readonly EditGrid _move = new() { Height = 100 };
@@ -134,14 +146,22 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         rows.Children.Add(_refRow);
 
         var checkInner = new DockPanel();
+        Dock(checkInner, _checkDetails, Avalonia.Controls.Dock.Bottom);
         Dock(checkInner, Row(_bCheckAdd, _bCheckDel), Avalonia.Controls.Dock.Bottom);
         checkInner.Children.Add(_check);
+        var idCell = new StackPanel();
+        idCell.Children.Add(_checkId);
+        idCell.Children.Add(_checkIdStatus);
+        DetailRow(0, "Id:", idCell);
+        DetailRow(1, "Rule ref:", _checkRef);
+        DetailRow(2, "Notes:", _checkNotes);
+        DetailRow(3, "Links:", _checkLinks);
         rows.Children.Add(Box("Checklist (double-click to edit)", checkInner));
 
         _start.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("For each", EditColumnKind.Combo, Weight: 40), new EditColumn("Filter (units)", Weight: 90)]);
         _end.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("For each", EditColumnKind.Combo, Weight: 40), new EditColumn("Filter (units)", Weight: 90)]);
         _move.SetColumns([new EditColumn("Formula", EditColumnKind.Combo, Weight: 90), new EditColumn("Filter (units)", Weight: 90), new EditColumn("Fires for", EditColumnKind.Combo, Weight: 40, Items: FiresForNames)]);
-        _warn.SetColumns([new EditColumn("Condition", Weight: 90), new EditColumn("Message ({unit} = unit name)", Weight: 90), new EditColumn("Decision", EditColumnKind.Check, Weight: 30)]);
+        _warn.SetColumns([new EditColumn("Condition", Weight: 90), new EditColumn("Message ({unit} = unit name)", Weight: 90), new EditColumn("Decision", EditColumnKind.Check, Weight: 30), new EditColumn("Rule ref", EditColumnKind.Combo, Weight: 60)]);
         rows.Children.Add(GridBox("On start: run formulas", _start, _startAdd, _startDel));
         rows.Children.Add(GridBox("On end: run formulas", _end, _endAdd, _endDel));
         rows.Children.Add(GridBox("On move: run formulas for moved units", _move, _moveAdd, _moveDel));
@@ -190,6 +210,12 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         _bCheckAdd.Click += (_, _) => Run(AddCheckAsync);
         _bCheckDel.Click += (_, _) => Run(RemoveCheck);
         _check.DoubleTapped += (_, _) => Run(EditCheckAsync);
+        _check.SelectionChanged += (_, _) => Run(OnCheckSelected);
+        _checkId.OnTextSet(() => { if (!_loading) Kick(); });
+        _checkNotes.OnTextSet(() => { if (!_loading) Kick(); });
+        _checkId.LostFocus += (_, _) => Run(Flush);
+        _checkNotes.LostFocus += (_, _) => Run(Flush);
+        _checkRef.SelectionChanged += (_, _) => Run(OnCheckRuleRefChosen);
 
         _start.CellCommitted += (r, c, t) => Run(() => OnStartCell(r, c, t));
         _end.CellCommitted += (r, c, t) => Run(() => OnEndCell(r, c, t));
@@ -243,6 +269,18 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     }
 
     static List<T> Without<T>(List<T> list, int index) => list.Where((_, i) => i != index).ToList();
+
+    void DetailRow(int row, string label, Control editor)
+    {
+        _checkLabels.Add(label);
+        var t = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 3, 6, 2) };
+        Grid.SetRow(t, row);
+        _checkDetails.Children.Add(t);
+        editor.Margin = new Thickness(0, 0, 0, 2);
+        Grid.SetRow(editor, row);
+        Grid.SetColumn(editor, 1);
+        _checkDetails.Children.Add(editor);
+    }
 
     /// <summary>OnEnd without row <paramref name="index"/>; null (not an empty list) when none is left.</summary>
     static List<StartEntry>? WithoutEnd(List<StartEntry>? list, int index)
@@ -543,6 +581,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
                 ShowIssues();
             }
         }
+        FlushChecklistItem();
         if (_selectedSide is { } sid && pack.Sides.FirstOrDefault(x => x.Id == sid) is { } sd && (sd.UnitFilter ?? "").Trim() != (_sideFilter.Text ?? "").Trim())
         {
             var f = _sideFilter.Text;
@@ -739,14 +778,125 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         var i = _check.SelectedIndex;
         if (i < 0 || Current is not { } ph || i >= ph.Checklist.Count || Owner is not { } w) return;
         var id = ph.Id;
-        var old = ph.Checklist[i];
+        var old = ph.Checklist[i].Text;
         var text = await _dialogs.AskTextAsync(w, "Checklist item", "Text of the item:", old);
-        if (string.IsNullOrWhiteSpace(text) || StillCurrent(id) is not { } cur || i >= cur.Checklist.Count || cur.Checklist[i] != old) return;
-        CommitPhase(p => p with { Checklist = p.Checklist.Select((c, k) => k == i ? text.Trim() : c).ToList() });
+        if (string.IsNullOrWhiteSpace(text) || StillCurrent(id) is not { } cur || i >= cur.Checklist.Count || cur.Checklist[i].Text != old) return;
+        CommitPhase(p => p with { Checklist = p.Checklist.Select((c, k) => k == i ? c with { Text = text.Trim() } : c).ToList() });
         LoadChecklist();
     }
 
-    void LoadChecklist() => _check.ItemsSource = (Current?.Checklist ?? new List<string>()).ToList();
+    /// <summary>The list rows: "{id}: {shown text}" (or the shown text), links rendered as a player sees them.</summary>
+    void LoadChecklist()
+    {
+        var pack = _s.Rules;
+        var ph = Current;
+        if (_checkPhase != _selectedPhase) { _checkIndex = -1; _checkPhase = _selectedPhase; }
+        var prev = _loading;
+        _loading = true;
+        try
+        {
+            _check.ItemsSource = (ph?.Checklist ?? new List<ChecklistItem>()).Select(c => ChecklistRow(pack, c)).ToList();
+            if (ph == null || _checkIndex >= ph.Checklist.Count) _checkIndex = -1;
+            _check.SelectedIndex = _checkIndex;
+        }
+        finally { _loading = prev; }
+        LoadCheckDetails();
+    }
+
+    static string ChecklistRow(RulesPack? pack, ChecklistItem? c)
+    {
+        var text = c?.Text ?? "";
+        var shown = pack == null ? text : ChecklistText.Render(pack, text);
+        return string.IsNullOrEmpty(c?.Id) ? shown : $"{c!.Id}: {shown}";
+    }
+
+    ChecklistItem? CheckItem => Current is { } ph && _checkIndex >= 0 && _checkIndex < ph.Checklist.Count ? ph.Checklist[_checkIndex] : null;
+
+    void OnCheckSelected()
+    {
+        if (_loading) return;
+        var i = _check.SelectedIndex;
+        FlushChecklistItem();   // what was typed belongs to the item shown until now
+        _checkIndex = i;
+        LoadChecklist();
+    }
+
+    void LoadCheckDetails()
+    {
+        var pack = _s.Rules;
+        var item = CheckItem;
+        var prev = _loading;
+        _loading = true;
+        try
+        {
+            _checkDetails.IsEnabled = item != null;
+            _checkId.Text = item?.Id ?? "";
+            _checkIdStatus.Text = "";
+            _checkNotes.Text = item?.Notes ?? "";
+            var (items, ids) = RuleRefPicker.Items(pack, item?.RuleRefId);
+            _checkRefIds.Clear();
+            _checkRefIds.AddRange(ids);
+            _checkRef.ItemsSource = items;
+            _checkRef.SelectedIndex = item == null ? -1 : _checkRefIds.IndexOf(item.RuleRefId ?? "");
+            _checkLinks.Text = item == null || pack == null ? "" : LinksText(pack, item.Text);
+        }
+        finally { _loading = prev; }
+    }
+
+    /// <summary>Each link's target ("{target}"), or "{token} (missing)", in order.</summary>
+    static string LinksText(RulesPack pack, string? text) =>
+        string.Join(", ", ChecklistText.Tokens(text ?? "").Select(t =>
+        {
+            var shown = ChecklistText.Render(pack, t.Token);
+            return shown == t.Token ? t.Token + " (missing)" : shown;
+        }));
+
+    /// <summary>Commits the typed id and notes of the shown item. An unusable or taken id is refused with a status line and not stored.</summary>
+    void FlushChecklistItem()
+    {
+        if (_loading || _s.Rules is not { } pack || CheckItem is not { } item) return;
+        var index = _checkIndex;
+        var typedId = NullIfBlank(_checkId.Text ?? "");
+        var notes = _checkNotes.Text ?? "";
+        var idChanged = typedId != item.Id;
+        if (idChanged && typedId != null)
+        {
+            string? problem = null;
+            if (!ChecklistText.IsUsableId(typedId)) problem = IdUnusableText;
+            else if (pack.Phases.SelectMany(ph => (ph.Checklist ?? new()).Select((c, k) => (ph, c, k)))
+                     .Any(x => x.c?.Id == typedId && !(x.ph.Id == _selectedPhase && x.k == index)))
+                problem = $"Another checklist item already has the id \"{typedId}\"";
+            if (problem != null) { _checkIdStatus.Text = problem; idChanged = false; }
+            else _checkIdStatus.Text = "";
+        }
+        else _checkIdStatus.Text = "";
+        var notesChanged = Norm(item.Notes ?? "") != Norm(notes);
+        if (!idChanged && !notesChanged) return;
+        var status = _checkIdStatus.Text;
+        CommitPhase(p => p with
+        {
+            Checklist = p.Checklist.Select((c, k) => k != index ? c : c with
+            {
+                Id = idChanged ? typedId : c.Id,
+                Notes = notesChanged ? (notes.Length == 0 ? null : notes) : c.Notes,
+            }).ToList(),
+        });
+        LoadChecklist();
+        _checkIdStatus.Text = status;
+    }
+
+    void OnCheckRuleRefChosen()
+    {
+        if (_loading || CheckItem is not { } item) return;
+        var i = _checkRef.SelectedIndex;
+        if (i < 0 || i >= _checkRefIds.Count) return;
+        var id = _checkRefIds[i];
+        if ((item.RuleRefId ?? "") == id) return;
+        var index = _checkIndex;
+        FlushChecklistItem();
+        CommitPhase(p => p with { Checklist = p.Checklist.Select((c, k) => k != index ? c : c with { RuleRefId = id.Length == 0 ? null : id }).ToList() });
+        LoadChecklist();
+    }
 
     // ---------- grids ----------
 
@@ -766,7 +916,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         _start.SetRows(start.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.ForEach.ToString(), e.UnitFilter ?? "" }).ToList());
         _end.SetRows(end.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.ForEach.ToString(), e.UnitFilter ?? "" }).ToList());
         _move.SetRows(move.Select(e => (IReadOnlyList<string>)new[] { FormulaName(e.FormulaId), e.UnitFilter ?? "", FiresForNames[(int)e.FiresFor] }).ToList());
-        _warn.SetRows(warn.Select(w => (IReadOnlyList<string>)new[] { w.Condition, w.Message, w.IsDecision ? "True" : "False" }).ToList());
+        _warn.SetRows(warn.Select(w => (IReadOnlyList<string>)new[] { w.Condition, w.Message, w.IsDecision ? "True" : "False", RuleRefPicker.Text(_s.Rules, w.RuleRefId) }).ToList());
         // SetRows resets per-cell state: items and errors go on afterwards
         for (var i = 0; i < start.Count; i++)
         {
@@ -786,7 +936,11 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             _move.SetCellItems(i, 2, FiresForNames);
             SetExprError(_move, i, 1);
         }
-        for (var i = 0; i < warn.Count; i++) SetExprError(_warn, i, 0);
+        for (var i = 0; i < warn.Count; i++)
+        {
+            SetExprError(_warn, i, 0);
+            _warn.SetCellItems(i, 3, RuleRefPicker.Items(_s.Rules, warn[i].RuleRefId).Items);
+        }
     }
 
     static void SetExprError(EditGrid g, int row, int col) => g.SetCellError(row, col, FormulaEdit.SyntaxProblem(g.Cell(row, col)));
@@ -883,6 +1037,10 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
                 var on = string.Equals(text, "True", StringComparison.OrdinalIgnoreCase);
                 edit = w => w with { IsDecision = on };
                 break;
+            case 3:
+                if (RuleRefPicker.IdOf(_s.Rules, text, ph.Warnings[row].RuleRefId) is not { } refId) return;
+                edit = w => w with { RuleRefId = refId.Length == 0 ? null : refId };
+                break;
             default:
                 return;
         }
@@ -905,6 +1063,13 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     internal TextBlock SideFilterError => _sideFilterErr;
     internal TextBox Issues => _issues;
     internal ListBox Checklist => _check;
+    internal Control ChecklistDetails => _checkDetails;
+    internal TextBox ChecklistIdBox => _checkId;
+    internal TextBlock ChecklistIdStatus => _checkIdStatus;
+    internal ComboBox ChecklistRuleRefBox => _checkRef;
+    internal TextBox ChecklistNotesBox => _checkNotes;
+    internal TextBlock ChecklistLinksText => _checkLinks;
+    internal IReadOnlyList<string> ChecklistDetailLabels => _checkLabels;
     internal EditGrid StartGrid => _start;
     internal EditGrid EndGrid => _end;
     internal EditGrid MoveGrid => _move;

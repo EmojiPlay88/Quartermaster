@@ -65,6 +65,19 @@ public static class PhaseTexts
     public static RuleRef? RuleRefOf(PhaseView v, RulesPack? rules) =>
         v.PlayingText == null && v.Current?.RuleRefId is { Length: > 0 } id ? rules?.ById<RuleRef>(id) : null;
 
+    /// <summary>
+    /// The current phase's checklist as the panel shows it: each item's text with its links rendered (<c>{item:x}</c> as the quoted, cut
+    /// text; <c>{formula:x}</c> as the formula name). A link to an item of a phase whose checklist the viewer may not see stays as written
+    /// (<see cref="Decisions.ChecklistShown"/>), so its text never reaches that player. Empty when the checklist is hidden.
+    /// </summary>
+    public static IReadOnlyList<string> ChecklistLines(PhaseView v, RulesPack? rules, GameState? viewState, bool checklistHidden)
+    {
+        if (checklistHidden || v.Current?.Checklist is not { } items) return Array.Empty<string>();
+        return items.Select(c => c?.Text ?? "").Select(t => rules == null ? t
+            : viewState == null ? ChecklistText.Render(rules, t)
+            : ChecklistText.Render(rules, t, ph => Decisions.ChecklistShown(ph, viewState))).ToList();
+    }
+
     public static string RuleLinkText(RuleRef r) => r.Page > 0 ? $"Rule: {r.Label} (p. {r.Page})" : $"Rule: {r.Label}";
 
     /// <summary>"{message} — n unit(s)" (just the message for a game-level warning) plus " (decision)" / " (acknowledged)" for decision warnings.</summary>

@@ -30,6 +30,8 @@ Tables, formulas and phases can point at a page of the rulebook (a "rule ref"). 
 - **Link to current page** sets the rule ref to the page shown in the left pane.
 - **Find in rulebook** searches the rulebook for the selected text, or the item's name.
 
+Properties, holders, alerts, phase warnings and checklist items can have a rule ref too. They get it from a picker: **(none)**, then every rule ref the pack already has, shown as `{label}, page {page}` (for example "Ferry rules, page 4"). The picker only chooses a ref that exists; make one first with **Link to current page** on a table, formula or phase. A ref that no longer exists shows as `{id} (missing)` so you can see it and pick **(none)** to clear it. See [Rule references](Making-a-Rules-Pack#rule-references).
+
 ## Tables tab
 
 The list on the left holds the pack's tables, for example `SupplyByDistance`, with **New…**, **Rename…** and **Delete**.
@@ -58,8 +60,8 @@ The list on the left holds the pack's formulas, with **New…**, **Rename…** a
 | **Refusal message** | The reason shown when that condition is false. Empty = `{formula name} cannot be run now` |
 | **Rule ref:** | See above |
 | **Notes** | Shown as a tooltip on the formula title in the formula dialog |
-| **Bindings** | What each name in the formula means: Variable, Kind (Unit, Global, Holder, Table, Location, Input, Roll, Moved or Piece), Target, Details, Caption **Only when** (a condition that must be true for the variable to be used; empty = always, see [Variables used only sometimes](Making-a-Rules-Pack#variables-used-only-sometimes)) and, for a Roll, **Dice count** (an expression for the number of dice, 1 to 100; blank = the fixed number in Details, see [a roll per plane](Making-a-Rules-Pack#a-range-chart-and-a-roll-per-plane)). **Remove unused bindings** clears names the formula no longer uses. For an Input, Details holds the limits or choices (a range such as `0..20`, or choices separated by commas, with `"double quotes"` around a choice that holds a comma), then optional `\| always ask` and `\| auto: expression` (either order). For a Piece, Target is the property read from the counter the player picks and Details is the **which pieces** filter (a unit filter; blank = every piece; see [Reading another counter](Formula-Reference#where-names-get-their-values)). A phase's on-move formula gets a warning only when it has no Moved, Input, Unit, Global or Holder binding |
-| **Outputs** | What the result changes: Target, Holder, Property and Op (Set, Add or Subtract). **Value** is an expression for what this output gets (blank = the formula's result, see [Outputs](Formula-Reference#outputs)). **Choose from** lists properties separated by commas and **Pick by** is an expression that picks one at run time (a number picks the Nth, a name picks that property); the **Property** cell is then not used. **Add output**, **Remove output** |
+| **Bindings** | What each name in the formula means: Variable, Kind (Unit, Global, Holder, Table, Location, Input, Roll, Moved or Piece), Target, Details, Caption **Only when** (a condition that must be true for the variable to be used; empty = always, see [Variables used only sometimes](Making-a-Rules-Pack#variables-used-only-sometimes)) and, for a Roll, **Dice count** (an expression for the number of dice, 1 to 100; blank = the fixed number in Details, see [a roll per plane](Making-a-Rules-Pack#a-range-chart-and-a-roll-per-plane)). **Remove unused bindings** clears names the formula no longer uses. For an Input, Details holds the limits or choices (a range such as `0..20`, or choices separated by commas, with `"double quotes"` around a choice that holds a comma), then optional `\| always ask` and `\| auto: expression` (either order). For a Piece, Target is the property read from the counter the player picks and Details is the **which pieces** filter (a unit filter; blank = every piece; see [Reading another counter](Formula-Reference#where-names-get-their-values)). A phase's on-move formula gets a warning only when it has no Moved, Input, Unit, Global or Holder binding. A Holder binding's Target offers each holder only the properties it keeps, and a Global binding only what the global holder keeps ([Properties some holders keep](Making-a-Rules-Pack#properties-some-holders-keep)) |
+| **Outputs** | What the result changes: Target, Holder, Property and Op (Set, Add or Subtract). A Holder or Global output's **Property** offers only the properties that holder keeps. **Value** is an expression for what this output gets (blank = the formula's result, see [Outputs](Formula-Reference#outputs)). **Choose from** lists properties separated by commas and **Pick by** is an expression that picks one at run time (a number picks the Nth, a name picks that property); the **Property** cell is then not used. **Add output**, **Remove output** |
 | **Preview** | The [formula dialog](Window-Formula-Dialog) as it will look, with a **Test piece:** to try it on. Sample values are not saved |
 
 ![The preview of Ammo for firing](images/formula.png)
@@ -84,8 +86,12 @@ The list on the left holds the pack's formulas, with **New…**, **Rename…** a
 | Expression | Makes the property **computed**: its value is this expression, worked out whenever it is read and never stored, for example `Fuel * 2 + Readiness`. Default and SheetField are greyed while it is set. Empty means a stored value. See [Computed properties](Formula-Reference#computed-properties) |
 | Overrides table | A table this property overrides for the counter that holds it: a read of that table at the row named like the counter gives the counter's own value instead of the printed cell. Pick from the pack's tables; blank means none. See [A piece's own value for a table rating](Formula-Reference#a-pieces-own-value-for-a-table-rating) |
 | Column | The overridden column, picked from the table's columns. Greyed for a table with one dimension (it has no column) and when no table is picked |
+| Rule ref | The rulebook page for this property, from the rule-ref picker ([Rule references](#rule-references)) |
+| Labels | A one-column table (OneD or Dice) whose row for a value gives the text shown next to it, for example `3 (Fog)`. Values stay numbers. Blank = none. See [Labels for numbers](Making-a-Rules-Pack#labels-for-numbers) |
+| Holders | For a holder property: the holders that keep it, comma-separated names (`global` is the built-in holder). Blank = every holder. A name that is no holder is refused with `No holder named "{name}"` and the cell goes back to what it was. See [Properties some holders keep](Making-a-Rules-Pack#properties-some-holders-keep) |
+| Clone as | What a copy made with the counter's Clone command gets: **Copy** (this counter's current value) or **Default** (what a new counter starts with). See [Clone and ledger values](Making-a-Rules-Pack#clone-and-ledger-values) |
 
-**Holders** keep values that do not belong to a counter, such as a depot's stores. The built-in **global** holder always exists. **Add holder** and **Delete holder** change the list.
+**Holders** keep values that do not belong to a counter, such as a depot's stores. The built-in **global** holder always exists. **Add holder** and **Delete holder** change the list. The holder grid has Name, Notes and **Rule ref** (from the rule-ref picker; the global holder's row is read-only).
 
 ## Phases tab
 
@@ -105,11 +111,11 @@ On the right, for the selected phase:
 | **Notes** | Shown as a tooltip on the phase |
 | **Runs only if** | A condition for the phase; the hint reads "Leave empty to always run. Example: PlayerA == 1, turn() == 1, mod(turn(), 4) == 1." Problems with the condition show in **Problems with this phase** |
 | **Rule ref:** | See above |
-| **Checklist** | Items the player ticks. **Add…**, **Remove**, double-click to edit |
+| **Checklist** | Items the player ticks. **Add…**, **Remove**, double-click to edit the text. Each row reads `{id}: {shown text}`, or just the shown text for an item without an id; links are shown as the player sees them. Below the list, the selected item's details: **Id:** (letters, digits, `-`, `_` or `.`; a bad id shows "Use letters, digits, '-', '_' or '.' in an id" and one already used anywhere in the pack shows `Another checklist item already has the id "{id}"`; neither is stored), **Rule ref:** (the rule-ref picker), **Notes:** and **Links:** (each link's target, or `{token} (missing)`). See [Checklist item ids and links](Making-a-Rules-Pack#checklist-item-ids-and-links) |
 | **On start: run formulas** | Formulas that run when the phase starts: Formula, For each and Filter (units) |
 | **On end: run formulas** | Formulas that run when Next Phase leaves the phase: Formula, For each and Filter (units), like **On start**. See [Phases](Window-Phases#end-of-phase-formulas) |
 | **On move: run formulas for moved units** | Formulas that run when a unit moves: Formula, Filter (units) and **Fires for** (**Acting side**, **Other side** or **Any side**; the default is Acting side). See [Phases](Window-Phases#moves-by-the-other-side) |
-| **Warnings** | Condition, Message (`{unit}` = the unit's name) and Decision (ticked: the warning counts as a decision left until it is acknowledged in the phase panel) |
+| **Warnings** | Condition, Message (`{unit}` = the unit's name), Decision (ticked: the warning counts as a decision left until it is acknowledged in the phase panel) and **Rule ref** (the rule-ref picker) |
 | **Problems with this phase** | What is wrong with this phase |
 
 ## Alerts tab
@@ -125,6 +131,7 @@ On the left, **Alerts, in order**, with columns Alert and Severity, and **Add**,
 | **Message ({unit} = unit name):** | For example "{unit} is low on fuel" |
 | **Severity:** | Info (blue), Warning (amber) or Critical (red) |
 | **Side:** | Limits the alert to one side's units, and (when the pack has phases) to the phases that side plays |
+| **Rule ref:** | The rulebook page for the alert, from the rule-ref picker ([Rule references](#rule-references)) |
 | **Notes** | Shown as a tooltip on the alert |
 
 Alerts appear as chips in the main window's [alert bar](Window-Main-Window#alert-bar).

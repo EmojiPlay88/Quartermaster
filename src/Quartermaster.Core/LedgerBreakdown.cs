@@ -50,7 +50,8 @@ public static class LedgerBreakdown
         var prop = pack?.ById<PropertyDef>(propertyId);
         if (prop != null && PropertyFacts.IsComputed(prop)) return ForComputed(s, pack!, model, key, prop);
         var value = Ledger.Get(s, key, propertyId) ?? prop?.Default ?? 0;
-        var title = $"{prop?.Name ?? propertyId} {Num(value)}  ({OwnerName(s, pack, key)})";
+        var valueText = pack != null && prop != null ? Rules.Tables.PropertyLabels.Text(pack, prop, value) : Num(value);   // "3 (Fog)" when the value has a label
+        var title = $"{prop?.Name ?? propertyId} {valueText}  ({OwnerName(s, pack, key)})";
 
         var history = Ledger.History(s, key, propertyId);
         var lines = new List<BreakdownLine>();
@@ -87,7 +88,7 @@ public static class LedgerBreakdown
     {
         string shown;
         string? error = null;
-        try { shown = PropertyValues.Get(s, pack, model, key, prop) is { } v ? Num(v) : "—"; }
+        try { shown = PropertyValues.Get(s, pack, model, key, prop) is { } v ? Rules.Tables.PropertyLabels.Text(pack, prop, v) : "—"; }
         catch (Rules.Expr.EvalError ex) { shown = "error"; error = ex.Message; }
         var lines = new List<BreakdownLine> { new("", "= " + prop.Expr!.Trim(), null) };
         if (error != null) lines.Add(new BreakdownLine("", error, null));

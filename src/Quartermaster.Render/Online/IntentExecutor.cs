@@ -161,9 +161,10 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
                 return IntentResult.Refused(HostOnlyText);
         }
         using (c.ActingFor(sides, who))
+        using (clean is AddPiece ? g.BeginAction() : null)   // an add and its seeds (a clone's copied values) are one undoable action
         {
             g.Execute(CommandLog.Prepare(CommandLog.Stamp(clean, who), g.State, s));
-            if (clean is AddPiece) s.SeedLedgers();
+            if (clean is AddPiece added) s.SeedAfterAdd(added);
         }
         return IntentResult.Done();
     }
@@ -186,6 +187,13 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (BadId(add.PieceId) || BadId(add.MapId) || string.IsNullOrEmpty(add.TypeString) || add.TypeString.Length > MaxTypeText
             || (add.StateString?.Length ?? 0) > MaxTypeText || !double.IsFinite(add.Pos.X) || !double.IsFinite(add.Pos.Y))
             return "That piece can't be placed.";
+        // A clone copies its source's values: only from a piece the sender may act on, and only as that piece's own type, so a guest can
+        // never move another side's private values into a counter of its own.
+        if (add.CloneOf != null)
+        {
+            if (Actable(g, a, add.CloneOf) is { } cloneWhy) return cloneWhy;
+            if (!string.Equals(g.State.Pieces[add.CloneOf].TypeString, add.TypeString, StringComparison.Ordinal)) return "That piece can't be placed.";
+        }
         if (a.MapHidden(add.MapId)) return MapText;
         // Decode the state exactly as the reducer does, so the side is judged on the piece as it will exist.
         var probe = new PieceInstance { Id = add.PieceId, TypeString = add.TypeString, MapId = add.MapId, Pos = add.Pos,
@@ -227,6 +235,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (s.Rules?.Properties.FirstOrDefault(p => p != null && p.Id == l.PropertyId) is not { } prop)
             return IntentResult.Refused("That value no longer exists.");
         if (LedgerViewRules.ComputedRefusal(s.Rules, prop.Id) is { } computed) return IntentResult.Refused(computed);
+        if (LedgerViewRules.NotKeptRefusal(s.Rules, l.Key, prop.Id) is { } notKept) return IntentResult.Refused(notKept);
         if (LedgerKey.TryParse(l.Key, out var isPiece, out var id) && isPiece && !Exists(g, Access(g, sides), id))
             return IntentResult.Refused(GoneText);
         if (!s.CanEditLedgerFor(l.Key, sides)) return IntentResult.Refused(OtherSide("That value"));

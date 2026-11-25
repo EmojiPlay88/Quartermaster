@@ -36,6 +36,10 @@ public static class RulesValidator
             foreach (var p in pack.Properties) CheckComputed(pack, p, issues);
             CheckComputedCycles(pack, issues);
             CheckOverrides(pack, issues);
+            CheckLabels(pack, issues);
+            CheckHolders(pack, issues);
+            CheckRuleRefs(pack, issues);
+            CheckChecklists(pack, issues);
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
             foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues));
             foreach (var s in pack.Sides) Guarded(issues, s.Id, s.Name, () => CheckSide(s, pack, issues));
@@ -104,6 +108,68 @@ public static class RulesValidator
         }
     }
 
+    private static void DanglingRef(RulesPack pack, string? refId, string who, string id, string name, List<RulesIssue> issues)
+    {
+        if (!string.IsNullOrEmpty(refId) && pack.ById<RuleRef>(refId!) is null)
+            Add(issues, RulesIssueSeverity.Warning, id, name, $"{who}: rule reference \"{refId}\" does not exist");
+    }
+
+    /// <summary>Rule references of properties, holders and alerts that point at nothing (a warning: the item still works).</summary>
+    private static void CheckRuleRefs(RulesPack pack, List<RulesIssue> issues)
+    {
+        foreach (var p in pack.Properties) DanglingRef(pack, p.RuleRefId, $"Property \"{p.Name}\"", p.Id, p.Name, issues);
+        foreach (var h in pack.Holders) DanglingRef(pack, h.RuleRefId, $"Holder \"{h.Name}\"", h.Id, h.Name, issues);
+        foreach (var a in pack.Alerts) DanglingRef(pack, a.RuleRefId, $"Alert \"{a.Name}\"", a.Id, a.Name, issues);
+    }
+
+    /// <summary>Checklist ids: usable characters, unique across the whole pack (the first holder of an id keeps it, later ones are reported).</summary>
+    private static void CheckChecklists(RulesPack pack, List<RulesIssue> issues)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var ph in pack.Phases)
+        {
+            int n = 0;
+            foreach (var it in ph.Checklist ?? new())
+            {
+                n++;
+                if (it?.Id is not { } id) continue;
+                if (!ChecklistText.IsUsableId(id))
+                    Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, $"Phase \"{ph.Name}\": checklist item {n} has an unusable id \"{id}\"; use letters, digits, '-', '_' or '.'");
+                else if (!seen.Add(id))
+                    Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, $"Phase \"{ph.Name}\": checklist item id \"{id}\" is used more than once");
+            }
+        }
+    }
+
+    private static void CheckLabels(RulesPack pack, List<RulesIssue> issues)
+    {
+        foreach (var p in pack.Properties)
+        {
+            if (string.IsNullOrWhiteSpace(p.Labels)) continue;
+            if (pack.ById<TableDef>(p.Labels!) is not { } t)
+                Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" takes its labels from a table that no longer exists");
+            else if (t.Kind == TableKind.TwoD)
+                Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" takes its labels from table \"{t.Name}\", which has more than one column");
+        }
+    }
+
+    private static void CheckHolders(RulesPack pack, List<RulesIssue> issues)
+    {
+        foreach (var p in pack.Properties)
+        {
+            if (p.Holders is not { Count: > 0 } list) continue;
+            if (p.Scope == PropertyScope.Pieces)
+                Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" lists holders but is not a holder property");
+            foreach (var h in list.Distinct(StringComparer.Ordinal))
+                if (h != HolderDef.GlobalId && pack.ById<HolderDef>(h) is null)
+                    Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" names holder \"{h}\", which does not exist");
+        }
+    }
+
+    /// <summary>The name a holder goes by in messages: its name, or Global for the built-in holder.</summary>
+    private static string HolderLabel(RulesPack pack, string? holderId) =>
+        holderId == HolderDef.GlobalId ? "Global" : pack.ById<HolderDef>(holderId ?? "")?.Name ?? holderId ?? "";
+
     /// <summary>Each distinct cycle once, on the first property of it in pack order.</summary>
     private static void CheckComputedCycles(RulesPack pack, List<RulesIssue> issues)
     {
@@ -156,6 +222,8 @@ public static class RulesValidator
         var prop = pack.PropertyByName(property);
         if (prop is null) yield return UnknownPropertyTail(property);
         else if (prop.Scope == PropertyScope.Pieces) yield return $"refers to \"{prop.Name}\", which is not a holder property";
+        else if (pack.HolderByName(holder) is { } h && !PropertyFacts.KeptBy(prop, h.Id))
+            yield return $"refers to \"{prop.Name}\", which holder \"{h.Name}\" does not keep";
     }
 
     /// <summary>
@@ -290,9 +358,25 @@ public static class RulesValidator
             WarnOutsidePhases(ph, f, "move", issues);
         }
         CheckPhaseCondition(pack, ph, issues);
-        foreach (var w in ph.Warnings)
+        int itemNo = 0;
+        foreach (var it in ph.Checklist ?? new())
         {
+            itemNo++;
+            if (it is null) continue;
+            DanglingRef(pack, it.RuleRefId, $"{who}: checklist item {itemNo}", ph.Id, ph.Name, issues);
+            foreach (var (kind, id, _) in ChecklistText.Tokens(it.Text).DistinctBy(t => (t.Kind, t.Id)))
+            {
+                if (kind == "item" && ChecklistText.ItemById(pack, id) is null)
+                    Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: checklist item {itemNo} names item \"{id}\", which does not exist");
+                else if (kind == "formula" && pack.ById<FormulaDef>(id) is null)
+                    Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: checklist item {itemNo} names formula \"{id}\", which does not exist");
+            }
+        }
+        for (int wi = 0; wi < ph.Warnings.Count; wi++)
+        {
+            var w = ph.Warnings[wi];
             CheckPhaseExpr(pack, w.Condition, who, "warning condition", Err);
+            DanglingRef(pack, w.RuleRefId, $"{who}: warning {wi + 1}", ph.Id, ph.Name, issues);
             if (string.IsNullOrWhiteSpace(w.Message)) Err($"{who}: warning message is empty");
             else if (ShowsOnceWithUnit(pack, w.Condition, w.Message))
                 Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: warning {ShowsOnceText}");
@@ -499,7 +583,15 @@ public static class RulesValidator
             var msg = $"rule reference points to a file on this computer (\"{file}\"); link it again to a module document or an opened scan";
             var users = pack.Formulas.Where(f => f.RuleRefId == r.Id).Select(f => (f.Id, f.Name, Who: $"Formula \"{f.Name}\""))
                 .Concat(pack.Tables.Where(t => t.RuleRefId == r.Id).Select(t => (t.Id, t.Name, Who: $"Table \"{t.Name}\"")))
-                .Concat(pack.Phases.Where(p => p.RuleRefId == r.Id).Select(p => (p.Id, p.Name, Who: $"Phase \"{p.Name}\""))).ToList();
+                .Concat(pack.Phases.Where(p => p.RuleRefId == r.Id).Select(p => (p.Id, p.Name, Who: $"Phase \"{p.Name}\"")))
+                .Concat(pack.Properties.Where(p => p.RuleRefId == r.Id).Select(p => (p.Id, p.Name, Who: $"Property \"{p.Name}\"")))
+                .Concat(pack.Holders.Where(h => h.RuleRefId == r.Id).Select(h => (h.Id, h.Name, Who: $"Holder \"{h.Name}\"")))
+                .Concat(pack.Alerts.Where(a => a.RuleRefId == r.Id).Select(a => (a.Id, a.Name, Who: $"Alert \"{a.Name}\"")))
+                .Concat(pack.Phases.SelectMany(p => p.Warnings.Select((w, i) => (p, w, i)).Where(x => x.w.RuleRefId == r.Id)
+                    .Select(x => (x.p.Id, x.p.Name, Who: $"Phase \"{x.p.Name}\": warning {x.i + 1}"))))
+                .Concat(pack.Phases.SelectMany(p => p.Checklist.Select((c, i) => (p, c, i)).Where(x => x.c?.RuleRefId == r.Id)
+                    .Select(x => (x.p.Id, x.p.Name, Who: $"Phase \"{x.p.Name}\": checklist item {x.i + 1}"))))
+                .ToList();
             if (users.Count == 0) Add(issues, RulesIssueSeverity.Error, r.Id, r.Label, $"Rule reference \"{r.Label}\": {msg}");
             foreach (var u in users) Add(issues, RulesIssueSeverity.Error, u.Id, u.Name, $"{u.Who}: {msg}");
         }
@@ -690,13 +782,17 @@ public static class RulesValidator
         switch (b.Kind)
         {
             case BindingKind.Unit:
+                CheckProperty(pack, b.Property, v, err);
+                break;
             case BindingKind.Global:
                 CheckProperty(pack, b.Property, v, err);
+                CheckKept(pack, b.Property, HolderDef.GlobalId, $"{v} reads", err);
                 break;
             case BindingKind.Holder:
                 CheckProperty(pack, b.Property, v, err);
                 if (b.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(b.HolderId ?? "") is null)
                     err($"{v} refers to unknown holder \"{b.HolderId}\"");
+                else CheckKept(pack, b.Property, b.HolderId!, $"{v} reads", err);
                 break;
             case BindingKind.Table:
             {
@@ -733,6 +829,13 @@ public static class RulesValidator
         }
     }
 
+    /// <summary>An error when the property (by id) exists but the holder does not keep it. Message: "{lead} \"{property}\", which holder \"{holder}\" does not keep".</summary>
+    private static void CheckKept(RulesPack pack, string? propertyId, string holderId, string lead, Action<string> err)
+    {
+        if (pack.ById<PropertyDef>(propertyId ?? "") is { } p && !PropertyFacts.KeptBy(p, holderId))
+            err($"{lead} \"{p.Name}\", which holder \"{HolderLabel(pack, holderId)}\" does not keep");
+    }
+
     private static void CheckExpr(string text, string what, string v, Action<string> err)
     {
         try { Parser.Parse(text); }
@@ -763,6 +866,9 @@ public static class RulesValidator
             ? p.Scope is PropertyScope.Pieces or PropertyScope.Both
             : p.Scope is PropertyScope.Holders or PropertyScope.Both;
         if (PropertyFacts.IsComputed(p)) { err($"output {outputNo} writes computed property \"{p.Name}\""); return; }
+        if (o.Target == OutputTarget.Global) CheckKept(pack, id, HolderDef.GlobalId, $"output {outputNo} writes", err);
+        else if (o.Target == OutputTarget.Holder && (o.HolderId == HolderDef.GlobalId || pack.ById<HolderDef>(o.HolderId ?? "") is not null))
+            CheckKept(pack, id, o.HolderId!, $"output {outputNo} writes", err);
         if (!ok)
             err($"output property \"{p.Name}\" cannot be written to {(o.Target == OutputTarget.Unit ? "a unit" : "a holder")} (its scope is {p.Scope})");
     }

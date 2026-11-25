@@ -36,6 +36,9 @@ public sealed record PhaseWarning
     /// <summary>May contain the token {unit}, replaced by the unit name in per-unit rows.</summary>
     public string Message { get; init; } = "";
     public bool IsDecision { get; init; }
+    /// <summary>Id of the rule reference this warning cites. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RuleRefId { get; init; }
 }
 
 public sealed record PhaseDef
@@ -45,7 +48,7 @@ public sealed record PhaseDef
     public string? SideId { get; init; }
     public string Instructions { get; init; } = "";
     public string? RuleRefId { get; init; }
-    public List<string> Checklist { get; init; } = new();
+    public List<ChecklistItem> Checklist { get; init; } = new();
     public List<StartEntry> OnStart { get; init; } = new();
     /// <summary>Runs when the phase is left, like OnStart. Null = none (the Workbench stores null, never an empty list).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

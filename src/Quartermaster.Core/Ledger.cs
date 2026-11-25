@@ -119,6 +119,48 @@ public static class LedgerSeeder
         // a piece that fails midway contributes nothing (nothing is added before the last loop)
     }
 
+    /// <summary>
+    /// Seeds that copy the source piece's stored values to its clone (the Clone command, spec #20): piece properties (Pieces or Both) that
+    /// are not computed and whose <see cref="PropertyDef.CloneAs"/> is Copy, in pack order. Null when there is nothing to copy, either piece
+    /// is missing, or the clone's side worked out with the copied values (and the normal seeding that follows them) differs from the source's side; then nothing is copied (so another
+    /// side's hidden values never move to a counter a different side sees) and a "rules" warning is added to <paramref name="log"/>.
+    /// The clone's other properties get the normal seeding afterwards. <paramref name="model"/> is not read today (sides need no module);
+    /// it keeps the shape of <see cref="BuildSeeds"/>. Never throws.
+    /// </summary>
+    public static SeedLedger? BuildCloneSeeds(GameState s, RulesPack pack, ModuleModel? model, string newPieceId, string sourcePieceId, DiagnosticLog? log = null)
+    {
+        if (s == null || pack == null || newPieceId == null || sourcePieceId == null || newPieceId == sourcePieceId) return null;
+        if (!s.Pieces.TryGetValue(sourcePieceId, out var source) || !s.Pieces.ContainsKey(newPieceId)) return null;
+        try
+        {
+            var from = LedgerKey.Piece(sourcePieceId);
+            var to = LedgerKey.Piece(newPieceId);
+            var seeds = new List<LedgerSeed>();
+            foreach (var prop in pack.Properties)
+            {
+                if (prop == null || prop.Scope == PropertyScope.Holders || PropertyFacts.IsComputed(prop) || prop.CloneAs != CloneValue.Copy) continue;
+                if (Ledger.Get(s, from, prop.Id) is { } v && double.IsFinite(v)) seeds.Add(new LedgerSeed(to, prop.Id, v));
+            }
+            if (seeds.Count == 0) return null;
+            var result = new SeedLedger(seeds, sourcePieceId);
+
+            var probe = s.DeepClone();
+            probe.Apply(result);
+            // The normal seeding that follows (sheet values of Default properties) can change the side too: judge the clone after it.
+            if (BuildSeeds(probe, pack, p => p.Id == newPieceId, model) is { } normal) probe.Apply(normal);
+            var sourceSide = Ownership.PieceSides(s, pack)(source);
+            var cloneSide = Ownership.PieceSides(probe, pack)(probe.Pieces[newPieceId]);
+            if (sourceSide == cloneSide) return result;
+            log?.Add(DiagnosticSeverity.Warning, "rules", $"Clone of \"{PieceInfo.Name(source)}\" belongs to another side, so its values were not copied");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            log?.Add(DiagnosticSeverity.Warning, "rules", $"Could not copy the values of piece '{sourcePieceId}': {ex.Message}");
+            return null;
+        }
+    }
+
     /// <summary>A piece property bound to a sheet row and stored (a computed property is never seeded: its Sheet field is ignored).</summary>
     private static bool Seeded(PropertyDef p) =>
         p.Scope != PropertyScope.Holders && !string.IsNullOrWhiteSpace(p.SheetField) && !PropertyFacts.IsComputed(p);

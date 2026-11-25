@@ -56,6 +56,9 @@ public sealed class GameState
     public PhasePosition? EndedAt { get; set; }
     public Difficulty Difficulty { get; set; } = Difficulty.SemiAuto;
     public List<int> Ticked { get; set; } = new();
+    /// <summary>Ids of the checklist items ticked by id this phase (items with an id); null when none. Cleared on phase change like <see cref="Ticked"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? TickedIds { get; set; }
     public List<int> Acknowledged { get; set; } = new();
     public List<PendingRun> Pending { get; set; } = new();
     /// <summary>Alert ids hidden until the turn number changes.</summary>
@@ -143,9 +146,20 @@ public sealed class GameState
                 Log.Add(LogBuilder.Line(this, LogKind.System, $"Difficulty changed to {DifficultyText.Display(sd.Difficulty)}", sd.Who, sd.At));
                 break;
             case TickChecklist tc:
-                Ticked ??= new();
-                if (tc.Ticked) { if (!Ticked.Contains(tc.Index)) Ticked.Add(tc.Index); }
-                else Ticked.RemoveAll(i => i == tc.Index);
+                if (!string.IsNullOrEmpty(tc.ItemId))
+                {
+                    // An item with an id is ticked by id, so reordering the pack's items keeps the tick on it.
+                    var ids = TickedIds ?? new();
+                    if (tc.Ticked) { if (!ids.Contains(tc.ItemId, StringComparer.Ordinal)) ids.Add(tc.ItemId); }
+                    else ids.RemoveAll(i => string.Equals(i, tc.ItemId, StringComparison.Ordinal));
+                    TickedIds = ids.Count == 0 ? null : ids;
+                }
+                else
+                {
+                    Ticked ??= new();
+                    if (tc.Ticked) { if (!Ticked.Contains(tc.Index)) Ticked.Add(tc.Index); }
+                    else Ticked.RemoveAll(i => i == tc.Index);
+                }
                 Log.Add(LogBuilder.Line(this, LogKind.Turn, (tc.Ticked ? "Done: " : "Not done: ") + tc.Item, tc.Who, tc.At));
                 break;
             case AcknowledgeWarning aw:
@@ -160,7 +174,7 @@ public sealed class GameState
                 break;
             case ResolveRun rr: DoResolve(rr); break;
             case AddLogLine al:
-                Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId, al.SideId, al.FormulaId));
+                Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId, al.SideId, al.FormulaId, al.Error));
                 break;
             case HideAlert ha:
                 HiddenAlerts ??= new();
@@ -208,7 +222,7 @@ public sealed class GameState
         Position = a.To;
         EndedAt = null;
         Turn = new TurnState(a.To.Turn, a.ToName);
-        Ticked = new(); Acknowledged = new(); Pending = new();
+        Ticked = new(); TickedIds = null; Acknowledged = new(); Pending = new();
         foreach (var k in a.Skipped ?? Array.Empty<SkippedPhase>())
             if (k != null) Log.Add(LogBuilder.LineAt(this, LogKind.Turn, $"Skipped {k.Name} (condition false)", a.Who, a.At, k.Turn, k.Name));
         if (!string.IsNullOrEmpty(a.Notice))

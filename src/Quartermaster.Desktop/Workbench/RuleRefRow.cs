@@ -78,3 +78,40 @@ public sealed class RuleRefRow : StackPanel
     /// <summary>Raises <see cref="LinkClicked"/> as a click on the link would (only when it is a link). For tests.</summary>
     internal void ClickLink() { if (_display.IsLink) LinkClicked?.Invoke(); }
 }
+
+/// <summary>
+/// The rule-ref picker of the property, holder, alert, phase-warning and checklist editors: "(none)", then every rule ref of the pack as
+/// "{label}, page {page}". It only chooses existing refs; making one stays with "Link to current page". A ref id that no longer exists shows
+/// as "{id} (missing)" so the stale value can be seen and cleared.
+/// </summary>
+public static class RuleRefPicker
+{
+    public const string None = "(none)";
+
+    public static string ItemText(RuleRef r) => $"{r.Label}, page {r.Page}";
+
+    /// <summary>The items and, aligned with them, the ref ids ("" for "(none)"); a dangling <paramref name="current"/> is added last.</summary>
+    public static (IReadOnlyList<string> Items, IReadOnlyList<string> Ids) Items(RulesPack? pack, string? current = null)
+    {
+        var items = new List<string> { None };
+        var ids = new List<string> { "" };
+        foreach (var r in pack?.RuleRefs ?? new List<RuleRef>()) { items.Add(ItemText(r)); ids.Add(r.Id); }
+        if (!string.IsNullOrEmpty(current) && !ids.Contains(current)) { items.Add(Missing(current)); ids.Add(current); }
+        return (items, ids);
+    }
+
+    static string Missing(string id) => $"{id} (missing)";
+
+    /// <summary>The shown text of a ref id: "(none)" for none, the item text, or "{id} (missing)".</summary>
+    public static string Text(RulesPack? pack, string? id) =>
+        string.IsNullOrEmpty(id) ? None : pack?.ById<RuleRef>(id!) is { } r ? ItemText(r) : Missing(id!);
+
+    /// <summary>The ref id an item text stands for: "" for "(none)", null for a text that is no item (nothing to change). The first ref
+    /// wins when two read alike.</summary>
+    public static string? IdOf(RulesPack? pack, string? text, string? current = null)
+    {
+        var (items, ids) = Items(pack, current);
+        var i = items.ToList().IndexOf(text ?? "");
+        return i < 0 ? null : ids[i];
+    }
+}

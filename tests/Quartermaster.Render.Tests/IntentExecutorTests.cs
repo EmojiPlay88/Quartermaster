@@ -169,6 +169,23 @@ public class IntentExecutorTests : IDisposable
     }
 
     [Fact]
+    public void Intent_edit_of_value_holder_does_not_keep_refused()
+    {
+        var (s, _, x) = Open();
+        s.UpdateRules(p => p with
+        {
+            Holders = p.Holders.Append(new HolderDef { Id = "bluedepot", Name = "Blue Depot", SideId = "blue" }).ToList(),
+            Properties = p.Properties.Append(new PropertyDef { Id = "tolls", Name = "Ferry tolls", Scope = PropertyScope.Holders, Holders = new() { "reddepot" } }).ToList(),
+        });
+        var g = s.Game!;
+        var before = Json(g.State);
+        var r = x.Execute("p2", Blue, new LedgerEditIntent(LedgerKey.Holder("bluedepot"), "tolls", 4, "filled"));
+        Assert.False(r.Ok);
+        Assert.Equal("Blue Depot does not keep Ferry tolls", r.Message);
+        Assert.Equal(before, Json(g.State));
+    }
+
+    [Fact]
     public void Intent_NextPhaseOutOfPhase_Refused()
     {
         var (s, c, x) = Open();
