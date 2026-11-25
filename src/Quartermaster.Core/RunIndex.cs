@@ -37,6 +37,7 @@ internal static class RunIndex
     public static double Count(GameState s, RulesPack pack, string formulaId, string? pieceId, string period,
         Lazy<Func<PieceInstance, string?>>? sides = null)
     {
+        PieceFilter.RefuseInStartingValue("runs");
         if (pack.ById<FormulaDef>(formulaId) is null) throw new EvalError($"runs() names formula \"{formulaId}\", which does not exist");
         if (Ownership.InUnitFilter) throw new EvalError("runs() is not available in a side's unit filter");
         if (s.IsPlayerView)

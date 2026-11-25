@@ -26,6 +26,7 @@ public static class PieceAggregates
     /// </summary>
     internal static Value Evaluate(string fn, string? property, string? filter, PieceInstance? self, AggregateFilters ctx)
     {
+        PieceFilter.RefuseInStartingValue(fn);   // also when reached through a computed property a starting value reads
         var (s, pack, model) = (ctx.State, ctx.Pack, ctx.Model);
         if (s.IsPlayerView && ctx.HiddenInView(fn, property, filter)) throw new EvalError($"{fn}() {HiddenText}") { HiddenData = true };
         IEnumerable<PieceInstance> pieces;

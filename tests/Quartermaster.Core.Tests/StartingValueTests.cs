@@ -87,7 +87,7 @@ public class StartingValueTests
         Assert.Equal("Starting value of \"Crew\" failed on \"Boat\": Unknown property 'Nope'; it starts at 2", w.Message);
 
         // The calls a starting value may not make fail at run time too, so the piece gets the Default.
-        foreach (var bad in new[] { "dice(1, 6)", "holder(Depot, Crew)", "runs(\"f-x\")", "countof()", "sum(Crew)", "1 +" })
+        foreach (var bad in new[] { "dice(1, 6)", "holder(Depot, Crew)", "runs(\"f-x\")", "countof(\"\")", "sum(Crew, \"\")", "1 +" })
         {
             var p = Pack(new PropertyDef { Id = "crew", Name = "Crew", Scope = PropertyScope.Both, Default = 2, DefaultExpr = bad });
             var l = new DiagnosticLog();
@@ -126,5 +126,36 @@ public class StartingValueTests
         var pack = Pack(new PropertyDef { Id = "crew", Name = "Crew", Scope = PropertyScope.Both, Default = 1, DefaultExpr = "5" });
         Assert.Equal([("p:a", "crew", 5.0)], Seeds(LedgerSeeder.BuildSeeds(s, pack, _ => true, RunnerFx.Model)));
         Assert.Null(LedgerSeeder.BuildSeeds(s, Pack(new PropertyDef { Id = "crew", Name = "Crew", Scope = PropertyScope.Holders, DefaultExpr = "5" }), _ => true, RunnerFx.Model));
+    }
+    [Fact]
+    public void Forbidden_calls_through_computed_properties_seed_default()
+    {
+        var s = S(("a", "5", "Large", ""), ("b", "9", "Small", ""));
+        s.Ledgers["h:depot"] = new() { ["stock"] = 40 };
+        foreach (var (expr, fn) in new[] { ("Total + 1", "sum"), ("Count + 1", "countof"), ("Reserve + 1", "holder"), ("Twice + 1", "holder"), ("Dicey + 1", "dice"), ("Stocky + 1", "countof") })
+        {
+            var pack = Pack(
+                new PropertyDef { Id = "crew", Name = "Crew", Scope = PropertyScope.Pieces, SheetField = "Crew" },
+                new PropertyDef { Id = "total", Name = "Total", Scope = PropertyScope.Pieces, Expr = "sum(Crew, \"\")" },
+                new PropertyDef { Id = "count", Name = "Count", Scope = PropertyScope.Pieces, Expr = "countof(\"\")" },
+                new PropertyDef { Id = "stock", Name = "Stock", Scope = PropertyScope.Holders },
+                new PropertyDef { Id = "reserve", Name = "Reserve", Scope = PropertyScope.Holders, Expr = "holder(Depot, Stock)" },
+                new PropertyDef { Id = "twice", Name = "Twice", Scope = PropertyScope.Pieces, Expr = "Reserve * 2" },
+                new PropertyDef { Id = "dicey", Name = "Dicey", Scope = PropertyScope.Pieces, Expr = "dice(1, 6)" },
+                new PropertyDef { Id = "stocky", Name = "Stocky", Scope = PropertyScope.Holders, Expr = "countof(\"\")" },
+                new PropertyDef { Id = "oars", Name = "Oars", Scope = PropertyScope.Pieces, Default = 2, DefaultExpr = expr });
+            var log = new DiagnosticLog();
+            var seeds = Seeds(LedgerSeeder.BuildSeeds(s, pack, _ => true, RunnerFx.Model, log));
+            Assert.Equal([("p:a", "crew", 5.0), ("p:a", "oars", 2.0), ("p:b", "crew", 9.0), ("p:b", "oars", 2.0)], seeds);
+            var w = Assert.Single(log.Items);
+            // A computed property's error carries its name as a prefix ("Total: sum() is not ...").
+            Assert.StartsWith("Starting value of \"Oars\" failed on \"Boat\": ", w.Message);
+            Assert.EndsWith($"{fn}() is not available in a starting value; it starts at 2", w.Message);
+        }
+        // Outside a starting value the same computed properties still work.
+        var ok = Pack(
+            new PropertyDef { Id = "stock", Name = "Stock", Scope = PropertyScope.Holders },
+            new PropertyDef { Id = "reserve", Name = "Reserve", Scope = PropertyScope.Holders, Expr = "holder(Depot, Stock)" });
+        Assert.True(PieceFilter.EvaluateGameLevel("Reserve == 40", s, ok, RunnerFx.Model));
     }
 }

@@ -66,8 +66,25 @@ public static class PieceFilter
     /// if already in its ledger (see <see cref="MatchesWithPending"/>). dice(), holder(), runs() and the piece aggregates are not available
     /// (an <see cref="EvalError"/>), so a seed is deterministic and never copies another side's values. Throws on any error.
     /// </summary>
-    internal static Value EvaluateWithPending(Quartermaster.Rules.Expr.Expr e, PieceInstance p, GameState s, RulesPack pack, IReadOnlyDictionary<string, double> pending) =>
-        Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), new AggregateFilters(s, pack, null), pending, startingValue: true));
+    /// <remarks>The ban holds however the call is reached: directly, or inside a computed property or computed global the expression reads
+    /// (<see cref="InStartingValue"/> is set on this thread while it is evaluated), so a seed never stores a value derived from them.</remarks>
+    internal static Value EvaluateWithPending(Quartermaster.Rules.Expr.Expr e, PieceInstance p, GameState s, RulesPack pack, IReadOnlyDictionary<string, double> pending)
+    {
+        _startingValueDepth++;
+        try { return Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), new AggregateFilters(s, pack, null), pending, startingValue: true)); }
+        finally { _startingValueDepth--; }
+    }
+
+    [ThreadStatic] private static int _startingValueDepth;
+
+    /// <summary>True while a starting value expression is evaluated on this thread (<see cref="EvaluateWithPending"/>).</summary>
+    internal static bool InStartingValue => _startingValueDepth > 0;
+
+    /// <summary>Throws <c>{fn}() is not available in a starting value</c> while a starting value is evaluated on this thread.</summary>
+    internal static void RefuseInStartingValue(string fn)
+    {
+        if (InStartingValue) throw new EvalError($"{fn}() is not available in a starting value");
+    }
 
     /// <summary>The parsed expression when it parses and reads nothing about a piece (<see cref="ExprFacts.IsGameLevel"/>); else null.</summary>
     internal static Quartermaster.Rules.Expr.Expr? ParseGameLevel(string? text, RulesPack pack)
@@ -159,6 +176,7 @@ public static class PieceFilter
     /// <remarks>A computed property is evaluated for the holder (<see cref="PropertyValues"/>); <paramref name="filters"/> is the caller's aggregate state.</remarks>
     internal static Value HolderRead(GameState s, RulesPack pack, string holder, string property, ModuleModel? model = null, AggregateFilters? filters = null)
     {
+        RefuseInStartingValue("holder");
         var h = pack.HolderByName(holder) ?? throw new EvalError($"No holder named '{holder}'");
         var def = pack.PropertyByName(property) ?? throw new EvalError($"Unknown property '{property}'");
         if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{def.Name} is not a holder property");
@@ -285,7 +303,7 @@ public static class PieceFilter
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col, p, s, filters.Model, filters, sides);
         public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
-        public IReadOnlyList<int> RollDice(int n, int sides) => throw (startingValue ? NotInStartingValue("dice") : new EvalError("Dice are not allowed here"));
+        public IReadOnlyList<int> RollDice(int n, int sides) => throw (startingValue || InStartingValue ? NotInStartingValue("dice") : new EvalError("Dice are not allowed here"));
         public bool Has(string property) =>
             pack.PropertyByName(property) is { } def && (PropertyFacts.IsComputed(def) ? Declared(def) : Stored(def) != null);
         public Value PieceName() => NameValue(p);
@@ -326,7 +344,11 @@ public static class PieceFilter
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col);
         public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
-        public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
+        public IReadOnlyList<int> RollDice(int n, int sides)
+        {
+            RefuseInStartingValue("dice");
+            throw new EvalError("Dice are not allowed here");
+        }
         public bool Has(string property) => false;
         public Value PieceName() => NameValue(null);
         public Value Marker(string key) => MarkerValue(null, key);
