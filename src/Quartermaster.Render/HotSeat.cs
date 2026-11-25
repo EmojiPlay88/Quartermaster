@@ -23,6 +23,7 @@ public sealed class HotSeat
         _s = s;
         _phases = phases;
         phases.PhaseBoundary += CheckHandover;
+        phases.RunsQueued += OnRunsQueued;
         s.GameReplaced += OnGameReplaced;
         s.RulesApplied += OnRulesApplied;
         Hook();
@@ -63,6 +64,7 @@ public sealed class HotSeat
         if (_detached) return;
         _detached = true;
         _phases.PhaseBoundary -= CheckHandover;
+        _phases.RunsQueued -= OnRunsQueued;
         _s.GameReplaced -= OnGameReplaced;
         _s.RulesApplied -= OnRulesApplied;
         if (_history != null) _history.Rewound -= OnRewound;
@@ -95,7 +97,9 @@ public sealed class HotSeat
         var (pos, _) = Sequencer.Resolve(pack, st.Position);
         if (pos == null || pos.PhaseIndex < 0 || pos.PhaseIndex >= pack.Phases.Count) return null;
         var side = Sequencer.ActingSide(pack, pack.Phases[pos.PhaseIndex]);
-        return side == null ? null : Players.Holding(st, pack, side.Id);
+        if (side != null) return Players.Holding(st, pack, side.Id);
+        // A phase without a side acts for the side an open ask run asks (spec #72): its player answers.
+        return PhaseController.OpenAskSide(st) is { } ask ? Players.Holding(st, pack, ask) : null;
     }
 
     private void CheckHandover()
@@ -115,6 +119,12 @@ public sealed class HotSeat
         if (due.Id == Pending?.Id) return;
         Pending = due;
         HandoverRequired?.Invoke(due);
+    }
+
+    /// <summary>An ask run queued without a phase boundary (entries continued after an answer): its side's player takes over.</summary>
+    private void OnRunsQueued(IReadOnlyList<PendingRun> runs)
+    {
+        if (runs.Any(r => !string.IsNullOrEmpty(r.AskSideId))) CheckHandover();
     }
 
     private void OnRewound()

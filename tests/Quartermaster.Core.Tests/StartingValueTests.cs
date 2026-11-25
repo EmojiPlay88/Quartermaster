@@ -107,6 +107,16 @@ public class StartingValueTests
     }
 
     [Fact]
+    public void Failure_warning_names_the_default_unrounded()
+    {
+        var s = S(("a", "", "Large", ""));
+        var pack = Pack(new PropertyDef { Id = "crew", Name = "Crew", Scope = PropertyScope.Pieces, Default = 1.234, DefaultExpr = "marker(\"Kind\")" });
+        var log = new DiagnosticLog();
+        Assert.Equal([("p:a", "crew", 1.234)], Seeds(LedgerSeeder.BuildSeeds(s, pack, _ => true, RunnerFx.Model, log)));
+        Assert.Equal("Starting value of \"Crew\" failed on \"Boat\": the starting value is not a number; it starts at 1.234", Assert.Single(log.Items).Message);
+    }
+
+    [Fact]
     public void Expression_evaluated_once_per_piece()
     {
         var s = S(("a", "", "Large", ""));

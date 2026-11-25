@@ -64,7 +64,7 @@ public sealed class HandoverTests : IDisposable
 
     /// <summary>A game of the phase fixture with players Anna and Ben; with <paramref name="atScreen"/> Anna has taken over (the first
     /// handover, raised when the game became multi-player, was continued).</summary>
-    MainWindow Game(Difficulty difficulty = Difficulty.FullyAuto, bool combatRun = false, bool atScreen = true)
+    MainWindow Game(Difficulty difficulty = Difficulty.FullyAuto, bool combatRun = false, bool atScreen = true, Func<RulesPack, RulesPack>? tweak = null)
     {
         var w = new MainWindow(_dialogs, Path.Combine(_tmp, "cache"), null, Path.Combine(_tmp, "layout")) { Width = 1024, Height = 768 };
         _windows.Add(w);
@@ -77,6 +77,7 @@ public sealed class HandoverTests : IDisposable
         s.UpdateRules(_ =>
         {
             var p = PhaseFixture.Pack(s.Archive.Sha256);
+            if (tweak != null) p = tweak(p);
             return p with
             {
                 Phases = p.Phases.Select(x => x.Id != "ph-combat" ? x : x with
@@ -327,6 +328,31 @@ public sealed class HandoverTests : IDisposable
         Assert.DoesNotContain(FormulaWindows.OpenFor(s), f => f.Link?.RunId == run.Id);
         Continue(w);
         Pump();
+        Assert.Contains(FormulaWindows.OpenFor(s), f => f.Link?.RunId == run.Id);
+    }
+
+    [AvaloniaFact]
+    public void Ask_run_hands_over_to_asked_side_and_opens_after_continue()
+    {
+        // Weather has no side; its roll is answered by Blue (spec #72). Anna (Red) is at the screen when the game starts.
+        var w = Game(Difficulty.Hardcore, tweak: p => p with
+        {
+            Phases = p.Phases.Select(x => x.Id != "ph-weather" ? x : x with
+            {
+                OnStart = new() { new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once, AskSideId = "blue" } },
+            }).ToList(),
+        });
+        var s = w.Session!;
+        w.Actions!.NextPhase();   // Start: Weather
+        PumpUntil(() => w.Handover != null);
+        Pump();
+        Assert.Equal("Pass to Ben (Blue)", w.Handover!.Message);
+        var run = Assert.Single(s.Game!.State.Pending);
+        Assert.DoesNotContain(FormulaWindows.OpenFor(s), f => f.Link?.RunId == run.Id);
+        Assert.DoesNotContain("That calculation", w.StatusText ?? "");
+        Continue(w);
+        Pump();
+        Assert.Equal(Ben.Id, w.HotSeat!.Current?.Id);
         Assert.Contains(FormulaWindows.OpenFor(s), f => f.Link?.RunId == run.Id);
     }
 

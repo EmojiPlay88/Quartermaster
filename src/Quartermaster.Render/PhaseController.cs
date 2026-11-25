@@ -174,10 +174,19 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (s.ViewSides is { } held && side != null && !held.Contains(side.Id))
             return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
                 Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
+        // Hot-seat or online: a phase without a side whose ask run another player answers shows who is answering, as a side's phase does.
+        if (s.ViewSides is { } holds && side == null && OpenAskSide(st) is { } ask && !holds.Contains(ask)
+            && Players.Holding(st, pack, ask) != null && pack.ById<SideDef>(ask) is { } asked)
+            return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), null, chips, cur, nextName, none,
+                Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(asked.Name) ? asked.Id : asked.Name)} is playing {cur.Name}");
         var seen = s.View ?? st;   // decisions and warnings over what this player may see
         return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
             Decisions.Compute(pack, seen, s.Model), Decisions.Warnings(pack, seen, cur, s.Model), Notice);
     }
+
+    /// <summary>The side asked by the first pending ask run with a unit still open (spec #72), else null.</summary>
+    public static string? OpenAskSide(GameState st) =>
+        st.Pending.FirstOrDefault(r => !string.IsNullOrEmpty(r.AskSideId) && r.Units.Any(u => !u.Applied))?.AskSideId;
 
     private const string SkippedTip = "Skipped this pass (condition false)";
     private const int MaxWalk = 10_000;   // a bound for the preview walks; a turn of a real pack is far shorter
@@ -598,6 +607,31 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         return false;
     }
 
+    /// <summary>A roll attempted while a start unit's precondition is checked (<see cref="Applicable"/>): the unit is kept.</summary>
+    private sealed class NoRollsHere() : Exception("Rolls are not made here");
+
+    /// <summary>
+    /// Semi-automatic and Hardcore start entries (spec #32): leaves out the units whose precondition is decided false, logging the refusal
+    /// as Fully automatic does, so a unit that can never be applied does not hold the later entries. The check uses no inputs and no auto
+    /// values and never rolls; a unit whose precondition is undecided (or whose run fails for another reason) stays in the run.
+    /// </summary>
+    private List<Unit> Applicable(FormulaDef f, List<Unit> units)
+    {
+        if (s.Runner is not { } runner || s.Game is not { } g || string.IsNullOrWhiteSpace(f.Precondition)) return units;
+        var none = new Dictionary<string, string>();
+        var noRolls = new Dictionary<string, IReadOnlyList<int>>();
+        Func<string, int, int, IReadOnlyList<int>> dice = (_, _, _) => throw new NoRollsHere();
+        var kept = new List<Unit>();
+        using (runner.BeginPass(g.State))
+            foreach (var u in units)
+            {
+                var trace = runner.Run(g.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, false, dice));
+                if (trace.Refused) Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true);   // as Fully automatic logs it
+                else kept.Add(u);
+            }
+        return kept;
+    }
+
     /// <param name="askSideId">An entry that asks a side (spec #72): its run is always queued, for that side, in every difficulty.</param>
     /// <returns>True when a run was queued.</returns>
     private bool Apply(FormulaDef f, string trigger, List<Unit> units, List<PendingRun> queued, string? askSideId = null)
@@ -607,6 +641,8 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var ask = string.IsNullOrWhiteSpace(askSideId) ? null : askSideId;
         if (mode != Difficulty.FullyAuto || s.Runner == null || ask != null)
         {
+            if (mode != Difficulty.FullyAuto && trigger == "start") units = Applicable(f, units);
+            if (units.Count == 0) return false;   // every unit refused: the entry counts as done
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,
                 units.Select(u => new PendingUnit(u.PieceId, u.Label, u.Moved, false)).ToList(), false) { AskSideId = ask };
             Exec(new QueueRuns(new[] { run }));

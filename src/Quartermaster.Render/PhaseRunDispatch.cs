@@ -127,7 +127,12 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
         ui.Status($"{runs.Count} calculation(s) waiting in the phase panel");
         // Hot-seat: the phase belongs to the next player; their calculations open once they are at the screen.
         if (HoldRuns?.Invoke(runs) == true) return;
-        foreach (var r in runs) Observe(OpenPendingRun(r.Id));
+        foreach (var r in runs)
+        {
+            // An ask run (spec #72) for a side this player does not hold is the asked player's: it waits in their phase panel.
+            if (!string.IsNullOrEmpty(r.AskSideId) && s.ViewSides is { } held && !held.Contains(r.AskSideId)) continue;
+            Observe(OpenPendingRun(r.Id));
+        }
     }
 
     /// <summary>

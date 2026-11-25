@@ -267,4 +267,25 @@ public class RunsFunctionTests
         Assert.False(PieceFilter.EvaluateGameLevel("runs(\"f-global\") == 1", blue, pack, RunnerFx.Model));   // hidden: fails closed
         Assert.False(PieceFilter.EvaluateGameLevel("runs(\"f-global\") != 1", blue, pack, RunnerFx.Model));
     }
+
+    [Fact]
+    public void Warning_on_unit_formula_runs_counts_per_counter()
+    {
+        var pack = Pack() with
+        {
+            Phases = new()
+            {
+                new PhaseDef
+                {
+                    Id = "dawn", Name = "Dawn",
+                    Warnings = new() { new PhaseWarning { Condition = "runs(\"f-raid\", \"turn\") < 1", Message = "{unit} has not raided" } },
+                },
+            },
+        };
+        var s = S();
+        Run(s, pack, "f-raid", "u1");
+        var hit = Assert.Single(Decisions.Warnings(pack, s, pack.Phases[0], RunnerFx.Model));
+        Assert.Equal(new[] { "u2", "b1" }, hit.PieceIds);   // only the counters that have not run it
+        Assert.Equal(new[] { "Boat u2 has not raided", "Boat b1 has not raided" }, hit.UnitTexts);
+    }
 }

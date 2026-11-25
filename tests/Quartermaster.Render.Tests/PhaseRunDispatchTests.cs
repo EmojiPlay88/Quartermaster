@@ -292,6 +292,47 @@ public class PhaseRunDispatchTests : IDisposable
         Assert.Single(r.Ui.Calls, x => x.StartsWith("unit f-weather", StringComparison.Ordinal));
     }
 
+    /// <summary>Weather (no side): Red answers a River level roll (spec #72).</summary>
+    private static RulesPack AskRed(RulesPack p) => p with
+    {
+        Properties = p.Properties.Append(new PropertyDef { Id = "river", Name = "River", Scope = PropertyScope.Holders }).ToList(),
+        Formulas = p.Formulas.Append(new FormulaDef
+        {
+            Id = "f-river", Name = "River level roll", Text = "R",
+            Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 } },
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "river", Op = OutputOp.Set } },
+        }).ToList(),
+        Phases = p.Phases.Select(x => x.Id != "ph-weather" ? x : x with
+        {
+            OnStart = new() { new StartEntry { FormulaId = "f-river", ForEach = ForEachMode.Once, AskSideId = "red" } },
+        }).ToList(),
+    };
+
+    [Fact]
+    public async Task Runs_queued_skips_ask_run_of_unheld_side_and_next_phase_waits()
+    {
+        var r = Make(Difficulty.SemiAuto, AskRed);
+        r.S.Game!.Execute(new SetPlayers(new[] { new PlayerDef("p1", "Alice", new[] { "red" }), new PlayerDef("p2", "Bob", new[] { "blue" }) }));
+        r.C.Start();
+        var runs = r.S.Game.State.Pending.ToList();
+        Assert.Equal("red", Assert.Single(runs).AskSideId);
+
+        r.S.SetViewSides(new HashSet<string> { "blue" });
+        r.D.OnRunsQueued(runs);
+        Assert.Equal(new[] { "1 calculation(s) waiting in the phase panel" }, r.Ui.Statuses);   // no refusal of something never tried
+        Assert.Empty(r.Ui.Calls);
+
+        await r.D.NextPhase();   // Blue cannot skip Red's answer
+        Assert.Equal("Red is playing Weather", r.Ui.Statuses[^1]);
+        Assert.Equal("ph-weather", r.Position);
+        Assert.Equal("Red is playing Weather", r.C.View().PlayingText);
+
+        r.S.SetViewSides(new HashSet<string> { "red" });
+        Assert.Null(r.C.View().PlayingText);
+        r.D.OnRunsQueued(runs);
+        Assert.Single(r.Ui.Calls, x => x.StartsWith("unit f-river", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void Difficulty_change_closes_formula_windows()
     {

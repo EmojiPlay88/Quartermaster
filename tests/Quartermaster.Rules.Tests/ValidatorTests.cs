@@ -575,6 +575,25 @@ public class ValidatorTests
     }
 
     [Fact]
+    public void Validator_runs_of_unit_formula_reads_the_unit()
+    {
+        var unitF = new FormulaDef
+        {
+            Id = "f-drill", Name = "Drill", Text = "1",
+            Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "p2", Op = OutputOp.Add } },
+        };
+        var pack = Clean() with { Formulas = Clean().Formulas.Append(unitF).ToList() };
+        var ph = Ph("a", "Alpha") with { Warnings = new() { new PhaseWarning { Condition = "runs(\"f-drill\", \"turn\") < 1", Message = "{unit} not drilled" } } };
+        var al = A("a1", "Low", "runs(\"f-drill\") < 1") with { Message = "{unit} never drilled" };
+        Assert.Empty(V(pack with { Phases = new() { ph }, Alerts = new() { al } }));   // counted per counter: no "shows once" notice
+
+        // runs() of a formula with no unit stays a once-only count.
+        var once = Ph("a", "Alpha") with { Warnings = new() { new PhaseWarning { Condition = "runs(\"f1\", \"turn\") < 1", Message = "{unit}" } } };
+        Assert.Equal("Phase \"Alpha\": warning shows once (its condition never reads the unit), so {unit} is left out",
+            Assert.Single(V(pack with { Phases = new() { once } })).Message);
+    }
+
+    [Fact]
     public void Validator_filter_holder_clean()
     {
         Assert.Empty(V(Clean() with { Alerts = new() { A("a1", "Low", "holder(Depot, Fuel) > 1") } }));

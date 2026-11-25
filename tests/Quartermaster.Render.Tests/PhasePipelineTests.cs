@@ -166,6 +166,60 @@ public class PhasePipelineTests : IDisposable
         Assert.Null(s.Game.State.StartCursor);
     }
 
+    private static readonly FormulaDef Capped = new()
+    {
+        Id = "f-cap", Name = "Capped drill", Text = "W - 1", Precondition = "runs(\"f-cap\", \"turn\") < 1",
+        Bindings = new() { new VariableBinding { Variable = "W", Kind = BindingKind.Unit, Property = "water" } },
+        Outputs = new() { new FormulaOutput { Target = OutputTarget.Unit, Property = "water", Op = OutputOp.Set } },
+    };
+
+    /// <summary>Supply: Capped drill for each unit (once a turn per unit), then Orders (once).</summary>
+    private static RulesPack CappedFirst(RulesPack p) => WithPhase(Extra(p) with { Formulas = Extra(p).Formulas.Append(Capped).ToList() },
+        "ph-supply", ph => ph with
+        {
+            OnStart = new()
+            {
+                new StartEntry { FormulaId = "f-cap", ForEach = ForEachMode.Units },
+                new StartEntry { FormulaId = "f-order", ForEach = ForEachMode.Once },
+            },
+        });
+
+    [Theory]
+    [InlineData(Difficulty.SemiAuto)]
+    [InlineData(Difficulty.Hardcore)]
+    public void Refused_start_unit_left_out_later_entries_continue(Difficulty d)
+    {
+        var (s, c) = Make(d, CappedFirst);
+        c.Start();
+        AnswerAll(s, c);
+        Assert.True(c.ApplyFormula(null, "r1", Trace(s, "f-cap", "r1"), false));   // Red 1 already drilled this turn
+        var mark = s.Game!.State.Log.Count;
+        c.Advance();
+        var run = Assert.Single(s.Game.State.Pending);
+        Assert.Equal("f-cap", run.FormulaId);
+        Assert.Equal(new[] { "r2" }, run.Units.Select(u => u.PieceId));   // Red 1 can never be applied: left out
+        var line = Assert.Single(s.Game.State.Log.Skip(mark), l => l.Text == "Capped drill: Red 1: Capped drill cannot be run now");
+        Assert.True(line.Error);
+        Assert.Equal(LogKind.Calc, line.Kind);
+
+        Assert.True(c.ApplyFormula(run.Id, "r2", Trace(s, "f-cap", "r2"), false));
+        Assert.Equal("f-order", Assert.Single(s.Game.State.Pending).FormulaId);   // the next entry is not stranded
+    }
+
+    [Theory]
+    [InlineData(Difficulty.SemiAuto)]
+    [InlineData(Difficulty.Hardcore)]
+    public void Entry_with_every_unit_refused_counts_as_done(Difficulty d)
+    {
+        var (s, c) = Make(d, CappedFirst);
+        c.Start();
+        AnswerAll(s, c);
+        foreach (var id in new[] { "r1", "r2" }) Assert.True(c.ApplyFormula(null, id, Trace(s, "f-cap", id), false));
+        c.Advance();
+        Assert.Equal("f-order", Assert.Single(s.Game!.State.Pending).FormulaId);
+        Assert.Null(s.Game.State.StartCursor);   // Orders is the last entry
+    }
+
     [Fact]
     public void FullyAuto_needs_input_stops_later_entries()
     {
@@ -388,6 +442,33 @@ public class PhasePipelineTests : IDisposable
         Assert.Equal("That calculation belongs to a side you don't hold.", verdict.Message);
         Assert.Null(River(s));
         Assert.Single(s.Game.State.Pending);
+    }
+
+    [Fact]
+    public void Ask_run_answered_by_asked_guest_through_intent()
+    {
+        var (s, c) = Make(Difficulty.SemiAuto, Ask);
+        s.SetViewSides(BlueOnly);   // the host holds Blue; the guest holds Red
+        c.Start();
+        var run = Assert.Single(s.Game!.State.Pending);
+
+        // As IntentExecutor runs a guest's formula intent: acting for the sender's sides.
+        FormulaVerdict refused;
+        using (c.ActingFor(BlueOnly, "blue-guest"))
+            refused = FormulaIntentRunner.Run(s, c, BlueOnly, new FormulaIntent("f-river", null, run.Id, None, false), guest: true, who: "blue-guest");
+        Assert.False(refused.Applied);
+        Assert.Equal("That calculation belongs to a side you don't hold.", refused.Message);
+
+        var mark = s.Game.Log.Count;
+        FormulaVerdict verdict;
+        using (c.ActingFor(RedOnly, "red-guest"))
+            verdict = FormulaIntentRunner.Run(s, c, RedOnly, new FormulaIntent("f-river", null, run.Id, None, false), guest: true, who: "red-guest");
+        Assert.True(verdict.Applied, verdict.Message);
+        Assert.Equal(3, River(s));
+        Assert.DoesNotContain(s.Game.State.Pending, r => r.Id == run.Id);   // the run resolved
+        var river = s.Game.Log.Skip(mark).OfType<LedgerDelta>().Single(d => d.PropertyId == "river");
+        Assert.Equal(("red", "red-guest"), (river.SideId, river.Who));
+        Assert.Equal("f-weather", Assert.Single(s.Game.State.Pending).FormulaId);   // the next entry continued
     }
 
     [Fact]

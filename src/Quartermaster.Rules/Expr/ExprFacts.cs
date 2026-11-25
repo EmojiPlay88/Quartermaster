@@ -6,8 +6,8 @@ namespace Quartermaster.Rules.Expr;
 public static class ExprFacts
 {
     /// <summary>
-    /// True when the expression reads nothing about a particular piece: no Pieces/Both property, and no
-    /// name(), marker(), has(), side() or map() call. Bare names of a lookup table or holder() arguments are
+    /// True when the expression reads nothing about a particular piece: no Pieces/Both property, no
+    /// name(), marker(), has(), side() or map() call, and no runs() of a formula that needs a unit. Bare names of a lookup table or holder() arguments are
     /// not property reads; unknown names count as piece-level.
     /// </summary>
     public static bool IsGameLevel(AstExpr e, RulesPack pack) => Check(e, pack);
@@ -124,6 +124,10 @@ public static class ExprFacts
         _ => false,
     };
 
+    /// <summary>A formula that needs a unit (a Unit binding or a Unit output), as <c>PieceFilter.FormulasFor</c> tests it.</summary>
+    private static bool NeedsUnit(FormulaDef? f) =>
+        f != null && ((f.Bindings ?? new()).Any(b => b?.Kind == BindingKind.Unit) || (f.Outputs ?? new()).Any(o => o?.Target == OutputTarget.Unit));
+
     private static bool Check(AstExpr e, RulesPack pack)
     {
         switch (e)
@@ -137,6 +141,8 @@ public static class ExprFacts
                 if (c.Function is "name" or "marker" or "has" or "side" or "map") return false;
                 if (NeedsPiece(c.Function)) return false;
                 if (IsAggregate(c.Function)) return true;   // the property and filter are read per piece, whatever they name
+                if (c.Function == "runs" && c.Args.Count > 0 && c.Args[0] is TextLit id && NeedsUnit(pack.ById<FormulaDef>(id.Value)))
+                    return false;   // the runs of a unit formula are counted per counter
                 int skip = c.Function is "lookup" or "lookuprange" ? 1 : c.Function == "holder" ? 2 : 0;
                 for (int i = skip; i < c.Args.Count; i++)
                     if (!Check(c.Args[i], pack)) return false;

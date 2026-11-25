@@ -25,7 +25,7 @@ public class HotSeatTests : IDisposable
     private static readonly PlayerDef Alice = new("p1", "Alice", new[] { "red" });
     private static readonly PlayerDef Bob = new("p2", "Bob", new[] { "blue" });
 
-    private (ModuleSession S, PhaseController C, HistoryController H, HotSeat HS) Make(bool twoPlayers)
+    private (ModuleSession S, PhaseController C, HistoryController H, HotSeat HS) Make(bool twoPlayers, Func<RulesPack, RulesPack>? tweak = null)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
@@ -37,7 +37,8 @@ public class HotSeatTests : IDisposable
         s.UpdateRules(_ =>
         {
             var p = PhaseFixture.Pack(s.Archive.Sha256);
-            return p with { Phases = p.Phases.Select(x => x.Id == "ph-combat" ? x with { SideId = "blue" } : x).ToList() };
+            p = p with { Phases = p.Phases.Select(x => x.Id == "ph-combat" ? x with { SideId = "blue" } : x).ToList() };
+            return tweak == null ? p : tweak(p);
         });
         if (twoPlayers) s.Game!.Execute(new SetPlayers(new[] { Alice, Bob }));
         Func<GameCommand, GameState, GameCommand> prepare = (c, _) => c;
@@ -104,6 +105,68 @@ public class HotSeatTests : IDisposable
         var l = new List<string>();
         hs.HandoverRequired += p => l.Add(p.Id);
         return l;
+    }
+
+    /// <summary>Weather (no side): Orders (an input, once), then a River level roll that Red answers (spec #72).</summary>
+    private static RulesPack OrdersThenAskRed(RulesPack p) => p with
+    {
+        Properties = p.Properties.Append(new PropertyDef { Id = "river", Name = "River", Scope = PropertyScope.Holders }).ToList(),
+        Formulas = p.Formulas.Concat(new[]
+        {
+            new FormulaDef { Id = "f-order", Name = "Orders", Text = "N", Bindings = new() { new VariableBinding { Variable = "N", Kind = BindingKind.Input } } },
+            new FormulaDef
+            {
+                Id = "f-river", Name = "River level roll", Text = "R",
+                Bindings = new() { new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCount = 1, DiceSides = 6 } },
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "river", Op = OutputOp.Set } },
+            },
+        }).ToList(),
+        Phases = p.Phases.Select(x => x.Id != "ph-weather" ? x : x with
+        {
+            OnStart = new()
+            {
+                new StartEntry { FormulaId = "f-order", ForEach = ForEachMode.Once },
+                new StartEntry { FormulaId = "f-river", ForEach = ForEachMode.Once, AskSideId = "red" },
+            },
+        }).ToList(),
+    };
+
+    [Fact]
+    public void Ask_run_for_unheld_side_hands_over_to_asked_side()
+    {
+        var (s, c, _, hs) = Make(true, OrdersThenAskRed);
+        c.Start();                                           // Weather: Orders waits for an input
+        hs.TakeOver(Bob);
+        var raised = Track(hs);
+        Assert.Null(hs.HandoverDue());                       // no ask run yet: Bob may stay
+        var orders = Assert.Single(s.Game!.State.Pending);
+        var trace = s.Runner!.Run(s.Game.State, new RunRequest("f-order", null, new Dictionary<string, string> { ["N"] = "1" },
+            new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>(), null, true));
+        Assert.True(c.ApplyFormula(orders.Id, null, trace, false));   // the continuation queues Red's answer, no phase boundary
+
+        Assert.Equal("red", Assert.Single(s.Game.State.Pending).AskSideId);
+        Assert.Equal(new[] { "p1" }, raised);                // Pass to Alice
+        Assert.Equal(Alice.Id, hs.Pending?.Id);
+        Assert.Empty(s.ViewSides!);
+        Assert.Equal("Red is playing Weather", c.View().PlayingText);   // Next Phase waits for Red's answer
+        s.SetViewSides(new HashSet<string> { "blue" });
+        Assert.Equal("Red is playing Weather", c.View().PlayingText);
+
+        hs.TakeOver(Alice);
+        Assert.Null(c.View().PlayingText);
+        Assert.Null(hs.HandoverDue());
+    }
+
+    [Fact]
+    public void Ask_run_pending_at_load_hands_over_to_asked_side()
+    {
+        var (s, c, _, hs) = Make(true, p => OrdersThenAskRed(p) with
+        {
+            Phases = OrdersThenAskRed(p).Phases.Select(x => x.Id != "ph-weather" ? x : x with { OnStart = x.OnStart.Skip(1).ToList() }).ToList(),
+        });
+        c.Start();
+        hs.TakeOver(Bob);
+        Assert.Equal(Alice.Id, hs.HandoverDue()?.Id);
     }
 
     [Fact]

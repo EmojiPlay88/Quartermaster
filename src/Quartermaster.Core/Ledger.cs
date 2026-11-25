@@ -206,7 +206,7 @@ public static class LedgerSeeder
         }
         catch (Exception ex) { error = ex.Message; }
         log?.AddOnce("seedexpr:" + prop.Id, DiagnosticSeverity.Warning, "rules",
-            $"Starting value of \"{prop.Name}\" failed on \"{PieceInfo.Name(piece)}\": {error}; it starts at {prop.Default.ToString("0.##", CultureInfo.InvariantCulture)}");
+            $"Starting value of \"{prop.Name}\" failed on \"{PieceInfo.Name(piece)}\": {error}; it starts at {prop.Default.ToString("0.######", CultureInfo.InvariantCulture)}");
         return prop.Default;
     }
 
