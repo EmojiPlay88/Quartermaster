@@ -82,6 +82,9 @@ public static class Decisions
     public static bool ChecklistShown(PhaseDef phase, GameState s) =>
         (s.ViewSides == null && !s.IsPlayerView) || string.IsNullOrWhiteSpace(phase.SideId) || s.ViewSides?.Contains(phase.SideId) == true;
 
+    private static string AskedSideName(RulesPack pack, string sideId) =>
+        pack.Sides?.FirstOrDefault(x => x != null && x.Id == sideId) is { } side && !string.IsNullOrWhiteSpace(side.Name) ? side.Name : sideId;
+
     public static IReadOnlyList<Decision> Compute(RulesPack pack, GameState s, ModuleModel? model = null)
     {
         var res = new List<Decision>();
@@ -99,7 +102,8 @@ public static class Decisions
             if (r == null) continue;
             var units = (r.Units ?? Array.Empty<PendingUnit>()).Where(u => u != null).ToList();
             string text;
-            if (r.NeedsInput) text = $"{r.FormulaName} — needs input";
+            if (!string.IsNullOrEmpty(r.AskSideId)) text = $"{r.FormulaName} — {AskedSideName(pack, r.AskSideId)} answers";
+            else if (r.NeedsInput) text = $"{r.FormulaName} — needs input";
             else if (units.Count > 1) text = $"{r.FormulaName} — {units.Count(u => u.Applied)} of {units.Count} applied";
             else if (units.Count == 1) text = $"{r.FormulaName} — {units[0].Label}";
             else text = r.FormulaName;

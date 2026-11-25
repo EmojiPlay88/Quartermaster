@@ -371,6 +371,8 @@ public static class PlayerView
             foreach (var r in v.Pending ?? new())
             {
                 if (r == null) continue;
+                // An ask run (spec #72) is the asked side's alone, whatever the phase.
+                if (!string.IsNullOrEmpty(r.AskSideId)) { if (_held.Contains(r.AskSideId)) runs.Add(r); continue; }
                 var units = r.Units ?? Array.Empty<PendingUnit>();
                 if (units.Count == 0) { if (phaseVisible) runs.Add(r); continue; }
                 var mine = units.Where(u => u != null && UnitVisible(u.PieceId)).ToList();

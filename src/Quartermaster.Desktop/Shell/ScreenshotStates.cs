@@ -183,15 +183,19 @@ static class ScreenshotStates
                 if (window.PhaseControl == null) return "This state needs --rules.";
                 window.PhaseControl.SetDifficulty(Difficulty.SemiAuto);
                 Pump(200);
-                window.Actions!.NextPhase();   // Start game: North Supply queues the weather, delivery and a fuel / ammo draw per unit
+                window.Actions!.NextPhase();   // Start game: North Supply runs the weather, delivery and a fuel / ammo draw per unit
                 Pump(600);
-                var grid = FormulaWindows.OpenBatchFor(s).FirstOrDefault();
-                if (grid == null)
+                // Start entries run in order: the runs before the fuel draw are answered from their auto values until it waits.
+                for (var guard = 0; guard < 10 && s.Game!.State.Pending.All(r => r?.FormulaId != "f-fuel-supply")
+                    && s.Game.State.Pending.FirstOrDefault(r => r != null) is { } before; guard++)
                 {
-                    var run = s.Game!.State.Pending.FirstOrDefault(r => r != null && r.FormulaId == "f-fuel-supply");
-                    if (run == null) return "No batch run is pending.";
-                    grid = FormulaWindows.ShowBatch(window, s, window.Actions!, run.Id, null);
+                    MissingInputs.ApplyAll(s, window.PhaseControl, before, new Dictionary<string, string>());
+                    Pump(200);
                 }
+                var run = s.Game!.State.Pending.FirstOrDefault(r => r != null && r.FormulaId == "f-fuel-supply");
+                if (run == null) return "No batch run is pending.";
+                var grid = FormulaWindows.OpenBatchFor(s).FirstOrDefault(w => w.RunId == run.Id)
+                    ?? FormulaWindows.ShowBatch(window, s, window.Actions!, run.Id, null);
                 if (grid == null) return "The batch grid did not open.";
                 Pump(500);
                 grid.TypeCell(0, 1, "3");

@@ -154,7 +154,7 @@ public class PhaseControllerTests : IDisposable
     }
 
     [Fact]
-    public void SemiAuto_OnStartUnits_QueuesOneRunPerEntry_RaisesRunsQueued()
+    public void SemiAuto_OnStart_QueuesFirstEntry_NextAfterAnswer()
     {
         var (s, c) = Make(Difficulty.SemiAuto, p => WithPhase(p, "ph-supply", ph => ph with
         {
@@ -166,20 +166,27 @@ public class PhaseControllerTests : IDisposable
 
         c.Advance();
 
-        var pending = s.Game!.State.Pending;
-        Assert.Equal(2, pending.Count);
-        Assert.NotEqual(pending[0].Id, pending[1].Id);
-        Assert.All(pending, r =>
-        {
-            Assert.Equal("f-water", r.FormulaId);
-            Assert.Equal("start", r.Trigger);
-            Assert.False(r.NeedsInput);
-            Assert.Equal(new[] { "r1", "r2" }, r.Units.Select(u => u.PieceId));
-            Assert.All(r.Units, u => Assert.False(u.Applied));
-        });
-        var one = Assert.Single(raised);
-        Assert.Equal(2, one.Count);
+        // Start entries run strictly in order (#32): only the first entry's run waits; the second is picked once it is answered.
+        var first = Assert.Single(s.Game!.State.Pending);
+        Assert.Equal("f-water", first.FormulaId);
+        Assert.Equal("start", first.Trigger);
+        Assert.False(first.NeedsInput);
+        Assert.Equal(new[] { "r1", "r2" }, first.Units.Select(u => u.PieceId));
+        Assert.All(first.Units, u => Assert.False(u.Applied));
+        Assert.Single(Assert.Single(raised));
         Assert.Equal(10, Water(s, "r1"));
+
+        var none = new Dictionary<string, string>();
+        foreach (var id in new[] { "r1", "r2" })
+            Assert.True(c.ApplyFormula(first.Id, id, s.Runner!.Run(s.Game.State, new RunRequest("f-water", id, none, none, new Dictionary<string, IReadOnlyList<int>>())), false));
+
+        var second = Assert.Single(s.Game.State.Pending);
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Equal("f-water", second.FormulaId);
+        Assert.Equal(new[] { "r1", "r2" }, second.Units.Select(u => u.PieceId));
+        Assert.Equal(2, raised.Count);
+        Assert.Equal(second.Id, Assert.Single(raised[1]).Id);
+        Assert.Equal(9, Water(s, "r1"));
     }
 
     [Fact]

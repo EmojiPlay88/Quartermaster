@@ -175,6 +175,30 @@ public class PhaseRunDispatchTests : IDisposable
         Assert.Equal("That calculation is no longer waiting.", r.Ui.Statuses[^1]);
     }
 
+    [Fact]
+    public async Task Ask_run_of_a_side_not_held_is_refused_on_open()
+    {
+        // Weather (no side) asks Red for its roll (spec #72).
+        var r = Make(Difficulty.SemiAuto, p => p with
+        {
+            Phases = p.Phases.Select(x => x.Id != "ph-weather" ? x : x with
+            {
+                OnStart = new() { new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once, AskSideId = "red" } },
+            }).ToList(),
+        });
+        r.C.Start();
+        var run = Assert.Single(r.S.Game!.State.Pending);
+        r.S.SetViewSides(new HashSet<string> { "blue" });
+        await r.D.OpenPendingRun(run.Id);
+        Assert.Equal("That calculation belongs to a side you don't hold.", r.Ui.Statuses[^1]);
+        Assert.Empty(r.Ui.Calls);
+        Assert.Single(r.S.Game.State.Pending);
+
+        r.S.SetViewSides(new HashSet<string> { "red" });
+        await r.D.OpenPendingRun(run.Id);
+        Assert.NotEmpty(r.Ui.Calls);   // the asked side opens it
+    }
+
     /// <summary>The weather roll also reads a picked piece's Water (times zero): a pick is per unit, never auto-filled.</summary>
     private static RulesPack PickInWeather(RulesPack p) => p with
     {

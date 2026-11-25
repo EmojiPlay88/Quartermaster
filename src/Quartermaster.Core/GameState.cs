@@ -54,6 +54,10 @@ public sealed class GameState
     /// <see cref="AdvancePhase"/>); null when they have not.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PhasePosition? EndedAt { get; set; }
+    /// <summary>Where the current phase's start entries stopped for an answer (set by <see cref="SetStartCursor"/>, cleared by
+    /// <see cref="AdvancePhase"/>); null when none are left (or in an older save).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StartCursor? StartCursor { get; set; }
     public Difficulty Difficulty { get; set; } = Difficulty.SemiAuto;
     public List<int> Ticked { get; set; } = new();
     /// <summary>Ids of the checklist items ticked by id this phase (items with an id); null when none. Cleared on phase change like <see cref="Ticked"/>.</summary>
@@ -177,6 +181,7 @@ public sealed class GameState
                 Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId, al.SideId, al.FormulaId, al.Error, al.AppliedRun));
                 break;
             case ResetProperties rsp: DoReset(rsp); break;
+            case SetStartCursor sc: StartCursor = sc.Cursor; break;
             case HideAlert ha:
                 HiddenAlerts ??= new();
                 if (!string.IsNullOrEmpty(ha.AlertId) && !HiddenAlerts.Contains(ha.AlertId))
@@ -222,6 +227,7 @@ public sealed class GameState
         SkippedPhases = skipped.Count == 0 ? null : skipped;
         Position = a.To;
         EndedAt = null;
+        StartCursor = null;
         Turn = new TurnState(a.To.Turn, a.ToName);
         Ticked = new(); TickedIds = null; Acknowledged = new(); Pending = new();
         foreach (var k in a.Skipped ?? Array.Empty<SkippedPhase>())

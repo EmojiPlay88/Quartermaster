@@ -145,6 +145,9 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
         if (open.Count == 0) return;
         // Hot-seat: a run with no unit of a held side (or of no side) is not this player's to calculate.
         if (!open.Any(u => s.CanAct(u.PieceId))) { ui.Status("That calculation " + ModuleSession.OtherSideText + "."); return; }
+        // An ask run (spec #72) is answered only by a player holding the asked side (solo: anyone).
+        if (!string.IsNullOrEmpty(run.AskSideId) && s.ViewSides is { } held && !held.Contains(run.AskSideId))
+        { ui.Status("That calculation " + ModuleSession.OtherSideText + "."); return; }
         if (game.State.Difficulty == Difficulty.FullyAuto)
         {
             await OpenPendingRunAutomatic(run);

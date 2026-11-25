@@ -28,6 +28,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(HideAlert), "hideAlert")]
 [JsonDerivedType(typeof(EndPhase), "endPhase")]
 [JsonDerivedType(typeof(ResetProperties), "resetProperties")]
+[JsonDerivedType(typeof(SetStartCursor), "setStartCursor")]
 public abstract record GameCommand;
 
 /// <summary>CloneOf: the piece this one is a copy of (the Clone command); its stored ledger values are copied (<see cref="LedgerSeeder.BuildCloneSeeds"/>). Omitted when null.</summary>
@@ -100,3 +101,7 @@ public sealed record EndPhase(PhasePosition At) : GameCommand;
 /// System line, <paramref name="Text"/> (<c>{phase}: reset {names}</c>: property names only, no counts, no pieces). Spec #56.
 /// </summary>
 public sealed record ResetProperties(IReadOnlyList<string> PropertyIds, string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+
+/// <summary>Records where the phase's start entries stopped (<see cref="GameState.StartCursor"/>; null = none left). Logs nothing;
+/// <see cref="AdvancePhase"/> clears it. Spec #32.</summary>
+public sealed record SetStartCursor(StartCursor? Cursor) : GameCommand;
