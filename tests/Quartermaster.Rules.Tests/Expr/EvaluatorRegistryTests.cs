@@ -43,6 +43,7 @@ public class EvaluatorRegistryTests
         "holder" => new AstExpr[] { new VarRef("H", 0, 1), new VarRef("P", 0, 1) },
         "name" or "turn" or "stage" or "side" or "phaseside" or "map" => Array.Empty<AstExpr>(),
         "marker" => new AstExpr[] { new TextLit("k", 0, 1) },
+        "runs" => new AstExpr[] { new TextLit("f", 0, 1) },
         _ => Array.Empty<AstExpr>(),
     };
 

@@ -34,6 +34,8 @@ public static class RulesValidator
                         Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": {fn}() is not available in a property's applies-to");
                 }
             foreach (var p in pack.Properties) CheckComputed(pack, p, issues);
+            foreach (var p in pack.Properties) CheckStartingValue(pack, p, issues);
+            CheckResets(pack, issues);
             CheckComputedCycles(pack, issues);
             CheckOverrides(pack, issues);
             CheckLabels(pack, issues);
@@ -66,11 +68,58 @@ public static class RulesValidator
         }
         foreach (var u in FilterRefProblems(p.Expr!, pack))   // unknown property, table and holder names, as an applies-to is checked
             Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": {u}");
+        if (PieceBoundAggregatesIn(p.Expr).Contains("runs"))
+            Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\": runs() is not available in a computed property");
         if (p.Default != 0 || !string.IsNullOrWhiteSpace(p.SheetField))
             Add(issues, RulesIssueSeverity.Warning, p.Id, p.Name, $"Property \"{p.Name}\" is computed; its Default and Sheet field are ignored");
         if (p.Visibility == Visibility.Public && PropertyFacts.ReadsHidden(pack, p))
             Add(issues, RulesIssueSeverity.Warning, p.Id, p.Name,
                 $"Property \"{p.Name}\" is Public but is computed from hidden data; players who do not hold every side see it as Private");
+    }
+
+    private static readonly string[] StartingValueForbidden = { "dice", "holder", "runs", "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
+
+    private static void CheckStartingValue(RulesPack pack, PropertyDef p, List<RulesIssue> issues)
+    {
+        if (string.IsNullOrWhiteSpace(p.DefaultExpr)) return;
+        void Err(string m) => Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, m);
+        if (PropertyFacts.IsComputed(p)) Err($"Property \"{p.Name}\" has a starting value expression and is computed; remove one");
+        if (p.Scope == PropertyScope.Holders) Err($"Property \"{p.Name}\" has a starting value expression but is not a piece property");
+        if (ParseProblem(p.DefaultExpr!) is { } pe)
+        {
+            Err($"Property \"{p.Name}\": the starting value expression does not parse: {pe}");
+            return;
+        }
+        foreach (var u in FilterRefProblems(p.DefaultExpr!, pack)) Err($"Property \"{p.Name}\": starting value {u}");
+        var found = new List<string>();
+        Scan(Parser.Parse(p.DefaultExpr!));
+        foreach (var fn in found.Distinct(StringComparer.Ordinal)) Err($"Property \"{p.Name}\": {fn}() is not available in a starting value");
+
+        void Scan(AstExpr e)
+        {
+            switch (e)
+            {
+                case Unary u: Scan(u.Operand); break;
+                case Binary b: Scan(b.Left); Scan(b.Right); break;
+                case Call c:
+                    if (StartingValueForbidden.Contains(c.Function)) found.Add(c.Function);
+                    foreach (var a in c.Args) Scan(a);
+                    break;
+            }
+        }
+    }
+
+    private static void CheckResets(RulesPack pack, List<RulesIssue> issues)
+    {
+        foreach (var p in pack.Properties)
+        {
+            if (p.ResetAt is not { Count: > 0 }) continue;
+            foreach (var id in p.ResetAt)
+                if (pack.ById<PhaseDef>(id) is null)
+                    Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" resets at phase \"{id}\", which does not exist");
+            if (PropertyFacts.IsComputed(p))
+                Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, $"Property \"{p.Name}\" is computed, so it has nothing to reset");
+        }
     }
 
     private static void CheckOverrides(RulesPack pack, List<RulesIssue> issues)
@@ -208,11 +257,21 @@ public static class RulesValidator
                         foreach (var a in c.Args.Skip(1)) Walk(a);
                     }
                     else if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp]) found.AddRange(HolderCallProblems(hn.Name, hp.Name, pack));
+                    else if (c.Function == "runs") found.AddRange(RunsProblems(c, pack));
                     else if (ExprFacts.IsAggregate(c.Function)) found.AddRange(AggregateProblems(c, pack));
                     else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
         }
+    }
+
+    /// <summary>Problems in a runs() call, as message tails: a formula id that is not quoted text or names no formula, a period that is not stage, turn or game.</summary>
+    private static IEnumerable<string> RunsProblems(Call c, RulesPack pack)
+    {
+        if (c.Args.Count == 0 || c.Args[0] is not TextLit id) yield return "runs() needs a formula id in quotes";
+        else if (pack.ById<FormulaDef>(id.Value) is null) yield return $"runs() names formula \"{id.Value}\", which does not exist";
+        if (c.Args.Count > 1 && !(c.Args[1] is TextLit pl && pl.Value.Trim().ToLowerInvariant() is "stage" or "turn" or "game"))
+            yield return "runs() period must be \"stage\", \"turn\" or \"game\"";
     }
 
     /// <summary>Problems in a holder(H, P) call, as message tails: an unknown holder, an unknown property, a property that is not a holder property.</summary>
@@ -266,7 +325,7 @@ public static class RulesValidator
                 case Unary u: Walk(u.Operand); break;
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
-                    if (ExprFacts.NeedsPiece(c.Function)) found.Add(c.Function);
+                    if (ExprFacts.NeedsPiece(c.Function) || c.Function == "runs") found.Add(c.Function);
                     if (ExprFacts.IsAggregate(c.Function)) Scan(ExprFacts.AggregateArgs(c).Filter);
                     foreach (var a in c.Args) Walk(a);
                     break;
@@ -388,12 +447,18 @@ public static class RulesValidator
     {
         string who = $"Phase \"{ph.Name}\"";
         void Err(string m) => Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, m);
+        int n = 0;
         foreach (var e in entries)
         {
             var f = pack.ById<FormulaDef>(e.FormulaId);
             if (f is null) Err($"{who}: formula \"{e.FormulaId}\" does not exist");
             CheckPhaseExpr(pack, e.UnitFilter, who, $"on-{kind} filter", Err);
             WarnOutsidePhases(ph, f, kind, issues);
+            n++;
+            if (string.IsNullOrEmpty(e.AskSideId)) continue;
+            if (pack.ById<SideDef>(e.AskSideId!) is null) Err($"{who}: {kind} entry {n} asks side \"{e.AskSideId}\", which does not exist");
+            if (e.ForEach != ForEachMode.Once) Err($"{who}: {kind} entry {n} asks a side, so it must run once, not for each unit");
+            if (!string.IsNullOrEmpty(ph.SideId)) Err($"{who}: {kind} entry {n} asks a side, but only a phase without a side may ask one");
         }
     }
 
@@ -417,7 +482,7 @@ public static class RulesValidator
         catch (ParseError) { return false; }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "has", "dice", "side", "map", "holder", "runs", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -766,6 +831,11 @@ public static class RulesValidator
                     err($"count() needs a roll binding, not {rv.Name}");
                 if (c.Function == "holder" && c.Args is [VarRef hn, VarRef hp])
                     foreach (var u in HolderCallProblems(hn.Name, hp.Name, pack)) err(u);
+                if (c.Function == "runs")
+                {
+                    foreach (var u in RunsProblems(c, pack)) err(u);
+                    break;
+                }
                 if (ExprFacts.IsAggregate(c.Function))
                 {
                     foreach (var u in AggregateProblems(c, pack)) err(u);

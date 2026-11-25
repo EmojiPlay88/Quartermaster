@@ -16,6 +16,9 @@ public sealed record StartEntry
     public string FormulaId { get; init; } = "";
     public ForEachMode ForEach { get; init; } = ForEachMode.Once;
     public string? UnitFilter { get; init; }
+    /// <summary>The side whose player answers this run; only in a phase without a side, run once. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AskSideId { get; init; }
 }
 
 /// <summary>Whose moves fire an OnMove entry, relative to the phase's acting side.</summary>

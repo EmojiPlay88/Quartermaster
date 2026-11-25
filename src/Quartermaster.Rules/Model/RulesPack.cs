@@ -67,6 +67,12 @@ public sealed record PropertyDef
     /// <summary>What a Clone copy gets for this property. Omitted from the pack JSON when Copy.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public CloneValue CloneAs { get; init; } = CloneValue.Copy;
+    /// <summary>An expression worked out once for each piece that gets this property and has no sheet value; blank = <see cref="Default"/>. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DefaultExpr { get; init; }
+    /// <summary>Ids of the phases that clear this property's values when they begin. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? ResetAt { get; init; }
 }
 
 /// <summary>Marks a map as belonging to one side; other players do not see its pieces.</summary>
