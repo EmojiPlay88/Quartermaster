@@ -9,7 +9,17 @@ namespace Quartermaster.Core;
 /// <see cref="PlayerView"/> clears it on a line it redacts.</summary>
 public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At, int? Turn = null, string? Phase = null, string? SideId = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)] bool Error = false);
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)] bool Error = false)
+{
+    /// <summary>The formula id on the one line that records an applied run (spec #71, read by <c>runs()</c>); null otherwise. Omitted when null.
+    /// <see cref="PlayerView"/> clears it on a line it redacts.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? AppliedRun { get; init; }
+
+    /// <summary>The stage (<see cref="PhasePosition.Repeat"/>) the run was applied in; set only with <see cref="AppliedRun"/>. Omitted when null.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? Stage { get; init; }
+}
 
 public static class LogKind
 {
@@ -82,12 +92,16 @@ static class LogBuilder
         if (!string.IsNullOrEmpty(d.Tag)) text += $" ({d.Tag})";
         var kind = d.Tag != null ? LogKind.Calc : d.Source == "formula" ? LogKind.Formula : LogKind.Ledger;
         string? pieceId = LedgerKey.TryParse(d.Key, out var isPiece, out var id) && isPiece ? id : d.PieceId;
-        return Make(s, kind, text, d.Who, d.At, pieceId, sideId: d.SideId);
+        return Stamp(s, Make(s, kind, text, d.Who, d.At, pieceId, sideId: d.SideId), d.AppliedRun);
     }
 
     public static LogEntry Line(GameState s, string kind, string text, string? who, DateTimeOffset? at, string? pieceId = null, string? sideId = null,
-        string? formulaId = null, bool error = false) =>
-        Make(s, kind, text, who, at, pieceId, sideId: sideId, formulaId: formulaId, error: error);
+        string? formulaId = null, bool error = false, string? appliedRun = null) =>
+        Stamp(s, Make(s, kind, text, who, at, pieceId, sideId: sideId, formulaId: formulaId, error: error), appliedRun);
+
+    /// <summary>The run stamp (<see cref="LogEntry.AppliedRun"/>, with the current stage) when the command carries one.</summary>
+    static LogEntry Stamp(GameState s, LogEntry e, string? appliedRun) =>
+        string.IsNullOrWhiteSpace(appliedRun) ? e : e with { AppliedRun = appliedRun, Stage = s.Position?.Repeat };
 
     /// <summary>A line stamped with the given turn and phase instead of the game's current ones (a skipped phase's own place).</summary>
     public static LogEntry LineAt(GameState s, string kind, string text, string? who, DateTimeOffset? at, int turn, string? phase) =>

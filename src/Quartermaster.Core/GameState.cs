@@ -174,8 +174,9 @@ public sealed class GameState
                 break;
             case ResolveRun rr: DoResolve(rr); break;
             case AddLogLine al:
-                Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId, al.SideId, al.FormulaId, al.Error));
+                Log.Add(LogBuilder.Line(this, al.Kind ?? LogKind.System, al.Text ?? "", al.Who, al.At, al.PieceId, al.SideId, al.FormulaId, al.Error, al.AppliedRun));
                 break;
+            case ResetProperties rsp: DoReset(rsp); break;
             case HideAlert ha:
                 HiddenAlerts ??= new();
                 if (!string.IsNullOrEmpty(ha.AlertId) && !HiddenAlerts.Contains(ha.AlertId))
@@ -263,6 +264,20 @@ public sealed class GameState
         LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, d.Key, d.PropertyId, double.IsFinite(d.Before) ? d.Before : 0,
             d.After, d.Source ?? "manual", d.FormulaId, d.RuleRefId, d.Note, d.Working, Turn.Turn, Turn.Phase));
         Log.Add(LogBuilder.Ledger(this, d));
+    }
+
+    void DoReset(ResetProperties rp)
+    {
+        var ids = (rp.PropertyIds ?? Array.Empty<string>()).Where(x => x != null).ToHashSet(StringComparer.Ordinal);
+        foreach (var key in Ledgers.Keys.ToList())
+        {
+            var inner = Ledgers[key];
+            if (inner == null) continue;
+            var removed = false;
+            foreach (var id in ids) removed |= inner.Remove(id);
+            if (removed && inner.Count == 0) Ledgers.Remove(key);   // a ledger the reset emptied goes; one that was already empty stays
+        }
+        Log.Add(LogBuilder.Line(this, LogKind.System, rp.Text ?? "", rp.Who, rp.At));
     }
 
     void DoSeed(SeedLedger sl)

@@ -221,9 +221,14 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var list = new List<GameCommand>();
         if (t.Result == null || t.Error != null) return list;
         foreach (var d in t.Rolls) list.Add(new RollDice(d.Purpose, d.Count, d.Sides, d.Results, PieceId: t.PieceId, SideId: sideId));
+        var first = true;
         foreach (var o in t.Outputs)
+        {
+            // The first output's line records the applied run (runs(), spec #71): exactly one stamped line per run.
             list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note, t.Working, Tag: tag,
-                Subject: subject, PieceId: t.PieceId, SideId: sideId));
+                Subject: subject, PieceId: t.PieceId, SideId: sideId) { AppliedRun = first ? t.Formula.Id : null });
+            first = false;
+        }
         return list;
     }
 
@@ -575,5 +580,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, run.Piece, run.Filters);
+        /// <summary>The applied runs of a formula on this run's unit (none: its runs without a unit); the run itself is not counted yet.</summary>
+        public double Runs(string formulaId, string period) => RunIndex.Count(run.State, run.Pack, formulaId, run.Piece?.Id, period, run.Sides);
     }
 }

@@ -61,6 +61,14 @@ public static class PieceFilter
         catch (Exception) { return false; }
     }
 
+    /// <summary>
+    /// Evaluates a starting value expression (<see cref="PropertyDef.DefaultExpr"/>, spec #4) on a piece, with values about to be seeded read as
+    /// if already in its ledger (see <see cref="MatchesWithPending"/>). dice(), holder(), runs() and the piece aggregates are not available
+    /// (an <see cref="EvalError"/>), so a seed is deterministic and never copies another side's values. Throws on any error.
+    /// </summary>
+    internal static Value EvaluateWithPending(Quartermaster.Rules.Expr.Expr e, PieceInstance p, GameState s, RulesPack pack, IReadOnlyDictionary<string, double> pending) =>
+        Evaluator.Evaluate(e, new FilterContext(p, s, pack, SideMap(s, pack), new AggregateFilters(s, pack, null), pending, startingValue: true));
+
     /// <summary>The parsed expression when it parses and reads nothing about a piece (<see cref="ExprFacts.IsGameLevel"/>); else null.</summary>
     internal static Quartermaster.Rules.Expr.Expr? ParseGameLevel(string? text, RulesPack pack)
     {
@@ -221,8 +229,11 @@ public static class PieceFilter
     private sealed class ParsedAppliesTo(Quartermaster.Rules.Expr.Expr? expr) { public Quartermaster.Rules.Expr.Expr? Expr { get; } = expr; }
 
     internal sealed class FilterContext(PieceInstance p, GameState s, RulesPack pack, Lazy<Func<PieceInstance, string?>> sides,
-        AggregateFilters filters, IReadOnlyDictionary<string, double>? pending = null) : IEvalContext
+        AggregateFilters filters, IReadOnlyDictionary<string, double>? pending = null, bool startingValue = false) : IEvalContext
     {
+        /// <summary>In a starting value (<see cref="EvaluateWithPending"/>) these calls fail.</summary>
+        private static EvalError NotInStartingValue(string fn) => new($"{fn}() is not available in a starting value");
+
         private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
         private readonly Dictionary<string, bool> _declared = new(StringComparer.Ordinal);
 
@@ -274,7 +285,7 @@ public static class PieceFilter
 
         public Value Lookup(string tableName, Value row, Value? col) => LookupTable(pack, tableName, row, col, p, s, filters.Model, filters, sides);
         public Value LookupRange(string table, Value row, Value value) => LookupRangeTable(pack, table, row, value);
-        public IReadOnlyList<int> RollDice(int n, int sides) => throw new EvalError("Dice are not allowed here");
+        public IReadOnlyList<int> RollDice(int n, int sides) => throw (startingValue ? NotInStartingValue("dice") : new EvalError("Dice are not allowed here"));
         public bool Has(string property) =>
             pack.PropertyByName(property) is { } def && (PropertyFacts.IsComputed(def) ? Declared(def) : Stored(def) != null);
         public Value PieceName() => NameValue(p);
@@ -284,9 +295,12 @@ public static class PieceFilter
         public Value Side() => SideValue(p, pack, sides);
         public Value PhaseSide() => PhaseSideAt(s, pack, filters);
         public Value MapName() => MapValue(p);
-        public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property, filters.Model, filters);
+        public Value HolderValue(string holder, string property) =>
+            startingValue ? throw NotInStartingValue("holder") : HolderRead(s, pack, holder, property, filters.Model, filters);
         public Value Aggregate(string fn, string? property, string? filter) =>
-            PieceAggregates.Evaluate(fn, property, filter, p, filters);
+            startingValue ? throw NotInStartingValue(fn) : PieceAggregates.Evaluate(fn, property, filter, p, filters);
+        public double Runs(string formulaId, string period) =>
+            startingValue ? throw NotInStartingValue("runs") : RunIndex.Count(s, pack, formulaId, p.Id, period, sides);
     }
 
     /// <summary>
@@ -324,5 +338,7 @@ public static class PieceFilter
         public Value HolderValue(string holder, string property) => HolderRead(s, pack, holder, property, model, _filters);
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, null, Filters);
+        /// <summary>No piece: the formula's runs made without a unit (hidden in a player view).</summary>
+        public double Runs(string formulaId, string period) => RunIndex.Count(s, pack, formulaId, null, period);
     }
 }
