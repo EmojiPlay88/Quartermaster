@@ -41,6 +41,12 @@ public sealed record VariableBinding
     /// <summary>Piece only: list just the other counters in the run piece's hex ("same hex"). False (default) is omitted from the pack.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool SameHex { get; init; }
+    /// <summary>Input only: the id of a table whose row keys are offered as the choices (it replaces <see cref="Choices"/>; a table with range row keys cannot be used). Null = none (the Workbench stores null, never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ChoicesTable { get; init; }
+    /// <summary>Input with a <see cref="ChoicesTable"/>: expression that must be true for a row key to be offered; row() is the key, and the counter's own values can be read. Null = every key (never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ChoicesFilter { get; init; }
 }
 
 public sealed record FormulaOutput
@@ -96,4 +102,7 @@ public sealed record FormulaDef
     /// <summary>Text shown when the precondition refuses a run. Null = "{formula name} cannot be run now".</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RefusalMessage { get; init; }
+    /// <summary>Roll the formula's dice once for a group of runs (same hex and side): in a batch the first run rolls and the others reuse its dice; for a phase entry, one roll per hex and side. False (default) is omitted from the pack.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool GroupRoll { get; init; }
 }

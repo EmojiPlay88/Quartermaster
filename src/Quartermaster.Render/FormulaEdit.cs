@@ -46,7 +46,7 @@ public static class FormulaEdit
     /// <summary>True when the binding holds anything beyond a default, unconfigured Input.</summary>
     public static bool IsConfigured(VariableBinding b) =>
         b.Kind != BindingKind.Input || b.PieceFilter != null || b.Property != null || b.HolderId != null || b.TableId != null || b.RowExpr != null || b.ColExpr != null
-        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null || b.AlwaysAsk || b.When != null || b.DiceCountExpr != null;
+        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null || b.AlwaysAsk || b.When != null || b.DiceCountExpr != null || b.ChoicesTable != null || b.ChoicesFilter != null;
 
     /// <summary>Bindings whose variable no longer appears in the text.</summary>
     public static IReadOnlyList<VariableBinding> Stale(FormulaDef f, IReadOnlyList<string> variables) =>
@@ -453,6 +453,17 @@ public static class FormulaEdit
 
     /// <summary>A Piece binding's "same hex" switch.</summary>
     public static VariableBinding WithSameHex(VariableBinding b, bool sameHex) => b with { SameHex = sameHex };
+
+    /// <summary>An Input's choices table (a table id); blank is null, and clearing it also clears the filter, which only applies to a table.</summary>
+    public static VariableBinding WithChoicesTable(VariableBinding b, string? tableId) =>
+        string.IsNullOrWhiteSpace(tableId) ? b with { ChoicesTable = null, ChoicesFilter = null } : b with { ChoicesTable = tableId.Trim() };
+
+    /// <summary>An Input's choices filter expression; blank is null, never "".</summary>
+    public static VariableBinding WithChoicesFilter(VariableBinding b, string? filter) =>
+        b with { ChoicesFilter = string.IsNullOrWhiteSpace(filter) ? null : filter.Trim() };
+
+    /// <summary>The formula's "roll once for the group" switch.</summary>
+    public static FormulaDef WithGroupRoll(FormulaDef f, bool on) => f with { GroupRoll = on };
 
     /// <summary>Sets the output's value expression; blank is null (the formula's result), never "".</summary>
     public static FormulaDef SetOutputValue(FormulaDef f, int index, string? expr) =>

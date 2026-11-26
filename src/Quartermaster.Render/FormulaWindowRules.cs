@@ -36,6 +36,13 @@ public static class FormulaWindowRules
         return (manual, d == Difficulty.SemiAuto, manual);
     }
 
+    /// <summary>
+    /// The group dice a dialog linked to a pending run uses (<see cref="FormulaDialogModel.SharedRolls"/>, B4): those the unit's roll group
+    /// already drew (<see cref="RollGroups.SharedFor"/>). Null for a menu run (a group of one), a unit without a group or before its group rolled.
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<int>>? SharedRolls(ModuleSession s, string? runId, string? pieceId) =>
+        runId == null || s?.Game?.State is not { } st ? null : RollGroups.SharedFor(st, runId, pieceId);
+
     /// <summary>True when a dialog is a player-started run, so the formula's phase limit applies (not a waiting run, not a Workbench preview).</summary>
     public static bool EnforcesPhaseLimit(string? runId, bool previewOnly) => runId == null && !previewOnly;
 
@@ -87,6 +94,48 @@ public static class FormulaWindowRules
     public static BatchCell VariableCell(BatchRowView row, int index) =>
         new(index >= 0 && index < row.Cells.Count ? row.Cells[index] : "",
             index >= 0 && index < row.Wrong.Count && row.Wrong[index] ? CellTone.Wrong : row.Applied ? CellTone.Applied : CellTone.Normal);
+
+    // ---- menu batch (B4) ----
+
+    /// <summary>Counter menu submenus: the clicked counter in a selection of two or more, else its stack.</summary>
+    public const string CalculateOnSelectionText = "Calculate on selection", CalculateOnStackText = "Calculate on stack";
+
+    /// <summary>The formula window's button of a menu run (no run link) and its tooltip.</summary>
+    public const string SeveralRunsText = "Several runs…";
+    public const string SeveralRunsTip = "Open a batch grid for this counter: one row per run, applied in order as one step.";
+
+    /// <summary>The menu batch grid's first line: its Input and Piece cells fill every row whose own cell is blank.</summary>
+    public const string AllRowsText = "All rows";
+
+    public const string AddRowText = "Add row", AddRowTip = "Add a run of the selected row's counter.";
+    public const string RemoveRowText = "Remove row", RemoveRowTip = "Remove the selected row (not the All rows line).";
+    public const string CalculateAllText = "Calculate all", ApplyAllText = "Apply all";
+
+    /// <summary>Exceptions cell of a menu batch row whose counter an earlier row removes (the row is skipped; it does not block).</summary>
+    public const string RemovedByEarlierRowText = "removed by an earlier row";
+
+    /// <summary>Status when a row would make the batch longer than <see cref="MenuBatchModel.MaxBatchRows"/>.</summary>
+    public const string MaxRowsText = "A batch holds at most 100 rows.";
+
+    /// <summary>Status when a menu batch is opened on more counters than <see cref="MenuBatchModel.MaxBatchRows"/> (only the first are taken).</summary>
+    public const string CutRowsText = "A batch holds at most 100 rows: only the first 100 were taken.";
+
+    /// <summary>
+    /// Status of a menu batch whose live apply stopped at <paramref name="row"/> (1-based): nothing applied, or the earlier rows applied as
+    /// one step (they stay). Counts only, so a guest learns nothing hidden.
+    /// </summary>
+    public static string StoppedText(int applied, int row) =>
+        applied == 0 ? NothingAppliedRowText(row) : AppliedRunsText(applied) + " " + RowMessage(row, "cannot be applied yet.");
+
+    /// <summary>The menu batch grid's title.</summary>
+    public static string MenuBatchTitle(string formula, int runs) => $"{formula} — {runs} runs";
+
+    public static string AppliedRunsText(int runs) => $"Applied {runs} run(s) as one step.";
+    public static string NothingAppliedRowText(int row) => $"Nothing applied: row {row} cannot be applied yet.";
+    public static string HostAppliedRunsText(int runs) => $"The host applied {runs} run(s) as one step.";
+
+    /// <summary>The host's message for a refused menu batch row (1-based), with the single run's neutral text.</summary>
+    public static string RowMessage(int row, string message) => $"Row {row}: {message}";
 
     // ---- missing-input dialog ----
 

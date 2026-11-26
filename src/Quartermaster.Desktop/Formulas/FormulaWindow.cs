@@ -38,6 +38,7 @@ public sealed class FormulaWindow : Window
     readonly Button _calc = Btn("&Calculate", 85);
     readonly Button _cancel = Btn("Cancel", 75);
     readonly Button _ruleRef = Btn("&Rule ref…", 85);
+    readonly Button _several = Btn(FormulaWindowRules.SeveralRunsText, 100);
     readonly CheckBox _physical = new() { Content = "Physical dice", Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock _status = new() { Margin = new Thickness(2, 3, 2, 3), TextTrimming = TextTrimming.CharacterEllipsis };
     readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(150) };
@@ -102,6 +103,10 @@ public sealed class FormulaWindow : Window
         _apply.IsDefault = true;
         _ruleRef.Click += (_, _) => Guarded(OpenRuleRef);
         UpdateRuleRef(formula);
+        // A menu run (no run link) of a counter can be repeated or batched: Several runs… opens a grid with what is typed here as its first row.
+        _several.IsVisible = link == null && pieceId != null;
+        ToolTip.SetTip(_several, FormulaWindowRules.SeveralRunsTip);
+        _several.Click += (_, _) => Guarded(OpenSeveralRuns);
         if (host.SettingsStore.Current.PhysicalDiceDefault && !s.IsGuest) { _physical.IsChecked = true; _model.PhysicalDice = true; }   // starts from Settings
         _physical.IsCheckedChanged += (_, _) => { _model.PhysicalDice = _physical.IsChecked == true; Recalc(); };
         _physical.IsVisible = !s.IsGuest;   // the host rolls a guest's dice
@@ -153,6 +158,7 @@ public sealed class FormulaWindow : Window
         row.Children.Add(_calc);
         row.Children.Add(_cancel);
         row.Children.Add(_ruleRef);
+        row.Children.Add(_several);
         row.Children.Add(_physical);
         return row;
     }
@@ -242,6 +248,20 @@ public sealed class FormulaWindow : Window
     }
 
     internal Button RuleRefButton => _ruleRef;
+    internal Button SeveralRunsButton => _several;
+
+    /// <summary>Several runs…: the grid starts with this counter and the Input / Piece values typed here (hidden boxes are left out).</summary>
+    void OpenSeveralRuns()
+    {
+        if (_pieceId == null || _host.Actions is not { } port || _s.Rules?.ById<FormulaDef>(_formulaId) is not { } f) return;
+        var typed = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var b in f.Bindings)
+        {
+            if (b is not { Kind: BindingKind.Input or BindingKind.Piece, Variable: { } v } || _model.Hidden.Contains(v)) continue;
+            if (_view.BoxText(v) is { } text && !string.IsNullOrWhiteSpace(text)) typed[v] = text;
+        }
+        FormulaWindows.ShowMenuBatch(_host, _s, port, _formulaId, new[] { _pieceId }, typed);
+    }
 
     void Unhook()
     {
@@ -302,6 +322,7 @@ public sealed class FormulaWindow : Window
         _debounce.Stop();
         // A preview on the host: fills the boxes, applies nothing. Re-evaluated first, so each pick is sent with its current label.
         if (_s.IsGuest) { Recalc(); SendToHost(calculate: true, preview: true); return; }
+        _model.SharedRolls = FormulaWindowRules.SharedRolls(_s, _link?.RunId, _pieceId);   // a pending unit's group dice (B4)
         _model.Calculate(_s.Game?.State ?? new GameState());
         Recalc();
     }
@@ -313,6 +334,7 @@ public sealed class FormulaWindow : Window
         {
             SyncMode();
             FormulaMasking.Configure(_model, _s);   // the viewer may have changed (hot-seat) or a snapshot arrived (guest)
+            _model.SharedRolls = FormulaWindowRules.SharedRolls(_s, _link?.RunId, _pieceId);   // re-read: the group may just have rolled
             var v = _model.Evaluate(_s.Game?.State ?? new GameState());
             _last = v;
             _view.Apply(v);

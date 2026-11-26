@@ -282,6 +282,7 @@ sealed class FormulaDialog : Form
     {
         _debounce.Stop();
         if (_s.IsGuest) { SendToHost(calculate: true, preview: true); return; }   // a preview on the host: fills the boxes, applies nothing
+        _model.SharedRolls = FormulaWindowRules.SharedRolls(_s, _link?.RunId, _pieceId);   // a pending unit's group dice (B4)
         _model.Calculate(_s.Game?.State ?? new GameState());
         Recalc();
     }
@@ -358,6 +359,7 @@ sealed class FormulaDialog : Form
         {
             SyncMode();
             FormulaMasking.Configure(_model, _s);   // the viewer may have changed (hot-seat) or a snapshot arrived (guest)
+            _model.SharedRolls = FormulaWindowRules.SharedRolls(_s, _link?.RunId, _pieceId);   // re-read: the group may just have rolled
             var v = _model.Evaluate(_s.Game?.State ?? new GameState());
             _last = v;
             _view.Apply(v);

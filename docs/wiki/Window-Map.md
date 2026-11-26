@@ -46,6 +46,7 @@ Right-click a counter for its menu:
 
 - The commands the module gives that counter (for example opening its property sheet, flipping or rotating it). A property sheet opens a small dialog with one box per row; rows that the rules pack keeps in the ledger say "(managed by ledger: ...)". Those rows are read-only; a tooltip says where to change the value (in the Ledger, or with a formula).
 - **Calculate** lists the rules pack's formulas that apply to this counter. In Riverland a rifle unit offers formulas such as Fuel supply and Ammo for firing. Choosing one opens the [formula dialog](Window-Formula-Dialog).
+- **Calculate on selection** and **Calculate on stack** list the formulas that apply to the selected counters, or to the stack under the pointer. Choosing one opens a batch grid for those counters; see [Running on several counters](Window-Formula-Dialog#running-on-several-counters).
 - **Show in Ledger** (Ctrl+L) selects the counter's row in the [Ledger](Window-Ledger#show-in-ledger), or the rows of all selected counters when you right-click one of them. Greyed out without a rules pack.
 - **Delete counter**, only in game master mode. Quartermaster asks first unless **Ask before deleting pieces** is off in Settings.
 

@@ -14,7 +14,7 @@ public sealed record BatchRowView(string? PieceId, string Label, IReadOnlyList<s
 /// <see cref="PhaseController.ApplyFormula"/> (or the action port's <see cref="IActionPort.ApplyTrace"/>) with the row's expected engine
 /// run, so a wrong typed value never reaches the ledger.
 /// </summary>
-public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTrace, bool, bool> apply, string runId)
+public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTrace, bool, bool> apply, string runId) : IBatchRows
 {
     public BatchModel(ModuleSession s, PhaseController phases, string runId) : this(s, phases.ApplyFormula, runId) { }
 
@@ -83,7 +83,17 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     private IReadOnlyList<string>? ChoicesFor(string variable, string? runPieceId)
     {
         if (Formula is not { } f || s.Rules is not { } pack) return null;
-        if (f.Bindings.FirstOrDefault(b => b?.Variable == variable) is { Kind: BindingKind.Piece } pick) return PieceLabels(pack, f, pick, runPieceId);
+        var binding = f.Bindings.FirstOrDefault(b => b?.Variable == variable);
+        if (binding is { Kind: BindingKind.Piece } pick) return PieceLabels(pack, f, pick, runPieceId);
+        // A choices table (B4): the keys left by its filter for this row's counter (every key without a row), listed on the seat's own view
+        // (as Piece candidates are), so the list never reflects data that seat cannot see.
+        if (binding is { Kind: BindingKind.Input } input && !string.IsNullOrWhiteSpace(input.ChoicesTable) && s.Game?.State is { } st)
+            return Cached(pack, f, variable, runPieceId, () =>
+            {
+                var sides = FormulaMasking.PickSides(s);
+                var shown = sides == null || st.IsPlayerView ? st : PlayerView.For(st, pack, s.Model, sides);
+                return InputChoices.For(shown, pack, s.Model, f, variable, runPieceId);
+            });
         return KeyChoices.For(pack, f, variable);
     }
 
@@ -91,7 +101,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     public bool IsChoiceColumn(string variable) =>
         Formula is { } f && (f.Bindings.Any(b => b is { Kind: BindingKind.Piece } && b.Variable == variable) || ChoicesFor(variable) is { Count: > 0 });
 
-    private readonly Dictionary<(string Variable, string? RunPiece), IReadOnlyList<string>> _pieceLabels = new();
+    private readonly Dictionary<(string Variable, string? RunPiece), IReadOnlyList<string>?> _pieceLabels = new();
     private object? _pieceLabelsKey;
 
     /// <summary>A Piece column's labels for a run piece (null: the column's, in label order), cached per (state object, its fingerprint, rules
@@ -100,12 +110,21 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     {
         if (s.Game?.State is not { } st) return Array.Empty<string>();
         var sides = FormulaMasking.PickSides(s);
+        return Cached(pack, f, b.Variable, runPieceId,
+            () => Quartermaster.Core.PieceChoices.For(st, pack, s.Model, b, sides, runPieceId).Select(c => c.Label).ToList())!;
+    }
+
+    /// <summary>A column's list for a run piece, cached per (state object, its fingerprint, rules pack, formula, viewer's sides).</summary>
+    private IReadOnlyList<string>? Cached(RulesPack pack, FormulaDef f, string variable, string? runPieceId, Func<IReadOnlyList<string>?> make)
+    {
+        if (s.Game?.State is not { } st) return make();
+        var sides = FormulaMasking.PickSides(s);
         var key = (st, FormulaDialogModel.StateFingerprint(st), pack, f, s.Model, sides == null ? "" : string.Join("\n", sides.Order(StringComparer.Ordinal)));
         if (!Equals(_pieceLabelsKey, key)) { _pieceLabels.Clear(); _pieceLabelsKey = key; }
-        if (_pieceLabels.TryGetValue((b.Variable, runPieceId), out var cached)) return cached;
-        var labels = Quartermaster.Core.PieceChoices.For(st, pack, s.Model, b, sides, runPieceId).Select(c => c.Label).ToList();
-        _pieceLabels[(b.Variable, runPieceId)] = labels;
-        return labels;
+        if (_pieceLabels.TryGetValue((variable, runPieceId), out var cached)) return cached;
+        var list = make();
+        _pieceLabels[(variable, runPieceId)] = list;
+        return list;
     }
 
     public int RowCount => Run != null && Formula != null ? Run.Units.Count : 0;
@@ -116,7 +135,10 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         {
             if (Run is not { } r) return "(finished)";
             if (Formula == null) return "(formula not found)";
-            return $"{r.FormulaName} — {r.Units.Count(u => u is { Applied: true })} of {r.Units.Count} applied";
+            var removed = r.Units.Count(u => u is { Removed: true });
+            var applied = r.Units.Count(u => u is { Applied: true, Removed: false });
+            return removed > 0 ? $"{r.FormulaName} — {applied} of {r.Units.Count} applied, {removed} removed"
+                : $"{r.FormulaName} — {applied} of {r.Units.Count} applied";
         }
     }
 
@@ -151,7 +173,37 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         CheckViewer();
         // Defence in depth: the mode is read again on every access, so a difficulty switch while a grid is open can never leave a row unchecked.
         model.Checked = s.Game!.State.Difficulty != Difficulty.FullyAuto;
+        model.SharedRolls = GroupShared(row, borrow: true);
         return model;
+    }
+
+    /// <summary>
+    /// A row's group dice (B4, <see cref="FormulaDef.GroupRoll"/>): those its group already drew on the run (state), else, with
+    /// <paramref name="borrow"/>, the pinned dice of the group's first open row (grid order), so every row of a group previews the same dice
+    /// before any is applied. Null for the first open row itself, a unit without a group or a formula without a group roll.
+    /// </summary>
+    private IReadOnlyDictionary<string, IReadOnlyList<int>>? GroupShared(int row, bool borrow)
+    {
+        if (Formula is not { GroupRoll: true } || Run is not { } r || Unit(row) is not { Group: { } group } u || s.Game?.State is not { } st) return null;
+        if (RollGroups.SharedFor(st, runId, u.PieceId) is { } drawn) return drawn;
+        if (!borrow) return null;
+        var lead = -1;
+        for (var i = 0; i < r.Units.Count && lead < 0; i++)
+            if (r.Units[i] is { Applied: false } x && x.Group == group && s.CanAct(x.PieceId)) lead = i;
+        if (lead < 0 || lead == row) return null;
+        var m = ModelFor(lead);
+        // The group's dice are its first row's pinned dice: rolled (and pinned) there first, under their group keys (matched on sides too).
+        var leadDice = RollGroups.Drawn(m.Run(st));
+        foreach (var key in leadDice.Keys.ToList())
+            if (!m.PinnedRolls.ContainsKey(key.Split("@d")[0])) leadDice.Remove(key);
+        return leadDice.Count == 0 ? null : leadDice;
+    }
+
+    /// <summary>The rows of the same roll group as <paramref name="row"/> (only that row without a group).</summary>
+    private IEnumerable<int> GroupRows(int row)
+    {
+        if (Formula is not { GroupRoll: true } || Run is not { } r || Unit(row)?.Group is not { } group) return new[] { row };
+        return Enumerable.Range(0, r.Units.Count).Where(i => r.Units[i]?.Group == group);
     }
 
     /// <summary>
@@ -275,14 +327,14 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     {
         if (Unit(row) is not { Applied: false }) return;
         ModelFor(row).SetBoxText(variable, text);
-        _views.Remove(row);
+        foreach (var i in GroupRows(row)) _views.Remove(i);   // a row may change its group's dice (another count)
     }
 
     public void CalculateRow(int row)
     {
         if (Unit(row) is not { Applied: false }) return;
         ModelFor(row).Calculate(s.Game!.State);
-        _views.Remove(row);
+        foreach (var i in GroupRows(row)) _views.Remove(i);
     }
 
     public void CalculateAll()
@@ -302,6 +354,14 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     {
         if (s.Game == null || Unit(row) is not { Applied: false } u || !s.CanAct(u.PieceId)) return false;
         var model = ModelFor(row);
+        // Dice borrowed from the group's first row (none applied yet): this row draws them for the group, so it logs them and they are saved.
+        // Only the keys this row really takes from them (matched on count and sides) become its own pins.
+        if (model.SharedRolls != null && GroupShared(row, borrow: false) == null)
+        {
+            var probe = model.Run(s.Game.State);
+            model.SharedRolls = null;
+            model.PinRolls(probe.SharedRollKeys.Where(probe.RollsByKey.ContainsKey).ToDictionary(k => k, k => probe.RollsByKey[k], StringComparer.Ordinal));
+        }
         var trace = model.Run(s.Game.State);
         var dv = model.View(trace);
         if (!dv.CanApply) return false;

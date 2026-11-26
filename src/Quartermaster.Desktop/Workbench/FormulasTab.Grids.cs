@@ -30,8 +30,12 @@ public sealed partial class FormulasTab
             new EditColumn("Only when", Weight: 90),
             new EditColumn("Dice count", Weight: 80),
             new EditColumn("Same hex", EditColumnKind.Check, Weight: 50),
+            new EditColumn("Choices table", EditColumnKind.Combo, Weight: 80),
+            new EditColumn("Choices filter", Weight: 100),
         ]);
         _bind.SetHeaderToolTip(7, SameHexHint);
+        _bind.SetHeaderToolTip(8, ChoicesTableHint);
+        _bind.SetHeaderToolTip(9, ChoicesFilterHint);
         _bind.CellCommitted += (r, c, text) => Run(() => OnBindingCell(r, c, text));
         _removeUnused.Click += (_, _) => Run(() => { FlushPending(final: false); Commit(FormulaEdit.RemoveUnused); RebuildBindings(); });
         var bar = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
@@ -50,6 +54,8 @@ public sealed partial class FormulasTab
 
     const string DiceCountHint = "Blank = the fixed number.";
     const string SameHexHint = "Piece binding: list only the other counters in this unit's hex.";
+    const string ChoicesTableHint = "Input: offer this table's row keys as the choices.";
+    const string ChoicesFilterHint = "Input with a choices table: list only the rows for which this is true; row() is the row key, and the counter's own values can be read.";
     const string ActionHint = "Write a value (default), place a palette counter, remove the counter, or set its layer or mask.";
     const string PieceHint = "The Piece variable whose picked counter this output acts on (target Piece).";
     const string PaletteHint = "Place: the palette counter to place in the hex.";
@@ -107,7 +113,8 @@ public sealed partial class FormulasTab
         var unused = FormulaEdit.Unused(f).Select(b => b.Variable).ToHashSet(StringComparer.Ordinal);
         var rows = new List<IReadOnlyList<string>>();
         foreach (var b in f.Bindings)
-            rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? "", b.When ?? "", b.DiceCountExpr ?? "", b.SameHex ? "True" : "False"]);
+            rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? "", b.When ?? "", b.DiceCountExpr ?? "", b.SameHex ? "True" : "False",
+                b.ChoicesTable == null ? "" : pack.ById<TableDef>(b.ChoicesTable)?.Name ?? FormulaEdit.Missing, b.ChoicesFilter ?? ""]);
         _bind.SetRows(rows);   // resets per-cell items, read-only state and hints: they go on afterwards
         for (var r = 0; r < f.Bindings.Count; r++)
         {
@@ -124,6 +131,12 @@ public sealed partial class FormulasTab
             _bind.SetCellToolTip(r, 6, b.Kind == BindingKind.Roll ? DiceCountHint : "");
             _bind.SetCellReadOnly(r, 7, b.Kind != BindingKind.Piece);
             _bind.SetCellToolTip(r, 7, b.Kind == BindingKind.Piece ? SameHexHint : "");
+            var input = b.Kind == BindingKind.Input;
+            _bind.SetCellItems(r, 8, new[] { "" }.Concat(pack.Tables.Select(t => t.Name)).ToList());
+            _bind.SetCellReadOnly(r, 8, !input);
+            _bind.SetCellToolTip(r, 8, input ? ChoicesTableHint : "");
+            _bind.SetCellReadOnly(r, 9, !input || b.ChoicesTable == null);
+            _bind.SetCellToolTip(r, 9, input ? ChoicesFilterHint : "");
         }
     }
 
@@ -179,6 +192,18 @@ public sealed partial class FormulasTab
                 if (b.Kind != BindingKind.Piece) return;
                 var on = string.Equals(text, "True", StringComparison.OrdinalIgnoreCase);
                 Commit(x => FormulaEdit.SetBinding(x, v, z => FormulaEdit.WithSameHex(z, on)));
+                break;
+            case 8:
+                if (b.Kind != BindingKind.Input) return;
+                var table = string.IsNullOrEmpty(text) ? null : _s.Rules?.TableByName(text);
+                if (!string.IsNullOrEmpty(text) && table == null) { again = true; break; }
+                Commit(x => FormulaEdit.SetBinding(x, v, z => FormulaEdit.WithChoicesTable(z, table?.Id)));
+                again = true;   // the filter cell opens or closes with the table
+                break;
+            case 9:
+                if (b.Kind != BindingKind.Input || b.ChoicesTable == null) return;
+                again = true;
+                if (TryExpression(text, "Choices filter", out var filter)) Commit(x => SyncAfter(FormulaEdit.SetBinding(x, v, z => FormulaEdit.WithChoicesFilter(z, filter))));
                 break;
             case 5:
                 again = true;

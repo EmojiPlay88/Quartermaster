@@ -64,4 +64,22 @@ public class FormulaReferenceTests
         Assert.Contains("Same hex", wb);
         Assert.Contains("same hex", File.ReadAllText(Path.Combine(wiki, "Window-Formula-Dialog.md")), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Wiki_mentions_row_function()
+    {
+        var wiki = Path.Combine(DemoModuleTests.RepoRoot(), "docs", "wiki");
+        Assert.Contains("### row()", Page);
+        Assert.Contains("row() can only be used in a choices filter", Page);
+        Assert.Contains("Not one of the choices for this piece", Page);
+        var making = File.ReadAllText(Path.Combine(wiki, "Making-a-Rules-Pack.md"));
+        Assert.Contains("## Group and repeated runs", making);
+        Assert.Contains("### Rolling once for a group", making);
+        Assert.Contains("### Choices from a table", making);
+        Assert.Contains("rolls once for the group but has no dice", making);
+        var dialog = File.ReadAllText(Path.Combine(wiki, "Window-Formula-Dialog.md"));
+        Assert.Contains("### Several runs on one counter", dialog);
+        Assert.Contains("## Running on several counters", dialog);
+        Assert.Contains("Roll once for the group", File.ReadAllText(Path.Combine(wiki, "Window-Rules-Workbench.md")));
+    }
 }

@@ -41,6 +41,14 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
     /// <summary>The run's effects (place, remove, layer and mask changes) in command order: Place, layer/mask changes in output order, then
     /// removals in output order. Empty for a run with none.</summary>
     public IReadOnlyList<PieceEffect> Effects { get; init; } = Array.Empty<PieceEffect>();
+
+    /// <summary>The keys this run took from <see cref="RunRequest.SharedRolls"/> (B4), in the order read: in <see cref="RollsByKey"/> but not in
+    /// <see cref="Rolls"/>, so the run logs no dice for them (the group's first run did). Empty when none.</summary>
+    public IReadOnlyList<string> SharedRollKeys { get; init; } = Array.Empty<string>();
+
+    /// <summary>The sides of every key in <see cref="RollsByKey"/> (rolled, pinned, typed or shared), so a group's dice can be matched on
+    /// sides as well as count (<see cref="RollGroups.GroupKey"/>). Empty for a trace not made by the runner.</summary>
+    public IReadOnlyDictionary<string, int> RollSides { get; init; } = new Dictionary<string, int>();
 }
 
 /// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
@@ -49,7 +57,13 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
 /// guest's sides on the host; null = every piece (solo, the host's own full-state runs, a run on a player view state).</param>
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
     IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false,
-    Func<string, int, int, IReadOnlyList<int>>? Dice = null, IReadOnlySet<string>? PickSides = null);
+    Func<string, int, int, IReadOnlyList<int>>? Dice = null, IReadOnlySet<string>? PickSides = null)
+{
+    /// <summary>A group's dice already drawn (group key → dice, <see cref="RollGroups.GroupKey"/>: an inline key carries its sides; B4
+    /// <see cref="FormulaDef.GroupRoll"/>): a key whose sides and dice count match and whose dice are within the sides is used before pins and the roller, and is not logged by this run (<see cref="FormulaTrace.SharedRollKeys"/>).
+    /// A typed roll still wins. Null = none.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<int>>? SharedRolls { get; init; }
+}
 
 /// <summary>Binds a formula's variables to game data, evaluates it and previews/produces the ledger commands. Run never throws.</summary>
 public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, int, IReadOnlyList<int>> roller)
@@ -183,29 +197,35 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var formula = _pack.ById<FormulaDef>(r.FormulaId);
         if (formula == null) return Fail(new FormulaDef { Id = r.FormulaId }, "Formula not found");
         var produced = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
+        var shared = new List<string>();
+        var sides = new Dictionary<string, int>(StringComparer.Ordinal);
+        FormulaTrace t;
         try
         {
-            var t = RunCore(s, r, formula, produced);
-            return r.PieceId != null && s.Pieces.ContainsKey(r.PieceId) ? t with { PieceId = r.PieceId } : t;
+            t = RunCore(s, r, formula, produced, shared, sides);
+            if (r.PieceId != null && s.Pieces.ContainsKey(r.PieceId)) t = t with { PieceId = r.PieceId };
         }
         catch (Exception ex)
         {
-            return Fail(formula, ex is EvalError or ParseError ? ex.Message : "Could not run formula: " + ex.Message, produced);
+            t = Fail(formula, ex is EvalError or ParseError ? ex.Message : "Could not run formula: " + ex.Message, produced);
         }
+        if (sides.Count > 0) t = t with { RollSides = new Dictionary<string, int>(sides, StringComparer.Ordinal) };
+        return shared.Count == 0 ? t : t with { SharedRollKeys = shared.ToArray() };
     }
 
     private static FormulaTrace Fail(FormulaDef f, string error, IReadOnlyDictionary<string, IReadOnlyList<int>>? produced = null) =>
         new(f, Array.Empty<VariableState>(), null, "", Array.Empty<OutputPreview>(), error, Array.Empty<DiceEntry>(),
             produced == null ? new Dictionary<string, IReadOnlyList<int>>() : new Dictionary<string, IReadOnlyList<int>>(produced));
 
-    private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula, Dictionary<string, IReadOnlyList<int>> produced)
+    private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula, Dictionary<string, IReadOnlyList<int>> produced, List<string> shared,
+        Dictionary<string, int> sides)
     {
         AstExpr expr;
         try { expr = Parse(formula, formula.Text ?? ""); }
         catch (ParseError pe) { return Fail(formula, pe.Message, produced); }
 
         var piece = r.PieceId != null && s.Pieces.TryGetValue(r.PieceId, out var pi) ? pi : null;
-        var run = new RunScope(this, s, r, formula, piece, produced);
+        var run = new RunScope(this, s, r, formula, piece, produced, shared, sides);
 
         // A Piece-target output names the Piece binding whose pick it acts on; without one it can never run.
         var pieceVars = new List<string>();
@@ -612,7 +632,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     }
 
     /// <summary>Per-run resolution of bindings to values.</summary>
-    private sealed class RunScope(FormulaRunner owner, GameState s, RunRequest r, FormulaDef formula, PieceInstance? piece, Dictionary<string, IReadOnlyList<int>> byKey)
+    private sealed class RunScope(FormulaRunner owner, GameState s, RunRequest r, FormulaDef formula, PieceInstance? piece, Dictionary<string, IReadOnlyList<int>> byKey,
+        List<string> sharedKeys, Dictionary<string, int> rollSides)
     {
         private readonly Dictionary<string, VariableState> _done = new(StringComparer.Ordinal);
         private readonly HashSet<string> _active = new(StringComparer.Ordinal);
@@ -639,6 +660,17 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public IReadOnlyList<int> RollKey(string key, int n, int sides)
         {
             if (_noRolls) throw new RollsForbidden();
+            // A group's dice (B4): kept for count(), dice() and the working, but not logged here (the group's first run logged them).
+            // Matched on count and sides: an inline key is looked up with its sides (RollGroups.GroupKey), so a branch rolling other dice
+            // under the same dice#i rolls its own.
+            if (r.SharedRolls != null && r.SharedRolls.TryGetValue(RollGroups.GroupKey(key, sides), out var group) && group != null && group.Count == n
+                && group.All(x => x >= 1 && x <= sides))
+            {
+                _byKey[key] = group;
+                rollSides[key] = sides;
+                if (!sharedKeys.Contains(key)) sharedKeys.Add(key);
+                return group;
+            }
             IReadOnlyList<int> res;
             if (r.FixedRolls.TryGetValue(key, out var pin) && pin != null && pin.Count == n && pin.All(x => x >= 1 && x <= sides)) res = pin;
             else res = r.Dice?.Invoke(key, n, sides) ?? owner._roller(n, sides);
@@ -651,6 +683,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             _rolls.Add(new DiceEntry(0, $"{formula.Name}: {key}", n, sides, dice));
             _byKey[key] = dice;
+            rollSides[key] = sides;
         }
 
         public IReadOnlyList<int> Roll(int n, int sides) => RollKey("dice#" + _inlineDice++, n, sides);
@@ -898,6 +931,15 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         /// </summary>
         public (PieceInstance Piece, string Name) Pick(VariableBinding b)
         {
+            // Once per variable per run: a Piece binding and the Piece outputs acting on it share one pick (one viewer state on the host).
+            if (_picks.TryGetValue(b.Variable, out var known)) return known;
+            return _picks[b.Variable] = PickOnce(b);
+        }
+
+        private readonly Dictionary<string, (PieceInstance Piece, string Name)> _picks = new(StringComparer.Ordinal);
+
+        private (PieceInstance Piece, string Name) PickOnce(VariableBinding b)
+        {
             if (b.SameHex && piece == null) throw new Missing("Needs a unit");
             var list = PieceChoices.Named(s, owner._pack, owner._model, b, r.PickSides, piece?.Id);
             if (list.Count == 0)
@@ -917,6 +959,17 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             var name = b.Variable;
             string? source = null;
+            // Choices from a table (B4): this counter's keys; none left, or a filter error, leaves the box missing whatever is typed.
+            List<string>? choices = null;
+            var numeric = false;
+            if (!string.IsNullOrWhiteSpace(b.ChoicesTable))
+            {
+                var keys = InputChoices.TableKeys(owner._pack, b.ChoicesTable) ?? throw new EvalError($"The choices table for {name} was deleted");
+                numeric = InputChoices.AllNumeric(keys);
+                try { choices = InputChoices.Filter(s, owner._pack, b, keys, piece, Sides, Filters, strict: true); }
+                catch (EvalError ex) { return new(name, null, false, false, ex.Message); }
+                if (choices.Count == 0) return new(name, null, false, false, InputChoices.NoChoiceText);
+            }
             if (!r.Typed.TryGetValue(name, out var raw) || string.IsNullOrWhiteSpace(raw))
             {
                 if (!r.UseAutoValues || b.AlwaysAsk || string.IsNullOrWhiteSpace(b.AutoValue)) return new(name, null, false, false, "Waiting for input");
@@ -925,6 +978,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 source = "default";
             }
             raw = raw.Trim();
+            if (choices != null)
+            {
+                var hit = choices.FirstOrDefault(c => string.Equals(c, raw, StringComparison.OrdinalIgnoreCase));
+                if (hit == null) return new(name, null, false, false, InputChoices.NotOneText);
+                return numeric && TryNum(hit, out var kn) ? new(name, Value.Of(kn), false, false, null, source)
+                    : new(name, Value.Of(hit), false, false, null, source);
+            }
             if (b.Choices is { Count: > 0 })
             {
                 var hit = b.Choices.FirstOrDefault(c => string.Equals(c.Trim(), raw, StringComparison.OrdinalIgnoreCase));

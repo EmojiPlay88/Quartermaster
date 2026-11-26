@@ -92,7 +92,7 @@ This part of the wiki lists everything you can see in Quartermaster: every menu 
 | [Main window](Window-Main-Window) | Toolbar, status bar, the left-hand trees, document tabs, floating windows, the alert bar, the interface tour |
 | [Map](Window-Map) | The map window, moving and selecting counters, line of sight, counter menus, saving the map as a picture, the overview |
 | [Phases](Window-Phases) | The phase strip, the phase panel, the Next Phase check and Step Back |
-| [Formula dialog](Window-Formula-Dialog) | The formula dialog, the cheat sheet, the batch grid and the missing-values dialog |
+| [Formula dialog](Window-Formula-Dialog) | The formula dialog, the cheat sheet, the batch grids (phase runs, several counters, several runs on one counter) and the missing-values dialog |
 | [Ledger](Window-Ledger) | The Ledger window and your own Ledger tabs |
 | [Log and side panels](Window-Log-and-Panels) | The log, chat, the outliner and the counter palette |
 | [Notes and Inventory](Window-Notes-and-Inventory) | The Notes and Inventory windows |

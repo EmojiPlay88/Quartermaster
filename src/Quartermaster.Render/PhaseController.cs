@@ -379,6 +379,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var name = UnitName(pieceId);
         var unit = name ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
+        var groupRolls = runId == null ? null : GroupRollsOf(runId, pieceId, trace);   // read before the run's own changes
         List<PendingRun> queued = new();
         IReadOnlyList<GameCommand> executed = Array.Empty<GameCommand>();
         using (s.Game.BeginAction(string.IsNullOrWhiteSpace(name) ? trace.Formula.Name : $"{trace.Formula.Name} on {name}"))
@@ -391,12 +392,32 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 LogWorking(trace, unit, tag);
             }
             finally { _askStamp = null; }
-            if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }));
+            if (runId != null) Exec(new ResolveRun(runId, new[] { pieceId }) { GroupRolls = groupRolls });
             var swept = executed.Any(x => x is RemovePiece) && ResolveGoneUnits();
             if (runId != null || swept) queued = ContinueEntries();   // inside the answer's action: one undo takes back the answer and what it released
         }
         RaiseQueued(queued);
         return true;
+    }
+
+    /// <summary>
+    /// The dice a pending unit's answer draws for its roll group (B4): with a <see cref="FormulaDef.GroupRoll"/> formula and a unit in a group,
+    /// {group: the keys this run rolled itself (not the group's shared ones)}; null otherwise. Saved on the run by its <see cref="ResolveRun"/>,
+    /// so the group's other units reuse them and undoing the answer drops them.
+    /// </summary>
+    private IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>? GroupRollsOf(string runId, string? pieceId, FormulaTrace trace)
+    {
+        if (!trace.Formula.GroupRoll || s.Game?.State.Pending.FirstOrDefault(r => r != null && r.Id == runId) is not { } run) return null;
+        if ((run.Units ?? Array.Empty<PendingUnit>()).FirstOrDefault(u => u is { Applied: false } && u.PieceId == pieceId)?.Group is not { } group) return null;
+        return Drawn(trace) is { } dice ? new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>(StringComparer.Ordinal) { [group] = dice } : null;
+    }
+
+    /// <summary>The keys a run rolled itself (rolled, pinned or typed dice; not those taken from its group), under their group keys
+    /// (<see cref="RollGroups.GroupKey"/>), or null when none.</summary>
+    private static Dictionary<string, IReadOnlyList<int>>? Drawn(FormulaTrace trace)
+    {
+        var res = RollGroups.Drawn(trace);
+        return res.Count == 0 ? null : res;
     }
 
     /// <summary>
@@ -411,7 +432,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             .Select(r => (r.Id, Gone: (r.Units ?? Array.Empty<PendingUnit>()).Where(u => u is { Applied: false, PieceId: { } id } && !st.Pieces.ContainsKey(id))
                 .Select(u => u.PieceId).ToList()))
             .Where(x => x.Gone.Count > 0).ToList();
-        foreach (var (id, gone) in sweeps) Exec(new ResolveRun(id, gone));
+        foreach (var (id, gone) in sweeps) Exec(new ResolveRun(id, gone) { Gone = true });   // counted as removed, not applied
         return sweeps.Count > 0;
     }
 
@@ -649,6 +670,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         return kept;
     }
 
+    /// <summary>Each unit's roll group (<see cref="RollGroups.Assign"/>) for a <see cref="FormulaDef.GroupRoll"/> formula; null otherwise.</summary>
+    private IReadOnlyList<string?>? Groups(FormulaDef f, List<Unit> units) =>
+        f.GroupRoll && s.Game is { } g && s.Rules is { } pack ? RollGroups.Assign(g.State, pack, s.Model, units.Select(u => u.PieceId).ToList()) : null;
+
     /// <param name="askSideId">An entry that asks a side (spec #72): its run is always queued, for that side, in every difficulty.</param>
     /// <returns>True when a run was queued.</returns>
     private bool Apply(FormulaDef f, string trigger, List<Unit> units, List<PendingRun> queued, string? askSideId = null)
@@ -660,8 +685,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         {
             if (mode != Difficulty.FullyAuto && trigger == "start") units = Applicable(f, units);
             if (units.Count == 0) return false;   // every unit refused: the entry counts as done
+            var groups = Groups(f, units);
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,
-                units.Select(u => new PendingUnit(u.PieceId, u.Label, u.Moved, false)).ToList(), false) { AskSideId = ask };
+                units.Select((u, i) => new PendingUnit(u.PieceId, u.Label, u.Moved, false) { Group = groups?[i] }).ToList(), false) { AskSideId = ask };
             Exec(new QueueRuns(new[] { run }));
             queued.Add(run);
             return true;
@@ -670,32 +696,51 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var none = new Dictionary<string, string>();
         var noRolls = new Dictionary<string, IReadOnlyList<int>>();
         var applied = 0;
-        var needInput = new List<Unit>();
+        var removed = 0;
+        var needInput = new List<(Unit U, string? Group)>();
         var g = s.Game;
         var state = g.State;
+        // Roll groups (B4): one roll per hex and side; the group's first applied unit draws it and the others reuse it (logged once).
+        var groupOf = Groups(f, units);
+        var groupDice = new Dictionary<string, Dictionary<string, IReadOnlyList<int>>>(StringComparer.Ordinal);
         // One pass (spec #31): the units share one side map and one aggregate state, and the entry raises Changed once; each unit reads the
         // writes of the units before it. A unit whose commands add, remove or move a piece or change a trait state drops the pass's side map
         // and aggregate state (AfterApply), so the next unit sees the change. A placed piece never joins this entry's units (the list is fixed).
         using (g.DeferChanged())
         {
             using (s.Runner.BeginPass(state))
-                foreach (var u in units)
+                for (var i = 0; i < units.Count; i++)
                 {
-                    if (u.PieceId != null && !g.State.Pieces.ContainsKey(u.PieceId)) continue;   // removed by an earlier unit: skipped, no line
-                    var trace = s.Runner.Run(state, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
+                    var u = units[i];
+                    var group = groupOf?[i];
+                    if (u.PieceId != null && !g.State.Pieces.ContainsKey(u.PieceId)) { removed++; continue; }   // removed by an earlier unit: skipped, no line
+                    var shared = group != null && groupDice.TryGetValue(group, out var drawn) ? drawn : null;
+                    var trace = s.Runner.Run(state, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true) { SharedRolls = shared });
                     if (trace.Error != null) { Calc($"{f.Name}: {u.Label}: {trace.Error}", u.PieceId, f.Id, error: true); continue; }   // hidden like its working
-                    if (trace.Result == null) { needInput.Add(u); continue; }
+                    if (trace.Result == null) { needInput.Add((u, group)); continue; }
                     var executed = FormulaApply.Execute(s, s.Runner.Commands(trace, null, "auto", u.Label, Stamp()), Exec);
                     LogWorking(trace, u.Label, "auto");
                     s.Runner.AfterApply(executed);
                     applied++;
+                    // Only dice that were logged (an applied unit's) become the group's; per key the first wins.
+                    if (group != null && Drawn(trace) is { } own)
+                    {
+                        if (!groupDice.TryGetValue(group, out var keep)) groupDice[group] = keep = new(StringComparer.Ordinal);
+                        foreach (var (key, dice) in own) keep.TryAdd(key, dice);
+                    }
                 }
-            if (units.Count > 1) Calc($"{f.Name}: {units.Count} units, {applied} applied", formulaId: LogKind.NoWorking);
+            if (units.Count > 1)
+                Calc(removed > 0 ? $"{f.Name}: {units.Count} units, {applied} applied, {removed} removed" : $"{f.Name}: {units.Count} units, {applied} applied",
+                    formulaId: LogKind.NoWorking);
         }
         if (needInput.Count > 0)
         {
+            // The units left waiting keep their groups and the dice their groups already drew here.
+            var kept = needInput.Where(x => x.Group != null && groupDice.ContainsKey(x.Group)).Select(x => x.Group!).Distinct()
+                .ToDictionary(k => k, k => (IReadOnlyDictionary<string, IReadOnlyList<int>>)groupDice[k], StringComparer.Ordinal);
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,
-                needInput.Select(u => new PendingUnit(u.PieceId, u.Label, u.Moved, false)).ToList(), true);
+                needInput.Select(x => new PendingUnit(x.U.PieceId, x.U.Label, x.U.Moved, false) { Group = x.Group }).ToList(), true)
+                { GroupRolls = kept.Count == 0 ? null : kept };
             Exec(new QueueRuns(new[] { run }));
             queued.Add(run);
             return true;

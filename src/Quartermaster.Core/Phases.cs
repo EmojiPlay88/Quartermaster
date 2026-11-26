@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Quartermaster.Rules;
 
 namespace Quartermaster.Core;
 
@@ -22,7 +23,18 @@ public sealed record PhasePosition(int Turn, int Repeat, string PhaseId, int Pha
 /// <summary>A phase passed over by Next Phase because its condition was false, at the position it would have had.</summary>
 public sealed record SkippedPhase(string PhaseId, string Name, int Turn, int Repeat);
 
-public sealed record PendingUnit(string? PieceId, string Label, double? Moved, bool Applied);
+public sealed record PendingUnit(string? PieceId, string Label, double? Moved, bool Applied)
+{
+    /// <summary>The unit's roll group (B4, a <see cref="FormulaDef.GroupRoll"/> formula): "{sideId}/{k}" (<see cref="RollGroups.Assign"/>),
+    /// shared by the run's units in one hex of one side; null = rolls its own. Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Group { get; init; }
+
+    /// <summary>The unit was resolved because its piece was removed by another run (<see cref="ResolveRun.Gone"/>): counted as removed, not
+    /// applied, in the batch summary. Omitted when false.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Removed { get; init; }
+}
 
 /// <summary>A queued formula run awaiting the player. Trigger is "start" or "move".</summary>
 public sealed record PendingRun(string Id, string FormulaId, string FormulaName, string Trigger, IReadOnlyList<PendingUnit> Units, bool NeedsInput)
@@ -31,6 +43,11 @@ public sealed record PendingRun(string Id, string FormulaId, string FormulaName,
     /// and apply it (solo: anyone), and its commands are stamped with it. Omitted when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? AskSideId { get; init; }
+
+    /// <summary>The dice each roll group drew (group → key → dice; B4): the first applied unit of a group fixes a key, the group's other
+    /// units reuse it (<see cref="RollGroups.SharedFor"/>). Host only: <see cref="PlayerView"/> drops it. Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>? GroupRolls { get; init; }
 }
 
 /// <summary>

@@ -200,9 +200,12 @@ public sealed class GameState
 
     void BatchSummary(PendingRun r, IReadOnlyList<PendingUnit> units, string? who, DateTimeOffset? at)
     {
-        if (units.Count > 1)
-            Log.Add(LogBuilder.Line(this, LogKind.Calc, $"{r.FormulaName}: {units.Count} units, {units.Count(u => u?.Applied == true)} applied", who, at,
-                formulaId: LogKind.NoWorking));
+        if (units.Count <= 1) return;
+        // A unit removed by another run (B4) is counted apart; with none removed the line is unchanged, so old saves replay the same.
+        var removed = units.Count(u => u?.Removed == true);
+        var applied = units.Count(u => u?.Applied == true && !u.Removed);
+        Log.Add(LogBuilder.Line(this, LogKind.Calc, $"{r.FormulaName}: {units.Count} units, {applied} applied" + (removed > 0 ? $", {removed} removed" : ""),
+            who, at, formulaId: LogKind.NoWorking));
     }
 
     void DoAdvance(AdvancePhase a)
@@ -248,13 +251,36 @@ public sealed class GameState
         if (idx < 0) return;
         var run = Pending[idx];
         var ids = new HashSet<string?>(rr.PieceIds ?? Array.Empty<string?>());
-        var units = (run.Units ?? Array.Empty<PendingUnit>()).Where(u => u != null).Select(u => !u.Applied && ids.Contains(u.PieceId) ? u with { Applied = true } : u).ToList();
+        var units = (run.Units ?? Array.Empty<PendingUnit>()).Where(u => u != null)
+            .Select(u => !u.Applied && ids.Contains(u.PieceId) ? u with { Applied = true, Removed = rr.Gone } : u).ToList();
         if (units.All(u => u.Applied))
         {
             Pending.RemoveAt(idx);
             BatchSummary(run, units, rr.Who, rr.At);
         }
-        else Pending[idx] = run with { Units = units };
+        else Pending[idx] = run with { Units = units, GroupRolls = MergeGroupRolls(run.GroupRolls, rr.GroupRolls) };
+    }
+
+    /// <summary>The run's group dice with an answer's merged in (new dictionaries; first wins per group and key). Null stays null when the
+    /// answer brings none.</summary>
+    static IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>? MergeGroupRolls(
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>? have,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>? add)
+    {
+        if (add == null || add.Count == 0) return have;
+        var merged = new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>(StringComparer.Ordinal);
+        foreach (var (g, keys) in have ?? new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>())
+            if (g != null && keys != null) merged[g] = keys;
+        foreach (var (g, keys) in add)
+        {
+            if (g == null || keys == null) continue;
+            var into = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
+            if (merged.TryGetValue(g, out var old)) foreach (var (k, d) in old) into[k] = d;
+            foreach (var (k, d) in keys)
+                if (k != null && d != null && !into.ContainsKey(k)) into[k] = d.ToArray();
+            merged[g] = into;
+        }
+        return merged;
     }
 
     void SetLedger(string key, string propertyId, double value)

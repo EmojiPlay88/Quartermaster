@@ -48,6 +48,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
                 MoveIntent m => Move(g, held, who, m.Moves),
                 PieceCommandIntent p => PieceCommand(g, held, who, p.Command),
                 FormulaIntent f => Formula(held, who, f),
+                FormulaBatchIntent fb => FormulaBatch(held, who, fb),
                 LedgerEditIntent l => EditLedger(g, held, who, l),
                 DiceIntent d => Dice(g, who, d),
                 TickIntent t => Phase(held, who, () => c.Tick(t.Index, t.Ticked)),
@@ -227,6 +228,14 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         return new IntentResult(v.Applied, v.Message, v);
     }
 
+    /// <summary>A menu batch (B4): every row checked as a single run, one action for all rows or nothing.</summary>
+    private IntentResult FormulaBatch(IReadOnlySet<string> sides, string who, FormulaBatchIntent f)
+    {
+        FormulaBatchVerdict v;
+        using (c.ActingFor(sides, who)) v = FormulaBatchRunner.Run(s, c, sides, f, guest: true, who, Pins);
+        return new IntentResult(v.Applied, v.Message) { BatchVerdict = v };
+    }
+
     private IntentResult EditLedger(GameSession g, IReadOnlySet<string> sides, string who, LedgerEditIntent l)
     {
         if (BadId(l.Key) || BadId(l.PropertyId)) return IntentResult.Refused(NotUnderstoodText);
@@ -312,8 +321,8 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
 /// </summary>
 internal static class FormulaIntentRunner
 {
-    private const string NotWaitingText = "This calculation is no longer waiting.";
-    private const string GoneUnitText = "That unit no longer exists.";
+    internal const string NotWaitingText = "This calculation is no longer waiting.";
+    internal const string GoneUnitText = "That unit no longer exists.";
     public const string UsePendingText = "Use the pending run for this unit.";
     private const string NotYourPhaseText = "That can't be calculated during another side's phase.";
     public const int MaxTyped = 64;
@@ -322,79 +331,36 @@ internal static class FormulaIntentRunner
     private static bool IsCheckedKind(BindingKind k) =>
         k is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Table or BindingKind.Location or BindingKind.Moved;
 
+    /// <summary>A run checked and set up by <see cref="Prepare"/>: its formula, its dialog model (masked, typed values in), the hidden
+    /// inputs and the pending unit's roll group (null when none).</summary>
+    internal sealed record Prepared(FormulaDef Formula, FormulaDialogModel Model, HashSet<string> Hidden, string? Group);
+
+    /// <summary>True when an intent breaks a size limit (ids, typed values, picks): <see cref="IntentExecutor.NotUnderstoodText"/>.</summary>
+    internal static bool BadSize(FormulaIntent? i) =>
+        i == null || i.FormulaId == null || i.FormulaId.Length > IntentExecutor.MaxId || (i.RunId?.Length ?? 0) > IntentExecutor.MaxId
+        || (i.PieceId?.Length ?? 0) > IntentExecutor.MaxId
+        || i.Typed is { Count: > MaxTyped } || (i.Typed ?? new Dictionary<string, string>()).Any(kv => kv.Key == null || kv.Key.Length > MaxTypedValue || (kv.Value?.Length ?? 0) > MaxTypedValue)
+        || i.Picks is { Count: > MaxTyped } || (i.Picks ?? new Dictionary<string, string>()).Any(kv => kv.Key == null || kv.Key.Length > MaxTypedValue || (kv.Value?.Length ?? 0) > IntentExecutor.MaxId);
+
     /// <param name="guest">True for a guest's intent (host-side rules on outputs and unit-less runs apply).</param>
     /// <param name="who">The sender (pins are per sender).</param>
     /// <param name="pins">Where a preview's dice are pinned and an Apply finds them; null = no pinning (the host's own dialog pins in its model).</param>
     public static FormulaVerdict Run(ModuleSession s, PhaseController c, IReadOnlySet<string>? sides, FormulaIntent i, bool guest,
         string? who = null, FormulaPins? pins = null)
     {
-        if (s.Game is not { } g || s.Runner is not { } runner || s.Rules is not { } pack) return FormulaVerdict.Refused(IntentExecutor.NoGameText);
-        if (i == null || i.FormulaId == null || i.FormulaId.Length > IntentExecutor.MaxId || (i.RunId?.Length ?? 0) > IntentExecutor.MaxId
-            || (i.PieceId?.Length ?? 0) > IntentExecutor.MaxId)
-            return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
-        if (i.Typed is { Count: > MaxTyped } || (i.Typed ?? new Dictionary<string, string>()).Any(kv => kv.Key == null || kv.Key.Length > MaxTypedValue || (kv.Value?.Length ?? 0) > MaxTypedValue))
-            return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
-        if (i.Picks is { Count: > MaxTyped } || (i.Picks ?? new Dictionary<string, string>()).Any(kv => kv.Key == null || kv.Key.Length > MaxTypedValue || (kv.Value?.Length ?? 0) > IntentExecutor.MaxId))
-            return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
-        if (pack.ById<FormulaDef>(i.FormulaId) is not { } f) return FormulaVerdict.Refused("That formula no longer exists.");
+        if (s.Game is not { } g || s.Runner == null || s.Rules is not { } pack) return FormulaVerdict.Refused(IntentExecutor.NoGameText);
+        if (BadSize(i)) return FormulaVerdict.Refused(IntentExecutor.NotUnderstoodText);
         var full = g.State;
-        PieceInstance? piece = null;
-        if (i.PieceId != null)
-        {
-            // A unit the sender cannot see does not exist for it.
-            if (!full.Pieces.TryGetValue(i.PieceId, out piece) || (sides != null && !new PieceAccess(full, pack, s.Model, sides).CanSee(i.PieceId)))
-                return FormulaVerdict.Refused(GoneUnitText);
-        }
-        if (!s.CanActFor(i.PieceId, sides)) return FormulaVerdict.Refused($"That unit {ModuleSession.OtherSideText}.");
-        if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides) is { } why) return FormulaVerdict.Refused(why);
-        double? moved = null;
-        if (i.RunId != null)
-        {
-            if (!c.IsPending(i.RunId, i.PieceId, f.Id)) return FormulaVerdict.Refused(NotWaitingText);
-            // An ask run (spec #72) is the asked side's: a sender without it is refused.
-            if (full.Pending.First(r => r.Id == i.RunId).AskSideId is { Length: > 0 } ask && sides != null && !sides.Contains(ask))
-                return FormulaVerdict.Refused("That calculation " + ModuleSession.OtherSideText + ".");
-            moved = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied).Moved;
-        }
-        else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))
-            return FormulaVerdict.Refused("That formula does not apply to this unit.");
-        // A player-started run obeys the formula's phase limit; a waiting run (queued by a hook) does not.
-        if (i.RunId == null && !FormulaPhases.Allowed(pack, full, f, out var phaseReason)) return FormulaVerdict.Refused(FormulaPhases.Refusal(f, phaseReason!));
-
-        // The same masking as the sender's own dialog: hidden boxes are filled by the engine and never typed (FormulaMasking).
-        var hidden = FormulaMasking.HiddenVariables(pack, s.Model, full, f, i.PieceId, sides);
-        // A Piece binding's label is resolved among the candidates the sender sees (its sides' view of the full state).
-        var model = new FormulaDialogModel(runner, f, i.PieceId)
-            { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden, PickSides = sides };
-        foreach (var (variable, text) in i.Typed ?? new Dictionary<string, string>())
-        {
-            if (variable == null) continue;
-            var b = f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable);
-            // A pick is a label from the sender's own list, so it is taken even when the value it reads is hidden; nothing else hidden is.
-            if (hidden.Contains(variable) && b is not { Kind: BindingKind.Piece }) continue;
-            // Input boxes and picks always; checked boxes only in the manual modes (they gate Apply and never feed the run); never dice or overrides.
-            var accept = b != null && (b.Kind is BindingKind.Input or BindingKind.Piece || (model.Checked && IsCheckedKind(b.Kind)));
-            if (accept) model.SetBoxText(variable, text ?? "");
-        }
-        // One unit, one set of dice: while the unit has this formula's run waiting, a guest uses that run (an ad-hoc run would be another roll).
-        if (guest && i.RunId == null && i.PieceId != null
-            && full.Pending.Any(r => r != null && r.FormulaId == f.Id && (r.Units ?? Array.Empty<PendingUnit>()).Any(u => u is { Applied: false } && u.PieceId == i.PieceId)))
-            return FormulaVerdict.Refused(UsePendingText);
-        // A pick sent with the piece it was picked as: the label must still resolve, among the sender's own candidates, to that piece. Any
-        // mismatch (the list moved on, a piece the sender cannot see, no such piece) gets the same neutral refusal; nothing is run or written.
-        foreach (var (variable, id) in i.Picks ?? new Dictionary<string, string>())
-        {
-            if (variable == null || f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable) is not { Kind: BindingKind.Piece } pb) continue;
-            if (i.Typed?.GetValueOrDefault(variable) is not { } label || string.IsNullOrWhiteSpace(label)) continue;   // nothing picked: waits
-            // The same list as the sender's dialog: its run piece's hex first ("same hex": only that hex).
-            var hit = Quartermaster.Core.PieceChoices.For(full, pack, s.Model, pb, sides, i.PieceId)
-                .FirstOrDefault(x => string.Equals(x.Label, label.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (hit == null || id == null || !string.Equals(hit.PieceId, id, StringComparison.Ordinal))
-                return FormulaVerdict.Refused(Quartermaster.Core.PieceChoices.Unknown);
-        }
+        var (prepared, why) = Prepare(s, c, sides, i, guest, full, full);
+        if (prepared == null) return FormulaVerdict.Refused(why!);
+        var (f, model, hidden, group) = prepared;
         // Every die of a guest's run is pinned per (sender, formula, unit) and dice configuration before anything is answered: a preview,
         // a refused Apply and a retry all see the same roll, so nothing can be re-rolled by asking again.
-        var pinKey = new FormulaPins.Key(who ?? "", f.Id, i.PieceId);
+        // A grouped pending unit pins per group, so the sender's previews of two rows of one group show the same dice (until the group's
+        // dice are on the run: those win). A menu run of a group-roll formula is a group of one: it pins under the sender's one group draw
+        // (batch:group, shared with its menu batches), so a single run and a batch can never offer one counter two rolls.
+        var pinKey = new FormulaPins.Key(who ?? "", f.Id,
+            group != null ? $"group:{i.RunId}:{group}" : f.GroupRoll && i.RunId == null ? FormulaBatchRunner.GroupPin : i.PieceId);
         FormulaPins.Scope? scope = null;
         if (pins != null)
         {
@@ -427,8 +393,84 @@ internal static class FormulaIntentRunner
             return new FormulaVerdict(false, boxes, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId));
         if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated || scope?.Previewed == true))
             return new FormulaVerdict(false, boxes, NotWaitingText);
-        pins?.Remove(pinKey);   // consumed
+        // Consumed. A counter's own pins are a queue: its later previewed runs (a longer batch's rows) move down one. A grouped pending
+        // unit's group scope stays (the group's other rows may still need dice it showed; it goes stale at the phase change).
+        if (group == null && pinKey.PieceId == i.PieceId) pins?.Shift(pinKey.Who, f.Id, i.PieceId, 1);
+        else if (group == null) pins?.Remove(pinKey);
         return new FormulaVerdict(true, boxes, null);
+    }
+
+    /// <summary>
+    /// Every check of a single run (<see cref="Run"/>) and its model, without running it. Shared with <see cref="FormulaBatchRunner"/>, whose
+    /// rows pass exactly these checks. The checks read <paramref name="full"/> (the live full state); a Piece binding's pick is resolved among
+    /// the sender's candidates on <paramref name="at"/>, the state the run is evaluated on (the full state, or a batch chain's clone of it).
+    /// Returns the refusal text instead when a check fails. The caller has checked <see cref="BadSize"/>.
+    /// </summary>
+    internal static (Prepared? Run, string? Refusal) Prepare(ModuleSession s, PhaseController c, IReadOnlySet<string>? sides, FormulaIntent i,
+        bool guest, GameState full, GameState at)
+    {
+        if (s.Runner is not { } runner || s.Rules is not { } pack) return (null, IntentExecutor.NoGameText);
+        if (pack.ById<FormulaDef>(i.FormulaId) is not { } f) return (null, "That formula no longer exists.");
+        PieceInstance? piece = null;
+        if (i.PieceId != null)
+        {
+            // A unit the sender cannot see does not exist for it.
+            if (!full.Pieces.TryGetValue(i.PieceId, out piece) || (sides != null && !new PieceAccess(full, pack, s.Model, sides).CanSee(i.PieceId)))
+                return (null, GoneUnitText);
+        }
+        if (!s.CanActFor(i.PieceId, sides)) return (null, $"That unit {ModuleSession.OtherSideText}.");
+        if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides) is { } why) return (null, why);
+        double? moved = null;
+        string? group = null;
+        if (i.RunId != null)
+        {
+            if (!c.IsPending(i.RunId, i.PieceId, f.Id)) return (null, NotWaitingText);
+            // An ask run (spec #72) is the asked side's: a sender without it is refused.
+            if (full.Pending.First(r => r.Id == i.RunId).AskSideId is { Length: > 0 } ask && sides != null && !sides.Contains(ask))
+                return (null, "That calculation " + ModuleSession.OtherSideText + ".");
+            var unit = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied);
+            moved = unit.Moved;
+            group = f.GroupRoll ? unit.Group : null;
+        }
+        else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))
+            return (null, "That formula does not apply to this unit.");
+        // A player-started run obeys the formula's phase limit; a waiting run (queued by a hook) does not.
+        if (i.RunId == null && !FormulaPhases.Allowed(pack, full, f, out var phaseReason)) return (null, FormulaPhases.Refusal(f, phaseReason!));
+
+        // The same masking as the sender's own dialog: hidden boxes are filled by the engine and never typed (FormulaMasking).
+        var hidden = FormulaMasking.HiddenVariables(pack, s.Model, full, f, i.PieceId, sides);
+        // A Piece binding's label is resolved among the candidates the sender sees (its sides' view of the full state).
+        var model = new FormulaDialogModel(runner, f, i.PieceId)
+            { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden, PickSides = sides };
+        // A grouped unit (B4) reuses the dice its roll group already drew on the run: read from the full state (a view never carries them).
+        if (i.RunId != null) model.SharedRolls = RollGroups.SharedFor(full, i.RunId, i.PieceId);
+        foreach (var (variable, text) in i.Typed ?? new Dictionary<string, string>())
+        {
+            if (variable == null) continue;
+            var b = f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable);
+            // A pick is a label from the sender's own list, so it is taken even when the value it reads is hidden; nothing else hidden is.
+            if (hidden.Contains(variable) && b is not { Kind: BindingKind.Piece }) continue;
+            // Input boxes and picks always; checked boxes only in the manual modes (they gate Apply and never feed the run); never dice or overrides.
+            var accept = b != null && (b.Kind is BindingKind.Input or BindingKind.Piece || (model.Checked && IsCheckedKind(b.Kind)));
+            if (accept) model.SetBoxText(variable, text ?? "");
+        }
+        // One unit, one set of dice: while the unit has this formula's run waiting, a guest uses that run (an ad-hoc run would be another roll).
+        if (guest && i.RunId == null && i.PieceId != null
+            && full.Pending.Any(r => r != null && r.FormulaId == f.Id && (r.Units ?? Array.Empty<PendingUnit>()).Any(u => u is { Applied: false } && u.PieceId == i.PieceId)))
+            return (null, UsePendingText);
+        // A pick sent with the piece it was picked as: the label must still resolve, among the sender's own candidates, to that piece. Any
+        // mismatch (the list moved on, a piece the sender cannot see, no such piece) gets the same neutral refusal; nothing is run or written.
+        foreach (var (variable, id) in i.Picks ?? new Dictionary<string, string>())
+        {
+            if (variable == null || f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable) is not { Kind: BindingKind.Piece } pb) continue;
+            if (i.Typed?.GetValueOrDefault(variable) is not { } label || string.IsNullOrWhiteSpace(label)) continue;   // nothing picked: waits
+            // The same list as the sender's dialog: its run piece's hex first ("same hex": only that hex).
+            var hit = Quartermaster.Core.PieceChoices.For(at, pack, s.Model, pb, sides, i.PieceId)
+                .FirstOrDefault(x => string.Equals(x.Label, label.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (hit == null || id == null || !string.Equals(hit.PieceId, id, StringComparison.Ordinal))
+                return (null, Quartermaster.Core.PieceChoices.Unknown);
+        }
+        return (new Prepared(f, model, hidden, group), null);
     }
 
     /// <summary>
@@ -469,8 +511,12 @@ internal static class FormulaIntentRunner
     }
 
     /// <summary>The dialog's status when it names only variables; an evaluation error is passed on only when no input is hidden.</summary>
-    private static string SafeStatus(DialogView dv, HashSet<string> hidden)
+    internal static string SafeStatus(DialogView dv, HashSet<string> hidden)
     {
+        // A typed value that is not among this counter's choices (or no choice left): the neutral text, never the list (B4).
+        if (dv.Trace.Variables.FirstOrDefault(v => v?.Variable != null && !hidden.Contains(v.Variable)
+                && v.MissingReason is InputChoices.NotOneText or InputChoices.NoChoiceText) is { } choice)
+            return choice.MissingReason!;
         if (dv.Status.StartsWith("Doesn't match: ", StringComparison.Ordinal) || dv.Status.StartsWith("Waiting for: ", StringComparison.Ordinal))
             return dv.Status;
         if (hidden.Count == 0 && dv.Trace.Error is { Length: > 0 } err) return err;
@@ -479,11 +525,168 @@ internal static class FormulaIntentRunner
 }
 
 /// <summary>
+/// A guest's menu batch on the host (B4, <see cref="FormulaBatchIntent"/>). Every row passes exactly the checks of a single run
+/// (<see cref="FormulaIntentRunner.Prepare"/>); a refused row refuses the batch with <c>Row {n}: {message}</c> (the single run's neutral text).
+/// The rows run in order as a chain on one clone of the full state (<see cref="GameState.DeepClone"/>), so each row sees the rows before it;
+/// a row whose counter an earlier row removes is skipped (no pin scope is opened for it). Dice are pinned per sender so that nothing can be
+/// re-rolled by asking again: a counter's first row uses the very pin of a single run on that counter (<c>{pieceId}</c>, both ways: a
+/// single run after a batch preview reuses the row's dice and the other way round), its k-th row (k &gt;= 2) <c>batch:{pieceId}#{k}</c>,
+/// so reordering rows on different counters keeps every row's dice. The pins are a queue (<see cref="FormulaPins.Shift"/>): an applied
+/// run (single or batch row) moves the counter's later pins down, so the k-th next run on a counter gets the k-th dice it was shown. A <see cref="FormulaDef.GroupRoll"/> formula has one live draw per
+/// sender: every group batch and every menu single run of it (a group of one) pins under <c>batch:group</c>, whatever the rows and their
+/// order, until an apply consumes it (or the phase position, game or pack changes), so a group roll cannot be had twice either.
+/// A preview answers each row's visible values and dice; an Apply applies every row (in order, each its own run) in one action, and only
+/// when every row can. Never throws past its caller's guard; nothing hidden goes into a verdict.
+/// </summary>
+internal static class FormulaBatchRunner
+{
+    /// <summary>The pin key suffix of a group-roll formula's one live draw per sender (menu batches and menu single runs).</summary>
+    internal const string GroupPin = "batch:group";
+
+    private sealed record Row(FormulaIntent Intent, FormulaIntentRunner.Prepared? Prepared, FormulaPins.Key? PinKey, FormulaPins.Scope? Scope, bool Removed);
+
+    public static FormulaBatchVerdict Run(ModuleSession s, PhaseController c, IReadOnlySet<string>? sides, FormulaBatchIntent bi, bool guest,
+        string? who = null, FormulaPins? pins = null)
+    {
+        if (s.Game is not { } g || s.Runner is not { } runner || s.Rules is not { } pack) return FormulaBatchVerdict.Refused(IntentExecutor.NoGameText);
+        if (bi?.Rows == null || bi.Rows.Count == 0 || bi.Rows.Count > MenuBatchModel.MaxBatchRows || bi.FormulaId == null || bi.FormulaId.Length > IntentExecutor.MaxId)
+            return FormulaBatchVerdict.Refused(IntentExecutor.NotUnderstoodText);
+        var intents = bi.Rows.Select(r => r == null ? null
+            : new FormulaIntent(bi.FormulaId, r.PieceId, null, r.Typed ?? new Dictionary<string, string>(), bi.Calculate, bi.Preview, r.Picks)).ToList();
+        if (intents.Any(FormulaIntentRunner.BadSize)) return FormulaBatchVerdict.Refused(IntentExecutor.NotUnderstoodText);
+        if (pack.ById<FormulaDef>(bi.FormulaId) is not { } f) return FormulaBatchVerdict.Refused("That formula no longer exists.");
+
+        var full = g.State;
+        var at = full;            // the chain's state: the full state until a row's commands must be seen by a later row, then one clone of it
+        var cloned = false;
+        var group = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
+        var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+        var rows = new List<Row>();
+        var verdicts = new List<FormulaVerdict>();
+        var roller = s.Roll;
+        FormulaPins.Key KeyFor(string? pieceId, int occurrence) => FormulaPins.QueueKey(who ?? "", f.Id, pieceId, occurrence);
+        // A group roll: the sender's one live group draw (shared with its menu single runs of this formula).
+        FormulaPins.Scope? groupScope = null;
+        var groupKey = new FormulaPins.Key(who ?? "", f.Id, GroupPin);
+        if (pins != null && f.GroupRoll && (groupScope = pins.Open(groupKey, g, pack, pins.MayRollHint(f))) == null)
+            return FormulaBatchVerdict.Refused(FormulaPins.FullText);
+        FormulaBatchVerdict Refuse(int row, string message) => new(false, verdicts, FormulaWindowRules.RowMessage(row + 1, message));
+
+        for (var k = 0; k < intents.Count; k++)
+        {
+            var i = intents[k]!;
+            // A counter an earlier row removed: checked as a single run on the live state (so nothing is said about a counter the sender
+            // cannot see), then skipped.
+            var removed = i.PieceId != null && full.Pieces.ContainsKey(i.PieceId) && !at.Pieces.ContainsKey(i.PieceId);
+            var (prepared, why) = FormulaIntentRunner.Prepare(s, c, sides, i, guest, full, removed ? full : at);
+            if (prepared == null) return Refuse(k, why!);
+            var occurrence = occurrences[i.PieceId ?? ""] = occurrences.GetValueOrDefault(i.PieceId ?? "") + 1;
+            if (removed)
+            {
+                rows.Add(new Row(i, prepared, null, null, true));   // skipped: no dice, no pin scope
+                verdicts.Add(new FormulaVerdict(false, Array.Empty<FormulaBox>(), FormulaWindowRules.RemovedByEarlierRowText));
+                continue;
+            }
+            var pinKey = groupScope != null ? (FormulaPins.Key?)null : KeyFor(i.PieceId, occurrence);
+            FormulaPins.Scope? scope = null;
+            if (pins != null)
+            {
+                scope = groupScope ?? pins.Open(pinKey!.Value, g, pack, pins.MayRollHint(f));
+                if (scope == null) return Refuse(k, FormulaPins.FullText);
+                var sc = scope;
+                prepared.Model.DiceSource = (key, n, sd) => sc.Roll(key, n, sd, roller);
+            }
+            rows.Add(new Row(i, prepared, pinKey, scope, false));
+            var (_, model, hidden, _) = prepared;
+            model.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
+            if (i.Calculate) model.Calculate(at);
+            var dv = model.Evaluate(at);
+            if (scope is { Unpinned: true }) return Refuse(k, FormulaPins.FullText);
+            var boxes = Boxes(dv, hidden);
+            if (bi.Preview)
+            {
+                if (scope != null) scope.Previewed = true;
+                var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
+                var values = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var v in source.Variables)
+                    if (v?.Variable != null && !hidden.Contains(v.Variable) && v.Value is { } val) values[v.Variable] = FormulaDialogModel.ExactText(val);
+                verdicts.Add(new FormulaVerdict(false, boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden), values,
+                    model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal)));
+            }
+            else
+            {
+                if (!dv.CanApply)
+                {
+                    verdicts.Add(new FormulaVerdict(false, boxes, FormulaIntentRunner.SafeStatus(dv, hidden)));
+                    return Refuse(k, FormulaIntentRunner.SafeStatus(dv, hidden));   // the dice stay pinned for a corrected batch
+                }
+                if (dv.Trace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
+                    return Refuse(k, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId)!);
+                verdicts.Add(new FormulaVerdict(false, boxes, null));
+            }
+            if (f.GroupRoll) BatchChain.AddDrawn(group, dv.Trace);
+            // The next rows see this one: its commands applied to the chain's clone (the last row's never need to be).
+            var chained = dv.CanApply ? dv.Trace : model.Checked ? model.LastExpected : null;
+            if (k < intents.Count - 1 && chained is { Result: not null, Error: null })
+            {
+                if (!cloned) { at = full.DeepClone(); cloned = true; }
+                BatchChain.Apply(at, runner, chained);
+            }
+        }
+        if (bi.Preview) return new FormulaBatchVerdict(false, verdicts, null);
+
+        // Every row can apply: one action, rows in order on the live state with their pinned dice, each its own run.
+        var label = MenuBatchModel.ActionLabelFor(f.Name, intents.Select(x => x!.PieceId).ToList());
+        group.Clear();
+        var applied = 0;
+        var consumed = new Dictionary<string, int>(StringComparer.Ordinal);
+        string? message = null;
+        using (g.BeginAction(label))
+        {
+            for (var k = 0; k < rows.Count; k++)
+            {
+                var row = rows[k];
+                var pid = row.Intent.PieceId;
+                if (row.Removed || (pid != null && !g.State.Pieces.ContainsKey(pid))) continue;   // removed by an earlier row
+                var (_, model, hidden, _) = row.Prepared!;
+                model.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
+                var trace = model.Run(g.State);
+                var dv = model.View(trace);
+                if (!dv.CanApply || PhaseController.WritesComputed(pack, trace)
+                    || !c.ApplyFormula(null, pid, trace, model.AutoCalculated || row.Scope?.Previewed == true))
+                {
+                    // Only a placed piece's seeds can differ from the chain: the rows applied stay (still one undo step).
+                    // The guest is told how many earlier rows stay applied (counts only, as the local grid says it).
+                    message = FormulaWindowRules.StoppedText(applied, k + 1);
+                    verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden));
+                    break;
+                }
+                verdicts[k] = new FormulaVerdict(true, verdicts[k].Boxes, null);
+                applied++;
+                if (row.PinKey != null) consumed[pid ?? ""] = consumed.GetValueOrDefault(pid ?? "") + 1;
+                if (f.GroupRoll) BatchChain.AddDrawn(group, trace);
+            }
+        }
+        // Consumed: each counter's pins are a queue, so its unapplied (or later previewed) runs move down by the rows applied to it and
+        // the k-th next run on that counter gets the k-th dice the sender was shown.
+        foreach (var (pieceKey, n) in consumed) pins?.Shift(who ?? "", f.Id, pieceKey.Length == 0 ? null : pieceKey, n);
+        if (message == null && groupScope != null) pins?.Remove(groupKey);
+        return new FormulaBatchVerdict(message == null && applied > 0, verdicts, message);
+    }
+
+    private static List<FormulaBox> Boxes(DialogView dv, HashSet<string> hidden) =>
+        dv.Boxes.Select(b => new FormulaBox(b.Variable, hidden.Contains(b.Variable) ? FormulaBox.Hidden : b.Wrong ? FormulaBox.Wrong : FormulaBox.Ok)).ToList();
+}
+
+/// <summary>
 /// The dice of guests' formula runs on the host (spec 8a.1: the host rolls). Every die rolled for a guest's run (preview, refused Apply,
 /// any refusal after the run) is pinned before the answer goes back, per scope (sender, formula, unit; the run id is not part of it, so
-/// an ad-hoc run and the pending run share their dice) and per dice configuration (<c>key|count|sides</c>). Pins are append-only: an
+/// an ad-hoc run and the pending run share their dice, except a GroupRoll formula's menu runs, which pin under <c>batch:group</c>, and
+/// grouped pending units, which pin per group) and per dice configuration (<c>key|count|sides</c>). Pins are append-only: an
 /// existing configuration is never rolled again, so asking again, retrying a wrong Apply or toggling an input that changes the dice
-/// all come back to the first roll. A scope lives until a successful Apply consumes it, the phase position (turn/phase) changes, or the
+/// all come back to the first roll. A counter's scopes are a queue (<see cref="Shift"/>): its next run pins under <c>{pieceId}</c>, its
+/// k-th next under <c>batch:{pieceId}#{k}</c>, and an applied run moves the later ones down. A scope lives until a successful Apply
+/// consumes it (a grouped pending unit's group scope stays until it goes stale), the phase position (turn/phase) changes, or the
 /// game session or rules pack is replaced; there is no wall-clock expiry. A live scope is never evicted: with
 /// <see cref="MaxPerSender"/> scopes a sender's run that may roll dice in a new scope is refused with <see cref="FullText"/>.
 /// </summary>
@@ -594,6 +797,34 @@ internal sealed class FormulaPins
     public void Remove(Key key)
     {
         if (_bySender.TryGetValue(key.Who, out var scopes)) scopes.Remove(key);
+    }
+
+    /// <summary>The pin key of a counter's k-th next run (k &gt;= 1): <c>{pieceId}</c> for the next, else <c>batch:{pieceId}#{k}</c>.</summary>
+    public static Key QueueKey(string who, string formulaId, string? pieceId, int k) =>
+        new(who, formulaId, k == 1 ? pieceId : $"batch:{pieceId}#{k}");
+
+    /// <summary>
+    /// A counter's pins are a queue: after <paramref name="consumed"/> of its runs are applied, its first <paramref name="consumed"/> pins
+    /// go and every later one moves down by as many (<c>#{j}</c> becomes <c>#{j-consumed}</c>, or <c>{pieceId}</c> at 1), so the k-th
+    /// next run on the counter always gets the k-th dice the sender was shown.
+    /// </summary>
+    public void Shift(string who, string formulaId, string? pieceId, int consumed)
+    {
+        if (consumed <= 0 || !_bySender.TryGetValue(who, out var scopes)) return;
+        var prefix = $"batch:{pieceId}#";
+        var last = 1;
+        foreach (var k in scopes.Keys)
+            if (k.FormulaId == formulaId && k.PieceId is { } p && p.StartsWith(prefix, StringComparison.Ordinal)
+                && int.TryParse(p.AsSpan(prefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var j)
+                && j > last)
+                last = j;
+        for (var j = 1; j <= last; j++)
+        {
+            var from = QueueKey(who, formulaId, pieceId, j);
+            if (j <= consumed) { scopes.Remove(from); continue; }
+            var to = QueueKey(who, formulaId, pieceId, j - consumed);
+            if (scopes.Remove(from, out var scope)) scopes[to] = scope;
+        }
     }
 
     /// <summary>Live and stale scopes held for a sender (tests).</summary>

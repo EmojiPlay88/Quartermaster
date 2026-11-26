@@ -105,6 +105,10 @@ public partial class MainWindow : Window
             Dialogs = _dialogs, Gesture = _router.Gesture, SaveAsPicture = SaveMapAsPictureAsync,
             GameMaster = () => GameMaster, ConfirmDelete = () => SettingsStore.Current.ConfirmDelete,
             ShowFormula = (formulaId, pieceId) => { if (_session is { } s) FormulaWindows.Show(this, s, formulaId, pieceId, null); },
+            ShowFormulaBatch = (formulaId, pieceIds) =>
+            {
+                if (_session is { } s && _actions is { } port) FormulaWindows.ShowMenuBatch(this, s, port, formulaId, pieceIds, null);
+            },
             ShowInLedger = ShowInLedger,
         };
         Maps.TilingProgress += (view, f) => { if (ReferenceEquals(view, Maps.ActiveView)) SetTilingProgress(f); };

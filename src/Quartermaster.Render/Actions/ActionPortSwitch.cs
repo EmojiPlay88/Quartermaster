@@ -23,6 +23,7 @@ public sealed class ActionPortSwitch(IActionPort inner) : IActionPort
     public void PieceCommands(IReadOnlyList<GameCommand> commands) => _inner.PieceCommands(commands);
     public FormulaVerdict ApplyFormula(FormulaIntent intent) => _inner.ApplyFormula(intent);
     public Task<FormulaVerdict> ApplyFormulaAsync(FormulaIntent intent) => _inner.ApplyFormulaAsync(intent);
+    public Task<FormulaBatchVerdict> ApplyFormulaBatchAsync(FormulaBatchIntent intent) => _inner.ApplyFormulaBatchAsync(intent);
     public bool ApplyTrace(string? runId, string? pieceId, FormulaTrace trace, bool calculated) => _inner.ApplyTrace(runId, pieceId, trace, calculated);
     public (int Applied, IReadOnlyList<string> Failed) ApplyMissingInputs(PendingRun run, IReadOnlyDictionary<string, string> values) => _inner.ApplyMissingInputs(run, values);
     public void EditLedger(string key, string propertyId, double after, string note) => _inner.EditLedger(key, propertyId, after, note);

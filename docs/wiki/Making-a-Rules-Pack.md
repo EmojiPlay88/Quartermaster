@@ -532,6 +532,46 @@ Each message begins `Formula "{name}": `.
 - Warning: `variable "{v}" has "same hex" but is not a Piece binding`.
 - `layer() needs a layer name in quotes`, and `layer` in a phase condition is refused like the other counter functions.
 
+## Group and repeated runs
+
+Two things help when one formula runs for many counters, or many times: a roll shared by a group, and choices that come from a table.
+
+### Rolling once for a group
+
+Riverland's `Ford crossing` formula rolls `1d6` to see whether a counter gets across the river, and it is run for every counter in a hex at the start of a phase. If each counter rolled its own die, two counters in the same hex could cross or fail on different dice. Tick **Roll once for the group** on the formula (in the Workbench, under the phase list). Now:
+
+- In a **phase entry** (a start entry that queues the formula for several units), the counters in the same hex and on the same side form one group. The group's dice are rolled once, by the first counter that is applied, and the others reuse them. Counters of another side in the same hex are a group of their own, and a counter off the grid has no group. Each counter still gets its own working line in the log, and the group's dice are logged once.
+- In a **menu batch** (see [Running on several counters](Window-Formula-Dialog#running-on-several-counters)), the first row rolls and the later rows reuse its dice. Dice are shared only when the later row asks for the same number of dice with the same sides; otherwise it rolls its own. This holds in a phase entry too, and for `dice()` calls in the formula text: if an `if` makes one counter roll `dice(2, 6)` and another `dice(2, 10)` at the same place, the second rolls its own d10s. A roll you type as a single number (a sum of physical dice) is never shared.
+- A formula without the tick rolls for every counter, as before.
+- Online, a guest never rolls a group's dice: the host draws them, and a guest who asks again does not get a new draw while the group's dice are still live.
+
+The Roll box of a shared roll reads `Roll (group roll)` (the Roll variable's caption plus ` (group roll)`), is greyed out, and its tooltip says `Rolled once for the group`.
+
+The Problems list warns `Formula "Ford crossing": rolls once for the group but has no dice` when the tick is set on a formula with no Roll variable and no `dice()`.
+
+When a counter in a fully automatic run is removed by an earlier counter's formula, the log summary says `Ford crossing: 3 units, 2 applied, 1 removed`. The removed count only shows when it is above 0.
+
+### Choices from a table
+
+An Input can offer the row keys of a table as its choices, so a player picks instead of typing. Riverland's `Barge cargo` formula has an Input `Cargo` with the **Choices table** `Cargo` (a table whose rows are cargo names, with a `Min size` column). The dropdown of the Input then lists every row key.
+
+Add a **Choices filter** to list only some rows. `row()` is the row key being tested, and the counter's own values can be read as well, for example:
+
+`lookup(Cargo, row(), "Min size") <= Size`
+
+lists only the cargo whose `Min size` is within the barge's `Size`. The list is worked out for each counter, so in a batch every row shows the choices for its own counter, and with no counter it shows every key. If the key is a number in the table (all keys numeric) the Input gives a number, otherwise text. A table whose row keys are ranges (`5+`) cannot be used as choices. Table names should be unique: if two tables share a name, the Workbench's **Choices table** cell picks the first. See [`row()`](Formula-Reference#row).
+
+At run time a typed value that is not in the list is refused with `Not one of the choices for this piece`, and a counter for which the filter leaves nothing gets `No choice for this piece`. A filter that fails shows `Choices filter: {message}`. Neither message lists the choices, so a player cannot learn from a refusal what a hidden counter would offer. In a hot-seat game the list uses only what the seated player can see.
+
+The Problems list says (each begins `Formula "{name}": `):
+
+- `variable "{v}" draws its choices from unknown table "{id}"`;
+- `variable "{v}" has a choices table but is not an Input`;
+- `variable "{v}" has both choices and a choices table`;
+- `variable "{v}" draws its choices from table "{name}", whose row keys are ranges`;
+- warning: `variable "{v}" has a choices filter but no choices table`;
+- `variable "{v}" choices filter {problem}` (a syntax problem, or a name the filter cannot use).
+
 ## Properties some holders keep
 
 By default every holder keeps every holder property. Some values belong to one holder only. Say only the North Depot takes ferry tolls: add a property **Ferry tolls** with scope Holders and type `North Depot` in its **Holders** cell (several names are separated by commas; `global` is the built-in holder; blank means every holder). An unknown name is refused with `No holder named "{name}"`.

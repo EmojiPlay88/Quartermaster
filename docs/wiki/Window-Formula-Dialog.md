@@ -88,6 +88,26 @@ Double-click a row to open that unit's formula dialog. In Semi-automatic mode a 
 
 There is no screenshot of the batch grid yet.
 
+## Running on several counters
+
+Select some counters (drag a box on the map, or right-click a stack) and open the counter menu: **Calculate on selection** (or **Calculate on stack**, for the stack under the pointer) lists the formulas that apply to the counters you may act on. Choosing one opens a batch grid for those counters, one row each, with a first line **All rows**: a value typed into an Input or Piece cell of that line is used by every row that has no value of its own. A counter you cannot act on is left out.
+
+The grid works like the phase batch grid above, with these differences:
+
+- The title reads `{formula} — {n} runs`. Buttons are **Calculate all**, **Apply all**, **Add row** and **Remove row**; there is no **Apply row**.
+- The rows are applied in order, and each row sees what the rows before it changed (a row for a counter that an earlier row removed shows `removed by an earlier row` in Exceptions and is skipped).
+- **Apply all** applies the whole batch as one step: one Undo takes all of it back. Each row is its own run, with its own line in the log. When a row cannot be applied yet, nothing is applied and the status reads `Nothing applied: row {n} cannot be applied yet.` If a row fails while the batch is being applied, the rows before it stay applied and the status reads `Applied {a} run(s) as one step. Row {n}: cannot be applied yet.`
+- After a full **Apply all** the grid closes. After a refusal or a stop it stays open, so you can finish.
+- The grid is not saved: closing it forgets it. A batch holds at most 100 rows; with more counters the status reads `A batch holds at most 100 rows: only the first 100 were taken.`
+- When the formula has **Roll once for the group** ticked, the first row rolls and the other rows reuse its dice (their Roll boxes read `(group roll)`).
+- Online, a guest's **Apply all** is one request to the host, which checks every row and decides; the status then reads `The host applied {n} run(s) as one step.` or names the first row it refused (`Row {n}: {message}`). A refusal never names a counter you cannot see.
+
+The undo entry reads `{formula} on {n} units` when every row is a different counter, otherwise `{formula}: {n} runs`.
+
+### Several runs on one counter
+
+The formula dialog has a **Several runs…** button (tooltip `Open a batch grid for this counter: one row per run, applied in order as one step.`), shown when the dialog is for a counter and was not opened from a phase run's link. It opens the same grid with one row for this counter, holding the values you have typed. Use **Add row** for each further run, for example to run Riverland's `Ford crossing` three times on one barge. Each row sees the result of the rows before it, so a counter's Fuel drops row by row. The button is not shown for a run started from a phase (use that run's own batch grid).
+
 ## Picking another counter
 
 A **Piece** variable shows as a list of the counters you can see. The counters in the same hex as the counter the formula runs on are listed first, then the rest, each part sorted by name. A variable marked **Same hex** lists only the other counters in that hex. A masked enemy counter shows as `Unknown piece`. See [Reading another counter](Formula-Reference#where-names-get-their-values).

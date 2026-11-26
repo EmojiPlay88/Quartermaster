@@ -561,7 +561,8 @@ public sealed class HostSession : IDisposable
     }
 
     private void Reply(string to, Guid id, IntentResult r) =>
-        Send(to, new NetIntentResult(id, r.Ok, r.Message, r.Verdict == null ? null : JsonSerializer.Serialize(r.Verdict, QuartermasterJson.Options)));
+        Send(to, new NetIntentResult(id, r.Ok, r.Message, r.Verdict != null ? JsonSerializer.Serialize(r.Verdict, QuartermasterJson.Options)
+            : r.BatchVerdict != null ? JsonSerializer.Serialize(r.BatchVerdict, QuartermasterJson.Options) : null));
 
     private void Send(string to, GamePayload p)
     {

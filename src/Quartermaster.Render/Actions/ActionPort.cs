@@ -28,6 +28,14 @@ public interface IActionPort
     /// <summary>As <see cref="ApplyFormula"/>; a remote port completes when the host's verdict arrives.</summary>
     Task<FormulaVerdict> ApplyFormulaAsync(FormulaIntent intent);
 
+    /// <summary>
+    /// A menu batch (B4, <see cref="FormulaBatchIntent"/>): every row run in order and applied as one action, or nothing; a preview only runs
+    /// the chain. A remote port completes when the host's verdict arrives. The default (a port written before menu batches) refuses with
+    /// <see cref="IntentExecutor.NotUnderstoodText"/>.
+    /// </summary>
+    Task<FormulaBatchVerdict> ApplyFormulaBatchAsync(FormulaBatchIntent intent) =>
+        Task.FromResult(FormulaBatchVerdict.Refused(IntentExecutor.NotUnderstoodText));
+
     /// <summary>Local: applies a formula run the dialog already made (see <see cref="PhaseController.ApplyFormula"/>).</summary>
     bool ApplyTrace(string? runId, string? pieceId, FormulaTrace trace, bool calculated);
 

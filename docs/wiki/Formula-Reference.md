@@ -293,6 +293,16 @@ True when Bridge repair has not yet been applied to this counter this turn: as a
 
 It works in formulas, bindings, preconditions, outputs, entry filters, warnings and alerts, but not in a property's applies-to, a computed property, a starting value, a side's unit filter or a phase condition. The validator reports `runs() needs a formula id in quotes`, `runs() names formula "{id}", which does not exist` and `runs() period must be "stage", "turn" or "game"`. In a player's view of the game, `runs()` on a counter the player does not hold (or with no counter) cannot be counted (`runs() cannot be counted in this view`): a guest's condition that uses it is decided by the host.
 
+### row()
+
+The row key being tested, for an Input's **Choices filter**. It is a number when the key is numeric, otherwise text. It has no arguments and works only in a choices filter, where the counter's own values can be read as well (formula variables cannot). Anywhere else the validator reports `row() can only be used in a choices filter`.
+
+```formula
+lookup(Cargo, row(), "Min size") <= Size
+```
+
+Offers only the rows of table Cargo whose Min size is within the counter's Size. The filter is tried once for each row key of the Input's **Choices table**; a row for which it is false, or cannot be worked out, is left out of the list. See [Choices from a table](Making-a-Rules-Pack#choices-from-a-table).
+
 ### mod(a, b)
 
 The remainder after dividing `a` by `b`, floored: the result has the sign of `b`, so it is never negative when `b` is positive. If `b` is 0 it is an error ("mod: division by zero").
@@ -508,6 +518,10 @@ A bare name in a formula (`Fuel`, `Hexes`, `Weather`) is a **variable**. How it 
 
 Every name used in the formula needs a binding, and every binding should be used. A name that appears in another binding's automatic value (for example `Hexes` in `auto: Hexes + 1`) counts as used when that other binding is itself used, but a binding's own name does not count as using itself; the Workbench's Problems list tells you when they do not match. The longer explanation, with pictures of each case, is in [Making a Rules Pack](Making-a-Rules-Pack#step-4-formulas). How the answers are shown and applied is in the [Formula dialog](Window-Formula-Dialog).
 
+**Choices from a table (Input bindings).** An Input can take its choices from a table instead of a list typed in Details: set its **Choices table**, and optionally a **Choices filter** (an expression, true for each row key to offer; see [`row()`](#row)). An Input with a choices table cannot also have typed choices. Each counter gets its own list; with no counter the list holds every key. See [Choices from a table](Making-a-Rules-Pack#choices-from-a-table).
+
+**Rolling once for a group.** A formula with **Roll once for the group** ticked shares one set of dice between the counters of a group (the same hex and side in a phase entry; the rows of a menu batch); the Roll box of a shared roll reads `(group roll)` and its tooltip says `Rolled once for the group`. See [Rolling once for a group](Making-a-Rules-Pack#rolling-once-for-a-group).
+
 **Reading another counter (Piece bindings).** A formula reads the counter it runs on; a **Piece** binding reads a property of a second counter instead, chosen by the player each time the formula runs. Its Target is the property (one that pieces hold: scope Pieces or Both; a stored or computed property) and its Details are the **which pieces** filter, a unit filter such as `startsWith(name(), "Blue")` (blank = every piece).
 
 - **Same hex.** Tick **Same hex** on the binding to list only the other counters in the hex of the counter the formula runs on (never that counter itself). With nobody else there the message is `No piece in this hex`; run from nowhere (no counter) it is `Needs a unit`. A formula whose only link to a counter is a Same hex binding is offered on counters in the counter menu, like one with a Unit binding. It only works for counters on a grid.
@@ -700,6 +714,11 @@ These come from the bindings and outputs rather than the formula text.
 | layer() needs a layer name in quotes | `layer` was given something other than quoted text. | Write `layer("Levels")`. |
 | layer() is not available here | `layer()` was used where no counter is being read. | Use it in a formula run on a counter, or in a filter. |
 | layer() cannot be read in this view | A player's view shows another side's masked counter, which has no readable layer. | Nothing to fix: the host works it out. |
+| Not one of the choices for this piece | A typed value for an Input with a **Choices table** is not one of the keys the counter's list offers. | Pick from the list. |
+| No choice for this piece | The Input's choices filter leaves no row for this counter. | Widen the filter, or run the formula on another counter. |
+| Choices filter: {message} | The filter failed while it was tried (the message says why). | Fix the filter in the Workbench. |
+| The choices table for Cargo was deleted | The Input names a table that no longer exists, or whose row keys are ranges. | Pick another table. |
+| row() can only be used in a choices filter | `row()` was used in a formula, condition or other expression. | Use it only in an Input's **Choices filter**. |
 | Variable x depends on itself | Variables refer to each other in a circle. | Break the circle. |
 | variable "x" has no binding | The Workbench: the formula uses a name that has no row under Bindings. | Add the binding. |
 | variable "x" is bound but not used in the formula | A warning: a binding is not used. | Remove the binding or use it. |
