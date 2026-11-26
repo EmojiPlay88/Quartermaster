@@ -207,7 +207,7 @@ public static class FormulaVariables
     /// any aggregate when <paramref name="piecesMayHide"/> (the viewer's view may lack pieces or their values: a map owned by a side it does not
     /// hold, a Hideable or Obscurable trait), any count (countof, hexcount), an aggregate over a property that is not Public (or unknown), or
     /// one whose filter reads a property that is not Public, calls holder() or another aggregate, looks up a table a non-Public property
-    /// overrides (<see cref="LookupHidden"/>), or does not parse. Otherwise (a Public
+    /// overrides (<see cref="LookupHidden"/>), reads a keyed() value that is not Public or names a holder (B6), or does not parse. Otherwise (a Public
     /// property, with no filter, "", or a filter over Public properties and piece facts) it is not hidden.
     /// </summary>
     public static bool AggregateCallHidden(RulesPack pack, string function, string? property, string? filter, bool piecesMayHide)
@@ -220,7 +220,9 @@ public static class FormulaVariables
         catch (ParseError) { return true; }   // fail closed
         return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
             || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p))
-            || ExprFacts.LookupTables(e).Any(t => LookupHidden(pack, t));
+            || ExprFacts.LookupTables(e).Any(t => LookupHidden(pack, t))
+            // B6: keyed(Property, key[, Holder]) reads its property by name, not as a variable
+            || ExprFacts.KeyedReads(e).Any(k => k.Holder != null || !PropertyFacts.IsPublic(pack, pack.PropertyByName(k.Property)));
     }
 
     /// <summary>

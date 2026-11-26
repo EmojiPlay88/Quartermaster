@@ -446,6 +446,24 @@ public class KeyedValuesTests
         Assert.Equal(1, Result("countof(\"keyed(Cargo, \\\"Barge\\\") == 7\")", null).Number);
     }
 
+    [Fact]
+    public void Starting_value_refuses_hex_distance_keyed()
+    {
+        var s = PlacesKit.State();
+        foreach (var (expr, fn) in new[] { ("hex() == \"0412\"", "hex"), ("distance(\"0303\", \"0304\")", "distance"), ("keyed(FordDepth, \"0412\")", "keyed") })
+        {
+            var e = Assert.Throws<EvalError>(() => PieceFilter.EvaluateWithPending(Parser.Parse(expr), s.Pieces["r1"], s, Pack, new Dictionary<string, double>()));
+            Assert.Equal($"{fn}() is not available in a starting value", e.Message);
+        }
+        // Reached through a computed property a starting value reads, the ban still holds.
+        var pack = Pack with
+        {
+            Properties = Pack.Properties.Append(new PropertyDef { Id = "p-where", Name = "Where", Scope = PropertyScope.Holders, Expr = "keyed(FordDepth, \"0412\")" }).ToList(),
+        };
+        var nested = Assert.Throws<EvalError>(() => PieceFilter.EvaluateWithPending(Parser.Parse("Where + 1"), s.Pieces["r1"], s, pack, new Dictionary<string, double>()));
+        Assert.EndsWith("keyed() is not available in a starting value", nested.Message);
+    }
+
     // ---------- tables ----------
 
     [Fact]

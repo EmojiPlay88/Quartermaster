@@ -104,6 +104,19 @@ public static class PlayerView
 
     private enum Outcome { Keep, Drop, Redact }
 
+    /// <summary>The keyed() reads of each formula record (property and holder names), parsed once per record (records are replaced on edit).</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FormulaDef, IReadOnlyList<(string Property, string? Holder)>> KeyedReadCache = new();
+
+    /// <summary>How many formula records had their keyed() reads parsed on this thread (tests read it).</summary>
+    [ThreadStatic] internal static int KeyedReadParses;
+
+    private static IReadOnlyList<(string Property, string? Holder)> KeyedReadsOf(FormulaDef f) =>
+        KeyedReadCache.GetValue(f, d =>
+        {
+            KeyedReadParses++;
+            return FormulaVariables.KeyedReads(d).Select(r => (r.Property, r.Holder)).ToList();
+        });
+
     private sealed class Filter
     {
         private readonly RulesPack _pack;
@@ -144,6 +157,7 @@ public static class PlayerView
                 set.Add(string.IsNullOrWhiteSpace(ph.SideId) ? "" : ph.SideId);
             }
             _privatePrefixes = (pack.Formulas ?? new()).Where(f => f is { PrivateRolls: true }).Select(f => (f.Name ?? "") + ": ").Distinct().ToList();
+            var hasKeyed = (pack.Properties ?? new()).Any(p => p?.KeyedBy != null && KeyedFacts.IsKeyed(p));   // packs without keyed values pay nothing
             var piecesMayHide = PieceAccess.PiecesMayHide(pack, model, held);   // this view may lack pieces or values (removed, on a hidden map, masked)
             foreach (var f in pack.Formulas ?? new())
                 if (f?.Id != null && ((f.Bindings ?? new()).Any(b => b is { Kind: BindingKind.Holder }
@@ -153,8 +167,8 @@ public static class PlayerView
                     || FormulaVariables.AggregateReadsHidden(pack, f, piecesMayHide)
                     || FormulaVariables.ComputedReadsHidden(pack, f)   // a computed value built from hidden data, even on a held piece or the global holder
                     || FormulaVariables.PieceBindingsHidden(pack, f, piecesMayHide).Any()   // a picked piece's non-Public value, or any once a pick may be masked
-                    || FormulaVariables.KeyedReads(f).Any(r => KeyedReadHidden(r.Property, r.Holder))   // B6: a keyed() read the viewer may not see
-                    || (f.Outputs ?? new()).Any(o => o?.Property != null && _privatePlaces.Contains(o.Property))))   // B6: its working names a hidden place value
+                    || (hasKeyed && KeyedReadsOf(f).Any(r => KeyedReadHidden(r.Property, r.Holder)))   // B6: a keyed() read the viewer may not see
+                    || (_privatePlaces.Count > 0 && (f.Outputs ?? new()).Any(o => o?.Property != null && _privatePlaces.Contains(o.Property)))))   // B6: its working names a hidden place value
                     _hiddenInputFormulas.Add(f.Id);
 
             foreach (var p in full.Pieces.Values)
@@ -382,7 +396,7 @@ public static class PlayerView
                     var line = log[i];
                     if (entryOfLine[i] is { } e && HidesInput(e))
                     {
-                        var plain = $"{e.PropertyId} {Num(e.Before)} → {Num(e.After)}";
+                        var plain = $"{e.PropertyId}{(e.ValueKey == null ? "" : $"[{e.ValueKey}]")} {Num(e.Before)} → {Num(e.After)}";
                         // Fail closed: when the working is not found verbatim, the whole line is replaced.
                         line = line with
                         {

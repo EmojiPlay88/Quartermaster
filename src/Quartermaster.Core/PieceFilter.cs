@@ -344,10 +344,10 @@ public static class PieceFilter
         public double Runs(string formulaId, string period) =>
             startingValue ? throw NotInStartingValue("runs") : RunIndex.Count(s, pack, formulaId, p.Id, period, sides);
         // B6: places and keyed values (without a module model, as while seeding, hex() and distance() are not available)
-        public Value Hex() => KeyedValues.Hex(p, filters.Model);
-        public double Distance(string a, string b) => KeyedValues.Distance(filters.Model, p, a, b);
+        public Value Hex() => startingValue ? throw NotInStartingValue("hex") : KeyedValues.Hex(p, filters.Model);
+        public double Distance(string a, string b) => startingValue ? throw NotInStartingValue("distance") : KeyedValues.Distance(filters.Model, p, a, b);
         public double Keyed(string property, Value key, string? holder) =>
-            KeyedValues.Read(s, pack, filters.Model, p, property, key, holder, sides);
+            startingValue ? throw NotInStartingValue("keyed") : KeyedValues.Read(s, pack, filters.Model, p, property, key, holder, sides);
     }
 
     /// <summary>

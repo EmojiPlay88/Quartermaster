@@ -178,6 +178,27 @@ public class PlacesPlayerViewTests
     }
 
     [Fact]
+    public void View_of_pack_without_keyed_parses_no_keyed_reads()
+    {
+        var plain = new RulesPack
+        {
+            Sides = PlacesFixture.Pack().Sides,
+            Properties = new() { new PropertyDef { Id = "p-str", Name = "Strength", Scope = PropertyScope.Pieces, Visibility = Visibility.Public } },
+            Formulas = new() { new FormulaDef { Id = "f", Name = "F", Text = "Strength + 1" } },
+        };
+        var full = PlacesKit.State();
+        PlayerView.KeyedReadParses = 0;
+        View(full, Red, plain);
+        Assert.Equal(0, PlayerView.KeyedReadParses);
+        // With keyed properties each formula record is parsed once, not once per view.
+        var keyed = PlacesKit.Pack(new FormulaDef { Id = "g", Name = "G", Text = "keyed(Mines, \"0505\")" });
+        View(full, Red, keyed);
+        Assert.Equal(1, PlayerView.KeyedReadParses);
+        View(full, Blue, keyed);
+        Assert.Equal(1, PlayerView.KeyedReadParses);
+    }
+
+    [Fact]
     public void Lockdown_view_has_no_keyed()
     {
         PlayerView.FailForTest = true;

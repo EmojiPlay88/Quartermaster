@@ -152,6 +152,7 @@ public static class KeyedValues
     internal static double Read(GameState s, RulesPack pack, ModuleModel? model, PieceInstance? piece, string property, Value key, string? holder,
         Lazy<Func<PieceInstance, string?>>? sides)
     {
+        PieceFilter.RefuseInStartingValue("keyed");   // a seed never reads another side's or a later state's values
         var name = (property ?? "").Trim();
         if (name.Length == 0) throw new EvalError("keyed() needs a property name");
         var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
@@ -168,8 +169,7 @@ public static class KeyedValues
             if (piece == null) throw new EvalError("keyed() needs a unit");
         }
         else holderId = HolderDef.GlobalId;
-        if (holderId != null && !PropertyFacts.KeptBy(def, holderId))
-            throw new EvalError($"{(holderId == HolderDef.GlobalId ? "Global" : pack.ById<HolderDef>(holderId)?.Name ?? holderId)} does not keep {def.Name}");
+        if (holderId != null) FormulaRunner.EnsureKept(pack, holderId, def);
         var ledgerKey = holderId != null ? LedgerKey.Holder(holderId) : LedgerKey.Piece(piece!.Id);
 
         string valueKey;
@@ -198,6 +198,7 @@ public static class KeyedValues
     /// <summary>hex(): the grid location name of the piece being evaluated, as text.</summary>
     internal static Value Hex(PieceInstance? piece, ModuleModel? model)
     {
+        PieceFilter.RefuseInStartingValue("hex");   // there is no grid while seeding
         if (piece == null) throw new EvalError("hex() needs a unit");
         if (model == null) throw new EvalError("hex() is not available here");
         return Value.Of(PieceInfo.Location(piece, model)
@@ -211,6 +212,7 @@ public static class KeyedValues
     /// </summary>
     internal static double Distance(ModuleModel? model, PieceInstance? piece, string a, string b)
     {
+        PieceFilter.RefuseInStartingValue("distance");
         if (model == null) throw new EvalError("distance() is not available here");
         var an = (a ?? "").Trim();
         var bn = (b ?? "").Trim();

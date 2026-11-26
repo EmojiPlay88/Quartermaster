@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Quartermaster.Rules;
 using Quartermaster.Vassal;
 
@@ -8,7 +9,7 @@ namespace Quartermaster.Core;
 public sealed record LedgerEntry(long Seq, string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, int? Turn = null, string? Phase = null)
 {
     /// <summary>The value key of a keyed property's change (B6, <see cref="LedgerDelta.ValueKey"/>); null for an unkeyed value. Omitted when null.</summary>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ValueKey { get; init; }
 }
 

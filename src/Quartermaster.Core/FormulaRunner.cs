@@ -573,7 +573,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         holderId == HolderDef.GlobalId ? "Global" : pack.ById<HolderDef>(holderId)?.Name ?? holderId;
 
     /// <summary>Fails the run with "{holder} does not keep {property}" when the property lists holders and this one is not among them.</summary>
-    private static void EnsureKept(RulesPack pack, string holderId, PropertyDef prop)
+    internal static void EnsureKept(RulesPack pack, string holderId, PropertyDef prop)
     {
         if (!PropertyFacts.KeptBy(prop, holderId)) throw new EvalError($"{HolderText(pack, holderId)} does not keep {prop.Name}");
     }

@@ -157,6 +157,23 @@ public class PlacesFunctionTests
     }
 
     [Fact]
+    public void Aggregate_filter_keyed_read_hidden()
+    {
+        var pack = Pack() with
+        {
+            Properties = Pack().Properties.Append(new PropertyDef { Id = "p-str", Name = "Strength", Scope = PropertyScope.Pieces, Visibility = Visibility.Public })
+                .Append(new PropertyDef { Id = "p-cargo", Name = "Cargo", Scope = PropertyScope.Pieces, KeyedBy = "turn" }).ToList(),
+        };
+        Assert.True(FormulaVariables.AggregateCallHidden(pack, "sum", "Strength", "keyed(Cargo, 1) > 0", piecesMayHide: false));   // Private
+        Assert.True(FormulaVariables.AggregateCallHidden(pack, "sum", "Strength", "keyed(Seep, \"a\") > 0", piecesMayHide: false));   // Private place
+        Assert.True(FormulaVariables.AggregateCallHidden(pack, "sum", "Strength", "keyed(Ford, \"a\", Yard) > 0", piecesMayHide: false));   // a holder
+        Assert.True(FormulaVariables.AggregateCallHidden(pack, "sum", "Strength", "keyed(Nope, 1) > 0", piecesMayHide: false));   // unknown
+        Assert.False(FormulaVariables.AggregateCallHidden(pack, "sum", "Strength", "keyed(Load, 1) > 0", piecesMayHide: false));   // Public
+        var f = new FormulaDef { Id = "f", Name = "F", Text = "sum(Strength, \"keyed(Cargo, 1) > 0\")" };
+        Assert.True(FormulaVariables.AggregateReadsHidden(pack, f, piecesMayHide: false));
+    }
+
+    [Fact]
     public void WorkingLine_names_keyed_property_and_holder()
     {
         const string text = "keyed(Ford, X) + keyed(Hulls, \"Barge\", Yard) + hex()";
