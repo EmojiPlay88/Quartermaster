@@ -513,7 +513,7 @@ The value of a **keyed** property for one key. The property (and the holder) are
 keyed(BargesDue, turn())
 ```
 
-The barges due this turn. A key never written reads the property's Default. Whose value it reads: with a third argument, that holder's (`keyed(HullCount, "Barge", BoatYard)`; the holder must keep the property); for a Pieces property, the counter's own; for a Holders property, the global holder's; for a Both property, the counter's when there is one, else the global holder's.
+The barges due this turn. A key never written reads the property's Default. Whose value it reads: with a third argument, that holder's (`keyed(HullCount, "Barge", Boatyard)`; the holder must keep the property, and is written as its name in identifier form: letters, digits and `_`); for a Pieces property, the counter's own; for a Holders property, the global holder's; for a Both property, the counter's when there is one, else the global holder's.
 
 The key is checked as an output's **Key** is: a table-keyed property takes a row of its table, a turn-keyed one a whole number from 1 to 100000, a hex-keyed one a hex of a board; at most 64 characters. A bad key stops the run with `keyed(): no row "Sloop" in table "Hull types"`, `keyed(): the turn must be a whole number of at least 1`, `keyed(): no hex named "9999" on any board` or `keyed(): the key is too long`. The other messages are `keyed() needs a property name`, `keyed() needs a holder name`, `Unknown property 'x'`, `FordDepth is not keyed` and `keyed() needs a unit`.
 

@@ -696,4 +696,12 @@ public sealed class PropertiesTabTests : IDisposable
         Pick(g, 0, PropertiesTab.KeyedByColumn, "");
         Assert.Null(s.Rules.Properties[0].KeyedBy);
     }
+
+    [AvaloniaFact]
+    public void PropertiesTab_malformed_keyed_by_shows_as_written()
+    {
+        var s = Session(p => p with { Properties = p.Properties.Select((x, i) => i == 0 ? x with { KeyedBy = "weekly" } : x).ToList() });
+        var tab = Tab(s);
+        Assert.Equal("weekly", tab.PropertyGrid.Cell(0, PropertiesTab.KeyedByColumn));
+    }
 }
