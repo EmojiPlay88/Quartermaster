@@ -208,4 +208,24 @@ public static class LedgerViewRules
         return new PlacesResult(keep.Select(i => all.Columns[i]).ToList(),
             all.Rows.Select(r => new PlaceRow(r.Hex, keep.Select(i => r.Values[i]).ToList())).Where(r => r.Values.Any(v => v != null)).ToList());
     }
+
+    /// <summary>The Places tab as CSV (RFC 4180, CRLF): <c>Hex</c> then the place properties; numbers invariant "0.##", empty for no value.</summary>
+    public static string PlacesCsv(IReadOnlyList<PropertyDef> columns, IReadOnlyList<PlaceRow> rows)
+    {
+        static string Field(string s) => s.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+        var sb = new System.Text.StringBuilder("Hex");
+        foreach (var c in columns) sb.Append(',').Append(Field(c.Name));
+        sb.Append("\r\n");
+        foreach (var r in rows)
+        {
+            sb.Append(Field(r.Hex));
+            for (var i = 0; i < columns.Count; i++)
+            {
+                sb.Append(',');
+                if (i < r.Values.Count && r.Values[i] is { } v) sb.Append(LedgerTable.FormatNumber(v));
+            }
+            sb.Append("\r\n");
+        }
+        return sb.ToString();
+    }
 }

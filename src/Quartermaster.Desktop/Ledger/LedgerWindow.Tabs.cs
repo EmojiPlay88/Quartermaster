@@ -141,7 +141,7 @@ public sealed partial class LedgerWindow
 
     void RebuildTabStrip(string? selectKey)
     {
-        _tabDefs = LedgerTabs.Tabs(_prefs.Tabs);
+        _tabDefs = LedgerTabs.Tabs(_prefs.Tabs, _s.Rules);
         _tab = _tabDefs.FirstOrDefault(t => t.Key == selectKey) ?? _tabDefs[0];
         _syncing = true;
         try
@@ -188,6 +188,15 @@ public sealed partial class LedgerWindow
     {
         var unitTab = LedgerViewRules.SideAndGroupApply(_tab);
         _sideLabel.IsVisible = _side.IsVisible = _groupLabel.IsVisible = _group.IsVisible = unitTab;
+        ShowPlacesTools(Places);
+    }
+
+    /// <summary>The rules changed: the Places tab comes or goes with the pack's place properties.</summary>
+    void RefreshTabList()
+    {
+        if (LedgerTabs.Tabs(_prefs.Tabs, _s.Rules).Select(t => t.Key).SequenceEqual(_tabDefs.Select(t => t.Key))) return;
+        RebuildTabStrip(_tab.Key);
+        _colSignature = "";
     }
 
     void OnTabPicked()

@@ -22,7 +22,7 @@ public static class PlacesFixture
         $"<{BP}Board name=\"{name}\" image=\"{image}\"><{BP}board.SquareGrid x0=\"25\" y0=\"25\" dx=\"50\" dy=\"50\">" +
         $"<{BP}board.mapgrid.SquareGridNumbering first=\"H\" hType=\"N\" vType=\"N\" sep=\"\" hLeading=\"1\" vLeading=\"1\" hOff=\"1\" vOff=\"1\"/></{BP}board.SquareGrid></{BP}Board>";
 
-    private static readonly Lazy<ModuleModel> LazyModel = new(() =>
+    private static FixtureModule Build()
     {
         var xml = $$"""
             <?xml version="1.0" encoding="UTF-8" standalone="no"?>
@@ -41,8 +41,16 @@ public static class PlacesFixture
               </{{V}}module.map.BoardPicker></{{V}}module.Map>
             </{{V}}GameModule>
             """;
-        using var fx = new FixtureModule().WithBuildFile(xml).AddImage("river.png", 800, 900).AddImage("delta.png", 300, 200)
+        return new FixtureModule().WithBuildFile(xml).AddImage("river.png", 800, 900).AddImage("delta.png", 300, 200)
             .AddImage("sq.png", 400, 400).AddSvg("unit.svg");
+    }
+
+    /// <summary>A fresh copy of the module as a .vmod for opening it in a session or window (the caller disposes it).</summary>
+    public static FixtureModule Module() => Build();
+
+    private static readonly Lazy<ModuleModel> LazyModel = new(() =>
+    {
+        using var fx = Build();
         using var a = VmodArchive.Open(fx.Build());
         return ModuleModelBuilder.Build(a, new DiagnosticLog());
     });

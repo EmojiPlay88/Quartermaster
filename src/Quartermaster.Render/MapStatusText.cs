@@ -44,6 +44,19 @@ public static class MapStatusText
         return hex => KeyedValues.PlacesAt(view, pack, hex) is { Count: > 0 } places ? KeyedValues.PlaceText(pack, places) : null;
     }
 
+    /// <summary>The grid location name (hex or square) of the board under the map point <paramref name="m"/>; empty when none.</summary>
+    public static string LocationName(MapDef map, PointD m)
+    {
+        foreach (var b in map.Boards)
+        {
+            var lx = m.X - b.Offset.X;
+            var ly = m.Y - b.Offset.Y;
+            if (lx < 0 || ly < 0 || lx >= b.Width || ly >= b.Height) continue;
+            return b.Grid?.LocationName(new PointD(lx, ly)) ?? "";
+        }
+        return "";
+    }
+
     /// <summary>The map tooltip of a hex with place values: <c>{hex}: {place text}</c>; null when it has none.</summary>
     public static string? Tooltip(string hex, Func<string, string?>? placeText) =>
         string.IsNullOrEmpty(hex) || placeText?.Invoke(hex) is not { Length: > 0 } text ? null : $"{hex}: {text}";
