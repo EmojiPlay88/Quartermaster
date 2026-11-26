@@ -620,7 +620,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     {
         var list = new List<GameCommand>();
         if (t.Result == null || t.Error != null) return list;
-        foreach (var d in t.Rolls) list.Add(new RollDice(d.Purpose, d.Count, d.Sides, d.Results, PieceId: t.PieceId, SideId: sideId));
+        foreach (var d in t.Rolls) list.Add(new RollDice(d.Purpose, d.Count, d.Sides, d.Results, PieceId: t.PieceId, SideId: sideId) { FormulaId = t.Formula.Id });
         var own = t.Outputs.Where(o => o.Target is not (OutputTarget.Piece or OutputTarget.Placed)).ToList();
         var onPieces = t.Outputs.Where(o => o.Target == OutputTarget.Piece).ToList();
         var onPlaced = t.Outputs.Where(o => o.Target == OutputTarget.Placed).ToList();

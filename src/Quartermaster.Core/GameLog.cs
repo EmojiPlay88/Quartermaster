@@ -81,7 +81,7 @@ static class LogBuilder
                 ? $"{expr} = {detail}"
                 : $"{expr} = {detail} = {total.ToString(CultureInfo.InvariantCulture)}";
         }
-        return Make(s, LogKind.Dice, $"{d.Purpose}: {body}", d.Who, d.At, d.PieceId, sideId: d.SideId);
+        return Make(s, LogKind.Dice, $"{d.Purpose}: {body}", d.Who, d.At, d.PieceId, sideId: d.SideId, formulaId: d.FormulaId);
     }
 
     public static LogEntry Ledger(GameState s, LedgerDelta d)

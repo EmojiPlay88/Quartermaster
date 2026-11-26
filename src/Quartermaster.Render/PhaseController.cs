@@ -486,15 +486,25 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         var items = CurrentPhase()?.Checklist;
         if (items == null || index < 0 || index >= items.Count || items[index] is not { } item) return;
-        // The raw text (links unrendered) is logged; an item with an id is ticked by id, so reordering items keeps the tick.
-        Exec(new TickChecklist(index, ticked, item.Text ?? "", ItemId: item.Id));
+        // The rendered text is logged, as the player read it: a link to an item of another side's phase stays as written, so the line never
+        // carries text its reader may not see. An item with an id is ticked by id, so reordering items keeps the tick. The line belongs to
+        // the phase's side (PlayerView drops it for another side).
+        var phase = CurrentPhase()!;
+        var text = s.Rules is { } pack
+            ? ChecklistText.Render(pack, item.Text ?? "", ph => string.IsNullOrWhiteSpace(ph.SideId) || ph.SideId == phase.SideId)
+            : item.Text ?? "";
+        Exec(new TickChecklist(index, ticked, text, ItemId: item.Id) { SideId = PhaseSideStamp(phase) });
     }
+
+    /// <summary>The side a checklist or warning line is stamped with: the phase's acting side; null in a phase with no (known) side.</summary>
+    private string? PhaseSideStamp(PhaseDef phase) =>
+        s.Rules is { } pack ? Sequencer.ActingSide(pack, phase)?.Id : null;
 
     public void Acknowledge(int warningIndex)
     {
         var ws = CurrentPhase()?.Warnings;
         if (ws == null || warningIndex < 0 || warningIndex >= ws.Count || ws[warningIndex] == null) return;
-        Exec(new AcknowledgeWarning(warningIndex, (ws[warningIndex].Message ?? "").Replace("{unit}", "").Trim()));
+        Exec(new AcknowledgeWarning(warningIndex, (ws[warningIndex].Message ?? "").Replace("{unit}", "").Trim()) { SideId = PhaseSideStamp(CurrentPhase()!) });
     }
 
     // ---- schedule (B5 #62) ----
