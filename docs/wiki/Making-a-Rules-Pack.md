@@ -592,6 +592,59 @@ The VASSAL **Clone** command copies a counter. By default the copy gets the coun
 
 If the copy, with the copied values, would belong to another side than the original, nothing is copied and the log warns `Clone of "{name}" belongs to another side, so its values were not copied`. In an online game a guest may clone only a counter it may act on.
 
+## Turn structure and end of game
+
+Five things the turn sequence can do beyond a fixed list of phases. All of them are optional: a pack that uses none of them plays and saves exactly as before.
+
+### Blocks that repeat until a player stops
+
+A block repeats its phases. A fixed block has a **Repeat count**. A count of `0` (the **Until a player stops** box in **Make block from selection…** on the Phases tab) makes the block open-ended: it repeats until the acting player chooses to continue. Riverland example: make a block labelled `Fire round` around North Combat and tick **Until a player stops**.
+
+When the game is at the last phase of an open block and the player presses **Next Phase**, a question appears: `End of {label} {n}: play another {label} or continue?`, with the buttons **Another {label}**, **Continue** (the default) and **Cancel**. Another plays the block's phases again (the phase strip then reads `Fire round 2`, without an "of"); Continue leaves the block; Cancel does nothing. The choice is part of the one Next Phase action, so a single undo takes it back. In an online game only the player whose side plays that phase answers.
+
+If the last phase has end-of-phase formulas, the first press runs them and stays in the phase with the notice `End-of-phase runs done; press Next Phase again to play another {label} or continue`. The next press asks the question. If an end-of-phase run needs input, finish it first and press again ([End-of-phase formulas](#end-of-phase-formulas)). A pack whose blocks all have fixed counts never asks.
+
+### Fire rounds inside a day
+
+A block may lie strictly inside one other block (one level only). Riverland example: an outer block `Day` with a count of 2 covers North Movement to North Combat, and an inner open-ended block `Fire round` covers North Combat only. Each day plays movement once and combat as many rounds as the players want.
+
+To limit what a counter does in a round, add a property `Fired this round` (Default 0) and type `North Combat` in its **Resets at** cell: it resets each time the game enters North Combat, which is every round. Give the Attack formula the **Only runs when** condition `Fired this round < 1` and an output that adds 1 to `Fired this round`.
+
+The function [`segment()`](Formula-Reference#segment) is the round number inside the inner block, and `stage()` is the day. A tiring modifier can read `if(segment() > 3, 1, 0)`. `runs("f-attack", "stage")` still counts per day.
+
+### Sides that react
+
+A phase can have **Also acting** sides: sides that may act in it besides its own. Riverland example: South Combat with the Northern League also acting. During South Combat a Northern League player can run a formula that needs no counter, such as `Ambush fire`, which writes the global value `River alarm`, and can write global values. Only the Southern Compact still ticks the checklist, acknowledges warnings and presses Next Phase. In a hot-seat game the reacting player takes the screen with **Game > Current Player**. Counter runs follow ownership as before, in any phase.
+
+The phase panel shows `Reacting: Northern League` under the side. A reacting player who looks at the panel sees `{side} is playing {phase}; you may react`, and Next Phase stays with the phase's own side.
+
+### Reinforcements and withdrawals
+
+The **Schedule** tab lists rows that say when counters arrive or leave. Riverland examples:
+
+- `Relief barges arrive`: turn 3, phase North Supply, counters `startswith(name(), "Relief barge")`, Action **Arrive**, zone map `North holding box`, formula `f-fresh-crew`.
+- `Hired pilot leaves`: turn 5, phase North Supply, counters `name() == "Hired pilot"`, Action **Leave**, zone map `North holding box`.
+
+A row can also have a **Stage** (the pass of a repeating block) and a **Label**; a blank label reads `Arrivals, turn {T}`, `Withdrawals, turn {T}` or `Returns, turn {T}`. **Return** works like Arrive: the counters wait on the zone map and are placed back, so a Return row needs a zone map too. A Leave row without a zone map deletes its counters, and then it cannot run a formula.
+
+The phase panel's **Due** section lists a row from the moment it is reached: `Due now` in its own turn and phase (and stage), then `Overdue since turn {T}`. Nothing is placed or withdrawn on its own; a row stays listed until a player acts on it. Inside a repeating block a later phase of an earlier pass has not reached the row yet. The row's button reads **Place** (Arrive, Return) or **Withdraw** (Leave). One Place marks the whole row done, however many counters it names: it shows the counters on the zone map and runs the formula on each, and you drag them to their hexes. Withdraw moves the counters to the zone map. In a solo game a row whose filter matches no counter is listed as `Due now, no counter matches` or `Overdue since turn {T}, no counter matches`, with no button. In a game with sides a player sees only rows with counters their side may act on. A row that is due now and has counters also shows in the Next Phase check as `Due: {label}`.
+
+### The last turn and victory
+
+On the **End of game** tab, **The game ends after turn** sets the last turn (Riverland: 8); **Last stage** also ends it after a given pass of a block on that turn. When Next Phase would go past the last turn, the game ends with the result `the last turn has been played`, unless a victory condition is true.
+
+A **victory condition** is a phase condition (see [What a phase condition may read](Formula-Reference#what-a-phase-condition-may-read)). Riverland example: `North ports >= 4`, side Northern League, message `The Northern League holds the river`, checked in North Supply. A condition is checked when the game enters a phase it names (blank = every phase), and at the end of the last turn. The first one that is true ends the game, and the result reads `Game over: The Northern League holds the river`. Without a message the result reads `{side} wins`. A condition that cannot be worked out counts as not met, and the Diagnostics list warns once. Write the names in the expression as letters, digits and `_`, for example `North_ports >= 4` when a property is called that.
+
+After the end, Next Phase does nothing and says `The game is over.`; counters, ledgers, the log, undo and saving still work. Undo takes the game out of game over. In an online game only the host checks victory. See [Phases](Window-Phases#game-over).
+
+### What the Problems list says for turn structure
+
+- Blocks: `Block "{label}": count cannot be negative`; `Block "{label}" covers the same phases as block "{other}"`; `Block "{label}" overlaps block "{other}"`; `Block "{label}" is inside block "{other}", which is itself inside another block; blocks nest one level only`; `Blocks "{a}" and "{b}" both end at phase "{p}" and both repeat until a player stops; give one of them a count`.
+- Also acting sides: `Phase "{p}": reacting side "{id}" does not exist`; warnings `has reacting sides but no side of its own; every side may already act in it` and `lists its own side as reacting`.
+- Game end: `The last turn must be at least 1`; `The last stage must be at least 1`; `A last stage needs a last turn`; warning `The last stage is set but no block repeats`.
+- `Victory condition {n}: ` then `has no id`, `id "{id}" is used twice`, `has no condition`, `condition {problem}`, `side "{id}" does not exist` or `phase "{id}" does not exist`.
+- `Schedule row {n}: ` then `has no id`, `id "{id}" is used twice`, `turn must be at least 1`, `stage must be at least 1`, `has no phase`, `phase "{id}" does not exist`, `has no counter filter`, `counters {problem}`, `needs a zone map to arrive from`, `zone map "{id}" was not found in the module`, `formula "{id}" does not exist`, `deletes its counters, so it cannot run a formula on them; give it a zone map`; warnings `has a stage, but phase "{name}" is not in a block` and `comes after the last turn`.
+
 ## Testing a pack outside the engine (stable)
 
 `PackHarness` (in `Quartermaster.Render`) runs a pack without any window, so you can keep automated tests for your own pack. Its members keep their names and meaning across releases (except `Session`, which is there for tests that need more and may change).

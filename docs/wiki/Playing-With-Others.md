@@ -42,6 +42,10 @@ If a guest drops, their seat is kept and they rejoin where they left off. Chat a
 
 Only the host can undo, step back and save. A guest can use **File > Export Viewer Copy…** to keep a copy of their own view. To leave an online game, use **Game > Leave Online Game**.
 
+### Sides that react
+
+A phase can name sides that also act in it. Online, a guest who holds only such a side may run formulas that need no counter and write global values in that phase; ticking, acknowledging and Next Phase stay with the phase's own side, and the panel tells the guest `{side} is playing {phase}; you may react`. In a hot-seat game the reacting player takes the screen with **Game > Current Player** (the hand-over itself still goes to the phase's own side's player). A guest's Due list is built from what that guest sees and may act on. Only the host decides when the game ends; after it ends every Next Phase press says `The game is over.` See [Sides that react](Making-a-Rules-Pack#sides-that-react).
+
 ## Turn files
 
 Turn files let you play with someone who is not online at the same time.

@@ -103,6 +103,10 @@ This part of the wiki lists everything you can see in Quartermaster: every menu 
 | [Multiplayer](Window-Multiplayer) | Hot-seat hand-over, the online lobby, seats, turn files and the replay bar |
 | [Documents and Diagnostics](Window-Documents-and-Diagnostics) | Rulebook and chart windows from the module, and the Diagnostics list |
 
+## Due section and the Next Phase question
+
+The phase panel can show a **Due** section (rows `Due now` or `Overdue since turn {T}`, with **Place** or **Withdraw**; see [Phases](Window-Phases#due-list)). At the last phase of a block that repeats until a player stops, **Next Phase** (or Ctrl+Right) asks `End of {label} {n}: play another {label} or continue?` (see [Phases](Window-Phases#another-round-or-continue)). After the game ends, Next Phase says `The game is over.`
+
 ## Menu bar
 
 The main window's menu bar has File, Edit, Game, View, Tools, Window and Help. An item that needs an open module, an open game or a rules pack is greyed out until you have one. Shortcuts shown here are the defaults. You can change them in [Settings](Window-Settings), on the Keyboard tab, and the menus then show your own keys.

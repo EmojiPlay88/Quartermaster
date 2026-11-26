@@ -110,9 +110,11 @@ modifier. No engine work beyond #6.
   - OnMove `FiresFor`, alerts and private dice are unchanged.
 
 ### #62 Reinforcement and withdrawal schedule
-- A row is **reached** at position `pos` when `pos.Turn > Turn`, or `pos.Turn == Turn` and the game is at or past the row's phase this
-  turn: `pos.PhaseIndex > index(PhaseId)`, or `pos.PhaseIndex == index(PhaseId)` and (`Stage` null or `pos.Repeat >= Stage`), or `pos`
-  is in the block holding the row's phase with `pos.Repeat > (Stage ?? 1)`. **Due now** = reached and the position is exactly the row's
+- A row is **reached** at position `pos` when `pos.Turn > Turn`; or `pos.Turn == Turn` and `pos` is in the row's phase with
+  (`Stage` null or `pos.Repeat >= Stage`); or `pos.Turn == Turn` and `pos` is in another phase of the same outer block as the row's
+  phase and the stage comes first: `pos.Repeat > (Stage ?? 1)`, or `pos.Repeat == (Stage ?? 1)` and `pos` is a later phase. Inside that
+  block a later phase of an EARLIER repeat is not reached. Outside such a block (a phase not in the row's block), `pos` is reached when
+  its phase is later than the row's. This is `ScheduleDue.Reached`. **Due now** = reached and the position is exactly the row's
   (turn, phase, and stage when set); else **overdue**. A row of a phase the pack lacks is never reached.
 - DECISION default **list overdue only**: nothing is placed or withdrawn by the engine on its own. A reached row stays listed (due now,
   then overdue) until a player acts on it; it is never dropped.

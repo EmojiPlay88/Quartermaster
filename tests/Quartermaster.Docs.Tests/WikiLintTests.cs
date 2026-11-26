@@ -137,4 +137,17 @@ public class WikiLintTests
             .Where(n => n != "_Sidebar" && !linked.Contains(n)).ToList();
         Assert.True(missing.Count == 0, "Pages missing from _Sidebar: " + string.Join(", ", missing));
     }
+
+    [Fact]
+    public void Wiki_turn_structure_strings()
+    {
+        var all = string.Join(" ", Pages().Select(File.ReadAllText));
+        foreach (var text in new[]
+        {
+            "End of {label} {n}: play another {label} or continue?", "Reacting:", "Due now", "Overdue since turn {T}", "no counter matches",
+            "Game over:", "The game is over.", "End-of-phase runs done; press Next Phase again to play another {label} or continue",
+            "{side} is playing {phase}; you may react", "Due: {label}", "Current Player",
+        })
+            Assert.True(all.Contains(text, StringComparison.Ordinal), "The wiki does not mention: " + text);
+    }
 }
