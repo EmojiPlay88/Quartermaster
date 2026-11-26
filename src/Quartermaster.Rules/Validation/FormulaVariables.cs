@@ -27,7 +27,7 @@ public static class FormulaVariables
                 yield return o.PieceVariable!;
     }
 
-    /// <summary>The expressions the outputs evaluate, in output order: each non-blank value expression, the selector of an output with a property list, and each non-blank key.</summary>
+    /// <summary>The expressions the outputs evaluate, in output order: each non-blank value expression, the selector of an output with a property list, each non-blank key, and each non-blank margin.</summary>
     public static IEnumerable<string> OutputSources(FormulaDef f)
     {
         foreach (var o in f?.Outputs ?? new List<FormulaOutput>())
@@ -36,6 +36,7 @@ public static class FormulaVariables
             if (!string.IsNullOrWhiteSpace(o.Expr)) yield return o.Expr!;
             if (o.PropertyChoice is { Count: > 0 } && !string.IsNullOrWhiteSpace(o.PropertySelect)) yield return o.PropertySelect!;   // only a list uses its selector
             if (!string.IsNullOrWhiteSpace(o.Key)) yield return o.Key!;
+            if (!string.IsNullOrWhiteSpace(o.Margin)) yield return o.Margin!;
         }
     }
 
@@ -84,6 +85,7 @@ public static class FormulaVariables
             yield return o.Expr;
             if (o.PropertyChoice is { Count: > 0 }) yield return o.PropertySelect;   // only a list uses its selector, as OutputSources
             yield return o.Key;
+            yield return o.Margin;
         }
         foreach (var b in f?.Bindings ?? new List<VariableBinding>())
         {

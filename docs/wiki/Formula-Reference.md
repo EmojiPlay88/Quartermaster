@@ -531,6 +531,16 @@ The piece sums (`sum`, `maxof`, `minof` and the `hex` and `attached` ones) canno
 
 **Hidden information.** In a player's view, `keyed()` of a value that player may not see (a Private place property, a counter property of a side that player does not hold, or a holder of such a side) stops with `keyed() reads data this player cannot see`, so the host works it out, as for a piece sum.
 
+### askside()
+
+The name of the side whose player is answering the run: in a run a start entry asks of one side, or in a sealed run (see [Making a Rules Pack](Making-a-Rules-Pack)), the side's name as `side()` gives it (its id when the name is blank). Anywhere else it is empty text. It is never an error.
+
+```
+askside()
+```
+
+For example, a sealed bid written with the key `askside()` keeps one value per side in a property keyed by a table of the side names, such as `Northern League` and `Southern Compact`.
+
 ## What a phase condition may read
 
 A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-a-Rules-Pack#phase-conditions)). A condition is checked when Quartermaster is about to start the phase, with no unit in hand, so it may read only:

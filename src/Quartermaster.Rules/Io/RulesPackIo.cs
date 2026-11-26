@@ -304,7 +304,7 @@ public static class RulesPackIo
                 Property = o.Property ?? "",
                 Expr = string.IsNullOrWhiteSpace(o.Expr) ? null : o.Expr,
                 PropertySelect = string.IsNullOrWhiteSpace(o.PropertySelect) ? null : o.PropertySelect,
-                PieceVariable = Blank(o.PieceVariable), Slot = Blank(o.Slot), Layer = Blank(o.Layer), ToMapId = Blank(o.ToMapId), Key = Blank(o.Key),
+                PieceVariable = Blank(o.PieceVariable), Slot = Blank(o.Slot), Layer = Blank(o.Layer), ToMapId = Blank(o.ToMapId), Key = Blank(o.Key), Margin = Blank(o.Margin),
                 PropertyChoice = o.PropertyChoice?.Where(i => i != null).ToList() is { Count: > 0 } ids ? ids : null,
             }).ToList(),
         }).ToList(),

@@ -19,6 +19,9 @@ public sealed record StartEntry
     /// <summary>The side whose player answers this run; only in a phase without a side, run once. Omitted from the pack JSON when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? AskSideId { get; init; }
+    /// <summary>Start entries only: every side answers this run in secret; the answers are applied together, in side order, once every side has answered. False (default) is omitted from the pack JSON.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Sealed { get; init; }
 }
 
 /// <summary>Whose moves fire an OnMove entry, relative to the phase's acting side.</summary>

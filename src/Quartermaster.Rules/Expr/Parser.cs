@@ -53,6 +53,8 @@ public static class Parser
         ["hex"] = (0, 0),
         ["distance"] = (2, 2),
         ["keyed"] = (2, 3),
+        // B7: visibility
+        ["askside"] = (0, 0),
     };
 
     public static Expr Parse(string text)
