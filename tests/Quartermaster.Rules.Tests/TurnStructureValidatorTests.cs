@@ -154,6 +154,12 @@ public class TurnStructureValidatorTests
     [Fact] public void Schedule_arrive_needs_zone() =>
         Assert.Contains("Schedule row 1: needs a zone map to arrive from", RowErrs(Row() with { ZoneMapId = null }));
 
+    [Fact] public void Schedule_return_needs_zone()
+    {
+        Assert.Contains("Schedule row 1: needs a zone map to arrive from", RowErrs(Row() with { Action = ScheduleAction.Return, ZoneMapId = null }));
+        Assert.DoesNotContain("Schedule row 1: needs a zone map to arrive from", RowErrs(Row() with { Action = ScheduleAction.Return }));
+    }
+
     [Fact] public void Schedule_unknown_zone_map() =>
         Assert.Contains("Schedule row 1: zone map \"reserve\" was not found in the module", RowErrs(Row(), "other"));
 

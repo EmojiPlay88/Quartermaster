@@ -508,10 +508,9 @@ public static class RulesValidator
     /// The phase-condition rules for any condition text (a phase's, a victory condition's); errors read "{who}: condition {problem}".
     /// <paramref name="neverTrue"/> is called when the condition reads nothing and is always false (null = not reported).
     /// </summary>
-    private static void CheckConditionExpr(RulesPack pack, string? text, string who, Action<string> err, Action? neverTrue)
+    private static void CheckConditionExpr(RulesPack pack, string? text, string who, Action<string> Err, Action? neverTrue)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        void Err(string m) => err(m);
 
         AstExpr ast;
         try { ast = Parser.Parse(text!); }
@@ -741,7 +740,7 @@ public static class RulesValidator
                         if (u != RowOutsideFilterTail && !u.StartsWith("runs()", StringComparison.Ordinal)) Err($"{who}: counters {u}");
                 }
 
-                if (row.Action == ScheduleAction.Arrive && string.IsNullOrEmpty(row.ZoneMapId)) Err($"{who}: needs a zone map to arrive from");
+                if (row.Action != ScheduleAction.Leave && string.IsNullOrEmpty(row.ZoneMapId)) Err($"{who}: needs a zone map to arrive from");
                 if (!string.IsNullOrEmpty(row.ZoneMapId) && knownMapIds != null && !knownMapIds.Contains(row.ZoneMapId!))
                     Err($"{who}: zone map \"{row.ZoneMapId}\" was not found in the module");
                 if (!string.IsNullOrEmpty(row.FormulaId) && pack.ById<FormulaDef>(row.FormulaId!) is null)
