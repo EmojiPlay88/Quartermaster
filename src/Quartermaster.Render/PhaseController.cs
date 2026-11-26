@@ -865,7 +865,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private sealed class NoRollsHere() : Exception("Rolls are not made here");
 
     /// <summary>
-    /// Semi-automatic and Hardcore start entries (spec #32): leaves out the units whose precondition is decided false, logging the refusal
+    /// Semi-automatic and Hardcore start entries (spec #32) and schedule formula runs (spec #62): leaves out the units whose precondition is decided false, logging the refusal
     /// as Fully automatic does, so a unit that can never be applied does not hold the later entries. The check uses no inputs and no auto
     /// values and never rolls; a unit whose precondition is undecided (or whose run fails for another reason) stays in the run.
     /// </summary>
@@ -899,7 +899,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var ask = string.IsNullOrWhiteSpace(askSideId) ? null : askSideId;
         if (mode != Difficulty.FullyAuto || s.Runner == null || ask != null)
         {
-            if (mode != Difficulty.FullyAuto && trigger == "start") units = Applicable(f, units);
+            if (mode != Difficulty.FullyAuto && trigger is "start" or "schedule") units = Applicable(f, units);   // a schedule formula runs as a start entry (spec #62)
             if (units.Count == 0) return false;   // every unit refused: the entry counts as done
             var groups = Groups(f, units);
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,

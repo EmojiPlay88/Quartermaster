@@ -144,9 +144,10 @@ public class WikiLintTests
         var all = string.Join(" ", Pages().Select(File.ReadAllText));
         foreach (var text in new[]
         {
-            "End of {label} {n}: play another {label} or continue?", "Reacting:", "Due now", "Overdue since turn {T}", "no counter matches",
-            "Game over:", "The game is over.", "End-of-phase runs done; press Next Phase again to play another {label} or continue",
-            "{side} is playing {phase}; you may react", "Due: {label}", "Current Player",
+            "End of {label} {n}: play another {label} or continue?", "`Reacting: {names}`", "Due now", "Overdue since turn {T}", "no counter matches",
+            "`Game over: {result}`", "The game is over.", "End-of-phase runs done; press Next Phase again to play another {label} or continue",
+            "{side} is playing {phase}; you may react", "Due: {label}", "**Game > Current Player**",
+            "**Also acting:**", "**Until a player stops**", "`(until stopped)`",
         })
             Assert.True(all.Contains(text, StringComparison.Ordinal), "The wiki does not mention: " + text);
     }

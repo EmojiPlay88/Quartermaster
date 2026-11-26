@@ -864,6 +864,7 @@ public partial class MainWindow : Window
 
     void CloseSession()
     {
+        _placeWait = null;
         EndOnline(notifyGuests: true);   // WinForms CloseSession: the guests are told first
         EndReplayUi();
         StopMailbox();
@@ -997,6 +998,7 @@ public partial class MainWindow : Window
     void OnGameReplacedAnyThread() => OnUi(() =>
     {
         _tour?.Close();   // WinForms OnGameReplaced: a new game, an opened save or a rewind to it ends the tour (on the UI thread)
+        _placeWait = null;   // a Place waiting for the host belongs to the game before
         HookGame();
         _dirty = false;
         _savePath = null;

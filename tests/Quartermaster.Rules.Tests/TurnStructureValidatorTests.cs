@@ -87,6 +87,15 @@ public class TurnStructureValidatorTests
             Warns(Base() with { LastTurn = 3, LastStage = 2, Blocks = new() { Blk("a", "b", 2, "Round") } }));
     }
 
+    [Fact] public void Last_stage_with_only_broken_blocks_warns()
+    {
+        // A negative count or a block whose phases are missing or reversed does not repeat: only valid blocks count.
+        foreach (var b in new[] { Blk("a", "b", -1, "Round"), Blk("a", "zz", 2, "Round"), Blk("c", "a", 2, "Round") })
+            Assert.Contains("The last stage is set but no block repeats", Warns(Base() with { LastTurn = 3, LastStage = 2, Blocks = new() { b } }));
+        Assert.DoesNotContain("The last stage is set but no block repeats",
+            Warns(Base() with { LastTurn = 3, LastStage = 2, Blocks = new() { Blk("a", "b", 0, "Round") } }));   // count 0 repeats
+    }
+
     private static VictoryCondition Vc(string id, string cond = "Supply > 3") => new() { Id = id, Condition = cond };
     private static RulesPack WithVictory(params VictoryCondition[] v) => Base() with { Victory = v.ToList() };
 

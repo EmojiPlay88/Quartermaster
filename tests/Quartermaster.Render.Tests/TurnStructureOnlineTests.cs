@@ -224,6 +224,20 @@ public class TurnStructureOnlineTests : IDisposable
     }
 
     [Fact]
+    public void Guest_game_end_line_stamped_with_guest()
+    {
+        var (s, c, x, _) = Make(p => p with { LastTurn = 1 });
+        c.Start();
+        for (var i = 0; i < 20 && Pos(s).PhaseId != "ph-end"; i++) c.Advance();
+        Assert.True(x.Execute("p2", Blue, new NextPhaseIntent()).Ok);   // End has no side: Bob's press ends the game
+        Assert.NotNull(s.Game!.State.GameOver);
+        var line = s.Game.State.Log[^1];
+        Assert.StartsWith("Game over:", line.Text);
+        Assert.Equal("p2", line.Who);
+        Assert.NotEqual(DateTimeOffset.UnixEpoch, line.At);
+    }
+
+    [Fact]
     public void Guest_next_phase_after_game_over_refused()
     {
         var (s, c, x, _) = Make(p => p with { LastTurn = 1 });

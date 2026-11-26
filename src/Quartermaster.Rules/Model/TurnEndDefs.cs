@@ -35,7 +35,7 @@ public sealed record ScheduleRow
     public string? Label { get; init; }
 }
 
-/// <summary>A condition that ends the game when it becomes true at the end of a phase. Omitted from the pack JSON when the pack has none.</summary>
+/// <summary>A condition that ends the game when it is true on entry to a listed phase, or when the last turn ends. Omitted from the pack JSON when the pack has none.</summary>
 public sealed record VictoryCondition
 {
     public string Id { get; init; } = "";
@@ -47,7 +47,7 @@ public sealed record VictoryCondition
     /// <summary>Text shown at game over; null = a default. Omitted from the pack JSON when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Message { get; init; }
-    /// <summary>Ids of the phases after which the condition is checked; null = every phase. Omitted from the pack JSON when null.</summary>
+    /// <summary>Ids of the phases on entry to which the condition is checked (it is also checked when the last turn ends); null = every phase. Omitted from the pack JSON when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? PhaseIds { get; init; }
 }

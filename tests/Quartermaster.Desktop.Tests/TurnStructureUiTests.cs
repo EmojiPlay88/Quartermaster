@@ -330,6 +330,29 @@ public sealed class TurnStructureGuestUiTests : IAsyncLifetime
     }
 
     [AvaloniaFact]
+    public async Task Guest_refused_place_does_not_select_later()
+    {
+        // Blue's arrivals are due in Red's Supply: the host refuses Blue's Place. When the row later leaves the due list (game over),
+        // the refused Place must not select the counters or claim they were placed.
+        var row = new ScheduleRow { Id = "b-arrive", Turn = 1, PhaseId = "ph-supply", Piece = "startsWith(name(), \"Blue\")", Action = ScheduleAction.Arrive, ZoneMapId = "Main Map" };
+        var (host, guest) = await Seated(p => p with { Schedule = new() { row }, LastTurn = 1 });
+        host.Actions!.NextPhase();   // Start: Weather
+        host.Actions!.NextPhase();   // Supply (Red)
+        PumpUntil(() => { guest.Phases.Flush(); return guest.Phases.DueRows.Count == 1; });
+
+        guest.Phases.ClickDue(0);
+        PumpUntil(() => guest.StatusText == "That can't be done during another side's phase.");
+
+        for (var i = 0; i < 40 && host.Session!.Game!.State.GameOver == null; i++) host.Actions!.NextPhase();
+        Assert.NotNull(host.Session!.Game!.State.GameOver);
+        PumpUntil(() => { guest.Phases.Flush(); return guest.Session!.Game!.State.GameOver != null && guest.Phases.DueRows.Count == 0; });
+        guest.Strip.Flush();
+        OnlineRig.PumpFor(300);   // let any late refresh run
+        Assert.DoesNotContain("Placed:", guest.StatusText ?? "");
+        Assert.Empty(guest.Maps.ActiveView?.SelectedPieceIds.ToList() ?? new List<string>());
+    }
+
+    [AvaloniaFact]
     public async Task Guest_sees_repeat_stop_notice_of_its_own_press()
     {
         var weatherOnce = new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once };

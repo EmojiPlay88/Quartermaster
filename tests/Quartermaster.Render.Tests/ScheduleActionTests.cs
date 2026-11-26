@@ -175,6 +175,29 @@ public class ScheduleActionTests : ScheduleTestBase
         Assert.Equal(actions + 1, g.Actions.Count);
     }
 
+    [Theory]
+    [InlineData(Difficulty.SemiAuto)]
+    [InlineData(Difficulty.Hardcore)]
+    public void Place_formula_leaves_out_refused_units_every_difficulty(Difficulty d)
+    {
+        // As a ForEach = Units start entry: a unit whose precondition is decided false is refused and logged, not queued (spec #62).
+        var t = Open(new[] { Row("r-red", RedRelief, formula: "f-water") },
+            p => p with
+            {
+                Formulas = p.Formulas.Select(f => f.Id == "f-water"
+                    ? f with { Precondition = "name() != \"Red Relief 2\"", RefusalMessage = "Not this one" } : f).ToList(),
+            }, difficulty: d);
+        ToSupply(t);
+        var g = t.S.Game!;
+        var logs = g.State.Log.Count;
+        Assert.Null(t.C.ActOnSchedule("r-red"));
+        var run = Assert.Single(g.State.Pending, r => r.Trigger == "schedule");
+        Assert.Equal(new[] { "rr1" }, run.Units.Select(u => u.PieceId));
+        var refused = Assert.Single(g.State.Log.Skip(logs), l => l.Text.Contains("Not this one"));
+        Assert.Equal("rr2", refused.PieceId);
+        Assert.Equal(10, Water(t.S, "rr1"));   // queued, not applied
+    }
+
     [Fact]
     public void Place_runs_formula_fully_auto_applies()
     {

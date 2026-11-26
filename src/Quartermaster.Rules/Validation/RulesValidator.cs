@@ -670,6 +670,13 @@ public static class RulesValidator
             Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who} lists its own side as reacting");
     }
 
+    /// <summary>A valid block (both phases found, in order, count not negative) that repeats: a count other than 1 (0 = until stopped).</summary>
+    private static bool Repeats(PhaseBlock b, RulesPack pack)
+    {
+        int lo = pack.Phases.FindIndex(p => p.Id == b.FirstPhaseId), hi = pack.Phases.FindIndex(p => p.Id == b.LastPhaseId);
+        return b.Count >= 0 && b.Count != 1 && lo >= 0 && hi >= lo;
+    }
+
     /// <summary>The last turn and stage, and the victory conditions (each checked like a phase condition).</summary>
     private static void CheckGameEnd(RulesPack pack, List<RulesIssue> issues)
     {
@@ -679,7 +686,7 @@ public static class RulesValidator
             if (pack.LastTurn is < 1) PackErr("The last turn must be at least 1");
             if (pack.LastStage is < 1) PackErr("The last stage must be at least 1");
             if (pack.LastStage != null && pack.LastTurn == null) PackErr("A last stage needs a last turn");
-            if (pack.LastStage != null && !pack.Blocks.Any(b => b.Count != 1))
+            if (pack.LastStage != null && !pack.Blocks.Any(b => Repeats(b, pack)))
                 Add(issues, RulesIssueSeverity.Warning, pack.Id, pack.Name, "The last stage is set but no block repeats");
 
             var seen = new HashSet<string>(StringComparer.Ordinal);

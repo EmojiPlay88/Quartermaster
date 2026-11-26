@@ -40,6 +40,54 @@ public class ScheduleOnlineTests : ScheduleTestBase
     }
 
     [Fact]
+    public void Guest_place_formula_lines_stamped_with_guest()
+    {
+        var t = Open(new[] { Row("r-red", RedRelief, formula: "f-water") }, players: Both);
+        ToSupply(t);
+        var g = t.S.Game!;
+        var logs = g.State.Log.Count;
+        Assert.True(t.X.Execute("p1", Red, new ScheduleIntent("r-red")).Ok);
+        var added = g.State.Log.Skip(logs).ToList();
+        Assert.Contains(added, l => l.Kind == LogKind.Calc);
+        Assert.Contains(added, l => l.Kind == LogKind.Turn);
+        Assert.All(added, l =>
+        {
+            Assert.Equal("p1", l.Who);
+            Assert.NotEqual(DateTimeOffset.UnixEpoch, l.At);
+        });
+    }
+
+    [Fact]
+    public void Guest_withdraw_of_own_hidden_counter_redacted_for_others()
+    {
+        // Blue withdraws its hidden spy to the Main Map, then (second row) removes it: Red's view of the log never names it.
+        var t = Open(new[]
+        {
+            Row("w-spy", "name() == \"Blue Spy\"", ScheduleAction.Leave, phase: "ph-weather", zone: "Main Map"),
+            Row("x-spy", "name() == \"Blue Spy\"", ScheduleAction.Leave, phase: "ph-weather", zone: null),
+        }, players: Both);
+        t.C.Start();   // Weather: no side
+        var g = t.S.Game!;
+        var logs = g.State.Log.Count;
+        Assert.True(t.X.Execute("p2", Blue, new ScheduleIntent("w-spy")).Ok);
+        Assert.Equal(t.S.Model.Maps.First(m => m.Name == "Main Map").Id, g.State.Pieces["bs1"].MapId);
+        Assert.Contains(g.State.Log.Skip(logs), l => l.Kind == LogKind.Move && l.PieceId == "bs1");
+        AssertRedSeesNoSpy(t);
+        Assert.True(t.X.Execute("p2", Blue, new ScheduleIntent("x-spy")).Ok);
+        Assert.False(g.State.Pieces.ContainsKey("bs1"));
+        Assert.Contains(g.State.Log.Skip(logs), l => l.Kind == LogKind.Delete && l.PieceId == "bs1");
+        Assert.All(g.State.Log.Skip(logs), l => Assert.Equal("p2", l.Who));
+        AssertRedSeesNoSpy(t);
+    }
+
+    private static void AssertRedSeesNoSpy(Table t)
+    {
+        var red = PlayerView.For(t.S.Game!.State, t.S.Rules, t.S.Model, Red);
+        Assert.DoesNotContain(red.Log, l => l.Text.Contains("Spy"));
+        Assert.DoesNotContain(red.Log, l => l.PieceId == "bs1");
+    }
+
+    [Fact]
     public void Guest_row_with_only_hidden_counters_refused_neutral()
     {
         var t = Open(new[] { Row("r-spy", "name() == \"Blue Spy\"", phase: "ph-weather") }, players: Both);
