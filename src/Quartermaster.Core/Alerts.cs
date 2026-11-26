@@ -20,22 +20,44 @@ public static class AlertEngine
     public const string WarningId = "builtin:warning";
     public static string NegativeId(string propertyId) => "builtin:neg:" + propertyId;
 
-    /// <summary>Hits with at least one match, Critical first, then by name. Hidden alerts are left out.</summary>
-    public static IReadOnlyList<AlertHit> Evaluate(GameState s, RulesPack? pack, ModuleModel? model, PhaseDef? current, string? actingSideId)
+    /// <summary>
+    /// Hits with at least one match, Critical first, then by name. Hidden alerts are left out. The pre-B7 rule: every viewer sees every
+    /// built-in list and a side alert only in its own side's phase (<paramref name="actingSideId"/>). Use the 6-argument overload for a viewer
+    /// who holds only some sides.
+    /// </summary>
+    public static IReadOnlyList<AlertHit> Evaluate(GameState s, RulesPack? pack, ModuleModel? model, PhaseDef? current, string? actingSideId) =>
+        Run(s, pack, model, current, actingSideId, null, legacy: true);
+
+    /// <summary>
+    /// <see cref="Evaluate(GameState, RulesPack?, ModuleModel?, PhaseDef?, string?)"/> for a viewer holding <paramref name="viewerSides"/>
+    /// (<c>null</c>: sees everything; see <see cref="HiddenValues.SeesEverything"/>). A side alert is shown to a viewer holding its side in
+    /// every phase, not only in that side's phase; the "Unacknowledged warning" chip only when the viewer holds the current phase's acting
+    /// side or the phase has no side; a "below zero" list names only the viewer's own counters and holders (pieces of a held side or no
+    /// side, never a masked placeholder; the Global holder, holders of no side and of a held side), so an alert never shows a value the
+    /// viewer cannot see. <paramref name="actingSideId"/> is not used by this overload (the phase's own side is).
+    /// </summary>
+    public static IReadOnlyList<AlertHit> Evaluate(GameState s, RulesPack? pack, ModuleModel? model, PhaseDef? current, string? actingSideId,
+        IReadOnlySet<string>? viewerSides) =>
+        Run(s, pack, model, current, actingSideId, viewerSides, legacy: false);
+
+    private static IReadOnlyList<AlertHit> Run(GameState s, RulesPack? pack, ModuleModel? model, PhaseDef? current, string? actingSideId,
+        IReadOnlySet<string>? viewer, bool legacy)
     {
         var hits = new List<AlertHit>();
         var hidden = s.HiddenAlerts ?? new();
         void Add(AlertHit h) { if (h.Matches.Count > 0 && !hidden.Contains(h.Id)) hits.Add(h); }
+        var own = !legacy && viewer != null;
 
-        Guarded(() => Negative(s, pack, hits, hidden));
+        Guarded(() => Negative(s, pack, hits, hidden, own ? viewer : null));
         Guarded(() => Pending(s, hits, hidden));
-        if (pack != null && current != null)
+        if (pack != null && current != null
+            && (!own || string.IsNullOrWhiteSpace(current.SideId) || viewer!.Contains(current.SideId)))
             Guarded(() => Warnings(s, pack, model, current, Add));
         if (pack != null)
             foreach (var a in pack.Alerts ?? new())
             {
                 if (a == null || hidden.Contains(a.Id)) continue;
-                Guarded(() => { var h = User(s, pack, model, a, actingSideId); if (h != null) Add(h); });
+                Guarded(() => { var h = User(s, pack, model, a, actingSideId, legacy, viewer); if (h != null) Add(h); });
             }
 
         return hits
@@ -61,8 +83,10 @@ public static class AlertEngine
         catch (Exception ex) when (ex is not OutOfMemoryException) { }
     }
 
-    private static void Negative(GameState s, RulesPack? pack, List<AlertHit> hits, List<string> hidden)
+    /// <summary>The below-zero lists; with <paramref name="ownSides"/> only the viewer's own pieces and holders are listed.</summary>
+    private static void Negative(GameState s, RulesPack? pack, List<AlertHit> hits, List<string> hidden, IReadOnlySet<string>? ownSides)
     {
+        var pieceSides = ownSides != null && pack != null ? Ownership.PieceSides(s, pack) : null;
         var byProp = new Dictionary<string, List<AlertMatch>>(StringComparer.Ordinal);
         var order = new List<string>();
         foreach (var (key, inner) in s.Ledgers)
@@ -77,6 +101,8 @@ public static class AlertEngine
                     if (isPiece)
                     {
                         if (!s.Pieces.TryGetValue(id, out var p)) break;
+                        if (ownSides != null && (s.IsPlayerView && PlayerView.IsPlaceholder(p)
+                            || (pieceSides?.Invoke(p) is { } ps && !ownSides.Contains(ps)))) break;
                         var n = PieceInfo.Name(p);
                         who = new AlertMatch(id, null, string.IsNullOrEmpty(n) ? id : n);
                     }
@@ -84,6 +110,8 @@ public static class AlertEngine
                     {
                         var h = pack?.ById<HolderDef>(id);
                         if (h == null && id != HolderDef.GlobalId) break;
+                        if (ownSides != null && pack != null && id != HolderDef.GlobalId
+                            && Ownership.SideOfHolder(id, pack) is { } hs && !ownSides.Contains(hs)) break;
                         who = new AlertMatch(null, id, h?.Name is { Length: > 0 } hn ? hn : id == HolderDef.GlobalId ? "Global" : id);
                     }
                 }
@@ -132,7 +160,8 @@ public static class AlertEngine
         add(new AlertHit(WarningId, "Unacknowledged warning", AlertSeverity.Warning, "The current phase has warnings you have not acknowledged.", matches, null));
     }
 
-    private static AlertHit? User(GameState s, RulesPack pack, ModuleModel? model, AlertDef a, string? actingSideId)
+    private static AlertHit? User(GameState s, RulesPack pack, ModuleModel? model, AlertDef a, string? actingSideId, bool legacy,
+        IReadOnlySet<string>? viewer)
     {
         if (string.IsNullOrWhiteSpace(a.Condition)) return null;
         string? sideFilter = null;
@@ -140,7 +169,7 @@ public static class AlertEngine
         {
             var side = pack.ById<SideDef>(a.SideId);
             if (side == null) return null;
-            if (pack.Phases.Count > 0 && actingSideId != a.SideId) return null;
+            if (legacy ? pack.Phases.Count > 0 && actingSideId != a.SideId : viewer != null && !viewer.Contains(a.SideId)) return null;
             sideFilter = side.UnitFilter;
         }
         var msg = a.Message ?? "";

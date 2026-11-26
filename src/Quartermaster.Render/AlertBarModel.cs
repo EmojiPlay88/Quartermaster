@@ -20,11 +20,14 @@ public sealed class AlertBarModel(ModuleSession s)
     /// <summary>The hits of the last <see cref="Recompute"/> (Critical first).</summary>
     public IReadOnlyList<AlertHit> Hits => _hits;
 
-    /// <summary>Evaluates the alerts on the viewer's state; <paramref name="hiddenThisTurn"/> ids are left out on top of the game's own hidden list.</summary>
+    /// <summary>Evaluates the alerts on the viewer's state, for the sides it holds (own counters only in the below-zero lists; side alerts by held side); <paramref name="hiddenThisTurn"/> ids are left out on top of the game's own hidden list.</summary>
     public IReadOnlyList<AlertChip> Recompute(PhaseDef? current, string? actingSideId, ISet<string> hiddenThisTurn)
     {
         if (s.Game is not { } game) { _hits = Array.Empty<AlertHit>(); return Array.Empty<AlertChip>(); }
-        _hits = AlertEngine.Evaluate(s.View ?? game.State, s.Rules, s.Model, current, actingSideId)
+        // The viewer's sides come from the one visibility rule: null when the viewer sees everything (solo, every side held, game over).
+        var sides = FormulaMasking.ViewerSides(s);
+        if (HiddenValues.SeesEverything(game.State, s.Rules, sides)) sides = null;
+        _hits = AlertEngine.Evaluate(s.View ?? game.State, s.Rules, s.Model, current, actingSideId, sides)
             .Where(h => !hiddenThisTurn.Contains(h.Id)).ToList();
         var visibleOnly = s.ViewFiltered;
         return _hits.Select(h => new AlertChip(h.Id, Label(h), h.Severity, Tooltip(h, visibleOnly), h.Matches.Count)).ToList();

@@ -68,13 +68,14 @@ public class AlertBarModelTests : IDisposable
     }
 
     [Fact]
-    public void Recompute_uses_acting_side()
+    public void Recompute_solo_shows_side_alert_in_every_phase()
     {
         var s = Make(Red(side: "red"));
         var m = new AlertBarModel(s);
+        // Solo sees every side (B7 #74b): the acting side no longer gates a side alert.
         Assert.Single(m.Recompute(null, "red", new HashSet<string>()));
-        Assert.Empty(m.Recompute(null, "blue", new HashSet<string>()));
-        Assert.Empty(m.Recompute(null, null, new HashSet<string>()));
+        Assert.Single(m.Recompute(null, "blue", new HashSet<string>()));
+        Assert.Single(m.Recompute(null, null, new HashSet<string>()));
     }
 
     [Fact]
