@@ -111,12 +111,32 @@ public class GroupRollTests
     {
         var pack = Pack("dice(2, 6) + dice(1, 6)", new VariableBinding { Variable = "Unused", Kind = BindingKind.Input });
         var runner = Runner(pack, face: 1);
-        var t = runner.Run(Barges(), Req(Dice("dice#0", 4, 4)));
+        var t = runner.Run(Barges(), Req(Dice(RollGroups.GroupKey("dice#0", 6), 4, 4)));
         Assert.Null(t.Error);
         Assert.Equal(4 + 4 + 1, t.Result!.Value.Number);
         Assert.Equal("dice#1", Assert.Single(t.Rolls).Purpose.Split(": ")[1]);   // only the unshared key is logged
         Assert.Equal(new[] { "dice#0" }, t.SharedRollKeys);
         Assert.Single(runner.Commands(t, null).OfType<RollDice>());
+    }
+
+    [Fact]
+    public void SharedRolls_inline_dice_matched_on_sides()
+    {
+        // M2: inline keys are numbered by call order; a branch rolling d10 under dice#0 must not take a group's d6 results.
+        Assert.Equal("dice#0@d6", RollGroups.GroupKey("dice#0", 6));
+        Assert.Equal("D", RollGroups.GroupKey("D", 6));
+        var pack = Pack("dice(2, 10)", new VariableBinding { Variable = "Unused", Kind = BindingKind.Input });
+        var runner = Runner(pack, face: 9);
+        var t = runner.Run(Barges(), Req(Dice(RollGroups.GroupKey("dice#0", 6), 4, 4)));
+        Assert.Null(t.Error);
+        Assert.Equal(18, t.Result!.Value.Number);   // rolled its own d10s
+        Assert.Empty(t.SharedRollKeys);
+        Assert.Single(t.Rolls);
+        // A plain (sides-less) inline key is never taken either.
+        Assert.Empty(runner.Run(Barges(), Req(Dice("dice#0", 4, 4))).SharedRollKeys);
+        // The drawn dice carry their sides.
+        Assert.Equal(new[] { "dice#0@d10" }, RollGroups.Drawn(t).Keys);
+        Assert.Equal(10, t.RollSides["dice#0"]);
     }
 
     [Fact]

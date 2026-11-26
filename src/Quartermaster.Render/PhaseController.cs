@@ -412,12 +412,11 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         return Drawn(trace) is { } dice ? new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>(StringComparer.Ordinal) { [group] = dice } : null;
     }
 
-    /// <summary>The keys a run rolled itself (rolled, pinned or typed dice; not those taken from its group), or null when none.</summary>
+    /// <summary>The keys a run rolled itself (rolled, pinned or typed dice; not those taken from its group), under their group keys
+    /// (<see cref="RollGroups.GroupKey"/>), or null when none.</summary>
     private static Dictionary<string, IReadOnlyList<int>>? Drawn(FormulaTrace trace)
     {
-        var res = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
-        foreach (var (key, dice) in trace.RollsByKey)
-            if (dice != null && !trace.SharedRollKeys.Contains(key)) res[key] = dice.ToList();
+        var res = RollGroups.Drawn(trace);
         return res.Count == 0 ? null : res;
     }
 

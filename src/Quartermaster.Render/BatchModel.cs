@@ -192,8 +192,11 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
             if (r.Units[i] is { Applied: false } x && x.Group == group && s.CanAct(x.PieceId)) lead = i;
         if (lead < 0 || lead == row) return null;
         var m = ModelFor(lead);
-        if (m.PinnedRolls.Count == 0) m.Run(st);   // the group's dice are its first row's: rolled (and pinned) there first
-        return m.PinnedRolls.Count == 0 ? null : new Dictionary<string, IReadOnlyList<int>>(m.PinnedRolls, StringComparer.Ordinal);
+        // The group's dice are its first row's pinned dice: rolled (and pinned) there first, under their group keys (matched on sides too).
+        var leadDice = RollGroups.Drawn(m.Run(st));
+        foreach (var key in leadDice.Keys.ToList())
+            if (!m.PinnedRolls.ContainsKey(key.Split("@d")[0])) leadDice.Remove(key);
+        return leadDice.Count == 0 ? null : leadDice;
     }
 
     /// <summary>The rows of the same roll group as <paramref name="row"/> (only that row without a group).</summary>
@@ -352,10 +355,12 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         if (s.Game == null || Unit(row) is not { Applied: false } u || !s.CanAct(u.PieceId)) return false;
         var model = ModelFor(row);
         // Dice borrowed from the group's first row (none applied yet): this row draws them for the group, so it logs them and they are saved.
-        if (model.SharedRolls is { } borrowed && GroupShared(row, borrow: false) == null)
+        // Only the keys this row really takes from them (matched on count and sides) become its own pins.
+        if (model.SharedRolls != null && GroupShared(row, borrow: false) == null)
         {
+            var probe = model.Run(s.Game.State);
             model.SharedRolls = null;
-            model.PinRolls(borrowed);
+            model.PinRolls(probe.SharedRollKeys.Where(probe.RollsByKey.ContainsKey).ToDictionary(k => k, k => probe.RollsByKey[k], StringComparer.Ordinal));
         }
         var trace = model.Run(s.Game.State);
         var dv = model.View(trace);

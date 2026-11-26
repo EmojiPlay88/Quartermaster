@@ -45,6 +45,10 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
     /// <summary>The keys this run took from <see cref="RunRequest.SharedRolls"/> (B4), in the order read: in <see cref="RollsByKey"/> but not in
     /// <see cref="Rolls"/>, so the run logs no dice for them (the group's first run did). Empty when none.</summary>
     public IReadOnlyList<string> SharedRollKeys { get; init; } = Array.Empty<string>();
+
+    /// <summary>The sides of every key in <see cref="RollsByKey"/> (rolled, pinned, typed or shared), so a group's dice can be matched on
+    /// sides as well as count (<see cref="RollGroups.GroupKey"/>). Empty for a trace not made by the runner.</summary>
+    public IReadOnlyDictionary<string, int> RollSides { get; init; } = new Dictionary<string, int>();
 }
 
 /// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
@@ -55,8 +59,8 @@ public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDict
     IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false,
     Func<string, int, int, IReadOnlyList<int>>? Dice = null, IReadOnlySet<string>? PickSides = null)
 {
-    /// <summary>A group's dice already drawn (key → dice; B4 <see cref="FormulaDef.GroupRoll"/>): a key whose dice count matches and whose
-    /// dice are within the sides is used before pins and the roller, and is not logged by this run (<see cref="FormulaTrace.SharedRollKeys"/>).
+    /// <summary>A group's dice already drawn (group key → dice, <see cref="RollGroups.GroupKey"/>: an inline key carries its sides; B4
+    /// <see cref="FormulaDef.GroupRoll"/>): a key whose sides and dice count match and whose dice are within the sides is used before pins and the roller, and is not logged by this run (<see cref="FormulaTrace.SharedRollKeys"/>).
     /// A typed roll still wins. Null = none.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<int>>? SharedRolls { get; init; }
 }
@@ -194,16 +198,18 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         if (formula == null) return Fail(new FormulaDef { Id = r.FormulaId }, "Formula not found");
         var produced = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
         var shared = new List<string>();
+        var sides = new Dictionary<string, int>(StringComparer.Ordinal);
         FormulaTrace t;
         try
         {
-            t = RunCore(s, r, formula, produced, shared);
+            t = RunCore(s, r, formula, produced, shared, sides);
             if (r.PieceId != null && s.Pieces.ContainsKey(r.PieceId)) t = t with { PieceId = r.PieceId };
         }
         catch (Exception ex)
         {
             t = Fail(formula, ex is EvalError or ParseError ? ex.Message : "Could not run formula: " + ex.Message, produced);
         }
+        if (sides.Count > 0) t = t with { RollSides = new Dictionary<string, int>(sides, StringComparer.Ordinal) };
         return shared.Count == 0 ? t : t with { SharedRollKeys = shared.ToArray() };
     }
 
@@ -211,14 +217,15 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         new(f, Array.Empty<VariableState>(), null, "", Array.Empty<OutputPreview>(), error, Array.Empty<DiceEntry>(),
             produced == null ? new Dictionary<string, IReadOnlyList<int>>() : new Dictionary<string, IReadOnlyList<int>>(produced));
 
-    private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula, Dictionary<string, IReadOnlyList<int>> produced, List<string> shared)
+    private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula, Dictionary<string, IReadOnlyList<int>> produced, List<string> shared,
+        Dictionary<string, int> sides)
     {
         AstExpr expr;
         try { expr = Parse(formula, formula.Text ?? ""); }
         catch (ParseError pe) { return Fail(formula, pe.Message, produced); }
 
         var piece = r.PieceId != null && s.Pieces.TryGetValue(r.PieceId, out var pi) ? pi : null;
-        var run = new RunScope(this, s, r, formula, piece, produced, shared);
+        var run = new RunScope(this, s, r, formula, piece, produced, shared, sides);
 
         // A Piece-target output names the Piece binding whose pick it acts on; without one it can never run.
         var pieceVars = new List<string>();
@@ -626,7 +633,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
     /// <summary>Per-run resolution of bindings to values.</summary>
     private sealed class RunScope(FormulaRunner owner, GameState s, RunRequest r, FormulaDef formula, PieceInstance? piece, Dictionary<string, IReadOnlyList<int>> byKey,
-        List<string> sharedKeys)
+        List<string> sharedKeys, Dictionary<string, int> rollSides)
     {
         private readonly Dictionary<string, VariableState> _done = new(StringComparer.Ordinal);
         private readonly HashSet<string> _active = new(StringComparer.Ordinal);
@@ -654,9 +661,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             if (_noRolls) throw new RollsForbidden();
             // A group's dice (B4): kept for count(), dice() and the working, but not logged here (the group's first run logged them).
-            if (r.SharedRolls != null && r.SharedRolls.TryGetValue(key, out var group) && group != null && group.Count == n && group.All(x => x >= 1 && x <= sides))
+            // Matched on count and sides: an inline key is looked up with its sides (RollGroups.GroupKey), so a branch rolling other dice
+            // under the same dice#i rolls its own.
+            if (r.SharedRolls != null && r.SharedRolls.TryGetValue(RollGroups.GroupKey(key, sides), out var group) && group != null && group.Count == n
+                && group.All(x => x >= 1 && x <= sides))
             {
                 _byKey[key] = group;
+                rollSides[key] = sides;
                 if (!sharedKeys.Contains(key)) sharedKeys.Add(key);
                 return group;
             }
@@ -672,6 +683,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             _rolls.Add(new DiceEntry(0, $"{formula.Name}: {key}", n, sides, dice));
             _byKey[key] = dice;
+            rollSides[key] = sides;
         }
 
         public IReadOnlyList<int> Roll(int n, int sides) => RollKey("dice#" + _inlineDice++, n, sides);

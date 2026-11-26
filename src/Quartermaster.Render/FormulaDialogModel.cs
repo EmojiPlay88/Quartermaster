@@ -207,7 +207,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     }
 
     /// <summary>True when the group's dice already hold this key (<see cref="SharedRolls"/>).</summary>
-    private bool IsShared(string key) => SharedRolls?.ContainsKey(key) == true;
+    private bool IsShared(string key) => SharedRolls is { } shared
+        && (shared.ContainsKey(key) || shared.Keys.Any(k => k.StartsWith(key + "@d", StringComparison.Ordinal)));   // inline keys carry sides
 
     /// <summary>Caption suffix of a Roll box whose dice are the group's (B4).</summary>
     public const string GroupRollSuffix = " (group roll)";

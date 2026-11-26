@@ -488,7 +488,6 @@ internal static class BatchChain
     /// <summary>Adds the keys a run rolled itself (not those it took from the group) to the group's dice; per key the first wins.</summary>
     public static void AddDrawn(Dictionary<string, IReadOnlyList<int>> group, FormulaTrace t)
     {
-        foreach (var (key, dice) in t.RollsByKey)
-            if (dice != null && !t.SharedRollKeys.Contains(key)) group.TryAdd(key, dice.ToList());
+        foreach (var (key, dice) in RollGroups.Drawn(t)) group.TryAdd(key, dice);   // under group keys: matched on sides too
     }
 }

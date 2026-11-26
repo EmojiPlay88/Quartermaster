@@ -52,4 +52,24 @@ public static class RollGroups
         if (unit?.Group is not { } group || run!.GroupRolls == null) return null;
         return run.GroupRolls.TryGetValue(group, out var dice) ? dice : null;
     }
+
+    /// <summary>
+    /// The key a run's dice are kept under in a group's dice (<see cref="RunRequest.SharedRolls"/>, <see cref="PendingRun.GroupRolls"/>):
+    /// a Roll binding's variable as it is (its sides are fixed by the binding); an inline <c>dice#i</c> with its sides (<c>dice#i@d{sides}</c>),
+    /// because inline keys are numbered by call order and a branch can roll other dice under the same number.
+    /// </summary>
+    public static string GroupKey(string key, int sides) =>
+        key.StartsWith("dice#", StringComparison.Ordinal) ? $"{key}@d{sides.ToString(System.Globalization.CultureInfo.InvariantCulture)}" : key;
+
+    /// <summary>The dice a run drew itself (rolled, pinned or typed; not those it took from its group), under their group keys
+    /// (<see cref="GroupKey"/>); empty when none.</summary>
+    public static Dictionary<string, IReadOnlyList<int>> Drawn(FormulaTrace t)
+    {
+        ArgumentNullException.ThrowIfNull(t);
+        var res = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
+        foreach (var (key, dice) in t.RollsByKey)
+            if (dice != null && !t.SharedRollKeys.Contains(key))
+                res.TryAdd(t.RollSides.TryGetValue(key, out var sides) ? GroupKey(key, sides) : key, dice.ToList());
+        return res;
+    }
 }
