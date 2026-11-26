@@ -48,6 +48,10 @@ public static class Parser
         ["attachedcount"] = (0, 1),
         ["attachedmax"] = (1, 2),
         ["attachedmin"] = (1, 2),
+        // B6: places and keyed values
+        ["hex"] = (0, 0),
+        ["distance"] = (2, 2),
+        ["keyed"] = (2, 3),
     };
 
     public static Expr Parse(string text)
@@ -62,7 +66,7 @@ public static class Parser
         return e;
     }
 
-    /// <summary>Distinct variable names in first-occurrence order, excluding the table-name argument of lookup and lookuprange and holder's two name arguments and every argument of the aggregates (a property name and a filter text, which is evaluated per piece).</summary>
+    /// <summary>Distinct variable names in first-occurrence order, excluding the table-name argument of lookup and lookuprange and holder's two name arguments and keyed's property and holder names and every argument of the aggregates (a property name and a filter text, which is evaluated per piece).</summary>
     public static IReadOnlyList<string> Variables(Expr e)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -86,7 +90,8 @@ public static class Parser
                     break;
                 case Call c:
                     if (ExprFacts.IsAggregate(c.Function)) break;
-                    for (int i = c.Function is "lookup" or "lookuprange" ? 1 : c.Function == "holder" ? 2 : 0; i < c.Args.Count; i++) Walk(c.Args[i]);
+                    for (int i = c.Function is "lookup" or "lookuprange" ? 1 : c.Function == "holder" ? 2 : 0; i < c.Args.Count; i++)
+                        if (!(c.Function == "keyed" && i is 0 or 2)) Walk(c.Args[i]);   // keyed(Property, key, Holder): the two names are not variables
                     break;
             }
         }

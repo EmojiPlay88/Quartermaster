@@ -79,6 +79,9 @@ public sealed record FormulaOutput
     /// <summary>Remove: the id of the map the counter moves to instead of being deleted. Null = delete (never "").</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ToMapId { get; init; }
+    /// <summary>Write to a keyed property: the expression giving the key this output writes (a hex name, a turn number or a table row key). Null = none (never ""). Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Key { get; init; }
 }
 
 public sealed record FormulaDef

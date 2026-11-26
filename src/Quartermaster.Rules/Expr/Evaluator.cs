@@ -53,6 +53,13 @@ public interface IEvalContext
     double Runs(string formulaId, string period) => throw new EvalError("runs() is not available here");
     /// <summary>The row key being tested by a choices filter (a number when the key is numeric, else text).</summary>
     Value Row() => throw new EvalError("row() can only be used in a choices filter");
+    // B6: places and keyed values
+    /// <summary>The grid location name of the piece being evaluated, as text.</summary>
+    Value Hex() => throw new EvalError("hex() is not available here");
+    /// <summary>The number of cells between two hex names.</summary>
+    double Distance(string a, string b) => throw new EvalError("distance() is not available here");
+    /// <summary>The value of a keyed property for one key; <paramref name="holder"/> names the holder when the call has a third argument.</summary>
+    double Keyed(string property, Value key, string? holder) => throw new EvalError("keyed() is not available here");
 }
 
 public static class Evaluator
@@ -185,6 +192,8 @@ public static class Evaluator
         "side", "phaseside", "map", "holder", "runs", "row",
         "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin",
         "attachedsum", "attachedcount", "attachedmax", "attachedmin",
+        // B6: places and keyed values
+        "hex", "distance", "keyed",
     };
 
     /// <summary>Every binary and unary operator the formula language accepts ('-' is both binary and unary).</summary>
@@ -319,6 +328,26 @@ public static class Evaluator
             case "layer":
                 if (a[0] is not TextLit ln) throw new EvalError("layer() needs a layer name in quotes", c);
                 return Num(ctx.Layer(ln.Value), c);
+            // B6: places and keyed values
+            case "hex": return ctx.Hex();
+            case "distance":
+            {
+                var from = Eval(a[0], ctx);
+                var to = Eval(a[1], ctx);
+                if (from.Kind != ValueKind.Text || to.Kind != ValueKind.Text) throw new EvalError("distance() needs hex names as text", c);
+                return Num(ctx.Distance(from.Text, to.Text), c);
+            }
+            case "keyed":
+            {
+                if (a[0] is not VarRef kp) throw new EvalError("keyed() needs a property name", a[0]);
+                string? holder = null;
+                if (a.Count > 2)
+                {
+                    if (a[2] is not VarRef kh) throw new EvalError("keyed() needs a holder name", a[2]);
+                    holder = kh.Name;
+                }
+                return Num(ctx.Keyed(kp.Name, Eval(a[1], ctx), holder), c);
+            }
             default: throw new EvalError($"Unknown function '{c.Function}'", c);
         }
     }
