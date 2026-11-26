@@ -4,14 +4,14 @@ using Quartermaster.Vassal;
 
 namespace Quartermaster.Core;
 
-public enum LedgerTabKind { Units, Holders, Everything, User }
+public enum LedgerTabKind { Units, Holders, Everything, User, Places }
 
 public enum LedgerGrouping { None, Map, Side }
 
 /// <summary>A personal ledger tab (stored per module on this PC, never in the rules pack).</summary>
 public sealed record UserLedgerTab(string Name, string? Filter, IReadOnlyList<string> ColumnIds, bool IncludeHolders, string? Notes);
 
-/// <summary>Key: "units", "holders", "all" or "user:&lt;name&gt;".</summary>
+/// <summary>Key: "units", "holders", "all", "places" (B6) or "user:&lt;name&gt;".</summary>
 public sealed record LedgerTabDef(string Key, string Title, LedgerTabKind Kind, UserLedgerTab? User);
 
 /// <summary>A ledger row plus what the UI needs to group, edit and picture it. Group headers carry <see cref="IsGroupHeader"/>.</summary>
@@ -38,8 +38,20 @@ public static class LedgerTabs
         return list;
     }
 
+    /// <summary>As <see cref="Tabs(IReadOnlyList{UserLedgerTab})"/>, with the Places tab (B6, key "places") after Everything when
+    /// <paramref name="pack"/> has a place property (keyed by hex). Its rows come from <see cref="KeyedTable.Places"/>.</summary>
+    public static IReadOnlyList<LedgerTabDef> Tabs(IReadOnlyList<UserLedgerTab> user, RulesPack? pack)
+    {
+        var list = Tabs(user);
+        if (pack?.Properties?.Any(KeyedFacts.IsPlace) != true) return list;
+        var withPlaces = list.ToList();
+        withPlaces.Insert(3, new LedgerTabDef("places", "Places", LedgerTabKind.Places, null));
+        return withPlaces;
+    }
+
     public static IReadOnlyList<PropertyDef> ColumnsFor(LedgerTabDef tab, RulesPack p)
     {
+        if (tab.Kind == LedgerTabKind.Places) return Array.Empty<PropertyDef>();   // its columns are the place properties (KeyedTable.Places)
         var all = LedgerTable.Columns(p);
         switch (tab.Kind)
         {
@@ -61,6 +73,7 @@ public static class LedgerTabs
     public static LedgerTabResult Rows(LedgerTabDef tab, GameState view, RulesPack p, ModuleModel m,
         string filter, string? sideId, LedgerGrouping group, bool includeEmpty)
     {
+        if (tab.Kind == LedgerTabKind.Places) return new LedgerTabResult(Array.Empty<PropertyDef>(), Array.Empty<LedgerRowEx>(), 0, null);
         var cols = ColumnsFor(tab, p);
         var allCols = LedgerTable.Columns(p);
         var map = cols.Select(c => allCols.ToList().FindIndex(a => a.Id == c.Id)).ToArray();

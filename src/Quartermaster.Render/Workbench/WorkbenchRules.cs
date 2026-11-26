@@ -32,9 +32,18 @@ public static class WorkbenchRules
     public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds) => Issues(pack, mapIds, null);
 
     /// <param name="slotKeys">The palette entries a Place output may name (<see cref="SlotKeys"/>); null = not checked.</param>
-    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds, IReadOnlyCollection<string>? slotKeys)
+    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds, IReadOnlyCollection<string>? slotKeys) =>
+        Rows(RulesValidator.Validate(pack, mapIds, slotKeys));
+
+    /// <summary>B6: as <see cref="Issues(RulesPack, IReadOnlyList{string}, IReadOnlyCollection{string})"/>, checked against the module
+    /// (the four-argument <see cref="RulesValidator"/>.Validate): Remove's To map is found by id or name, and hex name constants must be
+    /// hexes of a board.</summary>
+    public static IReadOnlyList<IssueRow> Issues(RulesPack pack, IReadOnlyList<string> mapIds, IReadOnlyCollection<string>? slotKeys,
+        Quartermaster.Vassal.ModuleModel? model) =>
+        Rows(RulesValidator.Validate(pack, mapIds, slotKeys, model));
+
+    private static IReadOnlyList<IssueRow> Rows(IReadOnlyList<RulesIssue> list)
     {
-        var list = RulesValidator.Validate(pack, mapIds, slotKeys);
         if (list.Count == 0) return [new IssueRow("", "", NoProblemsText, null)];
         return list.Select(i => new IssueRow(i.Severity.ToString(), i.EntityName, i.Message, i)).ToList();
     }

@@ -127,6 +127,9 @@ public sealed class RemoteActions(GuestSession g) : IActionPort
     public void EditLedger(string key, string propertyId, double after, string note) =>
         Send(new LedgerEditIntent(key, propertyId, after, note ?? ""));
 
+    public void EditKeyed(string key, string propertyId, string valueKey, double after, string note) =>
+        Send(new KeyedEditIntent(key, propertyId, valueKey ?? "", after, note ?? ""));
+
     public void Roll(DiceSpec spec, string purpose)
     {
         if (spec == null) return;

@@ -84,8 +84,17 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
         if (Blocked || s.Game is not { } g || !s.CanEditLedger(key)) return;
         var prop = s.Rules?.Properties.FirstOrDefault(p => p != null && p.Id == propertyId);
         if (prop != null && Quartermaster.Rules.PropertyFacts.IsComputed(prop)) return;   // never stored (the Ledger refuses it with LedgerViewRules.ComputedRefusal)
+        if (Quartermaster.Rules.KeyedFacts.IsKeyed(prop)) return;   // a keyed value is changed with EditKeyed (never in Ledgers)
         var before = prop != null ? Ledger.GetOrDefault(g.State, key, prop) : Ledger.Get(g.State, key, propertyId) ?? 0;
         Exec(g, new LedgerDelta(key, propertyId, before, after, "manual", null, null, (note ?? "").Trim(), null));
+    }
+
+    /// <summary>As <see cref="EditLedger"/> for one key of a keyed property: the key is normalised (a bad key, an unkeyed property or a place
+    /// off the Global holder does nothing), the working names it (<c>{Prop}[{key}] {before} → {after}</c>) and an unchanged value records nothing.</summary>
+    public void EditKeyed(string key, string propertyId, string valueKey, double after, string note)
+    {
+        if (Blocked || s.Game is not { } g || s.Rules is not { } pack || !double.IsFinite(after) || !s.CanEditLedger(key)) return;
+        if (LedgerViewRules.KeyedEdit(pack, s.Model, g.State, key, propertyId, valueKey, after, (note ?? "").Trim()) is { } delta) Exec(g, delta);
     }
 
     public void Roll(DiceSpec spec, string purpose)

@@ -7,6 +7,10 @@ namespace Quartermaster.Render;
 /// <paramref name="Reload"/>: the window should redraw its rows (refused or unchanged edits).</summary>
 public sealed record ManualEditCheck(bool Ok, double Value, bool Unchanged, string? Error, string? NotePrompt, bool Reload = false);
 
+/// <summary>One row of the keyed values panel (B6) over the viewer's state: <paramref name="Value"/> is null when <paramref name="Hidden"/> (the
+/// view may lack it, so neither a value nor the Default is shown).</summary>
+public sealed record KeyedCell(Quartermaster.Rules.PropertyDef Property, string Key, double? Value, bool Stored, bool Hidden);
+
 /// <summary>The Ledger window's UI-free rules (sorting, manual edits, tab titles, banner, CSV name, row height), shared by every front end.</summary>
 public static class LedgerViewRules
 {
@@ -139,4 +143,68 @@ public static class LedgerViewRules
 
     /// <summary>The Edit-tabs list entry of a tab.</summary>
     public static string ListLabel(UserLedgerTab t) => string.IsNullOrWhiteSpace(t.Name) ? NoNameText : "★ " + t.Name.Trim();
+
+    // ---------- keyed values (B6) ----------
+
+    /// <summary>
+    /// The stored form of <paramref name="valueKey"/> for a manual edit of <paramref name="prop"/> at <paramref name="ledgerKey"/>
+    /// (<see cref="KeyedValues.NormaliseKey"/>); null when the property is not keyed, a place is edited off the Global holder (places are kept
+    /// by Global only), the key is missing or longer than <see cref="KeyedValues.MaxKeyLength"/>, or it does not normalise.
+    /// </summary>
+    public static string? EditKey(Quartermaster.Rules.RulesPack pack, Quartermaster.Vassal.ModuleModel? model, Quartermaster.Rules.PropertyDef prop,
+        string ledgerKey, string? valueKey)
+    {
+        if (pack == null || !Quartermaster.Rules.KeyedFacts.IsKeyed(prop) || valueKey == null || valueKey.Length > KeyedValues.MaxKeyLength) return null;
+        if (Quartermaster.Rules.KeyedFacts.IsPlace(prop) && ledgerKey != LedgerKey.Holder(Quartermaster.Rules.HolderDef.GlobalId)) return null;
+        try { return KeyedValues.NormaliseKey(pack, model, prop, Quartermaster.Rules.Expr.Value.Of(valueKey)); }
+        catch (Quartermaster.Rules.Expr.EvalError) { return null; }
+    }
+
+    /// <summary>The working of a manual keyed edit: <c>{Prop}[{key}] {before} → {after}</c>.</summary>
+    public static string KeyedWorking(Quartermaster.Rules.PropertyDef prop, string valueKey, double before, double after) =>
+        $"{(string.IsNullOrWhiteSpace(prop.Name) ? prop.Id : prop.Name)}[{valueKey}] {LedgerTable.FormatNumber(before)} → {LedgerTable.FormatNumber(after)}";
+
+    /// <summary>The manual delta writing <paramref name="after"/> at the normalised <paramref name="valueKey"/> (Before: the stored value or the
+    /// Default); null when the value is already stored as <paramref name="after"/> (an unchanged value records nothing).</summary>
+    public static LedgerDelta? KeyedDelta(GameState state, Quartermaster.Rules.PropertyDef prop, string ledgerKey, string valueKey, double after, string note)
+    {
+        if (KeyedValues.Get(state, ledgerKey, prop.Id, valueKey) is { } cur && cur == after) return null;
+        var before = KeyedValues.GetOrDefault(state, ledgerKey, prop, valueKey);
+        return new LedgerDelta(ledgerKey, prop.Id, before, after, "manual", null, null, note, KeyedWorking(prop, valueKey, before, after)) { ValueKey = valueKey };
+    }
+
+    /// <summary>A local manual keyed edit (<see cref="LocalActions.EditKeyed"/>): null when the property is unknown, computed, not kept by the
+    /// holder, not keyed, the key is bad (<see cref="EditKey"/>) or the value unchanged.</summary>
+    public static LedgerDelta? KeyedEdit(Quartermaster.Rules.RulesPack pack, Quartermaster.Vassal.ModuleModel? model, GameState state, string ledgerKey,
+        string propertyId, string? valueKey, double after, string note)
+    {
+        if (pack?.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is not { } prop || state == null || ledgerKey == null) return null;
+        if (ComputedRefusal(pack, prop.Id) != null || NotKeptRefusal(pack, ledgerKey, prop.Id) != null) return null;
+        return EditKey(pack, model, prop, ledgerKey, valueKey) is { } vk ? KeyedDelta(state, prop, ledgerKey, vk, after, note) : null;
+    }
+
+    /// <summary>
+    /// The keyed values panel of a ledger row over the viewer's state (<see cref="KeyedTable.For"/>): a row the view may lack (another side's
+    /// non-Public value, a holder of a side not held) is <see cref="KeyedCell.Hidden"/> with no value, never the property's Default.
+    /// </summary>
+    public static IReadOnlyList<KeyedCell> KeyedRows(GameState view, Quartermaster.Rules.RulesPack pack, string ledgerKey) =>
+        KeyedTable.For(view, pack, ledgerKey).Select(r => !r.Stored && KeyedValues.HiddenIn(view, pack, ledgerKey, r.Property)
+            ? new KeyedCell(r.Property, r.Key, null, false, true)
+            : new KeyedCell(r.Property, r.Key, r.Value, r.Stored, false)).ToList();
+
+    /// <summary>The Value cell of the keyed panel: the number, or <see cref="ModuleSession.HiddenText"/> for a hidden row.</summary>
+    public static string KeyedValueText(KeyedCell c) => c.Value is { } v ? LedgerTable.FormatNumber(v) : ModuleSession.HiddenText;
+
+    /// <summary>The Places tab over the viewer's state (<see cref="KeyedTable.Places"/>); in a player view the place properties it may not see
+    /// (Private places) are left out as columns.</summary>
+    public static PlacesResult Places(GameState view, Quartermaster.Rules.RulesPack pack, string filter)
+    {
+        var all = KeyedTable.Places(view, pack, filter);
+        if (view == null || !view.IsPlayerView) return all;
+        var global = LedgerKey.Holder(Quartermaster.Rules.HolderDef.GlobalId);
+        var keep = Enumerable.Range(0, all.Columns.Count).Where(i => !KeyedValues.HiddenIn(view, pack, global, all.Columns[i])).ToList();
+        if (keep.Count == all.Columns.Count) return all;
+        return new PlacesResult(keep.Select(i => all.Columns[i]).ToList(),
+            all.Rows.Select(r => new PlaceRow(r.Hex, keep.Select(i => r.Values[i]).ToList())).Where(r => r.Values.Any(v => v != null)).ToList());
+    }
 }
