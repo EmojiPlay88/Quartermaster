@@ -33,7 +33,8 @@ public class PlayerViewTests(ITestOutputHelper output)
         {
             new PropertyDef { Id = "fuel", Name = "Fuel", Scope = PropertyScope.Pieces, Visibility = Visibility.Private },
             new PropertyDef { Id = "morale", Name = "Morale", Scope = PropertyScope.Pieces, Visibility = Visibility.Public },
-            new PropertyDef { Id = "supply", Name = "Supply", Scope = PropertyScope.Holders, Visibility = Visibility.Public },
+            // Private (B7 #74a): a Public value of the red depot would be every player's; these tests pin what a sided holder hides
+            new PropertyDef { Id = "supply", Name = "Supply", Scope = PropertyScope.Holders, Visibility = Visibility.Private },
         },
         Holders = new()
         {

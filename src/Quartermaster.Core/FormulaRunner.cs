@@ -939,7 +939,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var prop = Unkeyed(Prop(b));
             var (picked, shown) = Pick(b);
             if (s.IsPlayerView && (PlayerView.IsPlaceholder(picked)
-                    || (!PropertyFacts.IsPublic(owner._pack, prop) && Sides.Value(picked) is { } side && s.ViewSides?.Contains(side) != true)))
+                    || HiddenValues.PieceValueHidden(owner._pack, prop, picked, Sides, side => s.ViewSides?.Contains(side) == true)))
                 throw new Missing(HiddenText);
             return new(name, Value.Of(Read(LedgerKey.Piece(picked.Id), prop)), false, false, null, $"{prop.Name} of {shown}");
         }

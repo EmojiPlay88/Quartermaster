@@ -195,8 +195,10 @@ public class FilterReadsTests
         s.Ledgers[LedgerKey.Holder("camp")] = new() { ["tonnage"] = 5 };
         var south = PlayerView.For(s, pack, RunnerFx.Model, new HashSet<string> { "south" });
         var vp = south.Pieces["b"];
-        Assert.False(M("holder(Rail, Pub) == 2", vp, south, pack));
-        Assert.False(M("holder(Rail, Pub) != 2", vp, south, pack));
+        // B7 #74a: a Public value of another side's holder is in the view; its Private values are stripped, never defaulted
+        Assert.True(M("holder(Rail, Pub) == 9", vp, south, pack));
+        Assert.False(M("holder(Rail, Tonnage) == 4", vp, south, pack));
+        Assert.False(M("holder(Rail, Tonnage) != 4", vp, south, pack));
         Assert.True(M("holder(Camp, Tonnage) == 5", vp, south, pack));
         Assert.True(M("holder(Camp, Pub) == 2", vp, south, pack));
         var north = PlayerView.For(s, pack, RunnerFx.Model, new HashSet<string> { "north" });

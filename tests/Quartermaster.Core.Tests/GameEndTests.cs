@@ -143,26 +143,41 @@ public class GameEndTests
         s.Apply(new MarkScheduled("sched-1", "Schedule: Arrivals, turn 3"));
         s.Apply(new EndGame("Northern League wins", new[] { "north" }, "v-river"));
         var view = PlayerView.For(s, pk, Model, new HashSet<string> { "north" });
-        Assert.True(view.IsPlayerView);
+        Assert.False(view.IsPlayerView);   // B7 #73: a game that is over hides nothing
         Assert.Equal("Northern League wins", view.GameOver!.Text);
         Assert.Equal(new[] { "north" }, view.GameOver.Winners);
         Assert.Equal(new[] { "sched-1" }, view.ScheduleDone);
     }
 
     [Fact]
-    public void Lockdown_keeps_game_over()
+    public void Lockdown_keeps_schedule_done()
     {
         var pk = Pack();
         var s = At(pk, P(pk, 8, 1, "E"));
         s.Apply(new MarkScheduled("sched-1", "Schedule: Arrivals, turn 3"));
-        s.Apply(new EndGame("Northern League wins", new[] { "north" }, "v-river"));
         PlayerView.FailForTest = true;
         try
         {
             var view = PlayerView.For(s, pk, Model, new HashSet<string> { "north" });
             Assert.Equal(PlayerView.FilterErrorText, Assert.Single(view.Log).Text);
-            Assert.Equal("Northern League wins", view.GameOver!.Text);
             Assert.Equal(new[] { "sched-1" }, view.ScheduleDone);
+        }
+        finally { PlayerView.FailForTest = false; }
+    }
+
+    [Fact]
+    public void Game_over_view_never_filters()
+    {
+        var pk = Pack();
+        var s = At(pk, P(pk, 8, 1, "E"));
+        s.Apply(new EndGame("Northern League wins", new[] { "north" }, "v-river"));
+        PlayerView.FailForTest = true;   // B7 #73: the filter (and its lockdown) never runs once the game is over
+        try
+        {
+            var view = PlayerView.For(s, pk, Model, new HashSet<string> { "north" });
+            Assert.False(view.IsPlayerView);
+            Assert.Equal(s.Log.Count, view.Log.Count);
+            Assert.Equal("Northern League wins", view.GameOver!.Text);
         }
         finally { PlayerView.FailForTest = false; }
     }

@@ -133,7 +133,7 @@ public static class PropertyValues
                 throw new EvalError($"{def.Name} has no value on this piece") { MissingValue = true };
             return;
         }
-        if (Ownership.SideOfHolder(id, pack) is { } owner && s.ViewSides?.Contains(owner) != true)
+        if (HiddenValues.HolderValueHidden(pack, id, def, side => s.ViewSides?.Contains(side) == true))
             throw new EvalError($"{def.Name} has no value on {pack.ById<HolderDef>(id)?.Name ?? id}") { MissingValue = true };
     }
 

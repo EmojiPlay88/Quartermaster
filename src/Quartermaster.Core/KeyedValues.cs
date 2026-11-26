@@ -194,37 +194,32 @@ public static class KeyedValues
     /// <summary>
     /// The host's side of <see cref="HiddenIn"/>: true when the player view of a player holding <paramref name="held"/> may lack the values of
     /// <paramref name="p"/> at <paramref name="ledgerKey"/> of the full state <paramref name="full"/> (the same rule as <see cref="PlayerView"/>:
-    /// a player holding every side, or solo (null), sees everything). Used to refuse a guest's edit of a value it cannot see.
+    /// a player holding every side, solo (null), and anyone once the game is over see everything: <see cref="HiddenValues.SeesEverything"/>).
+    /// Used to refuse a guest's edit of a value it cannot see.
     /// </summary>
     public static bool HiddenFor(GameState full, RulesPack pack, IReadOnlySet<string>? held, string ledgerKey, PropertyDef p)
     {
-        if (full == null || pack == null || held == null || (pack.Sides ?? new()).All(x => x == null || held.Contains(x.Id))) return false;
-        return HiddenAt(full, pack, ledgerKey, p, held.Contains);
+        if (full == null || pack == null || HiddenValues.SeesEverything(full, pack, held)) return false;
+        return HiddenAt(full, pack, ledgerKey, p, held!.Contains);
     }
 
     private static bool HiddenAt(GameState s, RulesPack pack, string ledgerKey, PropertyDef p, Func<string, bool> holds)
     {
         if (pack == null || p == null || !LedgerKey.TryParse(ledgerKey, out var isPiece, out var id)) return true;
-        if (!isPiece)   // an unknown holder fails closed, as the view's own filter does
-            return (id != HolderDef.GlobalId && !(pack.Holders ?? new()).Any(h => h != null && h.Id == id)) || HiddenInView(s, pack, p, id, null, null, holds);
+        if (!isPiece) return HiddenInView(s, pack, p, id, null, null, holds);   // an unknown holder fails closed (HiddenValues)
         return !s.Pieces.TryGetValue(id, out var piece) || piece == null || HiddenInView(s, pack, p, null, piece, null, holds);
     }
 
-    /// <summary>True when a player view may lack this keyed value (see <see cref="Read"/>); <paramref name="holds"/>: whether the viewer holds a
-    /// side (default: the view's <see cref="GameState.ViewSides"/>).</summary>
+    /// <summary>True when a player view may lack this keyed value (see <see cref="Read"/>), as <see cref="HiddenValues"/> decides (the
+    /// placeholder of a masked piece lacks every value); <paramref name="holds"/>: whether the viewer holds a side (default: the view's
+    /// <see cref="GameState.ViewSides"/>).</summary>
     private static bool HiddenInView(GameState s, RulesPack pack, PropertyDef def, string? holderId, PieceInstance? piece,
         Lazy<Func<PieceInstance, string?>>? sides, Func<string, bool>? holds = null)
     {
         holds ??= side => s.ViewSides?.Contains(side) == true;
-        if (KeyedFacts.IsPlace(def) && !PropertyFacts.IsPublic(pack, def)) return true;   // a Private place: only a full view has it
         if (piece != null)
-        {
-            if (PlayerView.IsPlaceholder(piece)) return true;
-            if (PropertyFacts.IsPublic(pack, def)) return false;
-            var side = (sides ?? PieceFilter.SideMap(s, pack)).Value(piece);
-            return side != null && !holds(side);
-        }
-        return holderId != null && Ownership.SideOfHolder(holderId, pack) is { } owner && !holds(owner);
+            return PlayerView.IsPlaceholder(piece) || HiddenValues.PieceValueHidden(pack, def, piece, sides ?? PieceFilter.SideMap(s, pack), holds);
+        return holderId != null && HiddenValues.HolderValueHidden(pack, holderId, def, holds);
     }
 
     /// <summary>hex(): the grid location name of the piece being evaluated, as text.</summary>

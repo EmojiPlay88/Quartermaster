@@ -351,10 +351,15 @@ public class PlacesSessionTests : IDisposable
     public void Keyed_panel_masks_a_holder_of_a_side_not_held()
     {
         var red = new HashSet<string> { "red" };
-        var view = PlayerView.For(BoatState(), Riverland, PlacesFixture.Model, red);
-        var rows = LedgerViewRules.KeyedRows(view, Riverland, "h:blueyard");
+        // B7 #74a: another side's holder hides only its non-Public values (here HullCount made Private; Barges due stays Public)
+        var pack = Riverland with { Properties = Riverland.Properties.Select(p => p.Id == "p-hulls" ? p with { Visibility = Visibility.Private } : p).ToList() };
+        var view = PlayerView.For(BoatState(), pack, PlacesFixture.Model, red);
+        var rows = LedgerViewRules.KeyedRows(view, pack, "h:blueyard");
         Assert.Equal(4, rows.Count);   // HullCount's three rows and Barges due at the current turn
-        Assert.All(rows, r => { Assert.True(r.Hidden); Assert.Null(r.Value); });
+        Assert.All(rows.Where(r => r.Property.Id == "p-hulls"), r => { Assert.True(r.Hidden); Assert.Null(r.Value); });
+        Assert.All(rows.Where(r => r.Property.Id != "p-hulls"), r => Assert.False(r.Hidden));
+        Assert.All(LedgerViewRules.KeyedRows(PlayerView.For(BoatState(), Riverland, PlacesFixture.Model, red), Riverland, "h:blueyard"),
+            r => Assert.False(r.Hidden));   // all Public: every row shown
         Assert.All(LedgerViewRules.KeyedRows(PlayerView.For(BoatState(), Riverland, PlacesFixture.Model, Blue), Riverland, "h:blueyard"),
             r => Assert.False(r.Hidden));
     }

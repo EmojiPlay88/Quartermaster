@@ -185,8 +185,9 @@ public static class LedgerViewRules
     }
 
     /// <summary>
-    /// The keyed values panel of a ledger row over the viewer's state (<see cref="KeyedTable.For"/>): a row the view may lack (another side's
-    /// non-Public value, a holder of a side not held) is <see cref="KeyedCell.Hidden"/> with no value, never the property's Default.
+    /// The keyed values panel of a ledger row over the viewer's state (<see cref="KeyedTable.For"/>): a row the view may lack (a non-Public
+    /// value of another side's piece or holder, a Private place: <see cref="HiddenValues"/>) is <see cref="KeyedCell.Hidden"/> with no value,
+    /// never the property's Default.
     /// </summary>
     public static IReadOnlyList<KeyedCell> KeyedRows(GameState view, RulesPack pack, string ledgerKey) =>
         KeyedTable.For(view, pack, ledgerKey).Select(r => !r.Stored && KeyedValues.HiddenIn(view, pack, ledgerKey, r.Property)

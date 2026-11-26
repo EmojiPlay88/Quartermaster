@@ -416,7 +416,10 @@ public sealed class LedgerPlacesTests : IDisposable
         var w = Game();
         Put(w, "h:blueyard", "p-hulls", "Raft", 3);
         var s = w.Session!;
-        var cells = LedgerViewRules.KeyedRows(PlayerView.For(s.Game!.State, s.Rules!, s.Model, new HashSet<string> { "red" }), s.Rules!, "h:blueyard");
+        // B7 #74a: another side's holder hides only its non-Public values, so HullCount is made Private here
+        var pack = s.Rules! with { Properties = s.Rules!.Properties.Select(p => p.Id == "p-hulls" ? p with { Visibility = Visibility.Private } : p).ToList() };
+        var cells = LedgerViewRules.KeyedRows(PlayerView.For(s.Game!.State, pack, s.Model, new HashSet<string> { "red" }), pack, "h:blueyard")
+            .Where(c => c.Property.Id == "p-hulls").ToList();
         Assert.NotEmpty(cells);
         Assert.All(cells, c => { Assert.True(c.Hidden); Assert.Null(c.Value); });
         Assert.All(cells, c => Assert.Equal(ModuleSession.HiddenText, LedgerViewRules.KeyedValueText(c)));
