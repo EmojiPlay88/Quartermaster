@@ -112,13 +112,15 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
         if (!Blocked) c.Acknowledge(warningIndex);
     }
 
-    public string? NextPhase()
+    public string? NextPhase() => NextPhase(false);
+
+    public string? NextPhase(bool repeat)
     {
         if (Blocked || s.Game == null) return null;
         var v = c.View();
         if (v.NoPhases || v.PlayingText != null) return null;   // hot-seat: another side's phase (the UI says so before calling)
         if (v.BeforeStart) { c.Start(); return null; }
-        return c.Advance();
+        return c.Advance(repeat);
     }
 
     public void HideAlert(string alertId, string? name)

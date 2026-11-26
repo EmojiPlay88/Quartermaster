@@ -134,6 +134,23 @@ public class GameEndControllerTests : IDisposable
         Assert.Contains("skipped: Weather roll, Weather roll", Texts(s));
     }
 
+    [Fact]
+    public void Last_stage_ends_game()
+    {
+        // Last turn 1, last stage 1: leaving Combat in Round 1 ends the game; Round 2 is never played.
+        var (s, c) = Make(Difficulty.FullyAuto, p => p with { LastTurn = 1, LastStage = 1 });
+        c.Start();
+        for (var i = 0; i < 20 && Pos(s).PhaseId != "ph-combat"; i++) c.Advance();
+        Assert.Equal(new PhasePosition(1, 1, "ph-combat", 3), Pos(s));
+        Assert.Null(s.Game!.State.GameOver);
+        c.Advance();
+        var over = s.Game.State.GameOver;
+        Assert.NotNull(over);
+        Assert.Equal(GameEnd.LastTurnText, over!.Text);
+        Assert.Equal(new PhasePosition(1, 1, "ph-combat", 3), Pos(s));
+        Assert.Equal("Game over: the last turn has been played", s.Game.State.Log[^1].Text);
+    }
+
     // ---- victory on entry ----
 
     [Fact]
@@ -214,6 +231,29 @@ public class GameEndControllerTests : IDisposable
         var (h, hc) = Make(Difficulty.FullyAuto, always);
         hc.Start();
         Assert.NotNull(h.Game!.State.GameOver);
+    }
+
+    [Fact]
+    public void Game_end_not_decided_on_viewer_copy()
+    {
+        // A viewer copy (a player's view of an online game, opened read-only) never decides the end, at the last turn or on entry.
+        var (s, c) = Make(Difficulty.FullyAuto, Ends(1, V("v-any", "turn() >= 2", "red")));
+        ToEnd(s, c);
+        var path = Path.Combine(_tmp, "viewer.qmsave");
+        s.SaveNative(path);
+        var json = File.ReadAllText(path);
+        var open = json.IndexOf('{');
+        File.WriteAllText(path, json[..(open + 1)] + "\"viewerCopy\":true," + json[(open + 1)..]);
+        var (v, vc) = Make(Difficulty.FullyAuto, Ends(1, V("v-any", "turn() >= 2", "red")));
+        v.LoadNative(path);
+        Assert.True(v.IsViewerCopy);
+        Assert.Equal(new PhasePosition(1, 1, "ph-end", 4), Pos(v));
+        vc.Advance();
+        Assert.Null(v.Game!.State.GameOver);
+        Assert.Equal(2, Pos(v).Turn);   // stepped on into turn 2, where the condition holds, without ending
+
+        c.Advance();   // the host's own game does end
+        Assert.NotNull(s.Game!.State.GameOver);
     }
 
     // ---- after the end ----

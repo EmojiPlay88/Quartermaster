@@ -106,6 +106,8 @@ public sealed class PackHarness : IDisposable
     /// <summary>
     /// Presses Next Phase with the answer to the repeat question: <paramref name="repeat"/> true plays another pass of a block that repeats
     /// until a player stops (at its last phase), false continues; ignored elsewhere. <see cref="Advance()"/> is <c>Advance(false)</c>.
+    /// When that last phase has end-of-phase entries, a false press there first runs them and stays in the phase, so leaving the block
+    /// takes two <see cref="Advance()"/> calls; a true press runs them and repeats in one.
     /// </summary>
     public string? Advance(bool repeat) => _phases.Advance(repeat);
 

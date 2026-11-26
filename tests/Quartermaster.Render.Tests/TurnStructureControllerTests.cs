@@ -136,6 +136,7 @@ public class TurnStructureControllerTests : IDisposable
         Assert.Equal("ph-combat", Pos(s).PhaseId);
         Assert.Equal(0, boundaries);
         Assert.Equal(new RepeatAsk("Round", 1), c.View().RepeatAsk);
+        Assert.Equal("End-of-phase runs done; press Next Phase again to play another Round or continue", c.View().Notice);
         c.Advance(true);   // the end entries do not run again
         Assert.Equal(("ph-move", 2), (Pos(s).PhaseId, Pos(s).Repeat));
         Assert.Single(s.Game!.Log.OfType<EndPhase>());

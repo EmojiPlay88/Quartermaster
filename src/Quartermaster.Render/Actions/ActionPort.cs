@@ -57,6 +57,12 @@ public interface IActionPort
     /// <summary>Starts the game or advances one phase. Returns "Pass to {side} player" when the acting side changed, else null.</summary>
     string? NextPhase();
 
+    /// <summary>
+    /// As <see cref="NextPhase()"/>, with the player's answer to <see cref="PhaseView.RepeatAsk"/>: true plays another pass of the block
+    /// that repeats until a player stops, false continues. The default (a port written before B5) ignores it and continues.
+    /// </summary>
+    string? NextPhase(bool repeat) => NextPhase();
+
     /// <summary>Host only.</summary>
     void HideAlert(string alertId, string? name);
 

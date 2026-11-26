@@ -69,7 +69,15 @@ public sealed record TickIntent(int Index, bool Ticked) : GameIntent;
 
 public sealed record AckIntent(int Index) : GameIntent;
 
-public sealed record NextPhaseIntent : GameIntent;
+/// <summary>Next Phase (start the game or advance one phase).</summary>
+public sealed record NextPhaseIntent : GameIntent
+{
+    /// <summary>B5 #6: the sender's answer to the repeat question, true = play another pass of the block (false = Continue). The host
+    /// honours it only where it would ask the question itself, after the acting-side check. Omitted when false, so
+    /// <c>{"$t":"nextPhase"}</c> is unchanged.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Repeat { get; init; }
+}
 
 /// <summary>Host only (spec 8a.5): refused when a guest sends it.</summary>
 public sealed record HideAlertIntent(string AlertId, string? Name) : GameIntent;

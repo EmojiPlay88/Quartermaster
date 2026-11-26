@@ -53,7 +53,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
                 DiceIntent d => Dice(g, who, d),
                 TickIntent t => Phase(held, who, () => c.Tick(t.Index, t.Ticked)),
                 AckIntent a => Phase(held, who, () => c.Acknowledge(a.Index)),
-                NextPhaseIntent => NextPhase(held, who),
+                NextPhaseIntent n => NextPhase(held, who, n.Repeat),
                 ChatIntent ch => Chat(g, who, ch.Text, name),
                 HideAlertIntent => IntentResult.Refused(HostOnlyText),
                 _ => IntentResult.Refused(HostOnlyText),
@@ -287,16 +287,23 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         return IntentResult.Done();
     }
 
-    private IntentResult NextPhase(IReadOnlySet<string> sides, string who)
+    /// <summary>
+    /// A guest's Next Phase: refused after the game is over and outside the sender's phase (<see cref="PhaseGate"/>: a reacting side
+    /// does not press it). <paramref name="repeat"/> (B5 #6) is the guest's word only: it is honoured where the host's own state asks
+    /// the repeat question, and refused anywhere else (a guest that never saw the question, or saw it in a state the host has left).
+    /// </summary>
+    private IntentResult NextPhase(IReadOnlySet<string> sides, string who, bool repeat)
     {
-        if (s.Rules is not { Phases.Count: > 0 }) return IntentResult.Refused("This game has no phases; only the host can change the turn.");
+        if (s.Rules is not { Phases.Count: > 0 } pack) return IntentResult.Refused("This game has no phases; only the host can change the turn.");
+        if (s.Game?.State is { GameOver: not null }) return IntentResult.Refused(PhaseController.GameOverText);
         if (PhaseGate(sides) is { } why) return IntentResult.Refused(why);
+        if (repeat && PhaseController.RepeatAskOf(pack, s.Game!.State) == null) return IntentResult.Refused(NotUnderstoodText);
         string? pass;
         using (c.ActingFor(sides, who))
         {
             var v = c.View();
             if (v.BeforeStart) { c.Start(); pass = null; }
-            else pass = c.Advance();
+            else pass = c.Advance(repeat);
         }
         return new IntentResult(true, pass);
     }
@@ -474,19 +481,20 @@ internal static class FormulaIntentRunner
     }
 
     /// <summary>
-    /// False only while a side the sender does not hold owns the turn: true without phases, before the game started and in a phase with
-    /// no acting side (no turn ownership, no restriction), and in a phase of a held side.
+    /// False only while a side the sender may not act for owns the turn: true without phases, before the game started and in a phase with
+    /// no acting side (no turn ownership, no restriction), in a phase of a held side, and in a phase where a held side reacts
+    /// (<see cref="Sequencer.MayAct"/>, B5 #7).
     /// </summary>
     private static bool ActingSideHeld(ModuleSession s, RulesPack pack, IReadOnlySet<string> sides)
     {
         if (pack.Phases is not { Count: > 0 } || s.Game?.State is not { Position: not null } st) return true;
-        if (Sequencer.Current(pack, st) is not { } phase || Sequencer.ActingSide(pack, phase) is not { } side) return true;
-        return sides.Contains(side.Id);
+        if (Sequencer.Current(pack, st) is not { } phase) return true;
+        return Sequencer.MayAct(pack, phase, sides);
     }
 
     /// <summary>
     /// A guest may write holders of held sides or of no side; the global holder only during a phase of a side it holds; and may run a
-    /// unit-less formula only during a phase of a side it holds. Null when allowed.
+    /// unit-less formula only during a phase of a side it holds (or reacts in, B5 #7). Null when allowed.
     /// </summary>
     private static string? GuestRule(ModuleSession s, RulesPack pack, FormulaDef f, string? pieceId, IReadOnlySet<string> sides)
     {

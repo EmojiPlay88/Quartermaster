@@ -241,7 +241,20 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (Sequencer.RepeatChoice(pack, pos) is not { } block) return null;
         if (phase.OnEnd is { Count: > 0 } && st.EndedAt != pos) return null;
         var inner = ReferenceEquals(Sequencer.InnerBlock(pack, pos.PhaseIndex), block);
-        return new RepeatAsk(string.IsNullOrWhiteSpace(block.Label) ? "Stage" : block.Label, inner ? Math.Max(pos.Inner, 1) : pos.Repeat);
+        return new RepeatAsk(BlockLabel(block), inner ? Math.Max(pos.Inner, 1) : pos.Repeat);
+    }
+
+    private static string BlockLabel(PhaseBlock block) => string.IsNullOrWhiteSpace(block.Label) ? "Stage" : block.Label;
+
+    /// <summary>
+    /// The repeat question the game's own state asks at its position, whoever views it (null: nothing to choose, before the start, the
+    /// game is over, or end-of-phase entries still to run). The host checks a guest's repeat choice against it.
+    /// </summary>
+    internal static RepeatAsk? RepeatAskOf(RulesPack pack, GameState st)
+    {
+        if (st.GameOver != null || st.Position is not { } stored || pack.Phases is not { Count: > 0 }) return null;
+        var (pos, _) = Sequencer.Resolve(pack, stored);
+        return pos == null ? null : AskAt(pack, st, pack.Phases[pos.PhaseIndex], pos);
     }
 
     /// <summary>The side asked by the first pending ask run with a unit still open (spec #72), else null.</summary>
@@ -350,7 +363,11 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>The strip notice when a press ran end-of-phase entries that queued runs, so the game stays in the phase.</summary>
     public const string EndStopNotice = "Finish the end-of-phase runs, then press Next Phase again";
 
-    /// <returns>"Pass to {side} player" when the acting side changed, else null (also when the press stopped for end-of-phase runs).</returns>
+    /// <summary>The strip notice when a press ran the end-of-phase entries at the end of a pass the player may repeat (they applied at
+    /// once): the game stays so the next press asks the question. <paramref name="label"/> is the block's label (blank reads "Stage").</summary>
+    public static string RepeatStopText(string label) =>
+        $"End-of-phase runs done; press Next Phase again to play another {label} or continue";
+
     /// <summary>The notice (and refusal) once the game has ended: Next Phase does nothing.</summary>
     public const string GameOverText = "The game is over.";
 
@@ -362,6 +379,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// Presses Next Phase. <paramref name="repeat"/> is the player's answer to <see cref="PhaseView.RepeatAsk"/>: true plays another pass
     /// of the block, false continues; ignored where there is nothing to choose. With a last turn (or stage) reached, the press ends the game
     /// instead of advancing (the victory conditions decide the result); after the end it does nothing but set <see cref="GameOverText"/>.
+    /// At the last phase of a block that repeats until a player stops, a press with <paramref name="repeat"/> false that runs the phase's
+    /// end-of-phase entries stays in the phase (notice <see cref="RepeatStopText"/>) so the question can be asked: there
+    /// <c>Advance()</c> (Continue) needs two presses to leave the block.
     /// </summary>
     /// <returns>"Pass to {side} player" when the acting side changed, else null (also when the press stopped or ended the game).</returns>
     public string? Advance(bool repeat)
@@ -388,11 +408,11 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 SetNotice(Join(relocated, EndStopNotice));
                 stopped = true;
             }
-            else if (ranEnd && !repeat && Sequencer.RepeatChoice(pack, cur) != null)
+            else if (ranEnd && !repeat && Sequencer.RepeatChoice(pack, cur) is { } block)
             {
                 // The end entries just ran at the end of a pass the player may repeat, before the question could be asked (it is asked
                 // only once they ran): stay, so the next press asks. A press already choosing to repeat goes on.
-                SetNotice(relocated);
+                SetNotice(Join(relocated, RepeatStopText(BlockLabel(block))));
                 stopped = true;
             }
             else

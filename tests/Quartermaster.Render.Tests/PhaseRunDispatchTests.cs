@@ -36,7 +36,8 @@ public class PhaseRunDispatchTests : IDisposable
         public string? Position => S.Game!.State.Position?.PhaseId;
     }
 
-    private Rig Make(Difficulty d, Func<RulesPack, RulesPack>? tweak = null, bool autosaver = true)
+    /// <param name="asking">False: a UI written before B5, without <see cref="IPhaseUi.AskRepeat"/> (its default continues).</param>
+    private Rig Make(Difficulty d, Func<RulesPack, RulesPack>? tweak = null, bool autosaver = true, bool asking = true)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
@@ -51,7 +52,7 @@ public class PhaseRunDispatchTests : IDisposable
         var h = new HistoryController(s, c, prepare);
         var order = new List<string>();
         var port = new RecordingPort(new LocalActions(s, c, h, prepare), order);
-        var ui = new FakeUi(order);
+        var ui = asking ? new AskingUi(order) : new FakeUi(order);
         var saver = autosaver
             ? new Autosaver(() => s.Archive.Sha256, p => { order.Add("save"); File.WriteAllText(p, "x"); }, Path.Combine(_tmp, "saves"))
             : null;
@@ -143,6 +144,120 @@ public class PhaseRunDispatchTests : IDisposable
         Assert.Equal("Red is playing Supply", r.Ui.Statuses[^1]);
         Assert.Equal("ph-supply", r.Position);
         Assert.Equal(0, r.Ui.ConfirmCalls);
+    }
+
+    // ---- Next Phase: the repeat question (B5 #6) and game over (B5 #73) ----
+
+    /// <summary>The Round block (Movement–Combat) repeats until a player stops.</summary>
+    private static RulesPack OpenRound(RulesPack p) =>
+        p with { Blocks = new() { new PhaseBlock { FirstPhaseId = "ph-move", LastPhaseId = "ph-combat", Count = 0, Label = "Round" } } };
+
+    /// <summary>Start, then Next Phase until Combat (Weather, Supply, Movement, Combat).</summary>
+    private static void ToCombat(Rig r)
+    {
+        r.C.Start(); r.C.Advance(); r.C.Advance(); r.C.Advance();
+        Assert.Equal("ph-combat", r.Position);
+    }
+
+    [Fact]
+    public async Task Dispatch_asks_repeat_and_passes_choice()
+    {
+        var r = Make(Difficulty.FullyAuto, OpenRound);
+        ToCombat(r);
+        var advanced = 0;
+        r.D.Advanced += () => advanced++;
+        r.Ui.Repeat = true;
+        await r.D.NextPhase();
+        Assert.Equal(new RepeatAsk("Round", 1), Assert.Single(r.Ui.Asked));
+        Assert.Equal("next repeat", r.Order[^1]);
+        Assert.Equal(("ph-move", 2), (r.Position, r.S.Game!.State.Position!.Repeat));
+        Assert.Equal(1, advanced);
+
+        await r.D.NextPhase();   // Movement: nothing to choose
+        Assert.Single(r.Ui.Asked);
+        r.Ui.Repeat = false;
+        await r.D.NextPhase();   // Combat, Round 2: Continue
+        Assert.Equal(new RepeatAsk("Round", 2), r.Ui.Asked[^1]);
+        Assert.Equal("next", r.Order[^1]);
+        Assert.Equal("ph-end", r.Position);
+    }
+
+    [Fact]
+    public async Task Dispatch_cancel_does_nothing()
+    {
+        var r = Make(Difficulty.FullyAuto, OpenRound);
+        ToCombat(r);
+        var advanced = 0;
+        r.D.Advanced += () => advanced++;
+        var actions = r.S.Game!.Actions.Count;
+        r.Ui.Repeat = null;
+        await r.D.NextPhase();
+        Assert.Single(r.Ui.Asked);
+        Assert.DoesNotContain(r.Order, x => x.StartsWith("next"));
+        Assert.Equal("ph-combat", r.Position);
+        Assert.Equal(actions, r.S.Game.Actions.Count);
+        Assert.Equal(0, advanced);
+    }
+
+    [Fact]
+    public async Task Dispatch_no_question_without_open_block()
+    {
+        var r = Make(Difficulty.FullyAuto);   // the fixture's Round block repeats a fixed 2 times
+        ToCombat(r);
+        r.Ui.Repeat = null;                   // would cancel if asked
+        await r.D.NextPhase();
+        Assert.Empty(r.Ui.Asked);
+        Assert.Equal("next", r.Order[^1]);
+        Assert.Equal(("ph-move", 2), (r.Position, r.S.Game!.State.Position!.Repeat));
+    }
+
+    [Fact]
+    public async Task Dispatch_end_entries_first_then_asks()
+    {
+        // Fully automatic: the first press runs Combat's end entries and stays (with a notice); the next press asks.
+        var r = Make(Difficulty.FullyAuto, p => OpenRound(p) with
+        {
+            Phases = p.Phases.Select(x => x.Id != "ph-combat" ? x : x with
+            {
+                OnEnd = new() { new StartEntry { FormulaId = "f-weather", ForEach = ForEachMode.Once } },
+            }).ToList(),
+        });
+        ToCombat(r);
+        r.Ui.Repeat = true;
+        await r.D.NextPhase();
+        Assert.Empty(r.Ui.Asked);
+        Assert.Equal("ph-combat", r.Position);
+        Assert.Equal(PhaseController.RepeatStopText("Round"), r.C.View().Notice);
+        await r.D.NextPhase();
+        Assert.Equal(new RepeatAsk("Round", 1), Assert.Single(r.Ui.Asked));
+        Assert.Equal(("ph-move", 2), (r.Position, r.S.Game!.State.Position!.Repeat));
+    }
+
+    [Fact]
+    public async Task Old_ui_default_continues()
+    {
+        var r = Make(Difficulty.FullyAuto, OpenRound, asking: false);
+        ToCombat(r);
+        await r.D.NextPhase();
+        Assert.Empty(r.Ui.Asked);
+        Assert.Equal("next", r.Order[^1]);
+        Assert.Equal("ph-end", r.Position);
+    }
+
+    [Fact]
+    public async Task Dispatch_game_over_status()
+    {
+        var r = Make(Difficulty.FullyAuto, p => p with { LastTurn = 1 });
+        r.C.Start();
+        for (var i = 0; i < 20 && r.Position != "ph-end"; i++) r.C.Advance();
+        await r.D.NextPhase();   // the last turn has been played
+        Assert.NotNull(r.S.Game!.State.GameOver);
+        var nexts = r.Order.Count(x => x.StartsWith("next"));
+        var actions = r.S.Game.Actions.Count;
+        await r.D.NextPhase();
+        Assert.Equal("The game is over.", r.Ui.Statuses[^1]);
+        Assert.Equal(nexts, r.Order.Count(x => x.StartsWith("next")));
+        Assert.Equal(actions, r.S.Game.Actions.Count);
     }
 
     [Fact]
@@ -426,8 +541,12 @@ public class PhaseRunDispatchTests : IDisposable
 
     // ---- fakes ----
 
-    private sealed class FakeUi(List<string> order) : IPhaseUi
+    private class FakeUi(List<string> order) : IPhaseUi
     {
+        /// <summary>The answer an <see cref="AskingUi"/> gives (true = another pass, false = Continue, null = Cancel).</summary>
+        public bool? Repeat;
+        public readonly List<RepeatAsk> Asked = new();
+
         public readonly List<string> Calls = new();
         public readonly List<string> Statuses = new();
         public bool Continue = true;
@@ -456,6 +575,12 @@ public class PhaseRunDispatchTests : IDisposable
         public void SelectChecklist(int index) => Call("checklist " + index);
     }
 
+    /// <summary>A UI that answers the repeat question (B5 #6).</summary>
+    private sealed class AskingUi(List<string> order) : FakeUi(order), IPhaseUi
+    {
+        public Task<bool?> AskRepeat(RepeatAsk ask) { Asked.Add(ask); return Task.FromResult(Repeat); }
+    }
+
     private sealed class RecordingPort(IActionPort inner, List<string> order) : IActionPort
     {
         public bool IsRemote => inner.IsRemote;
@@ -476,6 +601,7 @@ public class PhaseRunDispatchTests : IDisposable
         public void Tick(int index, bool ticked) => inner.Tick(index, ticked);
         public void Ack(int warningIndex) => inner.Ack(warningIndex);
         public string? NextPhase() { order.Add("next"); return inner.NextPhase(); }
+        public string? NextPhase(bool repeat) { order.Add(repeat ? "next repeat" : "next"); return inner.NextPhase(repeat); }
         public void HideAlert(string alertId, string? name) => inner.HideAlert(alertId, name);
         public void Chat(string text) => inner.Chat(text);
         public void SetTurn(int turn, string? phase) => inner.SetTurn(turn, phase);
