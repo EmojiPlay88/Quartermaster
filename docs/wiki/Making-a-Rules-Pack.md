@@ -602,6 +602,8 @@ If the copy, with the copied values, would belong to another side than the origi
 | `NewGame(setup?, difficulty)` | Starts a game from the named setup (case does not matter), or from the module's setup stacks. An unknown name throws `No setup named "{name}"` |
 | `Run(formulaId, pieceName?, inputs?, dice?)` | Runs a formula on a unit (a unique piece name), with typed inputs by variable name and dice served in order, and applies it when it produced a result. Returns `Applied`, `Refused`, `Error`, `Result`, `Working`, `Missing` and `DiceUsed`. Running out of dice throws `The harness ran out of dice (formula "{name}")` |
 | `Advance()` | Presses Next Phase |
+| `Advance(repeat)` | Presses Next Phase with the answer to the repeat question: `true` plays another pass of a block that repeats until a player stops (at its last phase), `false` continues. `Advance()` is `Advance(false)` |
+| `GameOver` | How the game ended (`Text`, `Winners`, `VictoryId`, `At`), or null while it goes on. After the end Next Phase does nothing |
 | `Value(name, property)` | The value of a property on a holder (`Global` for the global holder) or a unique piece; an unset stored value reads its Default. Errors: `No holder or piece named "{name}"`, `No piece named "{name}"`, `{n} pieces are named "{name}"; use a unique name`, `No property named "{name}"` |
 | `Log` | The full host log, every side's lines |
 | `Phase`, `Pending` | The current phase's name, and the runs waiting for input |
