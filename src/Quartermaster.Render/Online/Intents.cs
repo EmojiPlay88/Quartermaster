@@ -19,6 +19,7 @@ namespace Quartermaster.Render;
 [JsonDerivedType(typeof(NextPhaseIntent), "nextPhase")]
 [JsonDerivedType(typeof(HideAlertIntent), "hideAlert")]
 [JsonDerivedType(typeof(ChatIntent), "chat")]
+[JsonDerivedType(typeof(ScheduleIntent), "schedule")]
 public abstract record GameIntent;
 
 /// <summary>One move gesture (any number of groups); the host fires the phase's OnMove formulas.</summary>
@@ -78,6 +79,11 @@ public sealed record NextPhaseIntent : GameIntent
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Repeat { get; init; }
 }
+
+/// <summary>B5 #62: act on schedule row <paramref name="RowId"/> (Place or Withdraw). The host checks it for the sender: only the row's
+/// counters the sender may act on are touched, and an unknown, unreached or done row, or one without such a counter, gets one neutral
+/// refusal.</summary>
+public sealed record ScheduleIntent(string RowId) : GameIntent;
 
 /// <summary>Host only (spec 8a.5): refused when a guest sends it.</summary>
 public sealed record HideAlertIntent(string AlertId, string? Name) : GameIntent;

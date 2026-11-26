@@ -286,6 +286,7 @@ public class ScheduleDueTests
         s.Apply(new MarkScheduled("r1", "Schedule: Relief barges arrive", Who: "Ann"));
         s.Apply(new MarkScheduled("r1", "Schedule: Relief barges arrive", Who: "Ann"));
         s.Apply(new MarkScheduled(null!, "Schedule: nothing"));
+        s.Apply(new MarkScheduled("  ", "Schedule: blank"));
         Assert.Equal(new[] { "r1" }, s.ScheduleDone);
         var line = Assert.Single(s.Log.Skip(before));
         Assert.Equal(LogKind.Turn, line.Kind);

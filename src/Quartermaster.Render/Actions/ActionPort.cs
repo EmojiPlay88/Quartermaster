@@ -63,6 +63,12 @@ public interface IActionPort
     /// </summary>
     string? NextPhase(bool repeat) => NextPhase();
 
+    /// <summary>
+    /// Acts on a schedule row (B5 #62: Place or Withdraw, one action). Returns null when done (a remote port: when sent; the host's refusal
+    /// comes as a notice), else the refusal. The default (a port written before B5) refuses with <see cref="IntentExecutor.NotUnderstoodText"/>.
+    /// </summary>
+    string? ActOnSchedule(string rowId) => IntentExecutor.NotUnderstoodText;
+
     /// <summary>Host only.</summary>
     void HideAlert(string alertId, string? name);
 

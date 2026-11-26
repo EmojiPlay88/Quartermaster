@@ -212,7 +212,7 @@ public sealed class GameState
                 Log.Add(LogBuilder.Line(this, LogKind.Turn, "Game over: " + GameOver.Text, eg.Who, eg.At));
                 break;
             case MarkScheduled ms:
-                if (string.IsNullOrEmpty(ms.RowId) || ScheduleDone?.Contains(ms.RowId, StringComparer.Ordinal) == true) break;
+                if (string.IsNullOrWhiteSpace(ms.RowId) || ScheduleDone?.Contains(ms.RowId, StringComparer.Ordinal) == true) break;
                 (ScheduleDone ??= new()).Add(ms.RowId);
                 Log.Add(LogBuilder.Line(this, LogKind.Turn, ms.Text ?? "", ms.Who, ms.At));
                 break;

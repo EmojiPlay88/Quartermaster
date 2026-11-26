@@ -491,6 +491,60 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         Exec(new AcknowledgeWarning(warningIndex, (ws[warningIndex].Message ?? "").Replace("{unit}", "").Trim()));
     }
 
+    // ---- schedule (B5 #62) ----
+
+    /// <summary>The one refusal for a schedule row that is unknown, not reached, done, or has no counter the actor may act on.</summary>
+    public const string ScheduleRefusedText = "That schedule row can't be done now.";
+
+    /// <summary>The refusal for a schedule row acted on during a phase the actor may not act in.</summary>
+    public const string ScheduleOtherPhaseText = "That can't be done during another side's phase.";
+
+    /// <summary>
+    /// Acts on a schedule row as one action labelled with the row's label (B5 #62). Place (Arrive, Return): marks the row done, then runs
+    /// its formula for each of its counters as a start entry for units runs (every difficulty as there), stamped for the actor; the counters
+    /// stay on the zone map. Withdraw (Leave): moves the counters to the zone map's first board centre in one move (no OnMove triggers) or
+    /// deletes them without a zone map, marks the row done, then runs the formula on the moved counters. The counters are those the actor
+    /// may act on (a guest's while <see cref="ActingFor"/> is open), read from the full state. <see cref="RunsQueued"/> is raised after
+    /// the action.
+    /// </summary>
+    /// <returns>Null when done; else the refusal: <see cref="GameOverText"/>, <see cref="ScheduleOtherPhaseText"/> (the actor may not act
+    /// in the current phase) or <see cref="ScheduleRefusedText"/>.</returns>
+    public string? ActOnSchedule(string rowId)
+    {
+        if (s.Game is not { } g || s.Rules is not { } pack) return ScheduleRefusedText;
+        if (g.State.GameOver != null) return GameOverText;
+        var phase = CurrentPhase();
+        if (phase != null && !Sequencer.MayAct(pack, phase, ActorSides)) return ScheduleOtherPhaseText;
+        if (phase == null || string.IsNullOrWhiteSpace(rowId)) return ScheduleRefusedText;
+        if (ScheduleDue.For(pack, g.State, s.Model, ActorSides).FirstOrDefault(d => d.Row.Id == rowId) is not { PieceIds.Count: > 0 } due)
+            return ScheduleRefusedText;
+        var row = due.Row;
+        var leave = row.Action == ScheduleAction.Leave;
+        MovePieces? move = null;
+        if (leave && !string.IsNullOrWhiteSpace(row.ZoneMapId))
+        {
+            if (ScheduleDue.ZoneMap(s.Model, row.ZoneMapId) is not { Boards.Count: > 0 } map) return ScheduleRefusedText;   // the validator reports it
+            var board = map.Boards[0];
+            move = new MovePieces(due.PieceIds.ToList(), map.Id, new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0), null);
+        }
+        var queued = new List<PendingRun>();
+        using (g.BeginAction(due.Label))
+        {
+            if (move != null) Exec(move);   // straight to the game: a schedule move fires no OnMove entries
+            else if (leave) foreach (var id in due.PieceIds) Exec(new RemovePiece(id));
+            Exec(new MarkScheduled(row.Id, "Schedule: " + due.Label));
+            // A deleting row has no counters left to run a formula on (the validator refuses that combination).
+            if (!string.IsNullOrWhiteSpace(row.FormulaId) && !(leave && move == null) && FindFormula(phase, row.FormulaId) is { } f)
+            {
+                var units = due.PieceIds.Where(g.State.Pieces.ContainsKey)
+                    .Select(id => new Unit(id, PieceInfo.Name(g.State.Pieces[id]), null)).ToList();
+                Apply(f, "schedule", units, queued);
+            }
+        }
+        RaiseQueued(queued);
+        return null;
+    }
+
     /// <summary>Applies a formula result; <paramref name="runId"/> (when set) marks that unit of the pending run done.</summary>
     public bool ApplyFormula(string? runId, string? pieceId, FormulaTrace trace, bool calculated)
     {

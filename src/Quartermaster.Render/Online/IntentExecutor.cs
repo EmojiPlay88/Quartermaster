@@ -55,6 +55,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
                 AckIntent a => Phase(held, who, () => c.Acknowledge(a.Index)),
                 NextPhaseIntent n => NextPhase(held, who, n.Repeat),
                 ChatIntent ch => Chat(g, who, ch.Text, name),
+                ScheduleIntent si => Schedule(held, who, si.RowId),
                 HideAlertIntent => IntentResult.Refused(HostOnlyText),
                 _ => IntentResult.Refused(HostOnlyText),
             };
@@ -306,6 +307,20 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             else pass = c.Advance(repeat);
         }
         return new IntentResult(true, pass);
+    }
+
+    // ---- schedule (B5 #62) ----
+
+    /// <summary>
+    /// A guest's schedule row: run for the sender's sides, so the row's counters are those the sender may act on in the full state; the
+    /// controller's refusal (game over, another side's phase, the one neutral text) is passed through.
+    /// </summary>
+    private IntentResult Schedule(IReadOnlySet<string> sides, string who, string? rowId)
+    {
+        if (BadId(rowId)) return IntentResult.Refused(NotUnderstoodText);
+        string? why;
+        using (c.ActingFor(sides, who)) why = c.ActOnSchedule(rowId!);
+        return why == null ? IntentResult.Done() : IntentResult.Refused(why);
     }
 
     // ---- chat ----

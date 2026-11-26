@@ -123,6 +123,8 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
         return c.Advance(repeat);
     }
 
+    public string? ActOnSchedule(string rowId) => Blocked ? BlockedText : c.ActOnSchedule(rowId);
+
     public void HideAlert(string alertId, string? name)
     {
         if (Blocked || s.Game is not { } g) return;

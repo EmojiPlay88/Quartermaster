@@ -148,6 +148,13 @@ public sealed class RemoteActions(GuestSession g) : IActionPort
         return null;
     }
 
+    /// <summary>Sent to the host; its refusal comes back as a notice, so this always returns null.</summary>
+    public string? ActOnSchedule(string rowId)
+    {
+        Send(new ScheduleIntent(rowId));
+        return null;
+    }
+
     public void HideAlert(string alertId, string? name) => Refuse(IntentExecutor.HostOnlyText);
 
     public void Chat(string text)
