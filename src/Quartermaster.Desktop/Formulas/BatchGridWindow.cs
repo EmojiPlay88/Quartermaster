@@ -63,6 +63,7 @@ public sealed class BatchGridWindow : Window
     GameSession? _game;
     int _shownRows = -1;
     bool _closing;
+    bool _done;      // a menu batch fully applied: the Close is posted, nothing may apply or send it again until it runs
     bool _sending;
     bool _updating;
 
@@ -494,6 +495,7 @@ public sealed class BatchGridWindow : Window
 
     void CalculateAll()
     {
+        if (_done) return;
         if (_model.HostCalculates) { SendToHost(_model.OpenRows(), calculate: true, preview: true); return; }
         _model.CalculateAll();
         UpdateRows();
@@ -501,10 +503,16 @@ public sealed class BatchGridWindow : Window
         UpdateCheat();
     }
 
-    void CloseAfterFullApply() => Dispatcher.UIThread.Post(() => { if (!_closing) Close(); });
+    void CloseAfterFullApply()
+    {
+        _done = true;
+        _calcAll.IsEnabled = _applyAll.IsEnabled = _applyRow.IsEnabled = _addRow.IsEnabled = _removeRow.IsEnabled = false;
+        Dispatcher.UIThread.Post(() => { if (!_closing) Close(); });
+    }
 
     void ApplyAll()
     {
+        if (_done) return;
         if (_model.HostCalculates) { SendToHost(_model.OpenRows(), calculate: false); return; }
         var before = _model.RowCount;
         var n = _model.ApplyAll();
@@ -527,7 +535,7 @@ public sealed class BatchGridWindow : Window
 
     void AddRow()
     {
-        if (_menu == null) return;
+        if (_menu == null || _done) return;
         var sel = SelectedRow;
         var ok = _menu.AddRow(sel >= 0 ? sel : null);
         _status.Text = ok ? "" : _menu.Status ?? "";
@@ -538,7 +546,7 @@ public sealed class BatchGridWindow : Window
 
     void RemoveRow()
     {
-        if (_menu == null) return;
+        if (_menu == null || _done) return;
         var sel = SelectedRow;
         if (sel < 0) { _status.Text = FormulaWindowRules.SelectRowText; return; }
         if (!_menu.RemoveRow(sel)) return;
@@ -563,7 +571,7 @@ public sealed class BatchGridWindow : Window
     /// <summary>Online guest: the rows go to the host as formula intents, awaited without blocking the UI; the grid shows its verdicts.</summary>
     async void SendToHost(IReadOnlyList<int> rows, bool calculate, bool preview = false)
     {
-        if (_sending || _closing) return;
+        if (_sending || _closing || _done) return;
         _sending = true;
         _calcAll.IsEnabled = _applyAll.IsEnabled = _applyRow.IsEnabled = _addRow.IsEnabled = _removeRow.IsEnabled = false;
         _status.Text = FormulaWindowRules.AskingHostText;
@@ -590,7 +598,7 @@ public sealed class BatchGridWindow : Window
         finally
         {
             _sending = false;
-            if (!_closing) _calcAll.IsEnabled = _applyAll.IsEnabled = _applyRow.IsEnabled = _addRow.IsEnabled = _removeRow.IsEnabled = true;
+            if (!_closing && !_done) _calcAll.IsEnabled = _applyAll.IsEnabled = _applyRow.IsEnabled = _addRow.IsEnabled = _removeRow.IsEnabled = true;
             if (!_closing) { _debounce.Stop(); Safe(Refresh); }
         }
     }

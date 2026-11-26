@@ -208,6 +208,30 @@ public sealed class MenuBatchGridTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Menu_grid_full_apply_disables_buttons_before_close()
+    {
+        var (w, _) = Make(Difficulty.Hardcore, pack: MovedInput);
+        var win = Menu(w, PhaseFixture.RedOne, PhaseFixture.RedTwo);
+        win.TypeCell(-1, 1, "1");
+        win.TypeCell(-1, 2, "Clear");
+        Click(ButtonOf(win, "Calculate all"));
+        Pump();
+        var applyAll = ButtonOf(win, "Apply all");
+        var calcAll = ButtonOf(win, "Calculate all");
+        Click(applyAll);
+        // The Close is posted: until it runs, nothing can apply the batch again.
+        Assert.False(applyAll.IsEnabled);
+        Assert.False(calcAll.IsEnabled);
+        var fuel = Fuel(w, PhaseFixture.RedOne);
+        var actions = w.Session!.Game!.Actions.Count;
+        Click(applyAll);
+        Assert.Equal(actions, w.Session.Game.Actions.Count);
+        Assert.Equal(fuel, Fuel(w, PhaseFixture.RedOne));
+        Pump();
+        Assert.False(win.IsVisible);
+    }
+
+    [AvaloniaFact]
     public void Menu_grid_nothing_applied_status()
     {
         var (w, _) = Make(Difficulty.Hardcore);
