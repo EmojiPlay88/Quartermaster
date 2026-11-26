@@ -55,8 +55,10 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
 
 /// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
 /// roller. The online host uses it so every die of a guest's run is pinned per dice configuration.</param>
-/// <param name="PickSides">The sides whose view a Piece binding's typed label is resolved in (<see cref="PieceChoices"/>): the requesting
-/// guest's sides on the host; null = every piece (solo, the host's own full-state runs, a run on a player view state).</param>
+/// <param name="PickSides">The chooser's sides: a Piece binding's typed label is resolved among the candidates of their view
+/// (<see cref="PieceChoices"/>) and an Input's choices filter is judged on that view (B7), so the accepted values are exactly the chooser's
+/// listed ones. The requesting guest's sides on the host, the viewer's sides in hot-seat; null = the run's own state (solo, hook runs, the
+/// host's own full-state runs, a run on a player view state). The view is built at most once per run, and only when it is needed.</param>
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
     IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false,
     Func<string, int, int, IReadOnlyList<int>>? Dice = null, IReadOnlySet<string>? PickSides = null)
@@ -682,6 +684,36 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         /// <summary>The compiled filters of this run's aggregate calls, each filter text compiled once per run (or per pass), sharing <see cref="Sides"/>.</summary>
         public AggregateFilters Filters => _filters ??= _pass?.Filters ?? new(s, owner._pack, owner._model) { SharedSides = Sides };
         private AggregateFilters? _filters;
+
+        /// <summary>
+        /// B7: the chooser's view (<see cref="PlayerView.For"/> of this run's state for <see cref="RunRequest.PickSides"/>), on which an
+        /// Input's choices filter and a Piece binding's candidates are judged; built on first use, at most once per run, and only for a run
+        /// with PickSides on a full state. Null otherwise: the run's own state is the chooser's (solo, a hook run, a run on a player view).
+        /// </summary>
+        public Chooser? ChooserView
+        {
+            get
+            {
+                if (_chooserDone) return _chooser;
+                _chooserDone = true;
+                if (r.PickSides == null || s.IsPlayerView) return null;
+                PieceChoices.ViewBuilds++;
+                var view = PlayerView.For(s, owner._pack, owner._model, r.PickSides);
+                return _chooser = new Chooser(owner, view);
+            }
+        }
+        private Chooser? _chooser;
+        private bool _chooserDone;
+
+        /// <summary>The chooser's view with its own side map and aggregate filters (a filter on the view reads only the view).</summary>
+        public sealed class Chooser(FormulaRunner owner, GameState view)
+        {
+            public GameState State => view;
+            public Lazy<Func<PieceInstance, string?>> Sides { get; } = PieceFilter.SideMap(view, owner._pack);
+            private AggregateFilters? _filters;
+            public AggregateFilters Filters => _filters ??= new(view, owner._pack, owner._model) { SharedSides = Sides };
+        }
+
         private readonly Dictionary<string, IReadOnlyList<int>> _byKey = byKey;
         private int _inlineDice;
         public IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey => _byKey;
@@ -941,8 +973,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
 
         /// <summary>
-        /// A Piece binding: the typed label (trimmed, case-insensitive) resolved among the candidates of <see cref="RunRequest.PickSides"/>
-        /// (<see cref="PieceChoices"/>), then that piece's property as a Unit binding reads it. Never filled automatically. On a player view
+        /// A Piece binding: the typed label (trimmed, case-insensitive) resolved among the candidates on the chooser's view
+        /// (<see cref="ChooserView"/>, <see cref="PieceChoices"/>), then that piece's property as a Unit binding reads it. Never filled automatically. On a player view
         /// state the placeholder of a masked piece, and a non-Public value of a side the view was not made for, are hidden (missing), not Default.
         /// </summary>
         private VariableState PickedPiece(VariableBinding b)
@@ -972,7 +1004,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private (PieceInstance Piece, string Name) PickOnce(VariableBinding b)
         {
             if (b.SameHex && piece == null) throw new Missing("Needs a unit");
-            var list = PieceChoices.Named(s, owner._pack, owner._model, b, r.PickSides, piece?.Id);
+            // The candidates on the chooser's view, shared with the choices of this run's Inputs (one view per run).
+            var list = PieceChoices.Named(ChooserView?.State ?? s, owner._pack, owner._model, b, piece?.Id);
             if (list.Count == 0)
                 throw new Missing(b.SameHex ? PieceChoices.NoPieceInHex
                     : string.IsNullOrWhiteSpace(b.PieceFilter) ? PieceChoices.NoPiece : $"No piece matches \"{b.PieceFilter.Trim()}\"");
@@ -990,6 +1023,11 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private static PropertyDef Unkeyed(PropertyDef prop) =>
             prop.KeyedBy != null && KeyedFacts.IsKeyed(prop) ? throw KeyedValues.BareRead(prop) : prop;
 
+        /// <summary>
+        /// An Input binding: the typed value (or its auto value), checked against its choices. Choices from a table are filtered for the run
+        /// piece on the chooser's view (<see cref="ChooserView"/>, B7) when the run has one, else on the run's state, so
+        /// <see cref="InputChoices.NotOneText"/> means "not in the chooser's list", never "excluded by a value the chooser cannot see".
+        /// </summary>
         private VariableState Input(VariableBinding b)
         {
             var name = b.Variable;
@@ -1001,7 +1039,16 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             {
                 var keys = InputChoices.TableKeys(owner._pack, b.ChoicesTable) ?? throw new EvalError($"The choices table for {name} was deleted");
                 numeric = InputChoices.AllNumeric(keys);
-                try { choices = InputChoices.Filter(s, owner._pack, b, keys, piece, Sides, Filters, strict: true); }
+                try
+                {
+                    // B7: judged on the chooser's view (the chooser's own list: a row excluded only by a value hidden from the chooser is
+                    // kept), with the run piece as that view has it; a run piece the chooser cannot see has no choice.
+                    if (piece != null && !string.IsNullOrWhiteSpace(b.ChoicesFilter) && ChooserView is { } view)
+                        choices = view.State.Pieces.TryGetValue(r.PieceId!, out var shown) && shown != null
+                            ? InputChoices.Filter(view.State, owner._pack, b, keys, shown, view.Sides, view.Filters, strict: true)
+                            : new List<string>();
+                    else choices = InputChoices.Filter(s, owner._pack, b, keys, piece, Sides, Filters, strict: true);
+                }
                 catch (EvalError ex) { return new(name, null, false, false, ex.Message); }
                 if (choices.Count == 0) return new(name, null, false, false, InputChoices.NoChoiceText);
             }
