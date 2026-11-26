@@ -180,13 +180,15 @@ public class PlacesFormulaMaskingTests : IDisposable
     }
 
     [Fact]
-    public void HotSeat_other_side_keyed_holder_read_masked_own_side_not()
+    public void HotSeat_other_side_keyed_holder_public_read_unmasked()
     {
+        // B7 #74a: a Public keyed value of another side's holder is seen (the one rule, HiddenValues), so the read masks nothing.
         var s = Open();
         s.SetViewSides(Blue);
-        var v = Dialog(s, "f-stock").Evaluate(s.Game!.State);
-        Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
-        Assert.DoesNotContain(SecretText, Shown(v));
+        var m = Dialog(s, "f-stock");
+        Assert.Empty(m.Hidden);
+        var v = m.Evaluate(s.Game!.State);
+        Assert.Equal(v.Trace.Working, v.WorkingText);
         s.SetViewSides(Red);   // Red's own depot, run on Red's own piece
         Assert.Empty(Dialog(s, "f-stock", PhaseFixture.RedOne).Hidden);
     }
@@ -247,7 +249,7 @@ public class PlacesFormulaMaskingTests : IDisposable
     {
         var host = Open();
         var guest = Guest(host);
-        foreach (var id in new[] { "f-mines", "f-auto", "f-row", "f-lay", "f-stock" })
+        foreach (var id in new[] { "f-mines", "f-auto", "f-row", "f-lay" })
         {
             var g = Dialog(guest, id);
             Assert.NotEmpty(g.Hidden);
@@ -255,6 +257,7 @@ public class PlacesFormulaMaskingTests : IDisposable
                 .OrderBy(x => x), g.Hidden.OrderBy(x => x));
         }
         Assert.Empty(Dialog(guest, "f-flood").Hidden);
+        Assert.Empty(Dialog(guest, "f-stock").Hidden);   // B7 #74a: a Public value of Red's depot
     }
 
     [Fact]

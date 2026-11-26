@@ -15,8 +15,12 @@ namespace Quartermaster.Render;
 /// <see cref="AggregateCallInput"/> when it counts or reads a property that is not Public (itself or in its filter), or whatever it reads once
 /// the viewer's view may lack pieces or values (<see cref="PieceAccess.PiecesMayHide"/>: from the pack and module, so host and guest agree);
 /// and through a table read (a Table binding, or lookup() in its expressions, marked by <see cref="TableCallInput"/>) of a table a non-Public
-/// property overrides, which reads that property on the run piece and so hides exactly when a Private Unit binding would. An input is hidden when it reads a private property of a piece the viewer cannot see or
-/// that belongs to a side not held, or any value of a holder owned by a side not held (or missing from the pack). The rule depends only on
+/// property overrides, which reads that property on the run piece and so hides exactly when a Private Unit binding would. Whether a value is
+/// hidden is decided by the one visibility rule, <see cref="HiddenValues"/> (B7): a viewer who sees everything (solo, every side held, a game
+/// that is over) has nothing hidden; else an input is hidden when it reads any value of a piece the viewer cannot see, a value of a piece of
+/// a side not held unless its property is Public, a value of a holder owned by a side not held unless its property is Public (Holder
+/// bindings, holder(H, P) and keyed() with a holder argument pass the property they read), a holder missing from the pack, or a place
+/// value that is not Public. A binding (any kind but Piece) whose own expressions read a hidden variable is hidden too. The rule depends only on
 /// the rules pack and the pieces, never on whether a value is set, so it gives the same answer on the host's full state and on a guest's
 /// filtered snapshot. A table lookup counts as hidden when any other input is, since its keys may be computed from them. A computed property
 /// built from hidden data (<see cref="FormulaVariables.ComputedFromHidden"/>) is hidden wherever it is read, even on the viewer's own unit
@@ -79,13 +83,14 @@ public static class FormulaMasking
     private static readonly IReadOnlySet<string> NoSides = new HashSet<string>();
 
     /// <summary>
-    /// True when a viewer holding <paramref name="sides"/> may see this output's value (before and after): null sides (solo) see all; otherwise
+    /// True when a viewer holding <paramref name="sides"/> may see this output's value (before and after): a viewer who sees everything
+    /// (<see cref="HiddenValues.SeesEverything"/>: solo, every side held, the game is over) sees it; otherwise
     /// the viewer may edit its ledger value, and a keyed value is not hidden from it (<see cref="KeyedValues.HiddenFor"/>: a Private place,
     /// another side's keyed value). Decides the dialog's "(negative)" mark and the batch grids' ledger text.
     /// </summary>
     public static bool OutputShown(ModuleSession s, IReadOnlySet<string>? sides, OutputPreview o)
     {
-        if (sides == null) return true;
+        if (HiddenValues.SeesEverything(s.Game?.State, s.Rules, sides)) return true;
         if (o == null || !s.CanEditLedgerFor(o.Key, sides)) return false;
         if (o.ValueKey == null) return true;   // unkeyed: the ledger rule above
         if (s.Rules is not { } pack || s.Game?.State is not { } st) return false;
@@ -124,55 +129,52 @@ public static class FormulaMasking
 
     /// <summary>
     /// The variables of <paramref name="f"/> whose value comes from data a viewer holding <paramref name="sides"/> may not see. Works on a
-    /// full state and on a filtered one alike. Empty in solo (null sides) or when every side is held. Fails closed: a subject piece that is
+    /// full state and on a filtered one alike. Empty when the viewer sees everything (<see cref="HiddenValues.SeesEverything"/>: solo, every
+    /// side held, or the game is over). Fails closed: a subject piece that is
     /// not in the state, or that the viewer cannot see, hides every Unit input.
     /// </summary>
     public static HashSet<string> HiddenVariables(RulesPack pack, ModuleModel? model, GameState state, FormulaDef f, string? pieceId,
         IReadOnlySet<string>? sides)
     {
         var hidden = new HashSet<string>(StringComparer.Ordinal);
-        if (sides == null || pack == null || f == null) return hidden;
-        if ((pack.Sides ?? new List<SideDef>()).All(x => x == null || sides.Contains(x.Id))) return hidden;   // as PlayerView.For
+        if (pack == null || f == null || HiddenValues.SeesEverything(state, pack, sides)) return hidden;   // as PlayerView.For
+        var holds = sides!.Contains;   // the viewer's held sides, as every HiddenValues caller takes them
         var access = new PieceAccess(state, pack, model, sides);
-        bool PropPrivate(string? prop) =>
-            !PropertyFacts.IsPublic(pack, (pack.Properties ?? new List<PropertyDef>()).FirstOrDefault(p => p != null && p.Id == prop));   // computed from hidden data: Private
-        // The run piece's private values are hidden: it is not in the state, the viewer cannot see it, or it is of a side not held.
-        bool RunPieceHidden()
+        var props = pack.Properties ?? new List<PropertyDef>();
+        PropertyDef? PropById(string? id) => id == null ? null : props.FirstOrDefault(p => p != null && p.Id == id);
+        bool PropPrivate(string? prop) => !PropertyFacts.IsPublic(pack, PropById(prop));   // computed from hidden data: Private
+        // A value of the run piece (null property: any of its values) is hidden: the piece is not in the state, the viewer cannot see it, or
+        // HiddenValues hides that value of a piece of its side.
+        bool RunPieceValueHidden(PropertyDef? prop)
         {
-            if (pieceId == null) return false;   // no piece: a table read is the printed cell
-            if (!state.Pieces.TryGetValue(pieceId, out var p) || p == null || !access.CanSee(pieceId)) return true;
-            try { return access.NotHeld(access.SideOf(p)); }
+            if (!state.Pieces.TryGetValue(pieceId!, out var p) || p == null || !access.CanSee(pieceId)) return true;
+            try { return HiddenValues.PieceValueHidden(pack, prop, access.SideOf(p), holds); }
             catch (Exception) { return true; }   // fail closed
         }
+        // The run piece's private values are hidden (no piece: a table read is the printed cell).
+        bool RunPieceHidden() => pieceId != null && RunPieceValueHidden(null);
         // A table read of the run piece's own row may be a non-Public override: hidden as a Private Unit read is.
         bool TableHidden(string? tableId) => tableId != null && Quartermaster.Rules.Tables.CellOverrideFacts.HiddenOverride(pack, tableId) && RunPieceHidden();
-        bool UnitHidden(string? prop)
-        {
-            if (pieceId == null) return false;   // a unit-less run has no unit values to read
-            if (!state.Pieces.TryGetValue(pieceId, out var p) || p == null || !access.CanSee(pieceId)) return true;
-            try { return access.NotHeld(access.SideOf(p)) && PropPrivate(prop); }
-            catch (Exception) { return true; }   // fail closed
-        }
-        bool HolderHidden(string? holderId)
-        {
-            if (holderId == null || holderId == HolderDef.GlobalId) return false;
-            if (!(pack.Holders ?? new List<HolderDef>()).Any(h => h != null && h.Id == holderId)) return true;   // unknown holder (as PlayerView)
-            return access.NotHeld(Ownership.SideOfHolder(holderId, pack));
-        }
+        // A unit-less run has no unit values to read.
+        bool UnitHidden(string? prop) => pieceId != null && RunPieceValueHidden(PropById(prop));
+        // A holder's value of a property (null: the whole key) as HiddenValues decides it; no holder named reads the Global holder.
+        bool HolderHidden(string? holderId, PropertyDef? prop) =>
+            holderId != null && HiddenValues.HolderValueHidden(pack, holderId, prop, holds);
         foreach (var b in f.Bindings ?? new List<VariableBinding>())
         {
             if (b?.Variable == null) continue;
             var isHidden = b.Kind switch
             {
                 BindingKind.Unit => UnitHidden(b.Property),
-                BindingKind.Holder => HolderHidden(b.HolderId),
+                BindingKind.Holder => HolderHidden(b.HolderId, PropById(b.Property)),
                 BindingKind.Table => TableHidden(b.TableId),   // otherwise decided below
                 _ => false,   // Global is public; Input, Roll, Location and Moved are the player's own; Piece is decided below
             };
             if (isHidden) hidden.Add(b.Variable);
         }
         // holder(H, P) in the formula's own expressions reads the holder as a Holder binding would; an unresolvable call fails closed.
-        if (FormulaVariables.HolderReads(f).Any(r => r.Holder == null || pack.HolderByName(r.Holder) is not { } h || HolderHidden(h.Id)))
+        if (FormulaVariables.HolderReads(f).Any(r => r.Holder == null || pack.HolderByName(r.Holder) is not { } h
+                || HolderHidden(h.Id, r.Property == null ? null : pack.PropertyByName(r.Property))))
             hidden.Add(HolderCallInput);
         // Aggregates read every piece, hidden or not: a count, a non-public property or a filter over one reads data this viewer may not see,
         // and so does any aggregate once the viewer's view may lack pieces or values (a map it cannot see, a Hideable or Obscurable trait).
@@ -183,7 +185,7 @@ public static class FormulaMasking
             && FormulaVariables.TablesRead(f).Any(t => FormulaVariables.LookupHidden(pack, t))) hidden.Add(TableCallInput);
         // B6: keyed(P, key[, H]) reads a keyed value as PlayerView and keyed() on a view decide; a place output's working shows its Before.
         // Packs without keyed properties (most packs) never parse the formula for keyed() calls.
-        if ((pack.Properties ?? new List<PropertyDef>()).Any(KeyedFacts.IsKeyed))
+        if (props.Any(KeyedFacts.IsKeyed))
             AddKeyedHidden(pack, f, hidden, pieceId, UnitHidden, HolderHidden);
         // A computed property built from hidden data shows that data wherever it is read: through a binding of any kind (the viewer's own
         // unit and the global holder included) or a variable, which is hidden itself, and through holder(H, P), which hides like a hidden holder.
@@ -201,7 +203,41 @@ public static class FormulaMasking
         if (hidden.Count > 0)
             foreach (var b in f.Bindings ?? new List<VariableBinding>())
                 if (b is { Kind: BindingKind.Table, Variable: not null }) hidden.Add(b.Variable);
+        AddDerivedHidden(f, hidden);
         return hidden;
+    }
+
+    /// <summary>
+    /// B7, the last step of <see cref="HiddenVariables"/>: a fixpoint over the bindings. A binding of any kind but Piece whose own expressions
+    /// (<see cref="FormulaVariables.Sources"/>: auto value, "Only when", dice count, row/column) read a hidden variable is hidden too, since its
+    /// value would show the hidden one. A Piece binding is the viewer's own pick and stays open. An Input's "Only when" is not one of them: the
+    /// Input's value is typed by the viewer, never computed from its guard, and a guard over hidden data leaves the box typeable and is the
+    /// host's to decide (<see cref="GuardsOnHidden"/>); its auto value is.
+    /// </summary>
+    private static void AddDerivedHidden(FormulaDef f, HashSet<string> hidden)
+    {
+        if (hidden.Count == 0) return;
+        var reads = new List<(string Variable, IReadOnlyList<string> Reads)>();
+        foreach (var b in f.Bindings ?? new List<VariableBinding>())
+        {
+            if (b?.Variable == null || b.Kind == BindingKind.Piece || hidden.Contains(b.Variable)) continue;
+            var vars = new List<string>();
+            // An Input's only derived expression is its auto value (see above).
+            var sources = b.Kind == BindingKind.Input ? new[] { b.AutoValue } : FormulaVariables.Sources(b).ToArray<string?>();
+            foreach (var src in sources)
+            {
+                if (string.IsNullOrWhiteSpace(src)) continue;
+                try { vars.AddRange(Parser.Variables(Parser.Parse(src))); }
+                catch (ParseError) { }   // never runs
+            }
+            if (vars.Count > 0) reads.Add((b.Variable, vars));
+        }
+        for (var changed = true; changed;)
+        {
+            changed = false;
+            foreach (var (variable, vars) in reads)
+                if (!hidden.Contains(variable) && vars.Any(hidden.Contains)) changed |= hidden.Add(variable);
+        }
     }
 
     /// <summary>
@@ -212,14 +248,14 @@ public static class FormulaMasking
     /// binding does; a run piece's value hides as a Unit binding does; an unknown property or holder fails closed.
     /// </summary>
     private static void AddKeyedHidden(RulesPack pack, FormulaDef f, HashSet<string> hidden, string? pieceId,
-        Func<string?, bool> unitHidden, Func<string?, bool> holderHidden)
+        Func<string?, bool> unitHidden, Func<string?, PropertyDef?, bool> holderHidden)
     {
         bool PrivatePlace(PropertyDef? p) => KeyedFacts.IsPlace(p) && !PropertyFacts.IsPublic(pack, p);
         bool ReadHidden((string Property, string? Holder, Quartermaster.Rules.Expr.Expr Key) r)
         {
             if (pack.PropertyByName(r.Property ?? "") is not { } def) return true;   // fail closed
             if (PrivatePlace(def)) return true;
-            if (r.Holder != null) return pack.HolderByName(r.Holder) is not { } h || holderHidden(h.Id);
+            if (r.Holder != null) return pack.HolderByName(r.Holder) is not { } h || holderHidden(h.Id, def);
             if (def.Scope == PropertyScope.Pieces || (def.Scope == PropertyScope.Both && pieceId != null)) return unitHidden(def.Id);   // the run piece's value
             return false;   // the Global holder's value of a Public or Private non-place property: public, as a Global binding
         }

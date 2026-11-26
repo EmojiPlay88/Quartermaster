@@ -905,7 +905,7 @@ public class FormulaMaskingTests : IDisposable
         Assert.True(box.Enabled);
         Assert.Equal(BoxBackground.Typed, box.Background);
         Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
-        Assert.Equal("", before.ResultText);
+        Assert.Equal(FormulaMasking.HostCalculatesText, before.ResultText);   // B7: a guest's masked result is always the host's
         Assert.DoesNotContain(RedText, Shown(before));
 
         // Without B the host (whose depot is not empty) waits for it; with B it applies.
@@ -990,7 +990,7 @@ public class FormulaMaskingTests : IDisposable
         var m = Dialog(guest, "f-dice", PhaseFixture.BlueOne, check: true);
         var first = m.Evaluate(guest.Game!.State);
         Assert.Equal(FormulaDialogModel.HostRollsText, first.Boxes.Single(b => b.Variable == "R").Text);   // no local dice for a guest
-        Assert.Equal("", first.ResultText);
+        Assert.Equal(FormulaMasking.HostCalculatesText, first.ResultText);   // B7: a guest's masked result is always the host's
 
         // Calculate is a preview: nothing executes on the host; the visible boxes fill as in solo.
         var before = Json(host.Game!.State);

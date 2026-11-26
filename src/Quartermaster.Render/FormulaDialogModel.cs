@@ -378,11 +378,18 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var working = masked ? (t.Result != null ? FormulaMasking.WorkingHiddenText : "") : t.Working;
         var result = t.Result?.Display() ?? "";
         if (localDice || hostDecides) { working = ""; result = ""; negative = false; }
+        // B7: a masked formula's result may be the hidden value itself. It shows only when the run writes at least one output and the viewer
+        // sees every one (it is then in the viewer's ledger anyway); a guest's local result is built from guesses, so it never shows.
+        if (masked && (HostCalculates || (result.Length > 0 && !ResultVisible(t)))) result = HiddenBoxText;
         return new DialogView(boxes, inline, result, working + (negative ? " (negative)" : ""), negative, status,
             canApply, t);
     }
 
     private static readonly IReadOnlySet<string> NoHostGuards = new HashSet<string>();
+
+    /// <summary>True when the run writes at least one output (every <see cref="FormulaTrace.Outputs"/> entry is a write) and the viewer sees
+    /// each (<see cref="OutputVisible"/>, as the "(negative)" mark; no rule: every output is seen).</summary>
+    private bool ResultVisible(FormulaTrace t) => t.Outputs.Count > 0 && t.Outputs.All(o => OutputVisible == null || OutputVisible(o));
 
     /// <summary>Shown on a typed dice box that may hold several dice (what count() reads).</summary>
     public const string TypeEachDieHint = "Type each die, separated by spaces";
