@@ -47,7 +47,7 @@ public sealed partial class WorkbenchWindow : Window
     /// <summary>Opens Settings on the OCR languages page (the OCR panel's "More languages…"); null when the window was made without a main window.</summary>
     internal Func<Task>? OpenOcrLanguages { get; }
 
-    readonly TabItem _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage, _visibilityPage;
+    readonly TabItem _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage, _visibilityPage, _schedulePage, _endPage;
     readonly Grid _split = new() { ColumnDefinitions = new ColumnDefinitions("40*,4,60*") };
     readonly ListBox _issues = new() { SelectionMode = SelectionMode.Single };
     readonly DockPanel _main = new();
@@ -101,14 +101,18 @@ public sealed partial class WorkbenchWindow : Window
         Phases = new PhasesTab(s, dialogs, LinkCurrentPage, ShowRule);
         Alerts = new AlertsTab(s, dialogs);
         Visibility = new VisibilityTab(s);
+        Schedule = new ScheduleTab(s, dialogs);
+        EndOfGame = new EndOfGameTab(s, dialogs);
         _tablesPage = Page("Tables", Tables);
         _formulasPage = Page("Formulas", Formulas);
         _propsPage = Page("Properties & Holders", Properties);
         _phasesPage = Page("Phases", Phases);
         _alertsPage = Page("Alerts", Alerts);
         _visibilityPage = Page("Visibility", Visibility);
+        _schedulePage = Page("Schedule", Schedule);
+        _endPage = Page("End of game", EndOfGame);
         Tabs = new TabControl();
-        foreach (var page in new[] { _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage, _visibilityPage }) Tabs.Items.Add(page);
+        foreach (var page in AllPages) Tabs.Items.Add(page);
         Tabs.SelectedIndex = 0;
 
         // left | splitter | tabs
@@ -251,6 +255,10 @@ public sealed partial class WorkbenchWindow : Window
     public PhasesTab Phases { get; }
     public AlertsTab Alerts { get; }
     public VisibilityTab Visibility { get; }
+    public ScheduleTab Schedule { get; }
+    public EndOfGameTab EndOfGame { get; }
+
+    TabItem[] AllPages => [_tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage, _visibilityPage, _schedulePage, _endPage];
 
     /// <summary>The problems list as shown (one "No problems found." row without an issue when the pack is clean).</summary>
     public IReadOnlyList<IssueRow> IssueRows => _issueRows;
@@ -271,6 +279,8 @@ public sealed partial class WorkbenchWindow : Window
             case PhasesTab ph: ph.CommitPending(); break;
             case AlertsTab a: a.CommitPending(); break;
             case VisibilityTab v: v.CommitPending(); break;
+            case ScheduleTab sc: sc.CommitPending(); break;
+            case EndOfGameTab eg: eg.CommitPending(); break;
         }
     }
 
@@ -308,7 +318,7 @@ public sealed partial class WorkbenchWindow : Window
     {
         var ro = _s.IsGuest;
         _readOnly.IsVisible = ro;
-        foreach (var page in new[] { _tablesPage, _formulasPage, _propsPage, _phasesPage, _alertsPage, _visibilityPage })
+        foreach (var page in AllPages)
             if (page.Content is Control c) c.IsEnabled = !ro;
     }
 
@@ -341,7 +351,7 @@ public sealed partial class WorkbenchWindow : Window
     {
         if (index < 0 || index >= _issueRows.Count || _issueRows[index].Issue is not { } issue) return;
         CommitPending();
-        if (_s.Rules is not { } p || WorkbenchRules.IssueTarget(p, issue.EntityId) is not { } target) return;
+        if (_s.Rules is not { } p || WorkbenchRules.IssueTarget(p, issue.EntityId, issue.Message) is not { } target) return;
         switch (target.Tab)
         {
             case WorkbenchTab.Tables: ShowTable(target.Id); break;
@@ -353,6 +363,8 @@ public sealed partial class WorkbenchWindow : Window
                 if (p.ById<HolderDef>(target.Id) != null) Properties.SelectHolder(target.Id); else Properties.SelectProperty(target.Id);
                 break;
             case WorkbenchTab.Visibility: Select(_visibilityPage); break;
+            case WorkbenchTab.Schedule: Select(_schedulePage); Schedule.SelectRow(target.Id); break;
+            case WorkbenchTab.EndOfGame: Select(_endPage); EndOfGame.SelectVictory(target.Id); break;
         }
     }
 

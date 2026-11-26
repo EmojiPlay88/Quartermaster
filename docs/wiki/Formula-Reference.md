@@ -281,6 +281,16 @@ stage() == 2
 
 True on the second pass through a block.
 
+### segment()
+
+The repeat number inside an inner block that repeats within another block (1 for the first pass, 2 for the second, and so on). Outside an inner block it is 0. Takes 0 arguments.
+
+```formula
+segment() > 3
+```
+
+True from the fourth pass through the inner block.
+
 ### runs("formula-id") or runs("formula-id", "period")
 
 How many times a formula has been applied. The first argument is the formula's id in quotes (the **Id** shown on the Formulas tab). The optional second argument is the period, in quotes: `"stage"` (the same turn and the same pass of a repeating block; outside a block, the same as the turn), `"turn"` (the same turn) or `"game"` (every turn; the default). On a counter it counts the runs of that formula on this counter; with no counter in play it counts the runs made without a unit. A warning or alert whose condition calls `runs()` of a formula that needs a unit is checked for each counter. Only applied runs count: a run that failed, was refused or was undone is not counted, and the run being checked is not counted yet. A run with no outputs counts once.
@@ -527,10 +537,13 @@ A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-
 
 - global properties (a global property that has not been set reads its Default);
 - tables, through `lookup`;
-- `turn()` and `stage()` of the position being tested;
+- `turn()`, `stage()` and `segment()` of the position being tested;
 - `phaseside()`, the name of the side whose phase is being tested;
+- global keyed values, through `keyed()` (on entry to a phase the keys of past turns are already dropped, so a victory condition checked there reads `keyed(BargesDue, turn())` but no longer an earlier turn's key); `hex()` and `distance()` are not available (no counter);
 - constants and the pure functions (`if`, `min`, `max`, `round`, `floor`, `ceil`, `abs`, `clamp`, `mod`, `startswith`, `contains`).
 - the whole-game piece sums `sum`, `countof`, `maxof` and `minof` (their filters test each piece, so they may read pieces, and even use the `hex` ones: `countof("hexcount() > 1") > 0` is true when any hex holds a stack).
+
+A **victory condition** (the End of game tab) is read as a phase condition, with the same rules: it is checked on the host's full game, once when the game enters a phase it names and once at the end of the last turn, for example `NorthPorts >= 4` (see [The last turn and victory](Making-a-Rules-Pack#the-last-turn-and-victory)). A condition that fails counts as not met.
 
 It may not use `name()`, `marker()`, `has()`, `side()`, `map()`, `holder()`, `runs()`, `dice()`, the `hex` and `attached` functions (outside a piece sum's filter) or the values of a piece or a side's holder. A formula that fails never skips the phase: the phase runs and a notice tells you what went wrong.
 

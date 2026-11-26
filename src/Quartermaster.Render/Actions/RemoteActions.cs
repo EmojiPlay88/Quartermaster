@@ -143,9 +143,18 @@ public sealed class RemoteActions(GuestSession g) : IActionPort
     public void Ack(int warningIndex) => Send(new AckIntent(warningIndex));
 
     /// <summary>Sent to the host; any "Pass to…" handover is the host's business, so this always returns null.</summary>
-    public string? NextPhase()
+    public string? NextPhase() => NextPhase(false);
+
+    public string? NextPhase(bool repeat)
     {
-        Send(new NextPhaseIntent());
+        Send(new NextPhaseIntent { Repeat = repeat });
+        return null;
+    }
+
+    /// <summary>Sent to the host; its refusal comes back as a notice, so this always returns null.</summary>
+    public string? ActOnSchedule(string rowId)
+    {
+        Send(new ScheduleIntent(rowId));
         return null;
     }
 

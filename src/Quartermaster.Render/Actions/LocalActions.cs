@@ -124,14 +124,20 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
         if (!Blocked) c.Acknowledge(warningIndex);
     }
 
-    public string? NextPhase()
+    public string? NextPhase() => NextPhase(false);
+
+    public string? NextPhase(bool repeat)
     {
         if (Blocked || s.Game == null) return null;
         var v = c.View();
         if (v.NoPhases || v.PlayingText != null) return null;   // hot-seat: another side's phase (the UI says so before calling)
         if (v.BeforeStart) { c.Start(); return null; }
-        return c.Advance();
+        // The repeat choice holds only where the game's own state still asks it: a dialog awaited before this press may have seen another
+        // position (a guest's intent on a host moved the game meanwhile).
+        return c.Advance(repeat && s.Rules is { } pack && PhaseController.RepeatAskOf(pack, s.Game.State) != null);
     }
+
+    public string? ActOnSchedule(string rowId) => Blocked ? BlockedText : c.ActOnSchedule(rowId);
 
     public void HideAlert(string alertId, string? name)
     {

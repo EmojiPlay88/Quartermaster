@@ -24,7 +24,7 @@ public static class PhaseConditions
     {
         error = null;
         if (string.IsNullOrWhiteSpace(phase.Condition)) return true;
-        try { return Evaluator.Evaluate(Parser.Parse(phase.Condition), new PhaseContext(pack, s, at, model)).IsTruthy; }
+        try { return Evaluate(pack, s, phase.Condition, at, model).IsTruthy; }
         catch (Exception ex) when (ex is EvalError or ParseError)
         {
             error = ex.Message;
@@ -32,13 +32,28 @@ public static class PhaseConditions
         }
     }
 
+    /// <summary>
+    /// Evaluates <paramref name="expr"/> in the phase-condition context at <paramref name="at"/> (globals, tables, turn(), stage(), segment(),
+    /// phaseside(), whole-game aggregates). Throws <see cref="EvalError"/> or <see cref="ParseError"/>; callers decide fail-open or closed.
+    /// </summary>
+    internal static Value Evaluate(RulesPack pack, GameState s, string expr, PhasePosition at, ModuleModel? model) =>
+        Evaluator.Evaluate(Parser.Parse(expr), new PhaseContext(pack, s, at, model));
+
     /// <summary>The first position of the game, skipping phases whose condition is false. Null when the pack has no phases.</summary>
     public static PhaseStep? First(RulesPack pack, GameState s, ModuleModel? model = null) =>
         Sequencer.First(pack) is { } first ? Walk(pack, s, first, first, model) : null;
 
     /// <summary>The position after <paramref name="cur"/>, skipping phases whose condition is false. Null when the pack has no phases.</summary>
     public static PhaseStep? Next(RulesPack pack, GameState s, PhasePosition cur, ModuleModel? model = null) =>
-        Sequencer.Next(pack, cur) is { } next ? Walk(pack, s, next, cur, model) : null;
+        Next(pack, s, cur, model, false);
+
+    /// <summary>
+    /// As <see cref="Next(RulesPack, GameState, PhasePosition, ModuleModel?)"/>, with the player's choice at a block that repeats until a
+    /// player stops (<see cref="Sequencer.Next(RulesPack, PhasePosition, bool)"/>). The choice applies to the first step only; skipped
+    /// phases after it are walked as Continue.
+    /// </summary>
+    public static PhaseStep? Next(RulesPack pack, GameState s, PhasePosition cur, ModuleModel? model, bool repeat) =>
+        Sequencer.Next(pack, cur, repeat) is { } next ? Walk(pack, s, next, cur, model) : null;
 
     /// <summary>
     /// Tests candidates from <paramref name="candidate"/> onward. Stops after one full turn of candidates (on reaching the phase and repeat of
@@ -65,20 +80,21 @@ public static class PhaseConditions
     internal static PhaseDef? PhaseAt(RulesPack pack, PhasePosition at) =>
         pack.Phases.FirstOrDefault(p => p.Id == at.PhaseId) ?? (at.PhaseIndex >= 0 && at.PhaseIndex < pack.Phases.Count ? pack.Phases[at.PhaseIndex] : null);
 
-    /// <summary>How many positions one turn has: each phase once, times its block's count.</summary>
-    private static int TurnLength(RulesPack pack)
+    /// <summary>How many positions one turn has (played as Continue): each phase times the counts of the blocks around it, a block that
+    /// repeats until a player stops counting 1.</summary>
+    internal static int TurnLength(RulesPack pack)
     {
-        var n = pack.Phases.Count;
+        var times = Enumerable.Repeat(1, pack.Phases.Count).ToArray();
         foreach (var b in Sequencer.ValidBlocks(pack))
         {
             var f = pack.Phases.FindIndex(p => p.Id == b.FirstPhaseId);
             var l = pack.Phases.FindIndex(p => p.Id == b.LastPhaseId);
-            n += (l - f + 1) * (b.Count - 1);
+            for (var i = f; i <= l; i++) times[i] *= Math.Max(b.Count, 1);
         }
-        return n;
+        return times.Sum();
     }
 
-    /// <summary>Reads global properties (Default when unset) and the candidate's turn, stage and side. No pieces, no dice.</summary>
+    /// <summary>Reads global properties (Default when unset) and the candidate's turn, stage, segment and side. No pieces, no dice.</summary>
     private sealed class PhaseContext(RulesPack pack, GameState s, PhasePosition at, ModuleModel? model) : IEvalContext
     {
         private AggregateFilters? _filters;
@@ -101,6 +117,7 @@ public static class PhaseConditions
         public Value Marker(string key) => throw new EvalError("marker() is not available in a phase condition");
         public double Turn() => at.Turn;
         public double Stage() => at.Repeat;
+        public double Segment() => at.Inner;
         public Value PhaseSide() => PieceFilter.PhaseSideValue(pack, PhaseAt(pack, at));
         /// <summary>Whole-game aggregates only: there is no piece, so the hex ones are not available (inside a filter they are, given the model).</summary>
         public Value Aggregate(string fn, string? property, string? filter) =>

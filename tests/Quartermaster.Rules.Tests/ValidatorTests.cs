@@ -644,13 +644,13 @@ public class ValidatorTests
             new() { FirstPhaseId = "a", LastPhaseId = "b", Count = 2, Label = "One" },
             new() { FirstPhaseId = "b", LastPhaseId = "c", Count = 2, Label = "Two" },
             new() { FirstPhaseId = "c", LastPhaseId = "a", Count = 2, Label = "Rev" },
-            new() { FirstPhaseId = "c", LastPhaseId = "x", Count = 0, Label = "" },
+            new() { FirstPhaseId = "c", LastPhaseId = "x", Count = -1, Label = "" },
         };
         var errs = V(Clean() with { Phases = phases, Blocks = blocks }).Where(i => i.Severity == RulesIssueSeverity.Error).Select(i => i.Message).ToList();
         Assert.Contains("Block \"One\" overlaps block \"Two\"", errs);
         Assert.Contains("Block \"Rev\": its first phase comes after its last phase", errs);
         Assert.Contains("Block \"(unnamed)\": phase \"x\" does not exist", errs);
-        Assert.Contains("Block \"(unnamed)\": count must be at least 1", errs);
+        Assert.Contains("Block \"(unnamed)\": count cannot be negative", errs);
     }
 
     [Fact]

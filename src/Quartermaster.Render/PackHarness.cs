@@ -103,6 +103,17 @@ public sealed class PackHarness : IDisposable
     /// <summary>Presses Next Phase (starting the first phase when the game has none). Returns "Pass to {side} player" when the acting side changed, else null.</summary>
     public string? Advance() => _phases.Advance();
 
+    /// <summary>
+    /// Presses Next Phase with the answer to the repeat question: <paramref name="repeat"/> true plays another pass of a block that repeats
+    /// until a player stops (at its last phase), false continues; ignored elsewhere. <see cref="Advance()"/> is <c>Advance(false)</c>.
+    /// When that last phase has end-of-phase entries, a false press there first runs them and stays in the phase, so leaving the block
+    /// takes two <see cref="Advance()"/> calls; a true press runs them and repeats in one.
+    /// </summary>
+    public string? Advance(bool repeat) => _phases.Advance(repeat);
+
+    /// <summary>How the game ended (the last turn or a victory condition); null while it goes on. Next Phase does nothing afterwards.</summary>
+    public GameOverState? GameOver => _session.Game?.State.GameOver;
+
     /// <summary>The name of the current phase; null before the first phase starts or when the pack has none.</summary>
     public string? Phase =>
         _session.Game?.State.Position is { } pos && _session.Rules is { } pack ? pack.Phases.FirstOrDefault(p => p.Id == pos.PhaseId)?.Name : null;

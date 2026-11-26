@@ -123,6 +123,22 @@ How a waiting calculation opens depends on the difficulty: a [formula dialog](Wi
 - **Continue anyway** moves on.
 - **Go back** stays in the phase. Double-click a row to go back and jump straight to that decision.
 
+### Another round or continue
+
+At the last phase of a block that repeats until a player stops, Next Phase asks `End of {label} {n}: play another {label} or continue?` with **Another {label}**, **Continue** and **Cancel**. Continue is the default; Cancel leaves the game where it is. If that phase has end-of-phase formulas, the first press runs them and the strip shows `End-of-phase runs done; press Next Phase again to play another {label} or continue`; the next press asks. The strip's stage text for such a block reads `{label} {n}` (no "of"), and for a block inside a block both parts are shown, joined with a comma. See [Blocks that repeat until a player stops](Making-a-Rules-Pack#blocks-that-repeat-until-a-player-stops).
+
+### Reacting sides
+
+When a phase lists sides that also act in it, the phase panel shows `Reacting: {names}` under the side. A player at the screen who holds only a reacting side sees `{side} is playing {phase}; you may react`: Next Phase and the checklist stay with the phase's own side, but the reacting player can run formulas that need no counter and write global values. See [Sides that react](Making-a-Rules-Pack#sides-that-react).
+
+### Due list
+
+When the pack has a schedule, the phase panel gets a **Due** section under the warnings. Each row shows its label, `Due now` or `Overdue since turn {T}`, and a button: **Place** (counters that arrive or return; they appear on the row's zone map, select them and drag them to their hexes) or **Withdraw** (counters that leave, moved to the zone map). One Place marks the whole row done. A solo game also lists a row without counters, as `Due now, no counter matches` or `Overdue since turn {T}, no counter matches`, with no button. A row that is due now and has counters also shows in the Next Phase check as `Due: {label}`. See [Reinforcements and withdrawals](Making-a-Rules-Pack#reinforcements-and-withdrawals).
+
+### Game over
+
+When the last turn has been played or a victory condition is met, the banner and the phase strip read `Game over: {result}` and the log has a Turn line with the same text. Next Phase then does nothing and says `The game is over.`; counters, ledgers, the log, undo and saving still work, and undo takes the game out of game over. See [The last turn and victory](Making-a-Rules-Pack#the-last-turn-and-victory).
+
 ## Step back
 
 **Edit > Step Back to Start of Phase** (Ctrl+Left, or the toolbar's **◀ Step Back**) asks before it goes back, and says what it would undo:

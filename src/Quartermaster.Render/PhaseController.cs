@@ -15,7 +15,22 @@ public sealed record PhaseChip(string Id, string Name, ChipState State, string? 
 /// <summary>Everything the tracker strip and phase panel show. Built fresh by <see cref="PhaseController.View"/>.</summary>
 public sealed record PhaseView(bool NoPhases, bool BeforeStart, int Turn, string? StageText, string? SideName,
     IReadOnlyList<PhaseChip> Chips, PhaseDef? Current, string? NextName, IReadOnlyList<Decision> Decisions,
-    IReadOnlyList<WarningHit> Warnings, string? Notice, string? PlayingText = null);
+    IReadOnlyList<WarningHit> Warnings, string? Notice, string? PlayingText = null)
+{
+    /// <summary>B5 #6: set when Next Phase pressed now ends a pass of a block that repeats until a player stops, so the player chooses to
+    /// play another pass or continue (null: nothing to choose, another side's phase, the game is over, or end-of-phase entries still to run).</summary>
+    public RepeatAsk? RepeatAsk { get; init; }
+
+    /// <summary>B5 #7: the names of the sides that may also act in the current phase (its known reacting sides), in the phase's order.</summary>
+    public IReadOnlyList<string> Reactors { get; init; } = Array.Empty<string>();
+
+    /// <summary>B5 #73: <c>Game over: {text}</c> once the game has ended; null while it goes on.</summary>
+    public string? GameOverText { get; init; }
+}
+
+/// <summary>The Next Phase question at the end of a pass of a block that repeats until a player stops: the block's label (blank reads
+/// "Stage") and the number of the pass just played.</summary>
+public sealed record RepeatAsk(string Label, int Number);
 
 /// <summary>
 /// Drives the turn sequence: advancing, OnStart / OnMove formula triggers per difficulty mode, checklist ticks and warning
@@ -30,17 +45,25 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private string? _notice;
     private PhasePosition? _noticeAt;   // the position the notice belongs to; once the game is elsewhere (undo, step back) it is dropped
     private PhasePosition? _noticeEnded; // and its end-of-phase mark (undoing a press that stopped for end runs drops its notice)
+    private bool _noticeOver;            // and whether the game was over (ending it, or undoing the end, keeps the position)
 
     private string? Notice
     {
         get
         {
-            if (_notice != null && (s.Game?.State.Position != _noticeAt || s.Game?.State.EndedAt != _noticeEnded)) _notice = null;
+            if (_notice != null && (s.Game?.State.Position != _noticeAt || s.Game?.State.EndedAt != _noticeEnded
+                || (s.Game?.State.GameOver != null) != _noticeOver)) _notice = null;
             return _notice;
         }
     }
 
-    private void SetNotice(string? text) { _notice = text; _noticeAt = s.Game?.State.Position; _noticeEnded = s.Game?.State.EndedAt; }
+    private void SetNotice(string? text)
+    {
+        _notice = text;
+        _noticeAt = s.Game?.State.Position;
+        _noticeEnded = s.Game?.State.EndedAt;
+        _noticeOver = s.Game?.State.GameOver != null;
+    }
 
     /// <summary>Runs queued (or needing input) by a trigger; raised once per OnStart / OnMove batch that queued any.</summary>
     public event Action<IReadOnlyList<PendingRun>>? RunsQueued;
@@ -161,6 +184,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             return new PhaseView(false, true, 1, null, null, chips0, null, firstName, none, Array.Empty<WarningHit>(), Notice);
         }
         var cur = pack.Phases[pos.PhaseIndex];
+        var over = st.GameOver is { } go ? "Game over: " + go.Text : null;
+        var reactors = ReactorNames(pack, cur);
+        PhaseView Finish(PhaseView v) => v with { Reactors = reactors, GameOverText = over };
         var next = PhaseConditions.Next(pack, st, pos, s.Model);
         var skippedBefore = SkippedBefore(pack, st, pos);
         var willSkip = WillSkip(pack, st, s.Model, next, pos.Turn);
@@ -170,18 +196,71 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             : willSkip.Contains(p.Id) ? ChipState.WillSkip : ChipState.Upcoming)).ToList();
         var side = Sequencer.ActingSide(pack, cur);
         var nextName = next == null ? null : pack.Phases.ElementAtOrDefault(next.To.PhaseIndex)?.Name;
-        // Hot-seat: another side's phase shows who is playing and none of their decisions.
+        // Hot-seat: another side's phase shows who is playing and none of their decisions. A viewer holding a reacting side (hot-seat or
+        // online guest) is told it may react; it still cannot tick, acknowledge or press Next Phase.
+        var viewer = s.IsGuest ? s.GuestSides : s.ViewSides;
+        if (side != null && viewer is { } reacting && !reacting.Contains(side.Id) && Sequencer.MayAct(pack, cur, reacting))
+            return Finish(new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
+                Array.Empty<WarningHit>(), Notice, $"{SideName(side)} is playing {cur.Name}; you may react"));
         if (s.ViewSides is { } held && side != null && !held.Contains(side.Id))
-            return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
-                Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name)} is playing {cur.Name}");
+            return Finish(new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
+                Array.Empty<WarningHit>(), Notice, $"{SideName(side)} is playing {cur.Name}"));
         // Hot-seat or online: a phase without a side whose ask run another player answers shows who is answering, as a side's phase does.
         if (s.ViewSides is { } holds && side == null && OpenAskSide(st) is { } ask && !holds.Contains(ask)
             && Players.Holding(st, pack, ask) != null && pack.ById<SideDef>(ask) is { } asked)
-            return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), null, chips, cur, nextName, none,
-                Array.Empty<WarningHit>(), Notice, $"{(string.IsNullOrWhiteSpace(asked.Name) ? asked.Id : asked.Name)} is playing {cur.Name}");
-        var seen = s.View ?? st;   // decisions and warnings over what this player may see
-        return new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
-            Decisions.Compute(pack, seen, s.Model), Decisions.Warnings(pack, seen, cur, s.Model), Notice);
+            return Finish(new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), null, chips, cur, nextName, none,
+                Array.Empty<WarningHit>(), Notice, $"{SideName(asked)} is playing {cur.Name}"));
+        var seen = s.View ?? st;   // decisions and warnings over what this player may see (a player view: only its own sides' items)
+        // A guest of another side gets no PlayingText (the host refuses its press), but it is not asked the question either.
+        var mayPress = !s.IsGuest || side == null || s.GuestSides?.Contains(side.Id) == true;
+        var repeatAsk = over == null && mayPress ? AskAt(pack, st, cur, pos) : null;
+        // The host's notice never reaches a guest: a guest whose press ran the end-of-phase entries and stopped for the question reads
+        // the same stop from the state it was sent (the entries ran at this position, and the question is now due).
+        var notice = Notice;
+        if (notice == null && s.IsGuest && repeatAsk != null && cur.OnEnd is { Count: > 0 } && st.EndedAt == pos)
+            notice = RepeatStopText(repeatAsk.Label);
+        return Finish(new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
+            Decisions.Compute(pack, seen, s.Model), Decisions.Warnings(pack, seen, cur, s.Model), notice)
+        {
+            RepeatAsk = repeatAsk,
+        });
+    }
+
+    private static string SideName(SideDef side) => string.IsNullOrWhiteSpace(side.Name) ? side.Id : side.Name;
+
+    /// <summary>The names of the phase's known reacting sides, in the phase's order (unknown ids and the acting side are left out).</summary>
+    private static IReadOnlyList<string> ReactorNames(RulesPack pack, PhaseDef phase)
+    {
+        if (phase.Reactors is not { Count: > 0 } ids) return Array.Empty<string>();
+        var res = new List<string>();
+        foreach (var id in ids.Distinct(StringComparer.Ordinal))
+            if (id != phase.SideId && pack.Sides.FirstOrDefault(x => x != null && x.Id == id) is { } sd) res.Add(SideName(sd));
+        return res;
+    }
+
+    /// <summary>
+    /// The repeat question at <paramref name="pos"/> (B5 #6): a block that repeats until a player stops ends a pass here, and the press
+    /// would advance (no end-of-phase entries, or they already ran this pass). A press that still runs end entries asks nothing.
+    /// </summary>
+    private static RepeatAsk? AskAt(RulesPack pack, GameState st, PhaseDef phase, PhasePosition pos)
+    {
+        if (Sequencer.RepeatChoice(pack, pos) is not { } block) return null;
+        if (phase.OnEnd is { Count: > 0 } && st.EndedAt != pos) return null;
+        var inner = ReferenceEquals(Sequencer.InnerBlock(pack, pos.PhaseIndex), block);
+        return new RepeatAsk(BlockLabel(block), inner ? Math.Max(pos.Inner, 1) : pos.Repeat);
+    }
+
+    private static string BlockLabel(PhaseBlock block) => string.IsNullOrWhiteSpace(block.Label) ? "Stage" : block.Label;
+
+    /// <summary>
+    /// The repeat question the game's own state asks at its position, whoever views it (null: nothing to choose, before the start, the
+    /// game is over, or end-of-phase entries still to run). The host checks a guest's repeat choice against it.
+    /// </summary>
+    internal static RepeatAsk? RepeatAskOf(RulesPack pack, GameState st)
+    {
+        if (st.GameOver != null || st.Position is not { } stored || pack.Phases is not { Count: > 0 }) return null;
+        var (pos, _) = Sequencer.Resolve(pack, stored);
+        return pos == null ? null : AskAt(pack, st, pack.Phases[pos.PhaseIndex], pos);
     }
 
     /// <summary>The side asked by the first pending ask run with a unit still open (spec #72), else null.</summary>
@@ -197,26 +276,39 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>
     /// Ids of the phases before <paramref name="pos"/> whose most recent pass this turn was skipped: a phase that both ran and was skipped
     /// this turn (block repeats) shows its latest pass. The latest pass of each phase is found by walking the plain sequence from the turn's
-    /// start to <paramref name="pos"/>; if that walk never gets there, any skip this turn counts.
+    /// start to <paramref name="pos"/>; at a block that repeats until a player stops the walk plays another pass while its pass number is
+    /// below the target's in that same block, else continues. If that walk never gets there, any skip this turn counts.
     /// </summary>
+    /// <remarks>A skip records the outer pass only (<see cref="SkippedPhase.Repeat"/>), so inside an inner block the latest outer pass decides.</remarks>
     private static HashSet<string> SkippedBefore(RulesPack pack, GameState st, PhasePosition pos)
     {
         var res = new HashSet<string>();
         var skips = st.SkippedPhases?.Where(k => k != null && k.Turn == pos.Turn).ToList();
         if (skips is not { Count: > 0 }) return res;
         var lastRepeat = new Dictionary<string, int>();
-        var at = new PhasePosition(pos.Turn, 1, pack.Phases[0].Id, 0);
+        var at = Sequencer.First(pack)! with { Turn = pos.Turn };
+        var open = pack.Blocks.Any(b => b is { Count: 0 });   // only a block that repeats until a player stops has a choice to walk
         var reached = false;
         for (var guard = 0; guard < MaxWalk && at.Turn == pos.Turn; guard++)
         {
-            if (at.PhaseId == pos.PhaseId && at.Repeat == pos.Repeat) { reached = true; break; }
+            if (at.PhaseId == pos.PhaseId && at.Repeat == pos.Repeat && at.Inner == pos.Inner) { reached = true; break; }
             lastRepeat[at.PhaseId] = at.Repeat;
-            if (Sequencer.Next(pack, at) is not { } n) break;
+            if (Sequencer.Next(pack, at, open && RepeatTowards(pack, at, pos)) is not { } n) break;
             at = n;
         }
         foreach (var k in skips)
             if (!reached || (lastRepeat.TryGetValue(k.PhaseId, out var r) && r == k.Repeat)) res.Add(k.PhaseId);
         return res;
+    }
+
+    /// <summary>The walk's choice at <paramref name="at"/> on its way to <paramref name="target"/>: another pass of the block that repeats
+    /// until a player stops ending here while the target lies in a later pass of that same block.</summary>
+    private static bool RepeatTowards(RulesPack pack, PhasePosition at, PhasePosition target)
+    {
+        if (Sequencer.RepeatChoice(pack, at) is not { } block) return false;
+        if (ReferenceEquals(Sequencer.InnerBlock(pack, at.PhaseIndex), block))
+            return at.Repeat == target.Repeat && ReferenceEquals(Sequencer.InnerBlock(pack, target.PhaseIndex), block) && at.Inner < target.Inner;
+        return ReferenceEquals(Sequencer.OuterBlock(pack, target.PhaseIndex), block) && at.Repeat < target.Repeat;
     }
 
     /// <summary>
@@ -267,8 +359,8 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         using (s.Game.BeginAction("Next Phase"))
         {
             Exec(new AdvancePhase(null, step.To, "", to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
-            SetNotice(startNotice);
             queued = EnterPhase(to);   // only the destination's OnStart runs; skipped phases trigger nothing
+            SetNotice(startNotice);    // after the entry, which may end the game (victory on entry)
         }
         RaiseQueued(queued);
         PhaseBoundary?.Invoke();
@@ -277,11 +369,32 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>The strip notice when a press ran end-of-phase entries that queued runs, so the game stays in the phase.</summary>
     public const string EndStopNotice = "Finish the end-of-phase runs, then press Next Phase again";
 
+    /// <summary>The strip notice when a press ran the end-of-phase entries at the end of a pass the player may repeat (they applied at
+    /// once): the game stays so the next press asks the question. <paramref name="label"/> is the block's label (blank reads "Stage").</summary>
+    public static string RepeatStopText(string label) =>
+        $"End-of-phase runs done; press Next Phase again to play another {label} or continue";
+
+    /// <summary>The notice (and refusal) once the game has ended: Next Phase does nothing.</summary>
+    public const string GameOverText = "The game is over.";
+
+    /// <summary>Presses Next Phase, choosing Continue at a block that repeats until a player stops.</summary>
     /// <returns>"Pass to {side} player" when the acting side changed, else null (also when the press stopped for end-of-phase runs).</returns>
-    public string? Advance()
+    public string? Advance() => Advance(false);
+
+    /// <summary>
+    /// Presses Next Phase. <paramref name="repeat"/> is the player's answer to <see cref="PhaseView.RepeatAsk"/>: true plays another pass
+    /// of the block, false continues; ignored where there is nothing to choose. With a last turn (or stage) reached, the press ends the game
+    /// instead of advancing (the victory conditions decide the result); after the end it does nothing but set <see cref="GameOverText"/>.
+    /// At the last phase of a block that repeats until a player stops, a press with <paramref name="repeat"/> false that runs the phase's
+    /// end-of-phase entries stays in the phase (notice <see cref="RepeatStopText"/>) so the question can be asked: there
+    /// <c>Advance()</c> (Continue) needs two presses to leave the block.
+    /// </summary>
+    /// <returns>"Pass to {side} player" when the acting side changed, else null (also when the press stopped or ended the game).</returns>
+    public string? Advance(bool repeat)
     {
         if (!HasPhases) return null;
-        if (s.Game!.State.Position == null) { Start(); return null; }
+        if (s.Game!.State.GameOver != null) { SetNotice(GameOverText); return null; }
+        if (s.Game.State.Position == null) { Start(); return null; }
         var pack = s.Rules!;
         string? pass = null;
         List<PendingRun> queued;
@@ -294,27 +407,46 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             // End-of-phase entries run once per pass, in this press's action. All applied: the same press advances (one undo step).
             // Any run queued for the player: the press stops in the phase; the next press finds EndedAt set and advances without
             // re-running them. Skipped phases are never left, so they run none.
-            queued = from.OnEnd is { Count: > 0 } && s.Game.State.EndedAt != cur ? OnLeave(from, cur) : new();
+            var ranEnd = from.OnEnd is { Count: > 0 } && s.Game.State.EndedAt != cur;
+            queued = ranEnd ? OnLeave(from, cur) : new();
             if (queued.Count > 0)
             {
                 SetNotice(Join(relocated, EndStopNotice));
+                stopped = true;
+            }
+            else if (ranEnd && !repeat && Sequencer.RepeatChoice(pack, cur) is { } block)
+            {
+                // The end entries just ran at the end of a pass the player may repeat, before the question could be asked (it is asked
+                // only once they ran): stay, so the next press asks. A press already choosing to repeat goes on.
+                SetNotice(Join(relocated, RepeatStopText(BlockLabel(block))));
                 stopped = true;
             }
             else
             {
                 // Conditions are evaluated here, against the state before the step (after any end entries); the command records the
                 // outcome (replay never re-evaluates).
-                var step = PhaseConditions.Next(pack, s.Game.State, cur, s.Model);
+                var step = PhaseConditions.Next(pack, s.Game.State, cur, s.Model, repeat);
                 if (step == null) return null;
-                var to = pack.Phases[step.To.PhaseIndex];
                 SetNotice(relocated);
                 LogNotRun(from, cur);
-                Exec(new AdvancePhase(cur, step.To, from.Name, to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
-                // The prompt compares the destination with the phase left; skipped phases in between never act.
-                var toSide = Sequencer.ActingSide(pack, to);
-                pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
-                SetNotice(Join(relocated, SkippedText(step), step.Notice, pass));
-                queued = EnterPhase(to);
+                if (Decides && GameEnd.Reached(pack, cur, step.To))
+                {
+                    // The last turn (or stage) has been played: the game ends in this press's action, every victory condition checked
+                    // (first met wins); the position stays.
+                    EndGameBy(pack, GameEnd.Check(pack, s.Game.State, cur, null, s.Model, WarnVictory));
+                    SetNotice(relocated);
+                }
+                else
+                {
+                    var to = pack.Phases[step.To.PhaseIndex];
+                    Exec(new AdvancePhase(cur, step.To, from.Name, to.Name, Skipped: step.Skipped.Count == 0 ? null : step.Skipped, Notice: step.Notice));
+                    // The prompt compares the destination with the phase left; skipped phases in between never act.
+                    var toSide = Sequencer.ActingSide(pack, to);
+                    pass = toSide != null && toSide.Id != Sequencer.ActingSide(pack, from)?.Id ? $"Pass to {toSide.Name} player" : null;
+                    queued = EnterPhase(to);
+                    if (s.Game.State.GameOver != null) pass = null;   // won on entry: nobody plays the phase
+                    SetNotice(Join(relocated, SkippedText(step), step.Notice, pass));
+                }
             }
         }
         RaiseQueued(queued);
@@ -363,6 +495,60 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var ws = CurrentPhase()?.Warnings;
         if (ws == null || warningIndex < 0 || warningIndex >= ws.Count || ws[warningIndex] == null) return;
         Exec(new AcknowledgeWarning(warningIndex, (ws[warningIndex].Message ?? "").Replace("{unit}", "").Trim()));
+    }
+
+    // ---- schedule (B5 #62) ----
+
+    /// <summary>The one refusal for a schedule row that is unknown, not reached, done, or has no counter the actor may act on.</summary>
+    public const string ScheduleRefusedText = "That schedule row can't be done now.";
+
+    /// <summary>The refusal for a schedule row acted on during a phase the actor may not act in.</summary>
+    public const string ScheduleOtherPhaseText = "That can't be done during another side's phase.";
+
+    /// <summary>
+    /// Acts on a schedule row as one action labelled with the row's label (B5 #62). Place (Arrive, Return): marks the row done, then runs
+    /// its formula for each of its counters as a start entry for units runs (every difficulty as there), stamped for the actor; the counters
+    /// stay on the zone map. Withdraw (Leave): moves the counters to the zone map's first board centre in one move (no OnMove triggers) or
+    /// deletes them without a zone map, marks the row done, then runs the formula on the moved counters. The counters are those the actor
+    /// may act on (a guest's while <see cref="ActingFor"/> is open), read from the full state. <see cref="RunsQueued"/> is raised after
+    /// the action.
+    /// </summary>
+    /// <returns>Null when done; else the refusal: <see cref="GameOverText"/>, <see cref="ScheduleOtherPhaseText"/> (the actor may not act
+    /// in the current phase) or <see cref="ScheduleRefusedText"/>.</returns>
+    public string? ActOnSchedule(string rowId)
+    {
+        if (s.Game is not { } g || s.Rules is not { } pack) return ScheduleRefusedText;
+        if (g.State.GameOver != null) return GameOverText;
+        var phase = CurrentPhase();
+        if (phase != null && !Sequencer.MayAct(pack, phase, ActorSides)) return ScheduleOtherPhaseText;
+        if (phase == null || string.IsNullOrWhiteSpace(rowId)) return ScheduleRefusedText;
+        if (ScheduleDue.For(pack, g.State, s.Model, ActorSides).FirstOrDefault(d => d.Row.Id == rowId) is not { PieceIds.Count: > 0 } due)
+            return ScheduleRefusedText;
+        var row = due.Row;
+        var leave = row.Action == ScheduleAction.Leave;
+        MovePieces? move = null;
+        if (leave && !string.IsNullOrWhiteSpace(row.ZoneMapId))
+        {
+            if (ScheduleDue.ZoneMap(s.Model, row.ZoneMapId) is not { Boards.Count: > 0 } map) return ScheduleRefusedText;   // the validator reports it
+            var board = map.Boards[0];
+            move = new MovePieces(due.PieceIds.ToList(), map.Id, new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0), null);
+        }
+        var queued = new List<PendingRun>();
+        using (g.BeginAction(due.Label))
+        {
+            if (move != null) Exec(move);   // straight to the game: a schedule move fires no OnMove entries
+            else if (leave) foreach (var id in due.PieceIds) Exec(new RemovePiece(id));
+            Exec(new MarkScheduled(row.Id, "Schedule: " + due.Label));
+            // A deleting row has no counters left to run a formula on (the validator refuses that combination).
+            if (!string.IsNullOrWhiteSpace(row.FormulaId) && !(leave && move == null) && FindFormula(phase, row.FormulaId) is { } f)
+            {
+                var units = due.PieceIds.Where(g.State.Pieces.ContainsKey)
+                    .Select(id => new Unit(id, PieceInfo.Name(g.State.Pieces[id]), null)).ToList();
+                Apply(f, "schedule", units, queued);
+            }
+        }
+        RaiseQueued(queued);
+        return null;
     }
 
     /// <summary>Applies a formula result; <paramref name="runId"/> (when set) marks that unit of the pending run done.</summary>
@@ -482,13 +668,43 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
 
     // ---- triggers ----
 
-    /// <summary>Entering a phase (Start, Next Phase): resets the properties that reset there (spec #56), seeds again, then runs the start entries.</summary>
+    /// <summary>Entering a phase (Start, Next Phase): resets the properties that reset there (spec #56), seeds again, then runs the start entries.
+    /// A victory condition met on entry (B5 #73) ends the game instead of the start entries.</summary>
     /// <returns>The runs queued (the caller raises <see cref="RunsQueued"/> once its action has closed).</returns>
     private List<PendingRun> EnterPhase(PhaseDef phase)
     {
         ResetAtEntry(phase);
         DropPastTurnsAtEntry();
+        if (VictoryOnEntry(phase)) return new();
         return OnEnter(phase);
+    }
+
+    // ---- game end (B5 #73) ----
+
+    /// <summary>Only the game's authority decides the end: the host, solo or hot-seat; never a guest, a viewer copy or a replayed turn
+    /// (replay re-applies the recorded <see cref="EndGame"/>).</summary>
+    private bool Decides => !s.IsGuest && !s.IsViewerCopy && !s.IsReplaying;
+
+    /// <summary>Checks the victory conditions of the entered phase (host only); the first met ends the game.</summary>
+    private bool VictoryOnEntry(PhaseDef phase)
+    {
+        if (!Decides || s.Rules is not { Victory.Count: > 0 } pack || s.Game?.State is not { Position: { } at } st) return false;
+        if (GameEnd.Check(pack, st, at, phase.Id, s.Model, WarnVictory) is not { } won) return false;
+        EndGameBy(pack, won);
+        return true;
+    }
+
+    /// <summary>Ends the game with <paramref name="won"/>'s result (null: the last turn was played, no winner).</summary>
+    private void EndGameBy(RulesPack pack, VictoryCondition? won) =>
+        Exec(new EndGame(GameEnd.ResultText(pack, won), string.IsNullOrWhiteSpace(won?.SideId) ? null : new[] { won!.SideId! }, won?.Id));
+
+    private static readonly System.Text.RegularExpressions.Regex VictoryNumber = new(@"^Victory condition (\d+) ");
+
+    /// <summary>A victory condition that failed: one diagnostics warning per condition (its number) per session.</summary>
+    private void WarnVictory(string text)
+    {
+        var m = VictoryNumber.Match(text);
+        s.Log.AddOnce("victory:" + (m.Success ? m.Groups[1].Value : text), DiagnosticSeverity.Warning, "rules", text);
     }
 
     private void ResetAtEntry(PhaseDef phase)
@@ -658,7 +874,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private sealed class NoRollsHere() : Exception("Rolls are not made here");
 
     /// <summary>
-    /// Semi-automatic and Hardcore start entries (spec #32): leaves out the units whose precondition is decided false, logging the refusal
+    /// Semi-automatic and Hardcore start entries (spec #32) and schedule formula runs (spec #62): leaves out the units whose precondition is decided false, logging the refusal
     /// as Fully automatic does, so a unit that can never be applied does not hold the later entries. The check uses no inputs and no auto
     /// values and never rolls; a unit whose precondition is undecided (or whose run fails for another reason) stays in the run.
     /// </summary>
@@ -692,7 +908,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var ask = string.IsNullOrWhiteSpace(askSideId) ? null : askSideId;
         if (mode != Difficulty.FullyAuto || s.Runner == null || ask != null)
         {
-            if (mode != Difficulty.FullyAuto && trigger == "start") units = Applicable(f, units);
+            if (mode != Difficulty.FullyAuto && trigger is "start" or "schedule") units = Applicable(f, units);   // a schedule formula runs as a start entry (spec #62)
             if (units.Count == 0) return false;   // every unit refused: the entry counts as done
             var groups = Groups(f, units);
             var run = new PendingRun(Guid.NewGuid().ToString("N"), f.Id, f.Name, trigger,

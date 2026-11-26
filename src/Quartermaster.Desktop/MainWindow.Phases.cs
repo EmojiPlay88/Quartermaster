@@ -71,6 +71,7 @@ public partial class MainWindow
         _phasePanel = new PhasePanel(s, c, () => _actions!, CentreOnPiece, OpenDocumentAtPage);
         _phasePanel.NextRequested += () => Guard(NextPhaseFromUi);
         _phasePanel.DecisionActivated += d => Guard(() => _dispatch?.JumpToDecision(d));
+        _phasePanel.DueActionRequested += e => Guard(() => ActOnDue(e));
         PlacePhases(s, _phasePanel);
         UpdatePhaseUi();
     }
@@ -206,8 +207,50 @@ public partial class MainWindow
     /// <summary><see cref="Guard"/> for the phase UI adapter.</summary>
     internal void GuardUi(Action a) => Guard(a);
 
+    // ---------- schedule rows (B5 #62) ----------
+
+    /// <summary>A guest's Place waiting for the host's answer: the row goes from the due list when the host did it.</summary>
+    (string RowId, IReadOnlyList<string> PieceIds, string? MapId)? _placeWait;
+
+    /// <summary>The due row's zone map when the module has it; a raw id of a map the module lacks is no zone map (never shown or selected).</summary>
+    MapDef? DueMap(DueEntry e) => _session == null ? null : ScheduleDue.ZoneMap(_session.Model, e.ZoneMapId);
+
+    /// <summary>Place or Withdraw on a due row through the port. A local Place selects the counters and shows their map (the player drags
+    /// them to their hexes); a guest's Place does so once the host has answered.</summary>
+    void ActOnDue(DueEntry e)
+    {
+        if (_actions is not { } port || _session == null) return;
+        var place = e.ButtonText == DueModel.PlaceText;
+        var map = DueMap(e);
+        if (_session.IsGuest)
+        {
+            _placeWait = place ? (e.RowId, e.PieceIds, map?.Id) : null;
+            port.ActOnSchedule(e.RowId);
+            return;
+        }
+        if (port.ActOnSchedule(e.RowId) is { } refused) { SetStatus(refused); return; }
+        if (place) ShowPlaced(e.PieceIds, map);
+    }
+
+    void ShowPlaced(IReadOnlyList<string> pieceIds, MapDef? map)
+    {
+        if (map == null || Maps.Open(map.Id) is not { } view) return;
+        view.SelectPieces(pieceIds);
+        SetStatus($"Placed: drag the counters from {map.Name} to their hexes");
+    }
+
+    /// <summary>A guest's Place was done by the host (its row left the due list): the counters are selected and their map shown.</summary>
+    void CompleteGuestPlace()
+    {
+        if (_placeWait is not { } w || _session == null) return;
+        if (DueModel.Rows(_session).Any(r => r.RowId == w.RowId)) return;
+        _placeWait = null;
+        ShowPlaced(w.PieceIds, w.MapId == null ? null : _session.Model.Maps.FirstOrDefault(m => m.Id == w.MapId));
+    }
+
     void RefreshStrip()
     {
+        CompleteGuestPlace();
         StripHost.StartEnabled = _session?.IsReplaying != true;
         if (_phases != null && _session?.Game != null) StripHost.SetView(_phases.View());
     }

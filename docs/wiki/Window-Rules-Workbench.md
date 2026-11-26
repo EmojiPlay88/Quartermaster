@@ -103,7 +103,7 @@ The list on the left holds the pack's formulas, with **New…**, **Rename…** a
 
 On the left:
 
-- **Phases, in order**: **Add**, **Duplicate**, **Remove**, **Move Up**, **Move Down**. **Make block from selection…** groups the selected phases into a block that repeats (it asks for a **Repeat count** and a **Label**); **Remove block** undoes that.
+- **Phases, in order**: **Add**, **Duplicate**, **Remove**, **Move Up**, **Move Down**. **Make block from selection…** groups the selected phases into a block that repeats (it asks for a **Repeat count** and a **Label**, or **Until a player stops**, which makes the block repeat until the acting player chooses Continue; a block may lie inside one other block); **Remove block** undoes that. The list marks each phase of a block with the block's label and its count, for example `┃ Day ×2`, or `(until stopped)` for a block that repeats until a player stops.
 - **Sides**: **Add…**, **Rename…**, **Remove**, and **Units of this side:**, a filter such as `marker("Side") == "Northern League"`.
 
 On the right, for the selected phase:
@@ -115,12 +115,25 @@ On the right, for the selected phase:
 | **Notes** | Shown as a tooltip on the phase |
 | **Runs only if** | A condition for the phase; the hint reads "Leave empty to always run. Example: PlayerA == 1, turn() == 1, mod(turn(), 4) == 1." Problems with the condition show in **Problems with this phase** |
 | **Rule ref:** | See above |
+| **Also acting:** | One box per other side: ticked sides may also act in this phase (run formulas that need no counter and write global values). Only the phase's own side ticks, acknowledges and presses Next Phase. See [Sides that react](Making-a-Rules-Pack#sides-that-react) |
 | **Checklist** | Items the player ticks. **Add…**, **Remove**, double-click to edit the text. Each row reads `{id}: {shown text}`, or just the shown text for an item without an id; links are shown as the player sees them. Below the list, the selected item's details: **Id:** (letters, digits, `-`, `_` or `.`; a bad id shows "Use letters, digits, '-', '_' or '.' in an id" and one already used anywhere in the pack shows `Another checklist item already has the id "{id}"`; neither is stored), **Rule ref:** (the rule-ref picker), **Notes:** and **Links:** (each link's target, or `{token} (missing)`). See [Checklist item ids and links](Making-a-Rules-Pack#checklist-item-ids-and-links) |
 | **On start: run formulas** | Formulas that run when the phase starts: Formula, For each, Filter (units) and **Asks side** (**(none)** or a side name: the side whose player answers the run; only in a phase without a side, with For each = Once; see [Asking a side](Making-a-Rules-Pack#asking-a-side-at-the-start-of-a-phase)). The rows run in order, see [Phases](Window-Phases#start-formulas-run-in-order) |
 | **On end: run formulas** | Formulas that run when Next Phase leaves the phase: Formula, For each, Filter (units) and Asks side, like **On start**. See [Phases](Window-Phases#end-of-phase-formulas) |
 | **On move: run formulas for moved units** | Formulas that run when a unit moves: Formula, Filter (units) and **Fires for** (**Acting side**, **Other side** or **Any side**; the default is Acting side). See [Phases](Window-Phases#moves-by-the-other-side) |
 | **Warnings** | Condition, Message (`{unit}` = the unit's name), Decision (ticked: the warning counts as a decision left until it is acknowledged in the phase panel) and **Rule ref** (the rule-ref picker) |
 | **Problems with this phase** | What is wrong with this phase |
+
+## Schedule tab
+
+There is no screenshot of this tab yet.
+
+A grid of reinforcement and withdrawal rows, with **Add**, **Remove**, **Move Up** and **Move Down**. The columns are **Turn**, **Stage** (blank = any stage), **Phase**, **Action** (Arrive, Leave or Return), **Counters** (a unit filter, for example `startswith(name(), "Relief barge")`), **Zone map** (where arrivals wait, or where withdrawals go; blank on a Leave row deletes the counters), **Formula** (run on each counter when the row is placed or withdrawn) and **Label**. A box under the grid lists the problems with the rows. See [Reinforcements and withdrawals](Making-a-Rules-Pack#reinforcements-and-withdrawals).
+
+## End of game tab
+
+There is no screenshot of this tab yet.
+
+At the top, **The game ends after turn** and **Last stage** (each with a number; the box must be ticked for it to apply). On the left, **Victory conditions, in order** with **Add**, **Remove**, **Move Up** and **Move Down**. For the selected condition: **Condition (true ends the game, for example Score >= 10)** with a live result, **Side:**, **Message:**, and **Checked in (phase names, comma-separated; blank = every phase)**. Problems show at the bottom. See [The last turn and victory](Making-a-Rules-Pack#the-last-turn-and-victory).
 
 ## Alerts tab
 

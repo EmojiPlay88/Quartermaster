@@ -267,6 +267,8 @@ public static class RulesPackIo
         Alerts = (p.Alerts ?? new()).Where(x => x != null)
             .Select(x => x with { Name = x.Name ?? "", Condition = x.Condition ?? "", Message = x.Message ?? "", RuleRefId = Blank(x.RuleRefId) }).ToList(),
         Sides = (p.Sides ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),
+        Schedule = (p.Schedule ?? new()).Where(x => x != null).Select(x => x with { Id = x.Id ?? "", PhaseId = x.PhaseId ?? "", Piece = x.Piece ?? "", ZoneMapId = Blank(x.ZoneMapId), FormulaId = Blank(x.FormulaId), Label = Blank(x.Label) }).ToList() is { Count: > 0 } sched ? sched : null,
+        Victory = (p.Victory ?? new()).Where(x => x != null).Select(x => x with { Id = x.Id ?? "", Condition = x.Condition ?? "", SideId = Blank(x.SideId), Message = Blank(x.Message), PhaseIds = CleanIds(x.PhaseIds) }).ToList() is { Count: > 0 } vic ? vic : null,
         Blocks = (p.Blocks ?? new()).Where(x => x != null)
             .Select(x => x with { FirstPhaseId = x.FirstPhaseId ?? "", LastPhaseId = x.LastPhaseId ?? "", Label = x.Label ?? "" }).ToList(),
         Phases = (p.Phases ?? new()).Where(x => x != null).Select(x => x with
@@ -276,6 +278,7 @@ public static class RulesPackIo
             Checklist = (x.Checklist ?? new()).Select(c => (c ?? new ChecklistItem()) with { Text = c?.Text ?? "", Id = Blank(c?.Id), RuleRefId = Blank(c?.RuleRefId), Notes = Blank(c?.Notes) }).ToList(),
             OnStart = (x.OnStart ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "", AskSideId = Blank(e.AskSideId) }).ToList(),
             OnEnd = x.OnEnd?.Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "", AskSideId = Blank(e.AskSideId) }).ToList(),
+            Reactors = CleanIds(x.Reactors),
             OnMove = (x.OnMove ?? new()).Where(e => e != null).Select(e => e with { FormulaId = e.FormulaId ?? "" }).ToList(),
             Warnings = (x.Warnings ?? new()).Where(w => w != null)
                 .Select(w => w with { Condition = w.Condition ?? "", Message = w.Message ?? "", RuleRefId = Blank(w.RuleRefId) }).ToList(),
@@ -308,6 +311,10 @@ public static class RulesPackIo
     };
 
     private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    /// <summary>Trimmed, distinct, non-blank ids; null when none are left.</summary>
+    private static List<string>? CleanIds(List<string>? ids) =>
+        ids?.Select(h => h?.Trim()).Where(h => !string.IsNullOrEmpty(h)).Select(h => h!).Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } l ? l : null;
 
     private static byte[] Utf8Lf(string json) => Encoding.UTF8.GetBytes(json.Replace("\r\n", "\n") + "\n");
 

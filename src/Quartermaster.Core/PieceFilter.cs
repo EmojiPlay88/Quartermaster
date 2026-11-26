@@ -217,6 +217,7 @@ public static class PieceFilter
 
     internal static double TurnOf(GameState s) => s.Position?.Turn ?? s.Turn.Turn;
     internal static double StageOf(GameState s) => s.Position?.Repeat ?? 1;
+    internal static double SegmentOf(GameState s) => s.Position?.Inner ?? 0;
 
     /// <summary>A Holders-scope property reads the global holder's value (else its Default; a computed one is evaluated for the global holder).</summary>
     internal static Value GlobalValue(GameState s, RulesPack pack, PropertyDef def, AggregateFilters? filters) =>
@@ -228,9 +229,10 @@ public static class PieceFilter
         IReadOnlyDictionary<string, double>? pending = null) =>
         new(p, s, pack, ReferenceEquals(filters.State, s) ? filters.Sides : SideMap(s, pack), filters, pending);
 
-    /// <summary>The turn, stage and phase an expression reads: the phase condition's candidate (<see cref="AggregateFilters.At"/>), else the game's.</summary>
+    /// <summary>The turn, stage, segment and phase an expression reads: the phase condition's candidate (<see cref="AggregateFilters.At"/>), else the game's.</summary>
     private static double TurnAt(GameState s, AggregateFilters? f) => f?.At is { } at ? at.Turn : TurnOf(s);
     private static double StageAt(GameState s, AggregateFilters? f) => f?.At is { } at ? at.Repeat : StageOf(s);
+    private static double SegmentAt(GameState s, AggregateFilters? f) => f?.At is { } at ? at.Inner : SegmentOf(s);
     private static Value PhaseSideAt(GameState s, RulesPack pack, AggregateFilters? f) =>
         PhaseSideValue(pack, f?.At is { } at ? PhaseConditions.PhaseAt(pack, at) : Sequencer.Current(pack, s));
 
@@ -334,6 +336,7 @@ public static class PieceFilter
         public double Layer(string name) => LayerValue(p, s, name);
         public double Turn() => TurnAt(s, filters);
         public double Stage() => StageAt(s, filters);
+        public double Segment() => SegmentAt(s, filters);
         public Value Side() => SideValue(p, pack, sides);
         public Value PhaseSide() => PhaseSideAt(s, pack, filters);
         public Value MapName() => MapValue(p);
@@ -384,6 +387,7 @@ public static class PieceFilter
         public Value Marker(string key) => MarkerValue(null, key);
         public double Turn() => TurnAt(s, _filters);
         public double Stage() => StageAt(s, _filters);
+        public double Segment() => SegmentAt(s, _filters);
         public Value Side() => SideValue(null, pack, SideMap(s, pack));
         public Value PhaseSide() => PhaseSideAt(s, pack, _filters);
         public Value MapName() => MapValue(null);

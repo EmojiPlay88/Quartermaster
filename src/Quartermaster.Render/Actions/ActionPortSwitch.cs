@@ -33,6 +33,8 @@ public sealed class ActionPortSwitch(IActionPort inner) : IActionPort
     public void Tick(int index, bool ticked) => _inner.Tick(index, ticked);
     public void Ack(int warningIndex) => _inner.Ack(warningIndex);
     public string? NextPhase() => _inner.NextPhase();
+    public string? NextPhase(bool repeat) => _inner.NextPhase(repeat);
+    public string? ActOnSchedule(string rowId) => _inner.ActOnSchedule(rowId);
     public void HideAlert(string alertId, string? name) => _inner.HideAlert(alertId, name);
     public void Chat(string text) => _inner.Chat(text);
     public void SetTurn(int turn, string? phase) => _inner.SetTurn(turn, phase);

@@ -43,6 +43,8 @@ public static class CommandLog
             HideAlert h => h with { At = h.At ?? at, Who = h.Who ?? w },
             AddLogLine l => l with { At = l.At ?? at, Who = l.Who ?? w },
             ResetProperties rp => rp with { At = rp.At ?? at, Who = rp.Who ?? w },
+            MarkScheduled ms => ms with { At = ms.At ?? at, Who = ms.Who ?? w },
+            EndGame eg => eg with { At = eg.At ?? at, Who = eg.Who ?? w },
             _ => c,
         };
     }

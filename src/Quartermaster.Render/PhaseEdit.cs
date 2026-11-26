@@ -83,19 +83,36 @@ public static class PhaseEdit
         return (moved, null);
     }
 
+    public const string NestMessage = "Blocks nest one level only";
+
+    /// <summary>Makes a block over the phases first..last. Count 0 = repeat until a player stops. A block may sit inside (or around) one other block;
+    /// partial overlaps, identical spans, a third level and two open-ended blocks ending at one phase are refused, as the validator does.</summary>
     public static (RulesPack Pack, string? Error) MakeBlock(RulesPack pack, int first, int last, int count, string label)
     {
         if (first < 0 || last >= pack.Phases.Count || first > last) return Fail(pack, "Select neighbouring phases");
-        if (count < 1) return Fail(pack, "Count must be at least 1");
+        if (count < 0) return Fail(pack, "Count cannot be negative");
+        var block = new PhaseBlock { FirstPhaseId = pack.Phases[first].Id, LastPhaseId = pack.Phases[last].Id, Count = count, Label = (label ?? "").Trim() };
+        var spans = new List<(int Lo, int Hi, PhaseBlock B)>();
         foreach (var b in pack.Blocks)
         {
             var f = IndexOf(pack, b.FirstPhaseId);
             var l = IndexOf(pack, b.LastPhaseId);
-            if (f >= 0 && l >= 0 && f <= last && first <= l) return Fail(pack, "These phases are already in a block");
+            if (f < 0 || l < f) continue;   // a broken block takes no part
+            if (f > last || first > l) { spans.Add((f, l, b)); continue; }
+            var newInside = f <= first && last <= l;
+            var newAround = first <= f && l <= last;
+            if ((!newInside && !newAround) || (f == first && l == last)) return Fail(pack, "These phases are already in a block");
+            spans.Add((f, l, b));
+            if (count == 0 && b.Count == 0 && l == last)
+                return Fail(pack, $"Blocks \"{Name(b)}\" and \"{Name(block)}\" both end at phase \"{pack.Phases[last].Name}\" and both repeat until a player stops; give one of them a count");
         }
-        var block = new PhaseBlock { FirstPhaseId = pack.Phases[first].Id, LastPhaseId = pack.Phases[last].Id, Count = count, Label = (label ?? "").Trim() };
+        spans.Add((first, last, block));
+        foreach (var x in spans)
+            if (spans.Count(y => !ReferenceEquals(y.B, x.B) && y.Lo <= x.Lo && x.Hi <= y.Hi) >= 2) return Fail(pack, NestMessage);
         return (pack with { Blocks = pack.Blocks.Append(block).ToList() }, null);
     }
+
+    private static string Name(PhaseBlock b) => string.IsNullOrEmpty(b.Label) ? "(unnamed)" : b.Label;
 
     public static (RulesPack Pack, string? Error) RemoveBlock(RulesPack pack, int blockIndex)
     {
@@ -134,11 +151,23 @@ public static class PhaseEdit
         (pack with
         {
             Sides = pack.Sides.Where(s => s.Id != id).ToList(),
-            Phases = pack.Phases.Select(p => p.SideId == id ? p with { SideId = null } : p).ToList(),
+            Phases = pack.Phases.Select(p =>
+            {
+                var q = p.SideId == id ? p with { SideId = null } : p;
+                return q.Reactors?.Contains(id) == true
+                    ? q with { Reactors = q.Reactors.Where(x => x != id).ToList() is { Count: > 0 } rest ? rest : null } : q;
+            }).ToList(),
         }, null);
 
     // ---------- per-phase fields ----------
 
     public static RulesPack UpdatePhase(RulesPack pack, string id, Func<PhaseDef, PhaseDef> edit) =>
         pack with { Phases = pack.Phases.Select(p => p.Id == id ? edit(p) : p).ToList() };
+
+    /// <summary>Sets the sides that may also act in the phase; none (or blank ids) = null.</summary>
+    public static RulesPack SetReactors(RulesPack pack, string phaseId, IEnumerable<string> sideIds)
+    {
+        var ids = sideIds.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToList();
+        return UpdatePhase(pack, phaseId, p => p with { Reactors = ids.Count == 0 ? null : ids });
+    }
 }

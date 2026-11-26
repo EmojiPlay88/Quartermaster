@@ -142,7 +142,7 @@ public sealed class ModuleSession : IDisposable
 
     /// <summary>
     /// The side a formula applied now is run for (its log lines and rolls are stamped with it): null in solo; else the current phase's
-    /// acting side when held, else the first held side in pack order.
+    /// acting side when held, else the first held side among the phase's reacting sides (B5 #7), else the first held side in pack order.
     /// </summary>
     public string? ActorSide() => ActorSideFor(_viewSides);
 
@@ -151,9 +151,13 @@ public sealed class ModuleSession : IDisposable
     {
         if (sides == null || sides.Count == 0) return null;
         var pack = Rules;
-        if (pack != null && _game?.State is { } st && Sequencer.Current(pack, st) is { } phase
-            && Sequencer.ActingSide(pack, phase)?.Id is { Length: > 0 } acting && sides.Contains(acting))
-            return acting;
+        if (pack != null && _game?.State is { } st && Sequencer.Current(pack, st) is { } phase)
+        {
+            if (Sequencer.ActingSide(pack, phase)?.Id is { Length: > 0 } acting && sides.Contains(acting)) return acting;
+            if (phase.Reactors is { } reactors)
+                foreach (var r in reactors)
+                    if (r != null && sides.Contains(r) && pack.Sides.Any(x => x != null && x.Id == r)) return r;
+        }
         foreach (var sd in pack?.Sides ?? new List<SideDef>())
             if (sd != null && sd.Id != null && sides.Contains(sd.Id)) return sd.Id;
         return sides.OrderBy(x => x, StringComparer.Ordinal).First();

@@ -26,6 +26,9 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     const string NoSide = "(none)";
     static readonly string[] FiresForNames = ["Acting side", "Other side", "Any side"];   // in MoveSide order
 
+    internal const string ReactorsTip = "Sides that may also act in this phase: run their own unit-less formulas and write global values. Only the phase's own side ticks, acknowledges and presses Next Phase.";
+    internal const string UntilStoppedMarker = "(until stopped)";
+
     internal sealed record PhaseRow(string Text, string Side);
 
     readonly ModuleSession _s;
@@ -78,6 +81,8 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     readonly List<string> _sideIds = new();
     readonly List<string> _phaseIds = new();
     readonly List<string> _phaseSideIds = new();
+    readonly WrapPanel _reactorRow = new();
+    readonly List<(CheckBox Box, string SideId)> _reactorBoxes = new();
     string? _selectedPhase, _selectedSide;
     bool _selfEdit, _loading;
 
@@ -138,6 +143,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         Dock(nameRow, sideLabel, Avalonia.Controls.Dock.Right);
         nameRow.Children.Add(_name);
         rows.Children.Add(nameRow);
+        rows.Children.Add(_reactorRow);
         var condRow = new DockPanel();
         Dock(condRow, _condLabel, Avalonia.Controls.Dock.Left);
         condRow.Children.Add(_cond);
@@ -438,13 +444,19 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             if (pack != null)
             {
                 var prefix = new string?[pack.Phases.Count];
+                var spans = new List<(int F, int L, PhaseBlock B)>();
                 foreach (var b in pack.Blocks)
                 {
                     var f = pack.Phases.FindIndex(p => p.Id == b.FirstPhaseId);
                     var l = pack.Phases.FindIndex(p => p.Id == b.LastPhaseId);
-                    if (f < 0 || l < 0 || f > l) continue;
+                    if (f >= 0 && l >= f) spans.Add((f, l, b));
+                }
+                // outer blocks first, so a nested block's marker follows its container's
+                foreach (var (f, l, b) in spans.OrderByDescending(x => x.L - x.F))
+                {
                     var label = string.IsNullOrWhiteSpace(b.Label) ? "block" : b.Label;
-                    for (var i = f; i <= l; i++) prefix[i] = $"┃ {label} ×{b.Count}  ";
+                    var marker = b.Count == 0 ? UntilStoppedMarker : $"×{b.Count}";
+                    for (var i = f; i <= l; i++) prefix[i] += $"┃ {label} {marker}  ";
                 }
                 for (var i = 0; i < pack.Phases.Count; i++)
                 {
@@ -506,11 +518,44 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             }
             _side.ItemsSource = names;
             _side.SelectedIndex = idx;
+            LoadReactors(ph, pack);
             LoadChecklist();
             ShowRefLabel(ph);
         }
         finally { _loading = prev; }
         RebuildGrids();
+        ShowIssues();
+    }
+
+    /// <summary>"Also acting:" with a check box per side other than the phase's own.</summary>
+    void LoadReactors(PhaseDef? ph, RulesPack? pack)
+    {
+        _reactorRow.Children.Clear();
+        _reactorBoxes.Clear();
+        _reactorRow.IsVisible = ph != null;
+        var label = new TextBlock { Text = "Also acting:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        ToolTip.SetTip(label, ReactorsTip);
+        _reactorRow.Children.Add(label);
+        if (ph == null || pack == null) return;
+        foreach (var sd in pack.Sides.Where(x => x.Id != ph.SideId))
+        {
+            var box = new CheckBox { Content = sd.Name, IsChecked = ph.Reactors?.Contains(sd.Id) == true, Margin = new Thickness(0, 0, 8, 0) };
+            ToolTip.SetTip(box, ReactorsTip);
+            box.IsCheckedChanged += (_, _) => Run(OnReactorsChanged);
+            _reactorBoxes.Add((box, sd.Id));
+            _reactorRow.Children.Add(box);
+        }
+    }
+
+    void OnReactorsChanged()
+    {
+        if (_loading || _selectedPhase is not { } id) return;
+        var ids = _reactorBoxes.Where(x => x.Box.IsChecked == true).Select(x => x.SideId).ToList();
+        // ids of sides that are not listed (a missing side) stay as they are: the validator reports them
+        var keep = Current?.Reactors?.Where(r => _reactorBoxes.All(x => x.SideId != r) && r != Current.SideId).ToList() ?? new List<string>();
+        ids.AddRange(keep);
+        CommitPack(p => PhaseEdit.SetReactors(p, id, ids));
+        RefreshList();
         ShowIssues();
     }
 
@@ -601,7 +646,16 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         if (i < 0 || i >= _phaseSideIds.Count) return;
         var id = _phaseSideIds[i];
         if ((Current.SideId ?? "") == id) return;
-        CommitPhase(p => p with { SideId = id.Length == 0 ? null : id });
+        CommitPhase(p => p with
+        {
+            SideId = id.Length == 0 ? null : id,
+            // a phase's own side already acts in it: it leaves the reacting list
+            Reactors = p.Reactors?.Where(r => r != id).ToList() is { Count: > 0 } rest ? rest : null,
+        });
+        var prev = _loading;
+        _loading = true;
+        try { LoadReactors(Current, _s.Rules); }
+        finally { _loading = prev; }
     }
 
     // ---------- sides ----------
@@ -1090,6 +1144,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     internal IReadOnlyList<PhaseRow> PhaseRows => ((IEnumerable<PhaseRow>?)_phases.ItemsSource)?.ToList() ?? new List<PhaseRow>();
     internal TextBox NameBox => _name;
     internal ComboBox SideBox => _side;
+    internal IReadOnlyList<(CheckBox Box, string SideId)> ReactorBoxes => _reactorBoxes;
     internal TextBox Instructions => _instr;
     internal TextBox Notes => _notes;
     internal TextBox ConditionBox => _cond;

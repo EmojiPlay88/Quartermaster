@@ -33,6 +33,7 @@ public static class PhaseTexts
         {
             l.Add(new StripChip($"Turn {v.Turn}", null, null));
             if (!string.IsNullOrWhiteSpace(v.StageText)) l.Add(new StripChip(v.StageText!, null, null));
+            if (!string.IsNullOrEmpty(v.GameOverText)) l.Add(new StripChip(v.GameOverText!, null, null));
         }
         foreach (var c in v.Chips)
         {
@@ -50,11 +51,11 @@ public static class PhaseTexts
     {
         _ = viewerSideId;
         var show = !v.NoPhases;
-        var enabled = show && (v.BeforeStart || v.NextName != null) && v.PlayingText == null && !replaying;
+        var enabled = show && (v.BeforeStart || v.NextName != null) && v.PlayingText == null && !replaying && v.GameOverText == null;
         if (!show) return new PanelText("", NextPhaseText, enabled, "", false, null, true, Array.Empty<WarningLine>());
         var title = v.BeforeStart ? "Before turn 1" : v.PlayingText is { } playing ? playing : v.Current is { } cur
             ? (v.SideName != null ? $"{v.SideName} player — {cur.Name}" : cur.Name) : "";
-        var next = v.BeforeStart ? StartGameText : v.NextName != null ? NextPhaseText + " " + v.NextName : NextPhaseText;
+        var next = v.GameOverText ?? (v.BeforeStart ? StartGameText : v.NextName != null ? NextPhaseText + " " + v.NextName : NextPhaseText);
         var n = v.Decisions.Count;
         return new PanelText(title, next, enabled, n == 1 ? "1 decision left" : $"{n} decisions left", n > 0,
             RuleRefOf(v, rules) is { } r ? RuleLinkText(r) : null, v.PlayingText != null,
@@ -77,6 +78,9 @@ public static class PhaseTexts
             : viewState == null ? ChecklistText.Render(rules, t)
             : ChecklistText.Render(rules, t, ph => Decisions.ChecklistShown(ph, viewState))).ToList();
     }
+
+    /// <summary>The phase panel's line under the side (B5 #7): <c>Reacting: {names}</c>, or null when no side reacts in the phase.</summary>
+    public static string? ReactingText(PhaseView v) => v.Reactors is { Count: > 0 } r ? "Reacting: " + string.Join(", ", r) : null;
 
     public static string RuleLinkText(RuleRef r) => r.Page > 0 ? $"Rule: {r.Label} (p. {r.Page})" : $"Rule: {r.Label}";
 

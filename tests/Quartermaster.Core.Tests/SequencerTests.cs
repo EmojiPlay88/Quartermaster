@@ -59,7 +59,7 @@ public class SequencerTests
             MC(2),
             new PhaseBlock { FirstPhaseId = "C", LastPhaseId = "E", Count = 3 },   // overlaps C
             new PhaseBlock { FirstPhaseId = "E", LastPhaseId = "S", Count = 3 },   // reversed
-            new PhaseBlock { FirstPhaseId = "W", LastPhaseId = "S", Count = 0 },   // count 0
+            new PhaseBlock { FirstPhaseId = "W", LastPhaseId = "S", Count = -1 },  // negative count
             new PhaseBlock { FirstPhaseId = "W", LastPhaseId = "zzz", Count = 3 }); // unknown id
         Assert.Single(Sequencer.ValidBlocks(pk));
         var cur = Sequencer.First(pk)!;

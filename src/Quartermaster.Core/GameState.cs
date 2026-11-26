@@ -83,6 +83,14 @@ public sealed class GameState
     /// missing value there reads its Default.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? ViewSides { get; set; }
+    /// <summary>Set when the game has ended (<see cref="EndGame"/>, B5 #73); null while it goes on. Public: a player view keeps it. Omitted
+    /// when null, so older saves keep their bytes.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GameOverState? GameOver { get; set; }
+    /// <summary>Ids of the schedule rows a player has acted on (<see cref="MarkScheduled"/>, B5 #62), in the order done; null when none.
+    /// Public: a player view keeps it. Omitted when null, so older saves keep their bytes.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? ScheduleDone { get; set; }
 
     public IEnumerable<StackInstance> StacksOn(string mapId) =>
         Stacks.Values.Where(s => s.MapId == mapId);
@@ -203,6 +211,37 @@ public sealed class GameState
             case ToggleTrail tt:
                 if (tt.PieceId != null && Pieces.TryGetValue(tt.PieceId, out var trp)) trp.TrailVisible = !trp.TrailVisible;
                 break;
+            case EndGame eg:
+                if (GameOver != null) break;
+                LogOpenRuns(eg.Who, eg.At);
+                Pending = new();
+                StartCursor = null;
+                GameOver = new GameOverState(eg.Text ?? "", eg.Winners?.Where(w => w != null).ToList(), eg.VictoryId, Position);
+                Log.Add(LogBuilder.Line(this, LogKind.Turn, "Game over: " + GameOver.Text, eg.Who, eg.At));
+                break;
+            case MarkScheduled ms:
+                if (string.IsNullOrWhiteSpace(ms.RowId) || ScheduleDone?.Contains(ms.RowId, StringComparer.Ordinal) == true) break;
+                (ScheduleDone ??= new()).Add(ms.RowId);
+                Log.Add(LogBuilder.Line(this, LogKind.Turn, ms.Text ?? "", ms.Who, ms.At));
+                break;
+        }
+    }
+
+    /// <summary>For every pending run, the <c>skipped: …</c> line of its open units and its batch summary: what leaving the phase with
+    /// runs still open logs (Next Phase and the end of the game).</summary>
+    void LogOpenRuns(string? who, DateTimeOffset? at)
+    {
+        foreach (var r in Pending ?? new())
+        {
+            if (r?.Units == null) continue;
+            var open = r.Units.Where(u => u != null && !u.Applied).ToList();
+            if (open.Count > 0)
+            {
+                var labels = string.Join(", ", open.Take(3).Select(u => u.Label));
+                if (open.Count > 3) labels += $" +{open.Count - 3} more";
+                Log.Add(LogBuilder.Line(this, LogKind.Calc, $"skipped: {r.FormulaName}, {labels}", who, at, formulaId: LogKind.NoWorking));
+            }
+            BatchSummary(r, r.Units, who, at);
         }
     }
 
@@ -219,18 +258,7 @@ public sealed class GameState
     void DoAdvance(AdvancePhase a)
     {
         if (a.To == null) return;
-        foreach (var r in Pending ?? new())
-        {
-            if (r?.Units == null) continue;
-            var open = r.Units.Where(u => u != null && !u.Applied).ToList();
-            if (open.Count > 0)
-            {
-                var labels = string.Join(", ", open.Take(3).Select(u => u.Label));
-                if (open.Count > 3) labels += $" +{open.Count - 3} more";
-                Log.Add(LogBuilder.Line(this, LogKind.Calc, $"skipped: {r.FormulaName}, {labels}", a.Who, a.At, formulaId: LogKind.NoWorking));
-            }
-            BatchSummary(r, r.Units, a.Who, a.At);
-        }
+        LogOpenRuns(a.Who, a.At);
         var sameTurn = a.To.Turn == Turn.Turn;
         if (!sameTurn) HiddenAlerts = new();
         var skipped = (sameTurn ? SkippedPhases ?? new() : new()).ToList();

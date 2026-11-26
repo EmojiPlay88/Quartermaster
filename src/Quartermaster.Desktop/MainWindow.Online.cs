@@ -255,6 +255,7 @@ public partial class MainWindow
     void OnGuestNotice(string message)
     {
         if (_closed) return;
+        _placeWait = null;   // a refused (or unanswered) Place never selects its counters later
         SetStatus(message);
         System.Diagnostics.Trace.WriteLine("online notice: " + message);
     }

@@ -1045,6 +1045,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public double Layer(string name) => PieceFilter.LayerValue(run.Piece, run.State, name);
         public double Turn() => run.State.Position?.Turn ?? run.State.Turn.Turn;
         public double Stage() => run.State.Position?.Repeat ?? 1;
+        public double Segment() => run.State.Position?.Inner ?? 0;
         public Value Side() => PieceFilter.SideValue(run.Piece, run.Pack, run.Sides);
         public Value PhaseSide() => PieceFilter.PhaseSideValue(run.Pack, Sequencer.Current(run.Pack, run.State));
         public Value MapName() => PieceFilter.MapValue(run.Piece);

@@ -63,6 +63,18 @@ public interface IActionPort
     /// <summary>Starts the game or advances one phase. Returns "Pass to {side} player" when the acting side changed, else null.</summary>
     string? NextPhase();
 
+    /// <summary>
+    /// As <see cref="NextPhase()"/>, with the player's answer to <see cref="PhaseView.RepeatAsk"/>: true plays another pass of the block
+    /// that repeats until a player stops, false continues. The default (a port written before B5) ignores it and continues.
+    /// </summary>
+    string? NextPhase(bool repeat) => NextPhase();
+
+    /// <summary>
+    /// Acts on a schedule row (B5 #62: Place or Withdraw, one action). Returns null when done (a remote port: when sent; the host's refusal
+    /// comes as a notice), else the refusal. The default (a port written before B5) refuses with <see cref="IntentExecutor.NotUnderstoodText"/>.
+    /// </summary>
+    string? ActOnSchedule(string rowId) => IntentExecutor.NotUnderstoodText;
+
     /// <summary>Host only.</summary>
     void HideAlert(string alertId, string? name);
 

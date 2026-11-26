@@ -30,6 +30,8 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(ResetProperties), "resetProperties")]
 [JsonDerivedType(typeof(SetStartCursor), "setStartCursor")]
 [JsonDerivedType(typeof(DropPastTurns), "dropPastTurns")]
+[JsonDerivedType(typeof(EndGame), "endGame")]
+[JsonDerivedType(typeof(MarkScheduled), "markScheduled")]
 public abstract record GameCommand;
 
 /// <summary>CloneOf: the piece this one is a copy of (the Clone command); its stored ledger values are copied (<see cref="LedgerSeeder.BuildCloneSeeds"/>). Omitted when null.</summary>
@@ -127,6 +129,21 @@ public sealed record ResetProperties(IReadOnlyList<string> PropertyIds, string T
 /// <summary>Records where the phase's start entries stopped (<see cref="GameState.StartCursor"/>; null = none left). Logs nothing;
 /// <see cref="AdvancePhase"/> clears it. Spec #32.</summary>
 public sealed record SetStartCursor(StartCursor? Cursor) : GameCommand;
+
+/// <summary>
+/// Ends the game (B5 #73): for every open pending run logs the <c>skipped: …</c> line and batch summary exactly as <see cref="AdvancePhase"/>
+/// does, clears <see cref="GameState.Pending"/> and <see cref="GameState.StartCursor"/>, sets <see cref="GameState.GameOver"/> (at the current
+/// position, which stays) and logs a Turn line <c>Game over: {Text}</c>. Ignored when the game is already over. Undo removes it.
+/// </summary>
+/// <param name="Winners">The winning side ids; null = no winner.</param>
+/// <param name="VictoryId">The victory condition that ended the game; null = the last turn was played.</param>
+public sealed record EndGame(string Text, IReadOnlyList<string>? Winners, string? VictoryId, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+
+/// <summary>
+/// Marks a schedule row done (B5 #62): adds <paramref name="RowId"/> to <see cref="GameState.ScheduleDone"/> once and logs a Turn line
+/// <paramref name="Text"/> (<c>Schedule: {label}</c>: no counter names, no counts). A row already done (or a blank id) is ignored.
+/// </summary>
+public sealed record MarkScheduled(string RowId, string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 
 /// <summary>Removes every value key below <paramref name="Turn"/> of the listed turn-keyed properties, in every ledger (B6, spec #60); a ledger
 /// left empty goes. Logs nothing; ledger history is kept.</summary>

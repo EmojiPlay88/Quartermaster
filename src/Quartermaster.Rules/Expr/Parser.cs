@@ -29,6 +29,7 @@ public static class Parser
         ["contains"] = (2, 2),
         ["turn"] = (0, 0),
         ["stage"] = (0, 0),
+        ["segment"] = (0, 0),
         ["mod"] = (2, 2),
         ["side"] = (0, 0),
         ["phaseside"] = (0, 0),

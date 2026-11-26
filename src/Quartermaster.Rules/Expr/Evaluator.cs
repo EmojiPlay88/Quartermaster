@@ -36,6 +36,8 @@ public interface IEvalContext
     double Turn() => 1;
     /// <summary>The current stage: how many times the turn's phase span has repeated (1 when unknown).</summary>
     double Stage() => 1;
+    /// <summary>The current segment: how many times the inner block of the phase span has repeated (0 outside an inner block).</summary>
+    double Segment() => 0;
     /// <summary>The side of the piece being evaluated.</summary>
     Value Side() => throw new EvalError("side() is not available here");
     /// <summary>The side the current phase belongs to.</summary>
@@ -188,7 +190,7 @@ public static class Evaluator
     public static IReadOnlyList<string> FunctionNames { get; } = new[]
     {
         "if", "min", "max", "round", "floor", "ceil", "abs", "clamp", "lookup", "lookuprange", "count",
-        "dice", "has", "startswith", "contains", "name", "marker", "layer", "turn", "stage", "mod",
+        "dice", "has", "startswith", "contains", "name", "marker", "layer", "turn", "stage", "segment", "mod",
         "side", "phaseside", "map", "holder", "runs", "row",
         "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin",
         "attachedsum", "attachedcount", "attachedmax", "attachedmin",
@@ -280,6 +282,7 @@ public static class Evaluator
             case "name": return ctx.PieceName();
             case "turn": return Num(ctx.Turn(), c);
             case "stage": return Num(ctx.Stage(), c);
+            case "segment": return Num(ctx.Segment(), c);
             case "side": return ctx.Side();
             case "phaseside": return ctx.PhaseSide();
             case "map": return ctx.MapName();

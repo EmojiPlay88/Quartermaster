@@ -150,6 +150,8 @@ public class PackHarnessTests : IDisposable
             "ModuleSession Session",
             "PackHarness NewGame(String setup, Difficulty difficulty)",
             "String Advance()",
+            "String Advance(Boolean repeat)",
+            "GameOverState GameOver",
             "String Phase",
             "Double? Value(String holderOrPieceName, String propertyName)",
             "Void Dispose()",

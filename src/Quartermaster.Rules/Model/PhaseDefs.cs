@@ -62,12 +62,16 @@ public sealed record PhaseDef
     /// <summary>Boolean expression over global properties, turn() and stage(); when false the phase is skipped. Null or empty = always runs.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? Condition { get; init; }
+    /// <summary>Ids of other sides that may also act in this phase (their own unit-less formulas and global writes). Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Reactors { get; init; }
 }
 
 public sealed record PhaseBlock
 {
     public string FirstPhaseId { get; init; } = "";
     public string LastPhaseId { get; init; } = "";
+    /// <summary>How many times the block runs each turn; 0 = repeat until the acting player stops. Always written.</summary>
     public int Count { get; init; } = 1;
     public string Label { get; init; } = "";
 }

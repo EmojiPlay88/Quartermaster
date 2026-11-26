@@ -33,6 +33,12 @@ public interface IPhaseUi
 
     /// <summary>Highlights a checklist item of the phase panel (after <see cref="RevealPhasePanel"/>).</summary>
     void SelectChecklist(int index) { }
+
+    /// <summary>
+    /// B5 #6, the Next Phase question at the end of a pass of a block that repeats until a player stops: true = play another pass, false =
+    /// Continue, null = Cancel (nothing happens). The default (a UI written before B5) continues.
+    /// </summary>
+    Task<bool?> AskRepeat(RepeatAsk ask) => Task.FromResult<bool?>(false);
 }
 
 /// <summary>
@@ -81,8 +87,9 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
         return true;
     }
 
-    /// <summary>Start game, or advance one phase. Open decisions only warn: the dialog lists them and the user may continue anyway.
-    /// A call while one is still running returns at once.</summary>
+    /// <summary>Start game, or advance one phase. Open decisions only warn: the dialog lists them and the user may continue anyway. Then,
+    /// at the end of a pass the player may repeat, <see cref="IPhaseUi.AskRepeat"/> asks (Cancel does nothing). Once the game is over it
+    /// only says so. A call while one is still running returns at once.</summary>
     public async Task NextPhase()
     {
         if (_nextRunning) return;
@@ -93,6 +100,7 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
             if (s.IsReplaying) { ui.Status(ModuleSession.ReplayingText); return; }   // the sender's turn replays as sent
             var v = c.View();
             if (v.NoPhases) return;
+            if (v.GameOverText != null) { ui.Status(PhaseController.GameOverText); return; }
             if (v.PlayingText is { } playing) { ui.Status(playing); return; }   // hot-seat: another side's phase
             if (v.BeforeStart)
             {
@@ -101,7 +109,13 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
                 return;
             }
             if (v.Decisions.Count > 0 && !await ui.ConfirmOpenDecisions(v.Decisions)) return;
-            if (port().NextPhase() is { } pass) ui.Status(pass);
+            var repeat = false;
+            if (v.RepeatAsk is { } ask)
+            {
+                if (await ui.AskRepeat(ask) is not { } choice) return;   // Cancel
+                repeat = choice;
+            }
+            if (port().NextPhase(repeat) is { } pass) ui.Status(pass);
             Advanced?.Invoke();
         }
         finally { _nextRunning = false; }
