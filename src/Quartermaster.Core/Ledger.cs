@@ -5,7 +5,12 @@ using Quartermaster.Vassal;
 namespace Quartermaster.Core;
 
 /// <summary>One change to a ledger value. Source is "formula", "manual" or "seed".</summary>
-public sealed record LedgerEntry(long Seq, string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, int? Turn = null, string? Phase = null);
+public sealed record LedgerEntry(long Seq, string Key, string PropertyId, double Before, double After, string Source, string? FormulaId, string? RuleRefId, string? Note, string? Working, int? Turn = null, string? Phase = null)
+{
+    /// <summary>The value key of a keyed property's change (B6, <see cref="LedgerDelta.ValueKey"/>); null for an unkeyed value. Omitted when null.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ValueKey { get; init; }
+}
 
 public sealed record DiceEntry(long Seq, string Purpose, int Count, int Sides, IReadOnlyList<int> Results);
 
@@ -33,8 +38,13 @@ public static class Ledger
 
     public static double GetOrDefault(GameState s, string key, PropertyDef p) => Get(s, key, p.Id) ?? p.Default;
 
+    /// <summary>The changes of an unkeyed value (entries without a <see cref="LedgerEntry.ValueKey"/>).</summary>
     public static IReadOnlyList<LedgerEntry> History(GameState s, string key, string propertyId) =>
-        s.LedgerHistory.Where(e => e.Key == key && e.PropertyId == propertyId).ToList();
+        s.LedgerHistory.Where(e => e.Key == key && e.PropertyId == propertyId && e.ValueKey == null).ToList();
+
+    /// <summary>The changes of one keyed value (B6): entries whose <see cref="LedgerEntry.ValueKey"/> is <paramref name="valueKey"/> (ordinal).</summary>
+    public static IReadOnlyList<LedgerEntry> History(GameState s, string key, string propertyId, string valueKey) =>
+        s.LedgerHistory.Where(e => e.Key == key && e.PropertyId == propertyId && string.Equals(e.ValueKey, valueKey, StringComparison.Ordinal)).ToList();
 
     /// <summary>Where a change came from: "manual: note", "seeded", "Formula · Rule", ...</summary>
     public static string SourceLabel(LedgerEntry e, RulesPack? pack)
@@ -145,7 +155,8 @@ public static class LedgerSeeder
             var seeds = new List<LedgerSeed>();
             foreach (var prop in pack.Properties)
             {
-                if (prop == null || prop.Scope == PropertyScope.Holders || PropertyFacts.IsComputed(prop) || prop.CloneAs != CloneValue.Copy) continue;
+                if (prop == null || prop.Scope == PropertyScope.Holders || PropertyFacts.IsComputed(prop) || prop.CloneAs != CloneValue.Copy
+                    || KeyedFacts.IsKeyed(prop)) continue;   // a clone copies no keyed value
                 if (Ledger.Get(s, from, prop.Id) is { } v && double.IsFinite(v)) seeds.Add(new LedgerSeed(to, prop.Id, v));
             }
             if (seeds.Count == 0) return null;
@@ -172,7 +183,7 @@ public static class LedgerSeeder
     /// Sheet field and starting value are ignored).</summary>
     private static bool Seeded(PropertyDef p) =>
         p.Scope != PropertyScope.Holders && (!string.IsNullOrWhiteSpace(p.SheetField) || !string.IsNullOrWhiteSpace(p.DefaultExpr))
-        && !PropertyFacts.IsComputed(p);
+        && !PropertyFacts.IsComputed(p) && !KeyedFacts.IsKeyed(p);   // a keyed property is never seeded (it has no single value)
 
     /// <summary>Parsed starting value per property record (records are replaced on edit, so this never goes stale).</summary>
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PropertyDef, ParsedExpr> ExprCache = new();

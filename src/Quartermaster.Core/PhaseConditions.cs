@@ -89,6 +89,7 @@ public static class PhaseConditions
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
             if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{name} is not a global property");
+            if (def.KeyedBy != null && KeyedFacts.IsKeyed(def)) throw KeyedValues.BareRead(def);   // never the Default of an unkeyed read
             return Value.Of(PropertyValues.GetOrDefault(s, pack, model, LedgerKey.Holder(HolderDef.GlobalId), def, PropertyFacts.IsComputed(def) ? Filters : null));
         }
 
@@ -104,5 +105,8 @@ public static class PhaseConditions
         /// <summary>Whole-game aggregates only: there is no piece, so the hex ones are not available (inside a filter they are, given the model).</summary>
         public Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, null, Filters);
+        /// <summary>B6: a holder property's keyed value (the Global holder's, or the named holder's); there is no piece, so a Pieces property
+        /// is "keyed() needs a unit".</summary>
+        public double Keyed(string property, Value key, string? holder) => KeyedValues.Read(s, pack, model, null, property, key, holder, null);
     }
 }

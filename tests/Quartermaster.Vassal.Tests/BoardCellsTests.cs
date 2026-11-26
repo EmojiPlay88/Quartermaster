@@ -113,6 +113,24 @@ public class BoardCellsTests
         Assert.Equal(after, BoardCells.Probes);
     }
 
+    [Fact]
+    public void Find_keeps_misses_only_up_to_the_limit()
+    {
+        var m = Build(out var o); using var _ = o;
+        var square = B(m, "Square");
+        var known = square.Grid!.LocationName(new PointD(75, 75));
+        for (var i = 0; i < BoardCells.MissLimit + 50; i++) Assert.Null(BoardCells.Find(m, "junk" + i, square));
+        BoardCells.Probes = 0;
+        Assert.Null(BoardCells.Find(m, "junk0", square));                                  // an early miss stays cached
+        var cachedMiss = BoardCells.Probes;
+        Assert.Null(BoardCells.Find(m, "junk" + (BoardCells.MissLimit + 40), square));     // a late miss was not kept
+        Assert.True(BoardCells.Probes > cachedMiss);
+        Assert.NotNull(BoardCells.Find(m, known, square));                                 // a name the board has is still kept
+        var after = BoardCells.Probes;
+        Assert.NotNull(BoardCells.Find(m, known, square));
+        Assert.Equal(after, BoardCells.Probes);
+    }
+
     private static IMapGrid Grid(string kind, string attrs)
     {
         var xml = $"<VASSAL.build.module.Map><{BP}Board name=\"B\" width=\"1000\" height=\"800\"><{BP}board.{kind} {attrs}/></{BP}Board></VASSAL.build.module.Map>";

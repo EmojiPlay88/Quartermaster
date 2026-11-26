@@ -9,6 +9,12 @@ public static class BoardCells
     // Per board: trimmed lower-case name -> board-local point of the cell (null: the board does not have that hex).
     private static readonly ConditionalWeakTable<BoardDef, ConcurrentDictionary<string, PointD?>> Index = new();
 
+    /// <summary>
+    /// Most names a board's cache keeps that it does not have. A name the board has is always kept (there are no more of those than cells);
+    /// a miss is kept only while the cache is smaller than this, so arbitrary text typed by a user (a key, a hex box) cannot grow it without bound.
+    /// </summary>
+    internal const int MissLimit = 1024;
+
     /// <summary>Uncached lookups made on this thread (tests only).</summary>
     [ThreadStatic] internal static int Probes;
 
@@ -43,7 +49,7 @@ public static class BoardCells
         if (pt is { } p && p.X >= 0 && p.Y >= 0 && p.X < board.Width && p.Y < board.Height
             && string.Equals(board.Grid.LocationName(p).Trim(), key, StringComparison.OrdinalIgnoreCase))
             result = p;
-        cache[key] = result;
+        if (result != null || cache.Count < MissLimit) cache[key] = result;
         return result;
     }
 

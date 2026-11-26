@@ -155,4 +155,12 @@ public class PlacesFunctionTests
         var reads = FormulaVariables.KeyedReads(f);
         Assert.Equal(new[] { "Ford", "Hulls" }, reads.Select(r => r.Property));
     }
+
+    [Fact]
+    public void WorkingLine_names_keyed_property_and_holder()
+    {
+        const string text = "keyed(Ford, X) + keyed(Hulls, \"Barge\", Yard) + hex()";
+        var line = WorkingLine.Render(P(text), text, v => v == "X" ? Value.Of("0412") : null);
+        Assert.Equal("keyed(Ford, 0412) + keyed(Hulls, \"Barge\", Yard) + hex()", line);
+    }
 }
