@@ -999,4 +999,39 @@ public sealed class FormulasTabTests : IDisposable
         Assert.Null(B(s, "f-att", "a").ChoicesTable);
         Assert.Null(B(s, "f-att", "a").ChoicesFilter);
     }
+
+    [AvaloniaFact]
+    public void FormulasTab_output_key_commits()
+    {
+        var s = Session(true, OneOutput());
+        s.UpdateRules(p => p with { Properties = p.Properties.Append(new PropertyDef { Id = "p-ford", Name = "FordDepth", Scope = PropertyScope.Holders, KeyedBy = "hex" }).ToList() });
+        var tab = Tab(s);
+        Assert.Equal("Key", tab.Outputs.HeaderText(12));
+        Assert.Equal("To map", tab.Outputs.HeaderText(11));
+        Assert.StartsWith("For a keyed property: the key this output writes", (string)tab.Outputs.HeaderToolTip(12)!);
+        Assert.Equal(tab.Outputs.HeaderToolTip(12), tab.Outputs.CellToolTip(0, 12));
+        Type(tab.Outputs, 0, 12, " hex() ");
+        Assert.Equal("hex()", F(s, "f-att").Outputs[0].Key);
+        Type(tab.Outputs, 0, 12, "");
+        Assert.Null(F(s, "f-att").Outputs[0].Key);
+        Type(tab.Outputs, 0, 12, "turn() + 2");
+        Pick(tab.Outputs, 0, 7, "Remove");   // an action other than Write clears the key
+        Assert.Null(F(s, "f-att").Outputs[0].Key);
+    }
+
+    [AvaloniaFact]
+    public void FormulasTab_to_map_by_name_not_missing()
+    {
+        var s = Session(true, PieceFormula());
+        var map = s.Model.Maps[0];
+        s.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Select(x => x with
+            {
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "R", Action = OutputAction.Remove, ToMapId = " " + map.Name + " " } },
+            }).ToList(),
+        });
+        var tab = Tab(s);
+        Assert.Equal(map.Name, tab.Outputs.Cell(0, 11));
+    }
 }

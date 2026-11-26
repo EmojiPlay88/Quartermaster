@@ -82,6 +82,10 @@ Then it asks for a file name. A whole map is drawn in the background in a "Savin
 
 ![The whole Riverland map saved as a picture](images/export.png)
 
+## Places on the map
+
+When a hex has place values the player may see (see [Places and keyed values](Making-a-Rules-Pack#places-and-keyed-values)), the status bar adds them after the hex name: `412, 288  0412  ·  FordDepth 3 (Flooded)`; several are joined with ` · `. Resting the pointer on such a hex with no counter on it shows the tooltip `0412: FordDepth 3 (Flooded)`. A hex with no visible place values shows the status bar as before.
+
 ## Overview
 
 **View > Overview** (or the **Overview** toolbar button) opens a small picture of the whole active map. The red rectangle is the part the map window shows. Click or drag in the overview to move the map there.

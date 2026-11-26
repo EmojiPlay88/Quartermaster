@@ -29,6 +29,9 @@ public sealed class PropertiesTab : UserControl
     const string OverridesColumnTip = "The column of the table it overrides. A one-dimension table has no column.";
     /// <summary>Column indexes of "Rule ref", "Labels", "Holders" and "Clone as" (after Column, so the older columns keep their places).</summary>
     internal const int RuleRefColumn = 10, LabelsColumn = 11, HoldersColumn = 12, CloneAsColumn = 13, StartingValueColumn = 14, ResetsAtColumn = 15;
+    /// <summary>Column index of "Keyed by" (after Resets at).</summary>
+    internal const int KeyedByColumn = 16;
+    internal const string KeyedByTip = "Keep one value per key instead of one value: per row of a table, per turn (keys of past turns are dropped when a new turn starts) or per hex (place values, kept by the Global holder). Read a value with keyed(Property, key); an output's Key chooses the key it writes.";
     /// <summary>Column index of the holder grid's "Rule ref" (after Notes).</summary>
     internal const int HolderRuleRefColumn = 2;
     internal const string LabelsTip = "A one-column table whose row for a value gives the text shown next to it, e.g. \"3 (Fog)\". Values stay numbers. Blank = none.";
@@ -70,6 +73,7 @@ public sealed class PropertiesTab : UserControl
             new EditColumn("Clone as", EditColumnKind.Combo, Weight: 60, Items: Enum.GetNames<CloneValue>()),
             new EditColumn("Starting value", Weight: 120),
             new EditColumn("Resets at", Weight: 90),
+            new EditColumn("Keyed by", EditColumnKind.Combo, Weight: 90),
         ]);
         _holders.SetColumns([new EditColumn("Name", Weight: 80), new EditColumn("Notes", Weight: 200), new EditColumn("Rule ref", EditColumnKind.Combo, Weight: 100)]);
         _props.SetHeaderToolTip(3, SheetTip);
@@ -82,6 +86,7 @@ public sealed class PropertiesTab : UserControl
         _props.SetHeaderToolTip(CloneAsColumn, CloneAsTip);
         _props.SetHeaderToolTip(StartingValueColumn, StartingValueTip);
         _props.SetHeaderToolTip(ResetsAtColumn, ResetsAtTip);
+        _props.SetHeaderToolTip(KeyedByColumn, KeyedByTip);
 
         var propsBox = Box("Properties", _props, Bar(_bAddProp, _bDelProp));
         var holdersBox = Box("Holders (the built-in \"global\" holder always exists)", _holders, Bar(_bAddHolder, _bDelHolder));
@@ -233,12 +238,15 @@ public sealed class PropertiesTab : UserControl
             p.CloneAs.ToString(),
             p.DefaultExpr ?? "",
             ResetAtText(pack!, p.ResetAt),
+            KeyedFacts.Display(pack!, p.KeyedBy),
         }).ToList());
         var tableNames = new List<string> { "" };
         tableNames.AddRange((pack?.Tables ?? new List<TableDef>()).Select(t => t.Name));
         // Labels come from a one-column table (one dimension or dice).
         var labelTables = new List<string> { "" };
         labelTables.AddRange((pack?.Tables ?? new List<TableDef>()).Where(t => t.Kind != TableKind.TwoD).Select(t => t.Name));
+        var keyedByItems = new List<string> { "", "Turn", "Hex (place)" };
+        keyedByItems.AddRange((pack?.Tables ?? new List<TableDef>()).Select(t => "Table: " + t.Name));
         for (var i = 0; i < props.Count; i++)
         {
             _propIds.Add(props[i].Id);
@@ -262,6 +270,10 @@ public sealed class PropertiesTab : UserControl
             _props.SetCellToolTip(i, StartingValueColumn, StartingValueTip);
             _props.SetCellError(i, StartingValueColumn, FormulaEdit.SyntaxProblem(props[i].DefaultExpr));
             _props.SetCellToolTip(i, ResetsAtColumn, ResetsAtTip);
+            var keyedBy = keyedByItems;
+            if (_props.Cell(i, KeyedByColumn) is { Length: > 0 } shownKey && !keyedBy.Contains(shownKey)) keyedBy = keyedBy.Append(shownKey).ToList();   // a malformed value shows as written
+            _props.SetCellItems(i, KeyedByColumn, keyedBy);
+            _props.SetCellToolTip(i, KeyedByColumn, KeyedByTip);
         }
         ApplySheetItems();
         var rows = new List<IReadOnlyList<string>> { new[] { HolderDef.GlobalId, "Built in; always exists.", "" } };
@@ -476,6 +488,12 @@ public sealed class PropertiesTab : UserControl
                 var svProblem = FormulaEdit.SyntaxProblem(sv);
                 if (svProblem != null) _status.Text = "Starting value: " + svProblem;
                 _props.SetCellError(row, StartingValueColumn, svProblem);
+                break;
+            }
+            case KeyedByColumn:
+            {
+                var kb = KeyedFacts.FromDisplay(pack, text);
+                Commit(p => Edit(p, id, x => PropertyEdit.WithKeyedBy(x, kb)));
                 break;
             }
             case ResetsAtColumn:

@@ -592,6 +592,47 @@ The VASSAL **Clone** command copies a counter. By default the copy gets the coun
 
 If the copy, with the copied values, would belong to another side than the original, nothing is copied and the log warns `Clone of "{name}" belongs to another side, so its values were not copied`. In an online game a guest may clone only a counter it may act on.
 
+## Places and keyed values
+
+Normally a property holds one number per counter or per holder. A **keyed** property holds one number per **key** instead: per row of a table, per turn, or per hex. Set it in the **Keyed by** column of the Properties & Holders tab. A keyed property never has a single value, so it has no starting value, no sheet field, no expression and no table to override, and the outliner does not total it (the Workbench warns `Property "Ford depth" is keyed, so the outliner does not total it`). Its values appear in the Ledger as [Places](Window-Ledger#places-tab) and [Keyed values](Window-Ledger#keyed-values).
+
+Riverland examples. Read the values with [`keyed()`](Formula-Reference#keyedproperty-key-or-keyedproperty-key-holder) and write them with an output's **Key**. Names in a formula are identifiers (letters, digits and `_`), so a property you read in a formula is named without spaces, here `FordDepth`, `BargesDue` and `HullCount`.
+
+### Values that belong to a hex
+
+**Keyed by** `Hex (place)` gives a property one value per hex: a **place value**. Use it for a state of the ground rather than of a counter. Make a property `FordDepth` with scope Holders, **Keyed by** `Hex (place)`, and **Labels** the table `Ford states` (1 Shallow, 2 Deep, 3 Flooded). Only the Global holder keeps a place property, so every output writes the Global target.
+
+A formula `Flood the ford`, run on the counter standing in the ford, has an output with Target Global, Property `FordDepth`, Op Set, Value `3` and **Key** `hex()`. The ford at that counter's hex now reads `3 (Flooded)`. Another formula reads it with `keyed(FordDepth, hex())`, or for a fixed hex `keyed(FordDepth, "0412")`.
+
+A place has no side. A Public place property is seen by every player; a Private one only by a player who holds every side (solo play, a hot-seat player holding all sides, the host). New properties are Private by default, so set **Visibility** to Public for a map state players should see. The status bar and the map tooltip show a hex's place values ([Map](Window-Map#places-on-the-map)).
+
+### Values per turn
+
+**Keyed by** `Turn` gives a property one value per turn number. Make `BargesDue` (scope Holders, Keyed by `Turn`). An output with Target Global, Property `BargesDue`, Op Add, Value `1` and **Key** `turn() + 2` records a barge arriving in two turns. A phase's start entry such as `Count the barges` can read `keyed(BargesDue, turn())`.
+
+Keys of past turns are dropped when a new turn's phase is entered, so nothing has to be cleared by hand. (A turn set by hand in the Dice & Turn window drops at the next phase entry.) One Next Phase is still one undo step. The turn must be a whole number from 1 to 100000.
+
+### One value per table row
+
+**Keyed by** `Table: Hull types` gives a property one value per row of that table, in place of one property per type. Make `HullCount` (scope Holders, **Holders** `Boat yard`, Keyed by `Table: Hull types`). A formula reads `keyed(HullCount, "Barge", BoatYard)`; an output writes it with **Key** `"Barge"`, or `marker("Type")` for the counter's own type. The Ledger lists every row of the table for the holder, whether a value was stored or not (an unwritten row shows the property's Default). The table's row keys must not be ranges. A Pieces property keyed by a table works the same way for each counter.
+
+### Distances
+
+`distance(a, b)` counts cells between two hexes of a board and `hex()` is the hex of the counter the formula runs on. A formula `Signal the lighthouse` has the precondition `distance(hex(), "0507") <= 3` and the refusal message `Too far from the lighthouse`: it runs only for a counter within 3 hexes of 0507. See [`distance()`](Formula-Reference#distancea-b).
+
+### What the Problems list says
+
+Errors unless marked. Formula messages begin `Formula "Flood the ford": `.
+
+- `Property "Ford depth" is keyed by "{text}"; use table:<id>, turn or hex`; `Property "Ford depth" is keyed by table "{id}", which does not exist`; `Property "Ford depth" is keyed by table "Hull types", whose row keys are ranges`
+- `Property "Ford depth" is keyed and computed; remove one`; `Property "Ford depth" is keyed, so it cannot have a starting value or a sheet field`; `Property "Ford depth" is keyed, so it cannot override a table`
+- `Property "Ford depth" is keyed by hex, so it must be a holder property`; `Property "Ford depth" is keyed by hex, so only the Global holder keeps it`
+- Warning: `Property "Ford depth" is keyed, so the outliner does not total it`
+- `output 1 writes keyed property "Ford depth" but has no key`; `output 1 has a key but writes property "Strength", which is not keyed`; `output 1 has a key but does not write a value` (an action other than Write); `output 1 lists keyed property "Ford depth"; a property list cannot hold keyed properties`; `output 1 writes place property "Ford depth" to a holder other than Global`; `output 1 key` followed by the parse problem
+- `variable "x" reads keyed property "Ford depth"; use keyed() in the formula`; `keyed() needs a property name`; `keyed() reads "Strength", which is not keyed`; `refers to unknown property "x"`; `reads keyed property "Ford depth"; use keyed()` (a bare name in a filter); `sum() cannot total keyed property "Ford depth"`; `distance() needs hex names as text`
+- A constant key that cannot be right: `keyed() key "Sloop" is not a row of table "Hull types"`, `keyed() key must be a whole turn number of at least 1`, `output 1 key "9999" is not a hex of any board` and `distance() names hex "9999", which is not on any board` (the two hex messages are checked against the module's boards, so only while a module is open)
+- Where `hex()` and `distance()` may not be used: a phase condition reads `condition may not use hex()`; a property's Applies to, a side's unit filter and a starting value reject them as they reject other piece-only functions (`Property "x": hex() is not available in a property's applies-to`); `keyed()` of a counter property in a phase condition gives `condition uses "x", which is not a global property`
+
 ## Testing a pack outside the engine (stable)
 
 `PackHarness` (in `Quartermaster.Render`) runs a pack without any window, so you can keep automated tests for your own pack. Its members keep their names and meaning across releases (except `Session`, which is there for tests that need more and may change).
