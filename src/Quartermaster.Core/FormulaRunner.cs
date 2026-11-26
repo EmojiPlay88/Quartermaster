@@ -65,6 +65,10 @@ public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDict
     /// <see cref="FormulaDef.GroupRoll"/>): a key whose sides and dice count match and whose dice are within the sides is used before pins and the roller, and is not logged by this run (<see cref="FormulaTrace.SharedRollKeys"/>).
     /// A typed roll still wins. Null = none.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<int>>? SharedRolls { get; init; }
+
+    /// <summary>B7: Input variables that take their auto value when nothing is typed, even without <see cref="UseAutoValues"/> (an Input
+    /// whose value is hidden from the viewer: the viewer cannot type it, so the engine reads it). Null = none.</summary>
+    public IReadOnlySet<string>? AutoInputs { get; init; }
 }
 
 /// <summary>Binds a formula's variables to game data, evaluates it and previews/produces the ledger commands. Run never throws.</summary>
@@ -995,7 +999,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             }
             if (!r.Typed.TryGetValue(name, out var raw) || string.IsNullOrWhiteSpace(raw))
             {
-                if (!r.UseAutoValues || b.AlwaysAsk || string.IsNullOrWhiteSpace(b.AutoValue)) return new(name, null, false, false, "Waiting for input");
+                var auto = r.UseAutoValues || r.AutoInputs?.Contains(name) == true;
+                if (!auto || b.AlwaysAsk || string.IsNullOrWhiteSpace(b.AutoValue)) return new(name, null, false, false, "Waiting for input");
                 try { raw = Evaluator.Evaluate(Parse(formula, b.AutoValue), new RunContext(this)).Display(); }
                 catch (Exception ex) when (ex is EvalError or ParseError) { return new(name, null, false, false, ex.Message); }
                 source = "default";

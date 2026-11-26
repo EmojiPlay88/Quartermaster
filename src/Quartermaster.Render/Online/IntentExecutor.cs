@@ -437,9 +437,7 @@ internal static class FormulaIntentRunner
             // Nothing is executed. The visible values and the dice go back; the dice stay pinned for this sender's Apply.
             if (scope != null) scope.Previewed = true;
             var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
-            var values = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var v in source.Variables)
-                if (v?.Variable != null && !hidden.Contains(v.Variable) && v.Value is { } val) values[v.Variable] = FormulaDialogModel.ExactText(val);
+            var values = PreviewValues(f, source, hidden);
             return new FormulaVerdict(false, boxes, dv.CanApply ? null : SafeStatus(dv, hidden), values,
                 model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal));
         }
@@ -568,6 +566,20 @@ internal static class FormulaIntentRunner
     }
 
     /// <summary>The dialog's status when it names only variables; an evaluation error is passed on only when no input is hidden.</summary>
+    /// <summary>
+    /// The values a preview sends back: every visible variable's value, never a hidden one, and never a host guard's
+    /// (<see cref="FormulaMasking.GuardsOnHidden"/>, B7): whether it has a value says whether its hidden guard holds; the sender keeps what it typed.
+    /// </summary>
+    internal static Dictionary<string, string> PreviewValues(FormulaDef f, FormulaTrace source, HashSet<string> hidden)
+    {
+        var guards = FormulaMasking.GuardsOnHidden(f, hidden);
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var v in source.Variables)
+            if (v?.Variable != null && !hidden.Contains(v.Variable) && !guards.Contains(v.Variable) && v.Value is { } val)
+                values[v.Variable] = FormulaDialogModel.ExactText(val);
+        return values;
+    }
+
     internal static string SafeStatus(DialogView dv, HashSet<string> hidden)
     {
         // A typed value that is not among this counter's choices (or no choice left): the neutral text, never the list (B4).
@@ -664,9 +676,7 @@ internal static class FormulaBatchRunner
             {
                 if (scope != null) scope.Previewed = true;
                 var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
-                var values = new Dictionary<string, string>(StringComparer.Ordinal);
-                foreach (var v in source.Variables)
-                    if (v?.Variable != null && !hidden.Contains(v.Variable) && v.Value is { } val) values[v.Variable] = FormulaDialogModel.ExactText(val);
+                var values = FormulaIntentRunner.PreviewValues(f, source, hidden);
                 verdicts.Add(new FormulaVerdict(false, boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden), values,
                     model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal)));
             }

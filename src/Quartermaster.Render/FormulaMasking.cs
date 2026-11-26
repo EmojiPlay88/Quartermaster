@@ -209,35 +209,54 @@ public static class FormulaMasking
 
     /// <summary>
     /// B7, the last step of <see cref="HiddenVariables"/>: a fixpoint over the bindings. A binding of any kind but Piece whose own expressions
-    /// (<see cref="FormulaVariables.Sources"/>: auto value, "Only when", dice count, row/column) read a hidden variable is hidden too, since its
-    /// value would show the hidden one. A Piece binding is the viewer's own pick and stays open. An Input's "Only when" is not one of them: the
-    /// Input's value is typed by the viewer, never computed from its guard, and a guard over hidden data leaves the box typeable and is the
-    /// host's to decide (<see cref="GuardsOnHidden"/>); its auto value is.
+    /// (<see cref="FormulaVariables.Sources"/>: auto value, "Only when", dice count, row/column) read hidden data
+    /// (<see cref="SourceReadsHidden"/>: a hidden variable, or a holder(), aggregate, lookup() or keyed() call once such a read is hidden) is
+    /// hidden too, since its value would show that data. A Piece binding is the viewer's own pick and stays open. For an Input only its auto
+    /// value counts: its value is typed by the viewer, and an "Only when" over hidden data makes it a host guard
+    /// (<see cref="GuardsOnHidden"/>: always open, always filled, the engine decides whether it is used).
     /// </summary>
     private static void AddDerivedHidden(FormulaDef f, HashSet<string> hidden)
     {
         if (hidden.Count == 0) return;
-        var reads = new List<(string Variable, IReadOnlyList<string> Reads)>();
+        var reads = new List<(string Variable, List<Quartermaster.Rules.Expr.Expr> Sources)>();
         foreach (var b in f.Bindings ?? new List<VariableBinding>())
         {
             if (b?.Variable == null || b.Kind == BindingKind.Piece || hidden.Contains(b.Variable)) continue;
-            var vars = new List<string>();
-            // An Input's only derived expression is its auto value (see above).
-            var sources = b.Kind == BindingKind.Input ? new[] { b.AutoValue } : FormulaVariables.Sources(b).ToArray<string?>();
-            foreach (var src in sources)
-            {
-                if (string.IsNullOrWhiteSpace(src)) continue;
-                try { vars.AddRange(Parser.Variables(Parser.Parse(src))); }
-                catch (ParseError) { }   // never runs
-            }
-            if (vars.Count > 0) reads.Add((b.Variable, vars));
+            var parsed = new List<Quartermaster.Rules.Expr.Expr>();
+            foreach (var src in b.Kind == BindingKind.Input ? new[] { b.AutoValue } : FormulaVariables.Sources(b).ToArray<string?>())
+                if (Parse(src) is { } e) parsed.Add(e);
+            if (parsed.Count > 0) reads.Add((b.Variable, parsed));
         }
         for (var changed = true; changed;)
         {
             changed = false;
-            foreach (var (variable, vars) in reads)
-                if (!hidden.Contains(variable) && vars.Any(hidden.Contains)) changed |= hidden.Add(variable);
+            foreach (var (variable, sources) in reads)
+                if (!hidden.Contains(variable) && sources.Any(e => ReadsHidden(e, hidden, variables: true))) changed |= hidden.Add(variable);
         }
+    }
+
+    /// <summary>
+    /// The one test of whether an expression of a formula reads data hidden from the viewer, given the formula's hidden entries
+    /// (<see cref="HiddenVariables"/>): it names a hidden variable (when <paramref name="variables"/>), or it makes a holder(H, P) call while
+    /// <see cref="HolderCallInput"/> is hidden, a piece aggregate while <see cref="AggregateCallInput"/> is, a lookup() while
+    /// <see cref="TableCallInput"/> is, or a keyed() read while <see cref="KeyedCallInput"/> is. Conservative: any such call counts once its
+    /// entry is hidden. Used by the derived-binding fixpoint and by <see cref="GuardsOnHidden"/>. An expression that does not parse never runs.
+    /// </summary>
+    public static bool SourceReadsHidden(string? src, IReadOnlySet<string> hidden, bool variables = true) =>
+        hidden is { Count: > 0 } && Parse(src) is { } e && ReadsHidden(e, hidden, variables);
+
+    private static bool ReadsHidden(Quartermaster.Rules.Expr.Expr e, IReadOnlySet<string> hidden, bool variables) =>
+        (variables && Parser.Variables(e).Any(hidden.Contains))
+        || (hidden.Contains(HolderCallInput) && ExprFacts.HolderReads(e).Count > 0)
+        || (hidden.Contains(AggregateCallInput) && ExprFacts.AggregateReads(e).Count > 0)
+        || (hidden.Contains(TableCallInput) && ExprFacts.LookupTables(e).Count > 0)
+        || (hidden.Contains(KeyedCallInput) && ExprFacts.KeyedReads(e).Count > 0);
+
+    private static Quartermaster.Rules.Expr.Expr? Parse(string? src)
+    {
+        if (string.IsNullOrWhiteSpace(src)) return null;
+        try { return Parser.Parse(src); }
+        catch (ParseError) { return null; }
     }
 
     /// <summary>
@@ -299,34 +318,21 @@ public static class FormulaMasking
     /// (transitively), or (when <see cref="HolderCallInput"/> is hidden) any holder(H, P) call along the way, or (when
     /// <see cref="AggregateCallInput"/> is hidden) any piece aggregate along the way, or (when <see cref="TableCallInput"/> is hidden) any lookup() call,
     /// or (when <see cref="PieceOutputInput"/> is hidden) any Piece variable a Piece output acts on. A viewer without the data cannot decide such a guard,
-    /// so an online guest's dialog leaves it to the host. Conservative: any holder() call, aggregate or lookup() counts once one is hidden.
+    /// so an online guest's dialog leaves it to the host; and for every masked viewer such a typed box is a host guard (B7: always open,
+    /// always to be filled, whatever the guard says; see <see cref="FormulaDialogModel"/>). Conservative: any holder() call, aggregate or lookup() counts once one is hidden.
     /// Empty when nothing is hidden.
     /// </summary>
     public static HashSet<string> GuardsOnHidden(FormulaDef f, IReadOnlySet<string> hidden)
     {
         var guards = new HashSet<string>(StringComparer.Ordinal);
         if (f == null || hidden == null || hidden.Count == 0) return guards;
-        var holderHidden = hidden.Contains(HolderCallInput);
-        var aggregateHidden = hidden.Contains(AggregateCallInput);
-        var tableHidden = hidden.Contains(TableCallInput);
-        var keyedHidden = hidden.Contains(KeyedCallInput);
         // A Piece output whose data may be hidden: the variables naming its target are read on the host (a guest's view may lack the target or
         // its values), so a guard reaching one is the host's to decide, as a guard reaching a holder() call is when HolderCallInput is hidden.
         var targetVars = hidden.Contains(PieceOutputInput)
             ? new HashSet<string>((f.Outputs ?? new List<FormulaOutput>()).Where(o => o is { Target: OutputTarget.Piece, PieceVariable: not null })
                 .Select(o => o.PieceVariable!), StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
-        bool HasHiddenCall(string? src)
-        {
-            if (string.IsNullOrWhiteSpace(src) || !(holderHidden || aggregateHidden || tableHidden || keyedHidden)) return false;
-            try
-            {
-                var e = Parser.Parse(src);
-                return (holderHidden && ExprFacts.HolderReads(e).Count > 0) || (aggregateHidden && ExprFacts.AggregateReads(e).Count > 0)
-                    || (tableHidden && ExprFacts.LookupTables(e).Count > 0) || (keyedHidden && ExprFacts.KeyedReads(e).Count > 0);
-            }
-            catch (ParseError) { return false; }
-        }
+        bool HasHiddenCall(string? src) => SourceReadsHidden(src, hidden, variables: false);
         bool Reaches(string? cond)
         {
             if (string.IsNullOrWhiteSpace(cond)) return false;

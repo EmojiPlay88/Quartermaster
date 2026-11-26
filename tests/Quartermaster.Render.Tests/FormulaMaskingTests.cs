@@ -499,7 +499,9 @@ public class FormulaMaskingTests : IDisposable
         var f = s.Rules!.ById<FormulaDef>("f-gwet")!;
         Assert.Contains("G", FormulaMasking.HiddenFor(s, f, PhaseFixture.BlueOne));
         Assert.DoesNotContain("W", FormulaMasking.HiddenFor(s, f, PhaseFixture.BlueOne));   // Blue's own water
-        var v = Dialog(s, "f-gwet", PhaseFixture.BlueOne, check: false).Evaluate(s.Game!.State);
+        var dialog = Dialog(s, "f-gwet", PhaseFixture.BlueOne, check: false);
+        dialog.SetBoxText("B", "7");   // B7: B's guard reads G, so B is always to be filled
+        var v = dialog.Evaluate(s.Game!.State);
         Assert.Equal(FormulaMasking.HiddenText, v.Boxes.Single(b => b.Variable == "G").Text);
         Assert.DoesNotContain(RedText, Shown(v));
         Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
@@ -527,10 +529,15 @@ public class FormulaMaskingTests : IDisposable
         var box = before.Boxes.Single(b => b.Variable == "B");
         Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot decide G < 10
         Assert.True(box.Enabled);
-        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
+        Assert.Equal("Waiting for: B", before.Status);   // B7: a guard over hidden data is always to be filled
         Assert.DoesNotContain("sum()", Shown(before));
 
-        // The host knows G is far above 10: B is not used, and the run applies without it.
+        // B7: the host asks for B although it knows G is far above 10 (its answer never depends on the guard).
+        var waiting = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.False(waiting.Applied);
+        Assert.Equal("Waiting for: B", waiting.Message);
+        // With B typed the run applies, and B is not used.
+        m.SetBoxText("B", "7");
         var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
         Assert.True(applied.Applied, applied.Message);
         Assert.Contains(host.Game!.State.LedgerHistory, e => e.FormulaId == "f-gwet" && e.Working != null);
@@ -630,10 +637,12 @@ public class FormulaMaskingTests : IDisposable
         var box = before.Boxes.Single(b => b.Variable == "B");
         Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot know: hidden pieces may count
         Assert.True(box.Enabled);
-        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
+        Assert.Equal("Waiting for: B", before.Status);   // B7: a guard over hidden data is always to be filled
 
-        // The host sees three pieces of Morale 5 (15): B is not used, and the run applies without it.
+        // The host sees three pieces of Morale 5 (15): it still asks for B (B7), then applies without using it.
         var before15 = Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water");
+        Assert.Equal("Waiting for: B", (await FormulaMasking.SendAsync(port, m, null, calculate: false)).Message);
+        m.SetBoxText("B", "7");
         var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
         Assert.True(applied.Applied, applied.Message);
         Assert.Equal(before15 ?? host.Rules!.Properties.First(p => p.Id == "water").Default, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
@@ -904,11 +913,11 @@ public class FormulaMaskingTests : IDisposable
         Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot know: the depot value is Red's
         Assert.True(box.Enabled);
         Assert.Equal(BoxBackground.Typed, box.Background);
-        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
+        Assert.Equal("Waiting for: B", before.Status);   // B7: a guard over hidden data is always to be filled
         Assert.Equal(FormulaMasking.HostCalculatesText, before.ResultText);   // B7: a guest's masked result is always the host's
         Assert.DoesNotContain(RedText, Shown(before));
 
-        // Without B the host (whose depot is not empty) waits for it; with B it applies.
+        // Without B the host waits for it (whatever the depot holds); with B it applies.
         var waiting = await FormulaMasking.SendAsync(port, m, null, calculate: false);
         Assert.False(waiting.Applied);
         Assert.Equal("Waiting for: B", waiting.Message);

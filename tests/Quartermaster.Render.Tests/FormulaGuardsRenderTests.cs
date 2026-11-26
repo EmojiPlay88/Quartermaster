@@ -126,11 +126,12 @@ public class FormulaGuardsRenderTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false, FormulaDialogModel.HiddenWaitText)]
-    [InlineData(true, FormulaDialogModel.HostWaitText)]
-    public void Dialog_masked_undecided_says_hidden_wait_not_other_inputs(bool hostCalculates, string expected)
+    [InlineData(false, "Waiting for: B")]
+    [InlineData(true, "Waiting for: B")]
+    public void Dialog_masked_undecided_guard_asks_for_its_box(bool hostCalculates, string expected)
     {
-        // A is hidden (never typed, missing on this screen); B's "Only when" reads it, so B is undecided and no visible input is missing.
+        // A is hidden (never typed, missing on this screen); B's "Only when" reads it, so B is undecided. B7: such a guard box is always
+        // to be filled, so the status asks for B on every masked screen (never a text that depends on the hidden guard).
         var m = Dialog(DialogPack());
         m.Hidden = new HashSet<string> { "A" };
         m.HostCalculates = hostCalculates;

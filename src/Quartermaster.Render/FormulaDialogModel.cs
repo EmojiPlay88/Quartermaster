@@ -106,6 +106,44 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     private bool IsHidden(string v) => _hidden.Contains(v);
 
+    private FormulaDef? _guardsFor;
+    private IReadOnlySet<string>? _guardsHidden;
+    private IReadOnlySet<string> _guards = NoHostGuards;
+
+    /// <summary>
+    /// B7: the bindings whose "Only when" (and the precondition, <see cref="FormulaMasking.PreconditionGuard"/>) depends on data hidden from
+    /// the viewer (<see cref="FormulaMasking.GuardsOnHidden"/>), for every masked viewer (hot-seat, the host's screen for a side, the host
+    /// running a guest's intent, a guest). Such a typed box is a host guard: always open and always to be filled, so nothing the viewer sees
+    /// (the box, its tooltip, the status, Apply, a preview's values) depends on whether the guard holds; the engine decides whether the
+    /// typed value is used. Cached per formula and hidden set.
+    /// </summary>
+    private IReadOnlySet<string> Guards()
+    {
+        if (_hidden.Count == 0) return NoHostGuards;
+        if (!ReferenceEquals(_guardsFor, formula) || !ReferenceEquals(_guardsHidden, _hidden))
+        {
+            _guardsFor = formula;
+            _guardsHidden = _hidden;
+            _guards = FormulaMasking.GuardsOnHidden(formula, _hidden);
+        }
+        return _guards;
+    }
+
+    /// <summary>A typed box (Input or Piece) of a host guard (<see cref="Guards"/>) that is not itself hidden.</summary>
+    private bool IsGuardBox(string variable) =>
+        !IsHidden(variable) && Guards().Contains(variable) && Binding(variable)?.Kind is BindingKind.Input or BindingKind.Piece;
+
+    /// <summary>The hidden Input variables with an auto value: the viewer cannot type them, so every run reads their auto value.</summary>
+    private IReadOnlySet<string>? HiddenAutoInputs()
+    {
+        if (_hidden.Count == 0) return null;
+        HashSet<string>? set = null;
+        foreach (var b in formula.Bindings)
+            if (b is { Kind: BindingKind.Input, Variable: { } v } && IsHidden(v) && !string.IsNullOrWhiteSpace(b.AutoValue))
+                (set ??= new HashSet<string>(StringComparer.Ordinal)).Add(v);
+        return set;
+    }
+
     /// <summary>Manual modes: the engine's values are hidden; the user types them and each box is compared with the engine.</summary>
     public bool Checked
     {
@@ -286,7 +324,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         {
             // (The runner call only gives the view its variable list; its dice are not pinned and nothing is applied.)
             // Outside the formula's phases nothing is run: the trace carries no result, so nothing can be applied.
-            var idle = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), new Dictionary<string, string>(StringComparer.Ordinal), _fixedRolls, Moved, false, DiceSource, PickSides) { SharedRolls = SharedRolls });
+            var idle = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), new Dictionary<string, string>(StringComparer.Ordinal), _fixedRolls, Moved, false, DiceSource, PickSides) { SharedRolls = SharedRolls, AutoInputs = HiddenAutoInputs() });
             return idle with { Result = null, Working = "", Outputs = Array.Empty<OutputPreview>() };
         }
         var typed = new Dictionary<string, string>(_typed);
@@ -300,7 +338,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         }
         foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice && !IsShared(b.Variable)))
             ov.TryAdd(b.Variable, "");
-        var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource, PickSides) { SharedRolls = SharedRolls });
+        // A hidden Input cannot be typed: the engine reads its auto value (B7), as it reads every other hidden value.
+        var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource, PickSides)
+            { SharedRolls = SharedRolls, AutoInputs = HiddenAutoInputs() });
         MergePins(trace);
         if (!Checked) return trace;
         // Checked: this is the EXPECTED engine run, the only source of ledger commands. Until every box matches it carries no result.
@@ -320,6 +360,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         foreach (var v in trace.Variables)
         {
             if (v.Value is not { } val || IsHidden(v.Variable)) continue;   // a hidden value is never copied into a box
+            if (IsGuardBox(v.Variable)) continue;   // filled or not as the hidden guard holds: the viewer types it either way
             var b = Binding(v.Variable);
             if (b == null) continue;
             if (b.Kind == BindingKind.Input) _typed[v.Variable] = Exact(val);
@@ -333,10 +374,12 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     public DialogView View(FormulaTrace t)
     {
         var vars = t.Variables;
-        // An online guest cannot decide a guard over data it does not have: such a box stays open and the host decides (spec 8a.2).
-        var hostGuards = HostCalculates && _hidden.Count > 0 ? FormulaMasking.GuardsOnHidden(formula, _hidden) : NoHostGuards;
+        // A guard over data the viewer may not see is a host guard (B7, every masked viewer): its box stays open and must be filled
+        // whether the guard holds or not. An online guest cannot decide it at all: the host decides (spec 8a.2).
+        var guards = Guards();
+        var hostGuards = HostCalculates ? guards : NoHostGuards;
         var picks = PieceLabels();
-        var boxes = vars.Select(v => Box(v, t, hostGuards, picks)).ToList();
+        var boxes = vars.Select(v => Box(v, t, guards, picks)).ToList();
         var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || HostRolled(kv.Key, t)))
             .Select(kv => new InlineRollView(kv.Key, DiceText(kv.Value))).ToList();
         // A guest's local run rolls its own dice; until the host's are in, no result built on them is shown.
@@ -345,11 +388,15 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         // A hidden pick still waits for the viewer's own choice (the reason comes from the viewer's list, never from the value). On a guest, a
         // pick whose target its view cannot read ("Hidden from this player": a masked piece, another side's private value a Piece output
         // writes) is made: the host decides it.
-        var missing = vars.Where(v => v.MissingReason != null && (!IsHidden(v.Variable) || (IsPick(v.Variable) && IsPickReason(v.MissingReason)))
-                && !(HostCalculates && IsPick(v.Variable) && v.MissingReason == TargetHiddenText))
+        // A guard box is missing exactly when it is blank, whatever the guard says (B7).
+        var missing = vars.Where(v => IsGuardBox(v.Variable)
+                ? Raw(v.Variable).Trim().Length == 0
+                : v.MissingReason != null && (!IsHidden(v.Variable) || (IsPick(v.Variable) && IsPickReason(v.MissingReason)))
+                    && !(HostCalculates && IsPick(v.Variable) && v.MissingReason == TargetHiddenText))
             .Select(v => v.Variable).ToList();
         var wrong = boxes.Where(b => b.Wrong).Select(b => b.Variable).ToList();
-        var canApply = t.Result != null && t.Error == null && _phaseReason == null;
+        var canApply = t.Result != null && t.Error == null && _phaseReason == null
+            && !vars.Any(v => IsGuardBox(v.Variable) && Raw(v.Variable).Trim().Length == 0);   // a blank guard box waits even when unused (B7)
         if (Checked)
         {
             var empty = boxes.Where(b => IsCheckedBox(b.Variable) && !IsHidden(b.Variable) && b.Text.Trim().Length == 0).Select(b => b.Variable).ToList();
@@ -378,18 +425,28 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var working = masked ? (t.Result != null ? FormulaMasking.WorkingHiddenText : "") : t.Working;
         var result = t.Result?.Display() ?? "";
         if (localDice || hostDecides) { working = ""; result = ""; negative = false; }
-        // B7: a masked formula's result may be the hidden value itself. It shows only when the run writes at least one output and the viewer
-        // sees every one (it is then in the viewer's ledger anyway); a guest's local result is built from guesses, so it never shows.
-        if (masked && (HostCalculates || (result.Length > 0 && !ResultVisible(t)))) result = HiddenBoxText;
+        // B7: a blank guard box waits whether or not its hidden guard holds, so nothing of a run that went ahead without it is shown.
+        if (vars.Any(v => IsGuardBox(v.Variable) && Raw(v.Variable).Trim().Length == 0)) { working = ""; result = ""; negative = false; }
+        // The result and the "(negative)" mark of a run with a guard over hidden data differ as the guard holds: never shown (B7).
+        if (guards.Count > 0) negative = false;
+        // B7: a masked formula's result may be the hidden value itself. It shows only when every output writes the result and the viewer
+        // sees every write (it is then in the viewer's ledger anyway); a guest's local result is built from guesses, so it never shows.
+        if (masked && (HostCalculates || (result.Length > 0 && (guards.Count > 0 || !ResultVisible(t))))) result = HiddenBoxText;
         return new DialogView(boxes, inline, result, working + (negative ? " (negative)" : ""), negative, status,
             canApply, t);
     }
 
     private static readonly IReadOnlySet<string> NoHostGuards = new HashSet<string>();
 
-    /// <summary>True when the run writes at least one output (every <see cref="FormulaTrace.Outputs"/> entry is a write) and the viewer sees
-    /// each (<see cref="OutputVisible"/>, as the "(negative)" mark; no rule: every output is seen).</summary>
-    private bool ResultVisible(FormulaTrace t) => t.Outputs.Count > 0 && t.Outputs.All(o => OutputVisible == null || OutputVisible(o));
+    /// <summary>
+    /// True when a masked formula's result may be shown: the run writes at least one output (every <see cref="FormulaTrace.Outputs"/> entry
+    /// is a write), every Write output of the formula writes the result itself (no value expression of its own, which could hide the result
+    /// behind another value), and the viewer sees each write (<see cref="OutputVisible"/>, as the "(negative)" mark; no rule: every write is seen).
+    /// </summary>
+    private bool ResultVisible(FormulaTrace t) =>
+        t.Outputs.Count > 0
+        && (formula.Outputs ?? new List<FormulaOutput>()).All(o => o == null || o.Action != OutputAction.Write || string.IsNullOrWhiteSpace(o.Expr))
+        && t.Outputs.All(o => OutputVisible == null || OutputVisible(o));
 
     /// <summary>Shown on a typed dice box that may hold several dice (what count() reads).</summary>
     public const string TypeEachDieHint = "Type each die, separated by spaces";
@@ -524,6 +581,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             : binding?.Kind == BindingKind.Piece ? picks.GetValueOrDefault(v.Variable) ?? Array.Empty<string>() : null;
         var reason = v.MissingReason == "Waiting for input" || (v.MissingReason != null && typedBox && Raw(v.Variable) == "")
             ? "Waiting for input" : v.MissingReason;
+        // A guard box's tooltip never says whether the hidden guard holds: blank waits, typed is the viewer's own (B7).
+        if (IsGuardBox(v.Variable)) reason = Raw(v.Variable).Trim().Length == 0 ? "Waiting for input" : v.Skipped ? null : v.MissingReason;
         if (v.Overridden || typedBox)
             return new BoxView(v.Variable, Raw(v.Variable), BoxBackground.Typed, v.Overridden && !typedBox ? " (override)" : binding is { Kind: BindingKind.Input, AlwaysAsk: true } ? AlwaysAskedSuffix : "", true, reason, null,
                 false, choices, binding is { Kind: BindingKind.Roll } && (binding.DiceCount > 1 || binding.DiceCountExpr != null) ? TypeEachDieHint : null);

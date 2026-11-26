@@ -41,6 +41,7 @@ public class B7ResultBoxTests : IDisposable
         Doubled("f-to-water", B7FormulaMaskingTests.ToWater),
         Doubled("f-no-output"),
         Doubled("f-both", B7FormulaMaskingTests.ToWater, B7FormulaMaskingTests.ToMines),
+        Doubled("f-own-expr", B7FormulaMaskingTests.ToWater with { Expr = "1" }),
     };
 
     private ModuleSession Open() => B7FormulaMaskingTests.Open(_tmp, _fixtures, _sessions, Extra);
@@ -91,6 +92,21 @@ public class B7ResultBoxTests : IDisposable
         var v = m.Evaluate(s.Game!.State);
         Assert.Equal(DoubleText, v.ResultText);
         Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
+    }
+
+    [Fact]
+    public void Hotseat_result_hidden_when_visible_write_has_own_expr()
+    {
+        // The write is visible but writes 1, not the result: the ledger never shows the result, so the box does not either.
+        var s = Open();
+        s.SetViewSides(Blue);
+        var m = Dialog(s, "f-own-expr");
+        Assert.NotEmpty(m.Hidden);
+        var v = m.Evaluate(s.Game!.State);
+        Assert.Equal(Secret * 2, v.Trace.Result!.Value.Number);
+        Assert.True(FormulaMasking.OutputShown(s, Blue, Assert.Single(v.Trace.Outputs)));
+        Assert.Equal(FormulaMasking.HiddenText, v.ResultText);
+        Assert.DoesNotContain(DoubleText, v.ResultText + v.WorkingText + v.Status);
     }
 
     [Fact]

@@ -86,6 +86,25 @@ public class B7FormulaMaskingTests : IDisposable
                     },
                     Outputs = new() { ToWater },
                 },
+                new FormulaDef
+                {
+                    // G is asked only when Red's Private plans exceed the threshold T Blue types: a guard over hidden data.
+                    Id = "f-guard", Name = "Raid guard", Text = "W + if(A > T, G, 0)",
+                    Bindings = new()
+                    {
+                        W, DepotBinding("A", "plans"),
+                        new VariableBinding { Variable = "T", Kind = BindingKind.Input },
+                        new VariableBinding { Variable = "G", Kind = BindingKind.Input, When = "A > T" },
+                    },
+                    Outputs = new() { ToWater },
+                },
+                new FormulaDef
+                {
+                    // An auto value that reads the hidden value through holder(): no hidden variable is named.
+                    Id = "f-auto-call", Name = "Plans input", Text = "X + W",
+                    Bindings = new() { W, new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "holder(RedDepot, Plans)" } },
+                    Outputs = new() { ToWater },
+                },
             }).Concat(extra).ToList(),
         };
     }
@@ -207,5 +226,139 @@ public class B7FormulaMaskingTests : IDisposable
         Assert.False(r.Verdict!.Applied);
         Assert.Equal("That unit belongs to a side you don't hold.", r.Verdict.Message);
         Assert.Equal(before, Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.RedOne), "water"));
+    }
+    private static FormulaDialogModel HotSeatDialog(ModuleSession s, string formulaId)
+    {
+        var m = new FormulaDialogModel(s.Runner!, s.Rules!.ById<FormulaDef>(formulaId)!, PhaseFixture.BlueOne);
+        FormulaMasking.Configure(m, s);
+        return m;
+    }
+
+    /// <summary>Everything a viewer sees of a dialog except the boxes named in <paramref name="except"/> (the viewer's own typing).</summary>
+    private static string Seen(DialogView v, params string[] except) =>
+        string.Join("|", v.Boxes.Where(b => !except.Contains(b.Variable))
+            .Select(b => $"{b.Variable}:{b.Text}:{b.Enabled}:{b.Tooltip}:{b.CaptionSuffix}:{b.Background}:{b.Wrong}"))
+        + "|" + v.ResultText + "|" + v.WorkingText + "|" + v.WorkingNegative + "|" + v.Status + "|" + v.CanApply;
+
+    private const string Huge = "99999999";   // above the hidden plans: the guard is false
+
+    [Fact]
+    public void HotSeat_guard_over_hidden_value_looks_the_same_either_way()
+    {
+        var s = Open();
+        s.SetViewSides(Blue);
+        Assert.Contains("G", FormulaMasking.GuardsOnHidden(s.Rules!.ById<FormulaDef>("f-guard")!, Hidden(s, "f-guard")));
+        foreach (var g in new[] { "", "5" })
+        {
+            var seen = new List<string>();
+            var traces = new List<FormulaTrace>();
+            foreach (var threshold in new[] { "0", Huge })
+            {
+                var m = HotSeatDialog(s, "f-guard");
+                m.SetBoxText("T", threshold);
+                if (g.Length > 0) m.SetBoxText("G", g);
+                var v = m.Evaluate(s.Game!.State);
+                var box = v.Boxes.Single(b => b.Variable == "G");
+                Assert.True(box.Enabled);
+                Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);
+                seen.Add(Seen(v, "T"));
+                traces.Add(v.Trace);
+                // Calculate fills nothing into the guard box either way.
+                m.Calculate(s.Game.State);
+                seen.Add(Seen(m.Evaluate(s.Game.State), "T"));
+            }
+            Assert.Equal(seen[0], seen[2]);
+            Assert.Equal(seen[1], seen[3]);
+            if (g.Length == 0)
+            {
+                Assert.Contains("Waiting for: G", seen[0]);
+                Assert.EndsWith("|False", seen[0]);
+            }
+            else
+            {
+                // The engine decides: G is used when the plans exceed T, ignored otherwise.
+                Assert.EndsWith("|True", seen[0]);
+                Assert.Equal(15, traces[0].Result!.Value.Number);
+                Assert.Equal(10, traces[1].Result!.Value.Number);
+            }
+        }
+    }
+
+    [Fact]
+    public void HotSeat_guard_run_applies_correctly_both_ways()
+    {
+        foreach (var (threshold, water) in new[] { ("0", 15.0), (Huge, 10.0) })
+        {
+            var s = Open();
+            s.SetViewSides(Blue);
+            var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+            var m = HotSeatDialog(s, "f-guard");
+            m.SetBoxText("T", threshold);
+            m.SetBoxText("G", "5");
+            var v = m.Evaluate(s.Game!.State);
+            Assert.True(v.CanApply);
+            Assert.True(c.ApplyFormula(null, PhaseFixture.BlueOne, v.Trace, false));
+            Assert.Equal(water, Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+        }
+    }
+
+    [Fact]
+    public void Guest_guard_verdict_same_either_way()
+    {
+        foreach (var g in new[] { null, "5" })
+        {
+            var answers = new List<string>();
+            foreach (var preview in new[] { true, false })
+            foreach (var threshold in new[] { "0", Huge })
+            {
+                var s = Open();
+                var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+                var x = new IntentExecutor(s, c);
+                var typed = new Dictionary<string, string> { ["T"] = threshold, ["W"] = "10" };   // W: the manual mode's checked box
+                if (g != null) typed["G"] = g;
+                var r = x.Execute("p2", Blue, new FormulaIntent("f-guard", PhaseFixture.BlueOne, null, typed, false, preview));
+                var v = r.Verdict!;
+                Assert.DoesNotContain(SecretText, System.Text.Json.JsonSerializer.Serialize(v, QuartermasterJson.Options));
+                var values = (v.Values ?? new Dictionary<string, string>()).Where(kv => kv.Key != "T").OrderBy(kv => kv.Key, StringComparer.Ordinal);
+                answers.Add($"{preview}|{v.Applied}|{v.Message}|{string.Join(",", v.Boxes.Select(b => b.Var + "=" + b.State))}|{string.Join(",", values)}|{v.Rolls?.Count}");
+                if (!preview && g != null)
+                    Assert.Equal(threshold == "0" ? 15 : 10, Ledger.Get(s.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+            }
+            Assert.Equal(answers[0], answers[1]);   // preview
+            Assert.Equal(answers[2], answers[3]);   // apply
+            if (g == null) Assert.Contains("Waiting for: G", answers[2]);
+            else Assert.Contains("|True|", answers[2]);
+        }
+    }
+
+    [Fact]
+    public void HotSeat_auto_value_holder_call_hidden_on_calculate()
+    {
+        var s = Open();
+        s.SetViewSides(Blue);
+        var m = HotSeatDialog(s, "f-auto-call");
+        Assert.Contains("X", m.Hidden);
+        m.Calculate(s.Game!.State);
+        var v = m.Evaluate(s.Game.State);
+        Assert.Equal(FormulaMasking.HiddenText, v.Boxes.Single(b => b.Variable == "X").Text);
+        Assert.DoesNotContain(SecretText, Seen(v));
+        // The engine reads the hidden Input: the run completes and writes Blue's own water (Secret + 10).
+        Assert.Equal(Secret + 10, v.Trace.Result!.Value.Number);
+    }
+
+    [Fact]
+    public void HotSeat_derived_hidden_input_runs_and_applies()
+    {
+        var s = Open();
+        s.SetViewSides(Blue);
+        var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        var m = HotSeatDialog(s, "f-derived");
+        var v = m.Evaluate(s.Game!.State);   // no Calculate: the hidden Inputs are read by the engine on every run
+        Assert.All(v.Boxes.Where(b => b.Variable is "A" or "B" or "C"), b => Assert.Equal(FormulaMasking.HiddenText, b.Text));
+        Assert.Equal((Secret + 1) * 2 + 10, v.Trace.Result!.Value.Number);
+        Assert.True(v.CanApply, v.Status);
+        Assert.DoesNotContain(((Secret + 1) * 2).ToString(CultureInfo.InvariantCulture), Seen(v));
+        Assert.True(c.ApplyFormula(null, PhaseFixture.BlueOne, v.Trace, false));
+        Assert.Equal((Secret + 1) * 2 + 10, Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
     }
 }
