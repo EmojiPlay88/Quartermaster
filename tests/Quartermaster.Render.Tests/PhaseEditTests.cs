@@ -123,7 +123,7 @@ public class PhaseEditTests
         var pack = Pack(new[] { "a", "b", "c", "d" });
         Assert.Equal("Select neighbouring phases", PhaseEdit.MakeBlock(pack, 2, 1, 2, "x").Error);
         Assert.Equal("Select neighbouring phases", PhaseEdit.MakeBlock(pack, 0, 9, 2, "x").Error);
-        Assert.Equal("Count must be at least 1", PhaseEdit.MakeBlock(pack, 0, 1, 0, "x").Error);
+        Assert.Equal("Count cannot be negative", PhaseEdit.MakeBlock(pack, 0, 1, -1, "x").Error);
         var (made, e) = PhaseEdit.MakeBlock(pack, 1, 2, 3, "Round");
         Assert.Null(e);
         Assert.Equal(new PhaseBlock { FirstPhaseId = "b", LastPhaseId = "c", Count = 3, Label = "Round" }, made.Blocks.Single());

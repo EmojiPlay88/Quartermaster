@@ -130,7 +130,7 @@ public sealed class TableDialogsTests
         var owner = Owner();
         var d = new BlockDialog();
         Assert.Equal("Make block", d.Title);
-        Assert.Equal((300d, 110d), (d.Width, d.Height));
+        Assert.Equal((300d, 140d), (d.Width, d.Height));
         Assert.Equal((1m, 99m, 2m), (d.CountBox.Minimum, d.CountBox.Maximum, d.CountBox.Value));
         var t = d.ShowDialog<(int Count, string Label)?>(owner);
         d.CountBox.Value = 5;

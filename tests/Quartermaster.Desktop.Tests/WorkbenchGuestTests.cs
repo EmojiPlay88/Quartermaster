@@ -77,7 +77,7 @@ public sealed class WorkbenchGuestTests : IDisposable
         Assert.Equal("Rules Workbench — TEST guest pack (read-only)", wb.Title);
         Assert.EndsWith(" (read-only)", wb.Title, StringComparison.Ordinal);
         Assert.False(wb.PromptShown);
-        Assert.Equal(6, TabContents(wb).Count());
+        Assert.Equal(8, TabContents(wb).Count());
         Assert.All(TabContents(wb), c => Assert.False(c.IsEnabled));
         Assert.False(wb.Formulas.IsEnabled);
 

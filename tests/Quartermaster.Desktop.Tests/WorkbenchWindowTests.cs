@@ -169,7 +169,7 @@ public sealed class WorkbenchWindowTests : IDisposable
         var wb = Bench(w);
         Assert.Equal((1000d, 640d), (wb.Width, wb.Height));
         Assert.Same(w, wb.Owner);
-        Assert.Equal(new[] { "Tables", "Formulas", "Properties & Holders", "Phases", "Alerts", "Visibility" },
+        Assert.Equal(new[] { "Tables", "Formulas", "Properties & Holders", "Phases", "Alerts", "Visibility", "Schedule", "End of game" },
             wb.Tabs.Items.Cast<TabItem>().Select(t => (string)t.Header!));
         Assert.Same(wb.Tables, Shown(wb));
         Assert.Same(wb, Bench(w));   // the menu again brings the same window to the front

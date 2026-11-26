@@ -4,7 +4,7 @@ using Quartermaster.Vassal;
 
 namespace Quartermaster.Render.Workbench;
 
-public enum WorkbenchTab { Tables, Formulas, Properties, Phases, Alerts, Visibility }
+public enum WorkbenchTab { Tables, Formulas, Properties, Phases, Alerts, Visibility, Schedule, EndOfGame }
 
 /// <summary>One line of the workbench's problems list. <see cref="Issue"/> is null for the "No problems found." row.</summary>
 public sealed record IssueRow(string Severity, string Item, string Problem, RulesIssue? Issue);
@@ -48,6 +48,19 @@ public static class WorkbenchRules
         if (pack.ById<PropertyDef>(entityId) != null) return (WorkbenchTab.Properties, entityId);
         if (pack.ById<HolderDef>(entityId) != null) return (WorkbenchTab.Properties, entityId);
         if (pack.MapOwners.Any(o => o.MapId == entityId)) return (WorkbenchTab.Visibility, entityId);
+        if (pack.Schedule?.Any(r => r.Id == entityId) == true) return (WorkbenchTab.Schedule, entityId);
+        if (pack.Victory?.Any(v => v.Id == entityId) == true) return (WorkbenchTab.EndOfGame, entityId);
+        return null;
+    }
+
+    /// <summary>As <see cref="IssueTarget(RulesPack, string)"/>, and the pack-level game-end and schedule issues (which name the pack, not an item) by their text.</summary>
+    public static (WorkbenchTab Tab, string Id)? IssueTarget(RulesPack pack, string entityId, string message)
+    {
+        if (IssueTarget(pack, entityId) is { } t) return t;
+        if (entityId != pack.Id) return null;
+        if (message.StartsWith("Schedule row ", StringComparison.Ordinal)) return (WorkbenchTab.Schedule, entityId);
+        if (message.StartsWith("Victory condition ", StringComparison.Ordinal) || message.StartsWith("The last ", StringComparison.Ordinal)
+            || message.StartsWith("A last stage ", StringComparison.Ordinal)) return (WorkbenchTab.EndOfGame, entityId);
         return null;
     }
 
