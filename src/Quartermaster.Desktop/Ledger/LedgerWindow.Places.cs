@@ -26,6 +26,7 @@ public sealed partial class LedgerWindow
     readonly TextBlock _placesEmpty = new() { Text = PlacesEmptyText, IsVisible = false, Margin = new Thickness(8, 6) };
     readonly StackPanel _placesBar = new() { Orientation = Avalonia.Layout.Orientation.Horizontal, Margin = new Thickness(2), IsVisible = false };   // its own row: the toolbar of the other tabs stays as it was
     readonly List<string> _addedHexes = new();   // hexes added with Add place that have no stored value yet
+    HashSet<string>? _addedHexesFor;   // the view sides they were added under (hot-seat: the next player does not see them)
 
     static readonly string PlacesKey = LedgerKey.Holder(HolderDef.GlobalId);
 
@@ -73,6 +74,16 @@ public sealed partial class LedgerWindow
         return new LedgerTabResult(found.Columns, shown, shown.Count, null);
     }
 
+    /// <summary>Hot-seat: the hexes one player added by hand are dropped when the view switches to other sides.</summary>
+    void ForgetAddedHexesForOtherView()
+    {
+        if (_addedHexes.Count == 0) return;
+        var now = _s.ViewSides;
+        if (now == null ? _addedHexesFor == null : _addedHexesFor != null && _addedHexesFor.SetEquals(now)) return;
+        _addedHexes.Clear();
+        _addedHexesFor = null;
+    }
+
     string PlacesCsvText() => LedgerViewRules.PlacesCsv(_cols, _rows.Select(r => new PlaceRow(r.Row.Name, r.Row.Values)).ToList());
 
     /// <summary>Add place: a row for the hex in the box (spelled as its board spells it); an unknown hex says so in the status.</summary>
@@ -88,7 +99,9 @@ public sealed partial class LedgerWindow
             _placeStatus.Text = ex.Message.Contains("too long") ? "The key is too long." : $"No hex named \"{text}\" on any board.";
             return;
         }
+        ForgetAddedHexesForOtherView();
         if (!_addedHexes.Contains(hex)) _addedHexes.Add(hex);
+        _addedHexesFor = _s.ViewSides == null ? null : new HashSet<string>(_s.ViewSides, StringComparer.Ordinal);
         _hexBox.Text = "";
         _debounce.Stop();
         Reload();

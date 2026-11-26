@@ -244,6 +244,33 @@ public sealed class LedgerPlacesTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Added_hexes_dropped_on_hot_seat_view_switch()
+    {
+        // Review M3: the next player at the shared screen does not see the rows the previous player added by hand.
+        var w = Game();
+        PutPlaces(w);
+        w.Session!.SetViewSides(new HashSet<string> { "red" });
+        Pump();
+        var lw = Open(w, "places");
+        lw.HexBox.Text = "0101";
+        Click(lw.AddPlaceButton);
+        Pump();
+        Assert.Contains("0101", lw.Rows.Select(r => r.Row.Name));
+        w.Session.SetViewSides(new HashSet<string> { "red" });   // the same sides: kept
+        Pump();
+        lw.Flush();
+        Assert.Contains("0101", lw.Rows.Select(r => r.Row.Name));
+        w.Session.SetViewSides(new HashSet<string> { "blue" });
+        Pump();
+        lw.Flush();
+        Assert.Equal(new[] { "0412", "0505" }, lw.Rows.Select(r => r.Row.Name));
+        w.Session.SetViewSides(new HashSet<string> { "red" });
+        Pump();
+        lw.Flush();
+        Assert.DoesNotContain("0101", lw.Rows.Select(r => r.Row.Name));
+    }
+
+    [AvaloniaFact]
     public void Places_filter_by_hex()
     {
         var w = Game();

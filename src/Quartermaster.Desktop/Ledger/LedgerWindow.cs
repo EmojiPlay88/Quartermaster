@@ -206,7 +206,7 @@ public sealed partial class LedgerWindow : Window
     void OnRewound() => OnUi(Kick);
     void OnGameReplaced() => OnUi(() => { HookGame(); _addedHexes.Clear(); Kick(); });
     void OnRulesChanged() => OnUi(() => { RefreshSides(); RefreshTabList(); Kick(); });
-    void OnViewChanged() => OnUi(Kick);   // debounced: a burst of changes reloads once
+    void OnViewChanged() => OnUi(() => { ForgetAddedHexesForOtherView(); Kick(); });   // debounced: a burst of changes reloads once
 
     protected override void OnClosed(EventArgs e)
     {
