@@ -248,6 +248,80 @@ public class MenuBatchOnlineTests : OtherPiecesTestBase
         Assert.NotEqual(offered.Sum(), next.Sum());
     }
 
+    // ---- final fix wave I1: a counter's pins are a queue ----
+
+    [Fact]
+    public void Shorter_batch_apply_then_single_gets_next_previewed_dice()
+    {
+        var (s, _, x) = Host();
+        var preview = Send(x, North, Batch(new[] { "n1", "n1" }, preview: true)).BatchVerdict!;
+        var a = preview.Rows[0].Rolls!["D"];
+        var b = preview.Rows[1].Rolls!["D"];
+        Assert.NotEqual(a, b);
+        var r = Send(x, North, Batch(new[] { "n1" }));   // the guest drops row 2 and applies row 1 only
+        Assert.True(r.Ok, r.Message);
+        Assert.Equal(a.Sum(), Str(s, "n1"));
+        Assert.Equal(b, Single(x, "n1", preview: true).Rolls!["D"]);   // the 2nd previewed dice, not a new roll
+        var v = Single(x, "n1", preview: false);
+        Assert.True(v.Applied, v.Message);
+        Assert.Equal(b.Sum(), Str(s, "n1"));
+    }
+
+    [Fact]
+    public void Single_apply_after_batch_preview_shifts_queue()
+    {
+        var (s, _, x) = Host();
+        var preview = Send(x, North, Batch(new[] { "n1", "n1" }, preview: true)).BatchVerdict!;
+        var v = Single(x, "n1", preview: false);
+        Assert.True(v.Applied, v.Message);
+        Assert.Equal(preview.Rows[0].Rolls!["D"].Sum(), Str(s, "n1"));
+        Assert.Equal(preview.Rows[1].Rolls!["D"], Send(x, North, Batch(new[] { "n1" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"]);
+    }
+
+    [Fact]
+    public void Two_of_three_applied_then_preview_shows_third_dice()
+    {
+        var (s, _, x) = Host();
+        var preview = Send(x, North, Batch(new[] { "n1", "n2", "n1", "n1" }, preview: true)).BatchVerdict!;
+        var third = preview.Rows[3].Rolls!["D"];
+        var r = Send(x, North, Batch(new[] { "n1", "n1" }));
+        Assert.True(r.Ok, r.Message);
+        Assert.Equal(preview.Rows[2].Rolls!["D"].Sum(), Str(s, "n1"));
+        Assert.Equal(third, Send(x, North, Batch(new[] { "n1" }, preview: true)).BatchVerdict!.Rows[0].Rolls!["D"]);
+        // Another counter's pins do not move.
+        Assert.Equal(preview.Rows[1].Rolls!["D"], Single(x, "n2", preview: true).Rolls!["D"]);
+    }
+
+    [Fact]
+    public void Grouped_unit_own_dice_survive_first_row_apply()
+    {
+        // M1: a group whose rows roll a different count (from the unit's strength): n2 previews its own dice in the group's scope; applying
+        // n1 first must not roll n2's previewed dice again.
+        var counted = GroupRollRunTests.Ford() with
+        {
+            Bindings = new List<VariableBinding>
+            {
+                new() { Variable = "S", Kind = BindingKind.Unit, Property = "str" },
+                new() { Variable = "D", Kind = BindingKind.Roll, DiceCount = 2, DiceSides = 6, DiceCountExpr = "S" },
+            },
+        };
+        var (s, c) = Open(Difficulty.SemiAuto, new[] { counted }, players: new[] { Alice, Bob }, phases: GroupRollRunTests.FordPhase());
+        GroupRollRunTests.Counting(s);
+        c.Start();
+        var run = Assert.Single(s.Game!.State.Pending);
+        Assert.Equal(run.Units.Single(u => u.PieceId == "n1").Group, run.Units.Single(u => u.PieceId == "n2").Group);
+        var x = new IntentExecutor(s, c);
+        FormulaVerdict Ask(string id, bool preview) => x.Execute("p1", North, new FormulaIntent("f", id, run.Id, None, true, preview)).Verdict!;
+        var n2Dice = Ask("n2", preview: true).Rolls!["D"];
+        Assert.Equal(3, n2Dice.Count);
+        var v1 = Ask("n1", preview: false);
+        Assert.True(v1.Applied, v1.Message);
+        Assert.Equal(n2Dice, Ask("n2", preview: true).Rolls!["D"]);
+        var v2 = Ask("n2", preview: false);
+        Assert.True(v2.Applied, v2.Message);
+        Assert.Equal(n2Dice.Sum(), Str(s, "n2"));
+    }
+
     [Fact]
     public void Removed_row_pins_released()
     {

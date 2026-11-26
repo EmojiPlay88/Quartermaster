@@ -393,7 +393,10 @@ internal static class FormulaIntentRunner
             return new FormulaVerdict(false, boxes, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId));
         if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated || scope?.Previewed == true))
             return new FormulaVerdict(false, boxes, NotWaitingText);
-        pins?.Remove(pinKey);   // consumed
+        // Consumed. A counter's own pins are a queue: its later previewed runs (a longer batch's rows) move down one. A grouped pending
+        // unit's group scope stays (the group's other rows may still need dice it showed; it goes stale at the phase change).
+        if (group == null && pinKey.PieceId == i.PieceId) pins?.Shift(pinKey.Who, f.Id, i.PieceId, 1);
+        else if (group == null) pins?.Remove(pinKey);
         return new FormulaVerdict(true, boxes, null);
     }
 
@@ -528,7 +531,8 @@ internal static class FormulaIntentRunner
 /// a row whose counter an earlier row removes is skipped (no pin scope is opened for it). Dice are pinned per sender so that nothing can be
 /// re-rolled by asking again: a counter's first row uses the very pin of a single run on that counter (<c>{pieceId}</c>, both ways: a
 /// single run after a batch preview reuses the row's dice and the other way round), its k-th row (k &gt;= 2) <c>batch:{pieceId}#{k}</c>,
-/// so reordering rows on different counters keeps every row's dice. A <see cref="FormulaDef.GroupRoll"/> formula has one live draw per
+/// so reordering rows on different counters keeps every row's dice. The pins are a queue (<see cref="FormulaPins.Shift"/>): an applied
+/// run (single or batch row) moves the counter's later pins down, so the k-th next run on a counter gets the k-th dice it was shown. A <see cref="FormulaDef.GroupRoll"/> formula has one live draw per
 /// sender: every group batch and every menu single run of it (a group of one) pins under <c>batch:group</c>, whatever the rows and their
 /// order, until an apply consumes it (or the phase position, game or pack changes), so a group roll cannot be had twice either.
 /// A preview answers each row's visible values and dice; an Apply applies every row (in order, each its own run) in one action, and only
@@ -560,8 +564,7 @@ internal static class FormulaBatchRunner
         var rows = new List<Row>();
         var verdicts = new List<FormulaVerdict>();
         var roller = s.Roll;
-        FormulaPins.Key KeyFor(string? pieceId, int occurrence) =>
-            new(who ?? "", f.Id, occurrence == 1 ? pieceId : $"batch:{pieceId}#{occurrence}");
+        FormulaPins.Key KeyFor(string? pieceId, int occurrence) => FormulaPins.QueueKey(who ?? "", f.Id, pieceId, occurrence);
         // A group roll: the sender's one live group draw (shared with its menu single runs of this formula).
         FormulaPins.Scope? groupScope = null;
         var groupKey = new FormulaPins.Key(who ?? "", f.Id, GroupPin);
@@ -636,6 +639,7 @@ internal static class FormulaBatchRunner
         var label = MenuBatchModel.ActionLabelFor(f.Name, intents.Select(x => x!.PieceId).ToList());
         group.Clear();
         var applied = 0;
+        var consumed = new Dictionary<string, int>(StringComparer.Ordinal);
         string? message = null;
         using (g.BeginAction(label))
         {
@@ -659,10 +663,13 @@ internal static class FormulaBatchRunner
                 }
                 verdicts[k] = new FormulaVerdict(true, verdicts[k].Boxes, null);
                 applied++;
-                if (row.PinKey is { } key) pins?.Remove(key);   // consumed
+                if (row.PinKey != null) consumed[pid ?? ""] = consumed.GetValueOrDefault(pid ?? "") + 1;
                 if (f.GroupRoll) BatchChain.AddDrawn(group, trace);
             }
         }
+        // Consumed: each counter's pins are a queue, so its unapplied (or later previewed) runs move down by the rows applied to it and
+        // the k-th next run on that counter gets the k-th dice the sender was shown.
+        foreach (var (pieceKey, n) in consumed) pins?.Shift(who ?? "", f.Id, pieceKey.Length == 0 ? null : pieceKey, n);
         if (message == null && groupScope != null) pins?.Remove(groupKey);
         return new FormulaBatchVerdict(message == null && applied > 0, verdicts, message);
     }
@@ -674,9 +681,12 @@ internal static class FormulaBatchRunner
 /// <summary>
 /// The dice of guests' formula runs on the host (spec 8a.1: the host rolls). Every die rolled for a guest's run (preview, refused Apply,
 /// any refusal after the run) is pinned before the answer goes back, per scope (sender, formula, unit; the run id is not part of it, so
-/// an ad-hoc run and the pending run share their dice) and per dice configuration (<c>key|count|sides</c>). Pins are append-only: an
+/// an ad-hoc run and the pending run share their dice, except a GroupRoll formula's menu runs, which pin under <c>batch:group</c>, and
+/// grouped pending units, which pin per group) and per dice configuration (<c>key|count|sides</c>). Pins are append-only: an
 /// existing configuration is never rolled again, so asking again, retrying a wrong Apply or toggling an input that changes the dice
-/// all come back to the first roll. A scope lives until a successful Apply consumes it, the phase position (turn/phase) changes, or the
+/// all come back to the first roll. A counter's scopes are a queue (<see cref="Shift"/>): its next run pins under <c>{pieceId}</c>, its
+/// k-th next under <c>batch:{pieceId}#{k}</c>, and an applied run moves the later ones down. A scope lives until a successful Apply
+/// consumes it (a grouped pending unit's group scope stays until it goes stale), the phase position (turn/phase) changes, or the
 /// game session or rules pack is replaced; there is no wall-clock expiry. A live scope is never evicted: with
 /// <see cref="MaxPerSender"/> scopes a sender's run that may roll dice in a new scope is refused with <see cref="FullText"/>.
 /// </summary>
@@ -787,6 +797,34 @@ internal sealed class FormulaPins
     public void Remove(Key key)
     {
         if (_bySender.TryGetValue(key.Who, out var scopes)) scopes.Remove(key);
+    }
+
+    /// <summary>The pin key of a counter's k-th next run (k &gt;= 1): <c>{pieceId}</c> for the next, else <c>batch:{pieceId}#{k}</c>.</summary>
+    public static Key QueueKey(string who, string formulaId, string? pieceId, int k) =>
+        new(who, formulaId, k == 1 ? pieceId : $"batch:{pieceId}#{k}");
+
+    /// <summary>
+    /// A counter's pins are a queue: after <paramref name="consumed"/> of its runs are applied, its first <paramref name="consumed"/> pins
+    /// go and every later one moves down by as many (<c>#{j}</c> becomes <c>#{j-consumed}</c>, or <c>{pieceId}</c> at 1), so the k-th
+    /// next run on the counter always gets the k-th dice the sender was shown.
+    /// </summary>
+    public void Shift(string who, string formulaId, string? pieceId, int consumed)
+    {
+        if (consumed <= 0 || !_bySender.TryGetValue(who, out var scopes)) return;
+        var prefix = $"batch:{pieceId}#";
+        var last = 1;
+        foreach (var k in scopes.Keys)
+            if (k.FormulaId == formulaId && k.PieceId is { } p && p.StartsWith(prefix, StringComparison.Ordinal)
+                && int.TryParse(p.AsSpan(prefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var j)
+                && j > last)
+                last = j;
+        for (var j = 1; j <= last; j++)
+        {
+            var from = QueueKey(who, formulaId, pieceId, j);
+            if (j <= consumed) { scopes.Remove(from); continue; }
+            var to = QueueKey(who, formulaId, pieceId, j - consumed);
+            if (scopes.Remove(from, out var scope)) scopes[to] = scope;
+        }
     }
 
     /// <summary>Live and stale scopes held for a sender (tests).</summary>
