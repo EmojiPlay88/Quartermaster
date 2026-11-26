@@ -28,6 +28,10 @@ public sealed record DialogView(IReadOnlyList<BoxView> Boxes, IReadOnlyList<Inli
 
     /// <summary>The run whose state the view shows (<see cref="Shown"/>, else <see cref="Trace"/>): read it for anything displayed, never apply it.</summary>
     public FormulaTrace ShownTrace => Shown ?? Trace;
+
+    /// <summary>B7: the viewer lacks data the formula reads (its hidden inputs are not empty): before Apply nothing of the run's values, result,
+    /// "(negative)" mark or dice is shown or sent (<see cref="FormulaMasking.LedgerPreview"/> and the related rules read this).</summary>
+    public bool Masked { get; init; }
 }
 
 /// <summary>UI-free state of the formula dialog: typed values, overrides, pinned dice, and the mapping from a run to what the controls show.</summary>
@@ -437,7 +441,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var hostGuards = HostCalculates ? guards : NoHostGuards;
         var picks = PieceLabels();
         var boxes = vars.Select(v => Box(v, t, guards, picks)).ToList();
-        var inline = t.RollsByKey.Where(kv => kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || HostRolled(kv.Key, t)))
+        // B7: a masked formula's dice are never shown before Apply (their count or whether they are rolled may follow the hidden data).
+        var inline = t.RollsByKey.Where(kv => _hidden.Count == 0 && kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || HostRolled(kv.Key, t)))
             .Select(kv => new InlineRollView(kv.Key, DiceText(kv.Value))).ToList();
         // A guest's local run rolls its own dice; until the host's are in, no result built on them is shown.
         var localDice = HostCalculates && t.RollsByKey.Keys.Any(k => !HostRolled(k, t));
@@ -488,7 +493,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         // with it as the viewer retypes a value compared with it. After Apply the ledger shows what the viewer may see.
         if (masked) { result = HiddenBoxText; negative = false; }
         return new DialogView(boxes, inline, result, working + (negative ? " (negative)" : ""), negative, status,
-            canApply, real) { Shown = ReferenceEquals(t, real) ? null : t };
+            canApply, real) { Shown = ReferenceEquals(t, real) ? null : t, Masked = masked };
     }
 
     private static readonly IReadOnlySet<string> NoHostGuards = new HashSet<string>();
@@ -610,6 +615,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
                 Raw(v.Variable).Trim().Length == 0 ? "Waiting for input" : IsPickReason(v.MissingReason) ? v.MissingReason : HiddenBoxText, null,
                 false, picks.GetValueOrDefault(v.Variable) ?? Array.Empty<string>());
         if (IsHidden(v.Variable)) return new BoxView(v.Variable, HiddenBoxText, BoxBackground.Auto, "", false, null, null);
+        // B7: the dice of a masked formula are not shown before Apply (dice the viewer types itself are its own).
+        if (binding?.Kind == BindingKind.Roll && _hidden.Count > 0 && !IsPhysicalRoll(v.Variable))
+            return new BoxView(v.Variable, HiddenBoxText, BoxBackground.Auto, "", false, null, null);
         // A guarded variable is not asked: "not used" once its condition is false, blank and closed while the condition is undecided.
         // On an online guest a guard over hidden data is the host's to decide: the box stays as it would be without the guard.
         var hostGuard = hostGuards.Contains(v.Variable);

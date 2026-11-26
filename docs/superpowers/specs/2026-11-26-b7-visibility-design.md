@@ -230,6 +230,18 @@ the `PhaseGate` text for the asked side: `{Side} is playing {phase}; wait for yo
   whether or not its writes are visible, since a previewed result could show the hidden value, or change with it as the viewer retypes a
   value compared with it. After Apply the ledger shows what the viewer may see. The batch grids show the same text (they read
   `DialogView.ResultText`).
+- **One rule for everything before Apply** (Task 3 round 3): for a viewer who lacks data a formula reads (`DialogView.Masked`), everything
+  shown or sent before Apply comes from the shown run (`DialogView.ShownTrace`), never the real one: the formula dialog, a guest's verdict
+  texts (`SafeStatus`, including `Not one of the choices for this piece` and `No choice for this piece`) and preview values
+  (`FormulaMasking.PreviewValues`), the batch grids' Ledger column (`FormulaMasking.LedgerPreview`: every output of a masked row reads
+  `{Prop} changes (hidden)`) and `goes negative` (`FormulaMasking.GoesNegativePreview`: never for a masked row), and a batch's preview chain
+  and roll-group draw (`FormulaMasking.ChainPreview`). The dice of a masked formula are not shown or sent before Apply: no inline rolls, Roll
+  boxes read `HiddenBoxText` (dice the player types in physical-dice mode stay theirs), a preview verdict carries no dice and no Roll values
+  (`FormulaMasking.PreviewRolls`). The dice stay pinned in the dialog or on the host, so the Apply uses them and asking again rolls nothing
+  new. Only the real run is applied.
+- Accepted by design: what Apply itself shows (the log, visible writes, the dice in the log) and probing a hidden precondition by repeated
+  Apply attempts. **Pack authors** must not put a hidden value into a dice count, or into a write the viewer can see, when they want it kept
+  secret: after Apply the dice and the visible ledger show it (Task 11 documents this in the wiki).
 
 ### Carry: one resolver for a schedule row's zone map (B5/B6)
 `ScheduleDue.ZoneMapIn` delegates to `MapRefs.Find`; the validator's schedule check uses `MapRefs.Find(_module.Maps, row.ZoneMapId)`

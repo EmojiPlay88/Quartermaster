@@ -438,14 +438,13 @@ internal static class FormulaIntentRunner
             if (scope != null) scope.Previewed = true;
             var source = model.Checked ? model.LastExpected ?? dv.ShownTrace : dv.ShownTrace;
             var values = PreviewValues(f, source, hidden);
-            return new FormulaVerdict(false, boxes, dv.CanApply ? null : SafeStatus(dv, hidden), values,
-                model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal));
+            return new FormulaVerdict(false, boxes, dv.CanApply ? null : SafeStatus(dv, hidden), values, FormulaMasking.PreviewRolls(model, hidden));
         }
         if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));   // the dice stay pinned for a corrected Apply
         // B7: a precondition or guard over data hidden from the sender decided against the run: the generic text, never which condition.
         if (FormulaDialogModel.ApplyRefusal(dv) is { } refusal) return new FormulaVerdict(false, boxes, refusal);
         // A computed value is never stored: a trace writing one is refused whole, never applied in part.
-        if (dv.Trace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
+        if (dv.ShownTrace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
             return new FormulaVerdict(false, boxes, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId));
         if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated || scope?.Previewed == true))
             return new FormulaVerdict(false, boxes, NotWaitingText);
@@ -568,29 +567,19 @@ internal static class FormulaIntentRunner
     }
 
     /// <summary>The dialog's status when it names only variables; an evaluation error is passed on only when no input is hidden.</summary>
-    /// <summary>
-    /// The values a preview sends back: every visible variable's value, never a hidden one, and never a host guard's
-    /// (<see cref="FormulaMasking.GuardsOnHidden"/>, B7): whether it has a value says whether its hidden guard holds; the sender keeps what it typed.
-    /// </summary>
-    internal static Dictionary<string, string> PreviewValues(FormulaDef f, FormulaTrace source, HashSet<string> hidden)
-    {
-        var guards = FormulaMasking.GuardsOnHidden(f, hidden);
-        var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var v in source.Variables)
-            if (v?.Variable != null && !hidden.Contains(v.Variable) && !guards.Contains(v.Variable) && v.Value is { } val)
-                values[v.Variable] = FormulaDialogModel.ExactText(val);
-        return values;
-    }
+    internal static Dictionary<string, string> PreviewValues(FormulaDef f, FormulaTrace source, HashSet<string> hidden) =>
+        FormulaMasking.PreviewValues(f, source, hidden);
 
     internal static string SafeStatus(DialogView dv, HashSet<string> hidden)
     {
-        // A typed value that is not among this counter's choices (or no choice left): the neutral text, never the list (B4).
-        if (dv.Trace.Variables.FirstOrDefault(v => v?.Variable != null && !hidden.Contains(v.Variable)
+        // A typed value that is not among this counter's choices (or no choice left): the neutral text, never the list (B4). Read from the run
+        // the sender is shown (B7), so a host guard's validation never depends on its hidden guard.
+        if (dv.ShownTrace.Variables.FirstOrDefault(v => v?.Variable != null && !hidden.Contains(v.Variable)
                 && v.MissingReason is InputChoices.NotOneText or InputChoices.NoChoiceText) is { } choice)
             return choice.MissingReason!;
         if (dv.Status.StartsWith("Doesn't match: ", StringComparison.Ordinal) || dv.Status.StartsWith("Waiting for: ", StringComparison.Ordinal))
             return dv.Status;
-        if (hidden.Count == 0 && dv.Trace.Error is { Length: > 0 } err) return err;
+        if (hidden.Count == 0 && dv.ShownTrace.Error is { Length: > 0 } err) return err;
         return "The formula could not be calculated.";
     }
 }
@@ -680,7 +669,7 @@ internal static class FormulaBatchRunner
                 var source = model.Checked ? model.LastExpected ?? dv.ShownTrace : dv.ShownTrace;
                 var values = FormulaIntentRunner.PreviewValues(f, source, hidden);
                 verdicts.Add(new FormulaVerdict(false, boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden), values,
-                    model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal)));
+                    FormulaMasking.PreviewRolls(model, hidden)));
             }
             else
             {
@@ -689,13 +678,13 @@ internal static class FormulaBatchRunner
                     verdicts.Add(new FormulaVerdict(false, boxes, FormulaIntentRunner.SafeStatus(dv, hidden)));
                     return Refuse(k, FormulaIntentRunner.SafeStatus(dv, hidden));   // the dice stay pinned for a corrected batch
                 }
-                if (dv.Trace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
+                if (dv.ShownTrace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
                     return Refuse(k, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId)!);
                 verdicts.Add(new FormulaVerdict(false, boxes, null));
             }
-            if (f.GroupRoll) BatchChain.AddDrawn(group, dv.Trace);
+            if (f.GroupRoll) BatchChain.AddDrawn(group, dv.ShownTrace);
             // The next rows see this one: its commands applied to the chain's clone (the last row's never need to be).
-            var chained = dv.CanApply ? dv.Trace : model.Checked ? model.LastExpected : null;
+            var chained = FormulaMasking.ChainPreview(model, dv);
             if (k < intents.Count - 1 && chained is { Result: not null, Error: null })
             {
                 if (!cloned) { at = full.DeepClone(); cloned = true; }

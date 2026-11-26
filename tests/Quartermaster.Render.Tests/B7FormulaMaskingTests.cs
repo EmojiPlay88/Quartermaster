@@ -52,6 +52,7 @@ public class B7FormulaMaskingTests : IDisposable
             {
                 new PropertyDef { Id = "cash", Name = "Cash", Scope = PropertyScope.Holders, Visibility = Visibility.Public },
                 new PropertyDef { Id = "plans", Name = "Plans", Scope = PropertyScope.Holders, Visibility = Visibility.Private },
+                new PropertyDef { Id = "spies", Name = "Spies", Scope = PropertyScope.Holders, Visibility = Visibility.Private },
                 new PropertyDef { Id = "mines", Name = "Mines", Scope = PropertyScope.Holders, KeyedBy = "hex", Visibility = Visibility.Private },
                 new PropertyDef { Id = "morale", Name = "Morale", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Default = 5 },
             }).ToList(),
@@ -127,6 +128,60 @@ public class B7FormulaMaskingTests : IDisposable
                 },
                 new FormulaDef
                 {
+                    // A guarded Input whose choices (a table filtered for this counter) are empty.
+                    Id = "f-guard-none", Name = "Empty raid", Text = "W + if(A > T, lookup(TestTerrainCost, K), 0)",
+                    Bindings = new()
+                    {
+                        W, DepotBinding("A", "plans"),
+                        new VariableBinding { Variable = "T", Kind = BindingKind.Input },
+                        new VariableBinding
+                        {
+                            Variable = "K", Kind = BindingKind.Input, When = "A > T", ChoicesTable = "t-cost",
+                            ChoicesFilter = "lookup(TestTerrainCost, row()) > 100",
+                        },
+                    },
+                    Outputs = new() { ToWater },
+                },
+                new FormulaDef
+                {
+                    // A guarded Input choosing a row of a table (Clear, Sand).
+                    Id = "f-guard-table", Name = "Table raid", Text = "W + if(A > T, lookup(TestTerrainCost, K), 0)",
+                    Bindings = new()
+                    {
+                        W, DepotBinding("A", "plans"),
+                        new VariableBinding { Variable = "T", Kind = BindingKind.Input },
+                        new VariableBinding { Variable = "K", Kind = BindingKind.Input, When = "A > T", ChoicesTable = "t-cost" },
+                    },
+                    Outputs = new() { ToWater },
+                },
+                new FormulaDef
+                {
+                    // As many dice as Red's (Private) spies: the count is hidden.
+                    Id = "f-dice-count", Name = "Spy dice", Text = "W + dice(S, 6)",
+                    Bindings = new() { W, DepotBinding("S", "spies") },
+                    Outputs = new() { ToWater },
+                },
+                new FormulaDef
+                {
+                    // A die rolled only when Red's spies exceed T: whether it is rolled follows the hidden value.
+                    Id = "f-dice-if", Name = "Spy check", Text = "W + if(S > T, dice(1, 6), 0)",
+                    Bindings = new() { W, DepotBinding("S", "spies"), new VariableBinding { Variable = "T", Kind = BindingKind.Input } },
+                    Outputs = new() { ToWater },
+                },
+                new FormulaDef
+                {
+                    // Raises the Global (Public) cash once the Private place of the counter's hex passes T: a menu batch chains it to the next row.
+                    Id = "f-chain", Name = "Mined cash", Text = "G + 1 + W * 0", Precondition = "keyed(Mines, hex()) > T",
+                    Bindings = new()
+                    {
+                        W,
+                        new VariableBinding { Variable = "G", Kind = BindingKind.Global, Property = "cash" },
+                        new VariableBinding { Variable = "T", Kind = BindingKind.Input },
+                    },
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "cash", Op = OutputOp.Set } },
+                },
+                new FormulaDef
+                {
                     // An auto value that reads the hidden value through holder(): no hidden variable is named.
                     Id = "f-auto-call", Name = "Plans input", Text = "X + W",
                     Bindings = new() { W, new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "holder(RedDepot, Plans)" } },
@@ -148,6 +203,7 @@ public class B7FormulaMaskingTests : IDisposable
         s.UpdateRules(_ => Pack(s.Archive.Sha256, extra));
         foreach (var prop in new[] { "cash", "plans" })
             s.Game!.Execute(new LedgerDelta(Depot, prop, 0, Secret, "manual", null, null, null, null));
+        s.Game!.Execute(new LedgerDelta(Depot, "spies", 0, 3, "manual", null, null, null, null));
         foreach (var piece in new[] { PhaseFixture.BlueOne, PhaseFixture.RedOne })
         {
             var hex = PieceInfo.Location(s.Game!.State.Pieces[piece], s.Model)!;
@@ -484,5 +540,108 @@ public class B7FormulaMaskingTests : IDisposable
             if (g == "5" && h == "2") Assert.True(off.CanApply);
             else Assert.False(off.CanApply);
         }
+    }
+    /// <summary>A guest's preview and apply verdicts for <paramref name="formulaId"/> with <paramref name="typed"/>, as one comparable line
+    /// (T, the threshold the guest typed, left out of the values).</summary>
+    private string GuestAnswers(string formulaId, Dictionary<string, string> typed)
+    {
+        var s = Open();
+        var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        var x = new IntentExecutor(s, c);
+        var line = new List<string>();
+        foreach (var preview in new[] { true, false })
+        {
+            var v = x.Execute("p2", Blue, new FormulaIntent(formulaId, PhaseFixture.BlueOne, null, typed, false, preview)).Verdict!;
+            var values = (v.Values ?? new Dictionary<string, string>()).Where(kv => kv.Key != "T").OrderBy(kv => kv.Key, StringComparer.Ordinal);
+            line.Add($"{preview}|{v.Applied}|{v.Message}|{string.Join(",", v.Boxes.Select(b => b.Var + "=" + b.State))}|{string.Join(",", values)}|{v.Rolls?.Count}");
+        }
+        return string.Join(" / ", line);
+    }
+
+    [Fact]
+    public void Guest_guard_box_invalid_choice_same_verdict_either_way()
+    {
+        foreach (var h in new[] { "3", "2" })
+        {
+            Dictionary<string, string> Typed(string t) => new() { ["T"] = t, ["W"] = "10", ["G"] = "5", ["H"] = h };
+            var on = GuestAnswers("f-guard-checked", Typed("0"));
+            var off = GuestAnswers("f-guard-checked", Typed(Huge));
+            Assert.Equal(on, off);
+            Assert.DoesNotContain(SecretText, on);
+        }
+        // A key not among the table's choices: the neutral "not one of the choices" text whether or not the guard holds.
+        foreach (var k in new[] { "Iron", "Sand" })
+        {
+            Dictionary<string, string> Typed(string t) => new() { ["T"] = t, ["W"] = "10", ["K"] = k };
+            var on = GuestAnswers("f-guard-table", Typed("0"));
+            Assert.Equal(on, GuestAnswers("f-guard-table", Typed(Huge)));
+            if (k == "Iron") Assert.Contains(InputChoices.NotOneText, on);
+        }
+    }
+
+    [Fact]
+    public void Guest_guard_box_with_no_choice_same_verdict_either_way()
+    {
+        Dictionary<string, string> Typed(string t) => new() { ["T"] = t, ["W"] = "10", ["K"] = "Clear" };
+        var on = GuestAnswers("f-guard-none", Typed("0"));
+        var off = GuestAnswers("f-guard-none", Typed(Huge));
+        Assert.Equal(on, off);
+        Assert.Contains(InputChoices.NoChoiceText, on);   // the forced run validates the box whether or not the guard holds
+    }
+
+    [Fact]
+    public void Masked_dice_not_shown_or_sent_before_apply()
+    {
+        var s = Open();
+        s.SetViewSides(Blue);
+        // dice(S, 6): the number of dice is Red's spies.
+        var (_, count) = Typed(s, "f-dice-count");
+        Assert.Equal(3, count.Trace.Rolls.Sum(r => r.Results.Count));   // the run rolled them
+        Assert.Empty(count.InlineRolls);
+        Assert.DoesNotContain("3", count.ResultText);
+        // if(S > T, dice(1, 6), 0): whether a die is rolled follows the hidden value.
+        var (_, rolled) = Typed(s, "f-dice-if", ("T", "0"));
+        var (_, none) = Typed(s, "f-dice-if", ("T", "99"));
+        Assert.NotEmpty(rolled.Trace.Rolls);
+        Assert.Empty(none.Trace.Rolls);
+        Assert.Empty(rolled.InlineRolls);
+        Assert.Equal(Seen(rolled, "T"), Seen(none, "T"));
+        // A guest's preview carries no dice and the same answer either way; the host keeps its pins (asking again rolls nothing new).
+        Assert.Equal(GuestAnswers("f-dice-if", new() { ["T"] = "0", ["W"] = "10" }), GuestAnswers("f-dice-if", new() { ["T"] = "99", ["W"] = "10" }));
+        var host = Open();
+        var rolls = 0;
+        host.SetRoller((n, _) => { rolls += n; return Enumerable.Repeat(4, n).ToList(); });
+        var x = new IntentExecutor(host, new PhaseController(host, (cmd, st) => CommandLog.Prepare(cmd, st, host)));
+        var typed = new Dictionary<string, string> { ["W"] = "10" };
+        var p1 = x.Execute("p2", Blue, new FormulaIntent("f-dice-count", PhaseFixture.BlueOne, null, typed, true, true)).Verdict!;
+        Assert.Null(p1.Rolls);
+        Assert.Null(x.Execute("p2", Blue, new FormulaIntent("f-dice-count", PhaseFixture.BlueOne, null, typed, true, true)).Verdict!.Rolls);
+        Assert.Equal(3, rolls);   // pinned on the host: the second preview rolled nothing
+        Assert.True(x.Execute("p2", Blue, new FormulaIntent("f-dice-count", PhaseFixture.BlueOne, null, typed, false)).Verdict!.Applied);
+        Assert.Equal(3, rolls);   // the Apply used the pinned dice
+        Assert.Equal(10 + 12, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+
+    [Fact]
+    public void Menu_batch_next_row_same_whether_hidden_check_passed()
+    {
+        string RowOne(string threshold)
+        {
+            var s = Open();
+            s.SetViewSides(new HashSet<string> { "red" });
+            var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+            var b = new MenuBatchModel(s, c, "f-chain", new[] { PhaseFixture.RedOne, PhaseFixture.RedTwo });
+            b.SetCell(0, "T", threshold);   // r1's hex holds the Private mines: T = 0 passes, T huge does not
+            b.SetCell(0, "G", "0");
+            b.SetCell(0, "W", "10");
+            b.SetCell(1, "T", "0");
+            b.SetCell(1, "G", "1");   // what row 1 reads if row 0 applied
+            b.SetCell(1, "W", "10");
+            var r0 = b.Row(0);
+            Assert.True(r0.CanApply, string.Join(",", r0.Cells) + "|" + string.Join(",", r0.Wrong) + "|" + r0.Exceptions + "|" + b.Variables.Count);   // a hidden precondition is decided at Apply
+            var r = b.Row(1);
+            return $"{string.Join(",", r.Cells)}|{string.Join(",", r.Wrong)}|{r.Result}|{r.LedgerText}|{r.Exceptions}|{r.CanApply}";
+        }
+        Assert.Equal(RowOne("0"), RowOne(Huge));
     }
 }

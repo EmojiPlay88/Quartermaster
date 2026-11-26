@@ -309,6 +309,63 @@ public static class FormulaMasking
             hidden.Add(PlaceOutputInput);
     }
 
+    /// <summary>
+    /// B7: what a batch grid row shows as the writes of a run before Apply (<see cref="DialogView.ShownTrace"/>, never the real run). An
+    /// output the viewer may not see, and every output of a masked run (<see cref="DialogView.Masked"/>: its values could show the hidden
+    /// data, or change with it as the viewer retypes a value), shows only its name: <c>{Prop} changes (hidden)</c>.
+    /// </summary>
+    public static string LedgerPreview(ModuleSession s, DialogView dv)
+    {
+        var t = dv.ShownTrace;
+        if (t.Error != null || t.Result == null) return "";
+        var sides = ViewerSides(s);
+        return string.Join("; ", t.Outputs.Select(o => !dv.Masked && OutputShown(s, sides, o)
+            ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
+            : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
+    }
+
+    /// <summary>B7: whether a batch grid row says "goes negative" before Apply: only for an unmasked run whose visible write goes below zero
+    /// (<see cref="DialogView.ShownTrace"/>; a masked run never previews it, as the dialog's "(negative)" mark).</summary>
+    public static bool GoesNegativePreview(ModuleSession s, DialogView dv)
+    {
+        if (dv.Masked) return false;
+        var t = dv.ShownTrace;
+        var sides = ViewerSides(s);
+        return t.Error == null && t.Outputs.Any(o => o.After < 0 && OutputShown(s, sides, o));
+    }
+
+    /// <summary>B7: the run a batch chain applies to its clone for the rows after this one, and draws a roll group's dice from, before Apply:
+    /// the run the viewer is shown (<see cref="DialogView.ShownTrace"/>; the engine's expected run in the manual modes), so a later row never
+    /// shows whether an earlier row's hidden check passed. The live Apply re-runs every row on the real state.</summary>
+    public static FormulaTrace? ChainPreview(FormulaDialogModel m, DialogView dv) =>
+        dv.CanApply ? dv.ShownTrace : m.Checked ? m.LastExpected : null;
+
+    /// <summary>B7: the dice a preview verdict sends a guest: none for a masked run (<paramref name="hidden"/> not empty); they stay pinned on the
+    /// host, so the Apply uses them and asking again rolls nothing new.</summary>
+    public static Dictionary<string, IReadOnlyList<int>>? PreviewRolls(FormulaDialogModel m, IReadOnlySet<string> hidden) =>
+        hidden.Count > 0 ? null : m.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal);
+
+    /// <summary>
+    /// B7: the values a preview verdict sends back, read from the run the sender is shown (<see cref="DialogView.ShownTrace"/>, or the
+    /// expected run in the manual modes): every visible variable's value, never a hidden one, never a host guard's
+    /// (<see cref="GuardsOnHidden"/>: whether it has a value says whether its hidden guard holds; the sender keeps what it typed), and for a
+    /// masked run never a Roll variable's (its dice are not sent before Apply, <see cref="PreviewRolls"/>).
+    /// </summary>
+    public static Dictionary<string, string> PreviewValues(FormulaDef f, FormulaTrace source, IReadOnlySet<string> hidden)
+    {
+        var guards = GuardsOnHidden(f, hidden);
+        var rolls = hidden.Count == 0 ? new HashSet<string>(StringComparer.Ordinal)
+            : new HashSet<string>((f.Bindings ?? new List<VariableBinding>()).Where(b => b is { Kind: BindingKind.Roll, Variable: not null })
+                .Select(b => b.Variable), StringComparer.Ordinal);
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var v in source.Variables)
+            if (v?.Variable != null && !hidden.Contains(v.Variable) && !guards.Contains(v.Variable) && !rolls.Contains(v.Variable) && v.Value is { } val)
+                values[v.Variable] = FormulaDialogModel.ExactText(val);
+        return values;
+    }
+
+    private static string Num(double d) => d.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>The entry <see cref="GuardsOnHidden"/> adds when the formula's precondition depends on hidden data (not a variable name).</summary>
     public const string PreconditionGuard = "(precondition)";
 

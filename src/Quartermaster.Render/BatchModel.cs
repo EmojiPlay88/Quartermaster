@@ -280,23 +280,14 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     }
 
     /// <summary>What the row would write. A value the viewer may not see (another side's holder) shows only its name.</summary>
-    private string LedgerOf(DialogView dv)
-    {
-        if (dv.ShownTrace.Error != null || dv.ShownTrace.Result == null) return "";
-        var sides = FormulaMasking.ViewerSides(s);
-        return string.Join("; ", dv.ShownTrace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
-            ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
-            : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
-    }
+    private string LedgerOf(DialogView dv) => FormulaMasking.LedgerPreview(s, dv);
 
     private static string Num(double d) => d.ToString("0.####", CultureInfo.InvariantCulture);
 
     private string ExceptionsFor(PendingUnit u, DialogView dv)
     {
         var parts = new List<string>();
-        var sides = FormulaMasking.ViewerSides(s);
-        if (dv.ShownTrace.Error == null && dv.ShownTrace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o))))
-            parts.Add("goes negative");   // only for values the viewer may see
+        if (FormulaMasking.GoesNegativePreview(s, dv)) parts.Add("goes negative");   // only for values the viewer may see
         if (u.PieceId != null && WarningsByPiece().TryGetValue(u.PieceId, out var names)) parts.AddRange(names);
         return string.Join("; ", parts);
     }
