@@ -1,5 +1,6 @@
 using Quartermaster.Rules.Expr;
 using Quartermaster.Rules.Tables;
+using Quartermaster.Vassal;
 using AstExpr = Quartermaster.Rules.Expr.Expr;
 
 namespace Quartermaster.Rules;
@@ -15,9 +16,21 @@ public static class RulesValidator
         Validate(pack, knownMapIds, null);
 
     /// <summary>As the two-argument form; <paramref name="knownSlots"/> are the module's palette entries a Place output may name (null = not known, so none is checked).</summary>
-    public static IReadOnlyList<RulesIssue> Validate(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, IReadOnlyCollection<string>? knownSlots)
+    public static IReadOnlyList<RulesIssue> Validate(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, IReadOnlyCollection<string>? knownSlots) =>
+        Validate(pack, knownMapIds, knownSlots, null);
+
+    // The module the current Validate call runs against (null = none): read by the private helpers so their signatures stay unchanged. Set and restored by the four-argument Validate.
+    [ThreadStatic] private static ModuleModel? _module;
+
+    /// <summary>
+    /// As the three-argument form; with a <paramref name="module"/> a Remove output's To map is resolved as the runtime does (<see cref="MapRefs.Find"/>: id, then name, trimmed)
+    /// and a constant hex name (a keyed property's key, a distance() argument) must be a hex of some board.
+    /// </summary>
+    public static IReadOnlyList<RulesIssue> Validate(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, IReadOnlyCollection<string>? knownSlots, ModuleModel? module)
     {
         var issues = new List<RulesIssue>();
+        var outerModule = _module;   // a nested call restores its caller's module
+        _module = module;
         try
         {
             Duplicates(pack.Properties.Select(p => (p.Id, p.Name)), "Property", issues);
@@ -43,6 +56,7 @@ public static class RulesValidator
             CheckComputedCycles(pack, issues);
             CheckOverrides(pack, issues);
             CheckLabels(pack, issues);
+            CheckKeyed(pack, issues);
             CheckHolders(pack, issues);
             CheckRuleRefs(pack, issues);
             CheckChecklists(pack, issues);
@@ -59,7 +73,142 @@ public static class RulesValidator
         {
             Add(issues, RulesIssueSeverity.Error, pack.Id, pack.Name, $"Validation failed unexpectedly: {ex.Message}");
         }
+        finally { _module = outerModule; }
         return issues;
+    }
+
+    // ---- B6: keyed properties, keyed(), distance(), hex() ----
+
+    private static void CheckKeyed(RulesPack pack, List<RulesIssue> issues)
+    {
+        foreach (var p in pack.Properties)
+        {
+            if (string.IsNullOrWhiteSpace(p.KeyedBy)) continue;
+            void Err(string m) => Add(issues, RulesIssueSeverity.Error, p.Id, p.Name, m);
+            var (kind, tableId) = KeyedFacts.Parse(p.KeyedBy);
+            if (kind == KeyKind.None) { Err($"Property \"{p.Name}\" is keyed by \"{p.KeyedBy}\"; use table:<id>, turn or hex"); continue; }
+            if (kind == KeyKind.Table)
+            {
+                if (pack.ById<TableDef>(tableId!) is not { } t) Err($"Property \"{p.Name}\" is keyed by table \"{tableId}\", which does not exist");
+                else if (t.RowKeys.Any(k => TableLookup.ParseKey(TableLookup.Normalise(k)).Kind is TableKeyKind.Range or TableKeyKind.AtLeast or TableKeyKind.AtMost))
+                    Err($"Property \"{p.Name}\" is keyed by table \"{t.Name}\", whose row keys are ranges");
+            }
+            if (PropertyFacts.IsComputed(p)) Err($"Property \"{p.Name}\" is keyed and computed; remove one");
+            if (!string.IsNullOrWhiteSpace(p.DefaultExpr) || !string.IsNullOrWhiteSpace(p.SheetField))
+                Err($"Property \"{p.Name}\" is keyed, so it cannot have a starting value or a sheet field");
+            if (!string.IsNullOrWhiteSpace(p.OverridesTable)) Err($"Property \"{p.Name}\" is keyed, so it cannot override a table");
+            if (kind == KeyKind.Hex)
+            {
+                if (p.Scope != PropertyScope.Holders) Err($"Property \"{p.Name}\" is keyed by hex, so it must be a holder property");
+                else if (p.Holders is null || p.Holders.Count == 0 || p.Holders.Any(h => h != HolderDef.GlobalId))
+                    Err($"Property \"{p.Name}\" is keyed by hex, so only the Global holder keeps it");
+            }
+            if (p.Outliner != OutlinerAggregate.None)
+                Add(issues, RulesIssueSeverity.Warning, p.Id, p.Name, $"Property \"{p.Name}\" is keyed, so the outliner does not total it");
+        }
+    }
+
+    /// <summary>A variable bound to a keyed property reads no single value: it must be read with keyed().</summary>
+    private static void CheckKeyedBinding(RulesPack pack, VariableBinding b, string v, Action<string> err)
+    {
+        if (b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Piece
+            && !string.IsNullOrWhiteSpace(b.Property) && pack.ById<PropertyDef>(b.Property!) is { } kp && KeyedFacts.IsKeyed(kp))
+            err($"{v} reads keyed property \"{kp.Name}\"; use keyed() in the formula");
+    }
+
+    /// <summary>An output's key: required for a keyed property and only for one, only on a Write, never in a property list; a place property is written to Global; a constant key must suit the property.</summary>
+    private static void CheckKeyedOutput(RulesPack pack, FormulaOutput o, int outputNo, Action<string> err)
+    {
+        bool hasKey = !string.IsNullOrWhiteSpace(o.Key);
+        if (o.Action != OutputAction.Write)
+        {
+            if (hasKey) err($"output {outputNo} has a key but does not write a value");
+            return;
+        }
+        if (o.PropertyChoice is { Count: > 0 } ids)
+        {
+            foreach (var id in ids.Distinct(StringComparer.Ordinal))
+                if (pack.ById<PropertyDef>(id ?? "") is { } listed && KeyedFacts.IsKeyed(listed))
+                    err($"output {outputNo} lists keyed property \"{listed.Name}\"; a property list cannot hold keyed properties");
+            return;
+        }
+        if (pack.ById<PropertyDef>(o.Property ?? "") is not { } p) return;
+        if (!KeyedFacts.IsKeyed(p))
+        {
+            if (hasKey) err($"output {outputNo} has a key but writes property \"{p.Name}\", which is not keyed");
+            return;
+        }
+        if (!hasKey) err($"output {outputNo} writes keyed property \"{p.Name}\" but has no key");
+        else if (ParseProblem(o.Key!) is null)
+            foreach (var tail in ConstantKeyProblems(pack, p, Parser.Parse(o.Key!))) err($"output {outputNo} {tail}");
+        if (KeyedFacts.IsPlace(p) && o.Target == OutputTarget.Holder && o.HolderId != HolderDef.GlobalId)
+            err($"output {outputNo} writes place property \"{p.Name}\" to a holder other than Global");
+    }
+
+    /// <summary>The value of an expression that reads nothing (a literal, or a calculation on literals); null when it cannot be worked out without a game.</summary>
+    private static Value? Fold(AstExpr e)
+    {
+        try { return Evaluator.Evaluate(e, new ConstantContext()); }
+        catch (EvalError) { return null; }
+    }
+
+    /// <summary>True when the module has a board with a grid: only then is a hex name checked against it.</summary>
+    private static bool HasGrid(ModuleModel m) => m.Maps.Any(map => map.Boards.Any(b => b.Grid != null));
+
+    /// <summary>Problems (message tails, without a prefix) of a key expression that has a constant value, for the keyed property <paramref name="p"/>.</summary>
+    private static List<string> ConstantKeyProblems(RulesPack pack, PropertyDef p, AstExpr key)
+    {
+        var found = new List<string>();
+        if (Fold(key) is not { } v) return found;
+        var (kind, tableId) = KeyedFacts.Parse(p.KeyedBy);
+        switch (kind)
+        {
+            case KeyKind.Table:
+                if (pack.ById<TableDef>(tableId!) is { } t && !t.RowKeys.Any(k => TableLookup.Matches(TableLookup.ParseKey(k), v)))
+                    found.Add($"key \"{v.Display()}\" is not a row of table \"{t.Name}\"");
+                break;
+            case KeyKind.Turn:
+                if (v.Kind != ValueKind.Number || v.Number != Math.Floor(v.Number) || v.Number < 1 || v.Number > 100000)
+                    found.Add("key must be a whole turn number of at least 1");
+                break;
+            case KeyKind.Hex:
+                if (v.Kind == ValueKind.Text && _module is { } m && HasGrid(m) && BoardCells.Find(m, v.Text, null) is null)
+                    found.Add($"key \"{v.Text}\" is not a hex of any board");
+                break;
+        }
+        return found;
+    }
+
+    /// <summary>Problems in a keyed() call, as message tails (see <see cref="FilterRefProblems"/>): the property, the optional holder, a constant key.</summary>
+    private static List<string> KeyedProblems(Call c, RulesPack pack)
+    {
+        var found = new List<string>();
+        if (c.Args.Count < 2 || c.Args[0] is not VarRef pn) { found.Add("keyed() needs a property name"); return found; }
+        var prop = pack.PropertyByName(pn.Name);
+        if (prop is null) { found.Add(UnknownPropertyTail(pn.Name)); return found; }
+        if (!KeyedFacts.IsKeyed(prop)) found.Add($"keyed() reads \"{prop.Name}\", which is not keyed");
+        if (c.Args.Count > 2)
+        {
+            if (c.Args[2] is VarRef hn) found.AddRange(HolderCallProblems(hn.Name, prop.Name, pack));
+            else found.Add("keyed() needs a holder name");
+        }
+        if (KeyedFacts.IsKeyed(prop))
+            foreach (var tail in ConstantKeyProblems(pack, prop, c.Args[1])) found.Add("keyed() " + tail);
+        return found;
+    }
+
+    /// <summary>Problems in a distance() call, as message tails: an argument that is not text, a constant hex name no board has (with a module).</summary>
+    private static List<string> DistanceProblems(Call c)
+    {
+        var found = new List<string>();
+        foreach (var arg in c.Args)
+        {
+            if (Fold(arg) is not { } v) continue;
+            if (v.Kind != ValueKind.Text) found.Add("distance() needs hex names as text");
+            else if (_module is { } m && HasGrid(m) && BoardCells.Find(m, v.Text, null) is null)
+                found.Add($"distance() names hex \"{v.Text}\", which is not on any board");
+        }
+        return found.Distinct(StringComparer.Ordinal).ToList();
     }
 
     private static void CheckComputed(RulesPack pack, PropertyDef p, List<RulesIssue> issues)
@@ -81,7 +230,7 @@ public static class RulesValidator
                 $"Property \"{p.Name}\" is Public but is computed from hidden data; players who do not hold every side see it as Private");
     }
 
-    private static readonly string[] StartingValueForbidden = { "dice", "holder", "runs", "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
+    private static readonly string[] StartingValueForbidden = { "dice", "holder", "runs", "sum", "countof", "maxof", "minof", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin", "hex", "distance" };
 
     private static void CheckStartingValue(RulesPack pack, PropertyDef p, List<RulesIssue> issues)
     {
@@ -247,7 +396,12 @@ public static class RulesValidator
         catch (ParseError) { }
         return found.Distinct(StringComparer.Ordinal);
 
-        void Prop(string n) { if (pack.PropertyByName(n) is null) found.Add(UnknownPropertyTail(n)); }
+        void Prop(string n, bool value = true)
+        {
+            var q = pack.PropertyByName(n);
+            if (q is null) found.Add(UnknownPropertyTail(n));
+            else if (value && KeyedFacts.IsKeyed(q)) found.Add($"reads keyed property \"{q.Name}\"; use keyed()");
+        }
         void Walk(AstExpr e)
         {
             switch (e)
@@ -257,8 +411,8 @@ public static class RulesValidator
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
                     if (c.Function == "layer") { if (c.Args.Count != 1 || c.Args[0] is not TextLit) found.Add("layer() needs a layer name in quotes"); }
-                    else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is TextLit t) Prop(t.Value);
-                    else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is VarRef hv) Prop(hv.Name);
+                    else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is TextLit t) Prop(t.Value, false);
+                    else if (c.Function == "has" && c.Args.Count == 1 && c.Args[0] is VarRef hv) Prop(hv.Name, false);
                     else if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
                     {
                         if (pack.TableByName(tv.Name) is null) found.Add($"refers to unknown table \"{tv.Name}\"");
@@ -268,6 +422,8 @@ public static class RulesValidator
                     else if (c.Function == "runs") found.AddRange(RunsProblems(c, pack));
                     else if (c.Function == "row") { if (!allowRow) found.Add(RowOutsideFilterTail); }
                     else if (ExprFacts.IsAggregate(c.Function)) found.AddRange(AggregateProblems(c, pack));
+                    else if (c.Function == "keyed") { found.AddRange(KeyedProblems(c, pack)); if (c.Args.Count > 1) Walk(c.Args[1]); }
+                    else if (c.Function == "distance") { found.AddRange(DistanceProblems(c)); foreach (var a in c.Args) Walk(a); }
                     else if (c.Function != "holder") foreach (var a in c.Args) Walk(a);
                     break;
             }
@@ -304,6 +460,7 @@ public static class RulesValidator
         var prop = property is null ? null : pack.PropertyByName(property);
         if (property is not null && prop is null) yield return $"{c.Function}() names unknown property \"{property}\"";
         else if (prop is { Scope: PropertyScope.Holders }) yield return $"{c.Function}() needs a piece property, not \"{property}\"";
+        if (KeyedFacts.IsKeyed(prop)) yield return $"{c.Function}() cannot total keyed property \"{prop!.Name}\"";
         if (string.IsNullOrWhiteSpace(filter)) yield break;
         if (ParseProblem(filter) is { } pe) yield return $"the filter of {c.Function}() does not parse: {pe}";
         else foreach (var u in FilterRefProblems(filter, pack)) yield return $"the filter of {c.Function}() {u}";
@@ -334,7 +491,7 @@ public static class RulesValidator
                 case Unary u: Walk(u.Operand); break;
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
-                    if (ExprFacts.NeedsPiece(c.Function) || c.Function == "runs") found.Add(c.Function);
+                    if (ExprFacts.NeedsPiece(c.Function) || c.Function is "runs" or "hex" or "distance") found.Add(c.Function);
                     if (ExprFacts.IsAggregate(c.Function)) Scan(ExprFacts.AggregateArgs(c).Filter);
                     foreach (var a in c.Args) Walk(a);
                     break;
@@ -491,7 +648,7 @@ public static class RulesValidator
         catch (ParseError) { return false; }
     }
 
-    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "layer", "has", "dice", "side", "map", "holder", "runs", "row", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
+    private static readonly string[] ForbiddenConditionFunctions = { "name", "marker", "layer", "has", "dice", "side", "map", "holder", "runs", "row", "hexsum", "hexcount", "hexmax", "hexmin", "attachedsum", "attachedcount", "attachedmax", "attachedmin", "hex", "distance" };
 
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
@@ -541,6 +698,18 @@ public static class RulesValidator
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
                     if (ForbiddenConditionFunctions.Contains(c.Function)) forbidden.Add(c.Function);
+                    if (c.Function == "keyed")
+                    {
+                        // keyed(P, key) reads P (a global property) at the key; the names are not variables, the key is an expression of its own
+                        dynamic = true;
+                        if (c.Args.Count > 0 && c.Args[0] is VarRef kv)
+                        {
+                            vars.Add(kv.Name);
+                            if (pack.PropertyByName(kv.Name) is not null) aggregateProblems.AddRange(KeyedProblems(c, pack));
+                        }
+                        if (c.Args.Count > 1) Walk(c.Args[1]);
+                        break;
+                    }
                     if (c.Function is "turn" or "stage" or "lookup" or "lookuprange" || ExprFacts.IsAggregate(c.Function)) dynamic = true;
                     if (ExprFacts.IsAggregate(c.Function)) { aggregateProblems.AddRange(AggregateProblems(c, pack)); break; }
                     if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
@@ -564,6 +733,8 @@ public static class RulesValidator
         public bool Has(string property) => throw new EvalError("No pieces here");
         public Value PieceName() => throw new EvalError("No pieces here");
         public Value Marker(string key) => throw new EvalError("No pieces here");
+        public double Turn() => throw new EvalError("No turn here");     // a key such as turn() - 5 has no constant value
+        public double Stage() => throw new EvalError("No stage here");
     }
 
     private static void CheckOwners(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, List<RulesIssue> issues)
@@ -827,6 +998,7 @@ public static class RulesValidator
             if (o.Action == OutputAction.Place) placeSeen = true;
             CheckOutput(pack, f, o, outputNo, Err, knownMapIds, knownSlots, secondPlace, hasPlace);
             ParseGuard(o.Expr, $"output {outputNo} value");
+            ParseGuard(o.Key, $"output {outputNo} key");
             if (o.Action == OutputAction.Write && o.PropertyChoice is { Count: > 0 })
             {
                 if (string.IsNullOrWhiteSpace(o.PropertySelect)) Err($"output {outputNo} has a property list but no \"Pick by\"");
@@ -862,6 +1034,8 @@ public static class RulesValidator
                     break;
                 }
                 if (c.Function == "row") err(RowOutsideFilterTail);
+                if (c.Function == "keyed") foreach (var u in KeyedProblems(c, pack)) err(u);
+                if (c.Function == "distance") foreach (var u in DistanceProblems(c)) err(u);
                 if (ExprFacts.IsAggregate(c.Function))
                 {
                     foreach (var u in AggregateProblems(c, pack)) err(u);
@@ -875,6 +1049,7 @@ public static class RulesValidator
     private static void CheckBinding(RulesPack pack, FormulaDef f, VariableBinding b, Action<string> err)
     {
         string v = $"variable \"{b.Variable}\"";
+        CheckKeyedBinding(pack, b, v, err);
         if (!string.IsNullOrWhiteSpace(b.ChoicesTable))
         {
             if (b.Kind != BindingKind.Input) err($"{v} has a choices table but is not an Input");
@@ -1001,10 +1176,12 @@ public static class RulesValidator
 
         if (o.Action == OutputAction.Remove)
         {
-            if (!string.IsNullOrWhiteSpace(o.ToMapId) && knownMapIds != null && !knownMapIds.Contains(o.ToMapId!))
+            if (!string.IsNullOrWhiteSpace(o.ToMapId) && (_module is { } mod ? MapRefs.Find(mod.Maps, o.ToMapId) is null : knownMapIds != null && !knownMapIds.Contains(o.ToMapId!.Trim())))
                 err($"output {outputNo} moves the piece to map \"{o.ToMapId}\", which does not exist in the module");
         }
         else if (!string.IsNullOrWhiteSpace(o.ToMapId)) err($"output {outputNo} names a map but does not remove a piece");
+
+        CheckKeyedOutput(pack, o, outputNo, err);
 
         if (o.Action != OutputAction.Write)
         {

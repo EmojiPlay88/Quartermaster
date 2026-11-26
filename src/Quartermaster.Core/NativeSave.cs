@@ -63,6 +63,18 @@ public static class NativeSave
             Need(p != null && p.TraitStates != null && p.Trail != null && p.TypeString != null && p.Id != null && p.MapId != null, "piece data");
         Need(snap.Ledgers != null && snap.LedgerHistory != null && snap.DiceHistory != null, "ledger data");
         foreach (var l in snap.Ledgers!.Values) Need(l != null, "ledger data");
+        if (snap.Keyed != null)   // keyed values (B6): drop empty or null parts, so readers never meet a null
+        {
+            foreach (var key in snap.Keyed.Keys.ToList())
+            {
+                var props = snap.Keyed[key];
+                if (props != null)
+                    foreach (var id in props.Keys.ToList())
+                        if (props[id] is not { Count: > 0 }) props.Remove(id);
+                if (props is not { Count: > 0 }) snap.Keyed.Remove(key);
+            }
+            if (snap.Keyed.Count == 0) snap.Keyed = null;
+        }
         Need(snap.LedgerHistory!.All(e => e != null && e.Key != null && e.PropertyId != null && e.Source != null), "ledger history");
         Need(snap.DiceHistory!.All(e => e != null && e.Purpose != null && e.Results != null), "dice history");
         foreach (var st in snap.Stacks!.Values)

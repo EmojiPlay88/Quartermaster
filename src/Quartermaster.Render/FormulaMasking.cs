@@ -63,7 +63,35 @@ public static class FormulaMasking
     /// </summary>
     public const string PieceOutputInput = "piece output";
 
+    /// <summary>
+    /// The entry <see cref="HiddenVariables"/> adds when the formula's own expressions read a keyed value through keyed() that the viewer may
+    /// not see (B6): a place that is not Public, a named holder whose values are hidden, an unknown property or holder, or a non-Public value of
+    /// a run piece the viewer cannot read. Like <see cref="HolderCallInput"/>, it hides no box but masks the formula.
+    /// </summary>
+    public const string KeyedCallInput = "keyed()";
+
+    /// <summary>
+    /// The entry <see cref="HiddenVariables"/> adds when an output writes a place that is not Public (B6): its working shows the value before
+    /// the change. Like <see cref="HolderCallInput"/>, it hides no box but masks the formula.
+    /// </summary>
+    public const string PlaceOutputInput = "place output";
+
     private static readonly IReadOnlySet<string> NoSides = new HashSet<string>();
+
+    /// <summary>
+    /// True when a viewer holding <paramref name="sides"/> may see this output's value (before and after): null sides (solo) see all; otherwise
+    /// the viewer may edit its ledger value, and a keyed value is not hidden from it (<see cref="KeyedValues.HiddenFor"/>: a Private place,
+    /// another side's keyed value). Decides the dialog's "(negative)" mark and the batch grids' ledger text.
+    /// </summary>
+    public static bool OutputShown(ModuleSession s, IReadOnlySet<string>? sides, OutputPreview o)
+    {
+        if (sides == null) return true;
+        if (o == null || !s.CanEditLedgerFor(o.Key, sides)) return false;
+        if (o.ValueKey == null) return true;   // unkeyed: the ledger rule above
+        if (s.Rules is not { } pack || s.Game?.State is not { } st) return false;
+        var prop = (pack.Properties ?? new List<PropertyDef>()).FirstOrDefault(p => p != null && p.Id == o.PropertyId);
+        return prop != null && !KeyedValues.HiddenFor(st, pack, sides, o.Key, prop);
+    }
 
     /// <summary>
     /// The sides whose view the local dialogs mask for: null in solo (no masking); the viewer's sides in hot-seat and on the online host's
@@ -91,7 +119,7 @@ public static class FormulaMasking
         m.HostCalculates = s.IsGuest;
         m.PickSides = PickSides(s);
         var sides = ViewerSides(s);
-        m.OutputVisible = sides == null ? null : key => s.CanEditLedgerFor(key, sides);
+        m.OutputVisible = sides == null ? null : o => OutputShown(s, sides, o);
     }
 
     /// <summary>
@@ -153,6 +181,10 @@ public static class FormulaMasking
         // Cheapest first: a pack with no hidden override (most packs) never parses the formula's expressions for lookup() calls.
         if (Quartermaster.Rules.Tables.CellOverrideFacts.AnyHidden(pack) && RunPieceHidden()
             && FormulaVariables.TablesRead(f).Any(t => FormulaVariables.LookupHidden(pack, t))) hidden.Add(TableCallInput);
+        // B6: keyed(P, key[, H]) reads a keyed value as PlayerView and keyed() on a view decide; a place output's working shows its Before.
+        // Packs without keyed properties (most packs) never parse the formula for keyed() calls.
+        if ((pack.Properties ?? new List<PropertyDef>()).Any(KeyedFacts.IsKeyed))
+            AddKeyedHidden(pack, f, hidden, pieceId, UnitHidden, HolderHidden);
         // A computed property built from hidden data shows that data wherever it is read: through a binding of any kind (the viewer's own
         // unit and the global holder included) or a variable, which is hidden itself, and through holder(H, P), which hides like a hidden holder.
         hidden.UnionWith(FormulaVariables.ComputedHiddenVariables(pack, f));
@@ -170,6 +202,56 @@ public static class FormulaMasking
             foreach (var b in f.Bindings ?? new List<VariableBinding>())
                 if (b is { Kind: BindingKind.Table, Variable: not null }) hidden.Add(b.Variable);
         return hidden;
+    }
+
+    /// <summary>
+    /// B6: adds <see cref="KeyedCallInput"/> when any keyed() read of the formula may be hidden from the viewer, every binding whose own
+    /// expressions (auto value, row/column, "Only when", dice count) make such a read (its value would show it), and
+    /// <see cref="PlaceOutputInput"/> when an output writes a place that is not Public. The rule is the one of <see cref="PlayerView"/> and
+    /// keyed() on a view: a place that is not Public is hidden from every viewer not holding every side; a named holder hides as a Holder
+    /// binding does; a run piece's value hides as a Unit binding does; an unknown property or holder fails closed.
+    /// </summary>
+    private static void AddKeyedHidden(RulesPack pack, FormulaDef f, HashSet<string> hidden, string? pieceId,
+        Func<string?, bool> unitHidden, Func<string?, bool> holderHidden)
+    {
+        bool PrivatePlace(PropertyDef? p) => KeyedFacts.IsPlace(p) && !PropertyFacts.IsPublic(pack, p);
+        bool ReadHidden((string Property, string? Holder, Quartermaster.Rules.Expr.Expr Key) r)
+        {
+            if (pack.PropertyByName(r.Property ?? "") is not { } def) return true;   // fail closed
+            if (PrivatePlace(def)) return true;
+            if (r.Holder != null) return pack.HolderByName(r.Holder) is not { } h || holderHidden(h.Id);
+            if (def.Scope == PropertyScope.Pieces || (def.Scope == PropertyScope.Both && pieceId != null)) return unitHidden(def.Id);   // the run piece's value
+            return false;   // the Global holder's value of a Public or Private non-place property: public, as a Global binding
+        }
+        bool SourceHidden(string? src)
+        {
+            if (string.IsNullOrWhiteSpace(src)) return false;
+            try { return ExprFacts.KeyedReads(Parser.Parse(src)).Any(ReadHidden); }
+            catch (ParseError) { return false; }   // never runs
+        }
+        // A Piece binding's filter or an Input's choices filter reads each candidate (not the run piece): any keyed() read of a value that is
+        // not Public or of a named holder may be hidden there (fails closed, as an aggregate's filter does).
+        bool FilterHidden(string? src)
+        {
+            if (string.IsNullOrWhiteSpace(src)) return false;
+            try
+            {
+                return ExprFacts.KeyedReads(Parser.Parse(src)).Any(k => k.Holder != null
+                    || pack.PropertyByName(k.Property ?? "") is not { } d || !PropertyFacts.IsPublic(pack, d));
+            }
+            catch (ParseError) { return false; }   // never runs
+        }
+        if (FormulaVariables.KeyedReads(f).Any(ReadHidden)
+            || (f.Bindings ?? new List<VariableBinding>()).Any(b => b != null && (FilterHidden(b.PieceFilter) || FilterHidden(b.ChoicesFilter))))
+            hidden.Add(KeyedCallInput);
+        if (hidden.Contains(KeyedCallInput))
+            foreach (var b in f.Bindings ?? new List<VariableBinding>())
+                if (b?.Variable != null && FormulaVariables.Sources(b).Any(SourceHidden))
+                    hidden.Add(b.Variable);
+        var props = pack.Properties ?? new List<PropertyDef>();
+        if ((f.Outputs ?? new List<FormulaOutput>()).Any(o => o is { Action: OutputAction.Write, Property: not null }
+                && PrivatePlace(props.FirstOrDefault(p => p != null && p.Id == o.Property))))
+            hidden.Add(PlaceOutputInput);
     }
 
     /// <summary>The entry <see cref="GuardsOnHidden"/> adds when the formula's precondition depends on hidden data (not a variable name).</summary>
@@ -191,6 +273,7 @@ public static class FormulaMasking
         var holderHidden = hidden.Contains(HolderCallInput);
         var aggregateHidden = hidden.Contains(AggregateCallInput);
         var tableHidden = hidden.Contains(TableCallInput);
+        var keyedHidden = hidden.Contains(KeyedCallInput);
         // A Piece output whose data may be hidden: the variables naming its target are read on the host (a guest's view may lack the target or
         // its values), so a guard reaching one is the host's to decide, as a guard reaching a holder() call is when HolderCallInput is hidden.
         var targetVars = hidden.Contains(PieceOutputInput)
@@ -199,12 +282,12 @@ public static class FormulaMasking
             : new HashSet<string>(StringComparer.Ordinal);
         bool HasHiddenCall(string? src)
         {
-            if (string.IsNullOrWhiteSpace(src) || !(holderHidden || aggregateHidden || tableHidden)) return false;
+            if (string.IsNullOrWhiteSpace(src) || !(holderHidden || aggregateHidden || tableHidden || keyedHidden)) return false;
             try
             {
                 var e = Parser.Parse(src);
                 return (holderHidden && ExprFacts.HolderReads(e).Count > 0) || (aggregateHidden && ExprFacts.AggregateReads(e).Count > 0)
-                    || (tableHidden && ExprFacts.LookupTables(e).Count > 0);
+                    || (tableHidden && ExprFacts.LookupTables(e).Count > 0) || (keyedHidden && ExprFacts.KeyedReads(e).Count > 0);
             }
             catch (ParseError) { return false; }
         }

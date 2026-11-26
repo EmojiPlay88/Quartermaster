@@ -31,6 +31,10 @@ namespace Quartermaster.Core;
 /// <item>Dice of a formula with PrivateRolls follow the line's owner; hidden rolls lose their results and read "{Side} rolled dice".</item>
 /// <item>Pending runs lose units of other sides (and removed pieces); runs left empty are dropped. Unit-less runs follow the current phase's side.
 /// Every run loses its group dice (<see cref="PendingRun.GroupRolls"/>); an ask run's units of other sides lose their group.</item>
+/// <item>Keyed values (<see cref="GameState.Keyed"/>, B6) are filtered exactly as Ledgers (a whole ledger key hidden, else per property). A place
+/// property (keyed by hex, kept by the Global holder) has no side: a Public one is shown to every player, any other only in a full view, so a
+/// player view drops its values and history entries and redacts its log lines. A formula whose keyed() reads may be hidden (a place that is
+/// not Public, a named holder the viewer may not see) never shows its working.</item>
 /// <item>If filtering fails, the view is emptied (fail closed) and its log holds one System line, <see cref="FilterErrorText"/>.</item>
 /// </list>
 /// </summary>
@@ -86,7 +90,7 @@ public static class PlayerView
     /// <summary>Everything that could hold another side's data removed, with one log line saying why.</summary>
     private static GameState Lockdown(GameState s)
     {
-        s.Pieces = new(); s.Stacks = new(); s.Ledgers = new(); s.LedgerHistory = new(); s.DiceHistory = new();
+        s.Pieces = new(); s.Stacks = new(); s.Ledgers = new(); s.Keyed = null; s.LedgerHistory = new(); s.DiceHistory = new();
         s.Pending = new(); s.MapOrder = new();
         s.IsPlayerView = true;
         s.Log = new() { new LogEntry(1, LogKind.System, FilterErrorText, null, null, null, DateTimeOffset.UnixEpoch, s.Position?.Turn,
@@ -99,6 +103,19 @@ public static class PlayerView
     private static string Num(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
     private enum Outcome { Keep, Drop, Redact }
+
+    /// <summary>The keyed() reads of each formula record (property and holder names), parsed once per record (records are replaced on edit).</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FormulaDef, IReadOnlyList<(string Property, string? Holder)>> KeyedReadCache = new();
+
+    /// <summary>How many formula records had their keyed() reads parsed on this thread (tests read it).</summary>
+    [ThreadStatic] internal static int KeyedReadParses;
+
+    private static IReadOnlyList<(string Property, string? Holder)> KeyedReadsOf(FormulaDef f) =>
+        KeyedReadCache.GetValue(f, d =>
+        {
+            KeyedReadParses++;
+            return FormulaVariables.KeyedReads(d).Select(r => (r.Property, r.Holder)).ToList();
+        });
 
     private sealed class Filter
     {
@@ -121,6 +138,8 @@ public static class PlayerView
         /// property they read (<see cref="FormulaVariables.PieceBindingsHidden"/>): their working (which shows that value) is never shown.
         /// </summary>
         private readonly HashSet<string> _hiddenInputFormulas = new(StringComparer.Ordinal);
+        /// <summary>Place properties (keyed by hex) that are not Public: only a full view has their values (B6).</summary>
+        private readonly HashSet<string> _privatePlaces = new(StringComparer.Ordinal);
         private readonly Regex? _names;
 
         public Filter(GameState full, RulesPack pack, ModuleModel? model, IReadOnlySet<string> held)
@@ -129,6 +148,8 @@ public static class PlayerView
             _access = new PieceAccess(full, pack, model, held);
             foreach (var p in pack.Properties ?? new())   // a computed property reading hidden data counts as Private
                 if (p != null) _visibility.TryAdd(p.Id ?? "", PropertyFacts.IsPublic(pack, p) ? Visibility.Public : Visibility.Private);
+            foreach (var p in pack.Properties ?? new())
+                if (p?.Id != null && KeyedFacts.IsPlace(p) && PropPrivate(p.Id)) _privatePlaces.Add(p.Id);
             foreach (var ph in pack.Phases ?? new())
             {
                 if (ph == null) continue;
@@ -136,6 +157,7 @@ public static class PlayerView
                 set.Add(string.IsNullOrWhiteSpace(ph.SideId) ? "" : ph.SideId);
             }
             _privatePrefixes = (pack.Formulas ?? new()).Where(f => f is { PrivateRolls: true }).Select(f => (f.Name ?? "") + ": ").Distinct().ToList();
+            var hasKeyed = (pack.Properties ?? new()).Any(p => p?.KeyedBy != null && KeyedFacts.IsKeyed(p));   // packs without keyed values pay nothing
             var piecesMayHide = PieceAccess.PiecesMayHide(pack, model, held);   // this view may lack pieces or values (removed, on a hidden map, masked)
             foreach (var f in pack.Formulas ?? new())
                 if (f?.Id != null && ((f.Bindings ?? new()).Any(b => b is { Kind: BindingKind.Holder }
@@ -144,7 +166,9 @@ public static class PlayerView
                         || ValueHidden(LedgerKey.Holder(h.Id), pack.PropertyByName(r.Property ?? "")?.Id, out _))
                     || FormulaVariables.AggregateReadsHidden(pack, f, piecesMayHide)
                     || FormulaVariables.ComputedReadsHidden(pack, f)   // a computed value built from hidden data, even on a held piece or the global holder
-                    || FormulaVariables.PieceBindingsHidden(pack, f, piecesMayHide).Any()))   // a picked piece's non-Public value, or any once a pick may be masked
+                    || FormulaVariables.PieceBindingsHidden(pack, f, piecesMayHide).Any()   // a picked piece's non-Public value, or any once a pick may be masked
+                    || (hasKeyed && KeyedReadsOf(f).Any(r => KeyedReadHidden(r.Property, r.Holder)))   // B6: a keyed() read the viewer may not see
+                    || (_privatePlaces.Count > 0 && (f.Outputs ?? new()).Any(o => o?.Property != null && _privatePlaces.Contains(o.Property)))))   // B6: its working names a hidden place value
                     _hiddenInputFormulas.Add(f.Id);
 
             foreach (var p in full.Pieces.Values)
@@ -199,11 +223,24 @@ public static class PlayerView
         private bool PropPrivate(string? prop) =>
             prop == null || !_visibility.TryGetValue(prop, out var v) || v != Visibility.Public;
 
+        /// <summary>
+        /// True when a keyed(Property, key[, Holder]) read may show the viewer a value it cannot see: an unknown property or holder (fail closed),
+        /// a place that is not Public, or a named holder whose values are hidden. A read of the run piece's own value follows the run's line.
+        /// </summary>
+        private bool KeyedReadHidden(string property, string? holder)
+        {
+            if (_pack.PropertyByName(property ?? "") is not { } def) return true;
+            if (_privatePlaces.Contains(def.Id)) return true;
+            if (holder == null) return false;
+            return _pack.HolderByName(holder) is not { } h || ValueHidden(LedgerKey.Holder(h.Id), def.Id, out _);
+        }
+
         /// <summary>True when this ledger value is hidden from the viewer; <paramref name="side"/> is its owner when known.</summary>
         private bool ValueHidden(string? key, string? prop, out string? side)
         {
             side = null;
             if (key == null || !LedgerKey.TryParse(key, out var isPiece, out var id)) return true;
+            if (prop != null && _privatePlaces.Contains(prop)) return true;   // a place that is not Public: only a full view has it
             if (isPiece)
             {
                 if (_hidden.Contains(id)) { _sideOf.TryGetValue(id, out side); return true; }
@@ -315,6 +352,20 @@ public static class PlayerView
             }
             v.MapOrder = (v.MapOrder ?? new()).Where(m => !MapHidden(m)).ToList();
 
+            // Keyed values (B6): as Ledgers.
+            if (v.Keyed != null)
+            {
+                foreach (var key in v.Keyed.Keys.ToList())
+                {
+                    var props = v.Keyed[key];
+                    if (props == null || (WholeKeyHidden(key) && ValueHidden(key, null, out _))) { v.Keyed.Remove(key); continue; }
+                    foreach (var prop in props.Keys.ToList())
+                        if (props[prop] == null || ValueHidden(key, prop, out _)) props.Remove(prop);
+                    if (props.Count == 0) v.Keyed.Remove(key);
+                }
+                if (v.Keyed.Count == 0) v.Keyed = null;
+            }
+
             // Ledgers.
             foreach (var key in v.Ledgers.Keys.ToList())
             {
@@ -345,7 +396,7 @@ public static class PlayerView
                     var line = log[i];
                     if (entryOfLine[i] is { } e && HidesInput(e))
                     {
-                        var plain = $"{e.PropertyId} {Num(e.Before)} → {Num(e.After)}";
+                        var plain = $"{e.PropertyId}{(e.ValueKey == null ? "" : $"[{e.ValueKey}]")} {Num(e.Before)} → {Num(e.After)}";
                         // Fail closed: when the working is not found verbatim, the whole line is replaced.
                         line = line with
                         {
@@ -401,8 +452,9 @@ public static class PlayerView
             string.IsNullOrEmpty(formulaId) || _hiddenInputFormulas.Contains(formulaId)
             || !(_pack.Formulas ?? new()).Any(f => f != null && f.Id == formulaId);
 
-        /// <summary>A formula entry whose working may show an input this viewer may not see (the result itself stays visible).</summary>
-        private bool HidesInput(LedgerEntry e) => e.Working != null && FormulaHidesInput(e.FormulaId);
+        /// <summary>A formula entry whose working may show an input this viewer may not see (the result itself stays visible). A manual
+        /// entry's working only names the value it changed (B6: "{Prop}[{key}] {before} → {after}"), which a kept entry shows anyway.</summary>
+        private bool HidesInput(LedgerEntry e) => e.Working != null && e.Source != "manual" && FormulaHidesInput(e.FormulaId);
 
         /// <summary>The text shown in place of a calc line's working that may hold a hidden input.</summary>
         private string HiddenWorkingText(string? formulaId) =>

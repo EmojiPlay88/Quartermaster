@@ -30,7 +30,8 @@ namespace Quartermaster.Desktop.Ledgers;
 /// </summary>
 public sealed partial class LedgerWindow : Window
 {
-    const int FixedCols = LedgerViewRules.FixedCols;   // Name, Kind
+    /// <summary>Leading read-only columns: Name and Kind; the Places tab has only Hex.</summary>
+    int Fixed => _tab.Kind == LedgerTabKind.Places ? 1 : LedgerViewRules.FixedCols;
     const double NameWidth = 180, KindWidth = 140, ValueWidth = 90, MinColumnWidth = 20;
     static readonly IBrush GroupBrush = new SolidColorBrush(Color.FromRgb(0xE3, 0xE3, 0xE3));     // SystemColors.ControlLight
     static readonly IBrush NegativeBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0x00, 0x00));  // Color.Red
@@ -99,6 +100,7 @@ public sealed partial class LedgerWindow : Window
 
         _list.ItemTemplate = new FuncDataTemplate<RowItem>((r, _) => r == null ? new Panel() : new LedgerRowView(this, r), supportsRecycling: false);
         _list.KeyDown += (_, e) => Run(() => OnListKey(e));
+        _list.SelectionChanged += (_, _) => Run(UpdateKeyedPanel);
         _list.AddHandler(TextInputEvent, (_, e) => Run(() => OnListText(e)), RoutingStrategies.Bubble);
         _list.AddHandler(ScrollViewer.ScrollChangedEvent, (_, _) => { _tip.Hide(); HidePreview(); }, RoutingStrategies.Bubble, handledEventsToo: true);
         _list.AddHandler(PointerPressedEvent, (_, _) => HidePreview(), RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -116,12 +118,18 @@ public sealed partial class LedgerWindow : Window
         var top = new StackPanel();
         top.Children.Add(_bar);
         top.Children.Add(_tabStrip);
+        top.Children.Add(_placesBar);
         top.Children.Add(_banner);
+        top.Children.Add(_placesEmpty);
         DockPanel.SetDock(top, Dock.Top);
         root.Children.Add(top);
+        DockPanel.SetDock(_keyedPanel, Dock.Bottom);
+        root.Children.Add(_keyedPanel);
         root.Children.Add(_hscroll);
         Content = root;
         InitCounters();
+        InitPlaces();
+        InitKeyed();
 
         _filter.TextChanged += (_, _) => Kick();
         _showEmpty.IsCheckedChanged += (_, _) => Kick();
@@ -196,9 +204,9 @@ public sealed partial class LedgerWindow : Window
 
     void OnGameChanged(GameCommand _) => OnUi(Kick);
     void OnRewound() => OnUi(Kick);
-    void OnGameReplaced() => OnUi(() => { HookGame(); Kick(); });
-    void OnRulesChanged() => OnUi(() => { RefreshSides(); Kick(); });
-    void OnViewChanged() => OnUi(Kick);   // debounced: a burst of changes reloads once
+    void OnGameReplaced() => OnUi(() => { HookGame(); _addedHexes.Clear(); Kick(); });
+    void OnRulesChanged() => OnUi(() => { RefreshSides(); RefreshTabList(); Kick(); });
+    void OnViewChanged() => OnUi(() => { ForgetAddedHexesForOtherView(); Kick(); });   // debounced: a burst of changes reloads once
 
     protected override void OnClosed(EventArgs e)
     {
@@ -226,7 +234,7 @@ public sealed partial class LedgerWindow : Window
     internal IReadOnlyList<LedgerRowEx> Rows => _rows;
 
     /// <summary>The column headers: Name, Kind, then the properties.</summary>
-    internal IReadOnlyList<string> Headers => new[] { "Name", "Kind" }.Concat(_cols.Select(c => c.Name)).ToList();
+    internal IReadOnlyList<string> Headers => (Places ? new[] { "Hex" } : new[] { "Name", "Kind" }).Concat(_cols.Select(c => c.Name)).ToList();
 
     /// <summary>A header's tooltip (the property's notes; none for Name and Kind).</summary>
     internal string? HeaderTip(int col) => col < _header.Children.Count ? ToolTip.GetTip(_header.Children[col]) as string : null;
@@ -289,14 +297,16 @@ public sealed partial class LedgerWindow : Window
     public void Reload()
     {
         if (_closing) return;
-        if (_editing != null) { Kick(); return; }   // never pull the cell out from under the user
+        if (_editing != null || _keyedEditing != null) { Kick(); return; }   // never pull the cell out from under the user
         _reloads++;
         var pack = _s.Rules;
         var game = _s.Game;
         var keepKeys = SelectedKeys();
         var firstKey = FirstVisibleKey();
 
-        _result = pack == null || game == null || _s.View is not { } view
+        _result = Places && pack != null && game != null && _s.View is { } placesView
+            ? PlacesResultFor(pack, placesView)
+            : pack == null || game == null || _s.View is not { } view
             ? new LedgerTabResult(pack == null ? Array.Empty<PropertyDef>() : LedgerTabs.ColumnsFor(_tab, pack), Array.Empty<LedgerRowEx>(), 0, null)
             : LedgerTabs.Rows(_tab, view, pack, _s.Model, _filter.Text ?? "", SideFilter, Grouping, _showEmpty.IsChecked == true);
         _cols = _result.Columns;
@@ -311,6 +321,8 @@ public sealed partial class LedgerWindow : Window
         _tip.Hide();
         HidePreview();   // the viewed state changed: pictures may differ
         ShowRows(keepKeys, firstKey);
+        UpdatePlacesState();
+        UpdateKeyedPanel();
     }
 
     void ShowRows(HashSet<string> keepKeys, string? firstKey)
@@ -325,17 +337,17 @@ public sealed partial class LedgerWindow : Window
     string TextOf(LedgerRowEx r, int col) => col switch
     {
         0 => r.Row.Name,
-        1 => r.Row.Kind,
-        _ when r.Row.NotKept?.Contains(col - FixedCols) == true => "",
-        _ when r.Row.Errors?.ContainsKey(col - FixedCols) == true => ErrorText,   // a computed cell whose read failed; the hover tip has the message
-        _ when col - FixedCols < r.Row.Values.Count && r.Row.Values[col - FixedCols] is { } v =>
-            _s.Rules is { } pack && col - FixedCols < _cols.Count ? PropertyLabels.Text(pack, _cols[col - FixedCols], v) : LedgerTable.FormatNumber(v),
+        1 when !Places => r.Row.Kind,
+        _ when r.Row.NotKept?.Contains(col - Fixed) == true => "",
+        _ when r.Row.Errors?.ContainsKey(col - Fixed) == true => ErrorText,   // a computed cell whose read failed; the hover tip has the message
+        _ when col - Fixed < r.Row.Values.Count && r.Row.Values[col - Fixed] is { } v =>
+            _s.Rules is { } pack && col - Fixed < _cols.Count ? PropertyLabels.Text(pack, _cols[col - Fixed], v) : LedgerTable.FormatNumber(v),
         _ => "",
     };
 
     /// <summary>The text an editor of a value cell starts with: the bare number (a label is display only).</summary>
     string EditText(int row, int col) =>
-        row >= 0 && row < _rows.Count && col >= FixedCols && col - FixedCols < _rows[row].Row.Values.Count && _rows[row].Row.Values[col - FixedCols] is { } v
+        row >= 0 && row < _rows.Count && col >= Fixed && col - Fixed < _rows[row].Row.Values.Count && _rows[row].Row.Values[col - Fixed] is { } v
             ? LedgerTable.FormatNumber(v) : "";
 
     bool _rebuildingColumns;
@@ -353,21 +365,21 @@ public sealed partial class LedgerWindow : Window
             var sameTab = _builtTabKey == _tab.Key;
             var oldIds = _builtColIds;
             var oldWidths = _widths;
-            var sortedId = sameTab && _sortCol >= FixedCols && _sortCol - FixedCols < oldIds.Count ? oldIds[_sortCol - FixedCols] : null;
-            _widths = new[] { NameWidth + NameImagePad, KindWidth }.Concat(_cols.Select(_ => ValueWidth)).ToArray();
+            var sortedId = sameTab && _sortCol >= Fixed && _sortCol - Fixed < oldIds.Count ? oldIds[_sortCol - Fixed] : null;
+            _widths = (Places ? new[] { NameWidth } : new[] { NameWidth + NameImagePad, KindWidth }).Concat(_cols.Select(_ => ValueWidth)).ToArray();
             ApplyColumnWidths();
             if (sameTab)
             {
-                for (var i = 0; i < FixedCols && i < oldWidths.Length; i++) _widths[i] = oldWidths[i];
+                for (var i = 0; i < Fixed && i < oldWidths.Length; i++) _widths[i] = oldWidths[i];
                 for (var c = 0; c < _cols.Count; c++)
                 {
                     var o = oldIds.ToList().IndexOf(_cols[c].Id);
-                    if (o >= 0 && o + FixedCols < oldWidths.Length) _widths[c + FixedCols] = oldWidths[o + FixedCols];
+                    if (o >= 0 && o + Fixed < oldWidths.Length) _widths[c + Fixed] = oldWidths[o + Fixed];
                 }
-                if (_sortCol >= FixedCols)
+                if (_sortCol >= Fixed)
                 {
                     var n = sortedId == null ? -1 : _cols.ToList().FindIndex(c => c.Id == sortedId);
-                    _sortCol = n < 0 ? -1 : n + FixedCols;
+                    _sortCol = n < 0 ? -1 : n + Fixed;
                 }
             }
             _builtTabKey = _tab.Key;
@@ -376,7 +388,7 @@ public sealed partial class LedgerWindow : Window
             _header.Children.Clear();
             _header.ColumnDefinitions = Columns(_widths);
             var names = Headers;
-            for (var c = 0; c < names.Count; c++) _header.Children.Add(HeaderCell(c, names[c], c >= FixedCols ? _cols[c - FixedCols].Notes : null));
+            for (var c = 0; c < names.Count; c++) _header.Children.Add(HeaderCell(c, names[c], c >= Fixed ? _cols[c - Fixed].Notes : null));
             UpdateSortGlyphs();
             _table.Width = _widths.Sum() + 24;
         }
@@ -503,7 +515,7 @@ public sealed partial class LedgerWindow : Window
     {
         UpdateSortGlyphs();
         if (_sortCol < 0 || _sortCol >= _widths.Length) return;
-        _rows = LedgerViewRules.Sort(_rows, _sortCol, _sortAsc).ToList();
+        _rows = LedgerViewRules.Sort(_rows, Places && _sortCol > 0 ? _sortCol + 1 : _sortCol, _sortAsc).ToList();   // Places: no Kind column
     }
 
     void UpdateSortGlyphs()
@@ -522,10 +534,11 @@ public sealed partial class LedgerWindow : Window
 
     Breakdown? BreakdownFor(int rowIndex, int colIndex)
     {
-        if (rowIndex < 0 || rowIndex >= _rows.Count || colIndex < FixedCols || colIndex - FixedCols >= _cols.Count || _rows[rowIndex].IsGroupHeader) return null;
+        if (Places) return null;   // place values are keyed: no single value, no breakdown
+        if (rowIndex < 0 || rowIndex >= _rows.Count || colIndex < Fixed || colIndex - Fixed >= _cols.Count || _rows[rowIndex].IsGroupHeader) return null;
         if (_s.Game is not { } game) return null;
-        if (_rows[rowIndex].Row.NotKept?.Contains(colIndex - FixedCols) == true) return null;   // blank: no stale value or history behind it
-        return LedgerBreakdown.For(_s.View ?? game.State, _s.Rules, _s.Model, _rows[rowIndex].Row.Key, _cols[colIndex - FixedCols].Id);
+        if (_rows[rowIndex].Row.NotKept?.Contains(colIndex - Fixed) == true) return null;   // blank: no stale value or history behind it
+        return LedgerBreakdown.For(_s.View ?? game.State, _s.Rules, _s.Model, _rows[rowIndex].Row.Key, _cols[colIndex - Fixed].Id);
     }
 
     /// <summary>Hovering a value cell shows its breakdown under the cursor (WinForms BreakdownTip.Track: 12 px right, 18 px down).</summary>
@@ -542,7 +555,7 @@ public sealed partial class LedgerWindow : Window
     /// selected with the keyboard only has its current cell on Name (WinForms CurrentCell column 0): nothing to edit then.</summary>
     (int Row, int Col)? EditTarget()
     {
-        if (_currentCell.Col < FixedCols) return null;
+        if (_currentCell.Col < Fixed) return null;
         var row = _currentCell.Row >= 0 && _currentCell.Row < _rows.Count ? _currentCell.Row : _list.SelectedIndex;
         return row < 0 ? null : (row, _currentCell.Col);
     }
@@ -564,18 +577,18 @@ public sealed partial class LedgerWindow : Window
     /// <summary>Starts editing a value cell (double-click or F2, as the WinForms grid); holder, group and fixed cells are not editable.</summary>
     internal bool BeginEdit(int row, int col, string? typed = null)
     {
-        if (_closing || _editing != null || row < 0 || row >= _rows.Count || col < FixedCols || col - FixedCols >= _cols.Count) return false;
+        if (_closing || _editing != null || row < 0 || row >= _rows.Count || col < Fixed || col - Fixed >= _cols.Count) return false;
         if (_rows[row].IsGroupHeader) return false;
-        if (LedgerViewRules.ComputedRefusal(_s.Rules, _cols[col - FixedCols].Id) is { } refused)
+        if (LedgerViewRules.ComputedRefusal(_s.Rules, _cols[col - Fixed].Id) is { } refused)
         {
             // a computed value is never stored: say so instead of opening an editor whose value would be refused
             Dispatcher.UIThread.Post(() => { if (!_closing) RunAsync(() => WarnAsync(refused)); });
             return false;
         }
-        if (_rows[row].Row.NotKept?.Contains(col - FixedCols) == true)
+        if (_rows[row].Row.NotKept?.Contains(col - Fixed) == true)
         {
             // a holder that does not keep the property: the cell stays blank and read-only
-            var notKept = LedgerViewRules.NotKeptRefusal(_s.Rules, _rows[row].Row.Key, _cols[col - FixedCols].Id) ?? "";
+            var notKept = LedgerViewRules.NotKeptRefusal(_s.Rules, _rows[row].Row.Key, _cols[col - Fixed].Id) ?? "";
             if (notKept.Length > 0) Dispatcher.UIThread.Post(() => { if (!_closing) RunAsync(() => WarnAsync(notKept)); });
             return false;
         }
@@ -609,10 +622,10 @@ public sealed partial class LedgerWindow : Window
         if (refocus && !(item?.Focus() ?? false)) _list.Focus();
         if (!commit || text.Length == 0) return;   // empty input cancels
         var data = ed.Row.Data;
-        if (data.IsGroupHeader || ed.Col - FixedCols >= _cols.Count) return;
+        if (data.IsGroupHeader || ed.Col - Fixed >= _cols.Count) return;
         var key = data.Row.Key;
-        var prop = _cols[ed.Col - FixedCols];
-        Dispatcher.UIThread.Post(() => { if (!_closing) RunAsync(() => CommitManualAsync(key, prop, text)); });
+        var prop = _cols[ed.Col - Fixed];
+        Dispatcher.UIThread.Post(() => { if (!_closing) RunAsync(() => Places ? CommitKeyedAsync(PlacesKey, key, prop, text) : CommitManualAsync(key, prop, text)); });
     }
 
     async Task CommitManualAsync(string key, PropertyDef prop, string text)
@@ -644,7 +657,7 @@ public sealed partial class LedgerWindow : Window
         var path = await _dialogs.SaveFileAsync(this, "Save As", new FileFilter("CSV files (*.csv)", "*.csv"), "csv", LedgerViewRules.CsvFileName(_tab.Title));
         if (path == null || _closing) return;
         var shown = _result with { Rows = _rows };
-        try { File.WriteAllText(path, LedgerTabs.ToCsv(shown), new UTF8Encoding(true)); }
+        try { File.WriteAllText(path, Places ? PlacesCsvText() : LedgerTabs.ToCsv(shown), new UTF8Encoding(true)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { await WarnAsync("Could not save the file: " + ex.Message); }
     }
 
@@ -712,12 +725,14 @@ public sealed partial class LedgerWindow : Window
         readonly LedgerWindow _w;
         readonly Border[] _cells;
         readonly TextBlock[] _texts;
+        readonly int _fixed;   // leading read-only columns when the row was built
         public int Index { get; }
         public LedgerRowEx Data { get; }
 
         public LedgerRowView(LedgerWindow w, RowItem item)
         {
             _w = w;
+            _fixed = w.Fixed;
             Index = item.Index;
             Data = item.Data;
             Height = w.RowHeightFor(Data);
@@ -732,10 +747,10 @@ public sealed partial class LedgerWindow : Window
                 var text = new TextBlock
                 {
                     Text = w.TextOf(Data, c), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
-                    HorizontalAlignment = c >= FixedCols ? HorizontalAlignment.Right : HorizontalAlignment.Left,
+                    HorizontalAlignment = c >= _fixed ? HorizontalAlignment.Right : HorizontalAlignment.Left,
                     FontWeight = Data.IsGroupHeader ? FontWeight.Bold : FontWeight.Normal,
                 };
-                if (c >= FixedCols && c - FixedCols < Data.Row.Values.Count && Data.Row.Values[c - FixedCols] is < 0) text.Foreground = NegativeBrush;
+                if (c >= _fixed && c - _fixed < Data.Row.Values.Count && Data.Row.Values[c - _fixed] is < 0) text.Foreground = NegativeBrush;
                 var cell = new Border { BorderThickness = new Thickness(0, 0, 1, 1), Padding = new Thickness(4, 0), Background = Brushes.Transparent };
                 cell.Bind(Border.BorderBrushProperty, cell.GetResourceObservable("Classic.BorderBrush"));
                 cell.Child = c == 0 ? NameCell(text) : text;
@@ -744,7 +759,7 @@ public sealed partial class LedgerWindow : Window
                 _cells[c] = cell;
                 _texts[c] = text;
                 cell.PointerPressed += (_, _) => _w._currentCell = (Index, col);
-                if (c >= FixedCols)
+                if (c >= _fixed)
                 {
                     cell.PointerEntered += (_, e) => _w.Run(() => _w.HoverCell(Index, col, e.GetPosition(_w)));
                     cell.PointerMoved += (_, e) => _w.Run(() => _w.HoverCell(Index, col, e.GetPosition(_w)));
@@ -767,7 +782,7 @@ public sealed partial class LedgerWindow : Window
 
         public TextBox? BeginEdit(int col, string text)
         {
-            if (col < FixedCols || col >= _cells.Length) return null;
+            if (col < _fixed || col >= _cells.Length) return null;
             var box = new TextBox { Text = text, Padding = new Thickness(2, 0), VerticalContentAlignment = VerticalAlignment.Center, HorizontalContentAlignment = HorizontalAlignment.Right, MinHeight = 0 };
             _cells[col].Child = box;
             return box;

@@ -27,6 +27,7 @@ public sealed class ActionPortSwitch(IActionPort inner) : IActionPort
     public bool ApplyTrace(string? runId, string? pieceId, FormulaTrace trace, bool calculated) => _inner.ApplyTrace(runId, pieceId, trace, calculated);
     public (int Applied, IReadOnlyList<string> Failed) ApplyMissingInputs(PendingRun run, IReadOnlyDictionary<string, string> values) => _inner.ApplyMissingInputs(run, values);
     public void EditLedger(string key, string propertyId, double after, string note) => _inner.EditLedger(key, propertyId, after, note);
+    public void EditKeyed(string key, string propertyId, string valueKey, double after, string note) => _inner.EditKeyed(key, propertyId, valueKey, after, note);
     public void Roll(DiceSpec spec, string purpose) => _inner.Roll(spec, purpose);
     public void RecordRoll(RollDice roll) => _inner.RecordRoll(roll);
     public void Tick(int index, bool ticked) => _inner.Tick(index, ticked);

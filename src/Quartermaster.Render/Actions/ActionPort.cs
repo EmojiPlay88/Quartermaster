@@ -45,6 +45,12 @@ public interface IActionPort
     /// <summary>A manual ledger change with its note.</summary>
     void EditLedger(string key, string propertyId, double after, string note);
 
+    /// <summary>
+    /// B6: a manual change of one keyed value (<paramref name="valueKey"/>: a table row, a turn number or a hex name, normalised by the
+    /// receiver) with its note. The default (a port written before keyed values) does nothing.
+    /// </summary>
+    void EditKeyed(string key, string propertyId, string valueKey, double after, string note) { }
+
     /// <summary>A dice-tool roll made with the session roller (on the host).</summary>
     void Roll(DiceSpec spec, string purpose);
 

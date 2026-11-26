@@ -61,6 +61,7 @@ public sealed partial class FormulasTab
     const string PaletteHint = "Place: the palette counter to place in the hex.";
     const string LayerHint = "Set layer: the layer's name on the counter; the value is the level (0 = off).";
     const string ToMapHint = "Remove: move the counter to this map instead of deleting it.";
+    internal const string KeyHint = "For a keyed property: the key this output writes, e.g. hex() for the counter's hex, turn() + 2, or a table row in quotes.";
     internal const string DeleteText = "(delete)";
 
     Control BuildOutputsBox()
@@ -79,12 +80,14 @@ public sealed partial class FormulasTab
             new EditColumn("Palette entry", EditColumnKind.EditableCombo, Weight: 100),
             new EditColumn("Layer", Weight: 70),
             new EditColumn("To map", EditColumnKind.Combo, Weight: 80),
+            new EditColumn("Key", Weight: 90),
         ]);
         _out.SetHeaderToolTip(7, ActionHint);
         _out.SetHeaderToolTip(8, PieceHint);
         _out.SetHeaderToolTip(9, PaletteHint);
         _out.SetHeaderToolTip(10, LayerHint);
         _out.SetHeaderToolTip(11, ToMapHint);
+        _out.SetHeaderToolTip(12, KeyHint);
         _out.SetHeaderToolTip(4, OutputValueHint);
         _out.SetHeaderToolTip(5, ChooseFromHint);
         _out.SetHeaderToolTip(6, PickByHint);
@@ -256,9 +259,9 @@ public sealed partial class FormulasTab
                 : o.Target == OutputTarget.Global ? HolderDef.GlobalId : "";
             var prop = pack.ById<PropertyDef>(o.Property)?.Name ?? (o.Property.Length == 0 ? "" : FormulaEdit.Missing);
             var choice = FormulaEdit.FormatNameList((o.PropertyChoice ?? new()).Select(id => pack.ById<PropertyDef>(id)?.Name ?? FormulaEdit.Missing));
-            var toMap = o.ToMapId == null ? DeleteText : _s.Model.Maps.FirstOrDefault(m => m.Id == o.ToMapId)?.Name ?? FormulaEdit.Missing;
+            var toMap = o.ToMapId == null ? DeleteText : MapRefs.Find(_s.Model.Maps, o.ToMapId)?.Name ?? FormulaEdit.Missing;
             rows.Add([o.Target.ToString(), holder, prop, o.Op.ToString(), o.Expr ?? "", choice, o.PropertySelect ?? "",
-                o.Action.ToString(), o.PieceVariable ?? "", o.Slot ?? "", o.Layer ?? "", toMap]);
+                o.Action.ToString(), o.PieceVariable ?? "", o.Slot ?? "", o.Layer ?? "", toMap, o.Key ?? ""]);
         }
         _out.SetRows(rows);
         for (var r = 0; r < f.Outputs.Count; r++)
@@ -286,6 +289,8 @@ public sealed partial class FormulasTab
             _out.SetCellToolTip(r, 9, PaletteHint);
             _out.SetCellToolTip(r, 10, LayerHint);
             _out.SetCellToolTip(r, 11, ToMapHint);
+            _out.SetCellToolTip(r, 12, KeyHint);
+            _out.SetCellReadOnly(r, 12, o.Action != OutputAction.Write);
         }
     }
 
@@ -356,6 +361,10 @@ public sealed partial class FormulasTab
                 var map = text == DeleteText ? null : _s.Model.Maps.FirstOrDefault(m => m.Name == text);
                 if (text != DeleteText && map == null) { again = true; break; }
                 Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithToMap(o, map?.Id)));
+                break;
+            case 12:
+                again = true;
+                if (TryExpression(text, "Key", out var key)) Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithKey(o, key)));
                 break;
         }
         if (again) Dispatcher.UIThread.Post(() => Run(RebuildOutputs));

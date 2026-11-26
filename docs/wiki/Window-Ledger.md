@@ -41,6 +41,18 @@ The Ledger lists every tracked value of the game, one row per unit or depot and 
 
 ![The large counter preview over NL 1 Rifles](images/ledger-tabs-preview.png)
 
+## Places and keyed values
+
+### Places tab
+
+When the pack has a place property (a property **Keyed by** `Hex (place)`), a **Places** tab follows **Everything**. Its first column is **Hex**; the other columns are the place properties, one row per hex that has a stored value. Rows are ordered by hex name and the filter box matches the hex name. A value is edited like any other cell (a note is asked for); a label table shows `3 (Flooded)` next to the number. CSV export works as on the other tabs. A Private place property shows only in a full view (see [Places and keyed values](Making-a-Rules-Pack#places-and-keyed-values)), and a guest's edits are checked by the host: a guest who edits a value hidden from them (a Private place, or a keyed value of a side they do not hold) is refused with `That value belongs to a side you don't hold.`
+
+To give a hex that has no values yet a row, type its name in the **Hex name** box and press **Add place** (tooltip: `Add a row for a hex that has no place values yet.`). A name no board has is refused with `No hex named "0999" on any board.` When there is nothing to show the tab says `No place values yet. A formula output keyed by hex() writes one, or add a hex here.`
+
+### Keyed values
+
+A keyed property has no single value, so the main grid, the CSV and your own tabs leave its column out. Select a row and a panel under the grid, `Keyed values of {row name}`, lists its keyed values with the columns **Property**, **Key** and **Value**: every row of the table for a table-keyed property (an unwritten row shows the Default), and every stored turn plus the current turn for a turn-keyed one. The panel is hidden for a row with none. Value is editable; a manual change needs a note, and the history line reads `HullCount[Barge] 4 -> 5`. Place values are not listed here; they have their [tab](#places-tab).
+
 ## Show in Ledger
 
 To find a counter's row, select the counter on the map and press **Ctrl+L**, or right-click it and choose **Show in Ledger**. The Ledger opens (or comes to the front) with the row selected. With several counters selected, all their rows are selected and the list scrolls to the first one.

@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
+  </ItemGroup>
+
 </Project>

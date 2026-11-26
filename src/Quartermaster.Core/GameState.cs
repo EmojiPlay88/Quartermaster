@@ -39,6 +39,12 @@ public sealed class GameState
     public long NextStackSeq { get; set; }
     /// <summary>Ledger key (see LedgerKey) -> property id -> value.</summary>
     public OrderedDictionary<string, OrderedDictionary<string, double>> Ledgers { get; set; } = new();
+    /// <summary>
+    /// Keyed values (B6): ledger key -> property id -> value key (a hex name, a turn number or a table row key) -> value. Null when empty, so
+    /// older saves keep their bytes (a reducer that empties it sets it back to null). <see cref="Ledgers"/> never holds a keyed property's value.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public OrderedDictionary<string, OrderedDictionary<string, OrderedDictionary<string, double>>>? Keyed { get; set; }
     public List<LedgerEntry> LedgerHistory { get; set; } = new();
     public List<DiceEntry> DiceHistory { get; set; } = new();
     public List<LogEntry> Log { get; set; } = new();
@@ -104,6 +110,7 @@ public sealed class GameState
                     DetachFromStack(rp);
                     Pieces.Remove(r.PieceId);
                     Ledgers.Remove(LedgerKey.Piece(r.PieceId));
+                    if (Keyed != null && Keyed.Remove(LedgerKey.Piece(r.PieceId)) && Keyed.Count == 0) Keyed = null;
                     PruneEmpty();
                 }
                 break;
@@ -192,6 +199,7 @@ public sealed class GameState
                 }
                 break;
             case SteppedBack sb: Log.Add(LogBuilder.SteppedBack(this, sb)); break;
+            case DropPastTurns dp: DoDropPastTurns(dp); break;
             case ToggleTrail tt:
                 if (tt.PieceId != null && Pieces.TryGetValue(tt.PieceId, out var trp)) trp.TrailVisible = !trp.TrailVisible;
                 break;
@@ -289,12 +297,21 @@ public sealed class GameState
         inner[propertyId] = value;
     }
 
+    void SetKeyed(string key, string propertyId, string valueKey, double value)
+    {
+        Keyed ??= new();
+        if (!Keyed.TryGetValue(key, out var props) || props == null) Keyed[key] = props = new();
+        if (!props.TryGetValue(propertyId, out var values) || values == null) props[propertyId] = values = new();
+        values[valueKey] = value;
+    }
+
     void DoLedgerDelta(LedgerDelta d)
     {
         if (d.Key == null || d.PropertyId == null || !double.IsFinite(d.After)) return;
-        SetLedger(d.Key, d.PropertyId, d.After);
+        if (d.ValueKey != null) SetKeyed(d.Key, d.PropertyId, d.ValueKey, d.After);
+        else SetLedger(d.Key, d.PropertyId, d.After);
         LedgerHistory.Add(new LedgerEntry(LedgerHistory.Count + 1, d.Key, d.PropertyId, double.IsFinite(d.Before) ? d.Before : 0,
-            d.After, d.Source ?? "manual", d.FormulaId, d.RuleRefId, d.Note, d.Working, Turn.Turn, Turn.Phase));
+            d.After, d.Source ?? "manual", d.FormulaId, d.RuleRefId, d.Note, d.Working, Turn.Turn, Turn.Phase) { ValueKey = d.ValueKey });
         Log.Add(LogBuilder.Ledger(this, d));
     }
 
@@ -309,7 +326,36 @@ public sealed class GameState
             foreach (var id in ids) removed |= inner.Remove(id);
             if (removed && inner.Count == 0) Ledgers.Remove(key);   // a ledger the reset emptied goes; one that was already empty stays
         }
+        RemoveKeyed(ids, _ => true);   // a keyed property that resets loses every key
         Log.Add(LogBuilder.Line(this, LogKind.System, rp.Text ?? "", rp.Who, rp.At));
+    }
+
+    void DoDropPastTurns(DropPastTurns dp)
+    {
+        var ids = (dp.PropertyIds ?? Array.Empty<string>()).Where(x => x != null).ToHashSet(StringComparer.Ordinal);
+        RemoveKeyed(ids, k => int.TryParse(k, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var turn)
+            && turn < dp.Turn);
+    }
+
+    /// <summary>Removes the value keys matching <paramref name="drop"/> of the listed properties from every keyed ledger; whatever is left
+    /// empty goes, and <see cref="Keyed"/> becomes null when nothing is left.</summary>
+    void RemoveKeyed(HashSet<string> propertyIds, Func<string, bool> drop)
+    {
+        if (Keyed == null || propertyIds.Count == 0) return;
+        foreach (var key in Keyed.Keys.ToList())
+        {
+            var props = Keyed[key];
+            if (props == null) { Keyed.Remove(key); continue; }
+            foreach (var id in propertyIds)
+            {
+                if (!props.TryGetValue(id, out var values)) continue;
+                if (values != null)
+                    foreach (var vk in values.Keys.Where(drop).ToList()) values.Remove(vk);
+                if (values == null || values.Count == 0) props.Remove(id);
+            }
+            if (props.Count == 0) Keyed.Remove(key);
+        }
+        if (Keyed.Count == 0) Keyed = null;
     }
 
     void DoSeed(SeedLedger sl)

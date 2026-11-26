@@ -424,7 +424,7 @@ public static class FormulaEdit
             PieceVariable = t == OutputTarget.Piece ? o.PieceVariable : null,
         };
 
-    /// <summary>Changing the action drops the fields only another action uses: palette entry unless Place, layer unless SetLayer, map unless Remove, the property fields unless Write.</summary>
+    /// <summary>Changing the action drops the fields only another action uses: palette entry unless Place, layer unless SetLayer, map unless Remove, the property fields and key unless Write.</summary>
     public static FormulaOutput WithOutputAction(FormulaOutput o, OutputAction a) =>
         o with
         {
@@ -435,9 +435,13 @@ public static class FormulaEdit
             PropertyChoice = a == OutputAction.Write ? o.PropertyChoice : null,
             PropertySelect = a == OutputAction.Write ? o.PropertySelect : null,
             Property = a == OutputAction.Write ? o.Property : "",
+            Key = a == OutputAction.Write ? o.Key : null,
         };
 
     private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    /// <summary>B6: the key a Write output of a keyed property writes (an expression, e.g. <c>hex()</c>); blank is null.</summary>
+    public static FormulaOutput WithKey(FormulaOutput o, string? key) => o with { Key = Blank(key) };
 
     /// <summary>The Piece variable the output acts on; blank is null.</summary>
     public static FormulaOutput WithPieceVariable(FormulaOutput o, string? variable) => o with { PieceVariable = Blank(variable) };

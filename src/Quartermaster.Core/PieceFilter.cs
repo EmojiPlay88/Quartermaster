@@ -198,6 +198,7 @@ public static class PieceFilter
         var h = pack.HolderByName(holder) ?? throw new EvalError($"No holder named '{holder}'");
         var def = pack.PropertyByName(property) ?? throw new EvalError($"Unknown property '{property}'");
         if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{def.Name} is not a holder property");
+        if (def.KeyedBy != null && KeyedFacts.IsKeyed(def)) throw KeyedValues.BareRead(def);
         return HolderKeyValue(s, pack, h.Id, h.Name, def, model, filters);
     }
 
@@ -283,6 +284,7 @@ public static class PieceFilter
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
+            if (def.KeyedBy != null && KeyedFacts.IsKeyed(def)) throw KeyedValues.BareRead(def);   // one value per key: read it with keyed()
             if (def.Scope == PropertyScope.Holders) return GlobalValue(s, pack, def, filters);
             if (PropertyFacts.IsComputed(def))
                 return PropertyValues.Get(s, pack, filters.Model, LedgerKey.Piece(p.Id), def, filters, pending) is { } c ? Value.Of(c)
@@ -341,6 +343,11 @@ public static class PieceFilter
             startingValue ? throw NotInStartingValue(fn) : PieceAggregates.Evaluate(fn, property, filter, p, filters);
         public double Runs(string formulaId, string period) =>
             startingValue ? throw NotInStartingValue("runs") : RunIndex.Count(s, pack, formulaId, p.Id, period, sides);
+        // B6: places and keyed values (without a module model, as while seeding, hex() and distance() are not available)
+        public Value Hex() => startingValue ? throw NotInStartingValue("hex") : KeyedValues.Hex(p, filters.Model);
+        public double Distance(string a, string b) => startingValue ? throw NotInStartingValue("distance") : KeyedValues.Distance(filters.Model, p, a, b);
+        public double Keyed(string property, Value key, string? holder) =>
+            startingValue ? throw NotInStartingValue("keyed") : KeyedValues.Read(s, pack, filters.Model, p, property, key, holder, sides);
     }
 
     /// <summary>
@@ -356,6 +363,7 @@ public static class PieceFilter
         public Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
+            if (def.KeyedBy != null && KeyedFacts.IsKeyed(def)) throw KeyedValues.BareRead(def);
             if (holderId != null && def.Scope != PropertyScope.Pieces)
                 return HolderKeyValue(s, pack, holderId, holderId == HolderDef.GlobalId ? "Global" : pack.ById<HolderDef>(holderId)?.Name ?? holderId, def,
                     model, PropertyFacts.IsComputed(def) ? Filters : _filters);
@@ -384,5 +392,9 @@ public static class PieceFilter
             PieceAggregates.Evaluate(fn, property, filter, null, Filters);
         /// <summary>No piece: the formula's runs made without a unit (hidden in a player view).</summary>
         public double Runs(string formulaId, string period) => RunIndex.Count(s, pack, formulaId, null, period);
+        // B6: places and keyed values (no piece: a Pieces property, or a Both one, has no unit to read)
+        public Value Hex() => KeyedValues.Hex(null, model);
+        public double Distance(string a, string b) => KeyedValues.Distance(model, null, a, b);
+        public double Keyed(string property, Value key, string? holder) => KeyedValues.Read(s, pack, model, null, property, key, holder, null);
     }
 }

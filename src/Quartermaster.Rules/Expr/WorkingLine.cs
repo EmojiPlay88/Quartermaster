@@ -79,6 +79,13 @@ public static class WorkingLine
                     }
                     sb.Append(')');
                     break;
+                case Call c when c.Function == "keyed" && c.Args.Count >= 2:
+                    // B6: keyed(Property, key[, Holder]): the property and holder are names, not variables; the key is worked out
+                    sb.Append("keyed(").Append(c.Args[0] is VarRef kp ? kp.Name : "?").Append(", ");
+                    Write(c.Args[1]);
+                    if (c.Args.Count > 2) sb.Append(", ").Append(c.Args[2] is VarRef kh ? kh.Name : "?");
+                    sb.Append(')');
+                    break;
                 case Call c when c.Function == "holder":
                     sb.Append("holder(").Append(((VarRef)c.Args[0]).Name).Append(", ").Append(((VarRef)c.Args[1]).Name).Append(')');
                     break;

@@ -29,6 +29,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(EndPhase), "endPhase")]
 [JsonDerivedType(typeof(ResetProperties), "resetProperties")]
 [JsonDerivedType(typeof(SetStartCursor), "setStartCursor")]
+[JsonDerivedType(typeof(DropPastTurns), "dropPastTurns")]
 public abstract record GameCommand;
 
 /// <summary>CloneOf: the piece this one is a copy of (the Clone command); its stored ledger values are copied (<see cref="LedgerSeeder.BuildCloneSeeds"/>). Omitted when null.</summary>
@@ -56,6 +57,11 @@ public sealed record LedgerDelta(string Key, string PropertyId, double Before, d
     /// Omitted when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? AppliedRun { get; init; }
+
+    /// <summary>The value key of a keyed property (B6: a hex name, a turn number or a table row key): when set, the reducer writes
+    /// <see cref="GameState.Keyed"/> instead of <see cref="GameState.Ledgers"/>. Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ValueKey { get; init; }
 }
 public sealed record LedgerSeed(string Key, string PropertyId, double Value);
 /// <summary>CloneOf: set when the seeds copy a cloned piece's values from this source piece; such a seed is its own undoable step (never folding). Omitted when null.</summary>
@@ -121,3 +127,7 @@ public sealed record ResetProperties(IReadOnlyList<string> PropertyIds, string T
 /// <summary>Records where the phase's start entries stopped (<see cref="GameState.StartCursor"/>; null = none left). Logs nothing;
 /// <see cref="AdvancePhase"/> clears it. Spec #32.</summary>
 public sealed record SetStartCursor(StartCursor? Cursor) : GameCommand;
+
+/// <summary>Removes every value key below <paramref name="Turn"/> of the listed turn-keyed properties, in every ledger (B6, spec #60); a ledger
+/// left empty goes. Logs nothing; ledger history is kept.</summary>
+public sealed record DropPastTurns(IReadOnlyList<string> PropertyIds, int Turn) : GameCommand;

@@ -326,7 +326,7 @@ public sealed partial class WorkbenchWindow : Window
     {
         if (_closed || _s.Rules is not { } pack) return;
         IReadOnlyList<IssueRow> rows;
-        try { rows = WorkbenchRules.Issues(pack, _s.Model.Maps.Select(m => m.Id).ToList(), WorkbenchRules.SlotKeys(_s.Model)); }
+        try { rows = WorkbenchRules.Issues(pack, _s.Model.Maps.Select(m => m.Id).ToList(), WorkbenchRules.SlotKeys(_s.Model), _s.Model); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             System.Diagnostics.Trace.WriteLine("workbench validation failed: " + ex);

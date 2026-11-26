@@ -487,6 +487,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     private List<PendingRun> EnterPhase(PhaseDef phase)
     {
         ResetAtEntry(phase);
+        DropPastTurnsAtEntry();
         return OnEnter(phase);
     }
 
@@ -498,6 +499,14 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         Exec(new ResetProperties(props.Select(p => p.Id).ToList(),
             $"{phase.Name}: reset {string.Join(", ", props.Select(p => string.IsNullOrWhiteSpace(p.Name) ? p.Id : p.Name))}"));
         s.SeedLedgers();   // sheet and starting value properties start again from their starting value
+    }
+
+    /// <summary>B6: drops the keys of past turns of the turn-keyed properties (one command, inside the Next Phase action); host only, as
+    /// <see cref="ResetAtEntry"/>. Nothing is executed when no such property has a key below the current turn.</summary>
+    private void DropPastTurnsAtEntry()
+    {
+        if (s.Rules is not { } pack || s.Game is not { } g || s.IsGuest || s.IsViewerCopy || s.IsReplaying) return;   // host only
+        if (KeyedValues.DropCommand(g.State, pack, g.State.Turn.Turn) is { } drop) Exec(drop);
     }
 
     /// <returns>The runs queued (the caller raises <see cref="RunsQueued"/> once its action has closed).</returns>

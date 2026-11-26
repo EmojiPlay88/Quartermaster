@@ -47,6 +47,7 @@ public sealed partial class MapView
     {
         string? stackId = null;
         if (PieceAt(p) is { } id && State is { } st && st.Pieces.TryGetValue(id, out var pc)) stackId = pc.StackId;
+        UpdatePlaceTip(p, stackId == null && PieceAt(p) == null);
         if (stackId == _hoverStack) return;
         // The popup is click-through away from its ledger lines, so the map sees the pointer crossing it on the way to a line: keep it up.
         if (_popup is { Interactive: true } && PointerOnPopup()) return;
@@ -56,6 +57,52 @@ public sealed partial class MapView
         else HidePopup();
         if (stackId != null) StartHoverTimer();
         InvalidateVisual();
+    }
+
+    // ---------- place tooltip (B6) ----------
+
+    DispatcherTimer? _placeTimer;
+    string? _placeHex;
+    string? _placeTip;
+
+    /// <summary>The place tooltip shown now (<c>{hex}: {place text}</c>); null when none (tests).</summary>
+    internal string? PlaceTip => _placeTip;
+
+    /// <summary>Resting on a hex with place values and no counter on it opens the tooltip after the hover delay; moving to another hex,
+    /// pressing, a game or view change and leaving the map clear it (<see cref="HidePopup"/>). Read from <see cref="State"/>, the viewer's state.</summary>
+    void UpdatePlaceTip(Point p, bool noCounter)
+    {
+        var hex = noCounter && MapStatusText.PlaceText(State, Session.Rules) is { } text
+            ? MapStatusText.LocationName(Map, MapPoint(p)) is { Length: > 0 } name && MapStatusText.Tooltip(name, text) != null ? name : null
+            : null;
+        if (hex == _placeHex) return;
+        ClearPlaceTip();
+        _placeHex = hex;
+        if (hex == null) return;
+        _placeTimer ??= NewTimer(ShowPlaceTip);
+        _placeTimer.Interval = TimeSpan.FromMilliseconds(HoverDelayMs);
+        _placeTimer.Start();
+    }
+
+    void ShowPlaceTip()
+    {
+        if (_placeHex == null || _panning || _bandActive || _drag.Active) return;
+        var tip = MapStatusText.Tooltip(_placeHex, MapStatusText.PlaceText(State, Session.Rules));
+        if (tip == null) { ClearPlaceTip(); return; }
+        _placeTip = tip;
+        ToolTip.SetTip(this, tip);
+        ToolTip.SetPlacement(this, PlacementMode.Pointer);
+        ToolTip.SetIsOpen(this, true);
+    }
+
+    void ClearPlaceTip()
+    {
+        _placeTimer?.Stop();
+        _placeHex = null;
+        if (_placeTip == null) return;
+        _placeTip = null;
+        ToolTip.SetIsOpen(this, false);
+        ToolTip.SetTip(this, null);
     }
 
     void StartHoverTimer()
@@ -163,6 +210,7 @@ public sealed partial class MapView
     /// <summary>Closes the hover popup and its breakdown tip and stops the hover timers (the hovered stack stays highlighted).</summary>
     public void HidePopup()
     {
+        ClearPlaceTip();
         _hoverTimer?.Stop();
         _graceTimer?.Stop();
         Tip.Hide();

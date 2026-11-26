@@ -50,6 +50,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
                 FormulaIntent f => Formula(held, who, f),
                 FormulaBatchIntent fb => FormulaBatch(held, who, fb),
                 LedgerEditIntent l => EditLedger(g, held, who, l),
+                KeyedEditIntent k => EditKeyed(g, held, who, k),
                 DiceIntent d => Dice(g, who, d),
                 TickIntent t => Phase(held, who, () => c.Tick(t.Index, t.Ticked)),
                 AckIntent a => Phase(held, who, () => c.Acknowledge(a.Index)),
@@ -243,6 +244,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (ChatText.Clean(l.Note) is not { } note) return IntentResult.Refused("A manual change needs a note.");
         if (s.Rules?.Properties.FirstOrDefault(p => p != null && p.Id == l.PropertyId) is not { } prop)
             return IntentResult.Refused("That value no longer exists.");
+        if (KeyedFacts.IsKeyed(prop)) return IntentResult.Refused(NotUnderstoodText);   // a keyed value is changed only with a KeyedEditIntent
         if (LedgerViewRules.ComputedRefusal(s.Rules, prop.Id) is { } computed) return IntentResult.Refused(computed);
         if (LedgerViewRules.NotKeptRefusal(s.Rules, l.Key, prop.Id) is { } notKept) return IntentResult.Refused(notKept);
         if (LedgerKey.TryParse(l.Key, out var isPiece, out var id) && isPiece && !Exists(g, Access(g, sides), id))
@@ -251,6 +253,38 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (Ledger.Get(g.State, l.Key, prop.Id) is { } cur && cur == l.After) return IntentResult.Done();   // unchanged: no history entry
         var before = Ledger.GetOrDefault(g.State, l.Key, prop);
         g.Execute(CommandLog.Prepare(CommandLog.Stamp(new LedgerDelta(l.Key, prop.Id, before, l.After, "manual", null, null, note, null), who), g.State, s));
+        return IntentResult.Done();
+    }
+
+    /// <summary>
+    /// B6: a guest's manual keyed edit. Every check of <see cref="EditLedger"/>, plus: the property is keyed, the value key is at most
+    /// <see cref="KeyedValues.MaxKeyLength"/> characters and normalises, and a place is written on the Global holder only by a sender who may
+    /// write Global values (anything else is <see cref="NotUnderstoodText"/>). A value the sender's player view may lack
+    /// (<see cref="KeyedValues.HiddenFor"/>, e.g. a Private place) is refused as another side's value. An unchanged value is done with no
+    /// history entry.
+    /// </summary>
+    private IntentResult EditKeyed(GameSession g, IReadOnlySet<string> sides, string who, KeyedEditIntent k)
+    {
+        if (BadId(k.Key) || BadId(k.PropertyId) || k.ValueKey == null || k.ValueKey.Length > KeyedValues.MaxKeyLength)
+            return IntentResult.Refused(NotUnderstoodText);
+        if (!double.IsFinite(k.After)) return IntentResult.Refused("That is not a number.");
+        if (ChatText.Clean(k.Note) is not { } note) return IntentResult.Refused("A manual change needs a note.");
+        if (s.Rules is not { } pack || pack.Properties.FirstOrDefault(p => p != null && p.Id == k.PropertyId) is not { } prop)
+            return IntentResult.Refused("That value no longer exists.");
+        if (!KeyedFacts.IsKeyed(prop)) return IntentResult.Refused(NotUnderstoodText);   // an unkeyed value is changed with a LedgerEditIntent
+        if (LedgerViewRules.ComputedRefusal(pack, prop.Id) is { } computed) return IntentResult.Refused(computed);
+        if (LedgerViewRules.NotKeptRefusal(pack, k.Key, prop.Id) is { } notKept) return IntentResult.Refused(notKept);
+        if (!LedgerKey.TryParse(k.Key, out var isPiece, out var id)) return IntentResult.Refused(NotUnderstoodText);
+        if (isPiece && !Exists(g, Access(g, sides), id)) return IntentResult.Refused(GoneText);
+        if (KeyedFacts.IsPlace(prop) && !s.CanEditLedgerFor(LedgerKey.Holder(HolderDef.GlobalId), sides))
+            return IntentResult.Refused(OtherSide("That value"));
+        if (!s.CanEditLedgerFor(k.Key, sides)) return IntentResult.Refused(OtherSide("That value"));
+        // A value the sender's view lacks (a Private place unless it holds every side) is never written for it: an unchanged answer
+        // (no log line) against a changed one would tell it the hidden value.
+        if (KeyedValues.HiddenFor(g.State, pack, sides, k.Key, prop)) return IntentResult.Refused(OtherSide("That value"));
+        if (LedgerViewRules.EditKey(pack, s.Model, prop, k.Key, k.ValueKey) is not { } valueKey) return IntentResult.Refused(NotUnderstoodText);
+        if (LedgerViewRules.KeyedDelta(g.State, prop, k.Key, valueKey, k.After, note) is { } delta)   // null: unchanged, no history entry
+            g.Execute(CommandLog.Prepare(CommandLog.Stamp(delta, who), g.State, s));
         return IntentResult.Done();
     }
 
