@@ -539,6 +539,7 @@ A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-
 - tables, through `lookup`;
 - `turn()`, `stage()` and `segment()` of the position being tested;
 - `phaseside()`, the name of the side whose phase is being tested;
+- global keyed values, through `keyed()` (on entry to a phase the keys of past turns are already dropped, so a victory condition checked there reads `keyed(BargesDue, turn())` but no longer an earlier turn's key); `hex()` and `distance()` are not available (no counter);
 - constants and the pure functions (`if`, `min`, `max`, `round`, `floor`, `ceil`, `abs`, `clamp`, `mod`, `startswith`, `contains`).
 - the whole-game piece sums `sum`, `countof`, `maxof` and `minof` (their filters test each piece, so they may read pieces, and even use the `hex` ones: `countof("hexcount() > 1") > 0` is true when any hex holds a stack).
 
