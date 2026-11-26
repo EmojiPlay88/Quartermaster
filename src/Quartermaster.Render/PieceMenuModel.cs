@@ -186,26 +186,38 @@ public static class PieceMenuModel
                 && (s.ViewSides == null || (s.View?.Pieces.TryGetValue(id, out var seen) == true && seen!.TypeString == p!.TypeString)))
             .Distinct().ToList();
         if (ids.Count < 2) return;
-        Dictionary<string, HashSet<string>> formulasOf;
-        IReadOnlyList<Quartermaster.Rules.FormulaDef> mine;
+        // Each counter's formulas are listed lazily and once (M3): building the menu only needs to know that a second counter matches, so
+        // the scan stops there; the full rows are listed when the entry is clicked.
+        var formulasOf = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        HashSet<string> Of(string id) => formulasOf.TryGetValue(id, out var known) ? known
+            : formulasOf[id] = st.Pieces.TryGetValue(id, out var p) && p != null
+                ? PieceFilter.FormulasFor(rules, p, st, s.Model).Select(f => f.Id).ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);   // gone by the time the entry is clicked
+        var children = new List<MenuEntry>();
         try
         {
-            formulasOf = ids.ToDictionary(id => id, id => PieceFilter.FormulasFor(rules, st.Pieces[id], st, s.Model).Select(f => f.Id).ToHashSet(StringComparer.Ordinal));
-            mine = PieceFilter.FormulasFor(rules, piece, st, s.Model);
+            foreach (var f in PieceFilter.FormulasFor(rules, piece, st, s.Model))
+            {
+                var id = f.Id;
+                if (ids.Where(x => Of(x).Contains(id)).Take(2).Count() < 2) continue;
+                var allowed = FormulaPhases.Allowed(rules, st, f, out var why);
+                children.Add(MenuEntry.Item(f.Name, () =>
+                {
+                    List<string> rows;
+                    try { rows = ids.Where(x => Of(x).Contains(id)).ToList(); }
+                    catch (Exception ex) when (ex is not OutOfMemoryException)
+                    {
+                        s.Log.Add(DiagnosticSeverity.Warning, "rules", "Could not list formulas for a piece: " + ex.Message);
+                        return;
+                    }
+                    show(id, rows);
+                }, allowed, why));
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             s.Log.Add(DiagnosticSeverity.Warning, "rules", "Could not list formulas for a piece: " + ex.Message);
             return;
-        }
-        var children = new List<MenuEntry>();
-        foreach (var f in mine)
-        {
-            var id = f.Id;
-            var rows = ids.Where(x => formulasOf[x].Contains(id)).ToList();
-            if (rows.Count < 2) continue;
-            var allowed = FormulaPhases.Allowed(rules, st, f, out var why);
-            children.Add(MenuEntry.Item(f.Name, () => show(id, rows), allowed, why));
         }
         if (children.Count == 0) return;
         menu.Add(MenuEntry.Submenu(onSelection ? FormulaWindowRules.CalculateOnSelectionText : FormulaWindowRules.CalculateOnStackText, children));
