@@ -213,10 +213,16 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         var seen = s.View ?? st;   // decisions and warnings over what this player may see (a player view: only its own sides' items)
         // A guest of another side gets no PlayingText (the host refuses its press), but it is not asked the question either.
         var mayPress = !s.IsGuest || side == null || s.GuestSides?.Contains(side.Id) == true;
+        var repeatAsk = over == null && mayPress ? AskAt(pack, st, cur, pos) : null;
+        // The host's notice never reaches a guest: a guest whose press ran the end-of-phase entries and stopped for the question reads
+        // the same stop from the state it was sent (the entries ran at this position, and the question is now due).
+        var notice = Notice;
+        if (notice == null && s.IsGuest && repeatAsk != null && cur.OnEnd is { Count: > 0 } && st.EndedAt == pos)
+            notice = RepeatStopText(repeatAsk.Label);
         return Finish(new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side?.Name, chips, cur, nextName,
-            Decisions.Compute(pack, seen, s.Model), Decisions.Warnings(pack, seen, cur, s.Model), Notice)
+            Decisions.Compute(pack, seen, s.Model), Decisions.Warnings(pack, seen, cur, s.Model), notice)
         {
-            RepeatAsk = over == null && mayPress ? AskAt(pack, st, cur, pos) : null,
+            RepeatAsk = repeatAsk,
         });
     }
 

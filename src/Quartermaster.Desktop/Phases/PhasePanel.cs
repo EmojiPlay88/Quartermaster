@@ -26,6 +26,10 @@ public sealed class PhasePanel : UserControl
     readonly PhaseWatch _watch;
 
     readonly TextBlock _title = new() { FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2) };
+    readonly TextBlock _reacting = new() { IsVisible = false, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 2) };
+    readonly TextBlock _dueCaption = new() { Text = "Due", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 4, 0, 0) };
+    readonly StackPanel _dueRows = new();
+    readonly StackPanel _due = new() { IsVisible = false, Name = "DueSection" };
     readonly TextBox _instructions = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
     readonly TextBlock _ref = new() { IsVisible = false, Cursor = new Cursor(StandardCursorType.Hand), Foreground = new SolidColorBrush(Color.FromRgb(0, 0, 0xFF)), TextDecorations = Avalonia.Media.TextDecorations.Underline, Margin = new Thickness(0, 2) };
     readonly TextBlock _warnCaption = new() { Text = "Warnings", VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 4, 0, 0) };
@@ -41,6 +45,7 @@ public sealed class PhasePanel : UserControl
     readonly Grid _body = new();
 
     IReadOnlyList<Decision> _openRows = Array.Empty<Decision>();
+    IReadOnlyList<DueEntry> _dueEntries = Array.Empty<DueEntry>();
     PhaseView? _view;
     bool _updating;
     string? _nextTip;
@@ -51,9 +56,11 @@ public sealed class PhasePanel : UserControl
         Name = "PhasePanel";
         MinWidth = 180;
 
-        _body.RowDefinitions = new RowDefinitions("Auto,2*,Auto,Auto,*,Auto,Auto,*,*,Auto,Auto");
+        _due.Children.Add(_dueCaption);
+        _due.Children.Add(new ScrollViewer { Content = _dueRows, MaxHeight = 140, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
+        _body.RowDefinitions = new RowDefinitions("Auto,2*,Auto,Auto,*,Auto,Auto,*,*,Auto,Auto,Auto");
         void Row(Control ctl, int row) { Grid.SetRow(ctl, row); _body.Children.Add(ctl); }
-        Row(_title, 0);
+        Row(new StackPanel { Children = { _title, _reacting } }, 0);
         Row(_instructions, 1);
         Row(_ref, 2);
         Row(_warnCaption, 3);
@@ -62,8 +69,9 @@ public sealed class PhasePanel : UserControl
         Row(_decCaption, 6);
         Row(new ScrollViewer { Content = _checklist, Name = "ChecklistScroll" }, 7);
         Row(_open, 8);
-        Row(_next, 9);
-        Row(_count, 10);
+        Row(_due, 9);
+        Row(_next, 10);
+        Row(_count, 11);
         _ref.PointerPressed += (_, e) => { if (e.GetCurrentPoint(_ref).Properties.IsLeftButtonPressed) ClickRule(); };
         ToolTip.SetShowOnDisabled(_next, true);
 
@@ -92,6 +100,9 @@ public sealed class PhasePanel : UserControl
 
     /// <summary>Raised when an open decision (not a checklist item) is double-clicked.</summary>
     public event Action<Decision>? DecisionActivated;
+
+    /// <summary>Raised by a Due row's Place / Withdraw button (the host acts on the schedule row and shows the counters).</summary>
+    public event Action<DueEntry>? DueActionRequested;
 
     /// <summary>Raised by the Pop out / Dock button; the host moves the panel.</summary>
     public event Action? PopToggleRequested;
@@ -126,6 +137,27 @@ public sealed class PhasePanel : UserControl
     public bool NextEnabled => _next.IsEnabled;
     public string? NextTip => _nextTip;
     public string TitleText => _title.Text ?? "";
+    /// <summary><c>Reacting: {names}</c> under the side, or null when no side reacts.</summary>
+    public string? ReactingText => _reacting.IsVisible ? _reacting.Text : null;
+    public bool DueVisible => _due.IsVisible;
+    /// <summary>The Due rows as shown, in order.</summary>
+    public IReadOnlyList<DueEntry> DueRows => _dueEntries;
+    /// <summary>The button of Due row <paramref name="i"/>: its text, tooltip and whether it is there at all (null = a row without counters).</summary>
+    public string? DueButtonText(int i) => DueButton(i)?.Content as string;
+    public string? DueButtonTip(int i) => DueButton(i) is { } b ? ToolTip.GetTip(b) as string : null;
+    public bool DueButtonEnabled(int i) => DueButton(i)?.IsEnabled == true;
+    public string DueRowText(int i) => $"{_dueEntries[i].Label} — {_dueEntries[i].StateText}";
+    Button? DueButton(int i) => DueRowOf(i).Children.OfType<Button>().FirstOrDefault();
+    Panel DueRowOf(int i) => (Panel)((Border)_dueRows.Children[i]).Child!;
+
+    /// <summary>Presses Due row <paramref name="i"/>'s button as the user would (tests).</summary>
+    public void ClickDue(int i)
+    {
+        if (DueButton(i) is { IsEnabled: true } b) b.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+    }
+
+    /// <summary>Clicks Due row <paramref name="i"/> itself: the view centres its first counter (tests).</summary>
+    public void ClickDueRow(int i) => CentreDue(_dueEntries[i]);
     public string InstructionsText => _instructions.Text ?? "";
     public string CountText => _count.Text ?? "";
     internal bool CountHasLocalForeground => _count.IsSet(TextBlock.ForegroundProperty);
@@ -181,6 +213,10 @@ public sealed class PhasePanel : UserControl
             _next.Content = text.NextText;
             if (!show) { _count.Text = text.CountText; return; }
             _title.Text = text.Title;
+            var reacting = PhaseTexts.ReactingText(v);
+            _reacting.Text = reacting;
+            _reacting.IsVisible = reacting != null;
+            ShowDue(replaying);
             // Hot-seat: another side's phase shows none of its instructions, notes or rule reference.
             var mine = v.PlayingText == null;
             _instructions.Text = mine ? (v.Current?.Instructions ?? "").Replace("\r\n", "\n") : "";
@@ -196,6 +232,43 @@ public sealed class PhasePanel : UserControl
             _count.IsVisible = !v.BeforeStart;
         }
         finally { _updating = false; }
+    }
+
+    void ShowDue(bool replaying)
+    {
+        _dueEntries = DueModel.Rows(_s);
+        _dueRows.Children.Clear();
+        _due.IsVisible = _dueEntries.Count > 0;
+        foreach (var e in _dueEntries)
+        {
+            var entry = e;
+            var row = new DockPanel { LastChildFill = true };
+            if (e.ButtonText != null)
+            {
+                var b = new Button { Content = e.ButtonText, IsEnabled = !replaying, Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+                ToolTip.SetTip(b, e.Tooltip);
+                ToolTip.SetShowOnDisabled(b, true);
+                b.Click += (_, ev) => { ev.Handled = true; DueActionRequested?.Invoke(entry); };
+                DockPanel.SetDock(b, Dock.Right);
+                row.Children.Add(b);
+            }
+            row.Children.Add(new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock { Text = e.Label, TextWrapping = TextWrapping.Wrap },
+                    new TextBlock { Text = e.StateText, FontSize = 11, Opacity = 0.7, TextWrapping = TextWrapping.Wrap },
+                },
+            });
+            var frame = new Border { Child = row, Padding = new Thickness(2), Cursor = e.PieceIds.Count > 0 ? new Cursor(StandardCursorType.Hand) : null };
+            frame.PointerPressed += (_, ev) => { if (ev.GetCurrentPoint(frame).Properties.IsLeftButtonPressed && !ev.Handled) CentreDue(entry); };
+            _dueRows.Children.Add(frame);
+        }
+    }
+
+    void CentreDue(DueEntry e)
+    {
+        if (e.PieceIds.Count > 0) _centre(e.PieceIds[0]);
     }
 
     void ShowWarnings(PhaseView v, IReadOnlyList<WarningLine> lines)

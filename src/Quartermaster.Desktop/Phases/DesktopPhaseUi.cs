@@ -34,4 +34,18 @@ sealed class DesktopPhaseUi(MainWindow host, ModuleSession s, Func<PhaseRunDispa
     public void Status(string text) => host.SetStatus(text);
     public void RevealPhasePanel() => host.RevealPhasePanel();
     public void SelectChecklist(int index) => host.Phases.SelectChecklist(index);
+
+    public const string RepeatCaption = "Next Phase";
+    public const string ContinueText = "Continue";
+    public const string CancelText = "Cancel";
+
+    public static string RepeatMessage(RepeatAsk ask) => $"End of {ask.Label} {ask.Number}: play another {ask.Label} or continue?";
+    public static string RepeatButton(RepeatAsk ask) => $"Another {ask.Label}";
+
+    /// <summary>The Next Phase question (B5 #6): Another {label} = true, Continue (the default) = false, Cancel or closing = null.</summary>
+    public async Task<bool?> AskRepeat(RepeatAsk ask)
+    {
+        var answer = await host.Dialogs.ChooseAsync(host, RepeatMessage(ask), RepeatCaption, new[] { RepeatButton(ask), ContinueText, CancelText }, 1);
+        return answer switch { 0 => true, 1 => false, _ => null };
+    }
 }

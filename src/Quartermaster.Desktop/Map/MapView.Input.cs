@@ -129,6 +129,16 @@ public sealed partial class MapView
         SelectionEdited();
     }
 
+    /// <summary>Selects exactly these pieces (the ones missing from the game are left out); an empty list clears.</summary>
+    public void SelectPieces(IEnumerable<string> ids)
+    {
+        var next = ids.Where(id => Session.View?.Pieces.ContainsKey(id) == true).ToHashSet(StringComparer.Ordinal);
+        if (_selected.SetEquals(next)) return;
+        _selected.Clear();
+        foreach (var id in next) _selected.Add(id);
+        SelectionEdited();
+    }
+
     /// <summary>Drops selected ids that no longer exist (after commands or a new game); a running drag is cancelled since its snapshot
     /// is out of date.</summary>
     public void PruneSelection()
