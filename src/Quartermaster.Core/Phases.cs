@@ -17,8 +17,15 @@ public static class DifficultyText
     };
 }
 
-/// <summary>Where the game is in the turn sequence. Repeat is 1-based and is 1 outside blocks.</summary>
-public sealed record PhasePosition(int Turn, int Repeat, string PhaseId, int PhaseIndex);
+/// <summary>Where the game is in the turn sequence. Repeat is 1-based and is 1 outside blocks; in a nested phase it is the outer block's
+/// repeat.</summary>
+public sealed record PhasePosition(int Turn, int Repeat, string PhaseId, int PhaseIndex)
+{
+    /// <summary>The inner block's repeat (B5: a block inside another block), 1-based; 0 outside an inner block. Read by <c>segment()</c>.
+    /// Part of record equality. Omitted when 0, so older saves keep their bytes.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int Inner { get; init; }
+}
 
 /// <summary>A phase passed over by Next Phase because its condition was false, at the position it would have had.</summary>
 public sealed record SkippedPhase(string PhaseId, string Name, int Turn, int Repeat);
