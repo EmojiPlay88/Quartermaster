@@ -51,6 +51,8 @@ public static class RulesValidator
             foreach (var s in pack.Sides) Guarded(issues, s.Id, s.Name, () => CheckSide(s, pack, issues));
             foreach (var ph in pack.Phases) Guarded(issues, ph.Id, ph.Name, () => CheckPhase(pack, ph, issues));
             CheckBlocks(pack, issues);
+            CheckGameEnd(pack, issues);
+            CheckSchedule(pack, issues, knownMapIds);
             CheckAlerts(pack, issues);
             CheckOwners(pack, knownMapIds, issues);
             CheckRuleRefPaths(pack, issues);
@@ -413,6 +415,7 @@ public static class RulesValidator
         if (!string.IsNullOrEmpty(ph.RuleRefId) && pack.ById<RuleRef>(ph.RuleRefId!) is null)
             Err($"{who}: rule reference \"{ph.RuleRefId}\" does not exist");
 
+        CheckReactors(pack, ph, issues);
         CheckRunEntries(pack, ph, ph.OnStart, "start", issues);
         CheckRunEntries(pack, ph, ph.OnEnd ?? new(), "end", issues);
         foreach (var e in ph.OnMove)
@@ -496,12 +499,22 @@ public static class RulesValidator
     /// <summary>A phase's run condition reads only global properties, tables, turn()/stage(), constants and pure functions.</summary>
     private static void CheckPhaseCondition(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
     {
-        if (string.IsNullOrWhiteSpace(ph.Condition)) return;
         string who = $"Phase \"{ph.Name}\"";
-        void Err(string m) => Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, m);
+        CheckConditionExpr(pack, ph.Condition, who, m => Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, m),
+            () => Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who} never runs (its condition is always false)"));
+    }
+
+    /// <summary>
+    /// The phase-condition rules for any condition text (a phase's, a victory condition's); errors read "{who}: condition {problem}".
+    /// <paramref name="neverTrue"/> is called when the condition reads nothing and is always false (null = not reported).
+    /// </summary>
+    private static void CheckConditionExpr(RulesPack pack, string? text, string who, Action<string> err, Action? neverTrue)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        void Err(string m) => err(m);
 
         AstExpr ast;
-        try { ast = Parser.Parse(ph.Condition!); }
+        try { ast = Parser.Parse(text!); }
         catch (ParseError e) { Err($"{who}: condition {e.Message}"); return; }
 
         var vars = new List<string>();
@@ -526,8 +539,7 @@ public static class RulesValidator
             try
             {
                 var r = Evaluator.Evaluate(ast, new ConstantContext());
-                if (r.Kind != ValueKind.Text && !r.IsTruthy)
-                    Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who} never runs (its condition is always false)");
+                if (r.Kind != ValueKind.Text && !r.IsTruthy) neverTrue?.Invoke();
             }
             catch (EvalError) { }
         }
@@ -541,7 +553,7 @@ public static class RulesValidator
                 case Binary b: Walk(b.Left); Walk(b.Right); break;
                 case Call c:
                     if (ForbiddenConditionFunctions.Contains(c.Function)) forbidden.Add(c.Function);
-                    if (c.Function is "turn" or "stage" or "lookup" or "lookuprange" || ExprFacts.IsAggregate(c.Function)) dynamic = true;
+                    if (c.Function is "turn" or "stage" or "segment" or "lookup" or "lookuprange" || ExprFacts.IsAggregate(c.Function)) dynamic = true;
                     if (ExprFacts.IsAggregate(c.Function)) { aggregateProblems.AddRange(AggregateProblems(c, pack)); break; }
                     if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
                     {
@@ -618,14 +630,134 @@ public static class RulesValidator
                 if (lo < 0) Err($"{who}: phase \"{b.FirstPhaseId}\" does not exist");
                 if (hi < 0) Err($"{who}: phase \"{b.LastPhaseId}\" does not exist");
                 if (lo >= 0 && hi >= 0 && lo > hi) Err($"{who}: its first phase comes after its last phase");
-                if (b.Count < 1) Err($"{who}: count must be at least 1");
+                if (b.Count < 0) Err($"{who}: count cannot be negative");   // 0 = repeat until a player stops
                 if (lo >= 0 && hi >= lo) valid.Add((b, lo, hi, label));
             });
+        void BlockErr(int i, string m) => Add(issues, RulesIssueSeverity.Error, valid[i].B.FirstPhaseId, valid[i].B.Label, m);
+        // Pairs: partial overlap and identical spans are errors; a block strictly inside another is nesting.
+        var containers = new List<int>[valid.Count];
+        for (int i = 0; i < valid.Count; i++) containers[i] = new();
         for (int i = 0; i < valid.Count; i++)
             for (int j = i + 1; j < valid.Count; j++)
-                if (valid[i].Lo <= valid[j].Hi && valid[j].Lo <= valid[i].Hi)
-                    Add(issues, RulesIssueSeverity.Error, valid[i].B.FirstPhaseId, valid[i].B.Label,
-                        $"Block \"{valid[i].Label}\" overlaps block \"{valid[j].Label}\"");
+            {
+                var (a, b) = (valid[i], valid[j]);
+                if (a.Lo > b.Hi || b.Lo > a.Hi) continue;
+                if (a.Lo == b.Lo && a.Hi == b.Hi) { BlockErr(i, $"Block \"{a.Label}\" covers the same phases as block \"{b.Label}\""); continue; }
+                bool aInB = b.Lo <= a.Lo && a.Hi <= b.Hi, bInA = a.Lo <= b.Lo && b.Hi <= a.Hi;
+                if (!aInB && !bInA) { BlockErr(i, $"Block \"{a.Label}\" overlaps block \"{b.Label}\""); continue; }
+                containers[aInB ? i : j].Add(aInB ? j : i);
+                if (a.B.Count == 0 && b.B.Count == 0 && a.Hi == b.Hi)
+                    BlockErr(i, $"Blocks \"{a.Label}\" and \"{b.Label}\" both end at phase \"{pack.Phases[a.Hi].Name}\" and both repeat until a player stops; give one of them a count");
+            }
+        for (int x = 0; x < valid.Count; x++)
+        {
+            if (containers[x].Count < 2) continue;
+            // The immediate container is the smallest one; it is itself inside another block.
+            int near = containers[x].OrderBy(k => valid[k].Hi - valid[k].Lo).First();
+            BlockErr(x, $"Block \"{valid[x].Label}\" is inside block \"{valid[near].Label}\", which is itself inside another block; blocks nest one level only");
+        }
+    }
+
+    private static void CheckReactors(RulesPack pack, PhaseDef ph, List<RulesIssue> issues)
+    {
+        if (ph.Reactors is not { Count: > 0 } reactors) return;
+        string who = $"Phase \"{ph.Name}\"";
+        foreach (var id in reactors.Distinct(StringComparer.Ordinal))
+            if (pack.ById<SideDef>(id) is null)
+                Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, $"{who}: reacting side \"{id}\" does not exist");
+        if (string.IsNullOrEmpty(ph.SideId))
+            Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who} has reacting sides but no side of its own; every side may already act in it");
+        else if (reactors.Contains(ph.SideId!))
+            Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who} lists its own side as reacting");
+    }
+
+    /// <summary>The last turn and stage, and the victory conditions (each checked like a phase condition).</summary>
+    private static void CheckGameEnd(RulesPack pack, List<RulesIssue> issues)
+    {
+        Guarded(issues, pack.Id, pack.Name, () =>
+        {
+            void PackErr(string m) => Add(issues, RulesIssueSeverity.Error, pack.Id, pack.Name, m);
+            if (pack.LastTurn is < 1) PackErr("The last turn must be at least 1");
+            if (pack.LastStage is < 1) PackErr("The last stage must be at least 1");
+            if (pack.LastStage != null && pack.LastTurn == null) PackErr("A last stage needs a last turn");
+            if (pack.LastStage != null && !pack.Blocks.Any(b => b.Count != 1))
+                Add(issues, RulesIssueSeverity.Warning, pack.Id, pack.Name, "The last stage is set but no block repeats");
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            int n = 0;
+            foreach (var v in pack.Victory ?? new())
+            {
+                n++;
+                string who = $"Victory condition {n}";
+                string eid = string.IsNullOrEmpty(v.Id) ? pack.Id : v.Id;
+                string ename = string.IsNullOrEmpty(v.Id) ? pack.Name : v.Id;
+                void Err(string m) => Add(issues, RulesIssueSeverity.Error, eid, ename, m);
+                if (string.IsNullOrWhiteSpace(v.Id)) Err($"{who}: has no id");
+                else if (!seen.Add(v.Id)) Err($"{who}: id \"{v.Id}\" is used twice");
+                if (string.IsNullOrWhiteSpace(v.Condition)) Err($"{who}: has no condition");
+                else CheckConditionExpr(pack, v.Condition, who, Err, null);
+                if (!string.IsNullOrEmpty(v.SideId) && pack.ById<SideDef>(v.SideId!) is null)
+                    Err($"{who}: side \"{v.SideId}\" does not exist");
+                foreach (var pid in (v.PhaseIds ?? new()).Distinct(StringComparer.Ordinal))
+                    if (pack.ById<PhaseDef>(pid) is null) Err($"{who}: phase \"{pid}\" does not exist");
+            }
+        });
+    }
+
+    /// <summary>Functions a schedule row's counter filter may not call (a row is not run in a formula, has no row key, and must not roll).</summary>
+    private static readonly string[] ScheduleForbiddenFunctions = { "runs", "row", "dice" };
+
+    private static void CheckSchedule(RulesPack pack, List<RulesIssue> issues, IReadOnlyCollection<string>? knownMapIds)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        int n = 0;
+        foreach (var row in pack.Schedule ?? new())
+        {
+            int no = ++n;
+            string eid = string.IsNullOrEmpty(row.Id) ? pack.Id : row.Id;
+            string ename = string.IsNullOrEmpty(row.Id) ? pack.Name : row.Id;
+            Guarded(issues, eid, ename, () =>
+            {
+                string who = $"Schedule row {no}";
+                void Err(string m) => Add(issues, RulesIssueSeverity.Error, eid, ename, m);
+                void Warn(string m) => Add(issues, RulesIssueSeverity.Warning, eid, ename, m);
+                if (string.IsNullOrWhiteSpace(row.Id)) Err($"{who}: has no id");
+                else if (!seen.Add(row.Id)) Err($"{who}: id \"{row.Id}\" is used twice");
+                if (row.Turn < 1) Err($"{who}: turn must be at least 1");
+                if (row.Stage is < 1) Err($"{who}: stage must be at least 1");
+                if (string.IsNullOrEmpty(row.PhaseId)) Err($"{who}: has no phase");
+                else if (pack.ById<PhaseDef>(row.PhaseId) is not { } phase) Err($"{who}: phase \"{row.PhaseId}\" does not exist");
+                else if (row.Stage != null && !pack.Blocks.Any(b => InBlock(pack, b, row.PhaseId)))
+                    Warn($"{who}: has a stage, but phase \"{phase.Name}\" is not in a block");
+
+                if (string.IsNullOrWhiteSpace(row.Piece)) Err($"{who}: has no counter filter");
+                else if (ParseProblem(row.Piece) is { } pe) Err($"{who}: counters {pe}");
+                else
+                {
+                    var ast = Parser.Parse(row.Piece);
+                    foreach (var fn in ScheduleForbiddenFunctions.Where(f => ExprFacts.CallsFunction(ast, f)))
+                        Err($"{who}: counters {fn}() is not available in a schedule row");
+                    foreach (var u in FilterRefProblems(row.Piece, pack))
+                        if (u != RowOutsideFilterTail && !u.StartsWith("runs()", StringComparison.Ordinal)) Err($"{who}: counters {u}");
+                }
+
+                if (row.Action == ScheduleAction.Arrive && string.IsNullOrEmpty(row.ZoneMapId)) Err($"{who}: needs a zone map to arrive from");
+                if (!string.IsNullOrEmpty(row.ZoneMapId) && knownMapIds != null && !knownMapIds.Contains(row.ZoneMapId!))
+                    Err($"{who}: zone map \"{row.ZoneMapId}\" was not found in the module");
+                if (!string.IsNullOrEmpty(row.FormulaId) && pack.ById<FormulaDef>(row.FormulaId!) is null)
+                    Err($"{who}: formula \"{row.FormulaId}\" does not exist");
+                if (row.Action == ScheduleAction.Leave && string.IsNullOrEmpty(row.ZoneMapId) && !string.IsNullOrEmpty(row.FormulaId))
+                    Err($"{who}: deletes its counters, so it cannot run a formula on them; give it a zone map");
+                if (pack.LastTurn is { } last && row.Turn > last) Warn($"{who}: comes after the last turn");
+            });
+        }
+    }
+
+    private static bool InBlock(RulesPack pack, PhaseBlock b, string phaseId)
+    {
+        int lo = pack.Phases.FindIndex(p => p.Id == b.FirstPhaseId), hi = pack.Phases.FindIndex(p => p.Id == b.LastPhaseId);
+        int at = pack.Phases.FindIndex(p => p.Id == phaseId);
+        return lo >= 0 && hi >= lo && at >= lo && at <= hi;
     }
 
     private static void Add(List<RulesIssue> l, RulesIssueSeverity s, string id, string name, string msg) =>
