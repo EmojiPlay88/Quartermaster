@@ -206,7 +206,9 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             return Finish(new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), side.Name, chips, cur, nextName, none,
                 Array.Empty<WarningHit>(), Notice, $"{SideName(side)} is playing {cur.Name}"));
         // Hot-seat or online: a phase without a side whose ask run another player answers shows who is answering, as a side's phase does.
-        if (s.ViewSides is { } holds && side == null && OpenAskSide(st) is { } ask && !holds.Contains(ask)
+        // Not shown to a viewer with an open ask run of its own: its own answer comes first (B7), and the text would name another side.
+        if (s.ViewSides is { } holds && side == null && !HasOpenAsk(st, holds)
+            && OpenAskFor(st, holds)?.AskSideId is { } ask
             && Players.Holding(st, pack, ask) != null && pack.ById<SideDef>(ask) is { } asked)
             return Finish(new PhaseView(false, false, pos.Turn, Sequencer.StageText(pack, pos), null, chips, cur, nextName, none,
                 Array.Empty<WarningHit>(), Notice, $"{SideName(asked)} is playing {cur.Name}"));
@@ -266,6 +268,14 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>The side asked by the first pending ask run with a unit still open (spec #72), else null.</summary>
     public static string? OpenAskSide(GameState st) =>
         st.Pending.FirstOrDefault(r => !string.IsNullOrEmpty(r.AskSideId) && r.Units.Any(u => !u.Applied))?.AskSideId;
+
+    /// <summary>The first pending ask run, with a unit still open, of a side not in <paramref name="sides"/> (B7): what another side is
+    /// answering while the holder of <paramref name="sides"/> waits; null when there is none.</summary>
+    public static PendingRun? OpenAskFor(GameState st, IReadOnlySet<string> sides) =>
+        st.Pending.FirstOrDefault(r => !string.IsNullOrEmpty(r.AskSideId) && !sides.Contains(r.AskSideId) && r.Units.Any(u => !u.Applied));
+
+    private static bool HasOpenAsk(GameState st, IReadOnlySet<string> sides) =>
+        st.Pending.Any(r => !string.IsNullOrEmpty(r.AskSideId) && sides.Contains(r.AskSideId) && r.Units.Any(u => !u.Applied));
 
     private const string SkippedTip = "Skipped this pass (condition false)";
     private const int MaxWalk = 10_000;   // a bound for the preview walks; a turn of a real pack is far shorter

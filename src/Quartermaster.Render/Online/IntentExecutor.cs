@@ -332,6 +332,10 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (s.Rules is not { Phases.Count: > 0 } pack) return IntentResult.Refused("This game has no phases; only the host can change the turn.");
         if (s.Game?.State is { GameOver: not null }) return IntentResult.Refused(PhaseController.GameOverText);
         if (PhaseGate(sides) is { } why) return IntentResult.Refused(why);
+        // The host checks every guest intent: another side's open answer holds the press (the text names the side, never what it answers).
+        if (s.Game!.State is { } st && PhaseController.OpenAskFor(st, sides) is { } open && Sequencer.Current(pack, st) is { } cur
+            && pack.ById<SideDef>(open.AskSideId!) is { } asked)
+            return IntentResult.Refused($"{(string.IsNullOrWhiteSpace(asked.Name) ? asked.Id : asked.Name)} is playing {cur.Name}; wait for your phase.");
         if (repeat && PhaseController.RepeatAskOf(pack, s.Game!.State) == null) return IntentResult.Refused(NotUnderstoodText);
         string? pass;
         using (c.ActingFor(sides, who))
