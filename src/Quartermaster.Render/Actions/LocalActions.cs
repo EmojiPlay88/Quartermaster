@@ -94,6 +94,9 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
     public void EditKeyed(string key, string propertyId, string valueKey, double after, string note)
     {
         if (Blocked || s.Game is not { } g || s.Rules is not { } pack || !double.IsFinite(after) || !s.CanEditLedger(key)) return;
+        // a value the viewer may not see (a Private place, another side's keyed value) is not written blind, as the host refuses a guest's
+        if (s.ViewSides is { } sides && (pack.Properties ?? new()).FirstOrDefault(p => p != null && p.Id == propertyId) is { } prop
+            && KeyedValues.HiddenFor(g.State, pack, sides, key, prop)) return;
         if (LedgerViewRules.KeyedEdit(pack, s.Model, g.State, key, propertyId, valueKey, after, (note ?? "").Trim()) is { } delta) Exec(g, delta);
     }
 

@@ -321,7 +321,7 @@ public sealed class MenuBatchModel : IBatchRows
     {
         if (dv.Trace.Error != null || dv.Trace.Result == null) return "";
         var sides = FormulaMasking.ViewerSides(s);
-        return string.Join("; ", dv.Trace.Outputs.Select(o => sides == null || s.CanEditLedgerFor(o.Key, sides)
+        return string.Join("; ", dv.Trace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
             ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
             : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
     }
@@ -331,7 +331,7 @@ public sealed class MenuBatchModel : IBatchRows
     private string ExceptionsOf(DialogView dv)
     {
         var sides = FormulaMasking.ViewerSides(s);
-        return dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (sides == null || s.CanEditLedgerFor(o.Key, sides)))
+        return dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o)))
             ? "goes negative" : "";   // only for values the viewer may see
     }
 

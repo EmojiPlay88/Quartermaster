@@ -254,7 +254,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// Which ledger outputs the viewer may see (set by <see cref="FormulaMasking.Configure"/>); null = all (solo). Only those decide the
     /// "(negative)" mark: another side's value going negative is not shown.
     /// </summary>
-    public Func<string, bool>? OutputVisible { get; set; }
+    public Func<OutputPreview, bool>? OutputVisible { get; set; }
 
     private Dictionary<string, string> PhysicalRollOverrides()
     {
@@ -364,7 +364,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var hostDecides = (hostGuards.Contains(FormulaMasking.PreconditionGuard) && (t.Refused || vars.Any(IsUndecided)))
             || vars.Any(v => (v.Skipped || IsUndecided(v)) && hostGuards.Contains(v.Variable));
         if (hostDecides) canApply = false;
-        var negative = !hostDecides && t.Error == null && t.Outputs.Any(o => o.After < 0 && (OutputVisible == null || OutputVisible(o.Key)));
+        var negative = !hostDecides && t.Error == null && t.Outputs.Any(o => o.After < 0 && (OutputVisible == null || OutputVisible(o)));
         var status = wrong.Count > 0 ? "Doesn't match: " + string.Join(", ", wrong)
             : hostDecides ? (missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing) : HostWaitText)
             : t.Error != null ? (masked ? FormulaMasking.ErrorHiddenText : t.Error)
