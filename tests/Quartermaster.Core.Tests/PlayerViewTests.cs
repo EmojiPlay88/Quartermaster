@@ -165,7 +165,7 @@ public class PlayerViewTests(ITestOutputHelper output)
             Assert.Empty(v.DiceHistory[0].Results);
             Assert.Contains(v.Log, l => l.Text == "Another side rolled dice");
             Assert.Contains(v.Log, l => l.Text == "Another side ledger changed");
-            Assert.Equal(7243, Ledger.Get(v, LedgerKey.Holder("pool"), "supply"));   // the public value itself stays
+            Assert.Equal(7243, Ledger.Get(v, LedgerKey.Holder("pool"), "supply"));   // the value itself stays: the pool has no side
         }
     }
 

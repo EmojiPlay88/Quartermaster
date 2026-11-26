@@ -109,6 +109,23 @@ public class B7PlayerViewTests
     }
 
     [Fact]
+    public void Holder_with_only_hidden_values_leaves_no_key()
+    {
+        var pk = Pack();
+        var s = NewState();
+        s.Apply(Delta(Depot, "p-reserve", 0, 4));
+        s.Apply(Delta(Depot, "p-bids", 0, 9, "2"));
+        var view = PlayerView.For(s, pk, Model, SouthOnly);
+        Assert.False(view.Ledgers.ContainsKey(Depot));   // nothing shows that the depot has a ledger entry at all
+        Assert.True(view.Keyed == null || !view.Keyed.ContainsKey(Depot));
+        Assert.DoesNotContain(view.LedgerHistory, e => e.Key == Depot);
+        Assert.DoesNotContain(Depot, System.Text.Json.JsonSerializer.Serialize(view, QuartermasterJson.Options));
+        var own = PlayerView.For(s, pk, Model, new HashSet<string> { North });
+        Assert.True(own.Ledgers.ContainsKey(Depot));
+        Assert.True(own.Keyed!.ContainsKey(Depot));
+    }
+
+    [Fact]
     public void Game_over_view_is_full()
     {
         var pk = Pack();
@@ -137,7 +154,7 @@ public class B7PlayerViewTests
         Assert.Null(g.State.GameOver);
         var view = PlayerView.For(g.State, pk, Model, SouthOnly);
         Assert.True(view.IsPlayerView);
-        Assert.False(view.Ledgers.TryGetValue(Depot, out var inner) && inner.ContainsKey("p-reserve"));
+        Assert.False(view.Ledgers.ContainsKey(Depot));   // its only stored value is hidden: the key goes too
     }
 
     [Fact]

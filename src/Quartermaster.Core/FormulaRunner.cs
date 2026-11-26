@@ -480,7 +480,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                     }
                     var tp = targets[o.PieceVariable!];
                     // on a player view, a non-Public value of a side the view was not made for is hidden (as the binding reads it)
-                    if (s.IsPlayerView && !PropertyFacts.IsPublic(_pack, prop) && run.Sides.Value(tp.Piece) is { } tside && s.ViewSides?.Contains(tside) != true)
+                    if (s.IsPlayerView && HiddenValues.PieceValueHidden(_pack, prop, tp.Piece, run.Sides, HiddenValues.HeldBy(s)))
                         return Unresolved(o.PieceVariable!, HiddenText);
                     target = (RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece));
                     key = LedgerKey.Piece(tp.Piece.Id);
@@ -939,7 +939,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var prop = Unkeyed(Prop(b));
             var (picked, shown) = Pick(b);
             if (s.IsPlayerView && (PlayerView.IsPlaceholder(picked)
-                    || HiddenValues.PieceValueHidden(owner._pack, prop, picked, Sides, side => s.ViewSides?.Contains(side) == true)))
+                    || HiddenValues.PieceValueHidden(owner._pack, prop, picked, Sides, HiddenValues.HeldBy(s))))
                 throw new Missing(HiddenText);
             return new(name, Value.Of(Read(LedgerKey.Piece(picked.Id), prop)), false, false, null, $"{prop.Name} of {shown}");
         }

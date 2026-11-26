@@ -128,12 +128,13 @@ public static class PropertyValues
     {
         if (piece != null)
         {
-            if (PlayerView.IsPlaceholder(piece) || Ownership.InUnitFilter
-                || (filters.SideOf(piece) is { } side && s.ViewSides?.Contains(side) != true))
+            if (PlayerView.IsPlaceholder(piece)
+                || (Ownership.InUnitFilter ? HiddenValues.UnknownSideValueHidden(pack, def)
+                    : HiddenValues.PieceValueHidden(pack, def, filters.SideOf(piece), HiddenValues.HeldBy(s))))
                 throw new EvalError($"{def.Name} has no value on this piece") { MissingValue = true };
             return;
         }
-        if (HiddenValues.HolderValueHidden(pack, id, def, side => s.ViewSides?.Contains(side) == true))
+        if (HiddenValues.HolderValueHidden(pack, id, def, HiddenValues.HeldBy(s)))
             throw new EvalError($"{def.Name} has no value on {pack.ById<HolderDef>(id)?.Name ?? id}") { MissingValue = true };
     }
 

@@ -182,13 +182,13 @@ public static class KeyedValues
 
     /// <summary>
     /// True when <paramref name="view"/> is a player view that may lack the values of <paramref name="p"/> at <paramref name="ledgerKey"/> (a
-    /// Private place, a non-Public value of another side's piece, a holder of a side not held), as keyed() decides. A Ledger model shows such a
+    /// Private place, a non-Public value of another side's piece or holder: <see cref="HiddenValues"/>), as keyed() decides. A Ledger model shows such a
     /// value as hidden instead of the Default <see cref="KeyedTable.For"/> lists for it. False for a full state.
     /// </summary>
     public static bool HiddenIn(GameState view, RulesPack pack, string ledgerKey, PropertyDef p)
     {
         if (view == null || !view.IsPlayerView) return false;
-        return HiddenAt(view, pack, ledgerKey, p, side => view.ViewSides?.Contains(side) == true);
+        return HiddenAt(view, pack, ledgerKey, p, HiddenValues.HeldBy(view));
     }
 
     /// <summary>
@@ -216,7 +216,7 @@ public static class KeyedValues
     private static bool HiddenInView(GameState s, RulesPack pack, PropertyDef def, string? holderId, PieceInstance? piece,
         Lazy<Func<PieceInstance, string?>>? sides, Func<string, bool>? holds = null)
     {
-        holds ??= side => s.ViewSides?.Contains(side) == true;
+        holds ??= HiddenValues.HeldBy(s);
         if (piece != null)
             return PlayerView.IsPlaceholder(piece) || HiddenValues.PieceValueHidden(pack, def, piece, sides ?? PieceFilter.SideMap(s, pack), holds);
         return holderId != null && HiddenValues.HolderValueHidden(pack, holderId, def, holds);

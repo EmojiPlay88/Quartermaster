@@ -137,8 +137,6 @@ public static class PlayerView
         /// <see cref="HiddenValues"/> takes them (made once per view, so a value costs no allocation).</summary>
         private readonly Func<string, bool> _holds;
         private readonly Func<PropertyDef, bool> _isPublic;
-        /// <summary>The sides of a deleted piece the viewer holds: none (its side is unknown, so it fails closed).</summary>
-        private static readonly Func<string, bool> NoneHeld = _ => false;
         /// <summary>Phase name -> the side ids of every phase with that name ("" for a phase with no side).</summary>
         private readonly Dictionary<string, HashSet<string>> _phaseSides = new(StringComparer.Ordinal);
         /// <summary>Piece name -> first side not held among pieces with that name (null when all are held or public).</summary>
@@ -266,7 +264,7 @@ public static class PlayerView
             if (isPiece)
             {
                 if (_hidden.Contains(id)) { _sideOf.TryGetValue(id, out side); return true; }
-                if (!_sideOf.TryGetValue(id, out var ps)) return HiddenValues.PieceValueHidden(_pack, def, "", NoneHeld, _isPublic);   // deleted piece
+                if (!_sideOf.TryGetValue(id, out var ps)) return HiddenValues.UnknownSideValueHidden(_pack, def, _isPublic);   // deleted piece
                 if (NotHeld(ps)) side = ps;
                 return HiddenValues.PieceValueHidden(_pack, def, ps, _holds, _isPublic);
             }
