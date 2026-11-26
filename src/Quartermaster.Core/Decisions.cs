@@ -4,9 +4,10 @@ using Quartermaster.Vassal;
 
 namespace Quartermaster.Core;
 
-public enum DecisionKind { Checklist, Pending, Warning }
+/// <summary>Schedule (B5 #62): a schedule row due now with counters; its Index is the row's index in the pack's schedule.</summary>
+public enum DecisionKind { Checklist, Pending, Warning, Schedule }
 
-/// <summary>One open item on the phase panel. Index is the checklist or warning index, or -1 for pending runs.</summary>
+/// <summary>One open item on the phase panel. Index is the checklist, warning or schedule row index, or -1 for pending runs.</summary>
 public sealed record Decision(DecisionKind Kind, string Text, int Index, string? RunId, IReadOnlyList<string> PieceIds);
 
 /// <summary>A phase warning with the units it currently matches.</summary>
@@ -119,6 +120,15 @@ public static class Decisions
             var head = n == 0 ? WithoutUnit(w.Message) : w.Message.Replace(Token, "").Trim();
             if (n == 0 && head.Length == 0) head = w.UnitTexts.FirstOrDefault() ?? "";
             res.Add(new Decision(DecisionKind.Warning, n == 0 ? head : $"{head} — {n} {(n == 1 ? "unit" : "units")}", w.Index, null, w.PieceIds));
+        }
+
+        // Schedule rows due now with counters the viewer may act on (from the state given: a player view lists its own side's only).
+        if (pack.Schedule is { Count: > 0 } && s.Position != null)
+        {
+            var sides = s.ViewSides == null ? null : new HashSet<string>(s.ViewSides, StringComparer.Ordinal);
+            foreach (var due in ScheduleDue.For(pack, s, model, sides))
+                if (due.Now && due.PieceIds.Count > 0)
+                    res.Add(new Decision(DecisionKind.Schedule, "Due: " + due.Label, pack.Schedule.IndexOf(due.Row), null, due.PieceIds));
         }
         return res;
     }

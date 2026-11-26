@@ -140,6 +140,13 @@ public static class Sequencer
             $"Phase \"{stored.PhaseId}\" no longer exists; continuing at \"{ph.Name}\"");
     }
 
+    /// <summary>The phase index of a position: by id, else its stored index when in range; -1 when neither.</summary>
+    internal static int IndexOf(RulesPack pack, PhasePosition p)
+    {
+        var idx = pack.Phases.FindIndex(x => x.Id == p.PhaseId);
+        return idx >= 0 ? idx : p.PhaseIndex >= 0 && p.PhaseIndex < pack.Phases.Count ? p.PhaseIndex : -1;
+    }
+
     public static PhaseDef? Current(RulesPack pack, GameState s) =>
         s.Position == null ? null : pack.Phases.FirstOrDefault(p => p.Id == s.Position.PhaseId);
 
