@@ -43,9 +43,9 @@ JSON (invented):
 { "firstPhaseId": "n-combat", "lastPhaseId": "n-combat", "count": 0, "label": "Fire round" }
 { "id": "s-combat", "name": "South Combat", "sideId": "south", "reactors": ["north"], ... }
 "lastTurn": 8,
-"victory": [ { "id": "v-river", "condition": "North ports >= 4", "sideId": "north", "message": "The Northern League holds the river", "phaseIds": ["n-supply"] } ],
+"victory": [ { "id": "v-river", "condition": "NorthPorts >= 4", "sideId": "north", "message": "The Northern League holds the river", "phaseIds": ["n-supply"] } ],
 "schedule": [ { "id": "r-relief", "turn": 3, "phaseId": "n-supply", "piece": "startswith(name(), \"Relief barge\")",
-  "zoneMapId": "North holding box", "formulaId": "f-fresh-crew", "label": "Relief barges arrive" } ]
+  "zoneMapId": "map-north-hold", "formulaId": "f-fresh-crew", "label": "Relief barges arrive" } ]
 ```
 
 ### #6 Open-ended blocks and one nesting level (Core `Sequencer`)
@@ -90,7 +90,7 @@ JSON (invented):
 ### #34 Rounds inside a stage (docs only)
 An open-ended inner block, a property that resets at its first phase (`ResetAt`, B2) and `segment()` cover it. Wiki recipe "Fire
 rounds inside a day": Riverland outer block `Day` (count 2) over North Movement–North Combat, inner open-ended block `Fire round` over
-North Combat, `Fired this round` resets at North Combat, precondition `Fired this round < 1`, `if(segment() > 3, 1, 0)` for a tiring
+North Combat, `FiredThisRound` resets at North Combat, precondition `FiredThisRound < 1`, `if(segment() > 3, 1, 0)` for a tiring
 modifier. No engine work beyond #6.
 
 ### #7 Sides that react in another side's phase

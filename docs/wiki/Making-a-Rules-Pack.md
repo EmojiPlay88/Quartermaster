@@ -608,13 +608,13 @@ If the last phase has end-of-phase formulas, the first press runs them and stays
 
 A block may lie strictly inside one other block (one level only). Riverland example: an outer block `Day` with a count of 2 covers North Movement to North Combat, and an inner open-ended block `Fire round` covers North Combat only. Each day plays movement once and combat as many rounds as the players want.
 
-To limit what a counter does in a round, add a property `Fired this round` (Default 0) and type `North Combat` in its **Resets at** cell: it resets each time the game enters North Combat, which is every round. Give the Attack formula the **Only runs when** condition `Fired this round < 1` and an output that adds 1 to `Fired this round`.
+To limit what a counter does in a round, add a property `FiredThisRound` (Default 0) and type `North Combat` in its **Resets at** cell: it resets each time the game enters North Combat, which is every round. Give the Attack formula the **Only runs when** condition `FiredThisRound < 1` and an output that adds 1 to `FiredThisRound`. A name used in an expression is written with letters, digits and `_` only (no spaces).
 
 The function [`segment()`](Formula-Reference#segment) is the round number inside the inner block, and `stage()` is the day. A tiring modifier can read `if(segment() > 3, 1, 0)`. `runs("f-attack", "stage")` still counts per day.
 
 ### Sides that react
 
-A phase can have **Also acting** sides: sides that may act in it besides its own. Riverland example: South Combat with the Northern League also acting. During South Combat a Northern League player can run a formula that needs no counter, such as `Ambush fire`, which writes the global value `River alarm`, and can write global values. Only the Southern Compact still ticks the checklist, acknowledges warnings and presses Next Phase. In a hot-seat game the reacting player takes the screen with **Game > Current Player**. Counter runs follow ownership as before, in any phase.
+A phase can have **Also acting** sides: sides that may act in it besides its own. Riverland example: South Combat with the Northern League also acting. During South Combat a Northern League player can run a formula that needs no counter, such as `Ambush fire`, which writes the global value `RiverAlarm`, and can write global values. Only the Southern Compact still ticks the checklist, acknowledges warnings and presses Next Phase. In a hot-seat game the reacting player takes the screen with **Game > Current Player**. Counter runs follow ownership as before, in any phase.
 
 The phase panel shows `Reacting: Northern League` under the side. A reacting player who looks at the panel sees `{side} is playing {phase}; you may react`, and Next Phase stays with the phase's own side.
 
@@ -633,7 +633,7 @@ The phase panel's **Due** section lists a row from the moment it is reached: `Du
 
 On the **End of game** tab, **The game ends after turn** sets the last turn (Riverland: 8); **Last stage** also ends it after a given pass of a block on that turn. When Next Phase would go past the last turn, the game ends with the result `the last turn has been played`, unless a victory condition is true.
 
-A **victory condition** is a phase condition (see [What a phase condition may read](Formula-Reference#what-a-phase-condition-may-read)). Riverland example: `North ports >= 4`, side Northern League, message `The Northern League holds the river`, checked in North Supply. A condition is checked when the game enters a phase it names (blank = every phase), and at the end of the last turn. The first one that is true ends the game, and the result reads `Game over: The Northern League holds the river`. Without a message the result reads `{side} wins`. A condition that cannot be worked out counts as not met, and the Diagnostics list warns once. Write the names in the expression as letters, digits and `_`, for example `North_ports >= 4` when a property is called that.
+A **victory condition** is a phase condition (see [What a phase condition may read](Formula-Reference#what-a-phase-condition-may-read)). Riverland example: `NorthPorts >= 4` (a global value `NorthPorts`), side Northern League, message `The Northern League holds the river`, checked in North Supply. A condition is checked when the game enters a phase it names (blank = every phase), and at the end of the last turn. The first one that is true ends the game, and the result reads `Game over: The Northern League holds the river`. Without a message the result reads `{side} wins`. A condition that cannot be worked out counts as not met, and the Diagnostics list warns once.
 
 After the end, Next Phase does nothing and says `The game is over.`; counters, ledgers, the log, undo and saving still work. Undo takes the game out of game over. In an online game only the host checks victory. See [Phases](Window-Phases#game-over).
 

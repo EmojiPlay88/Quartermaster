@@ -102,7 +102,7 @@ The list on the left holds the pack's formulas, with **New…**, **Rename…** a
 
 On the left:
 
-- **Phases, in order**: **Add**, **Duplicate**, **Remove**, **Move Up**, **Move Down**. **Make block from selection…** groups the selected phases into a block that repeats (it asks for a **Repeat count** and a **Label**, or **Until a player stops**, which makes the block repeat until the acting player chooses Continue; a block may lie inside one other block); **Remove block** undoes that.
+- **Phases, in order**: **Add**, **Duplicate**, **Remove**, **Move Up**, **Move Down**. **Make block from selection…** groups the selected phases into a block that repeats (it asks for a **Repeat count** and a **Label**, or **Until a player stops**, which makes the block repeat until the acting player chooses Continue; a block may lie inside one other block); **Remove block** undoes that. The list marks each phase of a block with the block's label and its count, for example `┃ Day ×2`, or `(until stopped)` for a block that repeats until a player stops.
 - **Sides**: **Add…**, **Rename…**, **Remove**, and **Units of this side:**, a filter such as `marker("Side") == "Northern League"`.
 
 On the right, for the selected phase:
