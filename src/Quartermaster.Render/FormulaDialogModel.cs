@@ -16,7 +16,19 @@ public sealed record BoxView(string Variable, string Text, BoxBackground Backgro
 public sealed record InlineRollView(string Key, string Text);
 
 public sealed record DialogView(IReadOnlyList<BoxView> Boxes, IReadOnlyList<InlineRollView> InlineRolls, string ResultText,
-    string WorkingText, bool WorkingNegative, string Status, bool CanApply, FormulaTrace Trace);
+    string WorkingText, bool WorkingNegative, string Status, bool CanApply, FormulaTrace Trace)
+{
+    /// <summary>
+    /// B7: the run the view was built from when it is not <see cref="Trace"/> (null otherwise). For a masked viewer of a formula whose
+    /// precondition or "Only when" reads hidden data, the view shows a run that ignores the precondition and uses every host guard
+    /// (<see cref="FormulaDialogModel"/>), so nothing shown depends on the hidden data; <see cref="Trace"/> stays the real run, the only one
+    /// ever applied.
+    /// </summary>
+    public FormulaTrace? Shown { get; init; }
+
+    /// <summary>The run whose state the view shows (<see cref="Shown"/>, else <see cref="Trace"/>): read it for anything displayed, never apply it.</summary>
+    public FormulaTrace ShownTrace => Shown ?? Trace;
+}
 
 /// <summary>UI-free state of the formula dialog: typed values, overrides, pinned dice, and the mapping from a run to what the controls show.</summary>
 public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef initialFormula, string? pieceId)
@@ -339,14 +351,57 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice && !IsShared(b.Variable)))
             ov.TryAdd(b.Variable, "");
         // A hidden Input cannot be typed: the engine reads its auto value (B7), as it reads every other hidden value.
-        var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource, PickSides)
-            { SharedRolls = SharedRolls, AutoInputs = HiddenAutoInputs() });
+        var request = new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource, PickSides)
+            { SharedRolls = SharedRolls, AutoInputs = HiddenAutoInputs() };
+        var trace = runner.Run(state, request);
         MergePins(trace);
+        // B7: a precondition or guard over hidden data is the host's to decide at Apply; the viewer is shown a run that does not depend on it.
+        _shownFor = null;
+        _shownTrace = null;
+        if (ShownRequest(request) is { } shownRequest)
+        {
+            _shownTrace = runner.Run(state, shownRequest with { FixedRolls = _fixedRolls });
+            MergePins(_shownTrace);
+            _shownFor = trace;
+        }
         if (!Checked) return trace;
         // Checked: this is the EXPECTED engine run, the only source of ledger commands. Until every box matches it carries no result.
-        _lastExpected = trace;
-        return View(trace).CanApply ? trace : trace with { Result = null, Working = "", Outputs = Array.Empty<OutputPreview>() };
+        // The boxes are checked against what the viewer is shown.
+        _lastExpected = _shownTrace ?? trace;
+        if (View(trace).CanApply) return trace;
+        var stripped = trace with { Result = null, Working = "", Outputs = Array.Empty<OutputPreview>() };
+        if (_shownFor != null) _shownFor = stripped;
+        return stripped;
     }
+
+    private FormulaTrace? _shownFor;
+    private FormulaTrace? _shownTrace;
+
+    /// <summary>
+    /// B7: the run a masked viewer (not an online guest, whose own run is guesses the host replaces) is shown instead of the real one when
+    /// the formula's precondition or a typed box's "Only when" reads data hidden from it (<see cref="Guards"/>): it ignores the precondition
+    /// (<see cref="RunRequest.IgnorePrecondition"/>) and resolves every guard box as if its guard held (<see cref="RunRequest.ForceWhen"/>),
+    /// so the boxes, their validation, the status and Apply never depend on the hidden data. Null when no such run is needed.
+    /// </summary>
+    private RunRequest? ShownRequest(RunRequest real)
+    {
+        if (HostCalculates || _hidden.Count == 0) return null;
+        var guards = Guards();
+        if (guards.Count == 0) return null;
+        HashSet<string>? force = null;
+        foreach (var b in formula.Bindings)
+            if (b?.Variable is { } v && IsGuardBox(v)) (force ??= new HashSet<string>(StringComparer.Ordinal)).Add(v);
+        var pre = guards.Contains(FormulaMasking.PreconditionGuard);
+        return force == null && !pre ? null : real with { IgnorePrecondition = pre, ForceWhen = force };
+    }
+
+    /// <summary>
+    /// B7: the status to show instead of applying when the view allowed Apply but the real run cannot be applied: a precondition or
+    /// guard over hidden data decided against it. The generic <see cref="FormulaMasking.ErrorHiddenText"/>, which never says which
+    /// condition failed. Null when the run can be applied (or the view did not allow it).
+    /// </summary>
+    public static string? ApplyRefusal(DialogView v) =>
+        v is { CanApply: true } && (v.Trace.Refused || v.Trace.Error != null || v.Trace.Result == null) ? FormulaMasking.ErrorHiddenText : null;
 
     /// <summary>Runs with the engine's auto values (rolling and pinning dice) and copies every value into the boxes.</summary>
     public void Calculate(GameState state)
@@ -373,6 +428,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     public DialogView View(FormulaTrace t)
     {
+        var real = t;
+        if (_shownTrace != null && ReferenceEquals(t, _shownFor)) t = _shownTrace;   // B7: what the viewer is shown (ShownRequest)
         var vars = t.Variables;
         // A guard over data the viewer may not see is a host guard (B7, every masked viewer): its box stays open and must be filled
         // whether the guard holds or not. An online guest cannot decide it at all: the host decides (spec 8a.2).
@@ -427,26 +484,14 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (localDice || hostDecides) { working = ""; result = ""; negative = false; }
         // B7: a blank guard box waits whether or not its hidden guard holds, so nothing of a run that went ahead without it is shown.
         if (vars.Any(v => IsGuardBox(v.Variable) && Raw(v.Variable).Trim().Length == 0)) { working = ""; result = ""; negative = false; }
-        // The result and the "(negative)" mark of a run with a guard over hidden data differ as the guard holds: never shown (B7).
-        if (guards.Count > 0) negative = false;
-        // B7: a masked formula's result may be the hidden value itself. It shows only when every output writes the result and the viewer
-        // sees every write (it is then in the viewer's ledger anyway); a guest's local result is built from guesses, so it never shows.
-        if (masked && (HostCalculates || (result.Length > 0 && (guards.Count > 0 || !ResultVisible(t))))) result = HiddenBoxText;
+        // B7: a masked formula never previews its result or its "(negative)" mark before Apply: either could be the hidden value, or change
+        // with it as the viewer retypes a value compared with it. After Apply the ledger shows what the viewer may see.
+        if (masked) { result = HiddenBoxText; negative = false; }
         return new DialogView(boxes, inline, result, working + (negative ? " (negative)" : ""), negative, status,
-            canApply, t);
+            canApply, real) { Shown = ReferenceEquals(t, real) ? null : t };
     }
 
     private static readonly IReadOnlySet<string> NoHostGuards = new HashSet<string>();
-
-    /// <summary>
-    /// True when a masked formula's result may be shown: the run writes at least one output (every <see cref="FormulaTrace.Outputs"/> entry
-    /// is a write), every Write output of the formula writes the result itself (no value expression of its own, which could hide the result
-    /// behind another value), and the viewer sees each write (<see cref="OutputVisible"/>, as the "(negative)" mark; no rule: every write is seen).
-    /// </summary>
-    private bool ResultVisible(FormulaTrace t) =>
-        t.Outputs.Count > 0
-        && (formula.Outputs ?? new List<FormulaOutput>()).All(o => o == null || o.Action != OutputAction.Write || string.IsNullOrWhiteSpace(o.Expr))
-        && t.Outputs.All(o => OutputVisible == null || OutputVisible(o));
 
     /// <summary>Shown on a typed dice box that may hold several dice (what count() reads).</summary>
     public const string TypeEachDieHint = "Type each die, separated by spaces";

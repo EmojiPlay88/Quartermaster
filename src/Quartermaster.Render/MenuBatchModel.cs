@@ -319,9 +319,9 @@ public sealed class MenuBatchModel : IBatchRows
     /// <summary>What the row would write. A value the viewer may not see (another side's holder) shows only its name.</summary>
     private string LedgerOf(DialogView dv)
     {
-        if (dv.Trace.Error != null || dv.Trace.Result == null) return "";
+        if (dv.ShownTrace.Error != null || dv.ShownTrace.Result == null) return "";
         var sides = FormulaMasking.ViewerSides(s);
-        return string.Join("; ", dv.Trace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
+        return string.Join("; ", dv.ShownTrace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
             ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
             : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
     }
@@ -331,7 +331,7 @@ public sealed class MenuBatchModel : IBatchRows
     private string ExceptionsOf(DialogView dv)
     {
         var sides = FormulaMasking.ViewerSides(s);
-        return dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o)))
+        return dv.ShownTrace.Error == null && dv.ShownTrace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o)))
             ? "goes negative" : "";   // only for values the viewer may see
     }
 
@@ -339,8 +339,8 @@ public sealed class MenuBatchModel : IBatchRows
     {
         var links = Chain();
         if (row < 0 || row >= links.Length || links[row].View is not { } dv || !s.CanAct(_rows[row].PieceId)) return Array.Empty<(string, string)>();
-        return dv.Trace.Error != null || dv.Trace.Result == null ? Array.Empty<(string, string)>()
-            : dv.Trace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+        return dv.ShownTrace.Error != null || dv.ShownTrace.Result == null ? Array.Empty<(string, string)>()
+            : dv.ShownTrace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
     }
 
     /// <summary>The rows not skipped (removed by an earlier row, gone, or another side's).</summary>

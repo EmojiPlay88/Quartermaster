@@ -273,8 +273,8 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         try
         {
             var dv = ModelFor(row).Evaluate(s.Game.State);
-            return dv.Trace.Error != null || dv.Trace.Result == null ? Array.Empty<(string, string)>()
-                : dv.Trace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+            return dv.ShownTrace.Error != null || dv.ShownTrace.Result == null ? Array.Empty<(string, string)>()
+                : dv.ShownTrace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return Array.Empty<(string, string)>(); }
     }
@@ -282,9 +282,9 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     /// <summary>What the row would write. A value the viewer may not see (another side's holder) shows only its name.</summary>
     private string LedgerOf(DialogView dv)
     {
-        if (dv.Trace.Error != null || dv.Trace.Result == null) return "";
+        if (dv.ShownTrace.Error != null || dv.ShownTrace.Result == null) return "";
         var sides = FormulaMasking.ViewerSides(s);
-        return string.Join("; ", dv.Trace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
+        return string.Join("; ", dv.ShownTrace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
             ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
             : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
     }
@@ -295,7 +295,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     {
         var parts = new List<string>();
         var sides = FormulaMasking.ViewerSides(s);
-        if (dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o))))
+        if (dv.ShownTrace.Error == null && dv.ShownTrace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o))))
             parts.Add("goes negative");   // only for values the viewer may see
         if (u.PieceId != null && WarningsByPiece().TryGetValue(u.PieceId, out var names)) parts.AddRange(names);
         return string.Join("; ", parts);

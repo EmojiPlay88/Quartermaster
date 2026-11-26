@@ -69,6 +69,14 @@ public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDict
     /// <summary>B7: Input variables that take their auto value when nothing is typed, even without <see cref="UseAutoValues"/> (an Input
     /// whose value is hidden from the viewer: the viewer cannot type it, so the engine reads it). Null = none.</summary>
     public IReadOnlySet<string>? AutoInputs { get; init; }
+
+    /// <summary>B7: a run for what a masked viewer is shown, never applied: a false precondition does not refuse it (a precondition over
+    /// data hidden from the viewer is the host's to decide at Apply).</summary>
+    public bool IgnorePrecondition { get; init; }
+
+    /// <summary>B7: variables resolved as if their "Only when" held (host guards over hidden data: their typed value is validated the same
+    /// way whatever the guard says). For a shown run only, never applied. Null = none.</summary>
+    public IReadOnlySet<string>? ForceWhen { get; init; }
 }
 
 /// <summary>Binds a formula's variables to game data, evaluates it and previews/produces the ledger commands. Run never throws.</summary>
@@ -277,7 +285,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             bool? ok;
             try { ok = run.Condition(pre, rolls: false); }
             catch (RollsForbidden) { throw new EvalError($"The precondition of {formula.Name} cannot roll dice"); }
-            if (ok == false)
+            if (ok == false && !r.IgnorePrecondition)
             {
                 var seen = names.Select(run.Cached).OfType<VariableState>().ToList();
                 return new(formula, seen, null, "", Array.Empty<OutputPreview>(), formula.RefusalMessage ?? $"{formula.Name} cannot be run now",
@@ -784,7 +792,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 var auto = b is { Kind: not (BindingKind.Input or BindingKind.Piece) };
                 try
                 {
-                    var use = b == null || string.IsNullOrWhiteSpace(b.When) ? true : Condition(Parse(formula, b.When));
+                    var use = b == null || string.IsNullOrWhiteSpace(b.When) || r.ForceWhen?.Contains(name) == true ? true : Condition(Parse(formula, b.When));
                     st = use == false ? new(name, null, auto, false, null, Skipped: true)
                         : use == null ? throw new Waits()
                         : b == null ? new(name, null, false, false, "No binding for " + name) : Bind(b);

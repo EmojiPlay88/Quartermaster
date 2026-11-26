@@ -366,7 +366,7 @@ sealed class FormulaDialog : Form
             _working.Text = v.WorkingText;
             _working.ForeColor = v.WorkingNegative ? Color.Red : SystemColors.ControlText;
             _status.Text = v.Status;
-            _status.ForeColor = v.Trace.Error != null ? Color.Firebrick : SystemColors.ControlText;
+            _status.ForeColor = v.ShownTrace.Error != null ? Color.Firebrick : SystemColors.ControlText;
             // A guest's Apply asks the host, which checks the boxes with the full game; the local check can't (hidden values are absent).
             _apply.Enabled = (_s.IsGuest ? !_sending : v.CanApply) && !_previewOnly && _s.Game != null;
             _calc.Enabled = !_sending;
@@ -416,6 +416,8 @@ sealed class FormulaDialog : Form
         if (_last is not { CanApply: true } v || _s.Game is not { } game || _s.Runner is not { } runner) return;
         // Hot-seat: the viewer may have changed while the dialog was open; another side's unit is refused.
         if (!_s.CanAct(_pieceId)) { _status.Text = "This unit " + ModuleSession.OtherSideText + "."; _apply.Enabled = false; return; }
+        // B7: a precondition or guard over hidden data decided against the run: the generic text, never which condition failed.
+        if (FormulaDialogModel.ApplyRefusal(v) is { } refusal) { _status.Text = refusal; return; }
         // v.Trace is the engine's own (expected) run: typed values only gate Apply, so a wrong formula can never reach the ledger.
         if (HostForm?.Actions is { } port)
         {

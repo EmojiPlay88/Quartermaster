@@ -82,16 +82,18 @@ public class B7ResultBoxTests : IDisposable
     }
 
     [Fact]
-    public void Hotseat_result_shown_when_every_output_visible()
+    public void Hotseat_result_hidden_even_when_every_output_visible()
     {
-        // Blue's own unit receives the result: the viewer sees it in the ledger anyway, so the box shows it.
+        // B7 round 2: Blue's own unit receives the result, but a masked formula never previews it before Apply (the ledger shows it after).
         var s = Open();
         s.SetViewSides(Blue);
         var m = Dialog(s, "f-to-water");
         Assert.NotEmpty(m.Hidden);
         var v = m.Evaluate(s.Game!.State);
-        Assert.Equal(DoubleText, v.ResultText);
+        Assert.Equal(Secret * 2, v.Trace.Result!.Value.Number);
+        Assert.Equal(FormulaMasking.HiddenText, v.ResultText);
         Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
+        Assert.True(v.CanApply);
     }
 
     [Fact]

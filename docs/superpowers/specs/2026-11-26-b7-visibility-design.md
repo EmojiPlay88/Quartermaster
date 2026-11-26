@@ -214,15 +214,22 @@ the `PhaseGate` text for the asked side: `{Side} is playing {phase}; wait for yo
   example `B = A + 1`) still runs and applies in hot-seat. Its box keeps showing `HiddenBoxText`.
 - **Host guards, for every masked viewer** (hot-seat, the host's screen for a side, the host running a guest's intent, a guest): a typed
   box (Input or Piece) whose "Only when" depends on hidden data (`FormulaMasking.GuardsOnHidden`) is always open and must always be filled.
-  Its text, tooltip, the status (`Waiting for: B` while it is blank), Apply, Calculate (never fills it) and a preview verdict's values
-  (never carry it) do not depend on whether the guard holds. The engine evaluates the guard on the full state and ignores the typed value
-  when the guard is false. While such a box is blank no result or working is shown. A formula with such a guard never shows its result or
-  "(negative)" mark. The host's verdict to a guest is the same whether or not the guard holds; it always asks for the value.
-- `FormulaDialogModel.View`, result box: an unmasked formula shows its result. A masked formula (`Hidden` not empty) shows its result only
-  when the trace has at least one Write output, every Write output of the formula writes the result itself (no value expression of its
-  own), and every write is visible to the viewer (`OutputVisible`, as the "(negative)" mark). Otherwise it reads `HiddenBoxText` (`hidden`,
-  or `hidden — the host calculates` on a guest). On a guest (`HostCalculates`) a masked formula's result is always hidden (its local result
-  is built from guesses). The batch grids show the same text (they read `DialogView.ResultText`).
+  Its text, tooltip, the validation of its typed value (`Not a number`, a range, listed choices), the status (`Waiting for: B` while it is
+  blank), Apply, Calculate (never fills it) and a preview verdict's values (never carry it) do not depend on whether the guard holds. The
+  engine evaluates the guard on the full state and ignores the typed value when the guard is false. While such a box is blank no working is
+  shown. The host's verdict to a guest is the same whether or not the guard holds; it always asks for the value.
+- **Preconditions over hidden data** (`FormulaMasking.PreconditionGuard`) are host-decided for every masked viewer: no refusal text and no
+  disabled Apply before Apply depend on them. The dialog (not on an online guest, whose own run is guesses the host replaces) builds its view
+  from a shown run that ignores the precondition (`RunRequest.IgnorePrecondition`) and resolves every guard box as if its guard held
+  (`RunRequest.ForceWhen`), exposed as `DialogView.Shown` / `ShownTrace`; `DialogView.Trace` stays the real run, the only one ever applied.
+  When the real run is refused (or fails) at Apply, `FormulaDialogModel.ApplyRefusal` gives the existing generic
+  `FormulaMasking.ErrorHiddenText` (`The formula could not be calculated.`), never which condition failed: on the local formula windows and
+  in the host's verdict (single runs and menu batch rows).
+- `FormulaDialogModel.View`, result box: an unmasked formula shows its result. A masked formula (`Hidden` not empty) never previews its
+  result or its "(negative)" mark before Apply: the result box reads `HiddenBoxText` (`hidden`, or `hidden — the host calculates` on a guest)
+  whether or not its writes are visible, since a previewed result could show the hidden value, or change with it as the viewer retypes a
+  value compared with it. After Apply the ledger shows what the viewer may see. The batch grids show the same text (they read
+  `DialogView.ResultText`).
 
 ### Carry: one resolver for a schedule row's zone map (B5/B6)
 `ScheduleDue.ZoneMapIn` delegates to `MapRefs.Find`; the validator's schedule check uses `MapRefs.Find(_module.Maps, row.ZoneMapId)`

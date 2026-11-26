@@ -100,6 +100,33 @@ public class B7FormulaMaskingTests : IDisposable
                 },
                 new FormulaDef
                 {
+                    // The text compares the hidden plans with a value Blue types; the result goes to Blue's own unit.
+                    Id = "f-compare", Name = "Plans probe", Text = "W - if(A > T, 1000, 0)",
+                    Bindings = new() { W, DepotBinding("A", "plans"), new VariableBinding { Variable = "T", Kind = BindingKind.Input } },
+                    Outputs = new() { ToWater },
+                },
+                new FormulaDef
+                {
+                    // The precondition compares the hidden plans with a value Blue types.
+                    Id = "f-pre", Name = "Plans gate", Text = "W + 1", Precondition = "A > T", RefusalMessage = "Red has no plans to raid",
+                    Bindings = new() { W, DepotBinding("A", "plans"), new VariableBinding { Variable = "T", Kind = BindingKind.Input } },
+                    Outputs = new() { ToWater },
+                },
+                new FormulaDef
+                {
+                    // A guarded Input with a range and one with listed choices: their typed values are validated.
+                    Id = "f-guard-checked", Name = "Checked raid", Text = "W + if(A > T, G + H, 0)",
+                    Bindings = new()
+                    {
+                        W, DepotBinding("A", "plans"),
+                        new VariableBinding { Variable = "T", Kind = BindingKind.Input },
+                        new VariableBinding { Variable = "G", Kind = BindingKind.Input, When = "A > T", Min = 0, Max = 100 },
+                        new VariableBinding { Variable = "H", Kind = BindingKind.Input, When = "A > T", Choices = new() { "1", "2" } },
+                    },
+                    Outputs = new() { ToWater },
+                },
+                new FormulaDef
+                {
                     // An auto value that reads the hidden value through holder(): no hidden variable is named.
                     Id = "f-auto-call", Name = "Plans input", Text = "X + W",
                     Bindings = new() { W, new VariableBinding { Variable = "X", Kind = BindingKind.Input, AutoValue = "holder(RedDepot, Plans)" } },
@@ -360,5 +387,102 @@ public class B7FormulaMaskingTests : IDisposable
         Assert.DoesNotContain(((Secret + 1) * 2).ToString(CultureInfo.InvariantCulture), Seen(v));
         Assert.True(c.ApplyFormula(null, PhaseFixture.BlueOne, v.Trace, false));
         Assert.Equal((Secret + 1) * 2 + 10, Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+    }
+    /// <summary>The dialog of <paramref name="formulaId"/> for a Blue hot-seat viewer with <paramref name="typed"/> boxes, evaluated.</summary>
+    private static (FormulaDialogModel M, DialogView V) Typed(ModuleSession s, string formulaId, params (string Var, string Text)[] typed)
+    {
+        var m = HotSeatDialog(s, formulaId);
+        foreach (var (v, t) in typed) m.SetBoxText(v, t);
+        return (m, m.Evaluate(s.Game!.State));
+    }
+
+    [Fact]
+    public void HotSeat_retyping_a_value_compared_with_a_hidden_one_previews_nothing()
+    {
+        var s = Open();
+        s.SetViewSides(Blue);
+        var (_, low) = Typed(s, "f-compare", ("T", "0"));
+        var (_, high) = Typed(s, "f-compare", ("T", Huge));
+        Assert.Equal(10 - 1000, low.Trace.Result!.Value.Number);   // the runs differ
+        Assert.Equal(10, high.Trace.Result!.Value.Number);
+        Assert.Equal(Seen(low, "T"), Seen(high, "T"));
+        Assert.Equal(FormulaMasking.HiddenText, low.ResultText);
+        Assert.False(low.WorkingNegative);   // the write would go below zero, but the mark is not previewed
+        Assert.DoesNotContain("(negative)", low.WorkingText);
+    }
+
+    [Fact]
+    public void HotSeat_precondition_over_hidden_value_is_decided_at_apply()
+    {
+        var s = Open();
+        s.SetViewSides(Blue);
+        var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        var (_, pass) = Typed(s, "f-pre", ("T", "0"));
+        var (_, refused) = Typed(s, "f-pre", ("T", Huge));
+        Assert.False(pass.Trace.Refused);
+        Assert.True(refused.Trace.Refused);   // the real run is refused
+        Assert.Equal(Seen(pass, "T"), Seen(refused, "T"));
+        Assert.True(refused.CanApply);
+        Assert.DoesNotContain("Red has no plans", Seen(refused));
+        // Apply: the refused run writes nothing and says only the generic text; the passing one applies.
+        Assert.Equal(FormulaMasking.ErrorHiddenText, FormulaDialogModel.ApplyRefusal(refused));
+        Assert.Equal("The formula could not be calculated.", FormulaDialogModel.ApplyRefusal(refused));
+        Assert.False(c.ApplyFormula(null, PhaseFixture.BlueOne, refused.Trace, false));
+        Assert.Equal(10, Ledger.Get(s.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water") ?? 10);
+        Assert.Null(FormulaDialogModel.ApplyRefusal(pass));
+        Assert.True(c.ApplyFormula(null, PhaseFixture.BlueOne, pass.Trace, false));
+        Assert.Equal(11, Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+        // Holding the depot's side, the precondition is the viewer's own: refused before Apply as always.
+        s.SetViewSides(new HashSet<string> { "red", "blue" });
+        var (_, own) = Typed(s, "f-pre", ("T", Huge));
+        Assert.False(own.CanApply);
+    }
+
+    [Fact]
+    public void Guest_precondition_over_hidden_value_same_preview_generic_refusal()
+    {
+        var answers = new List<string>();
+        foreach (var threshold in new[] { "0", Huge })
+        {
+            var s = Open();
+            var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+            var x = new IntentExecutor(s, c);
+            var typed = new Dictionary<string, string> { ["T"] = threshold, ["W"] = "10" };
+            var preview = x.Execute("p2", Blue, new FormulaIntent("f-pre", PhaseFixture.BlueOne, null, typed, false, true)).Verdict!;
+            var values = (preview.Values ?? new Dictionary<string, string>()).Where(kv => kv.Key != "T").OrderBy(kv => kv.Key, StringComparer.Ordinal);
+            answers.Add($"{preview.Applied}|{preview.Message}|{string.Join(",", preview.Boxes.Select(b => b.Var + "=" + b.State))}|{string.Join(",", values)}");
+            var apply = x.Execute("p2", Blue, new FormulaIntent("f-pre", PhaseFixture.BlueOne, null, typed, false)).Verdict!;
+            var json = System.Text.Json.JsonSerializer.Serialize(apply, QuartermasterJson.Options);
+            Assert.DoesNotContain("Red has no plans", json);
+            if (threshold == "0")
+            {
+                Assert.True(apply.Applied, apply.Message);
+                Assert.Equal(11, Ledger.Get(s.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+            }
+            else
+            {
+                Assert.False(apply.Applied);
+                Assert.Equal(FormulaMasking.ErrorHiddenText, apply.Message);
+                Assert.Null(Ledger.Get(s.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+            }
+        }
+        Assert.Equal(answers[0], answers[1]);
+    }
+
+    [Fact]
+    public void HotSeat_guard_box_validation_same_either_way()
+    {
+        var s = Open();
+        s.SetViewSides(Blue);
+        foreach (var (g, h) in new[] { ("abc", "1"), ("500", "1"), ("5", "3"), ("5", "2") })
+        {
+            var (_, on) = Typed(s, "f-guard-checked", ("T", "0"), ("G", g), ("H", h));
+            var (_, off) = Typed(s, "f-guard-checked", ("T", Huge), ("G", g), ("H", h));
+            Assert.Equal(Seen(on, "T"), Seen(off, "T"));
+            if (g == "abc") Assert.Contains("Not a number", Seen(off, "T"));
+            if (h == "3") Assert.Contains("Choose one of 1, 2", Seen(off, "T"));
+            if (g == "5" && h == "2") Assert.True(off.CanApply);
+            else Assert.False(off.CanApply);
+        }
     }
 }

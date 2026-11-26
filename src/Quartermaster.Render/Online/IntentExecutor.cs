@@ -436,12 +436,14 @@ internal static class FormulaIntentRunner
         {
             // Nothing is executed. The visible values and the dice go back; the dice stay pinned for this sender's Apply.
             if (scope != null) scope.Previewed = true;
-            var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
+            var source = model.Checked ? model.LastExpected ?? dv.ShownTrace : dv.ShownTrace;
             var values = PreviewValues(f, source, hidden);
             return new FormulaVerdict(false, boxes, dv.CanApply ? null : SafeStatus(dv, hidden), values,
                 model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal));
         }
         if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));   // the dice stay pinned for a corrected Apply
+        // B7: a precondition or guard over data hidden from the sender decided against the run: the generic text, never which condition.
+        if (FormulaDialogModel.ApplyRefusal(dv) is { } refusal) return new FormulaVerdict(false, boxes, refusal);
         // A computed value is never stored: a trace writing one is refused whole, never applied in part.
         if (dv.Trace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
             return new FormulaVerdict(false, boxes, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId));
@@ -675,7 +677,7 @@ internal static class FormulaBatchRunner
             if (bi.Preview)
             {
                 if (scope != null) scope.Previewed = true;
-                var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
+                var source = model.Checked ? model.LastExpected ?? dv.ShownTrace : dv.ShownTrace;
                 var values = FormulaIntentRunner.PreviewValues(f, source, hidden);
                 verdicts.Add(new FormulaVerdict(false, boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden), values,
                     model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal)));
@@ -725,7 +727,8 @@ internal static class FormulaBatchRunner
                     // Only a placed piece's seeds can differ from the chain: the rows applied stay (still one undo step).
                     // The guest is told how many earlier rows stay applied (counts only, as the local grid says it).
                     message = FormulaWindowRules.StoppedText(applied, k + 1);
-                    verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden));
+                    verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes,
+                        dv.CanApply ? FormulaDialogModel.ApplyRefusal(dv) : FormulaIntentRunner.SafeStatus(dv, hidden));
                     break;
                 }
                 verdicts[k] = new FormulaVerdict(true, verdicts[k].Boxes, null);
