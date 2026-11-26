@@ -120,12 +120,24 @@ public sealed record RulesPack
     public List<PhaseBlock> Blocks { get; init; } = new();
     public List<AlertDef> Alerts { get; init; } = new();
     public List<MapOwner> MapOwners { get; init; } = new();
+    /// <summary>Counters arriving, leaving or returning on set turns. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ScheduleRow>? Schedule { get; init; }
+    /// <summary>The game ends after this turn. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? LastTurn { get; init; }
+    /// <summary>The game ends after this stage of the last turn. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? LastStage { get; init; }
+    /// <summary>Conditions that end the game. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<VictoryCondition>? Victory { get; init; }
 
     public TableDef? TableByName(string name) => Tables.FirstOrDefault(t => Eq(t.Name, name));
     public PropertyDef? PropertyByName(string name) => Properties.FirstOrDefault(p => Eq(p.Name, name));
     public HolderDef? HolderByName(string name) => Holders.FirstOrDefault(h => Eq(h.Name, name));
 
-    /// <summary>Finds an entity by exact id. Supported: PropertyDef, HolderDef, TableDef, FormulaDef, RuleRef, SideDef, PhaseDef, AlertDef.</summary>
+    /// <summary>Finds an entity by exact id. Supported: PropertyDef, HolderDef, TableDef, FormulaDef, RuleRef, SideDef, PhaseDef, AlertDef, ScheduleRow, VictoryCondition.</summary>
     public T? ById<T>(string id) where T : class
     {
         if (typeof(T) == typeof(PropertyDef)) return Properties.FirstOrDefault(x => x.Id == id) as T;
@@ -136,6 +148,8 @@ public sealed record RulesPack
         if (typeof(T) == typeof(SideDef)) return Sides.FirstOrDefault(x => x.Id == id) as T;
         if (typeof(T) == typeof(PhaseDef)) return Phases.FirstOrDefault(x => x.Id == id) as T;
         if (typeof(T) == typeof(AlertDef)) return Alerts.FirstOrDefault(x => x.Id == id) as T;
+        if (typeof(T) == typeof(ScheduleRow)) return Schedule?.FirstOrDefault(x => x.Id == id) as T;
+        if (typeof(T) == typeof(VictoryCondition)) return Victory?.FirstOrDefault(x => x.Id == id) as T;
         return null;
     }
 

@@ -281,6 +281,16 @@ stage() == 2
 
 True on the second pass through a block.
 
+### segment()
+
+The repeat number inside an inner block that repeats within another block (1 for the first pass, 2 for the second, and so on). Outside an inner block it is 0. Takes 0 arguments.
+
+```formula
+segment() > 3
+```
+
+True from the fourth pass through the inner block.
+
 ### runs("formula-id") or runs("formula-id", "period")
 
 How many times a formula has been applied. The first argument is the formula's id in quotes (the **Id** shown on the Formulas tab). The optional second argument is the period, in quotes: `"stage"` (the same turn and the same pass of a repeating block; outside a block, the same as the turn), `"turn"` (the same turn) or `"game"` (every turn; the default). On a counter it counts the runs of that formula on this counter; with no counter in play it counts the runs made without a unit. A warning or alert whose condition calls `runs()` of a formula that needs a unit is checked for each counter. Only applied runs count: a run that failed, was refused or was undone is not counted, and the run being checked is not counted yet. A run with no outputs counts once.
