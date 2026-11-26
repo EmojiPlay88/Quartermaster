@@ -39,6 +39,7 @@ public class KeyedEditOnlineTests : IDisposable
             {
                 new PropertyDef { Id = "cargo", Name = "Cargo", Scope = PropertyScope.Pieces, KeyedBy = "table:t-cost", Visibility = Visibility.Private },
                 new PropertyDef { Id = "flood", Name = "Flood", Scope = PropertyScope.Holders, KeyedBy = "hex", Visibility = Visibility.Public },
+                new PropertyDef { Id = "mines", Name = "Mines", Scope = PropertyScope.Holders, KeyedBy = "hex", Visibility = Visibility.Private },
                 new PropertyDef { Id = "due", Name = "Barges due", Scope = PropertyScope.Holders, KeyedBy = "turn", Visibility = Visibility.Public },
             }).ToList(),
             Holders = new() { new HolderDef { Id = "reddepot", Name = "Red Depot", SideId = "red" } },
@@ -113,6 +114,8 @@ public class KeyedEditOnlineTests : IDisposable
         Assert.Equal(IntentExecutor.NotUnderstoodText, x.Execute("p2", Blue, new KeyedEditIntent("", "cargo", "Sand", 6, "n")).Message);
     }
 
+    // CanEditLedgerFor(h:global, sides) is true for every seated guest today, so the refusal this test can reach is the place written
+    // off the Global holder; the Global-right check stays in the executor for a future rule that narrows it.
     [Fact]
     public void Guest_place_edit_needs_global_right()
     {
@@ -181,5 +184,83 @@ public class KeyedEditOnlineTests : IDisposable
         var json = JsonSerializer.Serialize(i, QuartermasterJson.Options);
         Assert.Contains("\"$t\":\"keyedEdit\"", json);
         Assert.Equal(i, JsonSerializer.Deserialize<GameIntent>(json, QuartermasterJson.Options));
+    }
+
+    // ---------- hidden targets (review r1) ----------
+
+    private static readonly IReadOnlySet<string> Red = new HashSet<string> { "red" };
+    private static readonly IReadOnlySet<string> Both = new HashSet<string> { "red", "blue" };
+
+    private static void HostPut(ModuleSession s, string key, string prop, string valueKey, double after, string working) =>
+        s.Game!.Execute(new LedgerDelta(key, prop, 0, after, "manual", null, null, "secret note", working) { ValueKey = valueKey });
+
+    [Fact]
+    public void Guest_private_place_edit_refused()
+    {
+        var (s, x) = Open();
+        var hex = Hex(s, PhaseFixture.BlueOne);
+        HostPut(s, Global, "mines", hex, 2, $"Mines[{hex}] 0 → 2");
+        var before = JsonSerializer.Serialize(s.Game!.State, QuartermasterJson.Options);
+        var log = s.Game.Log.Count;
+        foreach (var guess in new double[] { 2, 5 })   // the same value and another: one answer, so no oracle
+        {
+            var r = x.Execute("p2", Blue, new KeyedEditIntent(Global, "mines", hex, guess, "probe"));
+            Assert.False(r.Ok);
+            Assert.Equal("That value " + ModuleSession.OtherSideText + ".", r.Message);
+        }
+        Assert.Equal(before, JsonSerializer.Serialize(s.Game.State, QuartermasterJson.Options));
+        Assert.Equal(log, s.Game.Log.Count);
+        Assert.Equal(2, KeyedValues.Get(s.Game.State, Global, "mines", hex));
+        // a Public place is still the guest's to edit; a player holding every side sees (and edits) the Private one
+        Assert.True(x.Execute("p2", Blue, new KeyedEditIntent(Global, "flood", hex, 1, "n")).Ok);
+        Assert.True(x.Execute("p1", Both, new KeyedEditIntent(Global, "mines", hex, 4, "n")).Ok);
+        Assert.Equal(4, KeyedValues.Get(s.Game.State, Global, "mines", hex));
+    }
+
+    [Fact]
+    public void Hidden_for_follows_the_player_view_rule()
+    {
+        var (s, _) = Open();
+        var pack = s.Rules!;
+        PropertyDef P(string id) => pack.Properties.Single(p => p.Id == id);
+        var st = s.Game!.State;
+        Assert.True(KeyedValues.HiddenFor(st, pack, Blue, Global, P("mines")));
+        Assert.False(KeyedValues.HiddenFor(st, pack, Both, Global, P("mines")));
+        Assert.False(KeyedValues.HiddenFor(st, pack, null, Global, P("mines")));   // solo
+        Assert.False(KeyedValues.HiddenFor(st, pack, Blue, Global, P("flood")));
+        Assert.True(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Piece(PhaseFixture.RedOne), P("cargo")));   // another side's Private value
+        Assert.False(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Piece(PhaseFixture.BlueOne), P("cargo")));
+        Assert.True(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Holder("reddepot"), P("due")));
+        Assert.True(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Holder("nowhere"), P("due")));   // unknown holder fails closed
+    }
+
+    [Fact]
+    public void Manual_keyed_edit_log_redacted_for_another_guest()
+    {
+        var (s, x) = Open();
+        var hex = Hex(s, PhaseFixture.BlueOne);
+        HostPut(s, Global, "mines", hex, 7, $"Mines[{hex}] 0 → 7");   // the host's own edit of a Private place
+        Assert.True(x.Execute("p1", Red, new KeyedEditIntent(LedgerKey.Piece(PhaseFixture.RedOne), "cargo", "Sand", 9, "secret note")).Ok);
+        Assert.True(x.Execute("p1", Red, new KeyedEditIntent(Global, "flood", hex, 3, "public note")).Ok);
+        Assert.Contains(s.Game!.State.Log, l => l.Text.Contains("Cargo[Sand] 0 → 9"));   // the full log has them
+        Assert.Contains(s.Game.State.Log, l => l.Text.Contains($"Mines[{hex}] 0 → 7"));
+
+        var view = PlayerView.For(s.Game.State, s.Rules, s.Model, Blue);
+        var text = string.Join(" | ", view.Log.Select(l => l.Text));
+        Assert.DoesNotContain("Mines", text);
+        Assert.DoesNotContain("Cargo", text);
+        Assert.DoesNotContain("secret note", text);
+        Assert.DoesNotContain("→ 7", text);
+        Assert.DoesNotContain("→ 9", text);
+        Assert.Contains($"Flood[{hex}] 0 → 3", text);   // a Public place's line stays
+        Assert.DoesNotContain(view.LedgerHistory, e => e.PropertyId is "mines" or "cargo");
+        Assert.Contains(view.LedgerHistory, e => e.PropertyId == "flood" && e.ValueKey == hex);
+        var json = JsonSerializer.Serialize(view, QuartermasterJson.Options);
+        Assert.DoesNotContain("Mines[", json);
+        Assert.DoesNotContain("Cargo[", json);
+        // Red holds the cargo's side: its own line is kept; the Private place is still hidden from it
+        var red = string.Join(" | ", PlayerView.For(s.Game.State, s.Rules, s.Model, Red).Log.Select(l => l.Text));
+        Assert.Contains("Cargo[Sand] 0 → 9", red);
+        Assert.DoesNotContain("Mines", red);
     }
 }

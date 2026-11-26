@@ -259,7 +259,9 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     /// <summary>
     /// B6: a guest's manual keyed edit. Every check of <see cref="EditLedger"/>, plus: the property is keyed, the value key is at most
     /// <see cref="KeyedValues.MaxKeyLength"/> characters and normalises, and a place is written on the Global holder only by a sender who may
-    /// write Global values (anything else is <see cref="NotUnderstoodText"/>). An unchanged value is done with no history entry.
+    /// write Global values (anything else is <see cref="NotUnderstoodText"/>). A value the sender's player view may lack
+    /// (<see cref="KeyedValues.HiddenFor"/>, e.g. a Private place) is refused as another side's value. An unchanged value is done with no
+    /// history entry.
     /// </summary>
     private IntentResult EditKeyed(GameSession g, IReadOnlySet<string> sides, string who, KeyedEditIntent k)
     {
@@ -277,6 +279,9 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (KeyedFacts.IsPlace(prop) && !s.CanEditLedgerFor(LedgerKey.Holder(HolderDef.GlobalId), sides))
             return IntentResult.Refused(OtherSide("That value"));
         if (!s.CanEditLedgerFor(k.Key, sides)) return IntentResult.Refused(OtherSide("That value"));
+        // A value the sender's view lacks (a Private place unless it holds every side) is never written for it: an unchanged answer
+        // (no log line) against a changed one would tell it the hidden value.
+        if (KeyedValues.HiddenFor(g.State, pack, sides, k.Key, prop)) return IntentResult.Refused(OtherSide("That value"));
         if (LedgerViewRules.EditKey(pack, s.Model, prop, k.Key, k.ValueKey) is not { } valueKey) return IntentResult.Refused(NotUnderstoodText);
         if (LedgerViewRules.KeyedDelta(g.State, prop, k.Key, valueKey, k.After, note) is { } delta)   // null: unchanged, no history entry
             g.Execute(CommandLog.Prepare(CommandLog.Stamp(delta, who), g.State, s));
