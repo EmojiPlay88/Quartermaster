@@ -1,11 +1,16 @@
 using System.Globalization;
 using Quartermaster.Core;
+using Quartermaster.Rules;
 
 namespace Quartermaster.Render;
 
 /// <summary>The outcome of checking a hand-typed Ledger value (see <see cref="LedgerViewRules.CheckManualEdit"/>).
 /// <paramref name="Reload"/>: the window should redraw its rows (refused or unchanged edits).</summary>
 public sealed record ManualEditCheck(bool Ok, double Value, bool Unchanged, string? Error, string? NotePrompt, bool Reload = false);
+
+/// <summary>One row of the keyed values panel (B6) over the viewer's state: <paramref name="Value"/> is null when <paramref name="Hidden"/> (the
+/// view may lack it, so neither a value nor the Default is shown).</summary>
+public sealed record KeyedCell(PropertyDef Property, string Key, double? Value, bool Stored, bool Hidden);
 
 /// <summary>The Ledger window's UI-free rules (sorting, manual edits, tab titles, banner, CSV name, row height), shared by every front end.</summary>
 public static class LedgerViewRules
@@ -74,19 +79,19 @@ public static class LedgerViewRules
     }
 
     /// <summary>"{name} is computed (= {expr}) and cannot be edited" when the property is computed (its value is never stored), else null.</summary>
-    public static string? ComputedRefusal(Quartermaster.Rules.RulesPack? pack, string? propertyId) =>
-        pack?.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is { } def && Quartermaster.Rules.PropertyFacts.IsComputed(def)
+    public static string? ComputedRefusal(RulesPack? pack, string? propertyId) =>
+        pack?.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is { } def && PropertyFacts.IsComputed(def)
             ? $"{def.Name} is computed (= {def.Expr!.Trim()}) and cannot be edited"
             : null;
 
     /// <summary>"{holder} does not keep {property}" when <paramref name="key"/> is a holder that does not keep the property (its
-    /// <see cref="Quartermaster.Rules.PropertyDef.Holders"/> list leaves the holder out), else null. The holder is "Global" for the global holder.</summary>
-    public static string? NotKeptRefusal(Quartermaster.Rules.RulesPack? pack, string key, string? propertyId)
+    /// <see cref="PropertyDef.Holders"/> list leaves the holder out), else null. The holder is "Global" for the global holder.</summary>
+    public static string? NotKeptRefusal(RulesPack? pack, string key, string? propertyId)
     {
         if (pack == null || !LedgerKey.TryParse(key, out var isPiece, out var holderId) || isPiece) return null;
-        if (pack.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is not { } def || def.Scope == Quartermaster.Rules.PropertyScope.Pieces) return null;
-        if (Quartermaster.Rules.PropertyFacts.KeptBy(def, holderId)) return null;
-        var holder = holderId == Quartermaster.Rules.HolderDef.GlobalId ? "Global" : pack.ById<Quartermaster.Rules.HolderDef>(holderId)?.Name ?? holderId;
+        if (pack.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is not { } def || def.Scope == PropertyScope.Pieces) return null;
+        if (PropertyFacts.KeptBy(def, holderId)) return null;
+        var holder = holderId == HolderDef.GlobalId ? "Global" : pack.ById<HolderDef>(holderId)?.Name ?? holderId;
         return $"{holder} does not keep {def.Name}";
     }
 
@@ -139,4 +144,88 @@ public static class LedgerViewRules
 
     /// <summary>The Edit-tabs list entry of a tab.</summary>
     public static string ListLabel(UserLedgerTab t) => string.IsNullOrWhiteSpace(t.Name) ? NoNameText : "★ " + t.Name.Trim();
+
+    // ---------- keyed values (B6) ----------
+
+    /// <summary>
+    /// The stored form of <paramref name="valueKey"/> for a manual edit of <paramref name="prop"/> at <paramref name="ledgerKey"/>
+    /// (<see cref="KeyedValues.NormaliseKey"/>); null when the property is not keyed, a place is edited off the Global holder (places are kept
+    /// by Global only), the key is missing or longer than <see cref="KeyedValues.MaxKeyLength"/>, or it does not normalise.
+    /// </summary>
+    public static string? EditKey(RulesPack pack, Quartermaster.Vassal.ModuleModel? model, PropertyDef prop,
+        string ledgerKey, string? valueKey)
+    {
+        if (pack == null || !KeyedFacts.IsKeyed(prop) || valueKey == null || valueKey.Length > KeyedValues.MaxKeyLength) return null;
+        if (KeyedFacts.IsPlace(prop) && ledgerKey != LedgerKey.Holder(HolderDef.GlobalId)) return null;
+        try { return KeyedValues.NormaliseKey(pack, model, prop, Quartermaster.Rules.Expr.Value.Of(valueKey)); }
+        catch (Quartermaster.Rules.Expr.EvalError) { return null; }
+    }
+
+    /// <summary>The working of a manual keyed edit: <c>{Prop}[{key}] {before} → {after}</c>.</summary>
+    public static string KeyedWorking(PropertyDef prop, string valueKey, double before, double after) =>
+        $"{(string.IsNullOrWhiteSpace(prop.Name) ? prop.Id : prop.Name)}[{valueKey}] {LedgerTable.FormatNumber(before)} → {LedgerTable.FormatNumber(after)}";
+
+    /// <summary>The manual delta writing <paramref name="after"/> at the normalised <paramref name="valueKey"/> (Before: the stored value or the
+    /// Default); null when the value is already stored as <paramref name="after"/> (an unchanged value records nothing).</summary>
+    public static LedgerDelta? KeyedDelta(GameState state, PropertyDef prop, string ledgerKey, string valueKey, double after, string note)
+    {
+        if (KeyedValues.Get(state, ledgerKey, prop.Id, valueKey) is { } cur && cur == after) return null;
+        var before = KeyedValues.GetOrDefault(state, ledgerKey, prop, valueKey);
+        return new LedgerDelta(ledgerKey, prop.Id, before, after, "manual", null, null, note, KeyedWorking(prop, valueKey, before, after)) { ValueKey = valueKey };
+    }
+
+    /// <summary>A local manual keyed edit (<see cref="LocalActions.EditKeyed"/>): null when the property is unknown, computed, not kept by the
+    /// holder, not keyed, the key is bad (<see cref="EditKey"/>) or the value unchanged.</summary>
+    public static LedgerDelta? KeyedEdit(RulesPack pack, Quartermaster.Vassal.ModuleModel? model, GameState state, string ledgerKey,
+        string propertyId, string? valueKey, double after, string note)
+    {
+        if (pack?.Properties?.FirstOrDefault(p => p != null && p.Id == propertyId) is not { } prop || state == null || ledgerKey == null) return null;
+        if (ComputedRefusal(pack, prop.Id) != null || NotKeptRefusal(pack, ledgerKey, prop.Id) != null) return null;
+        return EditKey(pack, model, prop, ledgerKey, valueKey) is { } vk ? KeyedDelta(state, prop, ledgerKey, vk, after, note) : null;
+    }
+
+    /// <summary>
+    /// The keyed values panel of a ledger row over the viewer's state (<see cref="KeyedTable.For"/>): a row the view may lack (another side's
+    /// non-Public value, a holder of a side not held) is <see cref="KeyedCell.Hidden"/> with no value, never the property's Default.
+    /// </summary>
+    public static IReadOnlyList<KeyedCell> KeyedRows(GameState view, RulesPack pack, string ledgerKey) =>
+        KeyedTable.For(view, pack, ledgerKey).Select(r => !r.Stored && KeyedValues.HiddenIn(view, pack, ledgerKey, r.Property)
+            ? new KeyedCell(r.Property, r.Key, null, false, true)
+            : new KeyedCell(r.Property, r.Key, r.Value, r.Stored, false)).ToList();
+
+    /// <summary>The Value cell of the keyed panel: the number, or <see cref="ModuleSession.HiddenText"/> for a hidden row.</summary>
+    public static string KeyedValueText(KeyedCell c) => c.Value is { } v ? LedgerTable.FormatNumber(v) : ModuleSession.HiddenText;
+
+    /// <summary>The Places tab over the viewer's state (<see cref="KeyedTable.Places"/>); in a player view the place properties it may not see
+    /// (Private places) are left out as columns.</summary>
+    public static PlacesResult Places(GameState view, RulesPack pack, string filter)
+    {
+        var all = KeyedTable.Places(view, pack, filter);
+        if (view == null || !view.IsPlayerView) return all;
+        var global = LedgerKey.Holder(HolderDef.GlobalId);
+        var keep = Enumerable.Range(0, all.Columns.Count).Where(i => !KeyedValues.HiddenIn(view, pack, global, all.Columns[i])).ToList();
+        if (keep.Count == all.Columns.Count) return all;
+        return new PlacesResult(keep.Select(i => all.Columns[i]).ToList(),
+            all.Rows.Select(r => new PlaceRow(r.Hex, keep.Select(i => r.Values[i]).ToList())).Where(r => r.Values.Any(v => v != null)).ToList());
+    }
+
+    /// <summary>The Places tab as CSV (RFC 4180, CRLF): <c>Hex</c> then the place properties; numbers invariant "0.##", empty for no value.</summary>
+    public static string PlacesCsv(IReadOnlyList<PropertyDef> columns, IReadOnlyList<PlaceRow> rows)
+    {
+        static string Field(string s) => s.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+        var sb = new System.Text.StringBuilder("Hex");
+        foreach (var c in columns) sb.Append(',').Append(Field(c.Name));
+        sb.Append("\r\n");
+        foreach (var r in rows)
+        {
+            sb.Append(Field(r.Hex));
+            for (var i = 0; i < columns.Count; i++)
+            {
+                sb.Append(',');
+                if (i < r.Values.Count && r.Values[i] is { } v) sb.Append(LedgerTable.FormatNumber(v));
+            }
+            sb.Append("\r\n");
+        }
+        return sb.ToString();
+    }
 }

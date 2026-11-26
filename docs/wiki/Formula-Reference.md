@@ -495,6 +495,42 @@ Warnings, alerts and Ledger filters are worked out on what each player can see. 
 
 An output still writes its result where the formula says: if a formula writes a piece sum (or anything worked out from one) into a Public property, every player sees that value, and so learns the total. Write such results into a Private property, or a holder of the side that owns them, when the total should stay hidden.
 
+### hex()
+
+The name of the hex the counter is in, as text, such as `"0412"`: the same name a Location binding and `hexsum` use. It takes no arguments.
+
+```formula
+keyed(FordDepth, hex())
+```
+
+The ford depth of the hex this counter stands in. Run with no counter it stops with `hex() needs a unit`; on a counter that is not on a grid, with `Raft A is not in a hex`.
+
+### distance(a, b)
+
+The number of cells between two hexes of the same board, as a number. Both arguments must be hex names as text: a name such as `0412` would lose its zero as a number, so a number stops the run with `distance() needs hex names as text`. Hex grids count hex steps; square grids count king moves, as the range tool does. `distance(hex(), hex())` is 0.
+
+```formula
+distance(hex(), "0507") <= 3
+```
+
+True when this counter is within 3 hexes of the lighthouse at 0507. The board of the counter is tried first, then every board of the module. A name no board has stops the run with `distance(): no hex named "0999" on any board`; two names on different boards, with `distance(): "0412" and "0507" are not on the same board`; a board with another kind of grid, with `distance() needs a hex or square grid`. A phase condition, a property's Applies to, a side's unit filter and a starting value cannot use `hex()` or `distance()`.
+
+### keyed(Property, key) or keyed(Property, key, Holder)
+
+The value of a **keyed** property for one key. The property (and the holder) are bare names, not variables. A keyed property keeps one value per key instead of one value (see [Places and keyed values](Making-a-Rules-Pack#places-and-keyed-values)), so a plain name or a binding cannot read it: `"FordDepth" is keyed; read it with keyed()`.
+
+```formula
+keyed(BargesDue, turn())
+```
+
+The barges due this turn. A key never written reads the property's Default. Whose value it reads: with a third argument, that holder's (`keyed(HullCount, "Barge", Boatyard)`; the holder must keep the property, and is written as its name in identifier form: letters, digits and `_`); for a Pieces property, the counter's own; for a Holders property, the global holder's; for a Both property, the counter's when there is one, else the global holder's.
+
+The key is checked as an output's **Key** is: a table-keyed property takes a row of its table, a turn-keyed one a whole number from 1 to 100000, a hex-keyed one a hex of a board; at most 64 characters. A bad key stops the run with `keyed(): no row "Sloop" in table "Hull types"`, `keyed(): the turn must be a whole number of at least 1`, `keyed(): no hex named "9999" on any board` or `keyed(): the key is too long`. The other messages are `keyed() needs a property name`, `keyed() needs a holder name`, `Unknown property 'x'`, `FordDepth is not keyed` and `keyed() needs a unit`.
+
+The piece sums (`sum`, `maxof`, `minof` and the `hex` and `attached` ones) cannot total a keyed property: `sum() cannot total keyed property "FordDepth"`.
+
+**Hidden information.** In a player's view, `keyed()` of a value that player may not see (a Private place property, a counter property of a side that player does not hold, or a holder of such a side) stops with `keyed() reads data this player cannot see`, so the host works it out, as for a piece sum.
+
 ## What a phase condition may read
 
 A phase can have a **Runs only if** condition (see [Making a Rules Pack](Making-a-Rules-Pack#phase-conditions)). A condition is checked when Quartermaster is about to start the phase, with no unit in hand, so it may read only:
@@ -633,6 +669,8 @@ Run on Raft A this gives 6; run on Raft B it gives 5, the printed cell. A Table 
 - **Do not read the cell through another computed property.** Suppose **Base Speed** is computed as `lookup(Rafts, name(), "Speed")` and **Upgraded Speed** as `Base Speed + 2` overrides `Rafts`, column `Speed`. Reading the table still works (Upgraded Speed is worked out, and its Base Speed reads the printed cell), but reading **Base Speed** on its own reads the table, which is Upgraded Speed, which reads Base Speed again: the error `Base Speed is computed from itself`. Read the cell inside the override's own expression instead: `lookup(Rafts, name(), "Speed") + 2`.
 - **Hidden information.** When the overriding property is not Public, a player who does not hold the piece's side cannot see its value, so reading that table counts as reading hidden data, exactly as a Unit binding of a Private property does: in a formula run on a counter of a side that player does not hold (or a counter they cannot see), a Table binding of that table and every `lookup` of it are hidden, the Formula dialog shows `hidden — the host calculates` to a guest, the working is not shown, and an "Only when" or precondition with a `lookup` is decided by the host. On the player's own counters nothing is hidden. A Public computed property whose expression looks up such a table counts as Private, and a piece sum whose filter looks one up counts as reading hidden data.
 
+**A key for a keyed property.** When an output writes a keyed property it also needs a **Key**, an expression worked out after the value: `hex()` for the counter's hex, `turn() + 2` for two turns ahead, or a table row in quotes such as `"Barge"`. The working line names the key: `FordDepth[0412] = 3 (Flooded)` or `BargesDue[5] 1 + 2 = 3`. A failure reads `The key for BargesDue: the turn must be a whole number of at least 1` (the same texts for a table row, a hex and a long key). **Key** is closed for an action other than Write. See [Places and keyed values](Making-a-Rules-Pack#places-and-keyed-values).
+
 ## Common errors
 
 The Workbench shows these in the Problems list and next to the box you are typing in. The Ledger shows a filter error in a banner above the table. Errors found while a formula runs appear in the Formula dialog.
@@ -697,6 +735,23 @@ Most of these end with "at position N", where N counts characters from the start
 | side() is not available in a side's unit filter | `side()` was used inside a side's own unit filter. | Describe the side's units with `name()`, `marker()` or a property instead. |
 | Unknown property 'x' | In a filter, a name is not a property in the pack. | Fix the name, or add the property. |
 | x has no value on this piece | In a filter, the property does not apply to this unit, or its value is another side's hidden value. | Check with `has(x)` first, or check the property's scope and Applies to. |
+| Raft A is not in a hex | `hex()` ran on a counter with no grid location (the message names the counter). | Run it on a counter on a gridded map. |
+| hex() needs a unit / keyed() needs a unit | `hex()`, or `keyed()` of a counter property, ran with no counter. | Run the formula from a counter. |
+| hex() is not available here / distance() is not available here / keyed() is not available here | The function ran where there is no module or game to ask. | Use it in a formula run in a module. |
+| distance(): no hex named "0999" on any board | A name given to `distance()` is not a hex of any board. | Fix the name. |
+| distance(): "0412" and "0507" are not on the same board | The two hexes are on different boards. | Pick two hexes of one board. |
+| distance() needs a hex or square grid | The board has another kind of grid, or none. | Use a board with a hex or square grid. |
+| distance() needs hex names as text | An argument was a number. | Put the name in quotes. |
+| keyed() needs a property name / keyed() needs a holder name | The first argument (or the third) is not a bare name. | Write `keyed(FordDepth, hex())`. |
+| FordDepth is not keyed | `keyed()` names a property with no Keyed by. | Set **Keyed by** on the property, or read it by its name. |
+| keyed(): no row "Sloop" in table "Hull types" | The key is not a row of the property's table. | Use a row key of the table. |
+| keyed(): the turn must be a whole number of at least 1 | A turn key that is not a whole number from 1 to 100000. | Fix the key. |
+| keyed(): no hex named "9999" on any board | A hex key no board has. | Fix the name. |
+| keyed(): the key is too long | A key over 64 characters. | Shorten it. |
+| "FordDepth" is keyed; read it with keyed() | A binding or a bare name in a filter read a keyed property. | Read it with `keyed(FordDepth, key)`. |
+| sum() cannot total keyed property "FordDepth" | A piece sum was given a keyed property. | Total another property. |
+| keyed() reads data this player cannot see | A player's view lacks a value `keyed()` reads (see `keyed` above). | Nothing to fix: the host works it out. |
+| The key for FordDepth: no hex named "9999" on any board | An output's Key is not a hex of a board (the same prefix for the other key messages). | Fix the output's **Key**. |
 
 ### Messages about the formula's setup
 

@@ -633,6 +633,8 @@ public sealed class PropertiesTabTests : IDisposable
         var tab = Tab(Session());
         Assert.Equal("Clone as", tab.PropertyGrid.HeaderText(13));
         Assert.Equal("Name", tab.PropertyGrid.HeaderText(0));
+        Assert.Equal(16, PropertiesTab.KeyedByColumn);
+        Assert.Equal("Resets at", tab.PropertyGrid.HeaderText(15));
     }
 
     [AvaloniaFact]
@@ -665,5 +667,41 @@ public sealed class PropertiesTabTests : IDisposable
         Assert.Equal("Main stock", s.Rules!.ById<HolderDef>("depot")!.Notes);
         Pick(g, 2, PropertiesTab.HolderRuleRefColumn, "(none)");
         Assert.Null(s.Rules!.ById<HolderDef>("yard")!.RuleRefId);
+    }
+
+    static RulesPack Hulls(RulesPack p) => p with
+    {
+        Tables = new() { new TableDef { Id = "t-hulls", Name = "Hull types", Kind = TableKind.OneD, RowKeys = new() { "Barge" }, ColumnKeys = new() { "Crew" }, Cells = new() { new() { "4" } } } },
+    };
+
+    [AvaloniaFact]
+    public void PropertiesTab_keyed_by_combo_commits()
+    {
+        var s = Session(Hulls);
+        var tab = Tab(s);
+        var g = tab.PropertyGrid;
+        Assert.Equal("Keyed by", g.HeaderText(PropertiesTab.KeyedByColumn));
+        Assert.Equal(PropertiesTab.KeyedByTip, g.HeaderToolTip(PropertiesTab.KeyedByColumn));
+        Assert.Equal(PropertiesTab.KeyedByTip, g.CellToolTip(0, PropertiesTab.KeyedByColumn));
+        Assert.StartsWith("Keep one value per key instead of one value:", PropertiesTab.KeyedByTip);
+        Assert.Equal("", g.Cell(0, PropertiesTab.KeyedByColumn));
+        Pick(g, 0, PropertiesTab.KeyedByColumn, "Table: Hull types");
+        Assert.Equal("table:t-hulls", s.Rules!.Properties[0].KeyedBy);
+        Assert.Equal("Table: Hull types", g.Cell(0, PropertiesTab.KeyedByColumn));
+        Pick(g, 0, PropertiesTab.KeyedByColumn, "Hex (place)");
+        Assert.Equal("hex", s.Rules.Properties[0].KeyedBy);
+        Pick(g, 0, PropertiesTab.KeyedByColumn, "Turn");
+        Assert.Equal("turn", s.Rules.Properties[0].KeyedBy);
+        Assert.Null(s.Rules.Properties[1].KeyedBy);
+        Pick(g, 0, PropertiesTab.KeyedByColumn, "");
+        Assert.Null(s.Rules.Properties[0].KeyedBy);
+    }
+
+    [AvaloniaFact]
+    public void PropertiesTab_malformed_keyed_by_shows_as_written()
+    {
+        var s = Session(p => p with { Properties = p.Properties.Select((x, i) => i == 0 ? x with { KeyedBy = "weekly" } : x).ToList() });
+        var tab = Tab(s);
+        Assert.Equal("weekly", tab.PropertyGrid.Cell(0, PropertiesTab.KeyedByColumn));
     }
 }

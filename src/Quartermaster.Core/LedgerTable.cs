@@ -18,9 +18,9 @@ public sealed record LedgerRow(string Key, string Name, string Kind, IReadOnlyLi
 /// <summary>Pure model behind the ledger window: columns, rows, filtering and CSV export.</summary>
 public static class LedgerTable
 {
-    /// <summary>All properties, ordered by name (then id).</summary>
+    /// <summary>All properties except keyed ones (they have no single value; B6), ordered by name (then id).</summary>
     public static IReadOnlyList<PropertyDef> Columns(RulesPack p) =>
-        p.Properties.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Id, StringComparer.Ordinal).ToList();
+        p.Properties.Where(x => !KeyedFacts.IsKeyed(x)).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Id, StringComparer.Ordinal).ToList();
 
     /// <summary>
     /// Holders (global first, then pack order), then pieces with at least one ledger value, by map order then name.

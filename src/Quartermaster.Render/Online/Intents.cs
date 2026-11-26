@@ -19,6 +19,7 @@ namespace Quartermaster.Render;
 [JsonDerivedType(typeof(NextPhaseIntent), "nextPhase")]
 [JsonDerivedType(typeof(HideAlertIntent), "hideAlert")]
 [JsonDerivedType(typeof(ChatIntent), "chat")]
+[JsonDerivedType(typeof(KeyedEditIntent), "keyedEdit")]
 [JsonDerivedType(typeof(ScheduleIntent), "schedule")]
 public abstract record GameIntent;
 
@@ -62,6 +63,10 @@ public sealed record FormulaBatchVerdict(bool Applied, IReadOnlyList<FormulaVerd
 
 /// <summary>A manual ledger change with its (required) note.</summary>
 public sealed record LedgerEditIntent(string Key, string PropertyId, double After, string Note) : GameIntent;
+
+/// <summary>B6: a manual change of one keyed value (<paramref name="ValueKey"/>: a table row, turn number or hex name) with its (required)
+/// note. A new type, so a host from before keyed values answers "not understood" instead of writing an unkeyed value.</summary>
+public sealed record KeyedEditIntent(string Key, string PropertyId, string ValueKey, double After, string Note) : GameIntent;
 
 /// <summary>A dice-tool roll; the host rolls.</summary>
 public sealed record DiceIntent(DiceSpec Spec, string Purpose) : GameIntent;

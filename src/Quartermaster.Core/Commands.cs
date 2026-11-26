@@ -29,6 +29,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(EndPhase), "endPhase")]
 [JsonDerivedType(typeof(ResetProperties), "resetProperties")]
 [JsonDerivedType(typeof(SetStartCursor), "setStartCursor")]
+[JsonDerivedType(typeof(DropPastTurns), "dropPastTurns")]
 [JsonDerivedType(typeof(EndGame), "endGame")]
 [JsonDerivedType(typeof(MarkScheduled), "markScheduled")]
 public abstract record GameCommand;
@@ -58,6 +59,11 @@ public sealed record LedgerDelta(string Key, string PropertyId, double Before, d
     /// Omitted when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? AppliedRun { get; init; }
+
+    /// <summary>The value key of a keyed property (B6: a hex name, a turn number or a table row key): when set, the reducer writes
+    /// <see cref="GameState.Keyed"/> instead of <see cref="GameState.Ledgers"/>. Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ValueKey { get; init; }
 }
 public sealed record LedgerSeed(string Key, string PropertyId, double Value);
 /// <summary>CloneOf: set when the seeds copy a cloned piece's values from this source piece; such a seed is its own undoable step (never folding). Omitted when null.</summary>
@@ -138,3 +144,7 @@ public sealed record EndGame(string Text, IReadOnlyList<string>? Winners, string
 /// <paramref name="Text"/> (<c>Schedule: {label}</c>: no counter names, no counts). A row already done (or a blank id) is ignored.
 /// </summary>
 public sealed record MarkScheduled(string RowId, string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+
+/// <summary>Removes every value key below <paramref name="Turn"/> of the listed turn-keyed properties, in every ledger (B6, spec #60); a ledger
+/// left empty goes. Logs nothing; ledger history is kept.</summary>
+public sealed record DropPastTurns(IReadOnlyList<string> PropertyIds, int Turn) : GameCommand;

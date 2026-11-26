@@ -61,6 +61,31 @@ public static class ExprFacts
         }
     }
 
+    /// <summary>
+    /// Every keyed(Property, key) / keyed(Property, key, Holder) call in the expression, in text order, as (property name, holder name or null, key expression).
+    /// A call whose property is not a bare name is left out (it cannot be resolved; it fails when run).
+    /// </summary>
+    public static List<(string Property, string? Holder, AstExpr Key)> KeyedReads(AstExpr e)
+    {
+        var found = new List<(string, string?, AstExpr)>();
+        Walk(e);
+        return found;
+
+        void Walk(AstExpr x)
+        {
+            switch (x)
+            {
+                case Unary u: Walk(u.Operand); break;
+                case Binary b: Walk(b.Left); Walk(b.Right); break;
+                case Call c:
+                    if (c.Function == "keyed" && c.Args.Count >= 2 && c.Args[0] is VarRef p)
+                        found.Add((p.Name, c.Args.Count > 2 && c.Args[2] is VarRef h ? h.Name : null, c.Args[1]));
+                    foreach (var a in c.Args) Walk(a);
+                    break;
+            }
+        }
+    }
+
     private static readonly HashSet<string> WholeGameAggregates = new() { "sum", "countof", "maxof", "minof" };
     private static readonly HashSet<string> HexAggregates = new() { "hexsum", "hexcount", "hexmax", "hexmin" };
     private static readonly HashSet<string> AttachedAggregates = new() { "attachedsum", "attachedcount", "attachedmax", "attachedmin" };
@@ -140,6 +165,14 @@ public static class ExprFacts
             case Call c:
                 if (c.Function is "name" or "marker" or "layer" or "has" or "side" or "map") return false;
                 if (NeedsPiece(c.Function)) return false;
+                if (c.Function == "hex") return false;   // B6: the hex of the piece being evaluated
+                if (c.Function == "keyed")
+                {
+                    // B6: a Pieces/Both property is read on the piece (unless a holder is named); otherwise only the key is walked
+                    if (c.Args.Count < 2 || c.Args[0] is not VarRef kp) return false;
+                    if (c.Args.Count == 2 && pack.PropertyByName(kp.Name) is not { Scope: PropertyScope.Holders }) return false;
+                    return Check(c.Args[1], pack);
+                }
                 if (IsAggregate(c.Function)) return true;   // the property and filter are read per piece, whatever they name
                 if (c.Function == "runs" && c.Args.Count > 0 && c.Args[0] is TextLit id && NeedsUnit(pack.ById<FormulaDef>(id.Value)))
                     return false;   // the runs of a unit formula are counted per counter

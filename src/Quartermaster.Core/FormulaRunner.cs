@@ -28,6 +28,8 @@ public sealed record OutputPreview(string Key, string PropertyId, string Propert
     public string? Subject { get; init; }
     /// <summary>Target Piece: the target's real name (the subject of its log line, which only the target's side reads in full).</summary>
     internal string? TargetName { get; init; }
+    /// <summary>The value key a keyed property's write goes to (B6: the output's key, normalised); null for an unkeyed property.</summary>
+    public string? ValueKey { get; init; }
 }
 
 public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableState> Variables, Value? Result, string Working,
@@ -386,9 +388,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                             { LogText = $"{formula.Name}: removed {tg.Real}", Name = tg.Real, SideId = tg.Side });
                         continue;
                     }
-                    var mapId = o.ToMapId.Trim();
-                    var map = _model.Maps.FirstOrDefault(m => m.Id == mapId) ?? _model.Maps.FirstOrDefault(m => m.Name == mapId)
-                        ?? throw new EvalError($"Map \"{mapId}\" was not found in the module");
+                    // the one resolver of a To map, as the validator's (B6): trimmed, id then name
+                    var map = MapRefs.Find(_model.Maps, o.ToMapId) ?? throw new EvalError($"Map \"{o.ToMapId.Trim()}\" was not found in the module");
                     if (map.Boards.Count == 0) throw new EvalError($"Map \"{map.Name}\" has no board");
                     var board = map.Boards[0];
                     var centre = new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0);
@@ -504,8 +505,24 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 value = Evaluator.Evaluate(Parse(formula, o.Expr), new RunContext(run));
                 if (value.Kind != ValueKind.Number) throw new EvalError($"The value for {prop.Name} is not a number");
             }
+            // A keyed property (B6) writes one key: the output's key, evaluated after its value and normalised. Unkeyed and keyed never mix.
+            string? valueKey = null;
+            if (KeyedFacts.IsKeyed(prop))
+            {
+                if (string.IsNullOrWhiteSpace(o.Key)) throw new EvalError(OutputError(oi, $" writes keyed property \"{prop.Name}\" but has no key"));
+                if (KeyedFacts.IsPlace(prop) && key != LedgerKey.Holder(HolderDef.GlobalId))
+                    throw new EvalError(OutputError(oi, $" writes place property \"{prop.Name}\" to a holder other than Global"));
+                var keyValue = Evaluator.Evaluate(Parse(formula, o.Key), new RunContext(run));
+                try { valueKey = KeyedValues.NormaliseKey(_pack, _model, prop, keyValue); }
+                catch (EvalError ex) { throw new EvalError($"The key for {prop.Name}: {ex.Message}"); }
+                // a player view lacks a Private place's values: a change of one is not previewed (the host decides), as a hidden binding waits
+                if (s.IsPlayerView && o.Op != OutputOp.Set && KeyedFacts.IsPlace(prop) && !PropertyFacts.IsPublic(_pack, prop))
+                    return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls, run.RollsByKey);
+            }
+            else if (!string.IsNullOrWhiteSpace(o.Key))
+                throw new EvalError(OutputError(oi, $" has a key but writes property \"{prop.Name}\", which is not keyed"));
             var x = value.Number;
-            var was = before ?? Ledger.GetOrDefault(s, key, prop);
+            var was = before ?? (valueKey != null ? KeyedValues.GetOrDefault(s, key, prop, valueKey) : Ledger.GetOrDefault(s, key, prop));
             var after = o.Op switch { OutputOp.Subtract => was - x, OutputOp.Add => was + x, _ => x };
             if (double.IsNaN(after) || double.IsInfinity(after)) throw new EvalError("Result is not a finite number");
             var b = Value.Of(was).Display();
@@ -517,7 +534,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 OutputOp.Add => $"{what} {b} + {xs} = {a}",
                 _ => $"{what} = {PropertyLabels.Text(_pack, prop, after)}",
             };
-            var part = Part(prop.Name);
+            var shownName = valueKey == null ? prop.Name : $"{prop.Name}[{valueKey}]";   // a keyed write names its key: "Ford depth[0412] = 3"
+            var part = Part(shownName);
             outputs.Add(new OutputPreview(key, prop.Id, prop.Name, was, after)
             {
                 Target = o.Target,
@@ -525,9 +543,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 SideId = target?.Side,
                 Subject = target?.Shown,
                 TargetName = target?.Real,
+                ValueKey = valueKey,
             });
             // the dialog's working names the target as its binding does ("Fuel of Blue Barge 4 + 2 = 6")
-            parts.Add(target is { } named ? Part($"{prop.Name} of {named.Shown}") : part);
+            parts.Add(target is { } named ? Part($"{shownName} of {named.Shown}") : part);
         }
         // Effects in command order: the Place, the layer and mask changes (output order), then the removals (output order).
         var effects = new List<PieceEffect>();
@@ -554,7 +573,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         holderId == HolderDef.GlobalId ? "Global" : pack.ById<HolderDef>(holderId)?.Name ?? holderId;
 
     /// <summary>Fails the run with "{holder} does not keep {property}" when the property lists holders and this one is not among them.</summary>
-    private static void EnsureKept(RulesPack pack, string holderId, PropertyDef prop)
+    internal static void EnsureKept(RulesPack pack, string holderId, PropertyDef prop)
     {
         if (!PropertyFacts.KeptBy(prop, holderId)) throw new EvalError($"{HolderText(pack, holderId)} does not keep {prop.Name}");
     }
@@ -603,7 +622,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             // The first own line records the applied run (runs(), spec #71): exactly one stamped line per run.
             list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note, working, Tag: tag,
-                Subject: subject, PieceId: t.PieceId, SideId: sideId) { AppliedRun = first ? t.Formula.Id : null });
+                Subject: subject, PieceId: t.PieceId, SideId: sideId) { AppliedRun = first ? t.Formula.Id : null, ValueKey = o.ValueKey });
             first = false;
         }
         // A Piece (or Placed) write is the target's line: keyed on it, stamped with its side, subject its real name, working "{formula}: {part}".
@@ -611,7 +630,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             LedgerKey.TryParse(o.Key, out _, out var targetId);
             list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note,
-                $"{t.Formula.Name}: {o.Part}", Tag: tag, Subject: o.TargetName ?? o.Subject, PieceId: targetId, SideId: o.SideId));
+                $"{t.Formula.Name}: {o.Part}", Tag: tag, Subject: o.TargetName ?? o.Subject, PieceId: targetId, SideId: o.SideId) { ValueKey = o.ValueKey });
         }
         // A layer or mask change: the trait state, then a System line by the piece's real name, stamped with its side.
         foreach (var e in effects.Where(e => e.Kind is PieceEffectKind.SetLayer or PieceEffectKind.SetMask))
@@ -803,13 +822,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 case BindingKind.Unit:
                 {
                     if (piece == null) throw new Missing("Needs a unit");
-                    var prop = Prop(b);
+                    var prop = Unkeyed(Prop(b));
                     return new(name, Value.Of(Read(LedgerKey.Piece(piece.Id), prop)), true, false, null,
                         $"{prop.Name} of {PieceInfo.Name(piece)}");
                 }
                 case BindingKind.Global:
                 {
-                    var prop = Prop(b);
+                    var prop = Unkeyed(Prop(b));
                     EnsureKept(owner._pack, HolderDef.GlobalId, prop);
                     return new(name, Value.Of(Read(LedgerKey.Holder(HolderDef.GlobalId), prop)), true, false, null,
                         $"{prop.Name} (global)");
@@ -818,7 +837,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 {
                     var hid = b.HolderId;
                     if (hid == null || (hid != HolderDef.GlobalId && owner._pack.ById<HolderDef>(hid) == null)) throw new Missing("Unknown holder");
-                    var prop = Prop(b);
+                    var prop = Unkeyed(Prop(b));
                     EnsureKept(owner._pack, hid, prop);
                     var hname = hid == HolderDef.GlobalId ? "global" : owner._pack.ById<HolderDef>(hid)!.Name;
                     return new(name, Value.Of(Read(LedgerKey.Holder(hid), prop)), true, false, null,
@@ -917,7 +936,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private VariableState PickedPiece(VariableBinding b)
         {
             var name = b.Variable;
-            var prop = Prop(b);
+            var prop = Unkeyed(Prop(b));
             var (picked, shown) = Pick(b);
             if (s.IsPlayerView && (PlayerView.IsPlaceholder(picked)
                     || (!PropertyFacts.IsPublic(owner._pack, prop) && Sides.Value(picked) is { } side && s.ViewSides?.Contains(side) != true)))
@@ -954,6 +973,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         private PropertyDef Prop(VariableBinding b) =>
             (b.Property == null ? null : owner._pack.ById<PropertyDef>(b.Property)) ?? throw new Missing("Unknown property");
+
+        /// <summary>A binding never reads a keyed property (B6: it has no single value); the run fails with the validator's advice.</summary>
+        private static PropertyDef Unkeyed(PropertyDef prop) =>
+            prop.KeyedBy != null && KeyedFacts.IsKeyed(prop) ? throw KeyedValues.BareRead(prop) : prop;
 
         private VariableState Input(VariableBinding b)
         {
@@ -1037,5 +1060,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             PieceAggregates.Evaluate(fn, property, filter, run.Piece, run.Filters);
         /// <summary>The applied runs of a formula on this run's unit (none: its runs without a unit); the run itself is not counted yet.</summary>
         public double Runs(string formulaId, string period) => RunIndex.Count(run.State, run.Pack, formulaId, run.Piece?.Id, period, run.Sides);
+        // B6: places and keyed values
+        public Value Hex() => KeyedValues.Hex(run.Piece, run.Model);
+        public double Distance(string a, string b) => KeyedValues.Distance(run.Model, run.Piece, a, b);
+        public double Keyed(string property, Value key, string? holder) =>
+            KeyedValues.Read(run.State, run.Pack, run.Model, run.Piece, property, key, holder, run.Sides);
     }
 }

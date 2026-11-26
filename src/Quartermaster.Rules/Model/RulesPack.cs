@@ -73,6 +73,13 @@ public sealed record PropertyDef
     /// <summary>Ids of the phases that clear this property's values when they begin. Omitted from the pack JSON when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? ResetAt { get; init; }
+    /// <summary>
+    /// Keeps one value per key instead of one value: <c>table:{table id}</c> (per row key of that table), <c>turn</c> (per turn number; keys of past turns are dropped
+    /// when a new turn's phase is entered) or <c>hex</c> (per hex name, kept by the Global holder only: place values). Matched case-insensitively after trimming
+    /// (see <see cref="KeyedFacts"/>). Omitted from the pack JSON when null.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? KeyedBy { get; init; }
 }
 
 /// <summary>Marks a map as belonging to one side; other players do not see its pieces.</summary>

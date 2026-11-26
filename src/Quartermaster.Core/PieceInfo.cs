@@ -61,6 +61,15 @@ public static class PieceInfo
     /// <summary>Grid location name of the piece in board-local coordinates; null when there is no board or grid under it.</summary>
     public static string? Location(PieceInstance p, ModuleModel model)
     {
+        if (BoardOf(p, model) is not { } b || b.Grid == null) return null;
+        var name = b.Grid.LocationName(new PointD(p.Pos.X - b.Offset.X, p.Pos.Y - b.Offset.Y));
+        return string.IsNullOrEmpty(name) ? null : name;
+    }
+
+    /// <summary>The board under the piece (the first board of its map whose area holds its position, as <see cref="Location"/> finds it); null
+    /// when its map is unknown or no board is under it.</summary>
+    public static BoardDef? BoardOf(PieceInstance p, ModuleModel model)
+    {
         var map = model.Maps.FirstOrDefault(m => m.Id == p.MapId) ?? model.Maps.FirstOrDefault(m => m.Name == p.MapId);
         if (map == null) return null;
         foreach (var b in map.Boards)
@@ -68,9 +77,7 @@ public static class PieceInfo
             var lx = p.Pos.X - b.Offset.X;
             var ly = p.Pos.Y - b.Offset.Y;
             if (lx < 0 || ly < 0 || lx >= b.Width || ly >= b.Height) continue;
-            if (b.Grid == null) return null;
-            var name = b.Grid.LocationName(new PointD(lx, ly));
-            return string.IsNullOrEmpty(name) ? null : name;
+            return b;
         }
         return null;
     }

@@ -284,7 +284,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     {
         if (dv.Trace.Error != null || dv.Trace.Result == null) return "";
         var sides = FormulaMasking.ViewerSides(s);
-        return string.Join("; ", dv.Trace.Outputs.Select(o => sides == null || s.CanEditLedgerFor(o.Key, sides)
+        return string.Join("; ", dv.Trace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
             ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
             : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
     }
@@ -295,7 +295,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
     {
         var parts = new List<string>();
         var sides = FormulaMasking.ViewerSides(s);
-        if (dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (sides == null || s.CanEditLedgerFor(o.Key, sides))))
+        if (dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o))))
             parts.Add("goes negative");   // only for values the viewer may see
         if (u.PieceId != null && WarningsByPiece().TryGetValue(u.PieceId, out var names)) parts.AddRange(names);
         return string.Join("; ", parts);

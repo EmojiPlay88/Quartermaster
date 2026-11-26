@@ -27,7 +27,7 @@ public sealed partial class LedgerWindow
     Action<string> _pictureReady = null!;
 
     bool CountersOn => _showCounters.IsChecked == true;
-    int NameImagePad => CountersOn ? ImageSize.Width + ImageLeft + 6 : 0;
+    int NameImagePad => CountersOn && !Places ? ImageSize.Width + ImageLeft + 6 : 0;
 
     /// <summary>Only unit rows need room for a picture: group headers and holder rows stay compact.</summary>
     double RowHeightFor(LedgerRowEx r) =>

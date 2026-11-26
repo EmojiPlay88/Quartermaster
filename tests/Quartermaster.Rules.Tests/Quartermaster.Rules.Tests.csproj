@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Quartermaster.Rules\Quartermaster.Rules.csproj" />
+    <ProjectReference Include="..\..\src\Quartermaster.Vassal\Quartermaster.Vassal.csproj" />
+    <ProjectReference Include="..\Quartermaster.TestFixtures\Quartermaster.TestFixtures.csproj" />
   </ItemGroup>
 
 </Project>

@@ -19,6 +19,9 @@ public static class MapStatus
 {
     public static string Location(MapDef map, PointD m) => MapStatusText.Location(map, m);
 
+    /// <summary>As above, with the hex's place values after its name (<see cref="MapStatusText.PlaceText"/>, from the viewer's state).</summary>
+    public static string Location(MapDef map, PointD m, Func<string, string?>? placeText) => MapStatusText.Location(map, m, placeText);
+
     public static string Zoom(Viewport v) => MapStatusText.Zoom(v.Zoom);
 }
 
@@ -424,7 +427,8 @@ public sealed class MapTabs : TabControl
         // wheel (after MapView's class handler zoomed) report the cursor's map location.
         v.ViewportChanged += (_, _) => StatusChanged?.Invoke(v, null, MapStatus.Zoom(v.View));
         v.ViewReset += (_, _) => StatusChanged?.Invoke(v, "-", MapStatus.Zoom(v.View));
-        void ReportAt(PointerEventArgs e) => StatusChanged?.Invoke(v, MapStatus.Location(map, v.ScreenToMap(e.GetPosition(v))), MapStatus.Zoom(v.View));
+        void ReportAt(PointerEventArgs e) =>
+            StatusChanged?.Invoke(v, MapStatus.Location(map, v.ScreenToMap(e.GetPosition(v)), MapStatusText.PlaceText(s.View, s.Rules)), MapStatus.Zoom(v.View));
         v.AddHandler(PointerMovedEvent, (_, e) => ReportAt(e), RoutingStrategies.Bubble, handledEventsToo: true);
         v.AddHandler(PointerWheelChangedEvent, (_, e) => ReportAt(e), RoutingStrategies.Bubble, handledEventsToo: true);
         DragDrop.SetAllowDrop(v, true);

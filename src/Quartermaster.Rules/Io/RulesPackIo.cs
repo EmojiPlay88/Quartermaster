@@ -256,7 +256,7 @@ public static class RulesPackIo
         // Packs older than format 4 had no visibility setting: everything stays visible.
         Properties = (p.Properties ?? new()).Where(x => x != null)
             .Select(x => x with { Name = x.Name ?? "", Expr = string.IsNullOrWhiteSpace(x.Expr) ? null : x.Expr, OverridesTable = string.IsNullOrWhiteSpace(x.OverridesTable) ? null : x.OverridesTable, OverridesColumn = string.IsNullOrWhiteSpace(x.OverridesColumn) ? null : x.OverridesColumn, Visibility = p.Format < 4 ? Visibility.Public : x.Visibility,
-                RuleRefId = Blank(x.RuleRefId), Labels = Blank(x.Labels), DefaultExpr = Blank(x.DefaultExpr),
+                RuleRefId = Blank(x.RuleRefId), Labels = Blank(x.Labels), DefaultExpr = Blank(x.DefaultExpr), KeyedBy = Blank(x.KeyedBy)?.Trim(),
                 ResetAt = x.ResetAt?.Select(h => h?.Trim()).Where(h => !string.IsNullOrEmpty(h)).Select(h => h!).Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } rs ? rs : null,
                 Holders = x.Holders?.Select(h => h?.Trim()).Where(h => !string.IsNullOrEmpty(h)).Select(h => h!).Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } hs ? hs : null }).ToList(),
         MapOwners = (p.MapOwners ?? new()).Where(x => x != null)
@@ -304,7 +304,7 @@ public static class RulesPackIo
                 Property = o.Property ?? "",
                 Expr = string.IsNullOrWhiteSpace(o.Expr) ? null : o.Expr,
                 PropertySelect = string.IsNullOrWhiteSpace(o.PropertySelect) ? null : o.PropertySelect,
-                PieceVariable = Blank(o.PieceVariable), Slot = Blank(o.Slot), Layer = Blank(o.Layer), ToMapId = Blank(o.ToMapId),
+                PieceVariable = Blank(o.PieceVariable), Slot = Blank(o.Slot), Layer = Blank(o.Layer), ToMapId = Blank(o.ToMapId), Key = Blank(o.Key),
                 PropertyChoice = o.PropertyChoice?.Where(i => i != null).ToList() is { Count: > 0 } ids ? ids : null,
             }).ToList(),
         }).ToList(),

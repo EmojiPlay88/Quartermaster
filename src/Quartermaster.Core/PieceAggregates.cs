@@ -50,6 +50,7 @@ public static class PieceAggregates
 
         var def = (property == null ? null : pack.PropertyByName(property)) ?? throw new EvalError($"Unknown property '{property}'");
         if (def.Scope == PropertyScope.Holders) throw new EvalError($"{def.Name} is not a piece property");
+        if (def.KeyedBy != null && KeyedFacts.IsKeyed(def)) throw new EvalError($"{fn}() cannot total keyed property \"{def.Name}\"");
         // a piece where a computed property does not apply is skipped (it has no value there); an error still fails the aggregate
         var values = PropertyFacts.IsComputed(def)
             ? pieces.Select(p => PropertyValues.Get(s, pack, model, LedgerKey.Piece(p.Id), def, ctx)).Where(v => v != null).Select(v => v!.Value)

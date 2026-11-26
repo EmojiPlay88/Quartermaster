@@ -29,6 +29,9 @@ public static class PropertyFacts
             try { e = Parser.Parse(p.Expr ?? ""); }
             catch (ParseError) { return true; }
             if (ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0) return true;
+            // B6: a keyed() read of a property that is not public, or of a named holder's value
+            foreach (var (kp, holder, _) in ExprFacts.KeyedReads(e))
+                if (holder != null || !IsPublic(pack, pack.PropertyByName(kp), path)) return true;
             foreach (var v in Parser.Variables(e))
                 if (pack.PropertyByName(v) is { } q && !IsPublic(pack, q, path)) return true;
             // lookup() of a table some property overrides reads that property on the piece it is read for. An overrider already being decided

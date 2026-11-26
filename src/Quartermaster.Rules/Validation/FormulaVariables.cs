@@ -27,7 +27,7 @@ public static class FormulaVariables
                 yield return o.PieceVariable!;
     }
 
-    /// <summary>The expressions the outputs evaluate, in output order: each non-blank value expression, and the selector of an output with a property list.</summary>
+    /// <summary>The expressions the outputs evaluate, in output order: each non-blank value expression, the selector of an output with a property list, and each non-blank key.</summary>
     public static IEnumerable<string> OutputSources(FormulaDef f)
     {
         foreach (var o in f?.Outputs ?? new List<FormulaOutput>())
@@ -35,6 +35,7 @@ public static class FormulaVariables
             if (o == null) continue;
             if (!string.IsNullOrWhiteSpace(o.Expr)) yield return o.Expr!;
             if (o.PropertyChoice is { Count: > 0 } && !string.IsNullOrWhiteSpace(o.PropertySelect)) yield return o.PropertySelect!;   // only a list uses its selector
+            if (!string.IsNullOrWhiteSpace(o.Key)) yield return o.Key!;
         }
     }
 
@@ -82,6 +83,7 @@ public static class FormulaVariables
             if (o == null) continue;
             yield return o.Expr;
             if (o.PropertyChoice is { Count: > 0 }) yield return o.PropertySelect;   // only a list uses its selector, as OutputSources
+            yield return o.Key;
         }
         foreach (var b in f?.Bindings ?? new List<VariableBinding>())
         {
@@ -111,6 +113,12 @@ public static class FormulaVariables
     /// and "Only when" condition and dice count expression and every Table binding's row/column expression, used or not. Expressions that do not parse are skipped (they never run).
     /// </summary>
     public static List<(string? Holder, string? Property)> HolderReads(FormulaDef f) => Collect(f, ExprFacts.HolderReads);
+
+    /// <summary>
+    /// Every keyed() call (see <see cref="ExprFacts.KeyedReads"/>) as (property name, holder name or null, key expression), from the same expressions as
+    /// <see cref="HolderReads(FormulaDef)"/> (outputs' keys included). Expressions that do not parse are skipped (they never run).
+    /// </summary>
+    public static List<(string Property, string? Holder, Quartermaster.Rules.Expr.Expr Key)> KeyedReads(FormulaDef f) => Collect(f, ExprFacts.KeyedReads);
 
     /// <summary>
     /// The tables read by lookup(Table, ...) in any expression of the formula (see <see cref="ExprFacts.LookupTables"/>), each once, in the
@@ -199,7 +207,7 @@ public static class FormulaVariables
     /// any aggregate when <paramref name="piecesMayHide"/> (the viewer's view may lack pieces or their values: a map owned by a side it does not
     /// hold, a Hideable or Obscurable trait), any count (countof, hexcount), an aggregate over a property that is not Public (or unknown), or
     /// one whose filter reads a property that is not Public, calls holder() or another aggregate, looks up a table a non-Public property
-    /// overrides (<see cref="LookupHidden"/>), or does not parse. Otherwise (a Public
+    /// overrides (<see cref="LookupHidden"/>), reads a keyed() value that is not Public or names a holder (B6), or does not parse. Otherwise (a Public
     /// property, with no filter, "", or a filter over Public properties and piece facts) it is not hidden.
     /// </summary>
     public static bool AggregateCallHidden(RulesPack pack, string function, string? property, string? filter, bool piecesMayHide)
@@ -212,7 +220,9 @@ public static class FormulaVariables
         catch (ParseError) { return true; }   // fail closed
         return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
             || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p))
-            || ExprFacts.LookupTables(e).Any(t => LookupHidden(pack, t));
+            || ExprFacts.LookupTables(e).Any(t => LookupHidden(pack, t))
+            // B6: keyed(Property, key[, Holder]) reads its property by name, not as a variable
+            || ExprFacts.KeyedReads(e).Any(k => k.Holder != null || !PropertyFacts.IsPublic(pack, pack.PropertyByName(k.Property)));
     }
 
     /// <summary>

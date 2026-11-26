@@ -743,4 +743,33 @@ public sealed class WorkbenchWindowTests : IDisposable
         Assert.Equal(fw, wb.Formulas.List.SelectedIndex);
         Assert.Equal("R + 1", s.Rules!.ById<FormulaDef>("f-weather")!.Text);
     }
+
+    [AvaloniaFact]
+    public void Workbench_problems_check_hex_constants()
+    {
+        var fx = PlacesFixture.Module();
+        _fixtures.Add(fx);
+        var s = ModuleSession.Open(fx.Build(), Path.Combine(_tmp, "cache" + _sessions.Count), null);
+        _sessions.Add(s);
+        s.NewRules("Invented");
+        var pk = PlacesFixture.Pack();
+        s.UpdateRules(p => p with
+        {
+            Properties = pk.Properties, Holders = pk.Holders, Tables = pk.Tables,
+            Formulas = new()
+            {
+                new FormulaDef
+                {
+                    Id = "f-flood", Name = "Flood the ford", Text = "1",
+                    Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "p-ford", Op = OutputOp.Set, Expr = "3", Key = "\"9999\"" } },
+                },
+            },
+        });
+        var wb = new WorkbenchWindow(s, _dialogs, () => Task.CompletedTask, () => Task.CompletedTask);
+        _windows.Add(wb);
+        wb.Show();
+        Pump();
+        Assert.True(WaitFor(() => wb.IssueRows.Any(r => r.Problem.Contains("key \"9999\" is not a hex of any board"))),
+            "issues: " + string.Join("; ", wb.IssueRows.Select(r => r.Item + ": " + r.Problem)));
+    }
 }
