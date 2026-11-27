@@ -42,6 +42,7 @@ public sealed class ModuleSession : IDisposable
             IsReplaying = false;   // any other game replacing the replayed one ends the replay; the turn path sets it again afterwards
             if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnGameRewound; }
             _game = value;
+            _lastFormerMap = null;   // a new game has never been translated
             if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnGameRewound; }
             // Decided before anything (e.g. seeding the loaded game) can raise ViewChanged: a multi-player game starts public-only.
             if (_game != null) _viewSides = ViewSidesFor(_game);
@@ -322,6 +323,7 @@ public sealed class ModuleSession : IDisposable
         Game = loaded;
         if (loaded.LoadNotice is { } notice) Log.Add(DiagnosticSeverity.Warning, "save", notice);
         WarnIfSaveRulesDiffer(loaded);
+        MapFormerSides();
         SeedLedgers();
         AfterGameReplaced();
     }
@@ -397,6 +399,7 @@ public sealed class ModuleSession : IDisposable
         Rules = next;
         Runner = runner;
         RulesDirty = true;
+        MapFormerSides();
         SeedLedgers();
         ResetView();
         if (Game != null) RulesApplied?.Invoke();
@@ -416,6 +419,7 @@ public sealed class ModuleSession : IDisposable
         if (Game != null)
         {
             Game.RulesSha256 = SafeHash(pack);
+            MapFormerSides();
             SeedLedgers();
             ResetView();
             RulesApplied?.Invoke();
@@ -461,6 +465,37 @@ public sealed class ModuleSession : IDisposable
     }
 
     /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
+    private IReadOnlyDictionary<string, string>? _lastFormerMap;
+
+    /// <summary>
+    /// B8: reads former side ids in the open game as the pack's sides (<see cref="GameSession.MapSides"/>), in memory only. Skipped for a guest,
+    /// a replayed turn, a pack without former ids, and a map equal by content to the one last applied to this game. Call outside any action scope
+    /// and any deferred-Changed scope (MapSides clears the deferred flag).
+    /// </summary>
+    private void MapFormerSides()
+    {
+        if (Game == null || Rules == null || IsGuest || IsReplaying) return;
+        var map = SideFacts.FormerMap(Rules);
+        if (map == null) return;
+        var last = _lastFormerMap;
+        if (last != null && last.Count == map.Count && map.All(kv => last.TryGetValue(kv.Key, out var v) && v == kv.Value)) return;
+        _lastFormerMap = map;
+        bool changed;
+        try { changed = Game.MapSides(map); }
+        catch (InvalidOperationException ex) { Log.Add(DiagnosticSeverity.Warning, "sides", $"Could not read former side ids: {ex.Message}"); return; }
+        if (!changed) return;
+        string NameOf(string id) => Rules.Sides.FirstOrDefault(x => x.Id == id) is { } d && !string.IsNullOrWhiteSpace(d.Name) ? d.Name : id;
+        var items = new List<string>();
+        foreach (var side in Rules.Sides)
+            foreach (var f in side.FormerIds ?? new List<string>())
+                if (map.TryGetValue(f, out var to) && to == side.Id) items.Add($"\"{f}\" → {NameOf(side.Id)}");
+        Log.Add(DiagnosticSeverity.Info, "sides", $"Former side ids in the game now read as the rules pack's sides: {string.Join(", ", items)}");
+        var players = Game.State.Players ?? new List<PlayerDef>();
+        foreach (var id in map.Values.Distinct(StringComparer.Ordinal))
+            if (players.Count(p => p?.Sides != null && p.Sides.Contains(id)) > 1)
+                Log.Add(DiagnosticSeverity.Warning, "sides", $"{NameOf(id)} is now held by more than one player; change it in Game → Players…");
+    }
+
     public void SeedLedgers()
     {
         if (Game == null || Rules == null || IsGuest || IsViewerCopy || IsReplaying) return;   // guests never execute; a viewer copy is read-only; a replayed turn stays the sender's

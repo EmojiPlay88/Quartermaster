@@ -268,10 +268,24 @@ public sealed class HostSession : IDisposable
     private void OnRulesApplied() => Guard(() =>
     {
         if (PackBytes() is not { } pack) return;
+        TranslateSeatSides();
         foreach (var seat in Seats.Guests)
             if (seat.MemberId is { } to) Send(to, new RulesChanged(pack));
         ScheduleSnapshots();
     });
+
+    /// <summary>B8: a seat holding a former side id of the pack holds the listing side (deduplicated in order), before snapshots go out.</summary>
+    private void TranslateSeatSides()
+    {
+        var rules = _s.Rules;
+        if (SideFacts.FormerMap(rules) == null) return;
+        foreach (var seat in Seats.All.ToList())
+        {
+            if (seat.Sides == null) continue;
+            var mapped = seat.Sides.Select(id => SideFacts.Canonical(rules, id)!).Distinct(StringComparer.Ordinal).ToList();
+            if (!mapped.SequenceEqual(seat.Sides)) seat.Sides = mapped;
+        }
+    }
 
     private void ScheduleSnapshots()
     {
