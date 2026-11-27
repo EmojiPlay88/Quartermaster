@@ -533,7 +533,7 @@ The piece sums (`sum`, `maxof`, `minof` and the `hex` and `attached` ones) canno
 
 ### askside()
 
-The name of the side whose player is answering the run: in a run a start entry asks of one side, or in a sealed run (see [Making a Rules Pack](Making-a-Rules-Pack)), the side's name as `side()` gives it (its id when the name is blank). Anywhere else it is empty text. It is never an error.
+The name of the side the run asks: in a run a start entry asks of one side, or in a sealed run (see [Making a Rules Pack](Making-a-Rules-Pack)), the side's name as `side()` gives it (its id when the name is blank). It is the run's side even when an ally answers it (see [Alliances](Making-a-Rules-Pack#alliances)). Anywhere else it is empty text. It is never an error.
 
 ```
 askside()

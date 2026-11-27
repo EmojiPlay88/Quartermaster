@@ -150,7 +150,7 @@ On the left, **Alerts, in order**, with columns Alert and Severity, and **Add**,
 | **Condition** | A unit filter, for example `Fuel < 2` |
 | **Message ({unit} = unit name):** | For example "{unit} is low on fuel" |
 | **Severity:** | Info (blue), Warning (amber) or Critical (red) |
-| **Side:** | Limits the alert to one side's units; only players holding that side see it, in every phase |
+| **Side:** | Limits the alert to one side's units; only players holding that side or an ally of it see it, in every phase |
 | **Rule ref:** | The rulebook page for the alert, from the rule-ref picker ([Rule references](#rule-references)) |
 | **Notes** | Shown as a tooltip on the alert |
 

@@ -22,7 +22,7 @@ The time format, and whether move, place and delete rows are shown at all, are s
 
 In hot-seat and online games each player sees only what their own sides may see. A hidden roll shows as a line such as "Southern Compact rolled dice", without the numbers. A roll is hidden when the formula that rolled it has **Private rolls** ticked.
 
-A checklist line (`Done: ...`) and an acknowledged warning belong to the side whose phase it is: only a player holding that side sees them, and the item text is shown as that player read it (a link to another side's item stays as written). Older lines in a saved game keep the text they were saved with. A reveal line such as `SC 3 Barge: Strength between 4 and 6` is public to everyone who can see the counter; a line about a counter you cannot see is not shown. A sealed answer shows as `{Side} has answered {formula} (sealed)` and nothing more until every side has answered. When the game is over, every player sees every line.
+A checklist line (`Done: ...`) and an acknowledged warning belong to the side whose phase it is: only a player holding that side or an ally of it sees them, and the item text is shown as that player read it (a link to another side's item stays as written). Older lines in a saved game keep the text they were saved with. A reveal line such as `SC 3 Barge: Strength between 4 and 6` is public to everyone who can see the counter; a line about a counter you cannot see is not shown. A sealed answer shows as `{Side} has answered {formula} (sealed)` and nothing more until every side has answered. When the game is over, every player sees every line.
 
 ### Chat
 
