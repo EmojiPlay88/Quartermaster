@@ -356,6 +356,49 @@ public sealed class GameSession
         ResetCheckpoints();
     }
 
+    /// <summary>
+    /// B8 #8: translates the game from former side ids (<paramref name="map"/>: former id → current side id, <c>SideFacts.FormerMap</c>) with
+    /// <see cref="FormerSides"/>. When neither <see cref="Genesis"/>, <see cref="State"/>, the command log nor the redo stack uses a former
+    /// id, returns false and changes nothing. Else maps <see cref="Genesis"/> in place, replaces each logged and each undone command by its
+    /// mapped copy and sets <see cref="State"/> to the replay of the mapped genesis through the mapped log (so a later save replays to its
+    /// snapshot exactly, and the <c>Players:</c> line a <see cref="SetPlayers"/> writes names the current ids; other log text is kept).
+    /// Cached snapshots are rebuilt at the same indices. No event is raised; action marks, checkpoints and the turn base are unchanged, so
+    /// one undo after it still takes back one action. Throws while an action scope is open.
+    /// </summary>
+    public bool MapSides(IReadOnlyDictionary<string, string> map)
+    {
+        if (map == null || map.Count == 0) return false;
+        if (!FormerSides.Uses(Genesis, map) && !FormerSides.Uses(State, map)
+            && !_log.Any(c => FormerSides.Uses(c, map)) && !_redo.Any(a => a.Commands.Any(c => FormerSides.Uses(c, map))))
+            return false;
+        if (_scopeDepth > 0) throw new InvalidOperationException("Cannot translate side ids while an action scope is open.");
+
+        FormerSides.Apply(Genesis, map);
+        for (int i = 0; i < _log.Count; i++) _log[i] = FormerSides.Apply(_log[i], map);
+        var undone = _redo.ToArray();   // next to redo first
+        _redo.Clear();
+        for (int i = undone.Length - 1; i >= 0; i--)
+        {
+            var a = undone[i];
+            var mapped = a.Commands.Select(c => FormerSides.Apply(c, map)).ToList();
+            _redo.Push(mapped.Where((c, k) => !ReferenceEquals(c, a.Commands[k])).Any() ? a with { Commands = mapped } : a);
+        }
+
+        var cached = _cacheOrder.ToList();
+        var keep = cached.ToHashSet();
+        ResetCache();
+        var state = Genesis.DeepClone();
+        for (int i = 0; i < _log.Count; i++)
+        {
+            state.Apply(_log[i]);
+            if (keep.Contains(i + 1)) _cache[i + 1] = state.DeepClone();
+        }
+        foreach (var k in cached) if (_cache.ContainsKey(k)) _cacheOrder.Add(k);
+        State = state;
+        _deferred = null;
+        return true;
+    }
+
     void ResetCache()
     {
         _cache.Clear();
