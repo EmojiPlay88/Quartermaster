@@ -23,7 +23,7 @@ public static class FormulaVariables
     {
         foreach (var o in f?.Outputs ?? new List<FormulaOutput>())
             if (o is { Target: OutputTarget.Piece } && !string.IsNullOrWhiteSpace(o.PieceVariable)
-                && f!.Bindings.Any(b => b != null && b.Variable == o.PieceVariable && b.Kind == BindingKind.Piece))
+                && f!.Bindings.Any(b => b != null && b.Variable == o.PieceVariable && b.Kind is BindingKind.Piece or BindingKind.Draw))
                 yield return o.PieceVariable!;
     }
 
@@ -60,7 +60,8 @@ public static class FormulaVariables
     public static IEnumerable<string> Sources(VariableBinding b)
     {
         var count = b.Kind == BindingKind.Roll ? b.DiceCountExpr : null;   // only a Roll expands its dice count expression
-        var all = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue, b.When, count } : new[] { b.AutoValue, b.When, count };
+        var draw = b.Kind == BindingKind.Draw ? b.DrawCount : null;        // only a Draw evaluates its draw count
+        var all = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue, b.When, count, draw } : new[] { b.AutoValue, b.When, count, draw };
         return all.Where(x => !string.IsNullOrWhiteSpace(x))!;
     }
 
@@ -93,6 +94,7 @@ public static class FormulaVariables
             yield return b.AutoValue;
             yield return b.When;
             yield return b.DiceCountExpr;
+            yield return b.DrawCount;
             if (b.Kind == BindingKind.Table) { yield return b.RowExpr; yield return b.ColExpr; }
         }
     }
