@@ -192,4 +192,31 @@ public class AllianceOnlineTests : AllianceTestBase
         }
         finally { h.Dispose(); }
     }
+
+    [Fact]
+    public void Guest_own_actions_stamped_own_side_outside_ally_phase()
+    {
+        var (s, c, x) = Host(d: Difficulty.SemiAuto);
+        To(s, c, "ph-move");   // no side acts
+        var r = x.Execute("p3", Hills, new FormulaIntent("f-gate", null, null, None, true));
+        Assert.True(r.Ok, r.Message);
+        Assert.Equal("hills", s.Game!.Log.OfType<LedgerDelta>().Last().SideId);
+        c.Advance(); c.Advance();   // End: the Southern Compact's phase
+        Assert.Equal("ph-end", s.Game.State.Position?.PhaseId);
+        var w = x.Execute("p3", Hills, new FormulaIntent("f-water", PhaseFixture.RedTwo, null, None, true));
+        Assert.True(w.Ok, w.Message);
+        Assert.Equal("hills", s.Game.Log.OfType<LedgerDelta>().Last().SideId);
+    }
+
+    [Fact]
+    public void Guest_in_ally_phase_stamped_ally_side_chat_names_guest()
+    {
+        var (s, c, x) = Host(d: Difficulty.SemiAuto);
+        To(s, c, "ph-combat");   // the Hill Clans' phase
+        var r = x.Execute("p1", North, new FormulaIntent("f-gate", null, null, None, true));
+        Assert.True(r.Ok, r.Message);
+        Assert.Equal("hills", s.Game!.Log.OfType<LedgerDelta>().Last().SideId);   // accepted decision: the ally's acting side
+        Assert.True(x.Execute("p1", North, new ChatIntent("ready")).Ok);
+        Assert.Equal("Alice: ready", s.Game.State.Log.Last(l => l.Kind == LogKind.Chat).Text);
+    }
 }

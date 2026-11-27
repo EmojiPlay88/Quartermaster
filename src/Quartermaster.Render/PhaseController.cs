@@ -88,10 +88,15 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     // Online host: a guest's intent runs for the guest's sides (not the host's view) and its commands carry the guest as Who.
     private bool _actorSet;
     private IReadOnlySet<string>? _actorSides;
+    private IReadOnlySet<string>? _actorOwn;
     private string? _actorWho;
 
     /// <summary>The sides the current action is run for: the guest's while <see cref="ActingFor"/> is open, else the session's view.</summary>
     private IReadOnlySet<string>? ActorSides => _actorSet ? _actorSides : s.ViewSides;
+
+    /// <summary>The player's own sides (without allies) for the stamp's last fallback: the guest's while <see cref="ActingFor"/> is open, else
+    /// <see cref="ModuleSession.PlayerSides"/>.</summary>
+    private IReadOnlySet<string>? ActorOwn => _actorSet ? _actorOwn : s.PlayerSides;
 
     /// <summary>Optional thread-affinity check for <see cref="ActingFor"/> (debug assert); the online host sets it to "not InvokeRequired".</summary>
     public Func<bool>? IsOwnerThread { get; set; }
@@ -103,12 +108,17 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// Like every game change it must run on the thread that owns the game (the host's UI thread); <see cref="IsOwnerThread"/> lets the
     /// host check that in debug builds.
     /// </summary>
-    public IDisposable ActingFor(IReadOnlySet<string> sides, string? who)
+    public IDisposable ActingFor(IReadOnlySet<string> sides, string? who) => ActingFor(sides, who, null);
+
+    /// <summary>As <see cref="ActingFor(IReadOnlySet{string}, string?)"/> with the player's own sides (<paramref name="own"/>, without allies):
+    /// a stamp that falls back to the first side in pack order takes it from them (null: from <paramref name="sides"/>).</summary>
+    public IDisposable ActingFor(IReadOnlySet<string> sides, string? who, IReadOnlySet<string>? own)
     {
         System.Diagnostics.Debug.Assert(IsOwnerThread?.Invoke() ?? true, "PhaseController.ActingFor called off the game's owning thread.");
         if (_actorSet) throw new InvalidOperationException("ActingFor is already open.");
         _actorSet = true;
         _actorSides = sides;
+        _actorOwn = own;
         _actorWho = who;
         return new ActorScope(this);
     }
@@ -119,6 +129,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         {
             owner._actorSet = false;
             owner._actorSides = null;
+            owner._actorOwn = null;
             owner._actorWho = null;
         }
     }
@@ -134,17 +145,17 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
 
     private string? _askStamp;   // while an ask run is applied: the asked side (spec #72)
 
-    private string? Stamp() => _inTrigger ? _triggerSide : _askStamp ?? s.ActorSideFor(ActorSides);
+    private string? Stamp() => _inTrigger ? _triggerSide : _askStamp ?? s.ActorSideFor(ActorSides, ActorOwn);
 
-    private string? TriggerSide(PhaseDef phase, IReadOnlySet<string>? sides) =>
-        sides == null || s.Rules is not { } pack ? null : Sequencer.ActingSide(pack, phase)?.Id ?? s.ActorSideFor(sides);
+    private string? TriggerSide(PhaseDef phase, IReadOnlySet<string>? sides, IReadOnlySet<string>? own) =>
+        sides == null || s.Rules is not { } pack ? null : Sequencer.ActingSide(pack, phase)?.Id ?? s.ActorSideFor(sides, own);
 
     /// <summary>Runs an automatic trigger with the phase's stamp (nested calls keep the outer one). <paramref name="hostView"/>: the stamp is
     /// worked out from the session's view, as Next Phase works it out, even while a guest's intent is run (entries continued after an answer).</summary>
     private T AsTrigger<T>(PhaseDef phase, Func<T> run, bool hostView = false)
     {
         if (_inTrigger) return run();
-        _triggerSide = TriggerSide(phase, hostView ? s.ViewSides : ActorSides);
+        _triggerSide = TriggerSide(phase, hostView ? s.ViewSides : ActorSides, hostView ? s.PlayerSides : ActorOwn);
         _inTrigger = true;
         try { return run(); }
         finally { _inTrigger = false; _triggerSide = null; }

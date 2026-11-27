@@ -212,4 +212,48 @@ public class AllianceHotSeatTests : AllianceTestBase
         Assert.NotSame(given, s.PlayerSides);   // copied once
         Assert.Same(s.PlayerSides, s.ViewSides);   // SideFacts.Held returned it unchanged
     }
+
+    private static LocalActions Actions(ModuleSession s, PhaseController c) =>
+        new(s, c, new HistoryController(s, c, (cmd, st) => CommandLog.Prepare(cmd, st, s)));
+
+    [Fact]
+    public void Hotseat_own_action_in_sideless_phase_stamped_own_side()
+    {
+        var s = Session(d: Difficulty.SemiAuto);
+        var c = Controller(s);
+        To(s, c, "ph-move");   // no side acts
+        s.SetViewSides(Hills);   // Cara; her held set {hills, north} has north first in pack order
+        Assert.Equal("hills", s.ActorSide());
+        var v = Actions(s, c).ApplyFormula(new FormulaIntent("f-gate", null, null, None, true));
+        Assert.True(v.Applied, v.Message);
+        Assert.Equal("hills", s.Game!.Log.OfType<LedgerDelta>().Last().SideId);
+    }
+
+    [Fact]
+    public void Hotseat_own_action_in_non_ally_phase_stamped_own_side()
+    {
+        var s = Session(d: Difficulty.SemiAuto);
+        var c = Controller(s);
+        To(s, c, "ph-end");   // the Southern Compact's phase
+        s.SetViewSides(Hills);
+        Assert.Equal("hills", s.ActorSide());
+        var v = Actions(s, c).ApplyFormula(new FormulaIntent("f-water", PhaseFixture.RedTwo, null, None, true));
+        Assert.True(v.Applied, v.Message);
+        Assert.Equal("hills", s.Game!.Log.OfType<LedgerDelta>().Last().SideId);
+    }
+
+    [Fact]
+    public void Hotseat_chat_author_is_the_player_at_the_screen()
+    {
+        var s = Session(d: Difficulty.SemiAuto);
+        var c = Controller(s);
+        To(s, c, "ph-combat");   // the Hill Clans' phase
+        s.SetViewSides(North);   // Alice acts in her ally's phase, but she is still Alice
+        Actions(s, c).Chat("ready");
+        Assert.Equal("Alice: ready", s.Game!.State.Log.Last(l => l.Kind == LogKind.Chat).Text);
+        c.Advance();   // End: the Southern Compact's phase
+        s.SetViewSides(Hills);
+        Actions(s, c).Chat("waiting");
+        Assert.Equal("Cara: waiting", s.Game.State.Log.Last(l => l.Kind == LogKind.Chat).Text);
+    }
 }

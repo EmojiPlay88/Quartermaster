@@ -40,6 +40,26 @@ public class AllianceTurnFileTests : AllianceTestBase
     }
 
     [Fact]
+    public void Failed_replay_restores_raw_player_sides()
+    {
+        var alice = Session();
+        var g = alice.Game!;
+        using (g.BeginAction()) g.Execute(new MovePieces(new[] { PhaseFixture.RedOne }, "Main Map", new PointD(40, 50), null));
+        var t = TurnSender.Build(alice, Cara.Id, Identity("alice", g.State.GameId!, Alice.Id));
+
+        var cara = Session();
+        cara.SetViewSides(Hills);
+        var start = t.Start.DeepClone();
+        start.Pieces[PhaseFixture.BlueOne].TraitStates = null!;   // a malformed step makes the replay fail
+        var bad = t with { Start = start, Commands = t.Commands.Append(new SetTraitState(PhaseFixture.BlueOne, 0, "s")).ToList() };
+        var model = cara.OpenTurn(bad, Cara.Id, Identity("cara", t.GameId));
+        model.PlayAll();
+        Assert.NotNull(model.Error);
+        Assert.Equal(new[] { "hills" }, cara.PlayerSides!);   // the raw sides come back, not the held set
+        Assert.Equal(new[] { "hills", "north" }, cara.ViewSides!.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void PackHarness_view_for_includes_allies()
     {
         using var fx = PhaseFixture.Module();

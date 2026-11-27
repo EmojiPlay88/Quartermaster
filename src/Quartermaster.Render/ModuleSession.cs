@@ -164,12 +164,21 @@ public sealed class ModuleSession : IDisposable
 
     /// <summary>
     /// The side a formula applied now is run for (its log lines and rolls are stamped with it): null in solo; else the current phase's
-    /// acting side when held, else the first held side among the phase's reacting sides (B5 #7), else the first held side in pack order.
+    /// acting side when held, else the first held side among the phase's reacting sides (B5 #7), else the player's own first side in pack
+    /// order. "Held" is <see cref="ViewSides"/> (with allies: in an ally's phase a run is stamped with the ally's acting side); the last
+    /// fallback reads <see cref="PlayerSides"/>, so outside an ally's phase a player's own actions keep their own side (B8).
     /// </summary>
-    public string? ActorSide() => ActorSideFor(_viewSides);
+    public string? ActorSide() => ActorSideFor(_viewSides, _playerSides);
 
     /// <summary>As <see cref="ActorSide()"/> for a player holding <paramref name="sides"/> (null = solo); the host uses it for a guest's intents.</summary>
-    public string? ActorSideFor(IReadOnlySet<string>? sides)
+    public string? ActorSideFor(IReadOnlySet<string>? sides) => ActorSideFor(sides, sides);
+
+    /// <summary>
+    /// As <see cref="ActorSide()"/> for a player whose held set (with allies) is <paramref name="sides"/> and whose own sides are
+    /// <paramref name="own"/>: the acting side and the reacting sides are looked up in the held set, the pack-order fallback in the own sides
+    /// (the held set when <paramref name="own"/> is null or empty).
+    /// </summary>
+    public string? ActorSideFor(IReadOnlySet<string>? sides, IReadOnlySet<string>? own)
     {
         if (sides == null || sides.Count == 0) return null;
         var pack = Rules;
@@ -180,9 +189,10 @@ public sealed class ModuleSession : IDisposable
                 foreach (var r in reactors)
                     if (r != null && sides.Contains(r) && pack.Sides.Any(x => x != null && x.Id == r)) return r;
         }
+        var mine = own is { Count: > 0 } ? own : sides;
         foreach (var sd in pack?.Sides ?? new List<SideDef>())
-            if (sd != null && sd.Id != null && sides.Contains(sd.Id)) return sd.Id;
-        return sides.OrderBy(x => x, StringComparer.Ordinal).First();
+            if (sd != null && sd.Id != null && mine.Contains(sd.Id)) return sd.Id;
+        return mine.OrderBy(x => x, StringComparer.Ordinal).First();
     }
 
     /// <summary>Shown in place of a value the current viewer may not see.</summary>
