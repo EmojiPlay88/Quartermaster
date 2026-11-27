@@ -31,6 +31,8 @@ With **Physical dice** on, a roll of several dice shows `Type each die, separate
 
 Dice values have a small **↻** button that rolls that die again.
 
+When a formula reads data you may not see (another side's private value, or a counter you cannot see), the box after **=** reads `hidden` (`hidden — the host calculates` for a guest online) and so does any box that holds such a value: a result shown before Apply could give the hidden value away. Apply still works, and after it the ledger shows what you may see. A reveal output shows nothing before Apply (the working says `reveal {Property}`); its line appears in the log afterwards.
+
 What you type depends on the difficulty:
 
 - **Hardcore** and **Semi-automatic**: you type each value. Quartermaster checks it against its own value. A wrong value turns red, the status line says "Doesn't match: Moved", and **Apply to ledger** stays greyed out until it is right. **Calculate** fills in the right values.
