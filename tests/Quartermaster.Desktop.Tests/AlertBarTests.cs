@@ -213,10 +213,10 @@ public sealed class AlertBarTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void Alerts_for_acting_side_only()
+    public void Side_alert_shows_in_every_phase_in_a_solo_game()
     {
         var w = Game(Red(side: "red"));
-        Assert.Empty(w.Alerts.ChipTexts);   // before the start no side acts
+        Assert.Single(w.Alerts.ChipTexts);   // B7: a solo game shows side alerts before the start too
         w.Actions!.NextPhase();
         w.Actions.NextPhase();   // Supply, Red's phase
         Settle(w);
@@ -225,7 +225,7 @@ public sealed class AlertBarTests : IDisposable
         w.Actions.NextPhase();   // Combat: no acting side
         Settle(w);
         Assert.Contains(w.Strip.ItemTexts, t => t == "Combat");
-        Assert.Empty(w.Alerts.ChipTexts);
+        Assert.Single(w.Alerts.ChipTexts);   // B7: a side alert shows in every phase, also one with no acting side
     }
 
     [AvaloniaFact]
