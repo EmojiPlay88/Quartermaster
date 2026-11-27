@@ -340,4 +340,26 @@ public class PlacesFormulaMaskingTests : IDisposable
         a.EditKeyed(Global, "mines", hex, 5, "n");
         Assert.Equal(5, KeyedValues.Get(s.Game.State, Global, "mines", hex));
     }
+
+    [Fact]
+    public void Game_over_gives_no_new_edit_of_a_private_place()
+    {
+        // Final review F7: game over lifts hiding, never adds a right. A Private place a Blue viewer could not edit stays unedited.
+        var s = Open();
+        var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        var a = new LocalActions(s, c, new HistoryController(s, c, (cmd, st) => cmd));
+        var x = new IntentExecutor(s, c);
+        var hex = PieceInfo.Location(s.Game!.State.Pieces[PhaseFixture.BlueOne], s.Model)!;
+        s.Game.Execute(new EndGame("Blue holds the river", new[] { "blue" }, null));
+        s.SetViewSides(Blue);
+        Assert.Empty(Dialog(s, "f-mines").Hidden);   // the information is lifted
+        a.EditKeyed(Global, "mines", hex, 5, "n");
+        Assert.Equal(Secret, KeyedValues.Get(s.Game.State, Global, "mines", hex));
+        var r = x.Execute("p2", Blue, new KeyedEditIntent(Global, "mines", hex, 6, "n"));
+        Assert.False(r.Ok);
+        Assert.Equal(Secret, KeyedValues.Get(s.Game.State, Global, "mines", hex));
+        // A Public place stays editable, as before game over.
+        Assert.True(x.Execute("p2", Blue, new KeyedEditIntent(Global, "flood", hex, 6, "n")).Ok);
+        Assert.Equal(6, KeyedValues.Get(s.Game.State, Global, "flood", hex));
+    }
 }

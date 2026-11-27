@@ -69,6 +69,7 @@ public class B7PlayerViewTests
         s.Apply(Delta(Depot, "p-reserve", 0, 4));
         var view = PlayerView.For(s, pk, Model, SouthOnly);
         Assert.False(view.Ledgers[Depot].ContainsKey("p-reserve"));
+        Assert.Equal(5, view.Ledgers[Depot]["p-stores"]);   // the Public value of the same holder is kept
         Assert.DoesNotContain(view.LedgerHistory, e => e.PropertyId == "p-reserve");
         Assert.Single(view.Log, l => l.Text == "Northern League ledger changed");
         var own = PlayerView.For(s, pk, Model, new HashSet<string> { North });

@@ -274,4 +274,22 @@ public class RevealTests
         Assert.DoesNotContain(g.State.Log, l => l.Text.Contains("Strength between"));
         Assert.Equal(3, Ledger.Get(g.State, LedgerKey.Piece("n1"), "str"));
     }
+
+    [Fact]
+    public void Reveal_window_of_negative_value_is_not_shifted()
+    {
+        // Final review F6(d): only a value of 0 or more moves its window up to 0; a negative value keeps lo = v - k.
+        var pack = Pack(Reveal(margin: "2"));
+        Assert.Equal(new[] { "North Scout: Strength between -4 and -2" }, RevealLines(Runner(pack, die: 2).Commands(Run(Runner(pack), State(-3)), null)));
+        Assert.Equal(new[] { "North Scout: Strength between -5 and -3" }, RevealLines(Runner(pack, die: 3).Commands(Run(Runner(pack), State(-3)), null)));
+    }
+
+    [Fact]
+    public void Reveal_window_well_above_margin_is_not_moved()
+    {
+        // v = 10, margin 2: the die picks where the value sits in the window (k = die - 1), and no window is moved.
+        var pack = Pack(Reveal(margin: "2"));
+        Assert.Equal(new[] { "North Scout: Strength between 10 and 12" }, RevealLines(Runner(pack, die: 1).Commands(Run(Runner(pack), State(10)), null)));
+        Assert.Equal(new[] { "North Scout: Strength between 8 and 10" }, RevealLines(Runner(pack, die: 3).Commands(Run(Runner(pack), State(10)), null)));
+    }
 }

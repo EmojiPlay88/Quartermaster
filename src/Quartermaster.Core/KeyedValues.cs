@@ -203,6 +203,17 @@ public static class KeyedValues
         return HiddenAt(full, pack, ledgerKey, p, held!.Contains);
     }
 
+    /// <summary>
+    /// <see cref="HiddenFor"/> as it was before the game ended: the "no blind write" rule for a manual edit. Game over lifts every hiding
+    /// rule but adds no right to act (B7 #73), so a value a player could not edit before game over (a Private place unless it holds every
+    /// side) stays unedited after it. Same rule as <see cref="HiddenFor"/> (<see cref="HiddenValues"/>), with the game-over test left out.
+    /// </summary>
+    public static bool HiddenForEdit(GameState full, RulesPack pack, IReadOnlySet<string>? held, string ledgerKey, PropertyDef p)
+    {
+        if (full == null || pack == null || HiddenValues.SeesEverything(null, pack, held)) return false;
+        return HiddenAt(full, pack, ledgerKey, p, held!.Contains);
+    }
+
     private static bool HiddenAt(GameState s, RulesPack pack, string ledgerKey, PropertyDef p, Func<string, bool> holds)
     {
         if (pack == null || p == null || !LedgerKey.TryParse(ledgerKey, out var isPiece, out var id)) return true;

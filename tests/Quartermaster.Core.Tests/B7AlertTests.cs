@@ -162,4 +162,48 @@ public class B7AlertTests
         Assert.Contains(Eval(s, Pack(ph), ph, Blue), h => h.Id == AlertEngine.WarningId);
         Assert.Contains(Eval(s, Pack(ph), ph, Red), h => h.Id == AlertEngine.WarningId);
     }
+
+    // ---- final review wave (F6 b, c) ----
+
+    private static RulesPack PlansPack(PhaseDef? phase, params AlertDef[] alerts)
+    {
+        var pk = Pack(phase, alerts);
+        pk.Properties.Add(new PropertyDef { Id = "plans", Name = "Plans", Scope = PropertyScope.Holders, Visibility = Visibility.Private });
+        pk.Holders.Add(new HolderDef { Id = "redStore", Name = "RedStore", SideId = "red" });
+        return pk;
+    }
+
+    [Fact]
+    public void User_alert_over_other_side_private_holder_value_silent_on_non_holder_view()
+    {
+        var a = new AlertDef { Id = "a-plans", Name = "Plans alert", Condition = "holder(RedStore, Plans) > 5", Message = "plans", Severity = AlertSeverity.Warning };
+        var ph = Phase(null);
+        var pk = PlansPack(ph, a);
+        var s = State();
+        s.Ledgers[LedgerKey.Holder("redStore")] = new() { ["plans"] = 9 };
+        Assert.Contains(Eval(s, pk, ph, null), h => h.Id == "a-plans");   // solo: it fires
+        Assert.Contains(Eval(PlayerView.For(s, pk, RunnerFx.Model, Red), pk, ph, Red), h => h.Id == "a-plans");
+        Assert.DoesNotContain(Eval(PlayerView.For(s, pk, RunnerFx.Model, Blue), pk, ph, Blue), h => h.Id == "a-plans");
+    }
+
+    [Fact]
+    public void Pending_and_side_less_warning_list_no_other_side_ask_or_sealed_units_on_view()
+    {
+        var ph = Phase(null, warn: true);
+        var pk = PlansPack(ph);
+        var s = State(redFuel: 0, blueFuel: 0);
+        s.Pending = new()
+        {
+            new PendingRun("ask-r", "f", "Red muster", "start", new[] { new PendingUnit("r", "Red One", null, false) }, false) { AskSideId = "red" },
+            new PendingRun("seal-r", "f", "Toll bid", "start", new[] { new PendingUnit(null, "Red toll", null, false) }, false) { AskSideId = "red", Seal = "seal-r" },
+            new PendingRun("seal-b", "f", "Toll bid", "start", new[] { new PendingUnit(null, "Blue toll", null, false) }, false) { AskSideId = "blue", Seal = "seal-r" },
+        };
+        var full = Eval(s, pk, ph, null);
+        Assert.Equal(3, full.Single(h => h.Id == AlertEngine.PendingId).Matches.Count);
+        var hits = Eval(PlayerView.For(s, pk, RunnerFx.Model, Blue), pk, ph, Blue);
+        Assert.Equal(new[] { "Blue toll" }, hits.Single(h => h.Id == AlertEngine.PendingId).Matches.Select(m => m.Text));
+        var warning = hits.Single(h => h.Id == AlertEngine.WarningId);
+        Assert.DoesNotContain(warning.Matches, m => m.PieceId == "r" || m.Text.Contains("Red"));
+        Assert.Contains(warning.Matches, m => m.PieceId == "b");
+    }
 }

@@ -100,6 +100,8 @@ public class FormulaReferenceTests
         Assert.Contains("### Sealed answers", Read("Window-Phases.md"));
         Assert.Contains("Limits the alert to one side's units; only players holding that side see it, in every phase", Read("Window-Rules-Workbench.md"));
         Assert.Contains("Your sealed answer is already in.", Read("Playing-With-Others.md"));
-        Assert.Contains("hidden", Read("Window-Formula-Dialog.md"));
+        var dialog = Read("Window-Formula-Dialog.md");
+        Assert.Contains("the box after **=** reads `hidden` (`hidden — the host calculates` for a guest online)", dialog);
+        Assert.Contains("A Roll whose count depends on hidden data is rolled by the engine even with physical dice", dialog);
     }
 }

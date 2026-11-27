@@ -98,4 +98,21 @@ public class B7TickTests : IDisposable
         Assert.DoesNotContain(log, l => l.Kind == LogKind.Turn && (l.Text.StartsWith("Done: ") || l.Text.StartsWith("Acknowledged: ")));
         Assert.DoesNotContain("Count stores", string.Join("|", log.Select(l => l.Text)));
     }
+
+    [Fact]
+    public void Tick_in_phase_of_unknown_side_fails_closed()
+    {
+        // Final review F5: a phase whose side is not in the pack stamps its lines with that side, so no player view shows them.
+        var (s, c) = Make("Plain");
+        s.UpdateRules(p => p with { Phases = p.Phases.Select(ph => ph.Id == "ph-move" ? ph with { SideId = "ghost" } : ph).ToList() });
+        c.Tick(0, true);
+        c.Acknowledge(0);
+        Assert.Equal("ghost", Line(s, "Done: ").SideId);
+        Assert.Equal("ghost", Line(s, "Acknowledged: ").SideId);
+        foreach (var side in new[] { "red", "blue" })
+        {
+            s.SetViewSides(new HashSet<string> { side });
+            Assert.DoesNotContain(s.View!.Log, l => l.Kind == LogKind.Turn && (l.Text.StartsWith("Done: ") || l.Text.StartsWith("Acknowledged: ")));
+        }
+    }
 }

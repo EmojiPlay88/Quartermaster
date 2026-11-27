@@ -533,9 +533,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         Exec(new TickChecklist(index, ticked, text, ItemId: item.Id) { SideId = PhaseSideStamp(phase) });
     }
 
-    /// <summary>The side a checklist or warning line is stamped with: the phase's acting side; null in a phase with no (known) side.</summary>
-    private string? PhaseSideStamp(PhaseDef phase) =>
-        s.Rules is { } pack ? Sequencer.ActingSide(pack, phase)?.Id : null;
+    /// <summary>The side a checklist or warning line is stamped with: the phase's side; null in a phase with no side. A side that is not in
+    /// the pack still stamps the line (fail closed: no player view shows it; the validator reports the phase).</summary>
+    private static string? PhaseSideStamp(PhaseDef phase) =>
+        string.IsNullOrWhiteSpace(phase.SideId) ? null : phase.SideId;
 
     public void Acknowledge(int warningIndex)
     {

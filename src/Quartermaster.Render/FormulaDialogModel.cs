@@ -226,7 +226,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     private VariableBinding? Binding(string v) => formula.Bindings.FirstOrDefault(b => b.Variable == v);
 
-    private bool IsPhysicalRoll(string v) => PhysicalDice && Binding(v)?.Kind == BindingKind.Roll;
+    /// <summary>A Roll the player types with physical dice. Never a hidden Roll (B7): the engine rolls that one.</summary>
+    private bool IsPhysicalRoll(string v) => PhysicalDice && Binding(v)?.Kind == BindingKind.Roll && !IsHidden(v);
 
     /// <summary>A Piece binding: its box holds the picked candidate's label (typed like an Input), never the value read from it.</summary>
     private bool IsPick(string v) => Binding(v)?.Kind == BindingKind.Piece;
@@ -318,7 +319,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         var ov = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!PhysicalDice) return ov;
-        foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && !IsShared(b.Variable)))
+        // B7: a hidden Roll (its count or "Only when" reads hidden data) cannot be typed: the engine rolls and pins it.
+        foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && !IsShared(b.Variable) && !IsHidden(b.Variable)))
             ov[b.Variable] = _overrides.GetValueOrDefault(b.Variable) ?? "";
         return ov;
     }
@@ -356,7 +358,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             if (IsShared(kv.Key) && Binding(kv.Key)?.Kind == BindingKind.Roll) continue;   // the group's dice stand
             if (!Checked || Binding(kv.Key)?.Kind == BindingKind.Roll) ov[kv.Key] = kv.Value; // checked: typed text only gates, never feeds the run
         }
-        foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice && !IsShared(b.Variable)))
+        foreach (var b in formula.Bindings.Where(b => b.Kind == BindingKind.Roll && PhysicalDice && !IsShared(b.Variable) && !IsHidden(b.Variable)))
             ov.TryAdd(b.Variable, "");
         // A hidden Input cannot be typed: the engine reads its auto value (B7), as it reads every other hidden value.
         var request = new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource, PickSides)
@@ -417,8 +419,11 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         _state = state;
         SyncPicks();
         if (PhaseReasonFor(state) != null) return;
-        var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed),
-            PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource, PickSides) { SharedRolls = SharedRolls, AskSideId = AskSideId });
+        var calc = new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed),
+            PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource, PickSides) { SharedRolls = SharedRolls, AskSideId = AskSideId };
+        // B7: a precondition or guard over hidden data must not decide which boxes are filled: the boxes come from the shown run
+        // (ShownRequest). Nothing is applied from this run.
+        var trace = runner.Run(state, ShownRequest(calc) ?? calc);
         MergePins(trace);
         foreach (var v in trace.Variables)
         {

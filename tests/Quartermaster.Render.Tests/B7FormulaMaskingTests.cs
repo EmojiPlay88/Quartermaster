@@ -644,4 +644,169 @@ public class B7FormulaMaskingTests : IDisposable
         }
         Assert.Equal(RowOne("0"), RowOne(Huge));
     }
+
+    // ---- final review wave ----
+
+    /// <summary>F1: Q has a (visible) auto value; the precondition compares Red's Private plans with the T Blue types.</summary>
+    private static FormulaDef PreAuto => new()
+    {
+        Id = "f-pre-auto", Name = "Plans gate auto", Text = "W + Q", Precondition = "A > T", RefusalMessage = "Red has no plans to raid",
+        Bindings = new() { W, DepotBinding("A", "plans"), new VariableBinding { Variable = "T", Kind = BindingKind.Input },
+            new VariableBinding { Variable = "Q", Kind = BindingKind.Input, AutoValue = "2" } },
+        Outputs = new() { ToWater },
+    };
+
+    [Fact]
+    public void HotSeat_calculate_fills_the_same_boxes_whether_hidden_precondition_holds()
+    {
+        var s = Open(_tmp, _fixtures, _sessions, PreAuto);
+        s.SetViewSides(Blue);
+        foreach (var manual in new[] { false, true })
+        {
+            var seen = new List<string>();
+            foreach (var threshold in new[] { "0", Huge })
+            {
+                var m = HotSeatDialog(s, "f-pre-auto");
+                m.Checked = manual;
+                m.SetBoxText("T", threshold);
+                m.Calculate(s.Game!.State);
+                var v = m.Evaluate(s.Game.State);
+                Assert.Equal("2", v.Boxes.Single(b => b.Variable == "Q").Text);
+                if (manual) Assert.Equal("10", v.Boxes.Single(b => b.Variable == "W").Text);   // the checked box is filled either way
+                seen.Add(Seen(v, "T"));
+            }
+            Assert.Equal(seen[0], seen[1]);
+        }
+    }
+
+    [Fact]
+    public void Guest_calculate_preview_same_verdict_whether_hidden_precondition_holds()
+    {
+        var answers = new List<string>();
+        foreach (var threshold in new[] { "0", Huge })
+        {
+            var s = Open(_tmp, _fixtures, _sessions, PreAuto);
+            var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+            var x = new IntentExecutor(s, c);
+            var typed = new Dictionary<string, string> { ["T"] = threshold };
+            var v = x.Execute("p2", Blue, new FormulaIntent("f-pre-auto", PhaseFixture.BlueOne, null, typed, true, true)).Verdict!;
+            var values = (v.Values ?? new Dictionary<string, string>()).Where(kv => kv.Key != "T").OrderBy(kv => kv.Key, StringComparer.Ordinal);
+            answers.Add($"{v.Applied}|{v.Message}|{string.Join(",", v.Boxes.Select(b => b.Var + "=" + b.State))}|{string.Join(",", values)}");
+        }
+        Assert.Equal(answers[0], answers[1]);
+        Assert.Contains("[Q, 2]", answers[0]);   // Calculate filled Q either way
+    }
+
+    /// <summary>F2 / F6(a): a Roll whose count is Red's Private spies, and an Input whose auto value reads that Roll.</summary>
+    private static FormulaDef SpyRoll => new()
+    {
+        Id = "f-spy-roll", Name = "Spy roll", Text = "W + R + B",
+        Bindings = new()
+        {
+            W, DepotBinding("S", "spies"),
+            new VariableBinding { Variable = "R", Kind = BindingKind.Roll, DiceCountExpr = "S", DiceSides = 6 },
+            new VariableBinding { Variable = "B", Kind = BindingKind.Input, AutoValue = "R + 1" },
+        },
+        Outputs = new() { ToWater },
+    };
+
+    [Fact]
+    public void HotSeat_physical_dice_hidden_roll_is_rolled_by_the_engine()
+    {
+        var s = Open(_tmp, _fixtures, _sessions, SpyRoll);
+        s.SetViewSides(Blue);
+        var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        var m = HotSeatDialog(s, "f-spy-roll");
+        m.PhysicalDice = true;
+        Assert.Contains("R", m.Hidden);
+        var v = m.Evaluate(s.Game!.State);
+        var box = v.Boxes.Single(b => b.Variable == "R");
+        Assert.Equal(FormulaMasking.HiddenText, box.Text);
+        Assert.False(box.Enabled);
+        // 3 spies, every die a 3: R = 9, B = R + 1 = 10 (read by the engine), W = 10.
+        Assert.True(v.CanApply, v.Status);
+        Assert.Equal(29, v.Trace.Result!.Value.Number);
+        var dice = s.Game.State.DiceHistory.Count;
+        Assert.True(c.ApplyFormula(null, PhaseFixture.BlueOne, v.Trace, false));
+        Assert.Equal(29, Ledger.Get(s.Game.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
+        Assert.Equal(dice + 1, s.Game.State.DiceHistory.Count);   // the dice line comes with the Apply
+    }
+
+    [Fact]
+    public void HotSeat_input_auto_value_over_hidden_count_roll_is_hidden_after_calculate()
+    {
+        var s = Open(_tmp, _fixtures, _sessions, SpyRoll);
+        s.SetViewSides(Blue);
+        var m = HotSeatDialog(s, "f-spy-roll");
+        Assert.Contains("B", m.Hidden);
+        m.Calculate(s.Game!.State);
+        var v = m.Evaluate(s.Game.State);
+        Assert.Equal(FormulaMasking.HiddenText, v.Boxes.Single(b => b.Variable == "B").Text);
+        Assert.Equal(FormulaMasking.HiddenText, v.Boxes.Single(b => b.Variable == "R").Text);
+    }
+
+    /// <summary>F3: a precondition over Red's Private plans, Q asked; and a table choice filtered by the plans.</summary>
+    private static FormulaDef QueuedPre => new()
+    {
+        Id = "f-q-pre", Name = "Queued gate", Text = "W + Q", Precondition = "A > 5", RefusalMessage = "Red has no plans to raid",
+        Bindings = new() { W, DepotBinding("A", "plans"), new VariableBinding { Variable = "Q", Kind = BindingKind.Input } },
+        Outputs = new() { ToWater },
+    };
+
+    private static FormulaDef QueuedChoice => new()
+    {
+        Id = "f-q-choice", Name = "Queued choice", Text = "W + lookup(TestTerrainCost, K)",
+        Bindings = new()
+        {
+            W,
+            new VariableBinding { Variable = "K", Kind = BindingKind.Input, ChoicesTable = "t-cost", ChoicesFilter = "holder(RedDepot, Plans) < 5" },
+        },
+        Outputs = new() { ToWater },
+    };
+
+    /// <summary>A hot-seat Blue session whose Red plans are <paramref name="plans"/>, with one queued run of <paramref name="formulaId"/> for Blue 1.</summary>
+    private (ModuleSession S, PhaseController C, PendingRun Run) Queued(string formulaId, double plans)
+    {
+        var s = Open(_tmp, _fixtures, _sessions, QueuedPre, QueuedChoice);
+        if (plans != Secret) s.Game!.Execute(new LedgerDelta(Depot, "plans", Secret, plans, "manual", null, null, null, null));
+        var run = new PendingRun("q1", formulaId, formulaId, "start", new List<PendingUnit> { new(PhaseFixture.BlueOne, "Blue 1", null, false) }, true);
+        s.Game!.Execute(new QueueRuns(new[] { run }));
+        s.SetViewSides(Blue);
+        return (s, new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s)), run);
+    }
+
+    private static string Missing(ModuleSession s, PendingRun run) =>
+        string.Join(";", MissingInputs.For(s, run).Select(m => $"{m.Variable}:{string.Join(",", m.Choices ?? Array.Empty<string>())}"));
+
+    [Fact]
+    public void Missing_inputs_hidden_precondition_lists_the_same_and_fails_generically()
+    {
+        var (pass, pc, prun) = Queued("f-q-pre", Secret);
+        var (refuse, rc, rrun) = Queued("f-q-pre", 0);
+        Assert.Equal(Missing(pass, prun), Missing(refuse, rrun));
+        Assert.Equal("Q:", Missing(pass, prun));
+        var answer = new Dictionary<string, string> { ["Q"] = "1" };
+        var (applied, failed) = MissingInputs.ApplyAll(pass, pc, prun, answer);
+        Assert.Equal(1, applied);
+        Assert.Empty(failed);
+        (applied, failed) = MissingInputs.ApplyAll(refuse, rc, rrun, answer);
+        Assert.Equal(0, applied);
+        Assert.Equal(new[] { "Blue 1: " + FormulaMasking.ErrorHiddenText }, failed);
+        Assert.DoesNotContain("Red has no plans", string.Join("|", failed));
+    }
+
+    [Fact]
+    public void Missing_inputs_choices_filter_over_hidden_value_judged_on_chooser_view()
+    {
+        var results = new List<string>();
+        foreach (var plans in new[] { Secret, 0 })
+        {
+            var (s, c, run) = Queued("f-q-choice", plans);
+            var listed = Missing(s, run);
+            var (applied, failed) = MissingInputs.ApplyAll(s, c, run, new Dictionary<string, string> { ["K"] = "Clear" });
+            results.Add($"{listed}|{applied}|{string.Join(",", failed)}");
+        }
+        Assert.Equal(results[0], results[1]);
+        Assert.EndsWith("|1|", results[0]);
+    }
 }

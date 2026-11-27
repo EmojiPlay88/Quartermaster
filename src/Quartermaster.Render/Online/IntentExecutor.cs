@@ -281,8 +281,8 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             return IntentResult.Refused(OtherSide("That value"));
         if (!s.CanEditLedgerFor(k.Key, sides)) return IntentResult.Refused(OtherSide("That value"));
         // A value the sender's view lacks (a Private place unless it holds every side) is never written for it: an unchanged answer
-        // (no log line) against a changed one would tell it the hidden value.
-        if (KeyedValues.HiddenFor(g.State, pack, sides, k.Key, prop)) return IntentResult.Refused(OtherSide("That value"));
+        // (no log line) against a changed one would tell it the hidden value. Game over lifts the hiding, not this rule (no new right, B7).
+        if (KeyedValues.HiddenForEdit(g.State, pack, sides, k.Key, prop)) return IntentResult.Refused(OtherSide("That value"));
         if (LedgerViewRules.EditKey(pack, s.Model, prop, k.Key, k.ValueKey) is not { } valueKey) return IntentResult.Refused(NotUnderstoodText);
         if (LedgerViewRules.KeyedDelta(g.State, prop, k.Key, valueKey, k.After, note) is { } delta)   // null: unchanged, no history entry
             g.Execute(CommandLog.Prepare(CommandLog.Stamp(delta, who), g.State, s));
