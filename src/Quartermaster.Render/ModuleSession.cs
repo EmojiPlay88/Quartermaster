@@ -464,7 +464,6 @@ public sealed class ModuleSession : IDisposable
         catch (Exception) { return null; }
     }
 
-    /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
     private IReadOnlyDictionary<string, string>? _lastFormerMap;
 
     /// <summary>
@@ -476,26 +475,30 @@ public sealed class ModuleSession : IDisposable
     {
         if (Game == null || Rules == null || IsGuest || IsReplaying) return;
         var map = SideFacts.FormerMap(Rules);
-        if (map == null) return;
+        if (map == null) { _lastFormerMap = null; return; }
         var last = _lastFormerMap;
         if (last != null && last.Count == map.Count && map.All(kv => last.TryGetValue(kv.Key, out var v) && v == kv.Value)) return;
-        _lastFormerMap = map;
+        // The former ids this game actually uses, found before the translation removes them.
+        var used = map.Where(kv => FormerSides.Uses(Game.State, new Dictionary<string, string> { [kv.Key] = kv.Value })).ToList();
         bool changed;
         try { changed = Game.MapSides(map); }
-        catch (InvalidOperationException ex) { Log.Add(DiagnosticSeverity.Warning, "sides", $"Could not read former side ids: {ex.Message}"); return; }
+        catch (InvalidOperationException ex) { Log.Add(DiagnosticSeverity.Warning, "sides", $"Could not read former side ids: {ex.Message}"); return; }   // not remembered: a later change retries
+        _lastFormerMap = map;
         if (!changed) return;
         string NameOf(string id) => Rules.Sides.FirstOrDefault(x => x.Id == id) is { } d && !string.IsNullOrWhiteSpace(d.Name) ? d.Name : id;
         var items = new List<string>();
         foreach (var side in Rules.Sides)
             foreach (var f in side.FormerIds ?? new List<string>())
-                if (map.TryGetValue(f, out var to) && to == side.Id) items.Add($"\"{f}\" → {NameOf(side.Id)}");
-        Log.Add(DiagnosticSeverity.Info, "sides", $"Former side ids in the game now read as the rules pack's sides: {string.Join(", ", items)}");
+                if (used.Any(u => u.Key == f && u.Value == side.Id)) items.Add($"\"{f}\" → {NameOf(side.Id)}");
+        if (items.Count > 0)
+            Log.Add(DiagnosticSeverity.Info, "sides", $"Former side ids in the game now read as the rules pack's sides: {string.Join(", ", items)}");
         var players = Game.State.Players ?? new List<PlayerDef>();
-        foreach (var id in map.Values.Distinct(StringComparer.Ordinal))
+        foreach (var id in used.Select(u => u.Value).Distinct(StringComparer.Ordinal))
             if (players.Count(p => p?.Sides != null && p.Sides.Contains(id)) > 1)
                 Log.Add(DiagnosticSeverity.Warning, "sides", $"{NameOf(id)} is now held by more than one player; change it in Game → Players…");
     }
 
+    /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
     public void SeedLedgers()
     {
         if (Game == null || Rules == null || IsGuest || IsViewerCopy || IsReplaying) return;   // guests never execute; a viewer copy is read-only; a replayed turn stays the sender's

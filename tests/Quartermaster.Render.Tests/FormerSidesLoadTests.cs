@@ -94,7 +94,7 @@ public class FormerSidesLoadTests : IDisposable
     }
 
     [Fact]
-    public void Load_with_pack_without_former_ids_never_scans()
+    public void Load_with_pack_without_former_ids_leaves_save_untouched()
     {
         var path = LegacySave();
         var s = OpenWithPack(p => p);
@@ -230,6 +230,41 @@ public class FormerSidesLoadTests : IDisposable
         phases.Start(); phases.Advance();                  // Supply (red)
         hs.TakeOver(new PlayerDef("p2", "Bob", new[] { "blue" }));
         Assert.Equal("p1", hs.HandoverDue()?.Id);
+    }
+
+    [Fact]
+    public void Failed_translation_is_retried_by_a_later_pack_change()
+    {
+        var path = LegacySave();
+        var s = OpenWithPack(p => p);
+        s.LoadNative(path);
+        using (s.Game!.BeginAction("busy"))
+            s.UpdateRules(p => WithFormer(p, "league"));   // MapSides refuses inside an open scope
+        Assert.Equal(new[] { "league" }, s.Game.State.Players!.First(p => p.Id == "p1").Sides);
+        s.UpdateRules(p => p with { Name = "again" });      // same map: must retry, not skip
+        Assert.Equal(new[] { "red" }, s.Game.State.Players!.First(p => p.Id == "p1").Sides);
+    }
+
+    [Fact]
+    public void Info_lists_only_former_ids_the_game_used()
+    {
+        var path = LegacySave();
+        var s = OpenWithPack(p => WithFormer(p, "league", "unused_old"));
+        s.LoadNative(path);
+        var d = Assert.Single(SideDiags(s), x => x.Severity == DiagnosticSeverity.Info);
+        Assert.Equal("Former side ids in the game now read as the rules pack's sides: \"league\" → Red", d.Message);
+    }
+
+    [Fact]
+    public void Removing_all_former_ids_forgets_the_applied_map()
+    {
+        var path = LegacySave();
+        var s = OpenWithPack(p => WithFormer(p, "league"));
+        s.LoadNative(path);
+        s.UpdateRules(p => WithFormer(p));
+        s.Game!.Execute(new AddLogLine("Note", "back", null, null, null, "league"));
+        s.UpdateRules(p => WithFormer(p, "league"));
+        Assert.DoesNotContain(s.Game.State.Log, l => l.Text == "back" && l.SideId == "league");
     }
 
     [Fact]

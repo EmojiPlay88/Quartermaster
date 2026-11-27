@@ -267,8 +267,8 @@ public sealed class HostSession : IDisposable
     /// <summary>Raised on the owning thread before the view changes: the new pack goes out ahead of the next snapshot.</summary>
     private void OnRulesApplied() => Guard(() =>
     {
-        if (PackBytes() is not { } pack) return;
         TranslateSeatSides();
+        if (PackBytes() is not { } pack) return;
         foreach (var seat in Seats.Guests)
             if (seat.MemberId is { } to) Send(to, new RulesChanged(pack));
         ScheduleSnapshots();
