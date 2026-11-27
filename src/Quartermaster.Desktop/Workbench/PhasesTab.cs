@@ -736,10 +736,12 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         var typed = await _dialogs.AskTextAsync(w, "Merge side", $"Name of the side to merge \"{sd.Name}\" into:", "");
         if (string.IsNullOrWhiteSpace(typed) || _selectedSide != id || _s.Rules is not { } pack2) return;
         typed = typed.Trim();
-        var target = pack2.Sides.FirstOrDefault(x => string.Equals(x.Name.Trim(), typed, StringComparison.OrdinalIgnoreCase));
-        var (next, err) = PhaseEdit.MergeSide(pack2, id, target?.Id ?? typed);
+        var target = pack2.Sides.FirstOrDefault(x => string.Equals(x.Name.Trim(), typed, StringComparison.OrdinalIgnoreCase))
+            ?? pack2.Sides.FirstOrDefault(x => x.Id == typed);
+        if (target == null) { await Warn($"No side is named \"{typed}\""); return; }
+        var (next, err) = PhaseEdit.MergeSide(pack2, id, target.Id);
         if (err != null) { await Warn(err); return; }
-        if (!await _dialogs.AskYesNoAsync(w, $"Merge \"{sd.Name}\" into \"{target!.Name}\"? Its phases, holders, maps and alerts move to \"{target.Name}\", and saved games that used it read as \"{target.Name}\".", "Merge side", defaultNo: true)) return;
+        if (!await _dialogs.AskYesNoAsync(w, $"Merge \"{sd.Name}\" into \"{target.Name}\"? Its phases, holders, maps and alerts move to \"{target.Name}\", and saved games that used it read as \"{target.Name}\".", "Merge side", defaultNo: true)) return;
         if (_selectedSide != id || !ReferenceEquals(_s.Rules, pack2)) return;
         _selectedSide = target.Id;
         _timer.Stop();

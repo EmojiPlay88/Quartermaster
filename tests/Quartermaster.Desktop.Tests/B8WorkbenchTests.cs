@@ -134,6 +134,20 @@ public sealed class B8WorkbenchTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Merge_typed_id_resolves_the_side()
+    {
+        var s = Session();
+        var tab = Phases(s);
+        tab.SideList.SelectedIndex = 2;
+        Pump();
+        _dialogs.Texts.Enqueue("south");   // an id, not a name
+        _dialogs.Answer = true;
+        Click(tab.SideMergeButton);
+        Assert.Equal(["Northern League", "Southern Compact"], s.Rules!.Sides.Select(x => x.Name).ToList());
+        Assert.All(s.Rules.Phases, p => Assert.Equal("south", p.SideId));
+    }
+
+    [AvaloniaFact]
     public void Merge_cancelled_changes_nothing()
     {
         var s = Session();
