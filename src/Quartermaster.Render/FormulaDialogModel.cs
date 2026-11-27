@@ -415,9 +415,11 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         // B7: a precondition or guard over hidden data is the host's to decide at Apply; the viewer is shown a run that does not depend on it.
         _shownFor = null;
         _shownTrace = null;
-        if (ShownRequest(request) is { } shownRequest)
+        // B9 #55: outputs on drawn counters may fail for some splits only: the viewer is shown a run that does not act on them.
+        var drawShown = FormulaMasking.DrawErrorsHidden(formula);
+        if ((ShownRequest(request) ?? (drawShown ? request : null)) is { } shownRequest)
         {
-            _shownTrace = runner.Run(state, shownRequest with { FixedRolls = _fixedRolls });
+            _shownTrace = runner.Run(state, shownRequest with { FixedRolls = _fixedRolls, SkipDrawOutputs = drawShown });
             MergePins(_shownTrace);
             _shownFor = trace;
         }
@@ -470,7 +472,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource, PickSides) { SharedRolls = SharedRolls, AskSideId = AskSideId };
         // B7: a precondition or guard over hidden data must not decide which boxes are filled: the boxes come from the shown run
         // (ShownRequest). Nothing is applied from this run.
-        var trace = runner.Run(state, ShownRequest(calc) ?? calc);
+        var trace = runner.Run(state, (ShownRequest(calc) ?? calc) with { SkipDrawOutputs = FormulaMasking.DrawErrorsHidden(formula) });
         MergePins(trace);
         foreach (var v in trace.Variables)
         {
@@ -549,7 +551,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         // B7: a masked formula never previews its result or its "(negative)" mark before Apply: either could be the hidden value, or change
         // with it as the viewer retypes a value compared with it. After Apply the ledger shows what the viewer may see.
         var outputs = localDice || hostDecides || (result.Length == 0 && !masked) ? Array.Empty<string>()
-            : FormulaMasking.OutputLines(t, masked, o => OutputVisible == null || OutputVisible(o));
+            : FormulaMasking.OutputLines(t, masked, o => OutputVisible == null || OutputVisible(o), runner.Pack);
         if (masked) { result = HiddenBoxText; negative = false; }
         return new DialogView(boxes, inline, result, working + (negative ? " (negative)" : ""), negative, status,
             canApply, real) { Shown = ReferenceEquals(t, real) ? null : t, Masked = masked, OutputLines = outputs };

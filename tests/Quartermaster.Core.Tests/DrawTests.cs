@@ -376,6 +376,22 @@ public class DrawTests
     }
 
     [Fact]
+    public void Skip_draw_outputs_draws_but_acts_on_no_counter()
+    {
+        var s = DrawFx.State();
+        var pack = DrawFx.Pack();
+        var real = DrawFx.Run(s, pack, DrawFx.Request(pins: DrawFx.Pins(1, 1, 1)));
+        var shown = DrawFx.Run(s, pack, DrawFx.Request(pins: DrawFx.Pins(1, 1, 1)) with { SkipDrawOutputs = true });
+        Assert.Null(shown.Error);
+        Assert.Equal(real.Result, shown.Result);
+        Assert.Equal(real.Working, shown.Working);
+        Assert.Equal(real.DrawRolls.Keys, shown.DrawRolls.Keys);
+        Assert.Equal(DrawFx.Split(real), DrawFx.Split(shown));
+        Assert.Contains(real.Outputs, o => o.Draw == "Hits");
+        Assert.DoesNotContain(shown.Outputs, o => o.Draw != null);
+    }
+
+    [Fact]
     public void Acting_working_shows_k_not_split()
     {
         var pack = DrawFx.Pack();

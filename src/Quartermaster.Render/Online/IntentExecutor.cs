@@ -749,7 +749,8 @@ internal static class FormulaBatchRunner
                 if (!dv.CanApply || PhaseController.WritesComputed(pack, trace)
                     || !c.ApplyFormula(null, pid, trace, model.AutoCalculated || row.Scope?.Previewed == true))
                 {
-                    // Only a placed piece's seeds can differ from the chain: the rows applied stay (still one undo step).
+                    // The live run can differ from the chain: a placed piece's seeds, and (B9 #55) whatever follows an earlier row's draw,
+                    // which the chain leaves out (another pool, k, a row whose counter a draw removed). The rows applied stay (one undo step).
                     // The guest is told how many earlier rows stay applied (counts only, as the local grid says it).
                     message = FormulaWindowRules.StoppedText(applied, k + 1);
                     verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes,

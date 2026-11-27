@@ -93,25 +93,18 @@ public static class FormulaMasking
     public const string DrawnCountersText = "{0} of the drawn counters changes";
 
     /// <summary>
-    /// B9 #55: true when an output on a draw's counters reads the Draw variable in its own expressions (there it is that counter's count), so
-    /// whether the run fails, and its error, may follow the split: such a formula's errors are never shown before Apply, to any viewer
-    /// (<see cref="ErrorHiddenText"/>). Static.
+    /// B9 #55: true when any output acts on a draw's counters (any action): whether such an output fails, and its error, may follow which
+    /// counters were drawn (a value expression reading a counter's count, a counter without the layer or mask). For such a formula the view
+    /// before Apply comes from a shown run that does not act on the drawn counters (<see cref="RunRequest.SkipDrawOutputs"/>), so its boxes,
+    /// result, working, status and Apply state never follow the split, and its errors are never shown to any viewer
+    /// (<see cref="ErrorHiddenText"/>); the real run decides at Apply (<see cref="FormulaDialogModel.ApplyRefusal"/>). Static.
     /// </summary>
     public static bool DrawErrorsHidden(FormulaDef? f)
     {
         var draws = new HashSet<string>((f?.Bindings ?? new List<VariableBinding>()).Where(b => b is { Kind: BindingKind.Draw, Variable: not null })
             .Select(b => b.Variable), StringComparer.Ordinal);
-        if (draws.Count == 0) return false;
-        foreach (var o in f!.Outputs ?? new List<FormulaOutput>())
-        {
-            if (o is not { Target: OutputTarget.Piece, PieceVariable: { } v } || !draws.Contains(v)) continue;
-            foreach (var src in new[] { o.Expr, o.Key })
-            {
-                if (string.IsNullOrWhiteSpace(src)) continue;
-                if (Parse(src) is not { } e || Parser.Variables(e).Contains(v)) return true;   // reads the count; does not parse: fail closed
-            }
-        }
-        return false;
+        return draws.Count > 0 && (f!.Outputs ?? new List<FormulaOutput>())
+            .Any(o => o is { Target: OutputTarget.Piece, PieceVariable: { } v } && draws.Contains(v));
     }
 
     /// <summary>B9 #55: true when the formula draws (has a Draw binding): in a batch chain every row after the first evaluated one is
@@ -375,17 +368,18 @@ public static class FormulaMasking
     public static string LedgerPreview(ModuleSession s, DialogView dv)
     {
         var sides = ViewerSides(s);
-        return string.Join("; ", OutputLines(dv.ShownTrace, dv.Masked, o => OutputShown(s, sides, o)));
+        return string.Join("; ", OutputLines(dv.ShownTrace, dv.Masked, o => OutputShown(s, sides, o), s.Rules));
     }
 
     /// <summary>
     /// The writes of a run as a viewer is shown them before Apply (<see cref="LedgerPreview"/>, <see cref="DialogView.OutputLines"/>): each
     /// output the viewer may see (<paramref name="shown"/>) of an unmasked run as <c>{Prop} {before} → {after}</c>, any other as
     /// <c>{Prop} changes (hidden)</c>. B9 #55: the outputs on a draw's counters (<see cref="OutputPreview.Draw"/>), masked or not, become one
-    /// line per Draw variable and property, <see cref="DrawnCountersText"/>, so nothing shows which counters were drawn. Empty for a run with
-    /// an error or no result.
+    /// line per Draw variable and property, <see cref="DrawnCountersText"/>, so nothing shows which counters were drawn. A shown run that does
+    /// not act on the drawn counters (<see cref="RunRequest.SkipDrawOutputs"/>) gets the same line for each write output on a Draw variable
+    /// that drew (k above 0), its property named from <paramref name="pack"/>. Empty for a run with an error or no result.
     /// </summary>
-    public static IReadOnlyList<string> OutputLines(FormulaTrace t, bool masked, Func<OutputPreview, bool> shown)
+    public static IReadOnlyList<string> OutputLines(FormulaTrace t, bool masked, Func<OutputPreview, bool> shown, RulesPack? pack = null)
     {
         if (t == null || t.Error != null || t.Result == null) return Array.Empty<string>();
         var lines = new List<string>();
@@ -401,6 +395,15 @@ public static class FormulaMasking
             lines.Add(!masked && shown(o)
                 ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
                 : $"{o.PropertyName} changes ({ModuleSession.HiddenText})");
+        }
+        foreach (var fo in t.Formula?.Outputs ?? new List<FormulaOutput>())
+        {
+            if (fo is not { Action: OutputAction.Write, Target: OutputTarget.Piece, PieceVariable: { } dv, Property: { } prop }) continue;
+            if (t.Formula!.Bindings.FirstOrDefault(b => b?.Variable == dv)?.Kind != BindingKind.Draw) continue;
+            var k = t.Variables.FirstOrDefault(v => v?.Variable == dv);
+            if (k is not { Skipped: false, Value: { Kind: ValueKind.Number } kv } || kv.Number <= 0) continue;
+            if (drawn.Add((dv, prop)))
+                lines.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, DrawnCountersText, pack?.ById<PropertyDef>(prop)?.Name ?? prop));
         }
         return lines;
     }

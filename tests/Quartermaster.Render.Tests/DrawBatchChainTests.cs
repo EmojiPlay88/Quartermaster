@@ -126,11 +126,56 @@ public class DrawBatchChainTests : DrawTestBase
         var m = Dialog(s);
         m.SetBoxText("Shots", "3");   // the highest faces: SC 2 Barge gives 1, SC 4 Barge 2
         var dv = m.Evaluate(s.Game!.State);
-        Assert.NotNull(dv.Trace.Error);
-        Assert.Equal(FormulaMasking.ErrorHiddenText, dv.Status);
+        Assert.NotNull(dv.Trace.Error);   // the real run fails on SC 2 Barge's share
+        Assert.DoesNotContain("Division", dv.Status, StringComparison.Ordinal);
+        Assert.True(dv.CanApply, dv.Status);   // the shown run does not act on the drawn counters: Apply never follows the split
+        Assert.Equal(FormulaMasking.ErrorHiddenText, FormulaDialogModel.ApplyRefusal(dv));
         var x = new IntentExecutor(s, c);
         var v = x.Execute("p1", North, new FormulaIntent("f", "nl1", null, new Dictionary<string, string> { ["Shots"] = "3" }, false)).Verdict!;
         Assert.False(v.Applied);
         Assert.Equal(FormulaMasking.ErrorHiddenText, v.Message);
+    }
+
+    /// <summary>One shot on hex 0101: face 1 takes SC 1 Barge (which has the mask and the layer), face 6 SC 4 Barge (which has neither).</summary>
+    private (string View, bool CanApply, string Verdict) EffectView(string effect, int face, IReadOnlySet<string>? viewer)
+    {
+        var (s, c) = Open(Visibility.Public, effect: effect, traited: new HashSet<string> { "sc1" });
+        if (viewer != null) s.SetViewSides(viewer);
+        var m = Dialog(s);
+        m.SetBoxText("Shots", "1");
+        Next.Enqueue(face);
+        m.Calculate(s.Game!.State);
+        var dv = m.Evaluate(s.Game.State);
+        var view = Shown(dv);
+        Assert.False(NamesBarge(view), view);
+        var x = new IntentExecutor(s, c);
+        Next.Enqueue(face);
+        var v = x.Execute("p1", North, new FormulaIntent("f", "nl1", null, new Dictionary<string, string> { ["Shots"] = "1" }, true, Preview: true)).Verdict!;
+        return (view, dv.CanApply, Json(v));
+    }
+
+    [Theory]
+    [InlineData("mask")]
+    [InlineData("layer")]
+    public void Effect_error_on_one_drawn_counter_same_view_for_any_split(string effect)
+    {
+        foreach (var viewer in new[] { null, North })
+        {
+            var ok = EffectView(effect, 1, viewer);
+            var bad = EffectView(effect, 6, viewer);
+            Assert.Equal(ok.View, bad.View);
+            Assert.Equal(ok.CanApply, bad.CanApply);
+            Assert.Equal(ok.Verdict, bad.Verdict);
+        }
+        // At Apply the host decides: the drawn counter without the trait refuses with the generic text, the other applies.
+        var (s, c) = Open(Visibility.Public, effect: effect, traited: new HashSet<string> { "sc1" });
+        s.SetViewSides(North);
+        var m = Dialog(s);
+        m.SetBoxText("Shots", "1");
+        Next.Enqueue(6);
+        var dv = m.Evaluate(s.Game!.State);
+        Assert.True(dv.CanApply, dv.Status);
+        Assert.Equal(FormulaMasking.ErrorHiddenText, FormulaDialogModel.ApplyRefusal(dv));
+        Assert.False(c.ApplyFormula(null, "nl1", dv.Trace, false));
     }
 }

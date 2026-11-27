@@ -45,7 +45,8 @@ public abstract class DrawTestBase : IDisposable
     }
 
     /// <param name="remove">The output removes the drawn barges instead of subtracting Boats.</param>
-    protected static FormulaDef Battery(bool groupRoll = false, bool remove = false) => new()
+    /// <param name="effect">"mask" (SetMask 1) or "layer" (SetLayer Levels 2) on the drawn barges instead of the Boats write.</param>
+    protected static FormulaDef Battery(bool groupRoll = false, bool remove = false, string? effect = null) => new()
     {
         Id = "f", Name = "Shore battery", Text = "Hits", GroupRoll = groupRoll,
         Bindings = new()
@@ -59,7 +60,9 @@ public abstract class DrawTestBase : IDisposable
         },
         Outputs = new()
         {
-            remove ? new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Action = OutputAction.Remove }
+            effect == "mask" ? new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Action = OutputAction.SetMask, Expr = "1" }
+            : effect == "layer" ? new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Action = OutputAction.SetLayer, Layer = "Levels", Expr = "2" }
+            : remove ? new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Action = OutputAction.Remove }
                 : new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Property = "p-boats", Op = OutputOp.Subtract, Expr = "Hits" },
         },
     };
@@ -89,16 +92,21 @@ public abstract class DrawTestBase : IDisposable
 
     private static FixtureModule Module() => PhaseFixture.Module(numbered: true);
 
-    private static void Add(GameSession g, string id, string name, double x, double? boats)
+    /// <summary>A mask trait (Obscurable) and a 4-level layer "Levels", for the barges given <c>traited</c>.</summary>
+    private const string MaskTrait = "obs;M;m.png;Mask it;I;?";
+    private const string LevelsTrait = "emb2;Activate;130;A;Up;130;U;Down;130;D;;;1;false;0;0;l1.png,l2.png,l3.png,l4.png;Camp,,Fort,Citadel;true;Levels;;;false;;1;1;false";
+
+    private static void Add(GameSession g, string id, string name, double x, double? boats, bool traited = false)
     {
-        var type = PieceTypeParser.EncodeState(new[] { "piece;;;unit.svg;" + name });
-        g.Execute(new AddPiece(id, type, PieceTypeParser.EncodeState(new[] { "" }), "Main Map", new PointD(x, 50), null, id + " placed"));
+        var type = PieceTypeParser.EncodeState(traited ? new[] { LevelsTrait, MaskTrait, "piece;;;unit.svg;" + name } : new[] { "piece;;;unit.svg;" + name });
+        var state = PieceTypeParser.EncodeState(traited ? new[] { "", "null", "" } : new[] { "" });
+        g.Execute(new AddPiece(id, type, state, "Main Map", new PointD(x, 50), null, id + " placed"));
         if (boats != null) g.Execute(new LedgerDelta(LedgerKey.Piece(id), "p-boats", 0, boats.Value, "seed", null, null, null, null));
     }
 
     protected (ModuleSession S, PhaseController C) Open(Visibility boats = Visibility.Private, bool split = false, bool groupRoll = false,
         Difficulty d = Difficulty.FullyAuto, IReadOnlyList<PlayerDef>? players = null, bool remove = false, bool twoBatteries = false,
-        IEnumerable<PhaseDef>? phases = null)
+        IEnumerable<PhaseDef>? phases = null, string? effect = null, IReadOnlySet<string>? traited = null)
     {
         var fx = Module();
         _fixtures.Add(fx);
@@ -113,14 +121,14 @@ public abstract class DrawTestBase : IDisposable
         var g = s.Game!;
         foreach (var id in new[] { PhaseFixture.RedOne, PhaseFixture.RedTwo, PhaseFixture.BlueOne }) g.Execute(new RemovePiece(id, null));
         var east = split ? 130 : 30;
-        Add(g, "sc1", "SC 1 Barge", 30, 3);
-        Add(g, "sc2", "SC 2 Barge", 30, 1);
-        Add(g, "sc3", "SC 3 Barge", east, 0);
-        Add(g, "sc4", "SC 4 Barge", east, 2);
+        Add(g, "sc1", "SC 1 Barge", 30, 3, traited?.Contains("sc1") == true);
+        Add(g, "sc2", "SC 2 Barge", 30, 1, traited?.Contains("sc2") == true);
+        Add(g, "sc3", "SC 3 Barge", east, 0, traited?.Contains("sc3") == true);
+        Add(g, "sc4", "SC 4 Barge", east, 2, traited?.Contains("sc4") == true);
         Add(g, "nl1", "NL Battery", 30, null);
         if (split || twoBatteries) Add(g, "nl2", "NL 2 Battery", split ? 130 : 30, null);
         s.NewRules("t");
-        s.UpdateRules(_ => Pack(s.Archive.Sha256, boats, Battery(groupRoll, remove), phases));
+        s.UpdateRules(_ => Pack(s.Archive.Sha256, boats, Battery(groupRoll, remove, effect), phases));
         g.Rebase();
         RollerCalls = 0;
         return (s, new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s)));

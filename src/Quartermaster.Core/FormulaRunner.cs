@@ -118,6 +118,11 @@ public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDict
     /// way whatever the guard says). For a shown run only, never applied. Null = none.</summary>
     public IReadOnlySet<string>? ForceWhen { get; init; }
 
+    /// <summary>B9 #55: a run for what a viewer is shown before Apply, never applied: the Draw bindings draw as usual (their dice are kept in
+    /// <see cref="FormulaTrace.DrawRolls"/>), but no output on the drawn counters is evaluated, so nothing of the run (its values, errors,
+    /// Apply state) follows which counters were drawn.</summary>
+    public bool SkipDrawOutputs { get; init; }
+
     /// <summary>B7: the side answering this run (an ask run's or a sealed run's <see cref="PendingRun.AskSideId"/>): <c>askside()</c> reads
     /// its name (the id when the name is blank). Null = no side answers (<c>askside()</c> is <c>""</c>).</summary>
     public string? AskSideId { get; init; }
@@ -471,6 +476,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         for (var oi = 0; oi < formula.Outputs.Count; oi++)
         {
             if (!IsDraw(formula.Outputs[oi])) { steps.Add((oi, null)); continue; }
+            if (r.SkipDrawOutputs) continue;   // B9 #55: a shown run never acts on the drawn counters
             var dv = formula.Outputs[oi].PieceVariable!;
             if (drawTargets.TryGetValue(dv, out var dl)) foreach (var (dp, n) in dl) steps.Add((oi, (dv, dp, n)));
         }
