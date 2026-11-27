@@ -98,7 +98,7 @@ public class FormulaReferenceTests
                      "start entry {n} is sealed, but formula \"{f}\" rolls dice", "start entry {n} is sealed, but the pack has fewer than two sides" })
             Assert.Contains(m, making);
         Assert.Contains("### Sealed answers", Read("Window-Phases.md"));
-        Assert.Contains("Limits the alert to one side's units; only players holding that side see it, in every phase", Read("Window-Rules-Workbench.md"));
+        Assert.Contains("Limits the alert to one side's units; only players holding that side or an ally of it see it, in every phase", Read("Window-Rules-Workbench.md"));
         Assert.Contains("Your sealed answer is already in.", Read("Playing-With-Others.md"));
         var dialog = Read("Window-Formula-Dialog.md");
         Assert.Contains("the box after **=** reads `hidden` (`hidden — the host calculates` for a guest online)", dialog);

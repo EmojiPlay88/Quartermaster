@@ -42,9 +42,10 @@ public sealed class ModuleSession : IDisposable
             IsReplaying = false;   // any other game replacing the replayed one ends the replay; the turn path sets it again afterwards
             if (_game != null) { _game.Changed -= OnGameChanged; _game.Rewound -= OnGameRewound; }
             _game = value;
+            _lastFormerMap = null;   // a new game has never been translated
             if (_game != null) { _game.Changed += OnGameChanged; _game.Rewound += OnGameRewound; }
             // Decided before anything (e.g. seeding the loaded game) can raise ViewChanged: a multi-player game starts public-only.
-            if (_game != null) _viewSides = ViewSidesFor(_game);
+            if (_game != null) _playerSides = _viewSides = ViewSidesFor(_game);
             ResetView();
         }
     }
@@ -54,6 +55,7 @@ public sealed class ModuleSession : IDisposable
     private sealed record AccessCache(GameState State, RulesPack? Rules, IReadOnlySet<string> Sides, PieceAccess Access);
     private volatile AccessCache? _access;   // null = invalid; reset with the view
     private IReadOnlySet<string>? _viewSides;
+    private IReadOnlySet<string>? _playerSides;
 
     private void OnGameChanged(GameCommand _) => InvalidateView();
     private void OnGameRewound() => InvalidateView();
@@ -61,7 +63,7 @@ public sealed class ModuleSession : IDisposable
     private void AfterGameReplaced()
     {
         // Session-owned so subscriber order never matters: a multi-player game starts public-only until a player takes over.
-        if (_game != null) _viewSides = ViewSidesFor(_game);
+        if (_game != null) _playerSides = _viewSides = ViewSidesFor(_game);   // null or empty: nothing for an alliance to widen
         ResetView();
         Counters.Clear();
         GameReplaced?.Invoke();
@@ -103,14 +105,42 @@ public sealed class ModuleSession : IDisposable
     /// <summary>Raised once per view invalidation, on the thread that raised the change (game change, rewind, rules change, game replaced, sides changed). UIs debounce.</summary>
     public event Action? ViewChanged;
 
-    /// <summary>The sides whose information is shown; null = everything (solo, or all sides held).</summary>
+    /// <summary>
+    /// The sides whose information is shown and for which the viewer acts (the held set): <see cref="PlayerSides"/> widened by
+    /// <see cref="SideFacts.Held"/>, so it includes allies (and reads former side ids as the pack's sides). Null = everything (solo, or a
+    /// guest's or viewer copy's already filtered state). Recomputed when the rules change.
+    /// </summary>
     public IReadOnlySet<string>? ViewSides => _viewSides;
 
+    /// <summary>
+    /// The sides the player at the screen holds themselves (the hot-seat player's, the host seat's, a turn file's local player's), as given to
+    /// <see cref="SetViewSides"/>: raw, without allies. Null when <see cref="ViewSides"/> is null. Ownership and seats read this; every
+    /// visibility or acting rule reads <see cref="ViewSides"/>.
+    /// </summary>
+    public IReadOnlySet<string>? PlayerSides => _playerSides;
+
+    /// <summary>Sets the player's own sides (<see cref="PlayerSides"/>, copied) and their held set (<see cref="ViewSides"/>, with allies).</summary>
     public void SetViewSides(IReadOnlySet<string>? sides)
     {
         if (IsGuest || IsViewerCopy) sides = null;   // already filtered: filtering again would hide the player's own sides
-        _viewSides = sides == null ? null : new HashSet<string>(sides);
+        _playerSides = sides == null ? null : new HashSet<string>(sides);
+        _viewSides = SideFacts.Held(Rules, _playerSides);   // B8: the one place a local player's held set is formed
         InvalidateView();
+    }
+
+    /// <summary>
+    /// A rules change re-forms the held sets from the raw sides (a new or removed alliance applies to the open view at once). A former side id
+    /// among the player's own sides is first read as the pack's side (B8), so new commands are stamped with a side that exists.
+    /// </summary>
+    private void RecomputeHeld()
+    {
+        if (!IsGuest && !IsViewerCopy)
+        {
+            if (_playerSides is { Count: > 0 } own && SideFacts.FormerMap(Rules) is { } map && own.Any(map.ContainsKey))
+                _playerSides = new HashSet<string>(own.Select(id => SideFacts.Canonical(Rules, id)!));
+            _viewSides = SideFacts.Held(Rules, _playerSides);
+        }
+        if (IsGuest) GuestSides = SideFacts.Held(Rules, _guestSides);
     }
 
     /// <summary>What the current viewer may see: the game state itself when <see cref="ViewSides"/> is null, else a cached filtered copy
@@ -142,12 +172,21 @@ public sealed class ModuleSession : IDisposable
 
     /// <summary>
     /// The side a formula applied now is run for (its log lines and rolls are stamped with it): null in solo; else the current phase's
-    /// acting side when held, else the first held side among the phase's reacting sides (B5 #7), else the first held side in pack order.
+    /// acting side when held, else the first held side among the phase's reacting sides (B5 #7), else the player's own first side in pack
+    /// order. "Held" is <see cref="ViewSides"/> (with allies: in an ally's phase a run is stamped with the ally's acting side); the last
+    /// fallback reads <see cref="PlayerSides"/>, so outside an ally's phase a player's own actions keep their own side (B8).
     /// </summary>
-    public string? ActorSide() => ActorSideFor(_viewSides);
+    public string? ActorSide() => ActorSideFor(_viewSides, _playerSides);
 
     /// <summary>As <see cref="ActorSide()"/> for a player holding <paramref name="sides"/> (null = solo); the host uses it for a guest's intents.</summary>
-    public string? ActorSideFor(IReadOnlySet<string>? sides)
+    public string? ActorSideFor(IReadOnlySet<string>? sides) => ActorSideFor(sides, sides);
+
+    /// <summary>
+    /// As <see cref="ActorSide()"/> for a player whose held set (with allies) is <paramref name="sides"/> and whose own sides are
+    /// <paramref name="own"/>: the acting side and the reacting sides are looked up in the held set, the pack-order fallback in the own sides
+    /// (the held set when <paramref name="own"/> is null or empty).
+    /// </summary>
+    public string? ActorSideFor(IReadOnlySet<string>? sides, IReadOnlySet<string>? own)
     {
         if (sides == null || sides.Count == 0) return null;
         var pack = Rules;
@@ -158,9 +197,10 @@ public sealed class ModuleSession : IDisposable
                 foreach (var r in reactors)
                     if (r != null && sides.Contains(r) && pack.Sides.Any(x => x != null && x.Id == r)) return r;
         }
+        var mine = own is { Count: > 0 } ? own : sides;
         foreach (var sd in pack?.Sides ?? new List<SideDef>())
-            if (sd != null && sd.Id != null && sides.Contains(sd.Id)) return sd.Id;
-        return sides.OrderBy(x => x, StringComparer.Ordinal).First();
+            if (sd != null && sd.Id != null && mine.Contains(sd.Id)) return sd.Id;
+        return mine.OrderBy(x => x, StringComparer.Ordinal).First();
     }
 
     /// <summary>Shown in place of a value the current viewer may not see.</summary>
@@ -322,6 +362,7 @@ public sealed class ModuleSession : IDisposable
         Game = loaded;
         if (loaded.LoadNotice is { } notice) Log.Add(DiagnosticSeverity.Warning, "save", notice);
         WarnIfSaveRulesDiffer(loaded);
+        MapFormerSides();
         SeedLedgers();
         AfterGameReplaced();
     }
@@ -397,6 +438,8 @@ public sealed class ModuleSession : IDisposable
         Rules = next;
         Runner = runner;
         RulesDirty = true;
+        RecomputeHeld();
+        MapFormerSides();
         SeedLedgers();
         ResetView();
         if (Game != null) RulesApplied?.Invoke();
@@ -413,9 +456,11 @@ public sealed class ModuleSession : IDisposable
         RulesPath = path;
         RulesDirty = dirty;
         Runner = runner;
+        RecomputeHeld();
         if (Game != null)
         {
             Game.RulesSha256 = SafeHash(pack);
+            MapFormerSides();
             SeedLedgers();
             ResetView();
             RulesApplied?.Invoke();
@@ -458,6 +503,39 @@ public sealed class ModuleSession : IDisposable
     {
         try { return RulesPackIo.ComputeSha256(pack); }
         catch (Exception) { return null; }
+    }
+
+    private IReadOnlyDictionary<string, string>? _lastFormerMap;
+
+    /// <summary>
+    /// B8: reads former side ids in the open game as the pack's sides (<see cref="GameSession.MapSides"/>), in memory only. Skipped for a guest,
+    /// a replayed turn, a pack without former ids, and a map equal by content to the one last applied to this game. Call outside any action scope.
+    /// </summary>
+    private void MapFormerSides()
+    {
+        if (Game == null || Rules == null || IsGuest || IsReplaying) return;
+        var map = SideFacts.FormerMap(Rules);
+        if (map == null) { _lastFormerMap = null; return; }
+        var last = _lastFormerMap;
+        if (last != null && last.Count == map.Count && map.All(kv => last.TryGetValue(kv.Key, out var v) && v == kv.Value)) return;
+        // The former ids this game actually uses (state or history: genesis, log, redo), found before the translation removes them.
+        var used = map.Where(kv => Game.UsesSides(new Dictionary<string, string> { [kv.Key] = kv.Value })).ToList();
+        bool changed;
+        try { changed = Game.MapSides(map); }
+        catch (InvalidOperationException ex) { Log.Add(DiagnosticSeverity.Warning, "sides", $"Could not read former side ids: {ex.Message}"); return; }   // not remembered: a later change retries
+        _lastFormerMap = map;
+        if (!changed) return;
+        string NameOf(string id) => Rules.Sides.FirstOrDefault(x => x.Id == id) is { } d && !string.IsNullOrWhiteSpace(d.Name) ? d.Name : id;
+        var items = new List<string>();
+        foreach (var side in Rules.Sides)
+            foreach (var f in side.FormerIds ?? new List<string>())
+                if (used.Any(u => u.Key == f && u.Value == side.Id)) items.Add($"\"{f}\" → {NameOf(side.Id)}");
+        if (items.Count > 0)
+            Log.Add(DiagnosticSeverity.Info, "sides", $"Former side ids in the game now read as the rules pack's sides: {string.Join(", ", items)}");
+        var players = Game.State.Players ?? new List<PlayerDef>();
+        foreach (var id in used.Select(u => u.Value).Distinct(StringComparer.Ordinal))
+            if (players.Count(p => p?.Sides != null && p.Sides.Contains(id)) > 1)
+                Log.Add(DiagnosticSeverity.Warning, "sides", $"{NameOf(id)} is now held by more than one player; change it in Game → Players…");
     }
 
     /// <summary>Executes a SeedLedger for sheet-bound properties not yet in the ledger. Never throws.</summary>
@@ -524,8 +602,12 @@ public sealed class ModuleSession : IDisposable
     /// </summary>
     public bool IsGuest { get; private set; }
 
-    /// <summary>The sides the guest holds (from the latest snapshot's player list); null outside guest mode or before a side is held.</summary>
+    /// <summary>The sides the guest holds (from the latest snapshot's player list), widened by <see cref="SideFacts.Held"/> so it includes
+    /// allies; null outside guest mode or before a side is held. Recomputed when the host's pack arrives.</summary>
     public IReadOnlySet<string>? GuestSides { get; private set; }
+
+    /// <summary>The guest's own sides as the snapshot gave them (raw, without allies).</summary>
+    private IReadOnlySet<string>? _guestSides;
 
     /// <summary>True when the open game is a viewer copy (read-only; every action is blocked).</summary>
     public bool IsViewerCopy => _game?.ViewerCopy == true;
@@ -547,7 +629,9 @@ public sealed class ModuleSession : IDisposable
         if (IsGuest) return;
         IsGuest = true;
         GuestSides = null;
+        _guestSides = null;
         _viewSides = null;
+        _playerSides = null;
         if (Game == null) { ResetView(); ViewChanged?.Invoke(); return; }
         Game = null;
         AfterGameReplaced();
@@ -566,7 +650,8 @@ public sealed class ModuleSession : IDisposable
         // (B7 #73, HiddenValues.SeesEverything) and keeps the host's flag: a B7 host sends the full clone, an older host's view stays a view.
         if (filtered.GameOver == null) filtered.IsPlayerView = true;
         // ViewSides travels in the snapshot; one from an older host has none, so its own empty holders keep failing closed.
-        GuestSides = sides == null ? null : new HashSet<string>(sides);
+        _guestSides = sides == null ? null : new HashSet<string>(sides);
+        GuestSides = SideFacts.Held(Rules, _guestSides);   // B8: the guest's held set, with allies
         if (Game is { } g)
         {
             g.ReplaceWithSnapshot(filtered);   // Rewound → view invalidated
@@ -591,6 +676,7 @@ public sealed class ModuleSession : IDisposable
         RulesPath = null;
         RulesDirty = false;
         Runner = runner;
+        RecomputeHeld();
         if (Game != null) Game.RulesSha256 = SafeHash(pack);
         ResetView();
         RulesChanged?.Invoke();

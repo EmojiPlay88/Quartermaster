@@ -214,7 +214,8 @@ public static class OnlineLobbyModel
         {
             try
             {
-                var p = NativeSave.Read(savePath).State.Players?.FirstOrDefault()?.Sides?.Where(ids.Contains).ToList();
+                var p = NativeSave.Read(savePath).State.Players?.FirstOrDefault()?.Sides?
+                    .Select(x => SideFacts.Canonical(pack, x)!).Distinct(StringComparer.Ordinal).Where(ids.Contains).ToList();
                 if (p is { Count: > 0 } && p.Count < ids.Count) return p;
             }
             catch (Exception e) when (e is not OutOfMemoryException) { }

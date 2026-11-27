@@ -49,7 +49,7 @@ public sealed class TurnReplayModel
         _localPlayerId = localPlayerId;
         _identity = identity ?? TurnIdentity.Load(t.GameId);
         _before = s.Game;
-        _beforeSides = s.ViewSides;
+        _beforeSides = s.PlayerSides;   // raw: restoring them forms the held set again
         _game = new GameSession(t.Start.DeepClone(), s.Archive.Sha256) { RulesSha256 = t.RulesSha256 };
         s.BeginTurnReplay(_game);
         if (Count == 0) Finish();

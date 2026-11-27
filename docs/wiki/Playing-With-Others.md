@@ -41,8 +41,8 @@ If a guest drops, their seat is kept and they rejoin where they left off. Chat a
 ### What each player sees
 
 - **Public values of a side's holder.** Another side's holder shows its **Public** properties to every side (for example the Northern League's North Depot shows its Stores to the Southern Compact) and keeps its Private ones hidden. Seeing is not acting: you still cannot write to another side's holder.
-- **Side alerts.** An alert limited to a side shows only to players holding that side, in every phase. The alerts for values below zero list only your own counters and holders.
-- **Sealed answers.** When a phase asks every side in secret, each side answers on its own; everyone sees `{Side} has answered {formula} (sealed)` and nothing else until the last side has answered, when the answers are applied together. A second answer is refused: `Your sealed answer is already in.` While a side still has to answer, another guest's Next Phase says `{Side} is playing {phase}; wait for your phase.` See [Sealed answers](Making-a-Rules-Pack#sealed-answers).
+- **Side alerts.** An alert limited to a side shows only to players holding that side or an ally of it, in every phase. The alerts for values below zero list only your own counters and holders.
+- **Sealed answers.** When a phase asks every side in secret, each side answers on its own (any player of the side's alliance may answer for it, and allies see each other's answers before release); everyone sees `{Side} has answered {formula} (sealed)` and nothing else until the last side has answered, when the answers are applied together. A second answer is refused: `Your sealed answer is already in.` While a side still has to answer, another guest's Next Phase says `{Side} is playing {phase}; wait for your phase.` See [Sealed answers](Making-a-Rules-Pack#sealed-answers).
 - **Choices and picks.** The list of choices or counters you are offered is built from what you can see, so two players may be offered different lists. A formula that reads data you cannot see is worked out by the host, and its result box reads `hidden` until the host has applied it.
 - **When the game ends.** Every player then sees everything. Undoing out of the game over hides it again; what a player has already seen stays seen. See [When the game ends](Making-a-Rules-Pack#when-the-game-ends).
 
@@ -53,6 +53,12 @@ Only the host can undo, step back and save. A guest can use **File > Export View
 ### Sides that react
 
 A phase can name sides that also act in it. Online, a guest who holds only such a side may run formulas that need no counter and write global values in that phase; ticking, acknowledging and Next Phase stay with the phase's own side, and the panel tells the guest `{side} is playing {phase}; you may react`. In a hot-seat game the reacting player takes the screen with **Game > Current Player** (the hand-over itself still goes to the phase's own side's player). A guest's Due list is built from what that guest sees and may act on. Only the host decides when the game ends; after it ends every Next Phase press says `The game is over.` See [Sides that react](Making-a-Rules-Pack#sides-that-react).
+
+### Allies
+
+When the rules pack puts sides in one alliance (for example the Northern League and the Hill Clans in `Upriver Pact`), their players are allies. An ally sees what the other sees (hidden values, lines, dice, asked runs, checklists, maps, alerts), moves the other's counters, changes the other's holders, and acts, ticks, acknowledges and presses Next Phase in the other's phase. A side outside the alliance sees and does nothing more than before. This works the same in hot-seat, online (the host checks every guest action with the allies included, and a guest sees the allies' values) and turn files.
+
+Seats do not change: each side is still held by exactly one player, and **Game > Players…** shows the same seats. In hot-seat the hand-over still goes to the player holding the phase's side, and an ally at the screen may act meanwhile. A run made in an ally's phase is stamped with the ally's side. In a sealed phase each side still has its own answer, and its window opens by itself only for that side's player; any ally may open it from the phase panel and give it, and allies see each other's answers before release. If a pack changes a side's id, saves that use the old id read as the new side when opened (see [Former side ids](Making-a-Rules-Pack#former-side-ids)); a received turn file is not translated, so both players open their saves with the new pack before they exchange turns. See [Alliances](Making-a-Rules-Pack#alliances).
 
 ## Turn files
 

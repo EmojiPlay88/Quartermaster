@@ -357,6 +357,49 @@ public sealed class HandoverTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Ally_sealed_run_waits_for_its_own_player_after_handover()
+    {
+        // B8: Red and Blue are allies. End has no side and a sealed toll bid (one run per side). Anna (Red) is handed the screen for the
+        // first bid; only her own run opens, Blue's waits for Ben.
+        var w = Game(Difficulty.Hardcore, tweak: p => p with
+        {
+            Sides = p.Sides.Select(x => x with { AllianceId = "Pact" }).ToList(),
+            Blocks = new(),   // Combat goes straight on to End
+            Formulas = p.Formulas.Append(new FormulaDef
+            {
+                Id = "f-bid", Name = "Toll bid", Text = "bid",
+                Bindings = new() { new VariableBinding { Variable = "bid", Kind = BindingKind.Input, Min = 0, Max = 10 } },
+            }).ToList(),
+            Phases = p.Phases.Select(x => x.Id != "ph-end" ? x : x with
+            {
+                OnStart = new() { new StartEntry { FormulaId = "f-bid", ForEach = ForEachMode.Once, Sealed = true } },
+            }).ToList(),
+        });
+        var s = w.Session!;
+        ToCombat(w);
+        PumpUntil(() => w.Handover != null);
+        Continue(w);   // Ben plays Combat
+        w.Actions!.NextPhase();   // End: the sealed bids
+        PumpUntil(() => w.Handover != null);
+        Pump();
+        Assert.Equal("Pass to Anna (Red)", w.Handover!.Message);
+        var red = s.Game!.State.Pending.Single(r => r.AskSideId == "red").Id;
+        var blue = s.Game.State.Pending.Single(r => r.AskSideId == "blue").Id;
+        Continue(w);
+        Pump();
+        Assert.Equal(Anna.Id, w.HotSeat!.Current?.Id);
+        Assert.Contains(FormulaWindows.OpenFor(s), f => f.Link?.RunId == red);
+        Assert.DoesNotContain(FormulaWindows.OpenFor(s), f => f.Link?.RunId == blue);   // the ally's bid is not pushed onto Anna
+
+        FormulaWindows.CloseAllFor(s);
+        var v = w.Actions!.ApplyFormula(new FormulaIntent("f-bid", null, red, new Dictionary<string, string> { ["bid"] = "3" }, false));
+        Assert.True(v.Applied, v.Message);
+        PumpUntil(() => w.Handover != null);
+        Assert.Equal("Pass to Ben (Blue)", w.Handover!.Message);   // Ben is asked for his own bid
+        Assert.Null(s.Game.State.Pending.Single(r => r.Id == blue).SealedAnswer);
+    }
+
+    [AvaloniaFact]
     public void Formula_windows_close_on_handover()
     {
         var w = Game();

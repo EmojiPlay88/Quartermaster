@@ -18,7 +18,7 @@ namespace Quartermaster.Desktop.Workbench;
 /// </summary>
 public sealed class AlertsTab : UserControl
 {
-    internal const string SideTip = "Only players holding this side see the alert, in every phase.";
+    internal const string SideTip = "Only players holding this side or an allied side see the alert, in every phase.";
     const string AnySide = "(any)";
     const string MissingText = "(missing)";
 

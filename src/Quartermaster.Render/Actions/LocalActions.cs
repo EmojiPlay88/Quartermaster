@@ -148,7 +148,8 @@ public sealed class LocalActions(ModuleSession s, PhaseController c, HistoryCont
     public void Chat(string text)
     {
         if (Blocked || s.Game is not { } g || ChatText.Clean(text) is not { } clean) return;
-        var name = s.ActorSide() is { } side ? Players.Holding(g.State, s.Rules, side)?.Name : null;
+        // The player at the screen (their own sides, never an ally's: in an ally's phase the stamp is the ally's, the author is not).
+        var name = s.ActorSideFor(s.PlayerSides) is { } side ? Players.Holding(g.State, s.Rules, side)?.Name : null;
         Exec(g, new AddLogLine(LogKind.Chat, ChatText.Line(name, clean)));
     }
 

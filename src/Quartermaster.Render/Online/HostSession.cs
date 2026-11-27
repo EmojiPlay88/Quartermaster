@@ -267,11 +267,35 @@ public sealed class HostSession : IDisposable
     /// <summary>Raised on the owning thread before the view changes: the new pack goes out ahead of the next snapshot.</summary>
     private void OnRulesApplied() => Guard(() =>
     {
+        if (TranslateSeatSides())
+        {
+            // The game's player list and the host's own sides follow the translated seats; the Seats dialog and sides panel show them.
+            Post(SyncPlayers);
+            SeatsChanged?.Invoke();
+        }
         if (PackBytes() is not { } pack) return;
         foreach (var seat in Seats.Guests)
             if (seat.MemberId is { } to) Send(to, new RulesChanged(pack));
         ScheduleSnapshots();
     });
+
+    /// <summary>B8: a seat holding a former side id of the pack holds the listing side (deduplicated in order), before snapshots go out.
+    /// True when any seat changed.</summary>
+    private bool TranslateSeatSides()
+    {
+        var rules = _s.Rules;
+        if (SideFacts.FormerMap(rules) == null) return false;
+        var changed = false;
+        foreach (var seat in Seats.All.ToList())
+        {
+            if (seat.Sides == null) continue;
+            var mapped = seat.Sides.Select(id => SideFacts.Canonical(rules, id)!).Distinct(StringComparer.Ordinal).ToList();
+            if (mapped.SequenceEqual(seat.Sides)) continue;
+            seat.Sides = mapped;
+            changed = true;
+        }
+        return changed;
+    }
 
     private void ScheduleSnapshots()
     {
@@ -481,7 +505,8 @@ public sealed class HostSession : IDisposable
         if (!Same(players, g.State.Players))
             g.Execute(CommandLog.Prepare(CommandLog.Stamp(new SetPlayers(players), Seats.Host.PlayerId), g.State, _s));
         var hostSides = Seats.Host.Sides.ToHashSet();
-        if (_s.ViewSides == null || !_s.ViewSides.SetEquals(hostSides)) _s.SetViewSides(hostSides);
+        // The host seat's own sides against the session's raw sides (its ViewSides also hold allies, so they would never match).
+        if (_s.PlayerSides == null || !_s.PlayerSides.SetEquals(hostSides)) _s.SetViewSides(hostSides);
     }
 
     private LobbyListing BuildListing()
@@ -524,7 +549,7 @@ public sealed class HostSession : IDisposable
         seat.SnapshotDue = false;
         if (seat.IsHost || seat.MemberId is not { } to || seat.Sides.Count == 0) return;
         if (_s.Game?.State is not { } full || _s.Rules is not { } pack) return;
-        var view = PlayerView.For(full, pack, _s.Model, seat.Sides.ToHashSet());
+        var view = PlayerView.For(full, pack, _s.Model, SideFacts.Held(pack, seat.Sides)!);   // B8: the seat's held set, with allies
         view.Players = Seats.ToPlayers();
         var json = JsonSerializer.SerializeToUtf8Bytes(view, QuartermasterJson.Options);
         seat.LastSnapshot = Now();

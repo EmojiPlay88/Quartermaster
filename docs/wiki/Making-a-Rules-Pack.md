@@ -339,7 +339,7 @@ If you press Next Phase while rows have not run yet, the log says `not run: Fuel
 
 ### Asking a side at the start of a phase
 
-Give a phase with **no side** a first row that a particular player must answer. Add a phase `Dawn` (leave **Side:** empty) and put the formula `River level roll` in **On start** with **For each** set to **Once** and **Asks side** set to **Northern League**. The run is always queued for the Northern League, in every difficulty, and the host never applies it by itself. It reads `River level roll — Northern League answers` in the open list. Only a player holding the Northern League sees and answers it; another player who tries gets `That calculation belongs to a side you don't hold.` When the League answers, its rolls and working follow that side's privacy, and the rows after it continue. Make the next row read the global that `River level roll` wrote (for example `Fuel supply` using `RiverLevel`). In hot-seat play the screen is passed to the League's player, and until the run is answered another player sees `Northern League is playing Dawn` and cannot use Next Phase. In a solo game in Fully automatic, an asked run that only rolls dice finishes by itself, with no window; one with a value to type still asks for it.
+Give a phase with **no side** a first row that a particular player must answer. Add a phase `Dawn` (leave **Side:** empty) and put the formula `River level roll` in **On start** with **For each** set to **Once** and **Asks side** set to **Northern League**. The run is always queued for the Northern League, in every difficulty, and the host never applies it by itself. It reads `River level roll — Northern League answers` in the open list. Only a player holding the Northern League (or an ally of it, see [Alliances](#alliances)) sees and answers it; another player who tries gets `That calculation belongs to a side you don't hold.` Its window opens by itself only for the League's own player; an ally may open it from the phase panel. When the League answers, its rolls and working follow that side's privacy, and the rows after it continue. Make the next row read the global that `River level roll` wrote (for example `Fuel supply` using `RiverLevel`). In hot-seat play the screen is passed to the League's player, and until the run is answered another player sees `Northern League is playing Dawn` and cannot use Next Phase. In a solo game in Fully automatic, an asked run that only rolls dice finishes by itself, with no window; one with a value to type still asks for it.
 
 Rules for **Asks side** (the same column is on **On end**): it needs a phase without a side and **For each** = Once. The validator reports `Phase "Dawn": start entry 1 asks side "{id}", which does not exist`, `Phase "Dawn": start entry 1 asks a side, so it must run once, not for each unit` and `Phase "Dawn": start entry 1 asks a side, but only a phase without a side may ask one`. **(none)** means no one is asked.
 
@@ -692,11 +692,11 @@ One rule decides whether a player may see a value, and every window, log line, l
 
 ### Public values of a side's holder
 
-A holder owned by a side hides its values from the other sides, except the properties you marked **Public**. In Riverland, North Depot is owned by the Northern League. Its `Stores` property is Public, so the Southern Compact sees the depot's Stores; its `Reserve` property is Private, so the Southern Compact never sees it (and a formula the Compact runs that reads it is worked out by the host). Seeing is not acting: another side still cannot write to North Depot. A place value that is not Public stays hidden as before.
+A holder owned by a side hides its values from the other sides (allies excepted, see [Alliances](#alliances)), except the properties you marked **Public**. In Riverland, North Depot is owned by the Northern League. Its `Stores` property is Public, so the Southern Compact sees the depot's Stores; its `Reserve` property is Private, so the Southern Compact never sees it (and a formula the Compact runs that reads it is worked out by the host). Seeing is not acting: another side (allies excepted) still cannot write to North Depot. A place value that is not Public stays hidden as before.
 
 ### Side alerts
 
-An alert with a **Side** is shown only to players holding that side, in every phase. In Riverland an alert `Low fuel` with Side Northern League shows to the League's players whichever phase it is, and the Southern Compact's players never see it. In a solo game you hold every side, so you see it always. Alerts without a side show to everyone, as before.
+An alert with a **Side** is shown only to players holding that side, in every phase. In Riverland an alert `Low fuel` with Side Northern League shows to the League's players whichever phase it is, and the Southern Compact's players never see it. In a solo game you hold every side, so you see it always. A player whose side has allies also sees the alerts of those allies' sides. Alerts without a side show to everyone, as before.
 
 Two built-in alerts follow the same idea. The alert for values below zero lists only your own counters and holders (those of your sides, of no side, and the global ones); a property with nothing of yours below zero gives no chip. The warning that decisions are unacknowledged shows only while you hold the side whose phase it is (or the phase has no side).
 
@@ -729,7 +729,7 @@ Sometimes every side must answer at the same time without seeing the others' ans
 
 An invented example: the formula `Toll bid` has an Input `bid` from 0 to 10, and one output with Target Global, Property `TollBid` (keyed by the table `Toll sides`, whose rows are `Northern League` and `Southern Compact`), Op Set, Value `bid` and Key `askside()`. [`askside()`](Formula-Reference#askside) is the name of the side answering, so each side's bid is stored under its own name. The next row, `Settle toll`, can read `keyed(TollBid, "Northern League") > keyed(TollBid, "Southern Compact")`.
 
-When the phase starts, one run is queued for every side of the pack, in pack order, in every difficulty. Each side answers its own run like an asked run. The answer is not applied yet: it is stored, the answering window says `Answer sealed; it is applied when every side has answered.`, and the log says `{Side} has answered Toll bid (sealed)` for everyone, naming no value. A side cannot answer twice: `Your sealed answer is already in.` Only the answering side (and the host's full copy) holds the answer until release. When the last side has answered, the log says `Toll bid: every side has answered`, then every answer is applied in the pack's side order (later answers see earlier ones' writes), and the rows after the sealed one continue. A run that cannot be applied logs `Toll bid: {Side}: {error}`. One Undo takes back the last answer together with the whole release. If Next Phase leaves the phase before everyone has answered, the log says `Toll bid: not every side answered; the sealed answers were discarded`.
+When the phase starts, one run is queued for every side of the pack, in pack order, in every difficulty. Each side answers its own run like an asked run. The answer is not applied yet: it is stored, the answering window says `Answer sealed; it is applied when every side has answered.`, and the log says `{Side} has answered Toll bid (sealed)` for everyone, naming no value. A side cannot answer twice: `Your sealed answer is already in.` Only the answering side, its allies and the host's full copy hold the answer until release (see [Alliances](#alliances)). When the last side has answered, the log says `Toll bid: every side has answered`, then every answer is applied in the pack's side order (later answers see earlier ones' writes), and the rows after the sealed one continue. A run that cannot be applied logs `Toll bid: {Side}: {error}`. One Undo takes back the last answer together with the whole release. If Next Phase leaves the phase before everyone has answered, the log says `Toll bid: not every side answered; the sealed answers were discarded`.
 
 A sealed row asks every side, so leave **Asks side** empty. Its formula may not roll dice or pick a piece. Online, another side's player who presses Next Phase while a side's answer is still open is told `{Side} is playing {phase}; wait for your phase.`
 
@@ -747,6 +747,49 @@ Each formula message begins `Formula "{name}": ` and each phase message `Phase "
 - `start entry {n} is sealed, but formula "{f}" rolls dice`; `start entry {n} is sealed, but formula "{f}" picks a piece`.
 - Warnings: `start entry {n} is sealed, but formula "{f}" asks for nothing`; `start entry {n} is sealed, but the pack has fewer than two sides`.
 - Warnings (only in a pack with two or more sides): `variable "{v}": its choices filter reads values another side may not see; each player chooses from what they can see` and `variable "{v}": its piece filter reads values another side may not see; each player picks from what they can see`. A list of choices or pieces is always built from what the chooser can see, so two players can be offered different lists.
+
+## Teams: renamed sides and alliances
+
+Two things about sides change over a pack's life. A side can be renamed or merged into another, so older saves name ids the pack no longer has; and in a game with more than two sides, some sides play together. Both are set in the Phases tab, Sides box ([Rules Workbench](Window-Rules-Workbench)). Both are optional: a pack that uses neither behaves exactly as before, and its file does not change.
+
+### Former side ids
+
+A save stores the ids of the sides its players hold, its log lines, its asked runs and its winners. If a later version of the pack gives a side a new id, the save would name a side that no longer exists, and its players would hold nothing. Give the side its old ids in **Former ids:** (comma-separated) and the save reads as the new side.
+
+An invented example: the Riverland pack first called its northern side `league`. A later version names it `north`, Northern League. Select Northern League and type `league` in **Former ids:**. A saved game whose player held `league` now opens with that player holding Northern League; its stamped log lines, its pending asked runs and its winners read as Northern League too. The undo history is translated with the game, so Undo does not bring `league` back. The old log text stays as it was written.
+
+To fold one side into another, select the side (say `East Shore`) and press **Merge into…**; type the name of the target, Southern Compact, and confirm. The target gains `East Shore`'s id and former ids as its own former ids; its units filter becomes `(filter of Southern Compact) or (filter of East Shore)` (blank if either was blank, which matches every unit); `East Shore` is removed; and every phase, holder, map, alert, ask and victory condition that named it now names Southern Compact.
+
+Good to know:
+
+- Nothing is written when a game is loaded. The game is translated in memory, and the save file changes only when you save. A game that uses no former id is not touched.
+- If a merge gave one player two sides' ids, the player now holds every side they held an old id of. If two players held ids that now name one side, both hold it, and the log says `{Side} is now held by more than one player; change it in Game → Players…`. Fix it in **Game → Players…**.
+- When the game is translated, the log says (Info) `Former side ids in the game now read as the rules pack's sides: "league" → Northern League`.
+- An open game is translated again when you change the pack in the Workbench, so a merge reaches it at once. As on load, this happens only when the game uses a former id; the sides of the player at the screen (and online, the seats) follow too.
+- A turn file you receive is not translated: it stays exactly as the sender made it. Both players open their saves with the new pack before they exchange turns.
+- A former id that is the id of a current side is ignored (the Problems list reports it). If two sides list the same former id, the first side in pack order wins.
+
+### Alliances
+
+Sides with the same **Alliance:** are allies. The name is free text; sides with the same name, compared without regard to case or surrounding spaces, are one alliance. Blank means no alliance.
+
+An invented example: the Northern League and the Hill Clans both have the alliance `Upriver Pact`; the Southern Compact has none. A League player now:
+
+- sees what a Clans player sees: the Clans' Private `Supply` values, their holders, their lines, dice rolls and asked runs, their checklists, their maps and their side alerts;
+- moves the Clans' barges, runs formulas on their counters and changes their holders' values;
+- acts in the Clans' phase: runs its formulas, ticks its checklist, acknowledges its warnings and presses Next Phase. This also holds the other way round.
+
+The Southern Compact sees and does exactly what it did before: it sees neither side's private values and cannot act for either.
+
+What does not change: a counter, holder or map still belongs to one side (`side()`, `phaseside()` and a side's units filter name that side only); each side is still held by one seat; victory winners; and a move by an ally is a move by another side, so an On move row set to **Acting side** does not fire for it. In hot-seat the hand-over still goes to the player holding the phase's side; an ally at the screen may act meanwhile. In an ally's phase a run is stamped with the ally's side, so both allies see it and nobody else does. A sealed phase still asks one run per side, and a side's window opens by itself only for that side's own player (in hot-seat the screen is still passed to each side's player in turn). Any player of the alliance may open a side's run from the phase panel and answer it, [`askside()`](Formula-Reference#askside) is that run's side, and allies see each other's answers before release; other sides never do.
+
+Allies are worked out where a player's sides become what that player may see and do, so every window follows at once, including a changed alliance in the Workbench. Online, the host checks every guest action with the allies included.
+
+### What the Problems list says for teams
+
+- Errors: `Side "{name}": former id "{f}" is the id of side "{other}"` (also when it is the side's own id); `Side "{name}": former id "{f}" is also a former id of side "{other}"` (reported on the later side in pack order).
+- Warnings: `Side "{name}": alliance "{a}" has no other side`; `Every side is in alliance "{a}", so nothing is hidden from any player` (two or more sides, all in one alliance); `Phase "{name}": reacting side "{s}" is an ally of the phase's side, so it already acts in this phase`.
+- The two visibility warnings about a choices or piece filter reading values another side may not see now appear only when the pack has at least two groups, where a side without an alliance is a group of its own and each alliance is one group.
 
 ## Testing a pack outside the engine (stable)
 

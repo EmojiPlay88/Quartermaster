@@ -191,15 +191,16 @@ sealed partial class MainForm
         _hiddenForHandover.Clear();
     }
 
-    /// <summary>Calculations queued by the phase the new player starts in open once they are at the screen.</summary>
+    /// <summary>Calculations queued by the phase the new player starts in open once they are at the screen: those asking no side or one of the
+    /// player's own sides (an ally's ask or sealed run waits in the phase panel for its own player, B8).</summary>
     void OpenRunsAfterHandover()
     {
         if (_runsAfterHandover.Count == 0) return;
         var runs = _runsAfterHandover.ToList();
         _runsAfterHandover.Clear();
-        if (_session?.Game is not { } g) return;
+        if (_session?.Game is not { } g || _dispatch is not { } d) return;
         foreach (var r in runs)
-            if (g.State.Pending.Any(x => x.Id == r.Id)) Guard(() => OpenPendingRun(r.Id));
+            if (g.State.Pending.Any(x => x.Id == r.Id) && d.OpensByItself(r)) Guard(() => OpenPendingRun(r.Id));
     }
 
     // ---------- player switcher (status bar) ----------
@@ -289,7 +290,7 @@ sealed partial class MainForm
         up?.SmokeContinue();
         Application.DoEvents();
         var okAfter = up != null && Visible && _handover == null && target != null && hs.Current?.Id == target.Id
-            && _session.ViewSides is { } vs && vs.SetEquals(target.Sides) && _sbPlayer.Text == $"Player: {target.Name}";
+            && _session.PlayerSides is { } vs && vs.SetEquals(target.Sides) && _sbPlayer.Text == $"Player: {target.Name}";
         Program.AppLog($"smoke: handover Continue {(okAfter ? "ok" : "FAILED")} (main visible {Visible}, status '{_sbPlayer.Text}')");
         if (!okAfter) Program.ExitCode = 1;
         SetGamePlayers(Array.Empty<PlayerDef>());
@@ -324,14 +325,14 @@ sealed partial class MainForm
         var key = LedgerKey.Piece(piece.Id);
         g.Execute(new LedgerDelta(key, fuel.Id, Ledger.Get(g.State, key, fuel.Id) ?? 0, 7731, "manual", null, null, "smoke", null, null, "Smoke", null, null, piece.Id, null));
         string Json(string side) => System.Text.Json.JsonSerializer.Serialize(
-            PlayerView.For(g.State, pack, _session.Model, new HashSet<string> { side }), QuartermasterJson.Options);
+            PlayerView.For(g.State, pack, _session.Model, new HashSet<string> { side }), QuartermasterJson.Options);   // deliberately one raw side (not a held set): which single side owns the marker
         var seeing = sides.Take(2).Where(s => Json(s).Contains("7731", StringComparison.Ordinal)).ToList();
         var viewer = seeing.Count == 1 ? (seeing[0] == sides[0] ? b : a) : b;
         hs.TakeOver(viewer);
         if (_handover != null) DismissHandover();
         Application.DoEvents();
         var leaked = _session.View is { } v && System.Text.Json.JsonSerializer.Serialize(v, QuartermasterJson.Options).Contains("7731", StringComparison.Ordinal);
-        var ok = seeing.Count == 1 && !leaked && _session.ViewSides is { } vs && vs.SetEquals(viewer.Sides);
+        var ok = seeing.Count == 1 && !leaked && _session.PlayerSides is { } vs && vs.SetEquals(viewer.Sides);
         Program.AppLog($"smoke: playerview {(ok ? "ok" : "FAILED")} (owners seeing the marker: {seeing.Count}, {viewer.Name}'s view leaks: {leaked})");
         if (!ok) Program.ExitCode = 1;
         OpenLedger();

@@ -725,7 +725,7 @@ sealed partial class MainForm
         var g = s.Game!;
         Check(!s.IsReplaying && _replay == null && !_replayBar.Visible && m.EndMatches && StateHash.Of(g.State) == t.EndHash,
             "replayed to the sender's end state");
-        Check(_hotSeat == null && s.ViewSides is { } vs && vs.SetEquals(blue.Sides) && _turnIdentity?.LocalPlayerId == blue.Id && _sendTurn?.Enabled == true,
+        Check(_hotSeat == null && s.PlayerSides is { } vs && vs.SetEquals(blue.Sides) && _turnIdentity?.LocalPlayerId == blue.Id && _sendTurn?.Enabled == true,
             "after the replay (Blue's view, no hot-seat, Send Turn on)");
         Check(TurnOpener.Check(s, t) == TurnCheck.AlreadyPlayed, "reopening says already played");
 

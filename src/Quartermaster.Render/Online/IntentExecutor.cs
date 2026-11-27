@@ -40,7 +40,8 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         {
             if (intent == null) return IntentResult.Refused(NotUnderstoodText);
             if (s.Game is not { } g) return IntentResult.Refused(NoGameText);
-            var held = sides ?? new HashSet<string>();
+            var held = SideFacts.Held(s.Rules, sides ?? new HashSet<string>())!;   // B8: the sender's sides and their allies; every check below reads it
+            _own = sides;   // the sender's own sides: a stamp's pack-order fallback reads them, not an ally's
             var who = string.IsNullOrWhiteSpace(playerId) ? "guest" : playerId.Length > MaxId ? playerId[..MaxId] : playerId;
             if (g.InAction) return IntentResult.Refused("The host is busy; try again.");
             return intent switch
@@ -67,7 +68,11 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             catch (Exception) { /* logging must not throw either */ }
             return IntentResult.Refused("The host could not do that.");
         }
+        finally { _own = null; }
     }
+
+    /// <summary>While <see cref="Execute"/> runs: the sender's own sides (without allies), passed to <see cref="PhaseController.ActingFor(IReadOnlySet{string}, string?, IReadOnlySet{string}?)"/>.</summary>
+    private IReadOnlySet<string>? _own;
 
     private PieceAccess Access(GameSession g, IReadOnlySet<string> sides) => new(g.State, s.Rules, s.Model, sides);
 
@@ -115,7 +120,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             if (CheckMove(g, a, m) is { } why) return IntentResult.Refused(why);
         // The guest's own log text and stamps are never trusted; a stack it may not see becomes a new stack.
         var clean = moves.Select(m => m with { LogText = null, At = null, Who = null, StackOnto = StackFor(g, a, m.MapId, m.StackOnto, out _) }).ToList();
-        using (c.ActingFor(sides, who))
+        using (c.ActingFor(sides, who, _own))
         using (g.BeginAction())
             c.ExecuteMove(clean);
         return IntentResult.Done();
@@ -163,7 +168,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             default:
                 return IntentResult.Refused(HostOnlyText);
         }
-        using (c.ActingFor(sides, who))
+        using (c.ActingFor(sides, who, _own))
         using (clean is AddPiece ? g.BeginAction() : null)   // an add and its seeds (a clone's copied values) are one undoable action
         {
             g.Execute(CommandLog.Prepare(CommandLog.Stamp(clean, who), g.State, s));
@@ -226,7 +231,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     private IntentResult Formula(IReadOnlySet<string> sides, string who, FormulaIntent f)
     {
         FormulaVerdict v;
-        using (c.ActingFor(sides, who)) v = FormulaIntentRunner.Run(s, c, sides, f, guest: true, who, Pins);
+        using (c.ActingFor(sides, who, _own)) v = FormulaIntentRunner.Run(s, c, sides, f, guest: true, who, Pins);
         return new IntentResult(v.Applied, v.Message, v);
     }
 
@@ -234,7 +239,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     private IntentResult FormulaBatch(IReadOnlySet<string> sides, string who, FormulaBatchIntent f)
     {
         FormulaBatchVerdict v;
-        using (c.ActingFor(sides, who)) v = FormulaBatchRunner.Run(s, c, sides, f, guest: true, who, Pins);
+        using (c.ActingFor(sides, who, _own)) v = FormulaBatchRunner.Run(s, c, sides, f, guest: true, who, Pins);
         return new IntentResult(v.Applied, v.Message) { BatchVerdict = v };
     }
 
@@ -318,7 +323,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     private IntentResult Phase(IReadOnlySet<string> sides, string who, Action act)
     {
         if (PhaseGate(sides) is { } why) return IntentResult.Refused(why);
-        using (c.ActingFor(sides, who)) act();
+        using (c.ActingFor(sides, who, _own)) act();
         return IntentResult.Done();
     }
 
@@ -338,7 +343,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             return IntentResult.Refused($"{(string.IsNullOrWhiteSpace(asked.Name) ? asked.Id : asked.Name)} is playing {cur.Name}; wait for your phase.");
         if (repeat && PhaseController.RepeatAskOf(pack, s.Game!.State) == null) return IntentResult.Refused(NotUnderstoodText);
         string? pass;
-        using (c.ActingFor(sides, who))
+        using (c.ActingFor(sides, who, _own))
         {
             var v = c.View();
             if (v.BeforeStart) { c.Start(); pass = null; }
@@ -357,7 +362,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
     {
         if (BadId(rowId)) return IntentResult.Refused(NotUnderstoodText);
         string? why;
-        using (c.ActingFor(sides, who)) why = c.ActOnSchedule(rowId!);
+        using (c.ActingFor(sides, who, _own)) why = c.ActOnSchedule(rowId!);
         return why == null ? IntentResult.Done() : IntentResult.Refused(why);
     }
 

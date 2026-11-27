@@ -24,6 +24,8 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     const string PhasesTitle = "Phases";
     internal const string SealedTip = "Every side answers this row in secret; the answers are applied together, in side order, once every side has answered.";
     internal const string AsksSideTip = "The side whose player answers this run, in every difficulty. Only in a phase without a side, with For each = Once. (none) = no one is asked.";
+    internal const string AllianceTip = "Sides with the same alliance see what each other sees and may act on each other's units and in each other's phases. Blank = no alliance.";
+    internal const string FormerIdsTip = "Ids this side had in older versions of the pack, separated by commas. Saved games that use them read as this side.";
     const string NoSide = "(none)";
     static readonly string[] FiresForNames = ["Acting side", "Other side", "Any side"];   // in MoveSide order
 
@@ -39,6 +41,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
 
     readonly ListBox _sides = new();
     readonly TextBox _sideFilter = new();
+    readonly TextBox _sideAlliance = new(), _sideFormer = new();
     readonly TextBlock _sideFilterErr = new() { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap };
     readonly ListBox _phases = new() { SelectionMode = SelectionMode.Multiple };
     readonly Control _right;
@@ -69,7 +72,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     readonly EditGrid _move = new() { Height = 100 };
     readonly EditGrid _warn = new() { Height = 110 };
     readonly TextBox _issues = new() { IsReadOnly = true, Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, Height = 52, BorderThickness = new Thickness(0) };
-    readonly Button _bSideAdd = new() { Content = "Add…", Width = 52 }, _bSideRename = new() { Content = "Rename…", Width = 62 }, _bSideDel = new() { Content = "Remove", Width = 56 };
+    readonly Button _bSideAdd = new() { Content = "Add…", Width = 52 }, _bSideRename = new() { Content = "Rename…", Width = 62 }, _bSideDel = new() { Content = "Remove", Width = 56 }, _bSideMerge = new() { Content = "Merge into…", Width = 84 };
     readonly Button _bAdd = new() { Content = "Add", Width = 50 }, _bDup = new() { Content = "Duplicate", Width = 62 }, _bDel = new() { Content = "Remove", Width = 56 },
         _bUp = new() { Content = "Move Up", Width = 62 }, _bDown = new() { Content = "Move Down", Width = 74 },
         _bBlock = new() { Content = "Make block from selection…" }, _bUnblock = new() { Content = "Remove block" };
@@ -105,17 +108,24 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         });
 
         // ----- left: phases above sides -----
-        var sideBtns = Row(_bSideAdd, _bSideRename, _bSideDel);
+        var sideBtns = Row(_bSideAdd, _bSideRename, _bSideDel, _bSideMerge);
         var filterRow = new StackPanel { Margin = new Thickness(0, 2, 0, 0) };
         filterRow.Children.Add(new TextBlock { Text = "Units of this side:" });
         filterRow.Children.Add(_sideFilter);
         filterRow.Children.Add(_sideFilterErr);
+        var allianceLabel = new TextBlock { Text = "Alliance:" };
+        var formerLabel = new TextBlock { Text = "Former ids:" };
+        ToolTip.SetTip(allianceLabel, AllianceTip);
+        ToolTip.SetTip(_sideAlliance, AllianceTip);
+        ToolTip.SetTip(formerLabel, FormerIdsTip);
+        ToolTip.SetTip(_sideFormer, FormerIdsTip);
+        foreach (var c in new Control[] { allianceLabel, _sideAlliance, formerLabel, _sideFormer }) filterRow.Children.Add(c);
         var sidesInner = new DockPanel();
         Dock(sidesInner, sideBtns, Avalonia.Controls.Dock.Top);
         Dock(sidesInner, filterRow, Avalonia.Controls.Dock.Bottom);
         sidesInner.Children.Add(_sides);
         var sidesBox = Box("Sides", sidesInner);
-        sidesBox.Height = 190;
+        sidesBox.Height = 290;
 
         var phaseBtns = new WrapPanel();
         foreach (var b in new[] { _bAdd, _bDup, _bDel, _bUp, _bDown, _bBlock, _bUnblock }) { b.Margin = new Thickness(0, 0, 2, 2); phaseBtns.Children.Add(b); }
@@ -193,6 +203,9 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         _sides.SelectionChanged += (_, _) => Run(OnSideSelected);
         _sideFilter.OnTextSet(() => { if (_loading) return; _sideFilterErr.Text = FormulaEdit.SyntaxProblem(_sideFilter.Text) ?? ""; Kick(); });
         _sideFilter.LostFocus += (_, _) => Run(Flush);
+        _sideAlliance.LostFocus += (_, _) => Run(Flush);
+        _sideFormer.LostFocus += (_, _) => Run(Flush);
+        _bSideMerge.Click += (_, _) => Run(MergeSideAsync);
 
         _bAdd.Click += (_, _) => Run(AddPhaseAsync);
         _bDup.Click += (_, _) => Run(() => Structural(p => PhaseEdit.Duplicate(p, SelectedIndex), nextIndex: SelectedIndex + 1));
@@ -491,6 +504,11 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             _sideFilter.IsEnabled = sd != null;
             if ((_sideFilter.Text ?? "") != (sd?.UnitFilter ?? "")) _sideFilter.Text = sd?.UnitFilter ?? "";
             _sideFilterErr.Text = FormulaEdit.SyntaxProblem(_sideFilter.Text) ?? "";
+            _sideAlliance.IsEnabled = _sideFormer.IsEnabled = _bSideMerge.IsEnabled = sd != null;
+            var al = sd?.AllianceId ?? "";
+            if ((_sideAlliance.Text ?? "") != al) _sideAlliance.Text = al;
+            var fo = string.Join(", ", sd?.FormerIds ?? []);
+            if ((_sideFormer.Text ?? "") != fo) _sideFormer.Text = fo;
         }
         finally { _loading = prev; }
     }
@@ -639,6 +657,22 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
             CommitPack(p => PhaseEdit.SetSideFilter(p, sid, f).Pack);
             ShowIssues();
         }
+        if (_selectedSide is { } sid2 && _s.Rules?.Sides.FirstOrDefault(x => x.Id == sid2) is { } sd2)
+        {
+            var al = _sideAlliance.Text;
+            if ((sd2.AllianceId ?? "") != (al ?? "").Trim())
+            {
+                CommitPack(p => PhaseEdit.SetSideAlliance(p, sid2, al).Pack);
+                ShowIssues();
+            }
+            var fo = _sideFormer.Text;
+            if (_s.Rules?.Sides.FirstOrDefault(x => x.Id == sid2) is { } sd3
+                && string.Join("\n", PhaseEdit.SetSideFormerIds(_s.Rules, sid2, fo).Pack.Sides.First(x => x.Id == sid2).FormerIds ?? []) != string.Join("\n", sd3.FormerIds ?? []))
+            {
+                CommitPack(p => PhaseEdit.SetSideFormerIds(p, sid2, fo).Pack);
+                ShowIssues();
+            }
+        }
     }
 
     void OnSideChosen()
@@ -693,6 +727,25 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
         if (_selectedSide != id || _s.Rules?.Sides.All(x => x.Id != id) != false) return;
         _timer.Stop();
         _s.UpdateRules(p => PhaseEdit.RemoveSide(p, id).Pack);
+    }
+
+    async Task MergeSideAsync()
+    {
+        Flush();
+        if (_selectedSide is not { } id || _s.Rules is not { } pack || pack.Sides.FirstOrDefault(x => x.Id == id) is not { } sd || Owner is not { } w) return;
+        var typed = await _dialogs.AskTextAsync(w, "Merge side", $"Name of the side to merge \"{sd.Name}\" into:", "");
+        if (string.IsNullOrWhiteSpace(typed) || _selectedSide != id || _s.Rules is not { } pack2) return;
+        typed = typed.Trim();
+        var target = pack2.Sides.FirstOrDefault(x => string.Equals(x.Name.Trim(), typed, StringComparison.OrdinalIgnoreCase))
+            ?? pack2.Sides.FirstOrDefault(x => x.Id == typed);
+        if (target == null) { await Warn($"No side is named \"{typed}\""); return; }
+        var (next, err) = PhaseEdit.MergeSide(pack2, id, target.Id);
+        if (err != null) { await Warn(err); return; }
+        if (!await _dialogs.AskYesNoAsync(w, $"Merge \"{sd.Name}\" into \"{target.Name}\"? Its phases, holders, maps and alerts move to \"{target.Name}\", and saved games that used it read as \"{target.Name}\".", "Merge side", defaultNo: true)) return;
+        if (_selectedSide != id || !ReferenceEquals(_s.Rules, pack2)) return;
+        _selectedSide = target.Id;
+        _timer.Stop();
+        _s.UpdateRules(_ => next);
     }
 
     // ---------- phases ----------
@@ -1158,6 +1211,9 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     internal TextBlock ConditionLabel => _condLabel;
     internal TextBlock ConditionHint => _condHint;
     internal TextBox SideFilter => _sideFilter;
+    internal TextBox AllianceBox => _sideAlliance;
+    internal TextBox FormerIdsBox => _sideFormer;
+    internal Button SideMergeButton => _bSideMerge;
     internal TextBlock SideFilterError => _sideFilterErr;
     internal TextBox Issues => _issues;
     internal ListBox Checklist => _check;

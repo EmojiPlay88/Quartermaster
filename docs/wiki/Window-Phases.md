@@ -47,11 +47,11 @@ If you press **Next Phase** while rows have not run yet, the game moves on and t
 
 ### Asked runs
 
-A phase with no side can give a start (or end) row **Asks side**. The run is queued for that side in every difficulty and shows in the open list as `{formula} — {side name} answers`. Only a player holding that side sees and applies it (in a solo game, anyone); another player who tries is told `That calculation belongs to a side you don't hold.` The rows after it wait for the answer.
+A phase with no side can give a start (or end) row **Asks side**. The run is queued for that side in every difficulty and shows in the open list as `{formula} — {side name} answers`. Only a player holding that side or an ally of it sees and applies it (in a solo game, anyone); another player who tries is told `That calculation belongs to a side you don't hold.` Its window opens by itself only for the player holding the asked side; an ally finds it in the phase panel's open list and may open and answer it from there. The rows after it wait for the answer.
 
 ### Sealed answers
 
-A start row with **Sealed** ticked (a phase with no side) queues one run for every side, in pack order. A side answers its own run like an asked run; the phase panel then says `Answer sealed; it is applied when every side has answered.` and the log says `{Side} has answered {formula} (sealed)` for everyone, with no value. A side that has answered has no open run left, and a second answer says `Your sealed answer is already in.` Online, another side's player who presses Next Phase while a side still has to answer is told `{Side} is playing {phase}; wait for your phase.` When the last side has answered, the log says `{formula}: every side has answered`, the answers are applied in side order as one step (one Undo takes back the last answer and the whole release), and the rows after it continue. A run that cannot be applied logs `{formula}: {Side}: {error}`. If Next Phase leaves the phase while some answers are in and others missing, the log says `{formula}: not every side answered; the sealed answers were discarded`. See [Sealed answers](Making-a-Rules-Pack#sealed-answers).
+A start row with **Sealed** ticked (a phase with no side) queues one run for every side, in pack order. A side answers its own run like an asked run: it opens by itself only for the player holding that side, and an ally may also open it from the phase panel and answer it (see [Alliances](Making-a-Rules-Pack#alliances)). The phase panel then says `Answer sealed; it is applied when every side has answered.` and the log says `{Side} has answered {formula} (sealed)` for everyone, with no value. Allies see each other's answers before release; other sides never do. A side that has answered has no open run left, and a second answer says `Your sealed answer is already in.` Online, another side's player who presses Next Phase while a side still has to answer is told `{Side} is playing {phase}; wait for your phase.` When the last side has answered, the log says `{formula}: every side has answered`, the answers are applied in side order as one step (one Undo takes back the last answer and the whole release), and the rows after it continue. A run that cannot be applied logs `{formula}: {Side}: {error}`. If Next Phase leaves the phase while some answers are in and others missing, the log says `{formula}: not every side answered; the sealed answers were discarded`. See [Sealed answers](Making-a-Rules-Pack#sealed-answers).
 
 ### Reset lines
 
@@ -134,6 +134,10 @@ At the last phase of a block that repeats until a player stops, Next Phase asks 
 ### Reacting sides
 
 When a phase lists sides that also act in it, the phase panel shows `Reacting: {names}` under the side. A player at the screen who holds only a reacting side sees `{side} is playing {phase}; you may react`: Next Phase and the checklist stay with the phase's own side, but the reacting player can run formulas that need no counter and write global values. See [Sides that react](Making-a-Rules-Pack#sides-that-react).
+
+### Phases of an ally
+
+A player may act in a phase whose side is an ally's (same alliance in the rules pack): run its formulas, tick its checklist, acknowledge its warnings and press Next Phase. The hand-over in hot-seat still goes to the player holding the phase's side. A run made there is stamped with the ally's side. See [Alliances](Making-a-Rules-Pack#alliances).
 
 ### Due list
 
