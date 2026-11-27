@@ -116,10 +116,10 @@ public static class PieceFilter
         catch (Exception) { return null; }
     }
 
-    /// <summary>Formulas that need a unit (a Unit binding or output, or a Piece binding limited to the unit's hex) and apply to this piece, ordered by name.</summary>
+    /// <summary>Formulas that need a unit (a Unit binding or output, or a Piece or Draw binding limited to the unit's hex) and apply to this piece, ordered by name.</summary>
     public static IReadOnlyList<FormulaDef> FormulasFor(RulesPack pack, PieceInstance p, GameState s, ModuleModel model) =>
         pack.Formulas
-            .Where(f => f.Bindings.Any(b => b.Kind == BindingKind.Unit || (b.Kind == BindingKind.Piece && b.SameHex)) || f.Outputs.Any(o => o.Target == OutputTarget.Unit))
+            .Where(f => f.Bindings.Any(b => b.Kind == BindingKind.Unit || (b.Kind is BindingKind.Piece or BindingKind.Draw && b.SameHex)) || f.Outputs.Any(o => o.Target == OutputTarget.Unit))
             .Where(f => Matches(f.AppliesTo, p, s, model, pack))
             .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(f => f.Id, StringComparer.Ordinal)

@@ -34,4 +34,7 @@ public sealed record PieceEffect(PieceEffectKind Kind, string PieceId, string Te
 
     /// <summary>The side of the piece acted on (null = a piece of no side): stamps its log line.</summary>
     public string? SideId { get; init; }
+
+    /// <summary>B9 #55: the Draw variable whose drawn counter this effect acts on (left out of the acting side's working); null otherwise.</summary>
+    public string? Draw { get; init; }
 }
