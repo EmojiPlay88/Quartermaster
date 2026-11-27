@@ -4,7 +4,8 @@ namespace Quartermaster.Core;
 
 /// <summary>One line of the human-readable game log. Kind is a <see cref="LogKind"/> value; unknown kinds are shown as system.</summary>
 /// <summary>SideId: the side the entry was explicitly made for (formula runs, stamped by the caller); null when not stamped.</summary>
-/// <summary>FormulaId: the formula whose working a calc line shows (so <see cref="PlayerView"/> can hide working with hidden inputs); null otherwise.</summary>
+/// <summary>FormulaId: the formula whose working a calc line shows (so <see cref="PlayerView"/> can hide working with hidden inputs), or
+/// (B9 #55) whose draw a side-stamped System line reports (kept only for that side); null otherwise.</summary>
 /// <summary>Error: the line reports a failure (a run that failed or was refused, a missing formula, an invalid filter); omitted when false.
 /// <see cref="PlayerView"/> clears it on a line it redacts.</summary>
 public sealed record LogEntry(long Seq, string Kind, string Text, string? Who, string? PieceId, string? MapId, DateTimeOffset At, int? Turn = null, string? Phase = null, string? SideId = null,

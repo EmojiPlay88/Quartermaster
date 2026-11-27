@@ -872,10 +872,11 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
         // B9 #55: one System line per drawn counter, "{formula}: {Var}: {n} on {name}", on the counter and stamped with its side (no side: public);
         // its formula id marks it as the counter's side's own line (PlayerView drops it for other sides).
+        // A preview without the counters' names and sides (not made by the runner) logs no line: an unstamped line would be public (fail closed).
         foreach (var d in draws)
-            for (var i = 0; i < d.Drawn.Count; i++)
+            for (var i = 0; i < d.Drawn.Count && d.Lines.Count == d.Drawn.Count; i++)
             {
-                var (name, side) = i < d.Lines.Count ? d.Lines[i] : (PieceChoices.UnknownName, null);
+                var (name, side) = d.Lines[i];
                 list.Add(new AddLogLine(LogKind.System, $"{t.Formula.Name}: {d.Variable}: {d.Drawn[i].Count} on {name}", d.Drawn[i].PieceId, SideId: side,
                     FormulaId: t.Formula.Id));
             }
@@ -1340,7 +1341,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
             var view = s.IsPlayerView;
             Func<string, bool>? held = view ? HiddenValues.HeldBy(s) : null;
-            if (view && (PieceAccess.PiecesMayHide(owner._pack, owner._model, s.ViewSides?.ToHashSet(StringComparer.Ordinal)) || PoolFilterMayHide(owner._pack, b.PieceFilter)))
+            if (view && (PieceAccess.PiecesMayHide(owner._pack, owner._model, s.ViewSides?.ToHashSet(StringComparer.Ordinal)) || FormulaVariables.FilterMayHide(owner._pack, b.PieceFilter)))
                 throw new Missing(HiddenText);
             var pool = new List<(PieceInstance Piece, int Count)>();
             string? hexLoc = null;
@@ -1400,20 +1401,6 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             try { return PropertyValues.Get(s, owner._pack, owner._model, LedgerKey.Piece(p.Id), weight, Filters) ?? 0; }
             catch (EvalError ex) when (ex.HiddenData) { throw new Missing(HiddenText); }
             catch (EvalError ex) when (ex.MissingValue) { return 0; }
-        }
-
-        /// <summary>A pool filter that may read data a viewer lacks (the piece-aggregate filter rule: a non-Public property, holder(), an
-        /// aggregate, a hidden table override, a keyed read of a non-Public value or of a holder; unparsable fails closed).</summary>
-        private static bool PoolFilterMayHide(RulesPack pack, string? filter)
-        {
-            if (string.IsNullOrWhiteSpace(filter)) return false;
-            AstExpr e;
-            try { e = Parser.Parse(filter); }
-            catch (ParseError) { return true; }
-            return ExprFacts.HolderReads(e).Count > 0 || ExprFacts.AggregateReads(e).Count > 0
-                || Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p))
-                || ExprFacts.LookupTables(e).Any(t => FormulaVariables.LookupHidden(pack, t))
-                || ExprFacts.KeyedReads(e).Any(k => k.Holder != null || !PropertyFacts.IsPublic(pack, pack.PropertyByName(k.Property)));
         }
 
         private PropertyDef Prop(VariableBinding b) =>

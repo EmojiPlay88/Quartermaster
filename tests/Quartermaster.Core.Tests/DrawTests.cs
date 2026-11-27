@@ -418,4 +418,96 @@ public class DrawTests
         Assert.Equal("Formula \"Shore battery\": output 1: Reveal cannot act on the counters of draw \"Hits\"",
             DrawFx.Run(DrawFx.State(), DrawFx.Pack(f), DrawFx.Request()).Error);
     }
+
+    [Fact]
+    public void Filter_may_hide_is_the_aggregate_filter_rule()
+    {
+        // one test shared by the pool on a view, the masking and the piece aggregates (host and guest agree)
+        var pack = DrawFx.Pack();
+        Assert.False(FormulaVariables.FilterMayHide(pack, null));
+        Assert.False(FormulaVariables.FilterMayHide(pack, " "));
+        Assert.False(FormulaVariables.FilterMayHide(pack, "side() == \"Southern Compact\""));
+        Assert.False(FormulaVariables.FilterMayHide(pack, "Salvos > 0"));                       // Public
+        Assert.True(FormulaVariables.FilterMayHide(pack, "Boats > 0"));                         // Private
+        Assert.True(FormulaVariables.FilterMayHide(pack, "sum(Salvos, \"\") > 0"));             // an aggregate
+        Assert.True(FormulaVariables.FilterMayHide(pack, "holder(\"Global\", \"Salvos\") > 0")); // holder()
+        Assert.True(FormulaVariables.FilterMayHide(pack, "Boats >"));                           // does not parse: fail closed
+        foreach (var filter in new[] { null, "Salvos > 0", "Boats > 0", "Boats >" })
+            Assert.Equal(FormulaVariables.FilterMayHide(pack, filter), FormulaVariables.AggregateCallHidden(pack, "sum", "Salvos", filter, false));
+    }
+
+    [Fact]
+    public void All_zero_weights_draw_nothing()
+    {
+        var s = new GameState { GameId = "g" };
+        DrawFx.Add(s, "b1", "SC 1 Barge", 0);
+        DrawFx.Add(s, "b2", "SC 2 Barge", 0);
+        var t = DrawFx.Run(s, DrawFx.Pack(), DrawFx.Request("3"));
+        Assert.Null(t.Error);
+        Assert.Equal(0.0, t.Result!.Value.Number);
+        Assert.Empty(DrawFx.Split(t));
+        Assert.Empty(t.DrawRolls);
+        Assert.Empty(t.Outputs);
+    }
+
+    [Fact]
+    public void Unset_weight_reads_default_and_computed_weight_reads_value()
+    {
+        // Boats Default 2: SC 3 Barge has no ledger, so it has 2 members
+        var s = DrawFx.State();
+        s.Ledgers.Remove(LedgerKey.Piece("b3"));
+        var basePack = DrawFx.Pack();
+        var withDefault = basePack with { Properties = basePack.Properties.Select(p => p.Id == "p-boats" ? p with { Default = 2 } : p).ToList() };
+        var t = DrawFx.Run(s, withDefault, DrawFx.Request("100"));
+        Assert.Equal(new[] { ("b1", 3), ("b2", 1), ("b3", 2), ("b4", 2) }, DrawFx.Split(t));
+        // a computed weight (Public Load = Boats * 2, not for SC 2 Barge): one that does not apply is 0
+        var load = new PropertyDef
+        {
+            Id = "p-load", Name = "Load", Scope = PropertyScope.Pieces, Visibility = Visibility.Public, Expr = "Boats * 2",
+            AppliesTo = "name() != \"SC 2 Barge\"",
+        };
+        var computed = DrawFx.Pack(DrawFx.Battery(DrawFx.Hits(weight: "p-load"))) is var cp ? cp with { Properties = cp.Properties.Append(load).ToList() } : null!;
+        var c = DrawFx.Run(DrawFx.State(), computed, DrawFx.Request("100"));
+        Assert.Null(c.Error);
+        Assert.Equal(new[] { ("b1", 6), ("b4", 4) }, DrawFx.Split(c));
+    }
+
+    [Fact]
+    public void Draw_no_output_acts_on_still_logs_lines()
+    {
+        var f = DrawFx.Battery(outputs: new[] { new FormulaOutput { Target = OutputTarget.Global, Property = "p-salvos", Op = OutputOp.Add, Expr = "Hits" } });
+        var pack = DrawFx.Pack(f);
+        var (runner, _) = DrawFx.Runner(pack);
+        var t = runner.Run(DrawFx.State(), DrawFx.Request(pins: DrawFx.Pins(1, 4, 4)));
+        Assert.Null(t.Error);
+        var cmds = runner.Commands(t, null, sideId: "north");
+        Assert.Equal(LedgerKey.Holder(HolderDef.GlobalId), Assert.Single(cmds.OfType<LedgerDelta>()).Key);
+        Assert.Equal(new[] { "Shore battery: Hits: 1 on SC 1 Barge", "Shore battery: Hits: 2 on SC 4 Barge" },
+            cmds.OfType<AddLogLine>().Where(l => l.Kind == LogKind.System).Select(l => l.Text));
+        Assert.Contains("Hits = 3", Assert.Single(cmds.OfType<LedgerDelta>()).Working);
+    }
+
+    [Fact]
+    public void Undecided_precondition_holds_the_draw()
+    {
+        var f = DrawFx.Battery() with { Precondition = "Gate > 0" };
+        f = f with { Bindings = f.Bindings.Append(new VariableBinding { Variable = "Gate", Kind = BindingKind.Input }).ToList() };
+        var (runner, calls) = DrawFx.Runner(DrawFx.Pack(f));
+        var t = runner.Run(DrawFx.State(), DrawFx.Request());
+        Assert.Null(t.Result);
+        Assert.True(Assert.Single(t.Variables, v => v.Variable == "Hits").Waiting);
+        Assert.Empty(t.DrawRolls);
+        Assert.Empty(calls);
+    }
+
+    [Fact]
+    public void Preview_without_lines_logs_no_draw_line()
+    {
+        // fail closed: a preview not made by the runner has no names or sides, so no (public, unstamped) line is logged
+        var pack = DrawFx.Pack();
+        var (runner, _) = DrawFx.Runner(pack);
+        var t = runner.Run(DrawFx.State(), DrawFx.Request(pins: DrawFx.Pins(1, 4, 4)));
+        var bare = t with { Draws = t.Draws.Select(d => new DrawPreview(d.Variable, d.Drawn)).ToList() };
+        Assert.DoesNotContain(runner.Commands(bare, null, sideId: "north").OfType<AddLogLine>(), l => l.Kind == LogKind.System);
+    }
 }

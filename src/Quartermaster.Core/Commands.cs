@@ -114,7 +114,8 @@ public sealed record ResolveRun(string RunId, IReadOnlyList<string?> PieceIds, D
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Gone { get; init; }
 }
-/// <summary>FormulaId: set on a calc line that shows a formula's working (see <see cref="LogEntry.FormulaId"/>).
+/// <summary>FormulaId: set on a calc line that shows a formula's working (see <see cref="LogEntry.FormulaId"/>), and (B9 #55) on a draw's
+/// System line, which marks it as the line of its side stamp's own (PlayerView drops it for other sides).
 /// Error: the line reports a failed or refused run (see <see cref="LogEntry.Error"/>); omitted when false.</summary>
 public sealed record AddLogLine(string Kind, string Text, string? PieceId = null, DateTimeOffset? At = null, string? Who = null, string? SideId = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? FormulaId = null,

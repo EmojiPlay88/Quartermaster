@@ -218,6 +218,18 @@ public static class FormulaVariables
     {
         if (piecesMayHide || ExprFacts.IsCountAggregate(function)) return true;
         if (property == null || !PropertyFacts.IsPublic(pack, pack.PropertyByName(property))) return true;
+        return FilterMayHide(pack, filter);
+    }
+
+    /// <summary>
+    /// The B7 filter test, shared by the piece aggregates, a Draw binding's pool (B9 #55: the runner on a player view and the formula masking)
+    /// so host and guest agree: true when a unit filter read on every piece may read data a viewer who does not hold every side cannot see:
+    /// it reads a property that is not Public, calls holder() or an aggregate, looks up a table a non-Public property overrides
+    /// (<see cref="LookupHidden"/>), reads a keyed() value that is not Public or names a holder (B6), or does not parse (fail closed). Null,
+    /// blank or a filter over Public properties and piece facts: false. Depends on the pack alone.
+    /// </summary>
+    public static bool FilterMayHide(RulesPack pack, string? filter)
+    {
         if (string.IsNullOrWhiteSpace(filter)) return false;   // "" matches every piece
         Quartermaster.Rules.Expr.Expr e;
         try { e = Parser.Parse(filter); }
