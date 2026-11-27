@@ -79,6 +79,38 @@ public class FormerSidesLoadTests : IDisposable
     }
 
     [Fact]
+    public void Turn_file_player_own_sides_follow_pack_change()
+    {
+        var path = LegacySave();
+        var s = OpenWithPack(p => p);
+        s.LoadNative(path);
+        s.SetViewSides(new HashSet<string> { "league" });   // the turn file's local player, Alice
+        s.UpdateRules(p => WithFormer(p, "league"));
+        Assert.Equal(new[] { "red" }, s.PlayerSides!);
+        Assert.Equal(new[] { "red" }, s.ViewSides!);
+        Assert.Equal("red", s.ActorSide());
+        Func<GameCommand, GameState, GameCommand> prepare = (cmd, st) => CommandLog.Prepare(cmd, st, s);
+        var c = new PhaseController(s, prepare);
+        new LocalActions(s, c, new HistoryController(s, c, prepare)).Chat("ready");
+        Assert.Equal("Alice: ready", s.Game!.State.Log.Last(l => l.Kind == LogKind.Chat).Text);
+    }
+
+    [Fact]
+    public void Info_logged_when_former_id_only_in_history()
+    {
+        var s0 = Open();
+        s0.LoadSetup(s0.Model.Setups[0], Difficulty.FullyAuto, new[] { Alice, Bob });   // genesis holds "league"
+        s0.Game!.Execute(new SetPlayers(new[] { new PlayerDef("p1", "Alice", new[] { "red" }), Bob }));
+        Assert.DoesNotContain(s0.Game.State.Players!, p => p.Sides.Contains("league"));
+        var path = Path.Combine(_tmp, "history.qmsave");
+        s0.SaveNative(path);
+        var s = OpenWithPack(p => WithFormer(p, "league"));
+        s.LoadNative(path);
+        var d = Assert.Single(SideDiags(s), x => x.Severity == DiagnosticSeverity.Info);
+        Assert.Equal("Former side ids in the game now read as the rules pack's sides: \"league\" → Red", d.Message);
+    }
+
+    [Fact]
     public void Load_without_former_ids_keeps_save_bytes()
     {
         var maker = OpenWithPack(p => WithFormer(p, "league"));   // the pack has a former id the save does not use

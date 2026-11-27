@@ -128,10 +128,18 @@ public sealed class ModuleSession : IDisposable
         InvalidateView();
     }
 
-    /// <summary>A rules change re-forms the held sets from the raw sides (a new or removed alliance applies to the open view at once).</summary>
+    /// <summary>
+    /// A rules change re-forms the held sets from the raw sides (a new or removed alliance applies to the open view at once). A former side id
+    /// among the player's own sides is first read as the pack's side (B8), so new commands are stamped with a side that exists.
+    /// </summary>
     private void RecomputeHeld()
     {
-        if (!IsGuest && !IsViewerCopy) _viewSides = SideFacts.Held(Rules, _playerSides);
+        if (!IsGuest && !IsViewerCopy)
+        {
+            if (_playerSides is { Count: > 0 } own && SideFacts.FormerMap(Rules) is { } map && own.Any(map.ContainsKey))
+                _playerSides = new HashSet<string>(own.Select(id => SideFacts.Canonical(Rules, id)!));
+            _viewSides = SideFacts.Held(Rules, _playerSides);
+        }
         if (IsGuest) GuestSides = SideFacts.Held(Rules, _guestSides);
     }
 
@@ -501,8 +509,7 @@ public sealed class ModuleSession : IDisposable
 
     /// <summary>
     /// B8: reads former side ids in the open game as the pack's sides (<see cref="GameSession.MapSides"/>), in memory only. Skipped for a guest,
-    /// a replayed turn, a pack without former ids, and a map equal by content to the one last applied to this game. Call outside any action scope
-    /// and any deferred-Changed scope (MapSides clears the deferred flag).
+    /// a replayed turn, a pack without former ids, and a map equal by content to the one last applied to this game. Call outside any action scope.
     /// </summary>
     private void MapFormerSides()
     {
@@ -511,8 +518,8 @@ public sealed class ModuleSession : IDisposable
         if (map == null) { _lastFormerMap = null; return; }
         var last = _lastFormerMap;
         if (last != null && last.Count == map.Count && map.All(kv => last.TryGetValue(kv.Key, out var v) && v == kv.Value)) return;
-        // The former ids this game actually uses, found before the translation removes them.
-        var used = map.Where(kv => FormerSides.Uses(Game.State, new Dictionary<string, string> { [kv.Key] = kv.Value })).ToList();
+        // The former ids this game actually uses (state or history: genesis, log, redo), found before the translation removes them.
+        var used = map.Where(kv => Game.UsesSides(new Dictionary<string, string> { [kv.Key] = kv.Value })).ToList();
         bool changed;
         try { changed = Game.MapSides(map); }
         catch (InvalidOperationException ex) { Log.Add(DiagnosticSeverity.Warning, "sides", $"Could not read former side ids: {ex.Message}"); return; }   // not remembered: a later change retries

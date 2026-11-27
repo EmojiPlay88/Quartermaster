@@ -57,6 +57,16 @@ public class PhaseEditSidesTests
     }
 
     [Fact]
+    public void Set_former_ids_maps_dangling_references()
+    {
+        var p = Pack() with { Holders = new() { new HolderDef { Id = "h", Name = "Depot", SideId = "west" } } };
+        var (a, err) = PhaseEdit.SetSideFormerIds(p, "south", "west");
+        Assert.Null(err);
+        Assert.Equal("south", a.Holders.Single().SideId);
+        Assert.Same(p.Holders, PhaseEdit.SetSideFormerIds(p, "south", "older").Pack.Holders);   // nothing named: references untouched
+    }
+
+    [Fact]
     public void Merge_moves_references_and_former_ids()
     {
         var (m, err) = PhaseEdit.MergeSide(Pack(), "east", "south");

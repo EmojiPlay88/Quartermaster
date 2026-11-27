@@ -191,15 +191,16 @@ sealed partial class MainForm
         _hiddenForHandover.Clear();
     }
 
-    /// <summary>Calculations queued by the phase the new player starts in open once they are at the screen.</summary>
+    /// <summary>Calculations queued by the phase the new player starts in open once they are at the screen: those asking no side or one of the
+    /// player's own sides (an ally's ask or sealed run waits in the phase panel for its own player, B8).</summary>
     void OpenRunsAfterHandover()
     {
         if (_runsAfterHandover.Count == 0) return;
         var runs = _runsAfterHandover.ToList();
         _runsAfterHandover.Clear();
-        if (_session?.Game is not { } g) return;
+        if (_session?.Game is not { } g || _dispatch is not { } d) return;
         foreach (var r in runs)
-            if (g.State.Pending.Any(x => x.Id == r.Id)) Guard(() => OpenPendingRun(r.Id));
+            if (g.State.Pending.Any(x => x.Id == r.Id) && d.OpensByItself(r)) Guard(() => OpenPendingRun(r.Id));
     }
 
     // ---------- player switcher (status bar) ----------

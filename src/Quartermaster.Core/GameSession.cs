@@ -368,10 +368,8 @@ public sealed class GameSession
     public bool MapSides(IReadOnlyDictionary<string, string> map)
     {
         if (map == null || map.Count == 0) return false;
-        if (!FormerSides.Uses(Genesis, map) && !FormerSides.Uses(State, map)
-            && !_log.Any(c => FormerSides.Uses(c, map)) && !_redo.Any(a => a.Commands.Any(c => FormerSides.Uses(c, map))))
-            return false;
-        if (_scopeDepth > 0) throw new InvalidOperationException("Cannot translate side ids while an action scope is open.");
+        if (_scopeDepth > 0) throw new InvalidOperationException("Cannot translate side ids while an action scope is open.");   // before the scan: a misplaced call fails for every pack
+        if (!UsesSides(map)) return false;
 
         FormerSides.Apply(Genesis, map);
         for (int i = 0; i < _log.Count; i++) _log[i] = FormerSides.Apply(_log[i], map);
@@ -394,10 +392,18 @@ public sealed class GameSession
             if (keep.Contains(i + 1)) _cache[i + 1] = state.DeepClone();
         }
         foreach (var k in cached) if (_cache.ContainsKey(k)) _cacheOrder.Add(k);
-        State = state;
-        _deferred = null;
+        State = state;   // no event: an enclosing DeferChanged scope still raises its pending Changed
         return true;
     }
+
+    /// <summary>
+    /// B8: true when <see cref="Genesis"/>, <see cref="State"/>, the command log or the redo stack uses a former side id of
+    /// <paramref name="map"/> (what <see cref="MapSides"/> would translate). Read-only.
+    /// </summary>
+    public bool UsesSides(IReadOnlyDictionary<string, string> map) =>
+        map != null && map.Count > 0
+        && (FormerSides.Uses(Genesis, map) || FormerSides.Uses(State, map)
+            || _log.Any(c => FormerSides.Uses(c, map)) || _redo.Any(a => a.Commands.Any(c => FormerSides.Uses(c, map))));
 
     void ResetCache()
     {

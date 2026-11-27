@@ -26,7 +26,7 @@ public class FormerSidesOnlineTests : IDisposable
         try { Directory.Delete(_tmp, true); } catch (IOException) { }
     }
 
-    private static RulesPack Pack(string sha, string? renameBlue = null, string? renameGreen = null)
+    private static RulesPack Pack(string sha, string? renameBlue = null, string? renameGreen = null, string? renameRed = null)
     {
         var p = PhaseFixture.Pack(sha);
         var sides = p.Sides.ToList();
@@ -34,8 +34,9 @@ public class FormerSidesOnlineTests : IDisposable
         sides = sides.Select(x =>
             x.Id == "blue" && renameBlue != null ? x with { Id = renameBlue, FormerIds = new List<string> { "blue" } }
             : x.Id == "green" && renameGreen != null ? x with { Id = renameGreen, FormerIds = new List<string> { "green" } }
+            : x.Id == "red" && renameRed != null ? x with { Id = renameRed, FormerIds = new List<string> { "red" } }
             : x).ToList();
-        return p with { Sides = sides };
+        return SideFacts.MapReferences(p with { Sides = sides });
     }
 
     private (ModuleSession S, HostSession H, MemoryRelay R, QueueDispatcher D) Open()
@@ -77,6 +78,46 @@ public class FormerSidesOnlineTests : IDisposable
         Assert.Equal(new[] { "south" }, seat.Sides);
         Assert.DoesNotContain(s.Game!.State.Players!, x => x.Sides.Contains("green"));
         Assert.Contains(s.Game.State.Players!, x => x.Sides.SequenceEqual(new[] { "south" }));
+    }
+
+    [Fact]
+    public void Host_rules_change_translates_host_own_sides_stamp_and_chat()
+    {
+        var (s, h, r, d) = Open();
+        Assert.Equal(new[] { "red" }, s.PlayerSides!);
+        var seatEvents = 0;
+        h.SeatsChanged += () => seatEvents++;
+        s.UpdateRules(_ => Pack(s.Archive.Sha256, renameRed: "crimson"));
+        d.Pump();
+        Assert.Equal(new[] { "crimson" }, h.Seats.Host.Sides);
+        Assert.Equal(new[] { "crimson" }, s.PlayerSides!);
+        Assert.Equal(new[] { "crimson" }, s.ViewSides!);
+        Assert.True(seatEvents > 0, "SeatsChanged was not raised for the translated seat");
+        Assert.Null(s.Game!.State.Position);   // before the start: no phase acts, the stamp is the player's own side
+        Assert.Equal("crimson", s.ActorSide());
+        var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        var actions = new LocalActions(s, c, new HistoryController(s, c, (cmd, st) => CommandLog.Prepare(cmd, st, s)));
+        actions.Chat("ready");
+        Assert.Equal("Alice: ready", s.Game.State.Log.Last(l => l.Kind == LogKind.Chat).Text);
+        d.Pump();
+        Assert.DoesNotContain(s.Game.State.Log, l => l.SideId == "red");
+    }
+
+    [Fact]
+    public void Guest_seat_translation_raises_seats_changed()
+    {
+        var (s, h, r, d) = Open();
+        var bob = r.Guest("m1");
+        Send(d, bob, new JoinRequest("Bob", null, s.Archive.Sha256));
+        Send(d, bob, new ChooseSides(new[] { "green" }));
+        var seatEvents = 0;
+        h.SeatsChanged += () => seatEvents++;
+        s.UpdateRules(_ => Pack(s.Archive.Sha256, renameGreen: "south"));
+        d.Pump();
+        Assert.Equal(1, seatEvents);
+        s.UpdateRules(p => p with { Name = "again" });   // nothing to translate: no seat event
+        d.Pump();
+        Assert.Equal(1, seatEvents);
     }
 
     [Fact]

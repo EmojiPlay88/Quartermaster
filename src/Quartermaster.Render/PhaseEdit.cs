@@ -151,11 +151,13 @@ public static class PhaseEdit
     public static (RulesPack Pack, string? Error) SetSideAlliance(RulesPack pack, string id, string? text) =>
         (pack with { Sides = pack.Sides.Select(s => s.Id == id ? s with { AllianceId = string.IsNullOrWhiteSpace(text) ? null : text.Trim() } : s).ToList() }, null);
 
-    /// <summary>Sets the side's former ids from comma-separated text: trimmed, blanks and duplicates (ordinal) dropped, none = null.</summary>
+    /// <summary>Sets the side's former ids from comma-separated text: trimmed, blanks and duplicates (ordinal) dropped, none = null. A phase,
+    /// holder, map, alert or victory reference that names one of them now names the side (<see cref="SideFacts.MapReferences"/>, as a save and
+    /// reopen would), so the Problems list does not keep reporting it.</summary>
     public static (RulesPack Pack, string? Error) SetSideFormerIds(RulesPack pack, string id, string? text)
     {
         var ids = (text ?? "").Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal).ToList();
-        return (pack with { Sides = pack.Sides.Select(s => s.Id == id ? s with { FormerIds = ids.Count == 0 ? null : ids } : s).ToList() }, null);
+        return (SideFacts.MapReferences(pack with { Sides = pack.Sides.Select(s => s.Id == id ? s with { FormerIds = ids.Count == 0 ? null : ids } : s).ToList() }), null);
     }
 
     /// <summary>Folds side <paramref name="fromId"/> into <paramref name="intoId"/>: the target lists the merged side's id and former ids, its unit filter becomes the

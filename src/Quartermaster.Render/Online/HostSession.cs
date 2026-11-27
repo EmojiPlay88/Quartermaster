@@ -267,24 +267,34 @@ public sealed class HostSession : IDisposable
     /// <summary>Raised on the owning thread before the view changes: the new pack goes out ahead of the next snapshot.</summary>
     private void OnRulesApplied() => Guard(() =>
     {
-        TranslateSeatSides();
+        if (TranslateSeatSides())
+        {
+            // The game's player list and the host's own sides follow the translated seats; the Seats dialog and sides panel show them.
+            Post(SyncPlayers);
+            SeatsChanged?.Invoke();
+        }
         if (PackBytes() is not { } pack) return;
         foreach (var seat in Seats.Guests)
             if (seat.MemberId is { } to) Send(to, new RulesChanged(pack));
         ScheduleSnapshots();
     });
 
-    /// <summary>B8: a seat holding a former side id of the pack holds the listing side (deduplicated in order), before snapshots go out.</summary>
-    private void TranslateSeatSides()
+    /// <summary>B8: a seat holding a former side id of the pack holds the listing side (deduplicated in order), before snapshots go out.
+    /// True when any seat changed.</summary>
+    private bool TranslateSeatSides()
     {
         var rules = _s.Rules;
-        if (SideFacts.FormerMap(rules) == null) return;
+        if (SideFacts.FormerMap(rules) == null) return false;
+        var changed = false;
         foreach (var seat in Seats.All.ToList())
         {
             if (seat.Sides == null) continue;
             var mapped = seat.Sides.Select(id => SideFacts.Canonical(rules, id)!).Distinct(StringComparer.Ordinal).ToList();
-            if (!mapped.SequenceEqual(seat.Sides)) seat.Sides = mapped;
+            if (mapped.SequenceEqual(seat.Sides)) continue;
+            seat.Sides = mapped;
+            changed = true;
         }
+        return changed;
     }
 
     private void ScheduleSnapshots()

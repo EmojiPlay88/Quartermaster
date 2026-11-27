@@ -179,6 +179,43 @@ public class MapSidesSessionTests
     }
 
     [Fact]
+    public void MapSides_in_open_scope_throws_even_without_use()
+    {
+        var g = new GameSession(Start(new PlayerDef("p1", "Ann", ["north"])), "mod");
+        using (g.BeginAction("busy"))
+            Assert.Throws<InvalidOperationException>(() => g.MapSides(Map));
+    }
+
+    [Fact]
+    public void MapSides_keeps_pending_deferred_Changed()
+    {
+        var g = LeagueGame();
+        var fired = new List<GameCommand>();
+        g.Changed += c => fired.Add(c);
+        using (g.DeferChanged())
+        {
+            g.Execute(new AddLogLine(LogKind.System, "inside", At: At, SideId: "south"));
+            Assert.True(g.MapSides(Map));
+            Assert.Empty(fired);
+        }
+        Assert.Single(fired);
+    }
+
+    [Fact]
+    public void UsesSides_sees_genesis_log_and_redo()
+    {
+        var onlyGenesis = new GameSession(Start(new PlayerDef("p1", "Ann", ["league"])), "mod");
+        onlyGenesis.Execute(new SetPlayers([new PlayerDef("p1", "Ann", ["north"])], At));
+        Assert.False(FormerSides.Uses(onlyGenesis.State, Map));
+        Assert.True(onlyGenesis.UsesSides(Map));
+        var onlyRedo = new GameSession(Start(new PlayerDef("p1", "Ann", ["north"])), "mod");
+        onlyRedo.Execute(new AddLogLine(LogKind.System, "x", At: At, SideId: "union"));
+        onlyRedo.Undo();
+        Assert.True(onlyRedo.UsesSides(Map));
+        Assert.False(onlyRedo.UsesSides(new Dictionary<string, string> { ["gone"] = "north" }));
+    }
+
+    [Fact]
     public void Two_players_former_ids_both_hold_side()
     {
         var g = new GameSession(Start(new PlayerDef("p1", "Ann", ["league"]), new PlayerDef("p2", "Bo", ["union", "hills"])), "mod");

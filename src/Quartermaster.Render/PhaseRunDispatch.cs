@@ -135,19 +135,25 @@ public sealed class PhaseRunDispatch(ModuleSession s, PhaseController c, History
 
     // ---------- pending runs ----------
 
-    /// <summary>Triggers queued runs: each opens its calculation UI at once (call on the UI thread, outside Advance / ExecuteMove).</summary>
+    /// <summary>Triggers queued runs: each that <see cref="OpensByItself"/> opens its calculation UI at once (call on the UI thread, outside
+    /// Advance / ExecuteMove).</summary>
     public void OnRunsQueued(IReadOnlyList<PendingRun> runs)
     {
         ui.Status($"{runs.Count} calculation(s) waiting in the phase panel");
         // Hot-seat: the phase belongs to the next player; their calculations open once they are at the screen.
         if (HoldRuns?.Invoke(runs) == true) return;
         foreach (var r in runs)
-        {
-            // An ask run (spec #72) for a side this player does not hold is the asked player's: it waits in their phase panel.
-            if (!string.IsNullOrEmpty(r.AskSideId) && s.ViewSides is { } held && !held.Contains(r.AskSideId)) continue;
-            Observe(OpenPendingRun(r.Id));
-        }
+            if (OpensByItself(r)) Observe(OpenPendingRun(r.Id));
     }
+
+    /// <summary>
+    /// True when a queued run opens by itself for the player at the screen (queued, or released after a hot-seat handover): a run that asks
+    /// no side, or an ask or sealed run (spec #72, B7) of one of the player's own sides. An ask run of any other side waits in the phase
+    /// panel: another player's, or an ally's (B8: the ally is asked for their own answer; the player may still answer it from the phase panel,
+    /// <see cref="OpenPendingRun"/> checks the held set). Solo: every run.
+    /// </summary>
+    public bool OpensByItself(PendingRun run) =>
+        run != null && (string.IsNullOrEmpty(run.AskSideId) || s.PlayerSides is not { } own || own.Contains(run.AskSideId));
 
     /// <summary>
     /// Opens the calculation UI of a pending run in the CURRENT difficulty, whatever mode it was queued in (spec 7.3).
