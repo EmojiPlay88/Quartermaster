@@ -24,6 +24,7 @@ public sealed class HotSeat
         _phases = phases;
         phases.PhaseBoundary += CheckHandover;
         phases.RunsQueued += OnRunsQueued;
+        phases.AskTurnChanged += CheckHandover;
         s.GameReplaced += OnGameReplaced;
         s.RulesApplied += OnRulesApplied;
         Hook();
@@ -65,6 +66,7 @@ public sealed class HotSeat
         _detached = true;
         _phases.PhaseBoundary -= CheckHandover;
         _phases.RunsQueued -= OnRunsQueued;
+        _phases.AskTurnChanged -= CheckHandover;
         _s.GameReplaced -= OnGameReplaced;
         _s.RulesApplied -= OnRulesApplied;
         if (_history != null) _history.Rewound -= OnRewound;

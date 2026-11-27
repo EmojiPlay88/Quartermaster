@@ -281,8 +281,8 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
             return IntentResult.Refused(OtherSide("That value"));
         if (!s.CanEditLedgerFor(k.Key, sides)) return IntentResult.Refused(OtherSide("That value"));
         // A value the sender's view lacks (a Private place unless it holds every side) is never written for it: an unchanged answer
-        // (no log line) against a changed one would tell it the hidden value.
-        if (KeyedValues.HiddenFor(g.State, pack, sides, k.Key, prop)) return IntentResult.Refused(OtherSide("That value"));
+        // (no log line) against a changed one would tell it the hidden value. Game over lifts the hiding, not this rule (no new right, B7).
+        if (KeyedValues.HiddenForEdit(g.State, pack, sides, k.Key, prop)) return IntentResult.Refused(OtherSide("That value"));
         if (LedgerViewRules.EditKey(pack, s.Model, prop, k.Key, k.ValueKey) is not { } valueKey) return IntentResult.Refused(NotUnderstoodText);
         if (LedgerViewRules.KeyedDelta(g.State, prop, k.Key, valueKey, k.After, note) is { } delta)   // null: unchanged, no history entry
             g.Execute(CommandLog.Prepare(CommandLog.Stamp(delta, who), g.State, s));
@@ -332,6 +332,10 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         if (s.Rules is not { Phases.Count: > 0 } pack) return IntentResult.Refused("This game has no phases; only the host can change the turn.");
         if (s.Game?.State is { GameOver: not null }) return IntentResult.Refused(PhaseController.GameOverText);
         if (PhaseGate(sides) is { } why) return IntentResult.Refused(why);
+        // The host checks every guest intent: another side's open answer holds the press (the text names the side, never what it answers).
+        if (s.Game!.State is { } st && PhaseController.OpenAskFor(st, sides) is { } open && Sequencer.Current(pack, st) is { } cur
+            && pack.ById<SideDef>(open.AskSideId!) is { } asked)
+            return IntentResult.Refused($"{(string.IsNullOrWhiteSpace(asked.Name) ? asked.Id : asked.Name)} is playing {cur.Name}; wait for your phase.");
         if (repeat && PhaseController.RepeatAskOf(pack, s.Game!.State) == null) return IntentResult.Refused(NotUnderstoodText);
         string? pass;
         using (c.ActingFor(sides, who))
@@ -436,16 +440,15 @@ internal static class FormulaIntentRunner
         {
             // Nothing is executed. The visible values and the dice go back; the dice stay pinned for this sender's Apply.
             if (scope != null) scope.Previewed = true;
-            var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
-            var values = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var v in source.Variables)
-                if (v?.Variable != null && !hidden.Contains(v.Variable) && v.Value is { } val) values[v.Variable] = FormulaDialogModel.ExactText(val);
-            return new FormulaVerdict(false, boxes, dv.CanApply ? null : SafeStatus(dv, hidden), values,
-                model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal));
+            var source = model.Checked ? model.LastExpected ?? dv.ShownTrace : dv.ShownTrace;
+            var values = PreviewValues(f, source, hidden);
+            return new FormulaVerdict(false, boxes, dv.CanApply ? null : SafeStatus(dv, hidden), values, FormulaMasking.PreviewRolls(model, hidden));
         }
         if (!dv.CanApply) return new FormulaVerdict(false, boxes, SafeStatus(dv, hidden));   // the dice stay pinned for a corrected Apply
+        // B7: a precondition or guard over data hidden from the sender decided against the run: the generic text, never which condition.
+        if (FormulaDialogModel.ApplyRefusal(dv) is { } refusal) return new FormulaVerdict(false, boxes, refusal);
         // A computed value is never stored: a trace writing one is refused whole, never applied in part.
-        if (dv.Trace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
+        if (dv.ShownTrace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
             return new FormulaVerdict(false, boxes, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId));
         if (!c.ApplyFormula(i.RunId, i.PieceId, dv.Trace, model.AutoCalculated || scope?.Previewed == true))
             return new FormulaVerdict(false, boxes, NotWaitingText);
@@ -478,15 +481,19 @@ internal static class FormulaIntentRunner
         if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides) is { } why) return (null, why);
         double? moved = null;
         string? group = null;
+        string? askSide = null;
         if (i.RunId != null)
         {
             if (!c.IsPending(i.RunId, i.PieceId, f.Id)) return (null, NotWaitingText);
             // An ask run (spec #72) is the asked side's: a sender without it is refused.
             if (full.Pending.First(r => r.Id == i.RunId).AskSideId is { Length: > 0 } ask && sides != null && !sides.Contains(ask))
                 return (null, "That calculation " + ModuleSession.OtherSideText + ".");
+            // B7 #53: a sealed run takes one answer.
+            if (PhaseController.AnswerRefusal(full, i.RunId) is { } answered) return (null, answered);
             var unit = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied);
             moved = unit.Moved;
             group = f.GroupRoll ? unit.Group : null;
+            askSide = full.Pending.First(r => r.Id == i.RunId).AskSideId;
         }
         else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))
             return (null, "That formula does not apply to this unit.");
@@ -497,7 +504,7 @@ internal static class FormulaIntentRunner
         var hidden = FormulaMasking.HiddenVariables(pack, s.Model, full, f, i.PieceId, sides);
         // A Piece binding's label is resolved among the candidates the sender sees (its sides' view of the full state).
         var model = new FormulaDialogModel(runner, f, i.PieceId)
-            { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden, PickSides = sides };
+            { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden, PickSides = sides, AskSideId = askSide };
         // A grouped unit (B4) reuses the dice its roll group already drew on the run: read from the full state (a view never carries them).
         if (i.RunId != null) model.SharedRolls = RollGroups.SharedFor(full, i.RunId, i.PieceId);
         foreach (var (variable, text) in i.Typed ?? new Dictionary<string, string>())
@@ -543,14 +550,16 @@ internal static class FormulaIntentRunner
 
     /// <summary>
     /// A guest may write holders of held sides or of no side; the global holder only during a phase of a side it holds; and may run a
-    /// unit-less formula only during a phase of a side it holds (or reacts in, B5 #7). Null when allowed.
+    /// unit-less formula only during a phase of a side it holds (or reacts in, B5 #7). A Reveal output writes nothing and is not checked
+    /// (B7 #47). Null when allowed.
     /// </summary>
     private static string? GuestRule(ModuleSession s, RulesPack pack, FormulaDef f, string? pieceId, IReadOnlySet<string> sides)
     {
         if (pieceId == null && !ActingSideHeld(s, pack, sides)) return NotYourPhaseText;
         foreach (var o in f.Outputs ?? new List<FormulaOutput>())
         {
-            if (o == null) continue;
+            // B7 #47: a Reveal writes nothing, so another side's holder or counter may be named; the host decides the value.
+            if (o == null || o.Action == OutputAction.Reveal) continue;
             var global = o.Target == OutputTarget.Global || (o.Target == OutputTarget.Holder && o.HolderId == HolderDef.GlobalId);
             if (global)
             {
@@ -568,15 +577,19 @@ internal static class FormulaIntentRunner
     }
 
     /// <summary>The dialog's status when it names only variables; an evaluation error is passed on only when no input is hidden.</summary>
+    internal static Dictionary<string, string> PreviewValues(FormulaDef f, FormulaTrace source, HashSet<string> hidden) =>
+        FormulaMasking.PreviewValues(f, source, hidden);
+
     internal static string SafeStatus(DialogView dv, HashSet<string> hidden)
     {
-        // A typed value that is not among this counter's choices (or no choice left): the neutral text, never the list (B4).
-        if (dv.Trace.Variables.FirstOrDefault(v => v?.Variable != null && !hidden.Contains(v.Variable)
+        // A typed value that is not among this counter's choices (or no choice left): the neutral text, never the list (B4). Read from the run
+        // the sender is shown (B7), so a host guard's validation never depends on its hidden guard.
+        if (dv.ShownTrace.Variables.FirstOrDefault(v => v?.Variable != null && !hidden.Contains(v.Variable)
                 && v.MissingReason is InputChoices.NotOneText or InputChoices.NoChoiceText) is { } choice)
             return choice.MissingReason!;
         if (dv.Status.StartsWith("Doesn't match: ", StringComparison.Ordinal) || dv.Status.StartsWith("Waiting for: ", StringComparison.Ordinal))
             return dv.Status;
-        if (hidden.Count == 0 && dv.Trace.Error is { Length: > 0 } err) return err;
+        if (hidden.Count == 0 && dv.ShownTrace.Error is { Length: > 0 } err) return err;
         return "The formula could not be calculated.";
     }
 }
@@ -663,12 +676,10 @@ internal static class FormulaBatchRunner
             if (bi.Preview)
             {
                 if (scope != null) scope.Previewed = true;
-                var source = model.Checked ? model.LastExpected ?? dv.Trace : dv.Trace;
-                var values = new Dictionary<string, string>(StringComparer.Ordinal);
-                foreach (var v in source.Variables)
-                    if (v?.Variable != null && !hidden.Contains(v.Variable) && v.Value is { } val) values[v.Variable] = FormulaDialogModel.ExactText(val);
+                var source = model.Checked ? model.LastExpected ?? dv.ShownTrace : dv.ShownTrace;
+                var values = FormulaIntentRunner.PreviewValues(f, source, hidden);
                 verdicts.Add(new FormulaVerdict(false, boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden), values,
-                    model.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal)));
+                    FormulaMasking.PreviewRolls(model, hidden)));
             }
             else
             {
@@ -677,13 +688,13 @@ internal static class FormulaBatchRunner
                     verdicts.Add(new FormulaVerdict(false, boxes, FormulaIntentRunner.SafeStatus(dv, hidden)));
                     return Refuse(k, FormulaIntentRunner.SafeStatus(dv, hidden));   // the dice stay pinned for a corrected batch
                 }
-                if (dv.Trace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
+                if (dv.ShownTrace.Outputs.FirstOrDefault(o => o != null && LedgerViewRules.ComputedRefusal(pack, o.PropertyId) != null) is { } computed)
                     return Refuse(k, LedgerViewRules.ComputedRefusal(pack, computed.PropertyId)!);
                 verdicts.Add(new FormulaVerdict(false, boxes, null));
             }
-            if (f.GroupRoll) BatchChain.AddDrawn(group, dv.Trace);
+            if (f.GroupRoll) BatchChain.AddDrawn(group, dv.ShownTrace);
             // The next rows see this one: its commands applied to the chain's clone (the last row's never need to be).
-            var chained = dv.CanApply ? dv.Trace : model.Checked ? model.LastExpected : null;
+            var chained = FormulaMasking.ChainPreview(model, dv);
             if (k < intents.Count - 1 && chained is { Result: not null, Error: null })
             {
                 if (!cloned) { at = full.DeepClone(); cloned = true; }
@@ -715,7 +726,8 @@ internal static class FormulaBatchRunner
                     // Only a placed piece's seeds can differ from the chain: the rows applied stay (still one undo step).
                     // The guest is told how many earlier rows stay applied (counts only, as the local grid says it).
                     message = FormulaWindowRules.StoppedText(applied, k + 1);
-                    verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes, dv.CanApply ? null : FormulaIntentRunner.SafeStatus(dv, hidden));
+                    verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes,
+                        dv.CanApply ? FormulaDialogModel.ApplyRefusal(dv) : FormulaIntentRunner.SafeStatus(dv, hidden));
                     break;
                 }
                 verdicts[k] = new FormulaVerdict(true, verdicts[k].Boxes, null);

@@ -364,6 +364,74 @@ public class GuestSessionTests : IDisposable
 
     // ---- guest mode ----
 
+    /// <summary>B7 #73: at game over the host sends the full state and the guest treats it as the full state; undoing the end hides again.</summary>
+    [Fact]
+    public void Guest_game_over_sees_everything_undo_hides_again()
+    {
+        var r = Open();
+        r.Host.UpdateRules(p => p with
+        {
+            Properties = p.Properties.Append(new PropertyDef
+            {
+                Id = "spare", Name = "Spare", Scope = PropertyScope.Holders, Visibility = Visibility.Private, Expr = "Supply + 1",
+            }).ToList(),
+            Holders = p.Holders.Append(new HolderDef { Id = "redvault", Name = "RedVault", SideId = "red" }).ToList(),
+            Formulas = p.Formulas.Concat(new[]
+            {
+                new FormulaDef { Id = "f-vault", Name = "Vault check", Text = "holder(RedVault, Supply)" },
+                new FormulaDef { Id = "f-spare", Name = "Spare check", Text = "holder(RedVault, Spare)" },
+            }).ToList(),
+        });
+        var vault = LedgerKey.Holder("redvault");
+        r.Host.Game!.Execute(new LedgerDelta(vault, "supply", 0, SecretStock, "manual", null, null, null, null, null, "Alice"));
+        var bob = Join(r);
+        Pick(r, bob);
+        var depot = LedgerKey.Holder("reddepot");
+        var redPhase = r.Host.Rules!.Phases.First(p => p.SideId == "red");
+        double? Run(string formulaId)
+        {
+            var runner = new FormulaRunner(bob.S.Rules!, bob.S.Model, (n, _) => Enumerable.Repeat(1, n).ToList());
+            var t = runner.Run(bob.S.Game!.State, new RunRequest(formulaId, null, new Dictionary<string, string>(), new Dictionary<string, string>(),
+                new Dictionary<string, IReadOnlyList<int>>()));
+            return t.Result?.Number;
+        }
+        void AssertMasked()
+        {
+            var st = bob.S.Game!.State;
+            Assert.True(st.IsPlayerView);
+            Assert.Null(Ledger.Get(st, depot, "supply"));
+            Assert.True(KeyedValues.HiddenIn(st, bob.S.Rules!, depot, bob.S.Rules!.ById<PropertyDef>("supply")!));
+            Assert.Null(Ledger.Get(st, vault, "supply"));
+            Assert.Null(Run("f-vault"));   // holder(): missing, never the Default; the host fills it in
+            Assert.Null(Run("f-spare"));   // a computed holder value: missing
+            Assert.False(Decisions.ChecklistShown(redPhase, st));
+            AssertNoMarker(SecretStock.ToString(), Json(st));
+            AssertNoMarker(SecretFuel.ToString(), Json(st));
+        }
+        AssertMasked();   // before game over the host never sends the full state
+
+        r.Host.Game!.Execute(new EndGame("Blue holds the ford", new[] { "blue" }, null));
+        r.H.FlushSnapshots();
+        r.D.Pump();
+        var over = bob.S.Game!.State;
+        Assert.NotNull(over.GameOver);
+        Assert.False(over.IsPlayerView);
+        Assert.Null(over.ViewSides);
+        Assert.Equal(SecretStock, Ledger.Get(over, depot, "supply"));
+        Assert.Equal(SecretFuel, Ledger.Get(over, LedgerKey.Piece(PhaseFixture.RedOne), "fuel"));
+        Assert.False(KeyedValues.HiddenIn(over, bob.S.Rules!, depot, bob.S.Rules!.ById<PropertyDef>("supply")!));
+        Assert.Equal(SecretStock, Run("f-vault"));
+        Assert.Equal(SecretStock + 1, Run("f-spare"));
+        Assert.True(Decisions.ChecklistShown(redPhase, over));
+        Assert.True(bob.S.Game.State.Pieces.ContainsKey("secret1"));   // a unit on Red's own map too
+
+        r.Host.Game.Undo();   // out of game over: the next snapshot is a filtered view again
+        r.H.FlushSnapshots();
+        r.D.Pump();
+        Assert.Null(bob.S.Game!.State.GameOver);
+        AssertMasked();
+    }
+
     [Fact]
     public void Guest_Snapshot_UndoDisabled_SaveDisabled()
     {

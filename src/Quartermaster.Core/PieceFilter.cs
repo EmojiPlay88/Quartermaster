@@ -209,7 +209,7 @@ public static class PieceFilter
         var key = LedgerKey.Holder(holderId);
         var v = PropertyValues.Get(s, pack, filters?.Model ?? model, key, def, filters);
         if (v != null) return Value.Of(v.Value);
-        if (s.IsPlayerView && HiddenValues.HolderValueHidden(pack, holderId, def, side => s.ViewSides?.Contains(side) == true))
+        if (s.IsPlayerView && HiddenValues.HolderValueHidden(pack, holderId, def, HiddenValues.HeldBy(s)))
             throw new EvalError($"{def.Name} has no value on {holderName}") { MissingValue = true };
         return Value.Of(def.Default);
     }

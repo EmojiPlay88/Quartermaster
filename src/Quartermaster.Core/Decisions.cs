@@ -100,7 +100,7 @@ public static class Decisions
 
         foreach (var r in s.Pending ?? new())
         {
-            if (r == null) continue;
+            if (r == null || r.SealedAnswer != null) continue;   // an answered sealed run (B7 #53) waits for the other sides: nothing to decide
             var units = (r.Units ?? Array.Empty<PendingUnit>()).Where(u => u != null).ToList();
             string text;
             if (!string.IsNullOrEmpty(r.AskSideId)) text = $"{r.FormulaName} — {AskedSideName(pack, r.AskSideId)} answers";

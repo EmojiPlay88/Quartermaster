@@ -205,12 +205,43 @@ the `PhaseGate` text for the asked side: `{Side} is playing {phase}; wait for yo
   nothing the view lacks).
 
 ### Carry: masking of derived bindings and the result box (B6)
-- `FormulaMasking.HiddenVariables`, last step: a fixpoint over the bindings — a binding (any kind but Piece) whose own expressions
-  (`FormulaVariables.Sources`: auto value, "Only when", dice count, row/column) read a hidden variable is hidden too.
-- `FormulaDialogModel.View`, result box: when the formula is masked (`Hidden` not empty) the result shows only when the trace has at least
-  one Write output and every Write output is visible to the viewer (`OutputVisible`, as the "(negative)" mark); else it reads
-  `HiddenBoxText` (`hidden`, or `hidden — the host calculates` on a guest). On a guest (`HostCalculates`) a masked formula's result is always
-  hidden (its local result is built from guesses). The batch grids show the same text (they read `DialogView.ResultText`).
+- `FormulaMasking.HiddenVariables`, last step: a fixpoint over the bindings — a binding (any kind but Piece) whose own expressions read
+  hidden data is hidden too. The expressions are `FormulaVariables.Sources` (auto value, "Only when", dice count, row/column), except that
+  an Input counts only its auto value (its "Only when" makes it a host guard, below). "Reads hidden data" is one function,
+  `FormulaMasking.SourceReadsHidden`, shared with `GuardsOnHidden`: it names a hidden variable, or makes a holder(), aggregate, lookup() or
+  keyed() call while that kind of read is hidden.
+- The engine reads a hidden Input's auto value on every run (`RunRequest.AutoInputs`), so a formula with a derived hidden Input (for
+  example `B = A + 1`) still runs and applies in hot-seat. Its box keeps showing `HiddenBoxText`.
+- **Host guards, for every masked viewer** (hot-seat, the host's screen for a side, the host running a guest's intent, a guest): a typed
+  box (Input or Piece) whose "Only when" depends on hidden data (`FormulaMasking.GuardsOnHidden`) is always open and must always be filled.
+  Its text, tooltip, the validation of its typed value (`Not a number`, a range, listed choices), the status (`Waiting for: B` while it is
+  blank), Apply, Calculate (never fills it) and a preview verdict's values (never carry it) do not depend on whether the guard holds. The
+  engine evaluates the guard on the full state and ignores the typed value when the guard is false. While such a box is blank no working is
+  shown. The host's verdict to a guest is the same whether or not the guard holds; it always asks for the value.
+- **Preconditions over hidden data** (`FormulaMasking.PreconditionGuard`) are host-decided for every masked viewer: no refusal text and no
+  disabled Apply before Apply depend on them. The dialog (not on an online guest, whose own run is guesses the host replaces) builds its view
+  from a shown run that ignores the precondition (`RunRequest.IgnorePrecondition`) and resolves every guard box as if its guard held
+  (`RunRequest.ForceWhen`), exposed as `DialogView.Shown` / `ShownTrace`; `DialogView.Trace` stays the real run, the only one ever applied.
+  When the real run is refused (or fails) at Apply, `FormulaDialogModel.ApplyRefusal` gives the existing generic
+  `FormulaMasking.ErrorHiddenText` (`The formula could not be calculated.`), never which condition failed: on the local formula windows and
+  in the host's verdict (single runs and menu batch rows).
+- `FormulaDialogModel.View`, result box: an unmasked formula shows its result. A masked formula (`Hidden` not empty) never previews its
+  result or its "(negative)" mark before Apply: the result box reads `HiddenBoxText` (`hidden`, or `hidden — the host calculates` on a guest)
+  whether or not its writes are visible, since a previewed result could show the hidden value, or change with it as the viewer retypes a
+  value compared with it. After Apply the ledger shows what the viewer may see. The batch grids show the same text (they read
+  `DialogView.ResultText`).
+- **One rule for everything before Apply** (Task 3 round 3): for a viewer who lacks data a formula reads (`DialogView.Masked`), everything
+  shown or sent before Apply comes from the shown run (`DialogView.ShownTrace`), never the real one: the formula dialog, a guest's verdict
+  texts (`SafeStatus`, including `Not one of the choices for this piece` and `No choice for this piece`) and preview values
+  (`FormulaMasking.PreviewValues`), the batch grids' Ledger column (`FormulaMasking.LedgerPreview`: every output of a masked row reads
+  `{Prop} changes (hidden)`) and `goes negative` (`FormulaMasking.GoesNegativePreview`: never for a masked row), and a batch's preview chain
+  and roll-group draw (`FormulaMasking.ChainPreview`). The dice of a masked formula are not shown or sent before Apply: no inline rolls, Roll
+  boxes read `HiddenBoxText` (dice the player types in physical-dice mode stay theirs), a preview verdict carries no dice and no Roll values
+  (`FormulaMasking.PreviewRolls`). The dice stay pinned in the dialog or on the host, so the Apply uses them and asking again rolls nothing
+  new. Only the real run is applied.
+- Accepted by design: what Apply itself shows (the log, visible writes, the dice in the log) and probing a hidden precondition by repeated
+  Apply attempts. **Pack authors** must not put a hidden value into a dice count, or into a write the viewer can see, when they want it kept
+  secret: after Apply the dice and the visible ledger show it (Task 11 documents this in the wiki).
 
 ### Carry: one resolver for a schedule row's zone map (B5/B6)
 `ScheduleDue.ZoneMapIn` delegates to `MapRefs.Find`; the validator's schedule check uses `MapRefs.Find(_module.Maps, row.ZoneMapId)`

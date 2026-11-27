@@ -1181,7 +1181,7 @@ public static class RulesValidator
 
     /// <summary>
     /// B7: true when a choices or piece filter may read a value another side may not see, in a pack with two or more sides: a property that is not
-    /// Public (bare name or keyed()), holder() or keyed() with a holder argument of a holder that has a side, or an aggregate over hidden data
+    /// Public (bare name or keyed()), holder() of a value that is not Public of a holder that has a side, or an aggregate over hidden data
     /// (<see cref="FormulaVariables.AggregateCallHidden"/> with <c>piecesMayHide: false</c>). A filter that does not parse reads nothing here (it is reported elsewhere).
     /// </summary>
     private static bool FilterMayReadHidden(RulesPack pack, string filter)
@@ -1193,8 +1193,9 @@ public static class RulesValidator
         bool Sided(string? holderName) =>
             holderName != null && pack.HolderByName(holderName) is { } h && !string.IsNullOrWhiteSpace(h.SideId) && pack.Sides.Any(s => s.Id == h.SideId);
         return Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p))
-            || ExprFacts.HolderReads(e).Any(r => Sided(r.Holder))
-            || ExprFacts.KeyedReads(e).Any(k => Sided(k.Holder) || !PropertyFacts.IsPublic(pack, pack.PropertyByName(k.Property)))
+            || ExprFacts.HolderReads(e).Any(r => Sided(r.Holder) && !PropertyFacts.IsPublic(pack, pack.PropertyByName(r.Property ?? "")))
+            // keyed(): an unknown property is reported by FilterRefProblems; a Public value is seen by every side, a sided holder's too (#74a).
+            || ExprFacts.KeyedReads(e).Any(k => pack.PropertyByName(k.Property) is { } kp && !PropertyFacts.IsPublic(pack, kp))
             || ExprFacts.AggregateReads(e).Any(a => FormulaVariables.AggregateCallHidden(pack, a.Function, a.Property, a.Filter, false));
     }
 

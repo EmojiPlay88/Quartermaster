@@ -278,9 +278,9 @@ public sealed class MenuBatchModel : IBatchRows
             if (calculate && !HostCalculates) m.Calculate(at);
             var dv = m.Evaluate(at);
             links[i] = new Link(false, null, dv);
-            if (f.GroupRoll) BatchChain.AddDrawn(group, dv.Trace);
+            if (f.GroupRoll) BatchChain.AddDrawn(group, dv.ShownTrace);
             // The rows after this one see it: its commands (the engine's expected run in the manual modes) applied to the chain's clone.
-            var chained = dv.CanApply ? dv.Trace : m.Checked ? m.LastExpected : null;
+            var chained = FormulaMasking.ChainPreview(m, dv);
             if (i < _rows.Count - 1 && chained is { Result: not null, Error: null })
             {
                 if (!cloned) { at = live.DeepClone(); cloned = true; }
@@ -317,30 +317,18 @@ public sealed class MenuBatchModel : IBatchRows
         s.Game?.State.Pieces.TryGetValue(pieceId, out var p) == true ? PieceInfo.Name(p) : pieceId;
 
     /// <summary>What the row would write. A value the viewer may not see (another side's holder) shows only its name.</summary>
-    private string LedgerOf(DialogView dv)
-    {
-        if (dv.Trace.Error != null || dv.Trace.Result == null) return "";
-        var sides = FormulaMasking.ViewerSides(s);
-        return string.Join("; ", dv.Trace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
-            ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
-            : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
-    }
+    private string LedgerOf(DialogView dv) => FormulaMasking.LedgerPreview(s, dv);
 
     private static string Num(double d) => d.ToString("0.####", CultureInfo.InvariantCulture);
 
-    private string ExceptionsOf(DialogView dv)
-    {
-        var sides = FormulaMasking.ViewerSides(s);
-        return dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o)))
-            ? "goes negative" : "";   // only for values the viewer may see
-    }
+    private string ExceptionsOf(DialogView dv) => FormulaMasking.GoesNegativePreview(s, dv) ? "goes negative" : "";   // only for values the viewer may see
 
     public IReadOnlyList<(string Key, string PropertyId)> OutputsOf(int row)
     {
         var links = Chain();
         if (row < 0 || row >= links.Length || links[row].View is not { } dv || !s.CanAct(_rows[row].PieceId)) return Array.Empty<(string, string)>();
-        return dv.Trace.Error != null || dv.Trace.Result == null ? Array.Empty<(string, string)>()
-            : dv.Trace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+        return dv.ShownTrace.Error != null || dv.ShownTrace.Result == null ? Array.Empty<(string, string)>()
+            : dv.ShownTrace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
     }
 
     /// <summary>The rows not skipped (removed by an earlier row, gone, or another side's).</summary>

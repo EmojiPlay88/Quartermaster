@@ -82,4 +82,26 @@ public class FormulaReferenceTests
         Assert.Contains("## Running on several counters", dialog);
         Assert.Contains("Roll once for the group", File.ReadAllText(Path.Combine(wiki, "Window-Rules-Workbench.md")));
     }
+    [Fact]
+    public void Wiki_mentions_visibility_reveals_and_sealed_answers()
+    {
+        var wiki = Path.Combine(DemoModuleTests.RepoRoot(), "docs", "wiki");
+        string Read(string n) => File.ReadAllText(Path.Combine(wiki, n));
+        Assert.Contains("### askside()", Page);
+        Assert.Contains("#### Reveal and Margin", Page);
+        Assert.Contains("The margin for Strength must be a whole number from 0 to 1000", Page);
+        var making = Read("Making-a-Rules-Pack.md");
+        foreach (var h in new[] { "## Visibility, reveals and sealed answers", "### Public values of a side's holder", "### Side alerts",
+                     "### Revealing a value", "### Sealed answers", "### When the game ends", "### What the Problems list says for visibility" })
+            Assert.Contains(h, making);
+        foreach (var m in new[] { "output {n} reveals no property", "output {n} margin must be a whole number from 0 to 1000",
+                     "start entry {n} is sealed, but formula \"{f}\" rolls dice", "start entry {n} is sealed, but the pack has fewer than two sides" })
+            Assert.Contains(m, making);
+        Assert.Contains("### Sealed answers", Read("Window-Phases.md"));
+        Assert.Contains("Limits the alert to one side's units; only players holding that side see it, in every phase", Read("Window-Rules-Workbench.md"));
+        Assert.Contains("Your sealed answer is already in.", Read("Playing-With-Others.md"));
+        var dialog = Read("Window-Formula-Dialog.md");
+        Assert.Contains("the box after **=** reads `hidden` (`hidden — the host calculates` for a guest online)", dialog);
+        Assert.Contains("A Roll whose count depends on hidden data is rolled by the engine even with physical dice", dialog);
+    }
 }

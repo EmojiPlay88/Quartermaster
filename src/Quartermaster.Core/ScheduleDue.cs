@@ -54,12 +54,9 @@ public static class ScheduleDue
     /// when there is no model or no such map.</summary>
     public static MapDef? ZoneMap(ModuleModel? model, string? id) => model == null ? null : ZoneMapIn(model.Maps, id);
 
-    internal static MapDef? ZoneMapIn(IReadOnlyList<MapDef> maps, string? id)
-    {
-        if (string.IsNullOrWhiteSpace(id)) return null;
-        var key = id.Trim();
-        return maps.FirstOrDefault(m => m.Id == key) ?? maps.FirstOrDefault(m => m.Name == key);
-    }
+    /// <summary>The map <see cref="MapRefs.Find"/> resolves (the one resolver, as the validator uses): trimmed, an exact id first, then an exact name.</summary>
+    internal static MapDef? ZoneMapIn(IReadOnlyList<MapDef> maps, string? id) =>
+        MapRefs.Find(maps, id);
 
     /// <summary>
     /// The counters of a row in <paramref name="s"/>: the pieces matching its <see cref="ScheduleRow.Piece"/> filter (none when blank); Arrive

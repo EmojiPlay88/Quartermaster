@@ -32,6 +32,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(DropPastTurns), "dropPastTurns")]
 [JsonDerivedType(typeof(EndGame), "endGame")]
 [JsonDerivedType(typeof(MarkScheduled), "markScheduled")]
+[JsonDerivedType(typeof(SealAnswer), "sealAnswer")]
 public abstract record GameCommand;
 
 /// <summary>CloneOf: the piece this one is a copy of (the Clone command); its stored ledger values are copied (<see cref="LedgerSeeder.BuildCloneSeeds"/>). Omitted when null.</summary>
@@ -69,7 +70,13 @@ public sealed record LedgerSeed(string Key, string PropertyId, double Value);
 /// <summary>CloneOf: set when the seeds copy a cloned piece's values from this source piece; such a seed is its own undoable step (never folding). Omitted when null.</summary>
 public sealed record SeedLedger(IReadOnlyList<LedgerSeed> Seeds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CloneOf = null) : GameCommand;
-public sealed record RollDice(string Purpose, int Count, int Sides, IReadOnlyList<int> Results, string? Expression = null, IReadOnlyList<string>? FaceTexts = null, int Modifier = 0, DateTimeOffset? At = null, string? Who = null, string? PieceId = null, string? SideId = null) : GameCommand;
+public sealed record RollDice(string Purpose, int Count, int Sides, IReadOnlyList<int> Results, string? Expression = null, IReadOnlyList<string>? FaceTexts = null, int Modifier = 0, DateTimeOffset? At = null, string? Who = null, string? PieceId = null, string? SideId = null) : GameCommand
+{
+    /// <summary>The formula whose run rolled these dice (B7 #74d): private dice follow the formula's <c>PrivateRolls</c> by id, so a rename
+    /// or a same-named formula cannot expose them. Null for a dice-tool roll and in an older save (the name-prefix rule then applies). Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FormulaId { get; init; }
+}
 public sealed record SetNotes(string Text, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetTurn(int Turn, string? Phase, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record SetPlayers(IReadOnlyList<PlayerDef> Players, DateTimeOffset? At = null, string? Who = null) : GameCommand;
@@ -81,8 +88,19 @@ public sealed record AdvancePhase(PhasePosition? From, PhasePosition To, string 
 public sealed record SetDifficulty(Difficulty Difficulty, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 /// <summary>ItemId: the item's stable id (ticked by id, <see cref="GameState.TickedIds"/>); null = ticked by <paramref name="Index"/>. Omitted when null.</summary>
 public sealed record TickChecklist(int Index, bool Ticked, string Item, DateTimeOffset? At = null, string? Who = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ItemId = null) : GameCommand;
-public sealed record AcknowledgeWarning(int Index, string Message, DateTimeOffset? At = null, string? Who = null) : GameCommand;
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ItemId = null) : GameCommand
+{
+    /// <summary>The side of the phase whose checklist was ticked (B7); its log line is that side's to read. Null in a phase with no side and in
+    /// an older save (the line stays public). Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SideId { get; init; }
+}
+public sealed record AcknowledgeWarning(int Index, string Message, DateTimeOffset? At = null, string? Who = null) : GameCommand
+{
+    /// <summary>As <see cref="TickChecklist.SideId"/>, for an acknowledged warning. Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SideId { get; init; }
+}
 public sealed record QueueRuns(IReadOnlyList<PendingRun> Runs, DateTimeOffset? At = null, string? Who = null) : GameCommand;
 public sealed record ResolveRun(string RunId, IReadOnlyList<string?> PieceIds, DateTimeOffset? At = null, string? Who = null) : GameCommand
 {
@@ -148,3 +166,10 @@ public sealed record MarkScheduled(string RowId, string Text, DateTimeOffset? At
 /// <summary>Removes every value key below <paramref name="Turn"/> of the listed turn-keyed properties, in every ledger (B6, spec #60); a ledger
 /// left empty goes. Logs nothing; ledger history is kept.</summary>
 public sealed record DropPastTurns(IReadOnlyList<string> PropertyIds, int Turn) : GameCommand;
+
+/// <summary>
+/// B7 #53: stores a side's sealed answer on its pending run (<see cref="PendingRun.SealedAnswer"/>; the run stays open until the group is
+/// released) and logs a public Turn line <paramref name="LogText"/> (<c>{Side} has answered {formula} (sealed)</c>: no value). An unknown run
+/// is ignored. <paramref name="Typed"/> holds the answer's Input values only.
+/// </summary>
+public sealed record SealAnswer(string RunId, IReadOnlyDictionary<string, string> Typed, string LogText, DateTimeOffset? At = null, string? Who = null) : GameCommand;

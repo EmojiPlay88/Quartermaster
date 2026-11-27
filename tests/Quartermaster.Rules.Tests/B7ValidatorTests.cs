@@ -236,9 +236,25 @@ public class B7ValidatorTests
         FormulaHas(Warnings(WithBinding(Choice("Secret > 0"))), ChoicesWarning);
     }
 
+    /// <summary>The pack with <paramref name="propertyId"/> made Private.</summary>
+    private static RulesPack Private(RulesPack p, string propertyId) =>
+        p with { Properties = p.Properties.Select(x => x.Id == propertyId ? x with { Visibility = Visibility.Private } : x).ToList() };
+
     [Fact]
     public void Filter_warning_piece_reads_sided_holder() =>
-        FormulaHas(Warnings(WithBinding(Pick("holder(NorthDepot, Reserve) > 0"))), PieceWarning);
+        FormulaHas(Warnings(Private(WithBinding(Pick("holder(NorthDepot, Reserve) > 0")), "p-reserve")), PieceWarning);
+
+    [Fact]
+    public void No_filter_warning_public_value_of_sided_holder()
+    {
+        // Final review F4: a Public value of a sided holder is seen by every side (#74a).
+        Assert.DoesNotContain(Warnings(WithBinding(Pick("holder(NorthDepot, Reserve) > 0"))), m => m.Contains("may not see"));
+        Assert.DoesNotContain(Warnings(WithBinding(Choice("keyed(TollBid, row(), SouthDepot) == 0"))), m => m.Contains("may not see"));
+    }
+
+    [Fact]
+    public void No_filter_warning_for_unknown_keyed_property() =>
+        Assert.DoesNotContain(Warnings(WithBinding(Choice("keyed(Nowhere, row()) == 0"))), m => m.Contains("may not see"));
 
     [Fact]
     public void Filter_warning_piece_reads_private_property() =>
@@ -246,7 +262,7 @@ public class B7ValidatorTests
 
     [Fact]
     public void Filter_warning_keyed_holder_argument() =>
-        FormulaHas(Warnings(WithBinding(Choice("keyed(TollBid, row(), SouthDepot) == 0"))), ChoicesWarning);
+        FormulaHas(Warnings(Private(WithBinding(Choice("keyed(TollBid, row(), SouthDepot) == 0")), "p-tollbid")), ChoicesWarning);
 
     [Fact]
     public void Filter_warning_aggregate_over_private_property() =>

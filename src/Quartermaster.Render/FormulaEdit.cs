@@ -424,7 +424,8 @@ public static class FormulaEdit
             PieceVariable = t == OutputTarget.Piece ? o.PieceVariable : null,
         };
 
-    /// <summary>Changing the action drops the fields only another action uses: palette entry unless Place, layer unless SetLayer, map unless Remove, the property fields and key unless Write.</summary>
+    /// <summary>Changing the action drops the fields only another action uses: palette entry unless Place, layer unless SetLayer, map unless
+    /// Remove, the property unless Write or Reveal, the property list and key unless Write, the margin unless Reveal (B7).</summary>
     public static FormulaOutput WithOutputAction(FormulaOutput o, OutputAction a) =>
         o with
         {
@@ -434,9 +435,13 @@ public static class FormulaEdit
             ToMapId = a == OutputAction.Remove ? o.ToMapId : null,
             PropertyChoice = a == OutputAction.Write ? o.PropertyChoice : null,
             PropertySelect = a == OutputAction.Write ? o.PropertySelect : null,
-            Property = a == OutputAction.Write ? o.Property : "",
+            Property = a is OutputAction.Write or OutputAction.Reveal ? o.Property : "",
             Key = a == OutputAction.Write ? o.Key : null,
+            Margin = a == OutputAction.Reveal ? o.Margin : null,
         };
+
+    /// <summary>B7: how wide a Reveal output's revealed range is (an expression); blank is null (the exact value).</summary>
+    public static FormulaOutput WithMargin(FormulaOutput o, string? margin) => o with { Margin = Blank(margin) };
 
     private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 

@@ -182,13 +182,13 @@ public static class KeyedValues
 
     /// <summary>
     /// True when <paramref name="view"/> is a player view that may lack the values of <paramref name="p"/> at <paramref name="ledgerKey"/> (a
-    /// Private place, a non-Public value of another side's piece, a holder of a side not held), as keyed() decides. A Ledger model shows such a
+    /// Private place, a non-Public value of another side's piece or holder: <see cref="HiddenValues"/>), as keyed() decides. A Ledger model shows such a
     /// value as hidden instead of the Default <see cref="KeyedTable.For"/> lists for it. False for a full state.
     /// </summary>
     public static bool HiddenIn(GameState view, RulesPack pack, string ledgerKey, PropertyDef p)
     {
         if (view == null || !view.IsPlayerView) return false;
-        return HiddenAt(view, pack, ledgerKey, p, side => view.ViewSides?.Contains(side) == true);
+        return HiddenAt(view, pack, ledgerKey, p, HiddenValues.HeldBy(view));
     }
 
     /// <summary>
@@ -200,6 +200,17 @@ public static class KeyedValues
     public static bool HiddenFor(GameState full, RulesPack pack, IReadOnlySet<string>? held, string ledgerKey, PropertyDef p)
     {
         if (full == null || pack == null || HiddenValues.SeesEverything(full, pack, held)) return false;
+        return HiddenAt(full, pack, ledgerKey, p, held!.Contains);
+    }
+
+    /// <summary>
+    /// <see cref="HiddenFor"/> as it was before the game ended: the "no blind write" rule for a manual edit. Game over lifts every hiding
+    /// rule but adds no right to act (B7 #73), so a value a player could not edit before game over (a Private place unless it holds every
+    /// side) stays unedited after it. Same rule as <see cref="HiddenFor"/> (<see cref="HiddenValues"/>), with the game-over test left out.
+    /// </summary>
+    public static bool HiddenForEdit(GameState full, RulesPack pack, IReadOnlySet<string>? held, string ledgerKey, PropertyDef p)
+    {
+        if (full == null || pack == null || HiddenValues.SeesEverything(null, pack, held)) return false;
         return HiddenAt(full, pack, ledgerKey, p, held!.Contains);
     }
 
@@ -216,7 +227,7 @@ public static class KeyedValues
     private static bool HiddenInView(GameState s, RulesPack pack, PropertyDef def, string? holderId, PieceInstance? piece,
         Lazy<Func<PieceInstance, string?>>? sides, Func<string, bool>? holds = null)
     {
-        holds ??= side => s.ViewSides?.Contains(side) == true;
+        holds ??= HiddenValues.HeldBy(s);
         if (piece != null)
             return PlayerView.IsPlaceholder(piece) || HiddenValues.PieceValueHidden(pack, def, piece, sides ?? PieceFilter.SideMap(s, pack), holds);
         return holderId != null && HiddenValues.HolderValueHidden(pack, holderId, def, holds);

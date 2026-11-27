@@ -166,6 +166,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
             {
                 Checked = s.Game!.State.Difficulty != Difficulty.FullyAuto,
                 Moved = u.Moved,
+                AskSideId = Run?.AskSideId,   // askside() names the asked side (B7)
             };
             FormulaMasking.Configure(model, s);
             _models[row] = model;
@@ -273,30 +274,21 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         try
         {
             var dv = ModelFor(row).Evaluate(s.Game.State);
-            return dv.Trace.Error != null || dv.Trace.Result == null ? Array.Empty<(string, string)>()
-                : dv.Trace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+            return dv.ShownTrace.Error != null || dv.ShownTrace.Result == null ? Array.Empty<(string, string)>()
+                : dv.ShownTrace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return Array.Empty<(string, string)>(); }
     }
 
     /// <summary>What the row would write. A value the viewer may not see (another side's holder) shows only its name.</summary>
-    private string LedgerOf(DialogView dv)
-    {
-        if (dv.Trace.Error != null || dv.Trace.Result == null) return "";
-        var sides = FormulaMasking.ViewerSides(s);
-        return string.Join("; ", dv.Trace.Outputs.Select(o => FormulaMasking.OutputShown(s, sides, o)
-            ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
-            : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
-    }
+    private string LedgerOf(DialogView dv) => FormulaMasking.LedgerPreview(s, dv);
 
     private static string Num(double d) => d.ToString("0.####", CultureInfo.InvariantCulture);
 
     private string ExceptionsFor(PendingUnit u, DialogView dv)
     {
         var parts = new List<string>();
-        var sides = FormulaMasking.ViewerSides(s);
-        if (dv.Trace.Error == null && dv.Trace.Outputs.Any(o => o.After < 0 && (FormulaMasking.OutputShown(s, sides, o))))
-            parts.Add("goes negative");   // only for values the viewer may see
+        if (FormulaMasking.GoesNegativePreview(s, dv)) parts.Add("goes negative");   // only for values the viewer may see
         if (u.PieceId != null && WarningsByPiece().TryGetValue(u.PieceId, out var names)) parts.AddRange(names);
         return string.Join("; ", parts);
     }

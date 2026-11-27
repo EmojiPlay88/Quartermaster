@@ -6,8 +6,9 @@ namespace Quartermaster.Core;
 /// The one rule deciding whether a viewer may see a value (B7). Every check of "may this player see this holder, piece or place value"
 /// calls this class; none keeps its own copy. Callers: <see cref="PlayerView"/> (what a view keeps), <see cref="KeyedValues"/>
 /// (<c>keyed()</c> in a view, <see cref="KeyedValues.HiddenIn"/>, <see cref="KeyedValues.HiddenFor"/>), <see cref="PieceFilter"/>
-/// (<c>holder()</c> in a view), <see cref="PropertyValues"/> (computed holder values in a view), <see cref="FormulaRunner"/> (a picked
-/// piece's value in a view), and in Render the formula masking and the alert bar.
+/// (<c>holder()</c> in a view), <see cref="PropertyValues"/> (computed piece and holder values in a view), <see cref="CellOverrides"/> (a
+/// piece's cell override in a view), <see cref="FormulaRunner"/> (a picked piece's value, a Piece output target and a Reveal's value in a view), and in Render
+/// the formula masking, the alert bar and the guest's snapshot (a game-over snapshot is the full state).
 /// <para>A viewer is described by the sides it holds: <c>holds(sideId)</c>, or the held set of <see cref="SeesEverything"/>. Widening what
 /// a viewer holds (for example a side's allies) widens what it sees, everywhere at once.</para>
 /// <para>These are information rules only. What a player may change (<c>PieceAccess</c>, a session's ledger edit right, a guest intent's
@@ -85,6 +86,18 @@ public static class HiddenValues
         if (property != null && PropertyFacts.IsPublic(pack, property)) return false;
         return PieceValueHidden(pack, property, sides.Value(piece), holds, null);
     }
+
+    /// <summary>
+    /// <see cref="PieceValueHidden(RulesPack, PropertyDef?, string?, Func{string, bool})"/> for a piece whose side is not known (a deleted
+    /// piece, or a piece read inside a side's own unit filter): a side no viewer holds, so only a Public value is seen (fail closed).
+    /// </summary>
+    internal static bool UnknownSideValueHidden(RulesPack pack, PropertyDef? property, Func<PropertyDef, bool>? isPublic = null) =>
+        PieceValueHidden(pack, property, "", NoneHeld, isPublic);
+
+    /// <summary>The sides a player view holds (<see cref="GameState.ViewSides"/>), as the rules above take them; a view without sides holds none.</summary>
+    internal static Func<string, bool> HeldBy(GameState view) => side => view.ViewSides?.Contains(side) == true;
+
+    private static readonly Func<string, bool> NoneHeld = _ => false;
 
     private static bool Public(RulesPack pack, PropertyDef property, Func<PropertyDef, bool>? isPublic) =>
         isPublic?.Invoke(property) ?? PropertyFacts.IsPublic(pack, property);

@@ -386,7 +386,7 @@ Open the **Visibility** tab.
 - In **Holders**, set North Depot's owner to Northern League and South Depot's to Southern Compact. Each depot now belongs to its side.
 - Leave **Maps and org displays** and **Formulas** as they are. (Tick **Private dice** on a formula when its rolls should be secret.)
 
-How hidden values behave in hot-seat and online play is explained in [Playing With Others](Playing-With-Others).
+How hidden values behave in hot-seat and online play is explained in [Playing With Others](Playing-With-Others). Public values of a side's holder, side alerts, revealing a value and sealed answers are in [Visibility, reveals and sealed answers](#visibility-reveals-and-sealed-answers).
 
 ## Step 8: Test in the Ledger
 
@@ -685,6 +685,68 @@ Errors unless marked. Formula messages begin `Formula "Flood the ford": `.
 - `variable "x" reads keyed property "Ford depth"; use keyed() in the formula`; `keyed() needs a property name`; `keyed() reads "Strength", which is not keyed`; `refers to unknown property "x"`; `refers to unknown holder "x"`; `refers to "Ford depth", which holder "Boatyard" does not keep`; `reads keyed property "Ford depth"; use keyed()` (a bare name in a filter); `sum() cannot total keyed property "Ford depth"`; `distance() needs hex names as text`
 - A constant key that cannot be right: `keyed() key "Sloop" is not a row of table "Hull types"`, `keyed() key must be a whole turn number of at least 1`, `output 1 key "9999" is not a hex of any board` and `distance() names hex "9999", which is not on any board` (the two hex messages are checked against the module's boards, so only while a module is open)
 - Where `hex()` and `distance()` may not be used: a phase condition reads `condition may not use hex()`; a property's Applies to, a side's unit filter and a starting value reject them as they reject other piece-only functions (`Property "x": hex() is not available in a property's applies-to`); `keyed()` of a counter property in a phase condition gives `condition uses "x", which is not a global property`
+
+## Visibility, reveals and sealed answers
+
+One rule decides whether a player may see a value, and every window, log line, list of choices and alert uses it. This section collects what a pack author needs: which values other sides see, who sees an alert, how to show a player part of a hidden value, how to let every side answer in secret, and what happens when the game ends. The Visibility tab itself is described in [Step 7](#step-7-visibility-who-may-see-what).
+
+### Public values of a side's holder
+
+A holder owned by a side hides its values from the other sides, except the properties you marked **Public**. In Riverland, North Depot is owned by the Northern League. Its `Stores` property is Public, so the Southern Compact sees the depot's Stores; its `Reserve` property is Private, so the Southern Compact never sees it (and a formula the Compact runs that reads it is worked out by the host). Seeing is not acting: another side still cannot write to North Depot. A place value that is not Public stays hidden as before.
+
+### Side alerts
+
+An alert with a **Side** is shown only to players holding that side, in every phase. In Riverland an alert `Low fuel` with Side Northern League shows to the League's players whichever phase it is, and the Southern Compact's players never see it. In a solo game you hold every side, so you see it always. Alerts without a side show to everyone, as before.
+
+Two built-in alerts follow the same idea. The alert for values below zero lists only your own counters and holders (those of your sides, of no side, and the global ones); a property with nothing of yours below zero gives no chip. The warning that decisions are unacknowledged shows only while you hold the side whose phase it is (or the phase has no side).
+
+Private dice follow the formula: a roll is private exactly when the formula that rolled it has **Private rolls** ticked, so two formulas with one name, or a formula you rename, are judged correctly. A roll from the dice tool (no formula) is judged by its name as before.
+
+### Revealing a value
+
+A formula can show a player a value they could not otherwise see, exactly or as a range. Give the formula an output with **Action** `Reveal`, a **Target** (Unit, Piece, Holder or Global; not Placed) and one **Property**. It writes nothing. The **Margin** column says how wide the range is: blank or `0` shows the exact value, `2` shows a range of that width that holds the value.
+
+An invented example, `Scout the far bank`: a Piece variable `target` with the filter `side() == "Southern Compact"`, and one output with Action Reveal, Target Piece, Piece `target`, Property `Strength` and Margin `2`. When it is applied the log reads `SC 3 Barge: Strength between 4 and 6`; with Margin `0` it reads `SC 3 Barge: Strength 5` (a value with labels reads as the Ledger shows it, such as `3 (Steady)`).
+
+How it behaves:
+
+- The value is read when the formula runs, in output order, after the run's own earlier writes to the same counter and property.
+- The range is drawn by the host: the window always holds the true value, and it never starts below 0 for a value that is 0 or more. No dice line is logged.
+- Nothing of the value is shown before Apply: the working says `reveal Strength`, and no box carries the value. The log line is public to everyone who can see the counter.
+- **Margin** is an expression, worked out in the run. It must come to a whole number from 0 to 1000, or the run stops with `The margin for Strength must be a whole number from 0 to 1000`.
+- A guest may run a formula that reveals another side's value (it writes nothing); the host reads it.
+
+Cautions for the author, because hidden values can leak through what a formula does:
+
+- A hidden value used in a dice count, or written into a visible value, is revealed by the outcome after Apply. Do not do this with values you want kept secret.
+- A refused Apply over a hidden precondition writes nothing, so a player can probe it by trying Apply. This is accepted; do not put secrets alone in preconditions.
+- A reveal's Margin that reads hidden data can leak it (the refusal text or the width of the window). Keep Margin to visible data or constants.
+- Each Apply draws a fresh window, so repeating a reveal (or Apply, Undo, Apply) narrows the range toward the exact value. Limit how often a reveal can run (for example with `runs()`) if that matters.
+
+### Sealed answers
+
+Sometimes every side must answer at the same time without seeing the others' answers: a bid, an order. Add a phase `River toll` with **no side**, and tick **Sealed** on its **On start** row `Toll bid` (**For each** = Once).
+
+An invented example: the formula `Toll bid` has an Input `bid` from 0 to 10, and one output with Target Global, Property `TollBid` (keyed by the table `Toll sides`, whose rows are `Northern League` and `Southern Compact`), Op Set, Value `bid` and Key `askside()`. [`askside()`](Formula-Reference#askside) is the name of the side answering, so each side's bid is stored under its own name. The next row, `Settle toll`, can read `keyed(TollBid, "Northern League") > keyed(TollBid, "Southern Compact")`.
+
+When the phase starts, one run is queued for every side of the pack, in pack order, in every difficulty. Each side answers its own run like an asked run. The answer is not applied yet: it is stored, the answering window says `Answer sealed; it is applied when every side has answered.`, and the log says `{Side} has answered Toll bid (sealed)` for everyone, naming no value. A side cannot answer twice: `Your sealed answer is already in.` Only the answering side (and the host's full copy) holds the answer until release. When the last side has answered, the log says `Toll bid: every side has answered`, then every answer is applied in the pack's side order (later answers see earlier ones' writes), and the rows after the sealed one continue. A run that cannot be applied logs `Toll bid: {Side}: {error}`. One Undo takes back the last answer together with the whole release. If Next Phase leaves the phase before everyone has answered, the log says `Toll bid: not every side answered; the sealed answers were discarded`.
+
+A sealed row asks every side, so leave **Asks side** empty. Its formula may not roll dice or pick a piece. Online, another side's player who presses Next Phase while a side's answer is still open is told `{Side} is playing {phase}; wait for your phase.`
+
+### When the game ends
+
+When the game is over (the last turn was played, or a victory condition was met), every player sees everything: other sides' values, holders, logs and sealed answers. Nobody gains a right to act on another side's counters. If the host undoes out of the game over, the hiding rules apply again; what a player has already seen stays seen.
+
+### What the Problems list says for visibility
+
+Each formula message begins `Formula "{name}": ` and each phase message `Phase "{name}": `.
+
+- `output {n} reveals no property`; `output {n} reveals keyed property "{p}"; a reveal shows one value`; `output {n} reveals a value, so it takes no value expression`; `output {n} reveals one property; a property list cannot be revealed`; `output {n} cannot reveal a value of the placed counter`.
+- `output {n} has a margin but does not reveal`; `output {n} margin {problem}` (the margin expression does not parse; the problem says why); `output {n} margin must be a whole number from 0 to 1000` (a constant margin out of range).
+- `start entry {n} is sealed, so it must run once, not for each unit`; `start entry {n} is sealed, but only a phase without a side may have one`; `start entry {n} is sealed, so it asks every side; leave Asks side empty`; `end entry {n} is sealed; only a start entry can be sealed`.
+- `start entry {n} is sealed, but formula "{f}" rolls dice`; `start entry {n} is sealed, but formula "{f}" picks a piece`.
+- Warnings: `start entry {n} is sealed, but formula "{f}" asks for nothing`; `start entry {n} is sealed, but the pack has fewer than two sides`.
+- Warnings (only in a pack with two or more sides): `variable "{v}": its choices filter reads values another side may not see; each player chooses from what they can see` and `variable "{v}": its piece filter reads values another side may not see; each player picks from what they can see`. A list of choices or pieces is always built from what the chooser can see, so two players can be offered different lists.
 
 ## Testing a pack outside the engine (stable)
 

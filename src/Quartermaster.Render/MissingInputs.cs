@@ -14,6 +14,33 @@ public static class MissingInputs
         (s.Game?.State.Pending.FirstOrDefault(r => r.Id == run.Id) ?? run).Units.Where(u => !u.Applied);
 
     /// <summary>
+    /// B7: the run the current player is shown for one unit: with the chooser's sides (<see cref="FormulaMasking.PickSides"/>), so a choices
+    /// or piece filter is judged on the player's view; and, when the formula's precondition or a typed box's "Only when" reads data hidden
+    /// from the player (<see cref="FormulaMasking.GuardsOnHidden"/>), ignoring that precondition and resolving those boxes as if their
+    /// guard held, as the formula dialog's shown run does. What the dialog lists never depends on the hidden data.
+    /// </summary>
+    private static RunRequest Shown(ModuleSession s, FormulaDef f, PendingUnit u, IReadOnlyDictionary<string, string> typed)
+    {
+        var req = Real(s, f, u, typed);
+        var hidden = FormulaMasking.HiddenFor(s, f, u.PieceId);
+        if (hidden.Count == 0) return req;
+        var guards = FormulaMasking.GuardsOnHidden(f, hidden);
+        if (guards.Count == 0) return req;
+        HashSet<string>? force = null;
+        foreach (var b in f.Bindings)
+            if (b is { Kind: BindingKind.Input or BindingKind.Piece, Variable: { } v } && !hidden.Contains(v) && guards.Contains(v))
+                (force ??= new HashSet<string>(StringComparer.Ordinal)).Add(v);
+        return req with { IgnorePrecondition = guards.Contains(FormulaMasking.PreconditionGuard), ForceWhen = force };
+    }
+
+    /// <summary>The run that is applied for one unit: the full state's values, with the chooser's sides (B7).</summary>
+    private static RunRequest Real(ModuleSession s, FormulaDef f, PendingUnit u, IReadOnlyDictionary<string, string> typed) =>
+        new(f.Id, u.PieceId, typed, NoText, NoRolls, u.Moved, true, null, FormulaMasking.PickSides(s));
+
+    private static readonly IReadOnlyDictionary<string, string> NoText = new Dictionary<string, string>();
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<int>> NoRolls = new Dictionary<string, IReadOnlyList<int>>();
+
+    /// <summary>
     /// True when a unit of the run the current player may act for has a used Piece binding with no value: a pick is made per unit in the
     /// formula dialog, never asked once for the whole run nor filled automatically. Never throws (false on an error).
     /// </summary>
@@ -23,11 +50,9 @@ public static class MissingInputs
         {
             if (s.Game is not { } game || s.Runner is not { } runner || s.Rules?.ById<FormulaDef>(run.FormulaId) is not { } f) return false;
             if (!f.Bindings.Any(b => b is { Kind: BindingKind.Piece })) return false;
-            var none = new Dictionary<string, string>();
-            var noRolls = new Dictionary<string, IReadOnlyList<int>>();
             foreach (var u in Open(s, run).Where(u => s.CanAct(u.PieceId)))
             {
-                var trace = runner.Run(game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
+                var trace = runner.Run(game.State, Shown(s, f, u, NoText));
                 if (trace.Variables.Any(v => v.Value == null && !v.Skipped && f.Bindings.FirstOrDefault(x => x.Variable == v.Variable) is { Kind: BindingKind.Piece }))
                     return true;
             }
@@ -43,19 +68,17 @@ public static class MissingInputs
         try
         {
             if (s.Game is not { } game || s.Runner is not { } runner || s.Rules?.ById<FormulaDef>(run.FormulaId) is not { } f) return result;
-            var none = new Dictionary<string, string>();
-            var noRolls = new Dictionary<string, IReadOnlyList<int>>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var u in Open(s, run).Where(u => s.CanAct(u.PieceId)))
             {
-                var trace = runner.Run(game.State, new RunRequest(f.Id, u.PieceId, none, none, noRolls, u.Moved, true));
+                var trace = runner.Run(game.State, Shown(s, f, u, NoText));
                 foreach (var v in trace.Variables)
                 {
                     if (v.Value != null || v.MissingReason != "Waiting for input" || !seen.Add(v.Variable)) continue;
                     var b = f.Bindings.FirstOrDefault(x => x.Variable == v.Variable);
                     if (b is not { Kind: BindingKind.Input }) continue;
-                    // One answer for every unit: a choices table offers all its keys (each unit's run checks its own).
-                    result.Add(new MissingInput(v.Variable, InputChoices.For(game.State, s.Rules, s.Model, f, v.Variable, null), b.Min, b.Max));
+                    // One answer for every unit: a choices table offers all its keys (each unit's run checks its own), as the player's view has them.
+                    result.Add(new MissingInput(v.Variable, InputChoices.For(s.View ?? game.State, s.Rules, s.Model, f, v.Variable, null), b.Min, b.Max));
                 }
             }
         }
@@ -73,8 +96,7 @@ public static class MissingInputs
         var failed = new List<string>();
         var applied = 0;
         if (s.Game == null || s.Runner is not { } runner) return (0, failed);
-        var noRolls = new Dictionary<string, IReadOnlyList<int>>();
-        var none = new Dictionary<string, string>();
+        var f = s.Rules?.ById<FormulaDef>(run.FormulaId);
         var typed = new Dictionary<string, string>(values);
         var units = Open(s, run).ToList();
         using var action = s.Game.BeginAction(BatchModel.ActionLabel(run.FormulaName, units.Count(u => s.CanAct(u.PieceId))));
@@ -88,11 +110,16 @@ public static class MissingInputs
             try
             {
                 // The group's dice are read again for each unit: an earlier unit of its group may just have drawn them (B4).
-                var trace = runner.Run(s.Game.State, new RunRequest(run.FormulaId, u.PieceId, typed, none, noRolls, u.Moved, true)
-                    { SharedRolls = RollGroups.SharedFor(s.Game.State, run.Id, u.PieceId) });
+                var request = f != null
+                    ? Real(s, f, u, typed)
+                    : new RunRequest(run.FormulaId, u.PieceId, typed, NoText, NoRolls, u.Moved, true, null, FormulaMasking.PickSides(s));
+                var trace = runner.Run(s.Game.State, request with { SharedRolls = RollGroups.SharedFor(s.Game.State, run.Id, u.PieceId) });
                 if (trace.Error != null || trace.Result == null)
                 {
-                    failed.Add($"{u.Label}: {trace.Error ?? "still missing input"}");
+                    // B7: for a formula reading data hidden from the player, the reason (a refused precondition's message, a missing value
+                    // the hidden data decided) is never shown: only the generic text.
+                    var masked = f != null && FormulaMasking.HiddenFor(s, f, u.PieceId).Count > 0;
+                    failed.Add($"{u.Label}: {(masked ? FormulaMasking.ErrorHiddenText : trace.Error ?? "still missing input")}");
                     continue;
                 }
                 if (!controller.ApplyFormula(run.Id, u.PieceId, trace, false))

@@ -634,6 +634,7 @@ For example, an Input `Slot` of `1..3` and Pick by `Slot` lets the player choose
 | Remove | Deletes the counter, or with **To map** moves it to the middle of that map's first board and keeps its ledger values | Unit, Piece | not used |
 | Set layer | Sets the layer named in **Layer** to the level (1 = first level, 0 = off) | Unit, Piece, Placed | the level, a whole number |
 | Set mask | Masks (1) or unmasks (0) the counter | Unit, Piece, Placed | 1 or 0 |
+| Reveal | Shows one property's value in the log, exactly or as a range (below); writes nothing | Unit, Piece, Holder, Global | not used; **Margin** gives the range's width |
 
 How a run with these outputs behaves:
 
@@ -646,6 +647,10 @@ How a run with these outputs behaves:
 - **The working** on the formula's own lines leaves out the parts about a picked counter (the owner sees them on their line), and names an effect's counter as the player sees it: `Unknown piece` for a masked counter.
 
 Examples are in [Acting on other pieces](Making-a-Rules-Pack#acting-on-other-pieces).
+
+#### Reveal and Margin
+
+A Reveal output names a **Target** (not Placed) and one **Property**, and takes no **Value**, no property list and no keyed property. It reads the value when the run happens, in output order (after the run's earlier writes to the same counter and property), and logs one public line. **Margin** is an expression for the width of the range; blank or 0 shows the exact value. A margin above 0 draws a window that always holds the true value: with value `v` and margin `m`, one die of `m + 1` faces gives `k`, the window is `v - k` to `v - k + m`, and a window that would start below 0 for a value of 0 or more is shifted to `0` to `m`. The line reads `{subject}: {Property} {value}` (margin 0) or `{subject}: {Property} between {low} and {high}`; the subject is the counter's name as the player sees it, the holder's name, or `Global`. The window's die is never logged, and nothing of the value shows before Apply (the working says `reveal {Property}`). The margin must come to a whole number from 0 to 1000, otherwise the run stops with `The margin for Strength must be a whole number from 0 to 1000`. Keep the margin to visible data or constants; see [Revealing a value](Making-a-Rules-Pack#revealing-a-value) for the cautions.
 
 ## Computed properties
 
@@ -722,6 +727,7 @@ Most of these end with "at position N", where N counts characters from the start
 | 'clamp' low limit is above the high limit | The second argument of `clamp` is bigger than the third. | Swap them. |
 | Division by zero | The right side of `/` was 0. | Guard it: `if(Hexes == 0, 0, Fuel / Hexes)`. |
 | Result is not a finite number | A sum overflowed. | Check for huge values. |
+| The margin for Strength must be a whole number from 0 to 1000 | A Reveal output's **Margin** came out as text, a fraction, a negative number or more than 1000 (the message names the property). | Use a whole number from 0 to 1000, or leave Margin blank for the exact value. |
 | No table named 'x' | A `lookup` names a table that does not exist. | Check the spelling against the Tables tab. Write the name as it appears on the Tables tab (capitals don't matter); use one word. |
 | No row for 5 in SupplyByDistance | No row key in the table matches the value (the message shows the value and the table). | Add a row, or an open-ended row such as `5+`. |
 | No column of Landing row 2 holds 7 | `lookuprange` found the row, but no cell of it holds the value (the message shows the table, the row and the value). | Add a cell that holds it, such as an open-ended `6+`. |
