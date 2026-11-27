@@ -256,7 +256,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (b == null || (IsHidden(variable) && !IsPickBinding(b))) return;   // a hidden pick is still the viewer's to make
         _verdict.Remove(variable);
         _verdictMessage = null;
-        if (b.Kind == BindingKind.Piece) { _typed[variable] = text; RecordPick(variable, text); return; }
+        if (IsPickBinding(b)) { _typed[variable] = text; RecordPick(variable, text); return; }
         if (IsTyped(b)) { _typed[variable] = text; return; }
         if (IsPhysicalRoll(variable) || IsCheckedBox(variable)) { _overrides[variable] = text; return; }
         if (string.IsNullOrWhiteSpace(text)) _overrides.Remove(variable);
@@ -455,7 +455,6 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var guards = Guards();
         var hostGuards = HostCalculates ? guards : NoHostGuards;
         var picks = PieceLabels();
-        AddHolderLabels(picks);
         var boxes = vars.Select(v => Box(v, t, guards, picks)).ToList();
         // B7: a masked formula's dice are never shown before Apply (their count or whether they are rolled may follow the hidden data).
         var inline = t.RollsByKey.Where(kv => _hidden.Count == 0 && kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || HostRolled(kv.Key, t)))
@@ -528,21 +527,13 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     }
 
     /// <summary>
-    /// B9 #13b: the candidate labels of each holder picker on the last run's state for <see cref="PickSides"/> (on a player view, the view's
-    /// own sides), added to <paramref name="picks"/> (<see cref="HolderChoices"/>: the listed holders the viewer may act on now).
+    /// The candidates (label and piece) of each Piece binding on the last run's state for <see cref="PickSides"/>, and (B9 #13b) of each
+    /// holder picker (label and holder id, <see cref="HolderChoices"/>: the listed holders the viewer may act on now; on a player view its
+    /// own sides); cached as the labels. A holder's owner follows the ledger, which the cache key covers.
     /// </summary>
-    private void AddHolderLabels(Dictionary<string, IReadOnlyList<string>> picks)
-    {
-        if (_state == null) return;
-        foreach (var b in formula.Bindings)
-            if (b is { Variable: not null } && HolderChoices.IsPicker(b))
-                picks[b.Variable] = HolderChoices.For(_state, runner.Pack, b, PickSides).Select(c => c.Label).ToList();
-    }
-
-    /// <summary>The candidates (label and piece) of each Piece binding on the last run's state for <see cref="PickSides"/>; cached as the labels.</summary>
     private Dictionary<string, IReadOnlyList<PieceChoice>> PieceLists()
     {
-        if (_state == null || !formula.Bindings.Any(b => b is { Kind: BindingKind.Piece }))
+        if (_state == null || !formula.Bindings.Any(b => b != null && IsPickBinding(b)))
         {
             _labels = null;
             return new(StringComparer.Ordinal);
@@ -553,6 +544,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         foreach (var b in formula.Bindings)
             if (b is { Kind: BindingKind.Piece, Variable: not null })
                 choices[b.Variable] = PieceCandidates.For(_state, runner.Pack, runner.Model, b, PickSides, pieceId);   // the run piece's hex first
+            else if (b is { Variable: not null } && HolderChoices.IsPicker(b))
+                choices[b.Variable] = HolderChoices.For(_state, runner.Pack, b, PickSides).Select(c => new PieceChoice(c.Label, c.HolderId)).ToList();
         _labelsKey = key;
         _labels = choices.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value.Select(c => c.Label).ToList(), StringComparer.Ordinal);
         return _choices = choices;
@@ -729,10 +722,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             if (IsTyped(b) && _typed.TryGetValue(b.Variable, out var t)) typed[b.Variable] = t;
             else if (Checked && IsChecked(b) && _overrides.TryGetValue(b.Variable, out var o)) typed[b.Variable] = o;
         }
-        // The piece each sent pick stands for: the host refuses the run if the label now resolves to another piece.
+        // The piece (or holder, B9) each sent pick stands for: the host refuses the run if the label now resolves to another one.
         Dictionary<string, string>? picks = null;
         foreach (var b in formula.Bindings)
-            if (b is { Kind: BindingKind.Piece, Variable: { } v } && typed.ContainsKey(v) && _pickedId.TryGetValue(v, out var id))
+            if (b is { Variable: { } v } && IsPickBinding(b) && typed.ContainsKey(v) && _pickedId.TryGetValue(v, out var id))
                 (picks ??= new(StringComparer.Ordinal))[v] = id;
         return new FormulaIntent(formula.Id, pieceId, runId, typed, calculate, preview, picks);
     }

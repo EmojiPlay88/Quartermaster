@@ -191,4 +191,56 @@ public class HolderPickDialogTests : HolderPickTestBase
         Assert.Empty(failed);
         Assert.Equal(FordStores - 6, Stores(s.Game.State));
     }
+
+    /// <summary>North Depot renamed "Ford Dump": the north lists Ford Dump as "Ford Dump" and the depot as "Ford Dump #2".</summary>
+    private static RulesPack SameNames(RulesPack p) =>
+        p with { Holders = p.Holders.Select(h => h.Id == Depot ? h with { Name = "Ford Dump" } : h).ToList() };
+
+    [Fact]
+    public void Hotseat_pick_follows_holder_when_labels_shift()
+    {
+        var s = PickSession();
+        s.UpdateRules(SameNames);
+        s.SetViewSides(North);
+        var m = Dialog(s);
+        var dv = m.Evaluate(s.Game!.State);
+        Assert.Equal(new[] { "Ford Dump", "Ford Dump #2" }, Box(dv, "Dump").Choices!.ToArray());
+        m.SetBoxText("Dump", "Ford Dump #2");   // the depot
+        m.SetBoxText("Need", "1");
+        Assert.Equal(Depot, m.Intent(null, calculate: false).Picks!["Dump"]);
+        s.Game.Execute(Capture(s.Rules!));   // Ford Dump leaves the north's list: the depot is now "Ford Dump"
+        dv = m.Evaluate(s.Game.State);
+        Assert.Equal("Ford Dump", Box(dv, "Dump").Text);   // the box follows the depot
+        Assert.True(dv.CanApply, dv.Status);
+        Assert.Contains("Stores of Ford Dump 30", dv.WorkingText);
+        Assert.Equal(LedgerKey.Holder(Depot), Assert.Single(dv.Trace.Outputs).Key);
+
+        // A pick whose holder leaves the list is cleared, never moved to the other "Ford Dump".
+        var s2 = PickSession();
+        s2.UpdateRules(SameNames);
+        s2.SetViewSides(North);
+        var m2 = Dialog(s2);
+        m2.Evaluate(s2.Game!.State);
+        m2.SetBoxText("Dump", "Ford Dump");   // Ford Dump itself
+        m2.SetBoxText("Need", "1");
+        s2.Game.Execute(Capture(s2.Rules!));
+        dv = m2.Evaluate(s2.Game.State);
+        Assert.Equal("", Box(dv, "Dump").Text);
+        Assert.False(dv.CanApply);
+        Assert.Equal("Waiting for input", Box(dv, "Dump").Tooltip);
+    }
+
+    [Fact]
+    public void Picker_with_stale_fixed_holder_not_masked()
+    {
+        var s = PickSession();
+        // A stale fixed holder of the south next to the choices (the validator warns): the north's own pick is not masked for it.
+        s.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Select(f => f.Id != "f-draw" ? f
+                : f with { Bindings = f.Bindings.Select(b => b.Variable == "Dump" ? b with { HolderId = Mill } : b).ToList() }).ToList(),
+        });
+        s.SetViewSides(North);
+        Assert.Empty(FormulaMasking.HiddenFor(s, s.Rules!.ById<FormulaDef>("f-draw")!, null));
+    }
 }

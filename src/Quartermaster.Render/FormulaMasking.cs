@@ -166,7 +166,8 @@ public static class FormulaMasking
             var isHidden = b.Kind switch
             {
                 BindingKind.Unit => UnitHidden(b.Property),
-                BindingKind.Holder => HolderHidden(b.HolderId, PropById(b.Property)),
+                // B9 #13b: a holder picker's candidates are the viewer's or no side's (its fixed holder, if any, is not used)
+                BindingKind.Holder => !HolderChoices.IsPicker(b) && HolderHidden(b.HolderId, PropById(b.Property)),
                 BindingKind.Table => TableHidden(b.TableId),   // otherwise decided below
                 _ => false,   // Global is public; Input, Roll, Location and Moved are the player's own; Piece is decided below
             };

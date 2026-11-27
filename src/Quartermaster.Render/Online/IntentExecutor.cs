@@ -545,7 +545,10 @@ internal static class FormulaIntentRunner
         {
             if (!HolderChoices.IsPicker(hb) || hb.Variable == null) continue;
             if (i.Typed?.GetValueOrDefault(hb.Variable) is not { } label || string.IsNullOrWhiteSpace(label)) continue;   // nothing picked: waits
-            if (HolderChoices.Find(HolderChoices.For(at, pack, hb, sides), label) == null) return (null, HolderChoices.Unknown);
+            // Sent with the holder it was picked as (FormulaIntent.Picks): the label must still name that holder in the sender's own list.
+            if (HolderChoices.Find(HolderChoices.For(at, pack, hb, sides), label) is not { } hit
+                || (i.Picks?.TryGetValue(hb.Variable, out var hid) == true && !string.Equals(hit.HolderId, hid, StringComparison.Ordinal)))
+                return (null, HolderChoices.Unknown);
         }
         return (new Prepared(f, model, hidden, group), null);
     }

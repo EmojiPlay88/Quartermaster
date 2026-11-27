@@ -133,4 +133,32 @@ public class HolderPickOnlineTests : HolderPickTestBase
         var haul = x.Execute("p2", South, new FormulaIntent("f-haul", null, null, new Dictionary<string, string>(), true));
         Assert.False(haul.Ok);
     }
+
+    [Fact]
+    public void Guest_pick_refused_when_label_shifts_to_other_holder()
+    {
+        var (host, _, x) = Host();
+        // Mill Dump renamed "Ford Dump": once the south holds Ford Dump it lists "Ford Dump" (Ford) and "Ford Dump #2" (Mill).
+        host.UpdateRules(p => p with { Holders = p.Holders.Select(h => h.Id == Mill ? h with { Name = "Ford Dump" } : h).ToList() });
+        host.Game!.Execute(Capture(host.Rules!));
+        var guest = Guest(host);
+        var m = Dialog(guest);
+        Assert.Equal(new[] { "Ford Dump", "Ford Dump #2" }, Box(m.Evaluate(guest.Game!.State), "Dump").Choices!.ToArray());
+        m.SetBoxText("Dump", "Ford Dump");
+        m.SetBoxText("Need", "2");
+        var intent = m.Intent(null, calculate: false);
+        Assert.Equal(Ford, intent.Picks!["Dump"]);
+        host.Game.Execute(Capture(host.Rules!, 2, 1));   // the south loses Ford Dump: "Ford Dump" now names Mill Dump
+        var v = x.Execute("p2", South, intent).Verdict!;
+        Assert.False(v.Applied);
+        Assert.Equal("Choose one of the listed holders", v.Message);
+        Assert.Equal(MillStores, StoresOf(host.Game.State, Mill));
+        // An id the sender may not choose, sent with a label it may, is refused the same way.
+        var forged = x.Execute("p2", South, Draw("Ford Dump") with { Picks = new Dictionary<string, string> { ["Dump"] = Ford } }).Verdict!;
+        Assert.Equal("Choose one of the listed holders", forged.Message);
+        // The matching id applies.
+        var ok = x.Execute("p2", South, Draw("Ford Dump") with { Picks = new Dictionary<string, string> { ["Dump"] = Mill } }).Verdict!;
+        Assert.True(ok.Applied, ok.Message);
+        Assert.Equal(MillStores - 4, StoresOf(host.Game.State, Mill));
+    }
 }
