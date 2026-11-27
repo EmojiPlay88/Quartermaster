@@ -168,7 +168,7 @@ public sealed class B7WorkbenchTests : IDisposable
     {
         var s = Session();
         var tab = Host(new AlertsTab(s, _dialogs));
-        Assert.Equal("Only players holding this side see the alert, in every phase.", ToolTip.GetTip(tab.SideBox));
+        Assert.Equal("Only players holding this side or an allied side see the alert, in every phase.", ToolTip.GetTip(tab.SideBox));
     }
 
     [AvaloniaFact]
