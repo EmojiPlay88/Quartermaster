@@ -135,6 +135,10 @@ At the last phase of a block that repeats until a player stops, Next Phase asks 
 
 When a phase lists sides that also act in it, the phase panel shows `Reacting: {names}` under the side. A player at the screen who holds only a reacting side sees `{side} is playing {phase}; you may react`: Next Phase and the checklist stay with the phase's own side, but the reacting player can run formulas that need no counter and write global values. See [Sides that react](Making-a-Rules-Pack#sides-that-react).
 
+### Phases of an ally
+
+A player may act in a phase whose side is an ally's (same alliance in the rules pack): run its formulas, tick its checklist, acknowledge its warnings and press Next Phase. The hand-over in hot-seat still goes to the player holding the phase's side. A run made there is stamped with the ally's side. See [Alliances](Making-a-Rules-Pack#alliances).
+
 ### Due list
 
 When the pack has a schedule, the phase panel gets a **Due** section under the warnings. Each row shows its label, `Due now` or `Overdue since turn {T}`, and a button: **Place** (counters that arrive or return; they appear on the row's zone map, select them and drag them to their hexes) or **Withdraw** (counters that leave, moved to the zone map). One Place marks the whole row done. A solo game also lists a row without counters, as `Due now, no counter matches` or `Overdue since turn {T}, no counter matches`, with no button. A row that is due now and has counters also shows in the Next Phase check as `Due: {label}`. See [Reinforcements and withdrawals](Making-a-Rules-Pack#reinforcements-and-withdrawals).
