@@ -221,7 +221,7 @@ public static class FormulaMasking
         var reads = new List<(string Variable, List<Quartermaster.Rules.Expr.Expr> Sources)>();
         foreach (var b in f.Bindings ?? new List<VariableBinding>())
         {
-            if (b?.Variable == null || b.Kind == BindingKind.Piece || hidden.Contains(b.Variable)) continue;
+            if (b?.Variable == null || b.Kind == BindingKind.Piece || HolderChoices.IsPicker(b) || hidden.Contains(b.Variable)) continue;   // a pick stays open
             var parsed = new List<Quartermaster.Rules.Expr.Expr>();
             foreach (var src in b.Kind == BindingKind.Input ? new[] { b.AutoValue } : FormulaVariables.Sources(b).ToArray<string?>())
                 if (Parse(src) is { } e) parsed.Add(e);

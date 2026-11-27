@@ -261,7 +261,7 @@ public sealed class FormulaWindow : Window
         var typed = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var b in f.Bindings)
         {
-            if (b is not { Kind: BindingKind.Input or BindingKind.Piece, Variable: { } v } || _model.Hidden.Contains(v)) continue;
+            if (b?.Variable is not { } v || !(b.Kind is BindingKind.Input or BindingKind.Piece || HolderChoices.IsPicker(b)) || _model.Hidden.Contains(v)) continue;
             if (_view.BoxText(v) is { } text && !string.IsNullOrWhiteSpace(text)) typed[v] = text;
         }
         FormulaWindows.ShowMenuBatch(_host, _s, port, _formulaId, new[] { _pieceId }, typed);

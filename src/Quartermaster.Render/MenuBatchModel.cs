@@ -144,8 +144,11 @@ public sealed class MenuBatchModel : IBatchRows
 
     private VariableBinding? Binding(string variable) => Formula?.Bindings.FirstOrDefault(b => b?.Variable == variable);
 
-    /// <summary>True for a column the <see cref="AllRows"/> line may fill: an Input or a Piece binding.</summary>
-    public bool IsAllRowsColumn(string variable) => Binding(variable) is { Kind: BindingKind.Input or BindingKind.Piece };
+    /// <summary>True for a column the <see cref="AllRows"/> line may fill: an Input, a Piece binding or a holder picker (B9 #13b).</summary>
+    public bool IsAllRowsColumn(string variable) => IsTypedColumn(Binding(variable));
+
+    /// <summary>An Input, a Piece binding or a holder picker: the cell is what the player types or picks.</summary>
+    private static bool IsTypedColumn(VariableBinding? b) => b is { Kind: BindingKind.Input or BindingKind.Piece } || HolderChoices.IsPicker(b);
 
     /// <summary>The All rows line: its Input and Piece cells (the others blank).</summary>
     public BatchRowView AllRows
@@ -169,7 +172,7 @@ public sealed class MenuBatchModel : IBatchRows
     public void SetCell(int row, string variable, string text)
     {
         if (SlotAt(row) is not { } slot || Binding(variable) is not { } b) return;
-        if (b.Kind is BindingKind.Input or BindingKind.Piece) slot.Own[variable] = text ?? "";
+        if (IsTypedColumn(b)) slot.Own[variable] = text ?? "";
         else Model(row).SetBoxText(variable, text ?? "");
         Invalidate();
     }
@@ -180,7 +183,7 @@ public sealed class MenuBatchModel : IBatchRows
         var slot = _rows[row];
         foreach (var b in Formula?.Bindings ?? new List<VariableBinding>())
         {
-            if (b is not { Kind: BindingKind.Input or BindingKind.Piece, Variable: { } v }) continue;
+            if (b?.Variable is not { } v || !IsTypedColumn(b)) continue;
             var own = slot.Own.GetValueOrDefault(v);
             var text = !string.IsNullOrWhiteSpace(own) ? own : _all.GetValueOrDefault(v) ?? "";
             if (string.Equals(slot.Pushed.GetValueOrDefault(v) ?? "", text, StringComparison.Ordinal)) continue;
@@ -359,6 +362,8 @@ public sealed class MenuBatchModel : IBatchRows
         IReadOnlyList<string>? list;
         if (b.Kind == BindingKind.Piece)
             list = Quartermaster.Core.PieceChoices.For(st, pack, s.Model, b, sides, piece).Select(c => c.Label).ToList();
+        else if (HolderChoices.IsPicker(b))
+            list = HolderChoices.For(st, pack, b, sides).Select(c => c.Label).ToList();   // B9 #13b: the seat's own dumps (every row alike)
         else if (b.Kind == BindingKind.Input && !string.IsNullOrWhiteSpace(b.ChoicesTable))
         {
             // The seat's own view, built once per (state, viewer) for every row and column.
@@ -371,7 +376,7 @@ public sealed class MenuBatchModel : IBatchRows
     }
 
     public bool IsChoiceColumn(string variable) =>
-        Binding(variable) is { } b && (b.Kind == BindingKind.Piece || ChoicesFor(variable, -1) is { Count: > 0 });
+        Binding(variable) is { } b && (b.Kind == BindingKind.Piece || HolderChoices.IsPicker(b) || ChoicesFor(variable, -1) is { Count: > 0 });
 
     // ---- actions ----
 

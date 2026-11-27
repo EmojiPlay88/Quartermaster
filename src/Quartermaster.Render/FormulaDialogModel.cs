@@ -98,7 +98,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             if (same) return;
             // Another viewer: a pick is a label from the previous viewer's own list, never carried into this one's box.
             foreach (var b in formula.Bindings)
-                if (b is { Kind: BindingKind.Piece, Variable: not null }) { _typed.Remove(b.Variable); _pickedId.Remove(b.Variable); }
+                if (b is { Variable: not null } && IsPickBinding(b)) { _typed.Remove(b.Variable); _pickedId.Remove(b.Variable); }
         }
     }
 
@@ -151,7 +151,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
 
     /// <summary>A typed box (Input or Piece) of a host guard (<see cref="Guards"/>) that is not itself hidden.</summary>
     private bool IsGuardBox(string variable) =>
-        !IsHidden(variable) && Guards().Contains(variable) && Binding(variable)?.Kind is BindingKind.Input or BindingKind.Piece;
+        !IsHidden(variable) && Guards().Contains(variable) && Binding(variable) is { } b && IsTyped(b);
 
     /// <summary>The hidden Input variables with an auto value: the viewer cannot type them, so every run reads their auto value.</summary>
     private IReadOnlySet<string>? HiddenAutoInputs()
@@ -196,7 +196,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     private static bool IsCheckedKind(BindingKind k) =>
         k is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Table or BindingKind.Location or BindingKind.Moved;
 
-    private bool IsCheckedBox(string v) => Checked && Binding(v) is { } b && IsCheckedKind(b.Kind);
+    private bool IsCheckedBox(string v) => Checked && Binding(v) is { } b && IsChecked(b);
+
+    /// <summary>A box the manual modes check against the engine: never a holder picker, whose box is the player's pick (B9 #13b).</summary>
+    private static bool IsChecked(VariableBinding b) => IsCheckedKind(b.Kind) && !HolderChoices.IsPicker(b);
 
     /// <summary>The rules pack changed: keep what the user typed but run the new runner and formula.</summary>
     public void Rebind(FormulaRunner newRunner, FormulaDef newFormula)
@@ -229,29 +232,32 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <summary>A Roll the player types with physical dice. Never a hidden Roll (B7): the engine rolls that one.</summary>
     private bool IsPhysicalRoll(string v) => PhysicalDice && Binding(v)?.Kind == BindingKind.Roll && !IsHidden(v);
 
-    /// <summary>A Piece binding: its box holds the picked candidate's label (typed like an Input), never the value read from it.</summary>
-    private bool IsPick(string v) => Binding(v)?.Kind == BindingKind.Piece;
+    /// <summary>A Piece binding or a holder picker (B9 #13b): its box holds the picked candidate's label (typed like an Input), never the
+    /// value read from it.</summary>
+    private bool IsPick(string v) => Binding(v) is { } b && IsPickBinding(b);
 
-    /// <summary>Kinds whose box text is what the player typed or picked (sent to the host, never an override).</summary>
-    private static bool IsTypedKind(BindingKind k) => k is BindingKind.Input or BindingKind.Piece;
+    private static bool IsPickBinding(VariableBinding b) => b.Kind == BindingKind.Piece || HolderChoices.IsPicker(b);
+
+    /// <summary>Bindings whose box text is what the player typed or picked (sent to the host, never an override): Input, Piece, holder picker.</summary>
+    private static bool IsTyped(VariableBinding b) => b.Kind == BindingKind.Input || IsPickBinding(b);
 
     /// <summary>
     /// The reasons a Piece box may show even when its value is hidden: they come from the viewer's own candidate list, never from the
     /// picked piece's value.
     /// </summary>
     private static bool IsPickReason(string? reason) =>
-        reason is "Waiting for input" or PieceCandidates.Unknown or PieceCandidates.NoPiece
+        reason is "Waiting for input" or PieceCandidates.Unknown or PieceCandidates.NoPiece or HolderChoices.Unknown or HolderChoices.None
         || (reason?.StartsWith("No piece matches \"", StringComparison.Ordinal) ?? false);
 
     /// <summary>The user changed a box. Typed boxes keep their text; auto boxes add or (when blank) drop an override.</summary>
     public void SetBoxText(string variable, string text)
     {
         var b = Binding(variable);
-        if (b == null || (IsHidden(variable) && b.Kind != BindingKind.Piece)) return;   // a hidden pick is still the viewer's to make
+        if (b == null || (IsHidden(variable) && !IsPickBinding(b))) return;   // a hidden pick is still the viewer's to make
         _verdict.Remove(variable);
         _verdictMessage = null;
         if (b.Kind == BindingKind.Piece) { _typed[variable] = text; RecordPick(variable, text); return; }
-        if (IsTypedKind(b.Kind)) { _typed[variable] = text; return; }
+        if (IsTyped(b)) { _typed[variable] = text; return; }
         if (IsPhysicalRoll(variable) || IsCheckedBox(variable)) { _overrides[variable] = text; return; }
         if (string.IsNullOrWhiteSpace(text)) _overrides.Remove(variable);
         else _overrides[variable] = text;
@@ -432,7 +438,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             var b = Binding(v.Variable);
             if (b == null) continue;
             if (b.Kind == BindingKind.Input) _typed[v.Variable] = Exact(val);
-            else if (Checked && IsCheckedKind(b.Kind)) _overrides[v.Variable] = Exact(val);   // a pick keeps its label: never its value
+            else if (Checked && IsChecked(b)) _overrides[v.Variable] = Exact(val);   // a pick keeps its label: never its value
         }
         AutoCalculated = true;
     }
@@ -449,6 +455,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var guards = Guards();
         var hostGuards = HostCalculates ? guards : NoHostGuards;
         var picks = PieceLabels();
+        AddHolderLabels(picks);
         var boxes = vars.Select(v => Box(v, t, guards, picks)).ToList();
         // B7: a masked formula's dice are never shown before Apply (their count or whether they are rolled may follow the hidden data).
         var inline = t.RollsByKey.Where(kv => _hidden.Count == 0 && kv.Key.StartsWith("dice#", StringComparison.Ordinal) && (!HostCalculates || HostRolled(kv.Key, t)))
@@ -518,6 +525,18 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         PieceLists();
         return _labels ?? new(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// B9 #13b: the candidate labels of each holder picker on the last run's state for <see cref="PickSides"/> (on a player view, the view's
+    /// own sides), added to <paramref name="picks"/> (<see cref="HolderChoices"/>: the listed holders the viewer may act on now).
+    /// </summary>
+    private void AddHolderLabels(Dictionary<string, IReadOnlyList<string>> picks)
+    {
+        if (_state == null) return;
+        foreach (var b in formula.Bindings)
+            if (b is { Variable: not null } && HolderChoices.IsPicker(b))
+                picks[b.Variable] = HolderChoices.For(_state, runner.Pack, b, PickSides).Select(c => c.Label).ToList();
     }
 
     /// <summary>The candidates (label and piece) of each Piece binding on the last run's state for <see cref="PickSides"/>; cached as the labels.</summary>
@@ -619,7 +638,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         var binding = Binding(v.Variable);
         // A hidden pick: the box shows the viewer's own pick and list; the value read from the piece stays hidden (only list reasons shown).
-        if (IsHidden(v.Variable) && binding?.Kind == BindingKind.Piece)
+        if (IsHidden(v.Variable) && binding != null && IsPickBinding(binding))
             return new BoxView(v.Variable, Raw(v.Variable), BoxBackground.Typed, "", true,
                 Raw(v.Variable).Trim().Length == 0 ? "Waiting for input" : IsPickReason(v.MissingReason) ? v.MissingReason : HiddenBoxText, null,
                 false, picks.GetValueOrDefault(v.Variable) ?? Array.Empty<string>());
@@ -637,10 +656,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (binding?.Kind == BindingKind.Roll && t.SharedRollKeys.Contains(v.Variable) && t.RollsByKey.TryGetValue(v.Variable, out var groupDice)
             && !(HostCalculates && !HostRolled(v.Variable, t)))
             return new BoxView(v.Variable, DiceText(groupDice), BoxBackground.Auto, GroupRollSuffix, false, GroupRollTooltip, null);
-        var typedBox = binding?.Kind is BindingKind.Input or BindingKind.Piece || IsPhysicalRoll(v.Variable);
+        var typedBox = (binding != null && IsTyped(binding)) || IsPhysicalRoll(v.Variable);
         var choices = binding?.Kind == BindingKind.Input
             ? InputChoices.For(string.IsNullOrWhiteSpace(binding.ChoicesTable) ? _state ?? new GameState() : ChoicesState(), runner.Pack, runner.Model, formula, v.Variable, pieceId)
-            : binding?.Kind == BindingKind.Piece ? picks.GetValueOrDefault(v.Variable) ?? Array.Empty<string>() : null;
+            : binding != null && IsPickBinding(binding) ? picks.GetValueOrDefault(v.Variable) ?? Array.Empty<string>() : null;
         var reason = v.MissingReason == "Waiting for input" || (v.MissingReason != null && typedBox && Raw(v.Variable) == "")
             ? "Waiting for input" : v.MissingReason;
         // A guard box's tooltip never says whether the hidden guard holds: blank waits, typed is the viewer's own (B7).
@@ -706,9 +725,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var typed = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var b in formula.Bindings)
         {
-            if (b?.Variable == null || (IsHidden(b.Variable) && b.Kind != BindingKind.Piece)) continue;   // a pick is a label from the guest's own list
-            if (IsTypedKind(b.Kind) && _typed.TryGetValue(b.Variable, out var t)) typed[b.Variable] = t;
-            else if (Checked && IsCheckedKind(b.Kind) && _overrides.TryGetValue(b.Variable, out var o)) typed[b.Variable] = o;
+            if (b?.Variable == null || (IsHidden(b.Variable) && !IsPickBinding(b))) continue;   // a pick is a label from the guest's own list
+            if (IsTyped(b) && _typed.TryGetValue(b.Variable, out var t)) typed[b.Variable] = t;
+            else if (Checked && IsChecked(b) && _overrides.TryGetValue(b.Variable, out var o)) typed[b.Variable] = o;
         }
         // The piece each sent pick stands for: the host refuses the run if the label now resolves to another piece.
         Dictionary<string, string>? picks = null;
@@ -735,7 +754,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         {
             if (variable == null || text == null || IsHidden(variable) || Binding(variable) is not { } b) continue;
             if (b.Kind == BindingKind.Input) _typed[variable] = text;
-            else if (Checked && IsCheckedKind(b.Kind)) _overrides[variable] = text;
+            else if (Checked && IsChecked(b)) _overrides[variable] = text;
         }
         if (verdict.Rolls != null)
         {
@@ -766,7 +785,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     }
 
     private string Raw(string variable) =>
-        (Binding(variable) is { } b && IsTypedKind(b.Kind) ? _typed : _overrides).GetValueOrDefault(variable) ?? "";
+        (Binding(variable) is { } b && IsTyped(b) ? _typed : _overrides).GetValueOrDefault(variable) ?? "";
 
     private static string DiceText(IReadOnlyList<int> dice) =>
         dice.Count <= 1 ? dice.Sum().ToString() : $"{dice.Sum()} ({string.Join("+", dice)})";

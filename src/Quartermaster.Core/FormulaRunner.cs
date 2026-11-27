@@ -73,8 +73,10 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
 /// roller. The online host uses it so every die of a guest's run is pinned per dice configuration.</param>
 /// <param name="PickSides">The chooser's sides: a Piece binding's typed label is resolved among the candidates of their view
 /// (<see cref="PieceChoices"/>) and an Input's choices filter is judged on that view (B7), so the accepted values are exactly the chooser's
-/// listed ones. The requesting guest's sides on the host, the viewer's sides in hot-seat; null = the run's own state (solo, hook runs, the
-/// host's own full-state runs, a run on a player view state). The view is built at most once per run, and only when it is needed.</param>
+/// listed ones. A holder picker's typed label (B9 #13b, <see cref="HolderChoices"/>) is resolved among the listed holders whose current
+/// owner is no side or one of these sides (no view is built for it). The requesting guest's held set on the host, the viewer's in hot-seat;
+/// null = the run's own state (solo, hook runs, the host's own full-state runs, a run on a player view state, whose own sides choose a
+/// holder). The view is built at most once per run, and only when it is needed.</param>
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
     IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false,
     Func<string, int, int, IReadOnlyList<int>>? Dice = null, IReadOnlySet<string>? PickSides = null)
@@ -272,6 +274,15 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 throw new EvalError("An output refers to a deleted Piece variable");
             if (!pieceVars.Contains(o.PieceVariable)) pieceVars.Add(o.PieceVariable);
         }
+        // B9 #13b: a Holder output may name the holder picker whose chosen holder it writes (or reveals), in place of a fixed holder.
+        var holderVars = new List<string>();
+        foreach (var o in formula.Outputs)
+        {
+            if (string.IsNullOrWhiteSpace(o.HolderVariable)) continue;
+            if (o.Target != OutputTarget.Holder || !HolderChoices.IsPicker(formula.Bindings.FirstOrDefault(x => x.Variable == o.HolderVariable)))
+                throw new EvalError("An output refers to a deleted Holder variable");
+            if (!holderVars.Contains(o.HolderVariable)) holderVars.Add(o.HolderVariable);
+        }
 
         AstExpr? pre = string.IsNullOrWhiteSpace(formula.Precondition) ? null : Parse(formula, formula.Precondition);
 
@@ -282,6 +293,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         foreach (var src in FormulaVariables.OutputSources(formula))
             foreach (var v in Parser.Variables(Parse(formula, src))) if (!names.Contains(v)) names.Add(v);
         foreach (var v in pieceVars) if (!names.Contains(v)) names.Add(v);   // an output's target is asked even when nothing reads its value
+        foreach (var v in holderVars) if (!names.Contains(v)) names.Add(v);
         for (var i = 0; i < names.Count; i++)
         {
             var b = formula.Bindings.FirstOrDefault(x => x.Variable == names[i]);
@@ -341,6 +353,14 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             catch (Missing m) { return Unresolved(v, m.Message); }
             if (s.IsPlayerView && PlayerView.IsPlaceholder(targets[v].Piece)) return Unresolved(v, HiddenText);
         }
+        // The holders the Holder-variable outputs act on (the picker's own pick, shared with its binding: one list per run).
+        var holderTargets = new Dictionary<string, HolderChoice>(StringComparer.Ordinal);
+        foreach (var v in holderVars)
+        {
+            if (states.First(x => x.Variable == v).Skipped) continue;   // "Only when" false: the outputs naming it do nothing
+            try { holderTargets[v] = run.PickHolder(formula.Bindings.First(x => x.Variable == v)); }
+            catch (Missing m) { return Unresolved(v, m.Message); }
+        }
 
         var result = Evaluator.Evaluate(expr, new RunContext(run));
         var working = WorkingLine.Render(expr, formula.Text ?? "", n => run.Cached(n)?.Value, run.Label) + " = " + result.Display();
@@ -354,6 +374,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         // Placed outputs of a Place skipped that way.
         var placeSkipped = false;
         bool SkippedTarget(FormulaOutput o) => (o.Target == OutputTarget.Piece && o.PieceVariable != null && !targets.ContainsKey(o.PieceVariable))
+            || (o.Target == OutputTarget.Holder && !string.IsNullOrWhiteSpace(o.HolderVariable) && !holderTargets.ContainsKey(o.HolderVariable))
             || (o.Target == OutputTarget.Placed && placeSkipped);
 
         // The placed piece first, so a Placed output listed before its Place still acts on it. At most one Place per formula.
@@ -416,7 +437,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 case OutputAction.Reveal:
                 {
                     // B7 #47: read now, in output order (after this run's earlier writes); shown only when the commands are built.
-                    var (rv, rp) = RevealOf(s, o, oi, run, piece, targets, outputs, OutputError);
+                    var (rv, rp) = RevealOf(s, o, oi, run, piece, targets, holderTargets, outputs, OutputError);
                     reveals.Add(rv);
                     parts.Add($"reveal {rp.Name}");
                     continue;
@@ -502,6 +523,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 throw new EvalError($"Formula \"{formula.Name}\": output {oi + 1} writes computed property \"{prop.Name}\"");
             string key;
             (string Real, string Shown, string? Side)? target = null;
+            string? chosen = null;   // a Holder-variable output: the chosen holder's name
             double? before = null;
             switch (o.Target)
             {
@@ -527,6 +549,15 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                         return Unresolved(o.PieceVariable!, HiddenText);
                     target = (RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece));
                     key = LedgerKey.Piece(tp.Piece.Id);
+                    break;
+                }
+                case OutputTarget.Holder when !string.IsNullOrWhiteSpace(o.HolderVariable):
+                {
+                    // B9 #13b: the holder the picker chose (always the chooser's or no side's, so never hidden from it)
+                    var hid = holderTargets[o.HolderVariable!].HolderId;
+                    EnsureKept(_pack, hid, prop);
+                    key = LedgerKey.Holder(hid);
+                    chosen = HolderText(_pack, hid);
                     break;
                 }
                 case OutputTarget.Holder:
@@ -578,13 +609,14 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 _ => $"{what} = {PropertyLabels.Text(_pack, prop, after)}",
             };
             var shownName = valueKey == null ? prop.Name : $"{prop.Name}[{valueKey}]";   // a keyed write names its key: "Ford depth[0412] = 3"
-            var part = Part(shownName);
+            // a chosen holder is named in its own part, the acting side's line ("Stores of Ford Dump 10 - 3 = 7")
+            var part = chosen == null ? Part(shownName) : Part($"{shownName} of {chosen}");
             outputs.Add(new OutputPreview(key, prop.Id, prop.Name, was, after)
             {
                 Target = o.Target,
                 Part = part,
                 SideId = target?.Side,
-                Subject = target?.Shown,
+                Subject = target?.Shown ?? chosen,
                 TargetName = target?.Real,
                 ValueKey = valueKey,
             });
@@ -608,7 +640,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// the full state. The margin (blank = 0) must be a whole number from 0 to 1000, else the run fails.
     /// </summary>
     private (RevealPreview Reveal, PropertyDef Property) RevealOf(GameState s, FormulaOutput o, int oi, RunScope run, PieceInstance? piece,
-        Dictionary<string, (PieceInstance Piece, string Name)> targets, List<OutputPreview> earlier, Func<int, string, string> outputError)
+        Dictionary<string, (PieceInstance Piece, string Name)> targets, Dictionary<string, HolderChoice> holderTargets, List<OutputPreview> earlier,
+        Func<int, string, string> outputError)
     {
         var prop = OutputProperty(o, run);
         if (KeyedFacts.IsKeyed(prop)) throw new EvalError(outputError(oi, $" reveals keyed property \"{prop.Name}\"; a reveal shows one value"));
@@ -645,6 +678,16 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 subject = "Global";
                 hidden = view && HiddenValues.HolderValueHidden(s, _pack, HolderDef.GlobalId, prop, held!);
                 break;
+            case OutputTarget.Holder when !string.IsNullOrWhiteSpace(o.HolderVariable):
+            {
+                // B9 #13b: the holder the picker chose; hidden as any holder's value on a view (its current owner, B9 #13a)
+                var hid = holderTargets[o.HolderVariable!].HolderId;
+                EnsureKept(_pack, hid, prop);
+                key = LedgerKey.Holder(hid);
+                subject = HolderText(_pack, hid);
+                hidden = view && HiddenValues.HolderValueHidden(s, _pack, hid, prop, held!);
+                break;
+            }
             case OutputTarget.Holder:
                 if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
                     throw new EvalError("An output refers to a deleted holder");
@@ -940,7 +983,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             try
             {
                 var b = formula.Bindings.FirstOrDefault(x => x.Variable == name);
-                var auto = b is { Kind: not (BindingKind.Input or BindingKind.Piece) };
+                var auto = b is { Kind: not (BindingKind.Input or BindingKind.Piece) } && !HolderChoices.IsPicker(b);   // a pick is always asked
                 try
                 {
                     var use = b == null || string.IsNullOrWhiteSpace(b.When) || r.ForceWhen?.Contains(name) == true ? true : Condition(Parse(formula, b.When));
@@ -970,7 +1013,9 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private VariableState Bind(VariableBinding b)
         {
             var name = b.Variable;
-            var auto = b.Kind is not (BindingKind.Input or BindingKind.Piece);
+            var auto = b.Kind is not (BindingKind.Input or BindingKind.Piece) && !HolderChoices.IsPicker(b);
+            // B9 #13b: a holder picker's value is always read from its pick (never an override, never filled automatically)
+            if (HolderChoices.IsPicker(b)) return PickedHolder(b);
             if (r.Overrides.TryGetValue(name, out var ov) && ov != null)
             {
                 if (b.Kind == BindingKind.Roll) return TypedRoll(b, ov);
@@ -1140,6 +1185,47 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var hit = list.FirstOrDefault(c => string.Equals(c.Label, typed, StringComparison.OrdinalIgnoreCase));
             if (hit.PieceId == null || !s.Pieces.TryGetValue(hit.PieceId, out var picked) || picked == null) throw new Missing(PieceChoices.Unknown);
             return (picked, hit.Name.Length > 0 ? hit.Name : hit.Label);
+        }
+
+        /// <summary>
+        /// B9 #13b: a holder picker (<see cref="HolderChoices"/>): the typed label (trimmed, case-insensitive) resolved among the listed holders
+        /// the chooser may act on (<see cref="RunRequest.PickSides"/>), then the binding's property on that holder as a fixed Holder binding
+        /// reads it (Default when unset). Working: "{Prop} of {holder name}". Never filled automatically.
+        /// </summary>
+        private VariableState PickedHolder(VariableBinding b)
+        {
+            var prop = Unkeyed(Prop(b));
+            var hid = PickHolder(b).HolderId;
+            EnsureKept(owner._pack, hid, prop);
+            return new(b.Variable, Value.Of(Read(LedgerKey.Holder(hid), prop)), false, false, null, $"{prop.Name} of {HolderText(owner._pack, hid)}");
+        }
+
+        /// <summary>
+        /// The holder a picker's typed label picks among <see cref="HolderChoices.For"/> of this run's state for <see cref="RunRequest.PickSides"/>;
+        /// throws <see cref="Missing"/> ("No holder to choose", "Waiting for input", "Choose one of the listed holders") when it cannot be picked.
+        /// Once per variable per run: the binding and the outputs naming it share one list.
+        /// </summary>
+        public HolderChoice PickHolder(VariableBinding b)
+        {
+            if (_holderPicks.TryGetValue(b.Variable, out var known)) return known ?? throw new Missing(_holderMissing[b.Variable]);
+            try { return _holderPicks[b.Variable] = PickHolderOnce(b); }
+            catch (Missing m)
+            {
+                _holderPicks[b.Variable] = null;
+                _holderMissing[b.Variable] = m.Message;
+                throw;
+            }
+        }
+
+        private readonly Dictionary<string, HolderChoice?> _holderPicks = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _holderMissing = new(StringComparer.Ordinal);
+
+        private HolderChoice PickHolderOnce(VariableBinding b)
+        {
+            var list = HolderChoices.For(s, owner._pack, b, r.PickSides);
+            if (list.Count == 0) throw new Missing(HolderChoices.None);
+            if (!r.Typed.TryGetValue(b.Variable, out var raw) || string.IsNullOrWhiteSpace(raw)) throw new Missing("Waiting for input");
+            return HolderChoices.Find(list, raw) ?? throw new Missing(HolderChoices.Unknown);
         }
 
         private PropertyDef Prop(VariableBinding b) =>

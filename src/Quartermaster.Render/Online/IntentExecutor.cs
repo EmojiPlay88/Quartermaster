@@ -517,9 +517,10 @@ internal static class FormulaIntentRunner
             if (variable == null) continue;
             var b = f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable);
             // A pick is a label from the sender's own list, so it is taken even when the value it reads is hidden; nothing else hidden is.
-            if (hidden.Contains(variable) && b is not { Kind: BindingKind.Piece }) continue;
+            var pick = b is { Kind: BindingKind.Piece } || HolderChoices.IsPicker(b);
+            if (hidden.Contains(variable) && !pick) continue;
             // Input boxes and picks always; checked boxes only in the manual modes (they gate Apply and never feed the run); never dice or overrides.
-            var accept = b != null && (b.Kind is BindingKind.Input or BindingKind.Piece || (model.Checked && IsCheckedKind(b.Kind)));
+            var accept = b != null && (b.Kind is BindingKind.Input || pick || (model.Checked && IsCheckedKind(b.Kind)));
             if (accept) model.SetBoxText(variable, text ?? "");
         }
         // One unit, one set of dice: while the unit has this formula's run waiting, a guest uses that run (an ad-hoc run would be another roll).
@@ -537,6 +538,14 @@ internal static class FormulaIntentRunner
                 .FirstOrDefault(x => string.Equals(x.Label, label.Trim(), StringComparison.OrdinalIgnoreCase));
             if (hit == null || id == null || !string.Equals(hit.PieceId, id, StringComparison.Ordinal))
                 return (null, Quartermaster.Core.PieceChoices.Unknown);
+        }
+        // B9 #13b: a holder label must be one of the sender's own (the listed holders its held set may act on now, on the state the run is
+        // evaluated on). A holder of another side and a name that is no holder get the same neutral refusal; nothing is run or written.
+        foreach (var hb in f.Bindings)
+        {
+            if (!HolderChoices.IsPicker(hb) || hb.Variable == null) continue;
+            if (i.Typed?.GetValueOrDefault(hb.Variable) is not { } label || string.IsNullOrWhiteSpace(label)) continue;   // nothing picked: waits
+            if (HolderChoices.Find(HolderChoices.For(at, pack, hb, sides), label) == null) return (null, HolderChoices.Unknown);
         }
         return (new Prepared(f, model, hidden, group), null);
     }
@@ -565,6 +574,8 @@ internal static class FormulaIntentRunner
         {
             // B7 #47: a Reveal writes nothing, so another side's holder or counter may be named; the host decides the value.
             if (o == null || o.Action == OutputAction.Reveal) continue;
+            // B9 #13b: a Holder-variable output writes the holder the sender picked, checked against its own list (Prepare's pick check).
+            if (o.Target == OutputTarget.Holder && !string.IsNullOrWhiteSpace(o.HolderVariable)) continue;
             var global = o.Target == OutputTarget.Global || (o.Target == OutputTarget.Holder && o.HolderId == HolderDef.GlobalId);
             if (global)
             {
