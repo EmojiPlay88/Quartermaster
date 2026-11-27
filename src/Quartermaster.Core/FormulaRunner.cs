@@ -32,6 +32,18 @@ public sealed record OutputPreview(string Key, string PropertyId, string Propert
     public string? ValueKey { get; init; }
 }
 
+/// <summary>
+/// B7 #47: what a Reveal output shows once its run is applied. Never shown before Apply: no box, verdict or working carries it; the commands
+/// log it (<see cref="FormulaRunner.Commands"/>), drawing the window then.
+/// </summary>
+/// <param name="Subject">The run piece's name (Unit), the picked piece's name as the requester sees it (Piece; a masked pick reads
+/// "Unknown piece"), the holder's name (Holder) or "Global" (Global).</param>
+/// <param name="PropertyId">The revealed property.</param>
+/// <param name="Value">The value read at the run, after the run's earlier writes to the same ledger key and property; null when unknown (a
+/// player view lacking it, or a computed value that cannot be worked out), so no line is logged.</param>
+/// <param name="Margin">The width of the revealed range, 0 to 1000; 0 shows the exact value.</param>
+public sealed record RevealPreview(string Subject, string PropertyId, double? Value, int Margin);
+
 public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableState> Variables, Value? Result, string Working,
     IReadOnlyList<OutputPreview> Outputs, string? Error, IReadOnlyList<DiceEntry> Rolls,
     IReadOnlyDictionary<string, IReadOnlyList<int>> RollsByKey, string? PieceId = null, bool Refused = false)
@@ -51,6 +63,10 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
     /// <summary>The sides of every key in <see cref="RollsByKey"/> (rolled, pinned, typed or shared), so a group's dice can be matched on
     /// sides as well as count (<see cref="RollGroups.GroupKey"/>). Empty for a trace not made by the runner.</summary>
     public IReadOnlyDictionary<string, int> RollSides { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>B7 #47: the run's Reveal outputs in output order. Their values are logged only by <see cref="FormulaRunner.Commands"/>, never
+    /// previewed (a Reveal adds no <see cref="OutputPreview"/>; its working part is "reveal {Prop}"). Empty for a run with none.</summary>
+    public IReadOnlyList<RevealPreview> Reveals { get; init; } = Array.Empty<RevealPreview>();
 }
 
 /// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
@@ -382,6 +398,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
         var traitEffects = new List<PieceEffect>();
         var removals = new List<PieceEffect>();
+        var reveals = new List<RevealPreview>();
         var pending = new Dictionary<(string, int), string>();   // trait states this run already set (a second change reads the first)
         // Every output is computed (value and property) before the trace is returned, so a failing output writes nothing.
         for (var oi = 0; oi < formula.Outputs.Count; oi++)
@@ -392,6 +409,14 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             {
                 case OutputAction.Write: break;
                 case OutputAction.Place: continue;
+                case OutputAction.Reveal:
+                {
+                    // B7 #47: read now, in output order (after this run's earlier writes); shown only when the commands are built.
+                    var (rv, rp) = RevealOf(s, o, oi, run, piece, targets, outputs, OutputError);
+                    reveals.Add(rv);
+                    parts.Add($"reveal {rp.Name}");
+                    continue;
+                }
                 case OutputAction.Remove:
                 {
                     if (o.Target == OutputTarget.Placed) throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
@@ -569,7 +594,87 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         effects.AddRange(removals);
         parts.AddRange(effects.Select(e => e.Text));
         if (parts.Count > 0) working += " → " + string.Join("; ", parts);
-        return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey) { Calc = calc, Effects = effects };
+        return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey) { Calc = calc, Effects = effects, Reveals = reveals };
+    }
+
+    /// <summary>
+    /// A Reveal output's subject, value and margin (B7 #47), with its property. The value is the property's as a binding of the target reads
+    /// it (stored, else Default, a computed property evaluated), or the After of this run's last earlier write to the same ledger key and
+    /// property. On a player view a value the view may not see (<see cref="HiddenValues"/>) is unknown (null), never an error: the host reads
+    /// the full state. The margin (blank = 0) must be a whole number from 0 to 1000, else the run fails.
+    /// </summary>
+    private (RevealPreview Reveal, PropertyDef Property) RevealOf(GameState s, FormulaOutput o, int oi, RunScope run, PieceInstance? piece,
+        Dictionary<string, (PieceInstance Piece, string Name)> targets, List<OutputPreview> earlier, Func<int, string, string> outputError)
+    {
+        var prop = OutputProperty(o, run);
+        if (KeyedFacts.IsKeyed(prop)) throw new EvalError(outputError(oi, $" reveals keyed property \"{prop.Name}\"; a reveal shows one value"));
+        var margin = 0;
+        if (!string.IsNullOrWhiteSpace(o.Margin))
+        {
+            var m = Evaluator.Evaluate(Parse(run.Formula, o.Margin), new RunContext(run));
+            if (m.Kind != ValueKind.Number || m.Number != Math.Floor(m.Number) || m.Number < 0 || m.Number > 1000)
+                throw new EvalError($"The margin for {prop.Name} must be a whole number from 0 to 1000");
+            margin = (int)m.Number;
+        }
+        var view = s.IsPlayerView;
+        var held = view ? HiddenValues.HeldBy(s) : null;
+        string key, subject;
+        bool hidden;
+        switch (o.Target)
+        {
+            case OutputTarget.Unit:
+                key = LedgerKey.Piece(piece!.Id);
+                subject = RealName(piece);
+                hidden = view && (PlayerView.IsPlaceholder(piece) || HiddenValues.PieceValueHidden(_pack, prop, piece, run.Sides, held!));
+                break;
+            case OutputTarget.Piece:
+            {
+                var tp = targets[o.PieceVariable!];
+                key = LedgerKey.Piece(tp.Piece.Id);
+                subject = tp.Name;
+                hidden = view && (PlayerView.IsPlaceholder(tp.Piece) || HiddenValues.PieceValueHidden(_pack, prop, tp.Piece, run.Sides, held!));
+                break;
+            }
+            case OutputTarget.Global:
+                EnsureKept(_pack, HolderDef.GlobalId, prop);
+                key = LedgerKey.Holder(HolderDef.GlobalId);
+                subject = "Global";
+                hidden = view && HiddenValues.HolderValueHidden(_pack, HolderDef.GlobalId, prop, held!);
+                break;
+            case OutputTarget.Holder:
+                if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
+                    throw new EvalError("An output refers to a deleted holder");
+                EnsureKept(_pack, o.HolderId, prop);
+                key = LedgerKey.Holder(o.HolderId);
+                subject = HolderText(_pack, o.HolderId);
+                hidden = view && HiddenValues.HolderValueHidden(_pack, o.HolderId, prop, held!);
+                break;
+            default:
+                throw new EvalError(outputError(oi, $": {o.Action} cannot target {o.Target}"));
+        }
+        double? value = null;
+        if (!hidden)
+            value = earlier.LastOrDefault(w => w.Key == key && w.PropertyId == prop.Id && w.ValueKey == null) is { } write ? write.After : run.ReadKnown(key, prop);
+        return (new RevealPreview(subject, prop.Id, value, margin), prop);
+    }
+
+    /// <summary>
+    /// The log line of a reveal, or null for an unknown value. Margin 0: "{subject}: {Prop} {value}" (labels as the Ledger shows them).
+    /// Otherwise a window of margin + 1 values holding the value, drawn with the runner's roller (one die of margin + 1 faces, never logged):
+    /// k = roll − 1, lo = value − k, hi = lo + margin; a value of 0 or more never gets a window starting below 0 (then 0 to margin).
+    /// </summary>
+    private string? RevealText(RevealPreview r)
+    {
+        if (r.Value is not { } v) return null;
+        var prop = _pack.ById<PropertyDef>(r.PropertyId);
+        var name = prop?.Name ?? r.PropertyId;
+        if (r.Margin <= 0) return $"{r.Subject}: {name} {(prop == null ? Value.Of(v).Display() : PropertyLabels.Text(_pack, prop, v))}";
+        var die = _roller(1, r.Margin + 1) is { Count: > 0 } d ? d[0] : 1;
+        var k = Math.Clamp(die - 1, 0, r.Margin);
+        var lo = v - k;
+        var hi = lo + r.Margin;
+        if (v >= 0 && lo < 0) { lo = 0; hi = r.Margin; }
+        return $"{r.Subject}: {name} between {lo.ToString("0.##", CultureInfo.InvariantCulture)} and {hi.ToString("0.##", CultureInfo.InvariantCulture)}";
     }
 
     private const string NothingPlaced = "An output writes the placed piece, but nothing was placed";
@@ -613,7 +718,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// The commands applying a trace. Each carries the unit the formula ran on (<see cref="FormulaTrace.PieceId"/>) and, when given, the side
     /// it was run for, so PlayerView can attribute rolls and working explicitly. Whatever the listed output order, the order is fixed: rolls;
     /// the Place (<see cref="AddPiece"/>); own writes (Unit, Global, Holder); Piece writes; Placed writes; each layer or mask change with its
-    /// System line (output order); the working line when no own write carries it; then removals and moves (output order), so every line
+    /// System line (output order); one System line per reveal with a known value (output order, B7 #47; a window is drawn now with the
+    /// runner's roller, no dice line); the working line when no own write carries it; then removals and moves (output order), so every line
     /// before a removal is logged against a piece that still exists. The caller seeds the placed piece right after its AddPiece executes.
     /// </summary>
     public IReadOnlyList<GameCommand> Commands(FormulaTrace t, string? note, string? tag = null, string? subject = null, string? sideId = null)
@@ -627,8 +733,11 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var effects = t.Effects ?? Array.Empty<PieceEffect>();
         // The acting side's working leaves out the Piece and Placed parts (those go on the targets' own lines, which the target's side reads)
         // and lists the effects by the names the acting player sees.
+        var reveals = t.Reveals ?? Array.Empty<RevealPreview>();
+        var revealParts = reveals.Select(r => $"reveal {_pack.ById<PropertyDef>(r.PropertyId)?.Name ?? r.PropertyId}");
         var working = t.Calc == null ? t.Working
-            : t.Calc + (own.Count + effects.Count == 0 ? "" : " → " + string.Join("; ", own.Select(o => o.Part).Concat(effects.Select(e => e.Text))));
+            : t.Calc + (own.Count + effects.Count + reveals.Count == 0 ? ""
+                : " → " + string.Join("; ", own.Select(o => o.Part).Concat(revealParts).Concat(effects.Select(e => e.Text))));
         foreach (var e in effects.Where(e => e.Kind == PieceEffectKind.Place))
             list.Add(new AddPiece(e.PieceId, e.TypeString!, e.StateString ?? "", e.MapId!, e.Pos, e.StackOnto, e.LogText));
         var first = true;
@@ -652,6 +761,10 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             list.Add(new SetTraitState(e.PieceId, e.TraitIndex, e.NewState ?? ""));
             list.Add(new AddLogLine(LogKind.System, e.LogText, e.PieceId, SideId: e.SideId));
         }
+        // B7 #47: one public System line per reveal with a known value (no piece, no side: every player who can see the subject keeps it;
+        // PlayerView drops a line naming a counter the viewer cannot see). A window is drawn here; its die is never logged.
+        foreach (var r in reveals)
+            if (RevealText(r) is { } text) list.Add(new AddLogLine(LogKind.System, text));
         // With no own line, the run's working (and its run stamp) goes on a line of its own, on the run piece, for the acting side.
         if (own.Count == 0 && (onPieces.Count + onPlaced.Count > 0 || effects.Count > 0))
             list.Add(new AddLogLine(LogKind.Calc, $"{subject ?? t.Formula.Name}: {working}" + (tag == null ? "" : $" ({tag})"), t.PieceId,
@@ -970,6 +1083,13 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         {
             try { return PropertyValues.GetOrDefault(s, owner._pack, owner._model, key, prop, PropertyFacts.IsComputed(prop) ? Filters : null); }
             catch (EvalError ex) when (ex.MissingValue || ex.HiddenData) { throw new Missing(ex.Message); }
+        }
+
+        /// <summary>B7 #47: a Reveal's value as <see cref="Read"/> reads it, or null when it cannot be worked out (never an error).</summary>
+        public double? ReadKnown(string key, PropertyDef prop)
+        {
+            try { return Read(key, prop); }
+            catch (Missing) { return null; }
         }
 
         /// <summary>

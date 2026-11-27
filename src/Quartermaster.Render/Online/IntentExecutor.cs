@@ -546,14 +546,16 @@ internal static class FormulaIntentRunner
 
     /// <summary>
     /// A guest may write holders of held sides or of no side; the global holder only during a phase of a side it holds; and may run a
-    /// unit-less formula only during a phase of a side it holds (or reacts in, B5 #7). Null when allowed.
+    /// unit-less formula only during a phase of a side it holds (or reacts in, B5 #7). A Reveal output writes nothing and is not checked
+    /// (B7 #47). Null when allowed.
     /// </summary>
     private static string? GuestRule(ModuleSession s, RulesPack pack, FormulaDef f, string? pieceId, IReadOnlySet<string> sides)
     {
         if (pieceId == null && !ActingSideHeld(s, pack, sides)) return NotYourPhaseText;
         foreach (var o in f.Outputs ?? new List<FormulaOutput>())
         {
-            if (o == null) continue;
+            // B7 #47: a Reveal writes nothing, so another side's holder or counter may be named; the host decides the value.
+            if (o == null || o.Action == OutputAction.Reveal) continue;
             var global = o.Target == OutputTarget.Global || (o.Target == OutputTarget.Holder && o.HolderId == HolderDef.GlobalId);
             if (global)
             {

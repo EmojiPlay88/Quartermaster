@@ -7,7 +7,7 @@ namespace Quartermaster.Core;
 /// calls this class; none keeps its own copy. Callers: <see cref="PlayerView"/> (what a view keeps), <see cref="KeyedValues"/>
 /// (<c>keyed()</c> in a view, <see cref="KeyedValues.HiddenIn"/>, <see cref="KeyedValues.HiddenFor"/>), <see cref="PieceFilter"/>
 /// (<c>holder()</c> in a view), <see cref="PropertyValues"/> (computed piece and holder values in a view), <see cref="CellOverrides"/> (a
-/// piece's cell override in a view), <see cref="FormulaRunner"/> (a picked piece's value and a Piece output target in a view), and in Render
+/// piece's cell override in a view), <see cref="FormulaRunner"/> (a picked piece's value, a Piece output target and a Reveal's value in a view), and in Render
 /// the formula masking, the alert bar and the guest's snapshot (a game-over snapshot is the full state).
 /// <para>A viewer is described by the sides it holds: <c>holds(sideId)</c>, or the held set of <see cref="SeesEverything"/>. Widening what
 /// a viewer holds (for example a side's allies) widens what it sees, everywhere at once.</para>
