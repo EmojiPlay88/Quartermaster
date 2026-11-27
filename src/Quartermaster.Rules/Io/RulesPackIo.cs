@@ -248,7 +248,9 @@ public static class RulesPackIo
     }
 
     /// <summary>Replaces nulls coming from JSON with empty values so collections are never null.</summary>
-    private static RulesPack Normalise(RulesPack p) => p with
+    private static RulesPack Normalise(RulesPack p) => SideFacts.MapReferences(NormaliseFields(p));
+
+    private static RulesPack NormaliseFields(RulesPack p) => p with
     {
         Id = p.Id ?? "",
         Name = p.Name ?? "",
@@ -266,7 +268,7 @@ public static class RulesPackIo
             .Select(x => x with { Label = x.Label ?? "", DocumentEntry = x.DocumentEntry ?? "" }).ToList(),
         Alerts = (p.Alerts ?? new()).Where(x => x != null)
             .Select(x => x with { Name = x.Name ?? "", Condition = x.Condition ?? "", Message = x.Message ?? "", RuleRefId = Blank(x.RuleRefId) }).ToList(),
-        Sides = (p.Sides ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "" }).ToList(),
+        Sides = (p.Sides ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "", FormerIds = CleanIds(x.FormerIds), AllianceId = Blank(x.AllianceId)?.Trim() }).ToList(),
         Schedule = (p.Schedule ?? new()).Where(x => x != null).Select(x => x with { Id = x.Id ?? "", PhaseId = x.PhaseId ?? "", Piece = x.Piece ?? "", ZoneMapId = Blank(x.ZoneMapId), FormulaId = Blank(x.FormulaId), Label = Blank(x.Label) }).ToList() is { Count: > 0 } sched ? sched : null,
         Victory = (p.Victory ?? new()).Where(x => x != null).Select(x => x with { Id = x.Id ?? "", Condition = x.Condition ?? "", SideId = Blank(x.SideId), Message = Blank(x.Message), PhaseIds = CleanIds(x.PhaseIds) }).ToList() is { Count: > 0 } vic ? vic : null,
         Blocks = (p.Blocks ?? new()).Where(x => x != null)

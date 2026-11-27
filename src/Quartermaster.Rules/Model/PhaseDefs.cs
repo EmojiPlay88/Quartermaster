@@ -7,6 +7,12 @@ public sealed record SideDef
     public string Id { get; init; } = "";
     public string Name { get; init; } = "";
     public string? UnitFilter { get; init; }
+    /// <summary>Ids this side had in older versions of the pack; saved games that use one read as this side. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? FormerIds { get; init; }
+    /// <summary>Sides with the same alliance (trimmed, case-insensitive) see what each other sees and may act for each other. Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AllianceId { get; init; }
 }
 
 public enum ForEachMode { Once, Units }

@@ -63,6 +63,7 @@ public static class RulesValidator
             foreach (var t in pack.Tables) CheckTable(pack, t, issues);
             foreach (var f in pack.Formulas) Guarded(issues, f.Id, f.Name, () => CheckFormula(pack, f, issues, knownMapIds, knownSlots));
             foreach (var s in pack.Sides) Guarded(issues, s.Id, s.Name, () => CheckSide(s, pack, issues));
+            CheckAlliances(pack, issues);
             foreach (var ph in pack.Phases) Guarded(issues, ph.Id, ph.Name, () => CheckPhase(pack, ph, issues));
             CheckBlocks(pack, issues);
             CheckGameEnd(pack, issues);
@@ -532,8 +533,26 @@ public static class RulesValidator
         else foreach (var u in FilterRefProblems(text!, pack)) err($"{who}: {what} {u}");
     }
 
+    /// <summary>Pack level: every side (two or more) in one alliance hides nothing from anyone.</summary>
+    private static void CheckAlliances(RulesPack pack, List<RulesIssue> issues)
+    {
+        if (pack.Sides.Count < 2 || SideFacts.Groups(pack) != 1 || pack.Sides.Any(x => SideFacts.Alliance(x) is null)) return;
+        Add(issues, RulesIssueSeverity.Warning, pack.Id, pack.Name, $"Every side is in alliance \"{SideFacts.Alliance(pack.Sides[0])}\", so nothing is hidden from any player");
+    }
+
     private static void CheckSide(SideDef s, RulesPack pack, List<RulesIssue> issues)
     {
+        int at = pack.Sides.IndexOf(s);
+        foreach (var f in (s.FormerIds ?? new()).Where(x => !string.IsNullOrEmpty(x)).Distinct(StringComparer.Ordinal))
+        {
+            var current = pack.Sides.FirstOrDefault(x => x.Id == f);
+            if (current != null)
+                Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": former id \"{f}\" is the id of side \"{current.Name}\"");
+            else if (pack.Sides.Take(Math.Max(at, 0)).FirstOrDefault(x => x.FormerIds != null && x.FormerIds.Contains(f)) is { } earlier)
+                Add(issues, RulesIssueSeverity.Error, s.Id, s.Name, $"Side \"{s.Name}\": former id \"{f}\" is also a former id of side \"{earlier.Name}\"");
+        }
+        if (SideFacts.Alliance(s) is { } alliance && !pack.Sides.Any(x => !ReferenceEquals(x, s) && string.Equals(SideFacts.Alliance(x), alliance, StringComparison.OrdinalIgnoreCase)))
+            Add(issues, RulesIssueSeverity.Warning, s.Id, s.Name, $"Side \"{s.Name}\": alliance \"{alliance}\" has no other side");
         // An empty filter matches every unit; with several sides that side owns every piece it comes before (ownership is first match).
         if (string.IsNullOrWhiteSpace(s.UnitFilter) && pack.Sides.Count > 1)
             Add(issues, RulesIssueSeverity.Warning, s.Id, s.Name, $"Side \"{s.Name}\": unit filter is empty, so it matches every unit");
@@ -865,6 +884,10 @@ public static class RulesValidator
             Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who} has reacting sides but no side of its own; every side may already act in it");
         else if (reactors.Contains(ph.SideId!))
             Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who} lists its own side as reacting");
+        if (pack.ById<SideDef>(ph.SideId ?? "") is { } own && SideFacts.Alliance(own) is { } ownAlliance)
+            foreach (var id in reactors.Distinct(StringComparer.Ordinal))
+                if (id != own.Id && pack.ById<SideDef>(id) is { } ally && string.Equals(SideFacts.Alliance(ally), ownAlliance, StringComparison.OrdinalIgnoreCase))
+                    Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: reacting side \"{ally.Name}\" is an ally of the phase's side, so it already acts in this phase");
     }
 
     /// <summary>A valid block (both phases found, in order, count not negative) that repeats: a count other than 1 (0 = until stopped).</summary>
@@ -1186,7 +1209,7 @@ public static class RulesValidator
     /// </summary>
     private static bool FilterMayReadHidden(RulesPack pack, string filter)
     {
-        if (pack.Sides.Count < 2) return false;
+        if (SideFacts.Groups(pack) < 2) return false;
         AstExpr e;
         try { e = Parser.Parse(filter); }
         catch (ParseError) { return false; }
