@@ -71,6 +71,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>Raised after the phase changed (start, advance), once its OnStart has run and the "Next Phase" action has closed.</summary>
     public event Action? PhaseBoundary;
 
+    /// <summary>B7 #53: a sealed answer was stored and another side of its group has yet to answer (no phase boundary, nothing queued):
+    /// the side that acts next has changed, so hot-seat re-checks its handover.</summary>
+    public event Action? AskTurnChanged;
+
     /// <summary>Raised after the difficulty of the open game changed (windows that were checking in the old mode must close).</summary>
     public event Action? DifficultyChanged;
 
@@ -639,9 +643,14 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         if (s.Game is not { } g || AnswerRefusal(g.State, run.Id) != null) return false;
         var typed = new Dictionary<string, string>(StringComparer.Ordinal);
+        // An Input the answering side cannot see (its value the host's engine read from hidden data) is not stored: the run is the side's own,
+        // so its answer reaches that side's view. The release reads it from its auto value then.
+        var hidden = s.Rules is { } pack && !string.IsNullOrEmpty(run.AskSideId)
+            ? FormulaMasking.HiddenVariables(pack, s.Model, g.State, trace.Formula, null, new HashSet<string>(StringComparer.Ordinal) { run.AskSideId })
+            : new HashSet<string>(StringComparer.Ordinal);
         foreach (var b in trace.Formula.Bindings ?? new List<VariableBinding>())
         {
-            if (b is not { Kind: BindingKind.Input, Variable: { } v }) continue;
+            if (b is not { Kind: BindingKind.Input, Variable: { } v } || hidden.Contains(v)) continue;
             if (trace.Variables.FirstOrDefault(x => x != null && x.Variable == v)?.Value is { } val) typed[v] = FormulaDialogModel.ExactText(val);
         }
         List<PendingRun> queued = new();
@@ -658,9 +667,13 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             }
         }
         SetNotice(complete ? null : SealedNoticeText);
+        if (!complete) AskTurnChanged?.Invoke();   // another side answers next: hot-seat hands the screen over
         RaiseQueued(queued);
         return true;
     }
+
+    /// <summary>A Calc line with no working stamped with no side (every viewer reads it; it holds no value).</summary>
+    private void PublicLine(string text) => Exec(new AddLogLine(LogKind.Calc, text, null, SideId: null, FormulaId: LogKind.NoWorking));
 
     /// <summary>The name of an asked side (its id when the name is blank or the side is unknown).</summary>
     private string AskedName(string? sideId) =>
@@ -668,7 +681,8 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
 
     /// <summary>
     /// Releases a complete sealed group (B7 #53): <c>{formula}: every side has answered</c>, then each run in pack side order, stamped with its
-    /// side and run on the current state with its sealed answer (later runs see earlier runs' writes); a run that cannot apply logs
+    /// side and run on the current state with its sealed answer (later runs see earlier runs' writes; an Input hidden from the side was not
+    /// stored and is read from its auto value now; with no PickSides, an Input's choices filter is judged on the full state); a run that cannot apply logs
     /// <c>{formula}: {Side}: {error}</c> (an error line of the formula, stamped with the side). Every run is then resolved.
     /// </summary>
     private void Release(List<PendingRun> group)
@@ -678,7 +692,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         for (var i = 0; i < pack.Sides.Count; i++)
             if (pack.Sides[i]?.Id is { } id) order.TryAdd(id, i);
         var runs = group.OrderBy(r => r.AskSideId != null && order.TryGetValue(r.AskSideId, out var i) ? i : int.MaxValue).ToList();
-        Calc($"{runs[0].FormulaName}: every side has answered", formulaId: LogKind.NoWorking);
+        PublicLine($"{runs[0].FormulaName}: every side has answered");
         var none = new Dictionary<string, string>();
         var noRolls = new Dictionary<string, IReadOnlyList<int>>();
         foreach (var r in runs)
@@ -771,7 +785,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (names.Count == 0) return;
         AsTrigger(phase, () =>
         {
-            foreach (var name in names) Calc($"{name}: not every side answered; the sealed answers were discarded", formulaId: LogKind.NoWorking);
+            foreach (var name in names) PublicLine($"{name}: not every side answered; the sealed answers were discarded");
             return 0;
         });
     }

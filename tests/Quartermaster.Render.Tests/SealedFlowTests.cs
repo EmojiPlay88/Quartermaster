@@ -35,10 +35,17 @@ public class SealedFlowTests : IDisposable
         try { Directory.Delete(_tmp, true); } catch (IOException) { }
     }
 
-    private static FormulaDef Toll(string? precondition = null) => new()
+    /// <param name="spy">The bid adds N, an Input whose auto value reads the Northern League's Private "Funds" (hidden from the south).</param>
+    private static FormulaDef Toll(string? precondition = null, bool spy = false) => new()
     {
-        Id = "f-toll", Name = "Toll bid", Text = "bid", Precondition = precondition,
-        Bindings = new() { new VariableBinding { Variable = "bid", Kind = BindingKind.Input, Min = 0, Max = 10 } },
+        Id = "f-toll", Name = "Toll bid", Text = spy ? "bid + N" : "bid", Precondition = precondition,
+        Bindings = spy
+            ? new()
+            {
+                new VariableBinding { Variable = "bid", Kind = BindingKind.Input, Min = 0, Max = 10 },
+                new VariableBinding { Variable = "N", Kind = BindingKind.Input, AutoValue = "holder(NorthDepot, Funds)" },
+            }
+            : new() { new VariableBinding { Variable = "bid", Kind = BindingKind.Input, Min = 0, Max = 10 } },
         Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "p-bid", Op = OutputOp.Set, Key = "askside()" } },
     };
 
@@ -48,7 +55,7 @@ public class SealedFlowTests : IDisposable
         Outputs = new() { new FormulaOutput { Target = OutputTarget.Global, Property = "p-open", Op = OutputOp.Set } },
     };
 
-    private static RulesPack Pack(string sha, string? precondition)
+    private static RulesPack Pack(string sha, string? precondition, bool spy = false)
     {
         var p = PhaseFixture.Pack(sha);
         return p with
@@ -63,13 +70,15 @@ public class SealedFlowTests : IDisposable
             {
                 new PropertyDef { Id = "p-bid", Name = "TollBid", Scope = PropertyScope.Holders, KeyedBy = "table:t-sides", Holders = new() { "global" }, Visibility = Visibility.Public },
                 new PropertyDef { Id = "p-open", Name = "FerryOpen", Scope = PropertyScope.Holders, Holders = new() { "global" }, Visibility = Visibility.Public },
+                new PropertyDef { Id = "p-funds", Name = "Funds", Scope = PropertyScope.Holders, Visibility = Visibility.Private },
             }).ToList(),
+            Holders = (p.Holders ?? new()).Append(new HolderDef { Id = "northdepot", Name = "NorthDepot", SideId = "north" }).ToList(),
             Tables = p.Tables.Append(new TableDef
             {
                 Id = "t-sides", Name = "Toll sides", Kind = TableKind.OneD, RowKeys = new() { "Northern League", "Southern Compact" },
                 ColumnKeys = new() { "Value" }, Cells = new() { new() { "1" }, new() { "2" } },
             }).ToList(),
-            Formulas = p.Formulas.Concat(new[] { Toll(precondition), Mark }).ToList(),
+            Formulas = p.Formulas.Concat(new[] { Toll(precondition, spy), Mark }).ToList(),
             Phases = p.Phases.Select(x => x.Id == "ph-weather"
                 ? x with
                 {
@@ -84,7 +93,7 @@ public class SealedFlowTests : IDisposable
         };
     }
 
-    private (ModuleSession S, PhaseController C, IntentExecutor X) Open(Difficulty d = Difficulty.FullyAuto, bool solo = false, string? precondition = null)
+    private (ModuleSession S, PhaseController C, IntentExecutor X) Open(Difficulty d = Difficulty.FullyAuto, bool solo = false, string? precondition = null, bool spy = false)
     {
         var fx = PhaseFixture.Module();
         _fixtures.Add(fx);
@@ -94,7 +103,7 @@ public class SealedFlowTests : IDisposable
         if (solo) s.LoadSetup(s.Model.Setups[0], d);
         else s.LoadSetup(s.Model.Setups[0], d, new[] { Alice, Bob });
         s.NewRules("t");
-        s.UpdateRules(_ => Pack(s.Archive.Sha256, precondition));
+        s.UpdateRules(_ => Pack(s.Archive.Sha256, precondition, spy));
         var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
         return (s, c, new IntentExecutor(s, c));
     }
@@ -103,7 +112,10 @@ public class SealedFlowTests : IDisposable
 
     private static FormulaTrace Bid(ModuleSession s, string side, int bid) =>
         s.Runner!.Run(s.Game!.State, new RunRequest("f-toll", null, new Dictionary<string, string> { ["bid"] = bid.ToString() },
-            new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()) { AskSideId = side });
+            new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<int>>()) { AskSideId = side, AutoInputs = new HashSet<string> { "N" } });
+
+    private static void SetFunds(ModuleSession s, double from, double to) =>
+        s.Game!.Execute(new LedgerDelta("h:northdepot", "p-funds", from, to, "manual", null, null, null, null));
 
     /// <summary>The host's screen for <paramref name="side"/> answers its run (hot-seat).</summary>
     private static bool Answer(ModuleSession s, PhaseController c, string side, int bid)
@@ -337,6 +349,59 @@ public class SealedFlowTests : IDisposable
         Assert.Equal("south", PhaseController.OpenAskSide(s.Game!.State));
         Assert.Equal("south", PhaseController.OpenAskFor(s.Game.State, North)?.AskSideId);
         Assert.Null(PhaseController.OpenAskFor(s.Game.State, South));   // the north's answered run is no longer open
+    }
+
+    [Fact]
+    public void Hidden_input_is_not_sealed_and_release_reads_its_auto_value()
+    {
+        var (s, c, _) = Open(spy: true);
+        SetFunds(s, 0, 5);
+        c.Start();
+        Assert.True(Answer(s, c, "south", 4));   // the engine read N = 5 from the north's Private funds
+        Assert.Equal(new[] { "bid" }, RunOf(s, "south").SealedAnswer!.Keys);
+        s.SetViewSides(South);
+        var own = s.View!.Pending.Single(r => r.AskSideId == "south");
+        Assert.NotNull(own.SealedAnswer);
+        Assert.False(own.SealedAnswer!.ContainsKey("N"));
+        Assert.DoesNotContain(own.SealedAnswer.Values, v => v == "5");
+        SetFunds(s, 5, 9);
+        Assert.True(Answer(s, c, "north", 1));
+        Assert.Equal(13, BidOf(s, "Southern Compact"));   // 4 + the funds at release, not the stale 5
+        Assert.Equal(10, BidOf(s, "Northern League"));
+    }
+
+    [Fact]
+    public void Hotseat_hands_over_after_a_partial_sealed_answer()
+    {
+        var (s, c, _) = Open();
+        var hs = new HotSeat(s, c);
+        hs.TakeOver(Alice);
+        c.Start();
+        var due = new List<string>();
+        hs.HandoverRequired += p => due.Add(p.Id);
+        Assert.True(c.ApplyFormula(RunOf(s, "north").Id, null, Bid(s, "north", 7), false));
+        Assert.Equal("p2", hs.HandoverDue()?.Id);
+        Assert.Equal(new[] { "p2" }, due);
+        hs.TakeOver(Bob);
+        Assert.True(c.ApplyFormula(RunOf(s, "south").Id, null, Bid(s, "south", 3), false));
+        Assert.Equal(7, BidOf(s, "Northern League"));
+        Assert.Equal(3, BidOf(s, "Southern Compact"));
+    }
+
+    [Fact]
+    public void Release_and_discard_lines_name_no_side()
+    {
+        var (s, c, _) = Open();
+        c.Start();
+        Assert.True(Answer(s, c, "north", 7));
+        Assert.True(Answer(s, c, "south", 3));
+        Assert.Null(s.Game!.State.Log.Last(l => l.Text == Released).SideId);
+        var (s2, c2, _) = Open();
+        c2.Start();
+        Assert.True(Answer(s2, c2, "north", 7));
+        s2.SetViewSides(North);
+        c2.Advance();
+        Assert.Null(s2.Game!.State.Log.Last(l => l.Text == Discarded).SideId);
     }
 
     [Fact]
