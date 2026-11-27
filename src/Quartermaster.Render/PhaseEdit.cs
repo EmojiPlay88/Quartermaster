@@ -147,6 +147,34 @@ public static class PhaseEdit
     public static (RulesPack Pack, string? Error) SetSideFilter(RulesPack pack, string id, string? filter) =>
         (pack with { Sides = pack.Sides.Select(s => s.Id == id ? s with { UnitFilter = string.IsNullOrWhiteSpace(filter) ? null : filter.Trim() } : s).ToList() }, null);
 
+    /// <summary>Sets the side's alliance: trimmed, blank = none.</summary>
+    public static (RulesPack Pack, string? Error) SetSideAlliance(RulesPack pack, string id, string? text) =>
+        (pack with { Sides = pack.Sides.Select(s => s.Id == id ? s with { AllianceId = string.IsNullOrWhiteSpace(text) ? null : text.Trim() } : s).ToList() }, null);
+
+    /// <summary>Sets the side's former ids from comma-separated text: trimmed, blanks and duplicates (ordinal) dropped, none = null.</summary>
+    public static (RulesPack Pack, string? Error) SetSideFormerIds(RulesPack pack, string id, string? text)
+    {
+        var ids = (text ?? "").Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+        return (pack with { Sides = pack.Sides.Select(s => s.Id == id ? s with { FormerIds = ids.Count == 0 ? null : ids } : s).ToList() }, null);
+    }
+
+    /// <summary>Folds side <paramref name="fromId"/> into <paramref name="intoId"/>: the target lists the merged side's id and former ids, its unit filter becomes the
+    /// union (blank when either is blank), the merged side is removed and every reference to it moves to the target.</summary>
+    public static (RulesPack Pack, string? Error) MergeSide(RulesPack pack, string fromId, string intoId)
+    {
+        if (pack.Sides.FirstOrDefault(s => s.Id == fromId) is not { } from) return Fail(pack, "That side no longer exists");
+        if (fromId == intoId) return Fail(pack, "A side cannot be merged into itself");
+        if (pack.Sides.FirstOrDefault(s => s.Id == intoId) is not { } into) return Fail(pack, $"No side is named \"{intoId}\"");
+        var former = (into.FormerIds ?? new()).Append(from.Id).Concat(from.FormerIds ?? new()).Where(x => !string.IsNullOrEmpty(x)).Distinct(StringComparer.Ordinal).ToList();
+        var filter = !string.IsNullOrWhiteSpace(into.UnitFilter) && !string.IsNullOrWhiteSpace(from.UnitFilter)
+            ? $"({into.UnitFilter.Trim()}) or ({from.UnitFilter.Trim()})" : null;
+        var merged = pack with
+        {
+            Sides = pack.Sides.Where(s => s.Id != fromId).Select(s => s.Id == intoId ? s with { FormerIds = former, UnitFilter = filter } : s).ToList(),
+        };
+        return (SideFacts.MapReferences(merged), null);
+    }
+
     public static (RulesPack Pack, string? Error) RemoveSide(RulesPack pack, string id) =>
         (pack with
         {
