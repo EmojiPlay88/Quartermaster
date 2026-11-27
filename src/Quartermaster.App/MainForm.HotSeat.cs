@@ -289,7 +289,7 @@ sealed partial class MainForm
         up?.SmokeContinue();
         Application.DoEvents();
         var okAfter = up != null && Visible && _handover == null && target != null && hs.Current?.Id == target.Id
-            && _session.ViewSides is { } vs && vs.SetEquals(target.Sides) && _sbPlayer.Text == $"Player: {target.Name}";
+            && _session.PlayerSides is { } vs && vs.SetEquals(target.Sides) && _sbPlayer.Text == $"Player: {target.Name}";
         Program.AppLog($"smoke: handover Continue {(okAfter ? "ok" : "FAILED")} (main visible {Visible}, status '{_sbPlayer.Text}')");
         if (!okAfter) Program.ExitCode = 1;
         SetGamePlayers(Array.Empty<PlayerDef>());
@@ -331,7 +331,7 @@ sealed partial class MainForm
         if (_handover != null) DismissHandover();
         Application.DoEvents();
         var leaked = _session.View is { } v && System.Text.Json.JsonSerializer.Serialize(v, QuartermasterJson.Options).Contains("7731", StringComparison.Ordinal);
-        var ok = seeing.Count == 1 && !leaked && _session.ViewSides is { } vs && vs.SetEquals(viewer.Sides);
+        var ok = seeing.Count == 1 && !leaked && _session.PlayerSides is { } vs && vs.SetEquals(viewer.Sides);
         Program.AppLog($"smoke: playerview {(ok ? "ok" : "FAILED")} (owners seeing the marker: {seeing.Count}, {viewer.Name}'s view leaks: {leaked})");
         if (!ok) Program.ExitCode = 1;
         OpenLedger();

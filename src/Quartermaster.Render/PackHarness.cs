@@ -146,11 +146,12 @@ public sealed class PackHarness : IDisposable
     /// <summary>The full host log (every side's lines, nothing masked).</summary>
     public IReadOnlyList<LogEntry> Log => _session.Game?.State.Log ?? (IReadOnlyList<LogEntry>)Array.Empty<LogEntry>();
 
-    /// <summary>What the given sides see: <c>PlayerView.For</c> of the current state. Use it to check masks; the rest of the harness is full-state.</summary>
+    /// <summary>What a player holding the given sides sees: <c>PlayerView.For</c> of the current state for their held set (the sides and their
+    /// allies, as a seated player). Use it to check masks; the rest of the harness is full-state.</summary>
     public GameState ViewFor(params string[] sideIds)
     {
         var game = _session.Game ?? throw new InvalidOperationException("No game is open; call NewGame first");
-        return PlayerView.For(game.State, _session.Rules, _session.Model, new HashSet<string>(sideIds ?? Array.Empty<string>()));
+        return PlayerView.For(game.State, _session.Rules, _session.Model, SideFacts.Held(_session.Rules, new HashSet<string>(sideIds ?? Array.Empty<string>()))!);
     }
 
     /// <summary>The underlying session, for tests that need more. Not stable: it may change between releases.</summary>

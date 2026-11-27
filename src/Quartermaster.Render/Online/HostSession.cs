@@ -495,7 +495,8 @@ public sealed class HostSession : IDisposable
         if (!Same(players, g.State.Players))
             g.Execute(CommandLog.Prepare(CommandLog.Stamp(new SetPlayers(players), Seats.Host.PlayerId), g.State, _s));
         var hostSides = Seats.Host.Sides.ToHashSet();
-        if (_s.ViewSides == null || !_s.ViewSides.SetEquals(hostSides)) _s.SetViewSides(hostSides);
+        // The host seat's own sides against the session's raw sides (its ViewSides also hold allies, so they would never match).
+        if (_s.PlayerSides == null || !_s.PlayerSides.SetEquals(hostSides)) _s.SetViewSides(hostSides);
     }
 
     private LobbyListing BuildListing()
@@ -538,7 +539,7 @@ public sealed class HostSession : IDisposable
         seat.SnapshotDue = false;
         if (seat.IsHost || seat.MemberId is not { } to || seat.Sides.Count == 0) return;
         if (_s.Game?.State is not { } full || _s.Rules is not { } pack) return;
-        var view = PlayerView.For(full, pack, _s.Model, seat.Sides.ToHashSet());
+        var view = PlayerView.For(full, pack, _s.Model, SideFacts.Held(pack, seat.Sides)!);   // B8: the seat's held set, with allies
         view.Players = Seats.ToPlayers();
         var json = JsonSerializer.SerializeToUtf8Bytes(view, QuartermasterJson.Options);
         seat.LastSnapshot = Now();

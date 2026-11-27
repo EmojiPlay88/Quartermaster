@@ -40,7 +40,7 @@ public sealed class IntentExecutor(ModuleSession s, PhaseController c)
         {
             if (intent == null) return IntentResult.Refused(NotUnderstoodText);
             if (s.Game is not { } g) return IntentResult.Refused(NoGameText);
-            var held = sides ?? new HashSet<string>();
+            var held = SideFacts.Held(s.Rules, sides ?? new HashSet<string>())!;   // B8: the sender's sides and their allies; every check below reads it
             var who = string.IsNullOrWhiteSpace(playerId) ? "guest" : playerId.Length > MaxId ? playerId[..MaxId] : playerId;
             if (g.InAction) return IntentResult.Refused("The host is busy; try again.");
             return intent switch
