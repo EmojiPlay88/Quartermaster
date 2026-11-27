@@ -159,7 +159,7 @@ public static class FormulaMasking
         bool UnitHidden(string? prop) => pieceId != null && RunPieceValueHidden(PropById(prop));
         // A holder's value of a property (null: the whole key) as HiddenValues decides it; no holder named reads the Global holder.
         bool HolderHidden(string? holderId, PropertyDef? prop) =>
-            holderId != null && HiddenValues.HolderValueHidden(pack, holderId, prop, holds);
+            holderId != null && HiddenValues.HolderValueHidden(state, pack, holderId, prop, holds);   // the owner as the state has it (B9)
         foreach (var b in f.Bindings ?? new List<VariableBinding>())
         {
             if (b?.Variable == null) continue;

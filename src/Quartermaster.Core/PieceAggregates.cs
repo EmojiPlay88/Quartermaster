@@ -131,6 +131,11 @@ internal sealed class AggregateFilters(GameState s, RulesPack pack, ModuleModel?
     /// <summary>The side owning a piece (<see cref="Sides"/>); null when none.</summary>
     public string? SideOf(PieceInstance p) => Sides.Value(p);
 
+    private Func<string, string?>? _holderSides;
+
+    /// <summary>B9: each holder's owner in this state (<see cref="Ownership.HolderSides"/>), worked out once per evaluation pass.</summary>
+    public Func<string, string?> HolderSides => _holderSides ??= Ownership.HolderSides(s, pack);
+
     private Func<PieceInstance, bool> CompileOnce(string text)
     {
         _cache ??= new(StringComparer.Ordinal);

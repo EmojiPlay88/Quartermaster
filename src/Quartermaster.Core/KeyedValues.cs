@@ -230,7 +230,7 @@ public static class KeyedValues
         holds ??= HiddenValues.HeldBy(s);
         if (piece != null)
             return PlayerView.IsPlaceholder(piece) || HiddenValues.PieceValueHidden(pack, def, piece, sides ?? PieceFilter.SideMap(s, pack), holds);
-        return holderId != null && HiddenValues.HolderValueHidden(pack, holderId, def, holds);
+        return holderId != null && HiddenValues.HolderValueHidden(s, pack, holderId, def, holds);
     }
 
     /// <summary>hex(): the grid location name of the piece being evaluated, as text.</summary>

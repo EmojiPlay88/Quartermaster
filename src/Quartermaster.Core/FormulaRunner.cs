@@ -643,7 +643,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 EnsureKept(_pack, HolderDef.GlobalId, prop);
                 key = LedgerKey.Holder(HolderDef.GlobalId);
                 subject = "Global";
-                hidden = view && HiddenValues.HolderValueHidden(_pack, HolderDef.GlobalId, prop, held!);
+                hidden = view && HiddenValues.HolderValueHidden(s, _pack, HolderDef.GlobalId, prop, held!);
                 break;
             case OutputTarget.Holder:
                 if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
@@ -651,7 +651,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 EnsureKept(_pack, o.HolderId, prop);
                 key = LedgerKey.Holder(o.HolderId);
                 subject = HolderText(_pack, o.HolderId);
-                hidden = view && HiddenValues.HolderValueHidden(_pack, o.HolderId, prop, held!);
+                hidden = view && HiddenValues.HolderValueHidden(s, _pack, o.HolderId, prop, held!);
                 break;
             default:
                 throw new EvalError(outputError(oi, $": {o.Action} cannot target {o.Target}"));

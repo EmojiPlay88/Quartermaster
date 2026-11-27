@@ -574,7 +574,7 @@ internal static class FormulaIntentRunner
             if (o.Target == OutputTarget.Holder)
             {
                 if (o.HolderId == null) return IntentExecutor.NotUnderstoodText;
-                if (Ownership.SideOfHolder(o.HolderId, pack) is { } owner && !sides.Contains(owner))
+                if (Ownership.SideOfHolder(o.HolderId, pack, s.Game?.State) is { } owner && !sides.Contains(owner))   // the current owner (B9)
                     return $"That formula writes to a holder that {ModuleSession.OtherSideText}.";
             }
         }

@@ -143,6 +143,8 @@ public static class PlayerView
         /// <see cref="HiddenValues"/> takes them (made once per view, so a value costs no allocation).</summary>
         private readonly Func<string, bool> _holds;
         private readonly Func<PropertyDef, bool> _isPublic;
+        /// <summary>Each holder's owner in the full state, worked out once per view (B9: <see cref="Ownership.HolderSides"/>).</summary>
+        private readonly Func<string, string?> _holderSide;
         /// <summary>Phase name -> the side ids of every phase with that name ("" for a phase with no side).</summary>
         private readonly Dictionary<string, HashSet<string>> _phaseSides = new(StringComparer.Ordinal);
         /// <summary>Piece name -> first side not held among pieces with that name (null when all are held or public).</summary>
@@ -165,6 +167,7 @@ public static class PlayerView
             _pack = pack; _held = held;
             _holds = held.Contains;
             _isPublic = p => !PropPrivate(p.Id);
+            _holderSide = Ownership.HolderSides(full, pack);
             _access = new PieceAccess(full, pack, model, held);
             foreach (var p in pack.Properties ?? new())   // a computed property reading hidden data counts as Private
                 if (p != null)
@@ -278,8 +281,8 @@ public static class PlayerView
                 if (NotHeld(ps)) side = ps;
                 return HiddenValues.PieceValueHidden(_pack, def, ps, _holds, _isPublic);
             }
-            if (!HiddenValues.HolderValueHidden(_pack, id, def, _holds, _isPublic)) return false;
-            if (id != HolderDef.GlobalId) side = Ownership.SideOfHolder(id, _pack);   // null: public, or owned by a deleted side (ignored, spec 8a.10)
+            if (!HiddenValues.HolderValueHidden(_pack, id, def, _holds, _isPublic, _holderSide)) return false;
+            if (id != HolderDef.GlobalId) side = _holderSide(id);   // null: public, or owned by a deleted side (ignored, spec 8a.10)
             return true;
         }
 

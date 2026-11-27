@@ -13,6 +13,9 @@ namespace Quartermaster.Core;
 /// a viewer holds (for example a side's allies) widens what it sees, everywhere at once.</para>
 /// <para>These are information rules only. What a player may change (<c>PieceAccess</c>, a session's ledger edit right, a guest intent's
 /// rule) is decided elsewhere and is never widened by this class.</para>
+/// <para>The owner of a holder comes from the state (B9): the state-aware overloads ask
+/// <see cref="Ownership.SideOfHolder(string, RulesPack, GameState?)"/>, so a holder whose owner expression names another side hides or shows
+/// its values by that side at once; the overloads without a state use the fixed owner.</para>
 /// </summary>
 public static class HiddenValues
 {
@@ -38,20 +41,29 @@ public static class HiddenValues
     /// property is Public (B7 #74a: a Public value of another side's holder is seen).
     /// </summary>
     public static bool HolderValueHidden(RulesPack pack, string holderId, PropertyDef? property, Func<string, bool> holds) =>
-        HolderValueHidden(pack, holderId, property, holds, null);
+        HolderValueHidden(pack, holderId, property, holds, null, null);
+
+    /// <summary>
+    /// <see cref="HolderValueHidden(RulesPack, string, PropertyDef?, Func{string, bool})"/> with the holder's owner in <paramref name="s"/>
+    /// (<see cref="Ownership.SideOfHolder(string, RulesPack, GameState?)"/>, B9); a null state uses the fixed owner.
+    /// </summary>
+    public static bool HolderValueHidden(GameState? s, RulesPack pack, string holderId, PropertyDef? property, Func<string, bool> holds) =>
+        HolderValueHidden(pack, holderId, property, holds, null, s == null ? null : id => Ownership.SideOfHolder(id, pack, s));
 
     /// <summary><see cref="HolderValueHidden(RulesPack, string, PropertyDef?, Func{string, bool})"/> with the caller's memo of
-    /// <see cref="PropertyFacts.IsPublic(RulesPack, PropertyDef?)"/> (a player view decides it once per property).</summary>
+    /// <see cref="PropertyFacts.IsPublic(RulesPack, PropertyDef?)"/> (a player view decides it once per property) and of the holder's owner
+    /// (<paramref name="holderSide"/>, e.g. <see cref="Ownership.HolderSides"/>; null: the fixed owner).</summary>
     internal static bool HolderValueHidden(RulesPack pack, string holderId, PropertyDef? property, Func<string, bool> holds,
-        Func<PropertyDef, bool>? isPublic)
+        Func<PropertyDef, bool>? isPublic, Func<string, string?>? holderSide = null)
     {
         if (PrivatePlace(pack, property, isPublic)) return true;
         if (holderId == HolderDef.GlobalId) return false;
         if (!HolderExists(pack, holderId)) return true;
-        if (Ownership.SideOfHolder(holderId, pack) is not { } owner) return false;
+        // A Public value is seen whoever owns the holder (every step below gives false for it), so its owner is not worked out.
+        if (property != null && Public(pack, property, isPublic)) return false;
+        if ((holderSide != null ? holderSide(holderId) : Ownership.SideOfHolder(holderId, pack)) is not { } owner) return false;
         if (holds(owner)) return false;
-        if (property == null) return true;
-        return !Public(pack, property, isPublic);
+        return true;   // the whole key, or a value that is not Public, of another side's holder
     }
 
     /// <summary>

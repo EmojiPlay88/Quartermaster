@@ -187,7 +187,7 @@ public static class PieceFilter
 
     /// <summary>
     /// holder(Holder, Property): the holder's value, else the property's Default. A player's view removes the values the viewer may not
-    /// see (<see cref="HiddenValues.HolderValueHidden(RulesPack, string, PropertyDef?, Func{string, bool})"/>: a non-Public value of a holder
+    /// see (<see cref="HiddenValues.HolderValueHidden(GameState?, RulesPack, string, PropertyDef?, Func{string, bool})"/>: a non-Public value of a holder
     /// owned by a side the viewer does not hold), so in a view such a missing value is hidden, not unset, and does not fall back to the
     /// Default, even when the holder's Public values are in the view (B7 #74a). A value the viewer may see that is missing reads the Default.
     /// </summary>
@@ -209,7 +209,9 @@ public static class PieceFilter
         var key = LedgerKey.Holder(holderId);
         var v = PropertyValues.Get(s, pack, filters?.Model ?? model, key, def, filters);
         if (v != null) return Value.Of(v.Value);
-        if (s.IsPlayerView && HiddenValues.HolderValueHidden(pack, holderId, def, HiddenValues.HeldBy(s)))
+        if (s.IsPlayerView && (filters != null
+                ? HiddenValues.HolderValueHidden(pack, holderId, def, HiddenValues.HeldBy(s), null, filters.HolderSides)
+                : HiddenValues.HolderValueHidden(s, pack, holderId, def, HiddenValues.HeldBy(s))))
             throw new EvalError($"{def.Name} has no value on {holderName}") { MissingValue = true };
         return Value.Of(def.Default);
     }

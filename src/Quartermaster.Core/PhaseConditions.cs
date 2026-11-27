@@ -94,14 +94,15 @@ public static class PhaseConditions
         return times.Sum();
     }
 
-    /// <summary>Reads global properties (Default when unset) and the candidate's turn, stage, segment and side. No pieces, no dice.</summary>
-    private sealed class PhaseContext(RulesPack pack, GameState s, PhasePosition at, ModuleModel? model) : IEvalContext
+    /// <summary>Reads global properties (Default when unset) and the candidate's turn, stage, segment and side. No pieces, no dice.
+    /// <see cref="HolderOwners"/> derives its owner context from it.</summary>
+    internal class PhaseContext(RulesPack pack, GameState s, PhasePosition at, ModuleModel? model) : IEvalContext
     {
         private AggregateFilters? _filters;
         /// <summary>Carries the candidate position, so a computed global read here sees its turn, stage and phase side.</summary>
         private AggregateFilters Filters => _filters ??= new(s, pack, model) { At = at };
 
-        public Value GetVariable(string name)
+        public virtual Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
             if (def.Scope == PropertyScope.Pieces) throw new EvalError($"{name} is not a global property");
@@ -120,7 +121,7 @@ public static class PhaseConditions
         public double Segment() => at.Inner;
         public Value PhaseSide() => PieceFilter.PhaseSideValue(pack, PhaseAt(pack, at));
         /// <summary>Whole-game aggregates only: there is no piece, so the hex ones are not available (inside a filter they are, given the model).</summary>
-        public Value Aggregate(string fn, string? property, string? filter) =>
+        public virtual Value Aggregate(string fn, string? property, string? filter) =>
             PieceAggregates.Evaluate(fn, property, filter, null, Filters);
         /// <summary>B6: a holder property's keyed value (the Global holder's, or the named holder's); there is no piece, so a Pieces property
         /// is "keyed() needs a unit".</summary>
