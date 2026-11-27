@@ -562,7 +562,9 @@ public sealed class ModuleSession : IDisposable
     {
         ArgumentNullException.ThrowIfNull(filtered);
         if (!IsGuest) throw new InvalidOperationException("Not an online guest.");
-        filtered.IsPlayerView = true;   // a host's snapshot is always a view, even from an older host that does not set the flag
+        // A host's snapshot is a view, even from an older host that does not set the flag; once the game is over it is the full state
+        // (B7 #73, HiddenValues.SeesEverything) and keeps the host's flag: a B7 host sends the full clone, an older host's view stays a view.
+        if (filtered.GameOver == null) filtered.IsPlayerView = true;
         // ViewSides travels in the snapshot; one from an older host has none, so its own empty holders keep failing closed.
         GuestSides = sides == null ? null : new HashSet<string>(sides);
         if (Game is { } g)

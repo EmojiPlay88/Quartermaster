@@ -499,7 +499,9 @@ public class FormulaMaskingTests : IDisposable
         var f = s.Rules!.ById<FormulaDef>("f-gwet")!;
         Assert.Contains("G", FormulaMasking.HiddenFor(s, f, PhaseFixture.BlueOne));
         Assert.DoesNotContain("W", FormulaMasking.HiddenFor(s, f, PhaseFixture.BlueOne));   // Blue's own water
-        var v = Dialog(s, "f-gwet", PhaseFixture.BlueOne, check: false).Evaluate(s.Game!.State);
+        var dialog = Dialog(s, "f-gwet", PhaseFixture.BlueOne, check: false);
+        dialog.SetBoxText("B", "7");   // B7: B's guard reads G, so B is always to be filled
+        var v = dialog.Evaluate(s.Game!.State);
         Assert.Equal(FormulaMasking.HiddenText, v.Boxes.Single(b => b.Variable == "G").Text);
         Assert.DoesNotContain(RedText, Shown(v));
         Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
@@ -527,10 +529,15 @@ public class FormulaMaskingTests : IDisposable
         var box = before.Boxes.Single(b => b.Variable == "B");
         Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot decide G < 10
         Assert.True(box.Enabled);
-        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
+        Assert.Equal("Waiting for: B", before.Status);   // B7: a guard over hidden data is always to be filled
         Assert.DoesNotContain("sum()", Shown(before));
 
-        // The host knows G is far above 10: B is not used, and the run applies without it.
+        // B7: the host asks for B although it knows G is far above 10 (its answer never depends on the guard).
+        var waiting = await FormulaMasking.SendAsync(port, m, null, calculate: false);
+        Assert.False(waiting.Applied);
+        Assert.Equal("Waiting for: B", waiting.Message);
+        // With B typed the run applies, and B is not used.
+        m.SetBoxText("B", "7");
         var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
         Assert.True(applied.Applied, applied.Message);
         Assert.Contains(host.Game!.State.LedgerHistory, e => e.FormulaId == "f-gwet" && e.Working != null);
@@ -630,10 +637,12 @@ public class FormulaMaskingTests : IDisposable
         var box = before.Boxes.Single(b => b.Variable == "B");
         Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot know: hidden pieces may count
         Assert.True(box.Enabled);
-        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
+        Assert.Equal("Waiting for: B", before.Status);   // B7: a guard over hidden data is always to be filled
 
-        // The host sees three pieces of Morale 5 (15): B is not used, and the run applies without it.
+        // The host sees three pieces of Morale 5 (15): it still asks for B (B7), then applies without using it.
         var before15 = Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water");
+        Assert.Equal("Waiting for: B", (await FormulaMasking.SendAsync(port, m, null, calculate: false)).Message);
+        m.SetBoxText("B", "7");
         var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
         Assert.True(applied.Applied, applied.Message);
         Assert.Equal(before15 ?? host.Rules!.Properties.First(p => p.Id == "water").Default, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
@@ -904,11 +913,11 @@ public class FormulaMaskingTests : IDisposable
         Assert.NotEqual(FormulaDialogModel.NotUsedText, box.Text);   // the guest cannot know: the depot value is Red's
         Assert.True(box.Enabled);
         Assert.Equal(BoxBackground.Typed, box.Background);
-        Assert.Equal(FormulaDialogModel.HostWaitText, before.Status);
-        Assert.Equal("", before.ResultText);
+        Assert.Equal("Waiting for: B", before.Status);   // B7: a guard over hidden data is always to be filled
+        Assert.Equal(FormulaMasking.HostCalculatesText, before.ResultText);   // B7: a guest's masked result is always the host's
         Assert.DoesNotContain(RedText, Shown(before));
 
-        // Without B the host (whose depot is not empty) waits for it; with B it applies.
+        // Without B the host waits for it (whatever the depot holds); with B it applies.
         var waiting = await FormulaMasking.SendAsync(port, m, null, calculate: false);
         Assert.False(waiting.Applied);
         Assert.Equal("Waiting for: B", waiting.Message);
@@ -989,8 +998,8 @@ public class FormulaMaskingTests : IDisposable
         var port = PortTo(executor);
         var m = Dialog(guest, "f-dice", PhaseFixture.BlueOne, check: true);
         var first = m.Evaluate(guest.Game!.State);
-        Assert.Equal(FormulaDialogModel.HostRollsText, first.Boxes.Single(b => b.Variable == "R").Text);   // no local dice for a guest
-        Assert.Equal("", first.ResultText);
+        Assert.Equal(FormulaMasking.HostCalculatesText, first.Boxes.Single(b => b.Variable == "R").Text);   // B7: a masked formula's dice are never shown before Apply
+        Assert.Equal(FormulaMasking.HostCalculatesText, first.ResultText);   // B7: a guest's masked result is always the host's
 
         // Calculate is a preview: nothing executes on the host; the visible boxes fill as in solo.
         var before = Json(host.Game!.State);
@@ -1001,23 +1010,28 @@ public class FormulaMaskingTests : IDisposable
         Assert.False(p1.Values!.ContainsKey("S"));
         Assert.Equal("10", p1.Values["W"]);
         Assert.DoesNotContain(RedText, string.Join("|", p1.Values.Values));
-        var roll = Assert.Single(p1.Rolls!["R"]);
+        Assert.Null(p1.Rolls);   // B7: the dice stay pinned on the host
+        Assert.False(p1.Values.ContainsKey("R"));
+        Assert.Equal(1, next);   // rolled once, on the host
         var shown = m.Evaluate(guest.Game!.State);
         Assert.Equal("10", shown.Boxes.Single(b => b.Variable == "W").Text);
-        Assert.Equal(roll.ToString(CultureInfo.InvariantCulture), shown.Boxes.Single(b => b.Variable == "R").Text);
+        Assert.Equal(FormulaMasking.HostCalculatesText, shown.Boxes.Single(b => b.Variable == "R").Text);
         Assert.Equal(FormulaMasking.HostCalculatesText, shown.Boxes.Single(b => b.Variable == "S").Text);
         Assert.Null(shown.Boxes.Single(b => b.Variable == "R").RerollKey);
         Assert.DoesNotContain(RedText, Shown(shown));
 
         // Calculate again: the same roll, no fishing.
         var p2 = await FormulaMasking.SendAsync(port, m, null, calculate: true, preview: true);
-        Assert.Equal(roll, Assert.Single(p2.Rolls!["R"]));
+        Assert.Null(p2.Rolls);
+        Assert.Equal(1, next);   // nothing rolled again
         Assert.Equal(before, Json(host.Game!.State));
         Assert.Equal(1, executor.Pins.Count("p2"));
 
         // Apply uses the pinned roll (once).
         var applied = await FormulaMasking.SendAsync(port, m, null, calculate: false);
         Assert.True(applied.Applied, applied.Message);
+        Assert.Equal(1, next);
+        var roll = Assert.Single(host.Game!.State.DiceHistory.Last().Results);
         Assert.Equal(10 + roll + RedSecret, Ledger.Get(host.Game!.State, LedgerKey.Piece(PhaseFixture.BlueOne), "water"));
         Assert.Equal(new[] { roll }, host.Game!.State.DiceHistory.Last().Results);
         Assert.Equal(0, executor.Pins.Count("p2"));
@@ -1049,17 +1063,20 @@ public class FormulaMaskingTests : IDisposable
     [Fact]
     public async Task Pins_Full_NoEviction_SameRoll_NewPreviewRefused()
     {
-        var (host, _, executor, _) = DiceHost();
+        var (host, _, executor, rolled) = DiceHost();
         var guest = Guest(host);
         var port = PortTo(executor);
         var a = Dialog(guest, "f-dice", PhaseFixture.BlueOne, check: true);
-        var roll = Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]);
+        // B7: f-dice is masked, so its dice stay on the host: the roll is followed through the host's roller.
+        Assert.Null((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls);
+        var roll = Assert.Single(rolled);
         // Fill the table with other scopes (as 511 other units would).
         for (var i = 1; i < FormulaPins.MaxPerSender; i++)
             Assert.NotNull(executor.Pins.Open(new FormulaPins.Key("p2", "f-dice", "x" + i), host.Game!, host.Rules!, mayRoll: true));
         Assert.Equal(FormulaPins.MaxPerSender, executor.Pins.Count("p2"));
         // A still re-shows its same roll; a new preview is refused before rolling, nothing evicted, nothing executed.
-        Assert.Equal(roll, Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]));
+        Assert.Null((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls);
+        Assert.Equal(roll, Assert.Single(rolled));   // the same roll: nothing rolled again
         var before = Json(host.Game!.State);
         var b = Dialog(guest, "f-dice2", PhaseFixture.BlueOne, check: true);
         var refused = await FormulaMasking.SendAsync(port, b, null, calculate: true, preview: true);
@@ -1068,7 +1085,8 @@ public class FormulaMaskingTests : IDisposable
         Assert.Null(refused.Rolls);
         Assert.Equal(before, Json(host.Game!.State));
         Assert.Equal(FormulaPins.MaxPerSender, executor.Pins.Count("p2"));
-        Assert.Equal(roll, Assert.Single((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls!["R"]));
+        Assert.Null((await FormulaMasking.SendAsync(port, a, null, calculate: true, preview: true)).Rolls);
+        Assert.Equal(roll, Assert.Single(rolled));
         // A formula without dice needs no pin, so it still previews.
         Assert.NotEqual(FormulaPins.FullText, Send(executor, "f-mix", null, calculate: true, preview: true).Message);
     }
@@ -1259,9 +1277,11 @@ public class FormulaMaskingTests : IDisposable
         });
         var b = new BatchModel(s, c, s.Game!.State.Pending.Single().Id);
         b.CalculateAll();
-        Assert.Contains("5150", Shown(b.Row(0)));   // Red sees its own fuel
+        // B7: the movement reads Blue's depot, so the masked row previews no value before Apply, not even Red's own fuel.
+        Assert.DoesNotContain("5150", Shown(b.Row(0)));
+        Assert.Contains("Fuel changes (hidden)", Shown(b.Row(0)));
         Assert.True(b.ApplyRow(0));
-        Assert.Contains("5150", Shown(b.Row(0)));   // the applied snapshot, still Red's view
+        Assert.True(Ledger.Get(s.Game!.State, LedgerKey.Piece(PhaseFixture.RedOne), "fuel") < 5150);   // applied: Red's fuel was spent
         s.SetViewSides(Blue);
         for (var i = 0; i < b.RowCount; i++)
         {

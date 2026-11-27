@@ -60,14 +60,13 @@ internal static class CellOverrides
         return k.Kind == TableKeyKind.Number && TableLookup.Matches(k, Value.Of(name));
     }
 
-    /// <summary>As a Picked-piece read decides it: a placeholder, or a non-Public property of a piece of a side the viewer does not hold.</summary>
+    /// <summary>As a Picked-piece read decides it: a placeholder, or what <see cref="HiddenValues"/> hides of the piece (a non-Public property
+    /// of a piece of a side the viewer does not hold).</summary>
     private static bool HiddenInView(GameState s, RulesPack pack, PieceInstance piece, PropertyDef p, Lazy<Func<PieceInstance, string?>>? sides)
     {
         if (!s.IsPlayerView) return false;
         if (PlayerView.IsPlaceholder(piece)) return true;
-        if (PropertyFacts.IsPublic(pack, p)) return false;
-        if (Ownership.InUnitFilter) return true;   // a side's own unit filter: the side map is not known yet
-        var side = (sides ?? PieceFilter.SideMap(s, pack)).Value(piece);
-        return side != null && s.ViewSides?.Contains(side) != true;
+        if (Ownership.InUnitFilter) return HiddenValues.UnknownSideValueHidden(pack, p);   // a side's own unit filter: the side is not known yet
+        return HiddenValues.PieceValueHidden(pack, p, piece, sides ?? PieceFilter.SideMap(s, pack), HiddenValues.HeldBy(s));
     }
 }

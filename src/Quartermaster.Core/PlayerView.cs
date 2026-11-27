@@ -12,9 +12,10 @@ namespace Quartermaster.Core;
 /// <item>Pieces on a map owned by a side not held are removed, with their stacks, ledgers, history and log lines; the map leaves MapOrder.</item>
 /// <item>A piece of a side not held with an active Hideable is removed; with an active Obscurable it becomes a nameless placeholder
 /// carrying only that mask trait (drawn as the mask), and its ledgers, history and log lines are removed.</item>
-/// <item>Private properties of pieces of sides not held (and of deleted pieces, whose side is unknown), and every value of holders owned
-/// by a side not held (or of holders missing from the pack), are removed from Ledgers and LedgerHistory. A kept formula history entry
-/// keeps its working only when its log line is shown unredacted.</item>
+/// <item>Whether a value is kept is decided by <see cref="HiddenValues"/>, the one visibility rule. Private properties of pieces of sides
+/// not held (and of deleted pieces, whose side is unknown) and of holders owned by a side not held (B7 #74a: a Public value of such a holder
+/// is kept, as a Public value of another side's piece is), and every value of holders missing from the pack, are removed from Ledgers and
+/// LedgerHistory. A kept formula history entry keeps its working only when its log line is shown unredacted.</item>
 /// <item>Owner of a log line: its SideId stamp; else the side of its PieceId (a unit that still exists); else, only for lines that need
 /// one, the side of its phase when that phase name belongs to exactly one side; else unknown, which hides. A "{unit name}: " prefix naming
 /// another side's unit can only hide.</item>
@@ -28,13 +29,23 @@ namespace Quartermaster.Core;
 /// <item>A log line's failure flag (<see cref="LogEntry.Error"/>) is cleared when the line is redacted and goes with a dropped line; a kept line
 /// keeps it (the viewer already holds that line's owner). The run stamp (<see cref="LogEntry.AppliedRun"/>, <see cref="LogEntry.Stage"/>) is
 /// cleared the same way, so <c>runs()</c> cannot count another side's runs from the view (it refuses such counts in a view anyway).</item>
-/// <item>Dice of a formula with PrivateRolls follow the line's owner; hidden rolls lose their results and read "{Side} rolled dice".</item>
+/// <item>Dice of a formula with PrivateRolls follow the line's owner; hidden rolls lose their results and read "{Side} rolled dice". A roll
+/// carries the id of its formula (B7 #74d): it is private exactly when that formula is, whatever its current name, and an id the pack no
+/// longer has is private; only a roll without an id (an older log) follows the formula-name prefix.</item>
+/// <item>A Turn line with a side stamp (a checklist tick or an acknowledged warning of that side's phase, B7) is kept only for a viewer
+/// holding that side and dropped for any other; an unstamped one (a phase with no side, an older save) is public.</item>
 /// <item>Pending runs lose units of other sides (and removed pieces); runs left empty are dropped. Unit-less runs follow the current phase's side.
-/// Every run loses its group dice (<see cref="PendingRun.GroupRolls"/>); an ask run's units of other sides lose their group.</item>
+/// Every run loses its group dice (<see cref="PendingRun.GroupRolls"/>); an ask run's units of other sides lose their group. A sealed answer
+/// (<see cref="PendingRun.SealedAnswer"/>, B7 #53) follows the ask-run rule: it stays only on the asked side's run, so another side never
+/// holds it before release (once the game is over every view is the full state).</item>
 /// <item>Keyed values (<see cref="GameState.Keyed"/>, B6) are filtered exactly as Ledgers (a whole ledger key hidden, else per property). A place
 /// property (keyed by hex, kept by the Global holder) has no side: a Public one is shown to every player, any other only in a full view, so a
 /// player view drops its values and history entries and redacts its log lines. A formula whose keyed() reads may be hidden (a place that is
 /// not Public, a named holder the viewer may not see) never shows its working.</item>
+/// <item>A game that is over (B7 #73, <see cref="GameState.GameOver"/>) hides nothing: every player gets the full state
+/// (<see cref="GameState.IsPlayerView"/> false, <see cref="GameState.ViewSides"/> null), as a player holding every side and a state
+/// without a pack do (<see cref="HiddenValues.SeesEverything"/>). Only information is lifted, never a right to act; undoing the end of
+/// the game hides again.</item>
 /// <item>If filtering fails, the view is emptied (fail closed) and its log holds one System line, <see cref="FilterErrorText"/>.</item>
 /// </list>
 /// </summary>
@@ -57,9 +68,8 @@ public static class PlayerView
     public static GameState For(GameState full, RulesPack? pack, ModuleModel model, IReadOnlySet<string> heldSides)
     {
         var view = full.DeepClone();
-        if (pack == null) return view;
-        var held = heldSides ?? new HashSet<string>();
-        if ((pack.Sides ?? new List<SideDef>()).All(x => x == null || held.Contains(x.Id))) return view;
+        var held = heldSides ?? new HashSet<string>();   // a missing set holds nothing (fail closed), as before B7
+        if (pack == null || HiddenValues.SeesEverything(full, pack, held)) return view;
         try
         {
             if (FailForTest) throw new InvalidOperationException("test fault");
@@ -127,11 +137,19 @@ public static class PlayerView
         private readonly HashSet<string> _hidden = new(StringComparer.Ordinal);
         private readonly PieceAccess _access;
         private readonly Dictionary<string, Visibility> _visibility = new(StringComparer.Ordinal);
+        /// <summary>Property id -> its record (first wins, as <see cref="RulesPack.ById{T}"/>).</summary>
+        private readonly Dictionary<string, PropertyDef> _props = new(StringComparer.Ordinal);
+        /// <summary>The viewer's sides and the memo of <see cref="PropertyFacts.IsPublic(RulesPack, PropertyDef?)"/>, as
+        /// <see cref="HiddenValues"/> takes them (made once per view, so a value costs no allocation).</summary>
+        private readonly Func<string, bool> _holds;
+        private readonly Func<PropertyDef, bool> _isPublic;
         /// <summary>Phase name -> the side ids of every phase with that name ("" for a phase with no side).</summary>
         private readonly Dictionary<string, HashSet<string>> _phaseSides = new(StringComparer.Ordinal);
         /// <summary>Piece name -> first side not held among pieces with that name (null when all are held or public).</summary>
         private readonly Dictionary<string, string?> _subjects = new(StringComparer.Ordinal);
         private readonly List<string> _privatePrefixes;
+        /// <summary>Formula id -> its <see cref="FormulaDef.PrivateRolls"/> (first record wins, as <see cref="RulesPack.ById{T}"/>); an id not here is private.</summary>
+        private readonly Dictionary<string, bool> _privateById = new(StringComparer.Ordinal);
         /// <summary>
         /// Formulas reading a holder value this viewer may not see, using an aggregate that may read hidden pieces or values, or reading a
         /// computed property built from hidden data (<see cref="FormulaVariables.ComputedReadsHidden"/>), or picking a piece whose non-Public
@@ -145,9 +163,15 @@ public static class PlayerView
         public Filter(GameState full, RulesPack pack, ModuleModel? model, IReadOnlySet<string> held)
         {
             _pack = pack; _held = held;
+            _holds = held.Contains;
+            _isPublic = p => !PropPrivate(p.Id);
             _access = new PieceAccess(full, pack, model, held);
             foreach (var p in pack.Properties ?? new())   // a computed property reading hidden data counts as Private
-                if (p != null) _visibility.TryAdd(p.Id ?? "", PropertyFacts.IsPublic(pack, p) ? Visibility.Public : Visibility.Private);
+                if (p != null)
+                {
+                    _visibility.TryAdd(p.Id ?? "", PropertyFacts.IsPublic(pack, p) ? Visibility.Public : Visibility.Private);
+                    if (p.Id != null) _props.TryAdd(p.Id, p);
+                }
             foreach (var p in pack.Properties ?? new())
                 if (p?.Id != null && KeyedFacts.IsPlace(p) && PropPrivate(p.Id)) _privatePlaces.Add(p.Id);
             foreach (var ph in pack.Phases ?? new())
@@ -156,6 +180,8 @@ public static class PlayerView
                 if (!_phaseSides.TryGetValue(ph.Name ?? "", out var set)) _phaseSides[ph.Name ?? ""] = set = new(StringComparer.Ordinal);
                 set.Add(string.IsNullOrWhiteSpace(ph.SideId) ? "" : ph.SideId);
             }
+            foreach (var f in pack.Formulas ?? new())
+                if (f?.Id != null) _privateById.TryAdd(f.Id, f.PrivateRolls);
             _privatePrefixes = (pack.Formulas ?? new()).Where(f => f is { PrivateRolls: true }).Select(f => (f.Name ?? "") + ": ").Distinct().ToList();
             var hasKeyed = (pack.Properties ?? new()).Any(p => p?.KeyedBy != null && KeyedFacts.IsKeyed(p));   // packs without keyed values pay nothing
             var piecesMayHide = PieceAccess.PiecesMayHide(pack, model, held);   // this view may lack pieces or values (removed, on a hidden map, masked)
@@ -235,24 +261,26 @@ public static class PlayerView
             return _pack.HolderByName(holder) is not { } h || ValueHidden(LedgerKey.Holder(h.Id), def.Id, out _);
         }
 
-        /// <summary>True when this ledger value is hidden from the viewer; <paramref name="side"/> is its owner when known.</summary>
+        /// <summary>
+        /// True when this ledger value (<paramref name="prop"/> null: the whole key) is hidden from the viewer, as <see cref="HiddenValues"/>
+        /// decides; <paramref name="side"/> is its owner when known. A removed or masked piece hides every value; a deleted piece's side is
+        /// unknown, so only a Public value of it is kept. An unknown property id counts as the whole key.
+        /// </summary>
         private bool ValueHidden(string? key, string? prop, out string? side)
         {
             side = null;
             if (key == null || !LedgerKey.TryParse(key, out var isPiece, out var id)) return true;
-            if (prop != null && _privatePlaces.Contains(prop)) return true;   // a place that is not Public: only a full view has it
+            var def = prop != null && _props.TryGetValue(prop, out var d) ? d : null;
             if (isPiece)
             {
                 if (_hidden.Contains(id)) { _sideOf.TryGetValue(id, out side); return true; }
-                if (!_sideOf.TryGetValue(id, out var ps)) return PropPrivate(prop);   // deleted piece: owner unknown
-                if (!NotHeld(ps)) return false;
-                side = ps;
-                return PropPrivate(prop);
+                if (!_sideOf.TryGetValue(id, out var ps)) return HiddenValues.UnknownSideValueHidden(_pack, def, _isPublic);   // deleted piece
+                if (NotHeld(ps)) side = ps;
+                return HiddenValues.PieceValueHidden(_pack, def, ps, _holds, _isPublic);
             }
-            if (id == HolderDef.GlobalId) return false;
-            if (!(_pack.Holders ?? new()).Any(h => h != null && h.Id == id)) return true;   // unknown holder
-            side = Ownership.SideOfHolder(id, _pack);   // null: public, or owned by a deleted side (ignored, spec 8a.10)
-            return NotHeld(side);
+            if (!HiddenValues.HolderValueHidden(_pack, id, def, _holds, _isPublic)) return false;
+            if (id != HolderDef.GlobalId) side = Ownership.SideOfHolder(id, _pack);   // null: public, or owned by a deleted side (ignored, spec 8a.10)
+            return true;
         }
 
         /// <summary>A "{unit name}: " prefix naming another side's piece (hides only; never reveals).</summary>
@@ -282,8 +310,13 @@ public static class PlayerView
             return hasPiece;
         }
 
-        private bool IsPrivateRoll(string? text) =>
-            text != null && _privatePrefixes.Any(px => text.StartsWith(px, StringComparison.Ordinal));
+        /// <summary>
+        /// A roll with a formula id is private exactly when that formula has <see cref="FormulaDef.PrivateRolls"/> (an id the pack no longer has
+        /// counts as private: fail closed); a roll without one (an older log) follows the name-prefix rule.
+        /// </summary>
+        private bool IsPrivateRoll(string? text, string? formulaId) =>
+            !string.IsNullOrEmpty(formulaId) ? !_privateById.TryGetValue(formulaId, out var priv) || priv
+            : text != null && _privatePrefixes.Any(px => text.StartsWith(px, StringComparison.Ordinal));
 
         private (Outcome, string?) Redact(string kind, string? side) =>
             kind == LogKind.Dice ? (Outcome.Redact, $"{Label(side)} rolled dice")
@@ -307,10 +340,11 @@ public static class PlayerView
 
             if (l.Kind == LogKind.Dice)
             {
-                if (!IsPrivateRoll(l.Text)) return (Outcome.Keep, null);
+                if (!IsPrivateRoll(l.Text, l.FormulaId)) return (Outcome.Keep, null);
                 if (hasOwner && owner != null) return HeldOrRedact(l.Kind, owner);
                 return HeldOrRedact(l.Kind, PhaseSide(l.Phase));
             }
+            if (l.Kind == LogKind.Turn && stamp != null && !_held.Contains(stamp)) return (Outcome.Drop, null);   // another side's tick or acknowledge
             if (!IsLedgerKind(l.Kind)) return (Outcome.Keep, null);
 
             if (e != null && ValueHidden(e.Key, e.PropertyId, out var vs)) return Redact(l.Kind, vs ?? owner);
@@ -461,13 +495,15 @@ public static class PlayerView
             ((_pack.Formulas ?? new()).FirstOrDefault(f => f != null && f.Id == formulaId)?.Name is { Length: > 0 } n ? n : "Formula")
             + ": calculated (inputs hidden)";
 
-        /// <summary>Removed or masked pieces and private or unknown holders lose every value; other keys are filtered per property.</summary>
+        /// <summary>
+        /// Removed or masked pieces and unknown holders lose every value; other keys, another side's holder too (B7 #74a), are filtered per
+        /// property.
+        /// </summary>
         private bool WholeKeyHidden(string key)
         {
             if (!LedgerKey.TryParse(key, out var isPiece, out var id)) return true;
             if (isPiece) return _hidden.Contains(id);
-            if (id == HolderDef.GlobalId) return false;
-            return !(_pack.Holders ?? new()).Any(h => h != null && h.Id == id) || NotHeld(Ownership.SideOfHolder(id, _pack));
+            return id != HolderDef.GlobalId && !(_pack.Holders ?? new()).Any(h => h != null && h.Id == id);
         }
 
         /// <summary>
@@ -512,14 +548,15 @@ public static class PlayerView
                 if (d == null) continue;
                 var line = -1;
                 for (var i = cursor; i < log.Count; i++)
-                    if (log[i]?.Kind == LogKind.Dice && log[i].Text != null && log[i].Text.StartsWith((d.Purpose ?? "") + ": ", StringComparison.Ordinal))
+                    if (log[i]?.Kind == LogKind.Dice && log[i].Text != null && log[i].Text.StartsWith((d.Purpose ?? "") + ": ", StringComparison.Ordinal)
+                        && (d.FormulaId == null || log[i].FormulaId == d.FormulaId))
                     {
                         line = i;
                         cursor = i + 1;
                         break;
                     }
                 var shown = line >= 0 && outcomes[line].Outcome == Outcome.Keep;
-                if (IsPrivateRoll((d.Purpose ?? "") + ": ") && !shown)
+                if (IsPrivateRoll((d.Purpose ?? "") + ": ", d.FormulaId) && !shown)
                 {
                     var text = line < 0 ? $"{Unknown} rolled dice"
                         : outcomes[line].Outcome == Outcome.Redact ? outcomes[line].Text!

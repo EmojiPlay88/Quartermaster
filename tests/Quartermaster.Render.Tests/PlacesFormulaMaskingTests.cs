@@ -180,13 +180,15 @@ public class PlacesFormulaMaskingTests : IDisposable
     }
 
     [Fact]
-    public void HotSeat_other_side_keyed_holder_read_masked_own_side_not()
+    public void HotSeat_other_side_keyed_holder_public_read_unmasked()
     {
+        // B7 #74a: a Public keyed value of another side's holder is seen (the one rule, HiddenValues), so the read masks nothing.
         var s = Open();
         s.SetViewSides(Blue);
-        var v = Dialog(s, "f-stock").Evaluate(s.Game!.State);
-        Assert.Equal(FormulaMasking.WorkingHiddenText, v.WorkingText);
-        Assert.DoesNotContain(SecretText, Shown(v));
+        var m = Dialog(s, "f-stock");
+        Assert.Empty(m.Hidden);
+        var v = m.Evaluate(s.Game!.State);
+        Assert.Equal(v.Trace.Working, v.WorkingText);
         s.SetViewSides(Red);   // Red's own depot, run on Red's own piece
         Assert.Empty(Dialog(s, "f-stock", PhaseFixture.RedOne).Hidden);
     }
@@ -247,7 +249,7 @@ public class PlacesFormulaMaskingTests : IDisposable
     {
         var host = Open();
         var guest = Guest(host);
-        foreach (var id in new[] { "f-mines", "f-auto", "f-row", "f-lay", "f-stock" })
+        foreach (var id in new[] { "f-mines", "f-auto", "f-row", "f-lay" })
         {
             var g = Dialog(guest, id);
             Assert.NotEmpty(g.Hidden);
@@ -255,6 +257,7 @@ public class PlacesFormulaMaskingTests : IDisposable
                 .OrderBy(x => x), g.Hidden.OrderBy(x => x));
         }
         Assert.Empty(Dialog(guest, "f-flood").Hidden);
+        Assert.Empty(Dialog(guest, "f-stock").Hidden);   // B7 #74a: a Public value of Red's depot
     }
 
     [Fact]
@@ -336,5 +339,27 @@ public class PlacesFormulaMaskingTests : IDisposable
         s.SetViewSides(new HashSet<string> { "red", "blue" });
         a.EditKeyed(Global, "mines", hex, 5, "n");
         Assert.Equal(5, KeyedValues.Get(s.Game.State, Global, "mines", hex));
+    }
+
+    [Fact]
+    public void Game_over_gives_no_new_edit_of_a_private_place()
+    {
+        // Final review F7: game over lifts hiding, never adds a right. A Private place a Blue viewer could not edit stays unedited.
+        var s = Open();
+        var c = new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s));
+        var a = new LocalActions(s, c, new HistoryController(s, c, (cmd, st) => cmd));
+        var x = new IntentExecutor(s, c);
+        var hex = PieceInfo.Location(s.Game!.State.Pieces[PhaseFixture.BlueOne], s.Model)!;
+        s.Game.Execute(new EndGame("Blue holds the river", new[] { "blue" }, null));
+        s.SetViewSides(Blue);
+        Assert.Empty(Dialog(s, "f-mines").Hidden);   // the information is lifted
+        a.EditKeyed(Global, "mines", hex, 5, "n");
+        Assert.Equal(Secret, KeyedValues.Get(s.Game.State, Global, "mines", hex));
+        var r = x.Execute("p2", Blue, new KeyedEditIntent(Global, "mines", hex, 6, "n"));
+        Assert.False(r.Ok);
+        Assert.Equal(Secret, KeyedValues.Get(s.Game.State, Global, "mines", hex));
+        // A Public place stays editable, as before game over.
+        Assert.True(x.Execute("p2", Blue, new KeyedEditIntent(Global, "flood", hex, 6, "n")).Ok);
+        Assert.Equal(6, KeyedValues.Get(s.Game.State, Global, "flood", hex));
     }
 }

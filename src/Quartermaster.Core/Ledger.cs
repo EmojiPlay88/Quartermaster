@@ -13,7 +13,12 @@ public sealed record LedgerEntry(long Seq, string Key, string PropertyId, double
     public string? ValueKey { get; init; }
 }
 
-public sealed record DiceEntry(long Seq, string Purpose, int Count, int Sides, IReadOnlyList<int> Results);
+public sealed record DiceEntry(long Seq, string Purpose, int Count, int Sides, IReadOnlyList<int> Results)
+{
+    /// <summary>The formula whose run rolled these dice (B7, see <see cref="RollDice.FormulaId"/>); null for a dice-tool roll and in an older save. Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FormulaId { get; init; }
+}
 
 /// <summary>Ledger keys: "p:{pieceId}" for pieces, "h:{holderId}" for holders.</summary>
 public static class LedgerKey

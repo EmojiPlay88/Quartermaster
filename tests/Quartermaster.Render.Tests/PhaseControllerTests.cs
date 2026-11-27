@@ -509,11 +509,11 @@ public class PhaseControllerTests : IDisposable
     [Fact]
     public void Tick_sends_item_id_and_raw_text()
     {
-        // An item with an id is ticked by id; the log carries the item's own text, links unrendered (no linked item's text).
+        // An item with an id is ticked by id; the log carries the rendered text (B7); a link to an item of another side's phase stays unrendered (no linked item's text).
         var (s, c) = Make(Difficulty.SemiAuto, p => WithPhase(WithPhase(p, "ph-combat", ph => ph with
         {
             Checklist = new() { new ChecklistItem { Id = "atk", Text = "Resolve attacks after {item:other}" }, "Plain" },
-        }), "ph-weather", ph => ph with { Checklist = new() { new ChecklistItem { Id = "other", Text = "TEST secret step" } } }));
+        }), "ph-weather", ph => ph with { SideId = "blue", Checklist = new() { new ChecklistItem { Id = "other", Text = "TEST secret step" } } }));
         c.Start();
         c.Advance();
         c.Advance();

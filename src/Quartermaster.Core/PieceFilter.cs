@@ -186,10 +186,10 @@ public static class PieceFilter
         p == null ? throw new EvalError("This formula needs a unit") : Value.Of(p.MapId ?? "");
 
     /// <summary>
-    /// holder(Holder, Property): the holder's value, else the property's Default. A player's view removes every value (and the ledger
-    /// key) of a holder owned by a side the viewer does not hold, so in a view a sided holder with no ledger key is hidden, not unset, and
-    /// does not fall back to the Default. A present key belongs to a holder the viewer may see. A holder of a side the view was made for
-    /// (<see cref="GameState.ViewSides"/>) is never stripped, so there a missing value reads the Default.
+    /// holder(Holder, Property): the holder's value, else the property's Default. A player's view removes the values the viewer may not
+    /// see (<see cref="HiddenValues.HolderValueHidden(RulesPack, string, PropertyDef?, Func{string, bool})"/>: a non-Public value of a holder
+    /// owned by a side the viewer does not hold), so in a view such a missing value is hidden, not unset, and does not fall back to the
+    /// Default, even when the holder's Public values are in the view (B7 #74a). A value the viewer may see that is missing reads the Default.
     /// </summary>
     /// <remarks>A computed property is evaluated for the holder (<see cref="PropertyValues"/>); <paramref name="filters"/> is the caller's aggregate state.</remarks>
     internal static Value HolderRead(GameState s, RulesPack pack, string holder, string property, ModuleModel? model = null, AggregateFilters? filters = null)
@@ -209,8 +209,7 @@ public static class PieceFilter
         var key = LedgerKey.Holder(holderId);
         var v = PropertyValues.Get(s, pack, filters?.Model ?? model, key, def, filters);
         if (v != null) return Value.Of(v.Value);
-        if (s.IsPlayerView && Ownership.SideOfHolder(holderId, pack) is { } side && !s.Ledgers.ContainsKey(key)
-            && s.ViewSides?.Contains(side) != true)
+        if (s.IsPlayerView && HiddenValues.HolderValueHidden(pack, holderId, def, HiddenValues.HeldBy(s)))
             throw new EvalError($"{def.Name} has no value on {holderName}") { MissingValue = true };
         return Value.Of(def.Default);
     }

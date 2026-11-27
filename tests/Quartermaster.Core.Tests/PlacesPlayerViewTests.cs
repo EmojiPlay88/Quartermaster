@@ -17,6 +17,15 @@ public class PlacesPlayerViewTests
 
     private static double? Value(GameState s, string key, string prop, string valueKey) => KeyedValues.Get(s, key, prop, valueKey);
 
+    /// <summary>The fixture pack with HullCount Private (a holder's non-Public keyed value).</summary>
+    private static RulesPack PrivateHulls()
+    {
+        var pack = PlacesFixture.Pack();
+        var i = pack.Properties.FindIndex(p => p.Id == "p-hulls");
+        pack.Properties[i] = pack.Properties[i] with { Visibility = Visibility.Private };
+        return pack;
+    }
+
     [Fact]
     public void View_drops_private_place_values_and_history()
     {
@@ -66,10 +75,11 @@ public class PlacesPlayerViewTests
         var blue = View(full, Blue);
         Assert.Equal(4, Value(blue, LedgerKey.Piece("b1"), "p-cargo", "Raft"));
         Assert.Null(Value(blue, LedgerKey.Piece("r1"), "p-cargo", "Barge"));
-        // A holder owned by a side not held loses its keyed values too.
+        // A holder owned by a side not held loses its non-Public keyed values; a Public one is kept (B7 #74a).
         PlacesKit.Put(full, "h:blueyard", "p-hulls", "Barge", 8);
-        Assert.False(View(full, Red).Keyed!.ContainsKey("h:blueyard"));
-        Assert.Equal(8, Value(View(full, Blue), "h:blueyard", "p-hulls", "Barge"));
+        Assert.Equal(8, Value(View(full, Red), "h:blueyard", "p-hulls", "Barge"));
+        Assert.False(View(full, Red, PrivateHulls()).Keyed!.ContainsKey("h:blueyard"));
+        Assert.Equal(8, Value(View(full, Blue, PrivateHulls()), "h:blueyard", "p-hulls", "Barge"));
     }
 
     [Fact]
@@ -77,7 +87,7 @@ public class PlacesPlayerViewTests
     {
         var full = PlacesKit.State();
         PlacesKit.Put(full, "h:blueyard", "p-hulls", "Barge", 8);
-        var pack = PlacesFixture.Pack();
+        var pack = PrivateHulls();
         var v = View(full, Red, pack);
         EvalError Hidden(string text, string pieceId)
         {
@@ -88,7 +98,7 @@ public class PlacesPlayerViewTests
                  {
                      ("keyed(Mines, \"0505\")", "r1"),               // a Private place
                      ("keyed(Cargo, \"Raft\")", "b1"),               // a Private piece value of a side not held
-                     ("keyed(HullCount, \"Barge\", Blueyard)", "r1"),   // a holder of a side not held
+                     ("keyed(HullCount, \"Barge\", Blueyard)", "r1"),   // a non-Public value of a holder of a side not held
                  })
         {
             var e = Hidden(text, piece);

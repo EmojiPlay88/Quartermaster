@@ -10,7 +10,9 @@ namespace Quartermaster.Core;
 /// The choices of an Input box for one counter (B4). With <see cref="VariableBinding.ChoicesTable"/>: that table's row keys (normalised as
 /// <see cref="KeyChoices"/> does, a repeated key once) for which <see cref="VariableBinding.ChoicesFilter"/> is true on the run piece; no
 /// filter, or no run piece, gives every key. Otherwise <see cref="KeyChoices.For"/>. The filter is a unit filter (the counter's own values,
-/// has(), name(), side(), lookups, aggregates) plus row(), the key tested (a number when it is numeric, else text).
+/// has(), name(), side(), lookups, aggregates) plus row(), the key tested (a number when it is numeric, else text). A run with
+/// <see cref="RunRequest.PickSides"/> (hot-seat, a guest's intent on the host) judges the filter on the chooser's view, as the chooser's
+/// own list is made (B7).
 /// </summary>
 public static class InputChoices
 {

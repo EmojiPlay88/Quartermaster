@@ -49,6 +49,10 @@ If you press **Next Phase** while rows have not run yet, the game moves on and t
 
 A phase with no side can give a start (or end) row **Asks side**. The run is queued for that side in every difficulty and shows in the open list as `{formula} — {side name} answers`. Only a player holding that side sees and applies it (in a solo game, anyone); another player who tries is told `That calculation belongs to a side you don't hold.` The rows after it wait for the answer.
 
+### Sealed answers
+
+A start row with **Sealed** ticked (a phase with no side) queues one run for every side, in pack order. A side answers its own run like an asked run; the phase panel then says `Answer sealed; it is applied when every side has answered.` and the log says `{Side} has answered {formula} (sealed)` for everyone, with no value. A side that has answered has no open run left, and a second answer says `Your sealed answer is already in.` Online, another side's player who presses Next Phase while a side still has to answer is told `{Side} is playing {phase}; wait for your phase.` When the last side has answered, the log says `{formula}: every side has answered`, the answers are applied in side order as one step (one Undo takes back the last answer and the whole release), and the rows after it continue. A run that cannot be applied logs `{formula}: {Side}: {error}`. If Next Phase leaves the phase while some answers are in and others missing, the log says `{formula}: not every side answered; the sealed answers were discarded`. See [Sealed answers](Making-a-Rules-Pack#sealed-answers).
+
 ### Reset lines
 
 When a phase is entered, properties that reset there are cleared first and the log says `{phase}: reset {property names}`; counters then start again from their starting value, and the start rows run. All of it is one Next Phase step for Undo. See [Values that reset at a phase](Making-a-Rules-Pack#values-that-reset-at-a-phase).

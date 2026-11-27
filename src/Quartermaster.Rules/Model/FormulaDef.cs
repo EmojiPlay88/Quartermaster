@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace Quartermaster.Rules;
 
 public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll, Moved, Piece }
-/// <summary>What an output does. Write (the default, omitted from the pack) changes a property; the others act on a counter: Place adds a palette counter, Remove deletes or moves it, SetLayer sets a layer's level, SetMask masks or reveals it.</summary>
-public enum OutputAction { Write, Place, Remove, SetLayer, SetMask }
+/// <summary>What an output does. Write (the default, omitted from the pack) changes a property; the others act on a counter: Place adds a palette counter, Remove deletes or moves it, SetLayer sets a layer's level, SetMask masks or reveals it, Reveal shows every player one property value of a target in the log, exactly or as a range (see Margin), and writes nothing.</summary>
+public enum OutputAction { Write, Place, Remove, SetLayer, SetMask, Reveal }
 /// <summary>Where an output acts. Piece = the counter a Piece variable picked; Placed = the counter this formula's Place output added.</summary>
 public enum OutputTarget { Unit, Global, Holder, Piece, Placed }
 public enum OutputOp { Subtract, Add, Set }
@@ -82,6 +82,9 @@ public sealed record FormulaOutput
     /// <summary>Write to a keyed property: the expression giving the key this output writes (a hex name, a turn number or a table row key). Null = none (never ""). Omitted from the pack JSON when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Key { get; init; }
+    /// <summary>Reveal only: expression giving how wide the revealed range is (a whole number from 0 to 1000); 0 or null shows the exact value. Null = 0 (the Workbench stores null, never ""). Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Margin { get; init; }
 }
 
 public sealed record FormulaDef

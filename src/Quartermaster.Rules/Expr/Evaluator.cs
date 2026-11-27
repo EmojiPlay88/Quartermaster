@@ -62,6 +62,9 @@ public interface IEvalContext
     double Distance(string a, string b) => throw new EvalError("distance() is not available here");
     /// <summary>The value of a keyed property for one key; <paramref name="holder"/> names the holder when the call has a third argument.</summary>
     double Keyed(string property, Value key, string? holder) => throw new EvalError("keyed() is not available here");
+    // B7: visibility
+    /// <summary>The name of the side answering the run (an ask or sealed run); empty elsewhere.</summary>
+    Value AskSide() => Value.Of("");
 }
 
 public static class Evaluator
@@ -196,6 +199,8 @@ public static class Evaluator
         "attachedsum", "attachedcount", "attachedmax", "attachedmin",
         // B6: places and keyed values
         "hex", "distance", "keyed",
+        // B7: visibility
+        "askside",
     };
 
     /// <summary>Every binary and unary operator the formula language accepts ('-' is both binary and unary).</summary>
@@ -351,6 +356,8 @@ public static class Evaluator
                 }
                 return Num(ctx.Keyed(kp.Name, Eval(a[1], ctx), holder), c);
             }
+            // B7: visibility
+            case "askside": return ctx.AskSide();
             default: throw new EvalError($"Unknown function '{c.Function}'", c);
         }
     }

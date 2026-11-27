@@ -140,7 +140,7 @@ public sealed class GameState
             case LedgerDelta ld: DoLedgerDelta(ld); break;
             case SeedLedger sl: DoSeed(sl); break;
             case RollDice rd:
-                DiceHistory.Add(new DiceEntry(DiceHistory.Count + 1, rd.Purpose ?? "", rd.Count, rd.Sides, (rd.Results ?? Array.Empty<int>()).ToList()));
+                DiceHistory.Add(new DiceEntry(DiceHistory.Count + 1, rd.Purpose ?? "", rd.Count, rd.Sides, (rd.Results ?? Array.Empty<int>()).ToList()) { FormulaId = rd.FormulaId });
                 Log.Add(LogBuilder.Dice(this, rd));
                 break;
             case SetNotes sn:
@@ -179,12 +179,12 @@ public sealed class GameState
                     if (tc.Ticked) { if (!Ticked.Contains(tc.Index)) Ticked.Add(tc.Index); }
                     else Ticked.RemoveAll(i => i == tc.Index);
                 }
-                Log.Add(LogBuilder.Line(this, LogKind.Turn, (tc.Ticked ? "Done: " : "Not done: ") + tc.Item, tc.Who, tc.At));
+                Log.Add(LogBuilder.Line(this, LogKind.Turn, (tc.Ticked ? "Done: " : "Not done: ") + tc.Item, tc.Who, tc.At, sideId: tc.SideId));
                 break;
             case AcknowledgeWarning aw:
                 Acknowledged ??= new();
                 if (!Acknowledged.Contains(aw.Index)) Acknowledged.Add(aw.Index);
-                Log.Add(LogBuilder.Line(this, LogKind.Turn, "Acknowledged: " + aw.Message, aw.Who, aw.At));
+                Log.Add(LogBuilder.Line(this, LogKind.Turn, "Acknowledged: " + aw.Message, aw.Who, aw.At, sideId: aw.SideId));
                 break;
             case QueueRuns qr:
                 Pending ??= new();
@@ -219,6 +219,14 @@ public sealed class GameState
                 GameOver = new GameOverState(eg.Text ?? "", eg.Winners?.Where(w => w != null).ToList(), eg.VictoryId, Position);
                 Log.Add(LogBuilder.Line(this, LogKind.Turn, "Game over: " + GameOver.Text, eg.Who, eg.At));
                 break;
+            case SealAnswer sa:
+            {
+                var at = (Pending ?? new()).FindIndex(r => r != null && r.Id == sa.RunId);
+                if (at < 0) break;
+                Pending![at] = Pending[at] with { SealedAnswer = new Dictionary<string, string>(sa.Typed ?? new Dictionary<string, string>(), StringComparer.Ordinal) };
+                Log.Add(LogBuilder.Line(this, LogKind.Turn, sa.LogText ?? "", sa.Who, sa.At));
+                break;
+            }
             case MarkScheduled ms:
                 if (string.IsNullOrWhiteSpace(ms.RowId) || ScheduleDone?.Contains(ms.RowId, StringComparer.Ordinal) == true) break;
                 (ScheduleDone ??= new()).Add(ms.RowId);

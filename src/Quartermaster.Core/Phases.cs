@@ -55,6 +55,17 @@ public sealed record PendingRun(string Id, string FormulaId, string FormulaName,
     /// units reuse it (<see cref="RollGroups.SharedFor"/>). Host only: <see cref="PlayerView"/> drops it. Omitted when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<int>>>? GroupRolls { get; init; }
+
+    /// <summary>B7 #53: the sealed group this run belongs to (the id of the group's first run): a sealed start entry queues one ask run per
+    /// side, all with the same seal. Omitted when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Seal { get; init; }
+
+    /// <summary>B7 #53: the side's sealed answer (Input variable → exact typed text, <see cref="SealAnswer"/>), applied when every run of the
+    /// group has one. Hidden as the run is: only in the full state and the asked side's view (every view once the game is over). Omitted when
+    /// null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, string>? SealedAnswer { get; init; }
 }
 
 /// <summary>

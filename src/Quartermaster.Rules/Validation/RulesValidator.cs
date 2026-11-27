@@ -624,12 +624,37 @@ public static class RulesValidator
             CheckPhaseExpr(pack, e.UnitFilter, who, $"on-{kind} filter", Err);
             WarnOutsidePhases(ph, f, kind, issues);
             n++;
+            if (e.Sealed) CheckSealedEntry(pack, ph, e, f, n, kind, issues);
             if (string.IsNullOrEmpty(e.AskSideId)) continue;
             if (pack.ById<SideDef>(e.AskSideId!) is null) Err($"{who}: {kind} entry {n} asks side \"{e.AskSideId}\", which does not exist");
             if (e.ForEach != ForEachMode.Once) Err($"{who}: {kind} entry {n} asks a side, so it must run once, not for each unit");
             if (!string.IsNullOrEmpty(ph.SideId)) Err($"{who}: {kind} entry {n} asks a side, but only a phase without a side may ask one");
         }
     }
+
+    /// <summary>B7: a sealed entry is a start entry that runs once, in a phase without a side, with no Asks side, and its formula asks and neither rolls dice nor picks a piece.</summary>
+    private static void CheckSealedEntry(RulesPack pack, PhaseDef ph, StartEntry e, FormulaDef? f, int n, string kind, List<RulesIssue> issues)
+    {
+        string who = $"Phase \"{ph.Name}\"";
+        void Err(string m) => Add(issues, RulesIssueSeverity.Error, ph.Id, ph.Name, $"{who}: {m}");
+        void Warn(string m) => Add(issues, RulesIssueSeverity.Warning, ph.Id, ph.Name, $"{who}: {m}");
+        if (kind != "start") { Err($"{kind} entry {n} is sealed; only a start entry can be sealed"); return; }
+        if (e.ForEach != ForEachMode.Once) Err($"start entry {n} is sealed, so it must run once, not for each unit");
+        if (!string.IsNullOrEmpty(ph.SideId)) Err($"start entry {n} is sealed, but only a phase without a side may have one");
+        if (!string.IsNullOrEmpty(e.AskSideId)) Err($"start entry {n} is sealed, so it asks every side; leave Asks side empty");
+        if (f is not null)
+        {
+            if (f.Bindings.Any(b => b.Kind == BindingKind.Roll) || FormulaCallsDice(f)) Err($"start entry {n} is sealed, but formula \"{f.Name}\" rolls dice");
+            if (f.Bindings.Any(b => b.Kind == BindingKind.Piece)) Err($"start entry {n} is sealed, but formula \"{f.Name}\" picks a piece");
+            if (!f.Bindings.Any(b => b.Kind == BindingKind.Input)) Warn($"start entry {n} is sealed, but formula \"{f.Name}\" asks for nothing");
+        }
+        if (pack.Sides.Count < 2) Warn($"start entry {n} is sealed, but the pack has fewer than two sides");
+    }
+
+    /// <summary>True when any expression of the formula (text, precondition, bindings, outputs) that parses calls dice().</summary>
+    private static bool FormulaCallsDice(FormulaDef f) =>
+        new[] { f.Text, f.Precondition }.Concat(f.Bindings.SelectMany(FormulaVariables.Sources)).Concat(FormulaVariables.OutputSources(f))
+            .Any(src => !string.IsNullOrWhiteSpace(src) && ParseProblem(src!) is null && ExprFacts.CallsFunction(Parser.Parse(src!), "dice"));
 
     private static void WarnOutsidePhases(PhaseDef ph, FormulaDef? f, string kind, List<RulesIssue> issues)
     {
@@ -746,6 +771,7 @@ public static class RulesValidator
         public Value Marker(string key) => throw new EvalError("No pieces here");
         public double Turn() => throw new EvalError("No turn here");     // a key such as turn() - 5 has no constant value
         public double Stage() => throw new EvalError("No stage here");
+        public Value AskSide() => throw new EvalError("No side here");   // a key such as askside() has no constant value
     }
 
     private static void CheckOwners(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, List<RulesIssue> issues)
@@ -919,7 +945,7 @@ public static class RulesValidator
                 }
 
                 if (row.Action != ScheduleAction.Leave && string.IsNullOrEmpty(row.ZoneMapId)) Err($"{who}: needs a zone map to arrive from");
-                if (!string.IsNullOrEmpty(row.ZoneMapId) && knownMapIds != null && !knownMapIds.Contains(row.ZoneMapId!))
+                if (!string.IsNullOrEmpty(row.ZoneMapId) && (_module is { } zm ? MapRefs.Find(zm.Maps, row.ZoneMapId) is null : knownMapIds != null && !knownMapIds.Contains(row.ZoneMapId!.Trim())))
                     Err($"{who}: zone map \"{row.ZoneMapId}\" was not found in the module");
                 if (!string.IsNullOrEmpty(row.FormulaId) && pack.ById<FormulaDef>(row.FormulaId!) is null)
                     Err($"{who}: formula \"{row.FormulaId}\" does not exist");
@@ -1065,8 +1091,15 @@ public static class RulesValidator
             {
                 if (string.IsNullOrWhiteSpace(b.ChoicesTable)) Warn($"variable \"{b.Variable}\" has a choices filter but no choices table");
                 if (ParseProblem(b.ChoicesFilter!) is { } cfe) Err($"variable \"{b.Variable}\" choices filter {cfe}");
-                else foreach (var u in FilterRefProblems(b.ChoicesFilter!, pack, allowRow: true)) Err($"variable \"{b.Variable}\" choices filter {u}");
+                else
+                {
+                    foreach (var u in FilterRefProblems(b.ChoicesFilter!, pack, allowRow: true)) Err($"variable \"{b.Variable}\" choices filter {u}");
+                    if (b.Kind == BindingKind.Input && FilterMayReadHidden(pack, b.ChoicesFilter!))
+                        Warn($"variable \"{b.Variable}\": its choices filter reads values another side may not see; each player chooses from what they can see");
+                }
             }
+            if (b.Kind == BindingKind.Piece && !string.IsNullOrWhiteSpace(b.PieceFilter) && FilterMayReadHidden(pack, b.PieceFilter!))
+                Warn($"variable \"{b.Variable}\": its piece filter reads values another side may not see; each player picks from what they can see");
             if (b.SameHex && b.Kind != BindingKind.Piece) Warn($"variable \"{b.Variable}\" has \"same hex\" but is not a Piece binding");
             if (!string.IsNullOrWhiteSpace(b.AutoValue))
             {
@@ -1137,12 +1170,33 @@ public static class RulesValidator
             CheckOutput(pack, f, o, outputNo, Err, knownMapIds, knownSlots, secondPlace, hasPlace);
             ParseGuard(o.Expr, $"output {outputNo} value");
             ParseGuard(o.Key, $"output {outputNo} key");
+            ParseGuard(o.Margin, $"output {outputNo} margin");
             if (o.Action == OutputAction.Write && o.PropertyChoice is { Count: > 0 })
             {
                 if (string.IsNullOrWhiteSpace(o.PropertySelect)) Err($"output {outputNo} has a property list but no \"Pick by\"");
                 else ParseGuard(o.PropertySelect, $"output {outputNo} pick-by");
             }
         }
+    }
+
+    /// <summary>
+    /// B7: true when a choices or piece filter may read a value another side may not see, in a pack with two or more sides: a property that is not
+    /// Public (bare name or keyed()), holder() of a value that is not Public of a holder that has a side, or an aggregate over hidden data
+    /// (<see cref="FormulaVariables.AggregateCallHidden"/> with <c>piecesMayHide: false</c>). A filter that does not parse reads nothing here (it is reported elsewhere).
+    /// </summary>
+    private static bool FilterMayReadHidden(RulesPack pack, string filter)
+    {
+        if (pack.Sides.Count < 2) return false;
+        AstExpr e;
+        try { e = Parser.Parse(filter); }
+        catch (ParseError) { return false; }
+        bool Sided(string? holderName) =>
+            holderName != null && pack.HolderByName(holderName) is { } h && !string.IsNullOrWhiteSpace(h.SideId) && pack.Sides.Any(s => s.Id == h.SideId);
+        return Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p))
+            || ExprFacts.HolderReads(e).Any(r => Sided(r.Holder) && !PropertyFacts.IsPublic(pack, pack.PropertyByName(r.Property ?? "")))
+            // keyed(): an unknown property is reported by FilterRefProblems; a Public value is seen by every side, a sided holder's too (#74a).
+            || ExprFacts.KeyedReads(e).Any(k => pack.PropertyByName(k.Property) is { } kp && !PropertyFacts.IsPublic(pack, kp))
+            || ExprFacts.AggregateReads(e).Any(a => FormulaVariables.AggregateCallHidden(pack, a.Function, a.Property, a.Filter, false));
     }
 
     /// <summary>Reports each distinct message once (as <see cref="FilterRefProblems"/> does), so a repeated call is one issue.</summary>
@@ -1270,7 +1324,7 @@ public static class RulesValidator
 
     private static bool TargetAllowed(OutputAction a, OutputTarget t) => a switch
     {
-        OutputAction.Write => true,
+        OutputAction.Write or OutputAction.Reveal => true,
         OutputAction.Place or OutputAction.Remove => t is OutputTarget.Unit or OutputTarget.Piece,
         _ => t is OutputTarget.Unit or OutputTarget.Piece or OutputTarget.Placed,
     };
@@ -1300,7 +1354,7 @@ public static class RulesValidator
         }
         else if (!string.IsNullOrWhiteSpace(o.Slot)) err($"output {outputNo} names a palette entry but does not place a piece");
 
-        if (o.Target == OutputTarget.Placed)
+        if (o.Target == OutputTarget.Placed && o.Action != OutputAction.Reveal)
         {
             if (!formulaPlaces) err($"output {outputNo} writes the placed piece, but no output places one");
             if (o.Action == OutputAction.Write && o.Op != OutputOp.Set) err($"output {outputNo} writes the placed piece, so its operation must be Set");
@@ -1321,6 +1375,8 @@ public static class RulesValidator
 
         CheckKeyedOutput(pack, o, outputNo, err);
 
+        if (o.Action == OutputAction.Reveal) { CheckRevealOutput(pack, o, outputNo, err, gone); return; }
+        if (!string.IsNullOrWhiteSpace(o.Margin)) err($"output {outputNo} has a margin but does not reveal");
         if (o.Action != OutputAction.Write)
         {
             if (o.PropertyChoice is { Count: > 0 }) err($"output {outputNo} has a property list but does not write a value");
@@ -1331,7 +1387,21 @@ public static class RulesValidator
         else CheckOutputProperty(pack, o, o.Property, outputNo, err, gone);
     }
 
-    private static void CheckOutputProperty(RulesPack pack, FormulaOutput o, string? id, int outputNo, Action<string> err, Action<string> gone)
+    /// <summary>B7: a Reveal output shows one property value and writes nothing: no value, no property list, no keyed property, not the placed counter; a constant margin is a whole number from 0 to 1000; the property is checked as a Write's is.</summary>
+    private static void CheckRevealOutput(RulesPack pack, FormulaOutput o, int outputNo, Action<string> err, Action<string> gone)
+    {
+        if (o.Target == OutputTarget.Placed) { err($"output {outputNo} cannot reveal a value of the placed counter"); return; }
+        if (!string.IsNullOrWhiteSpace(o.Expr)) err($"output {outputNo} reveals a value, so it takes no value expression");
+        if (!string.IsNullOrWhiteSpace(o.Margin) && ParseProblem(o.Margin!) is null && Fold(Parser.Parse(o.Margin!)) is { } m
+            && (m.Kind != ValueKind.Number || m.Number != Math.Floor(m.Number) || m.Number < 0 || m.Number > 1000))
+            err($"output {outputNo} margin must be a whole number from 0 to 1000");
+        if (o.PropertyChoice is { Count: > 0 }) { err($"output {outputNo} reveals one property; a property list cannot be revealed"); return; }
+        if (string.IsNullOrWhiteSpace(o.Property)) { err($"output {outputNo} reveals no property"); return; }
+        if (pack.ById<PropertyDef>(o.Property) is { } p && KeyedFacts.IsKeyed(p)) { err($"output {outputNo} reveals keyed property \"{p.Name}\"; a reveal shows one value"); return; }
+        CheckOutputProperty(pack, o, o.Property, outputNo, err, gone, reveal: true);
+    }
+
+    private static void CheckOutputProperty(RulesPack pack, FormulaOutput o, string? id, int outputNo, Action<string> err, Action<string> gone, bool reveal = false)
     {
         var p = pack.ById<PropertyDef>(id ?? "");
         if (p is null) { gone($"output {outputNo} refers to a property that no longer exists"); return; }
@@ -1339,7 +1409,7 @@ public static class RulesValidator
         bool ok = onPiece
             ? p.Scope is PropertyScope.Pieces or PropertyScope.Both
             : p.Scope is PropertyScope.Holders or PropertyScope.Both;
-        if (PropertyFacts.IsComputed(p)) { err($"output {outputNo} writes computed property \"{p.Name}\""); return; }
+        if (!reveal && PropertyFacts.IsComputed(p)) { err($"output {outputNo} writes computed property \"{p.Name}\""); return; }
         if (o.Target == OutputTarget.Global) CheckKept(pack, id, HolderDef.GlobalId, $"output {outputNo} writes", err);
         else if (o.Target == OutputTarget.Holder && (o.HolderId == HolderDef.GlobalId || pack.ById<HolderDef>(o.HolderId ?? "") is not null))
             CheckKept(pack, id, o.HolderId!, $"output {outputNo} writes", err);

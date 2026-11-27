@@ -230,7 +230,9 @@ public class KeyedEditOnlineTests : IDisposable
         Assert.False(KeyedValues.HiddenFor(st, pack, Blue, Global, P("flood")));
         Assert.True(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Piece(PhaseFixture.RedOne), P("cargo")));   // another side's Private value
         Assert.False(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Piece(PhaseFixture.BlueOne), P("cargo")));
-        Assert.True(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Holder("reddepot"), P("due")));
+        Assert.False(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Holder("reddepot"), P("due")));   // B7 #74a: a Public value of another side's holder
+        var privateDue = pack with { Properties = pack.Properties.Select(p => p.Id == "due" ? p with { Visibility = Visibility.Private } : p).ToList() };
+        Assert.True(KeyedValues.HiddenFor(st, privateDue, Blue, LedgerKey.Holder("reddepot"), privateDue.Properties.Single(p => p.Id == "due")));
         Assert.True(KeyedValues.HiddenFor(st, pack, Blue, LedgerKey.Holder("nowhere"), P("due")));   // unknown holder fails closed
     }
 

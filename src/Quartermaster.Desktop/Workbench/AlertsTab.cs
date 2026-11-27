@@ -18,6 +18,7 @@ namespace Quartermaster.Desktop.Workbench;
 /// </summary>
 public sealed class AlertsTab : UserControl
 {
+    internal const string SideTip = "Only players holding this side see the alert, in every phase.";
     const string AnySide = "(any)";
     const string MissingText = "(missing)";
 
@@ -98,6 +99,7 @@ public sealed class AlertsTab : UserControl
         pick.Children.Add(_severity);
         pick.Children.Add(new TextBlock { Text = "Side:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 4, 0) });
         pick.Children.Add(_side);
+        ToolTip.SetTip(_side, SideTip);
         rows.Children.Add(pick);
 
         var refRow = new StackPanel { Orientation = Orientation.Horizontal };
