@@ -268,6 +268,8 @@ public sealed class MenuBatchModel : IBatchRows
         var at = live;
         var cloned = false;
         var group = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
+        var draws = FormulaMasking.DrawsInChain(f);
+        var evaluated = false;
         for (var i = 0; i < _rows.Count; i++)
         {
             var id = _rows[i].PieceId;
@@ -276,6 +278,9 @@ public sealed class MenuBatchModel : IBatchRows
             if (!live.Pieces.ContainsKey(id)) { links[i] = new Link(true, FormulaIntentRunner.GoneUnitText, null); continue; }
             if (!at.Pieces.ContainsKey(id)) { links[i] = new Link(true, FormulaWindowRules.RemovedByEarlierRowText, null); continue; }
             var m = Model(i);
+            // B9 #55: a row after one that draws runs on a state that may carry its split: masked before Apply (B7 one rule).
+            if (m.ChainMasked != (draws && evaluated)) { m.ChainMasked = draws && evaluated; _rows[i].Pushed.Clear(); }
+            evaluated = true;
             Sync(i, m);
             m.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
             if (calculate && !HostCalculates) m.Calculate(at);
@@ -471,8 +476,17 @@ internal static class BatchChain
     /// lines, effects and removals, and the working line that stamps a run with no outputs (so <c>runs()</c> counts it). A placed piece
     /// is not seeded (that needs the session; the live apply does).
     /// </summary>
+    /// <remarks>B9 #55: the writes and effects on a draw's counters (and its log lines) are left out: a later row's pool never depends on
+    /// which counters were drawn (that row is masked anyway, <see cref="FormulaMasking.ChainHidden"/>; the live Apply decides).</remarks>
     public static void Apply(GameState state, FormulaRunner runner, FormulaTrace t)
     {
+        if (t.Draws.Count > 0)
+            t = t with
+            {
+                Outputs = t.Outputs.Where(o => o?.Draw == null).ToList(),
+                Effects = (t.Effects ?? Array.Empty<PieceEffect>()).Where(e => e?.Draw == null).ToList(),
+                Draws = Array.Empty<DrawPreview>(),
+            };
         foreach (var cmd in runner.Commands(t, null)) state.Apply(cmd);
         if (t.Outputs.Count == 0 && (t.Effects?.Count ?? 0) == 0 && !string.IsNullOrWhiteSpace(t.Working))
             state.Apply(new AddLogLine(LogKind.Calc, t.Working, t.PieceId, FormulaId: t.Formula.Id) { AppliedRun = t.Formula.Id });

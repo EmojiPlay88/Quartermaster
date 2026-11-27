@@ -608,7 +608,7 @@ internal static class FormulaIntentRunner
             return choice.MissingReason!;
         if (dv.Status.StartsWith("Doesn't match: ", StringComparison.Ordinal) || dv.Status.StartsWith("Waiting for: ", StringComparison.Ordinal))
             return dv.Status;
-        if (hidden.Count == 0 && dv.ShownTrace.Error is { Length: > 0 } err) return err;
+        if (hidden.Count == 0 && dv.ShownTrace.Error is { Length: > 0 } err && !FormulaMasking.DrawErrorsHidden(dv.ShownTrace.Formula)) return err;
         return "The formula could not be calculated.";
     }
 }
@@ -660,6 +660,10 @@ internal static class FormulaBatchRunner
         if (pins != null && f.GroupRoll && (groupScope = pins.Open(groupKey, g, pack, pins.MayRollHint(f))) == null)
             return FormulaBatchVerdict.Refused(FormulaPins.FullText);
         FormulaBatchVerdict Refuse(int row, string message) => new(false, verdicts, FormulaWindowRules.RowMessage(row + 1, message));
+        // B9 #55: a row after one that draws runs on a chain state that may carry that row's split: masked (B7 one rule), no k, values,
+        // dice or error text in its verdict, before Apply or when the live Apply stops on it.
+        var draws = FormulaMasking.DrawsInChain(f);
+        var evaluated = false;
 
         for (var k = 0; k < intents.Count; k++)
         {
@@ -687,6 +691,8 @@ internal static class FormulaBatchRunner
             }
             rows.Add(new Row(i, prepared, pinKey, scope, false));
             var (_, model, hidden, _) = prepared;
+            if (draws && evaluated) { model.ChainMasked = true; hidden = new HashSet<string>(model.Hidden, StringComparer.Ordinal); }
+            evaluated = true;
             model.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
             if (i.Calculate) model.Calculate(at);
             var dv = model.Evaluate(at);
@@ -735,7 +741,8 @@ internal static class FormulaBatchRunner
                 var row = rows[k];
                 var pid = row.Intent.PieceId;
                 if (row.Removed || (pid != null && !g.State.Pieces.ContainsKey(pid))) continue;   // removed by an earlier row
-                var (_, model, hidden, _) = row.Prepared!;
+                var (_, model, _, _) = row.Prepared!;
+                var hidden = new HashSet<string>(model.Hidden, StringComparer.Ordinal);   // the chain's masking (B9 #55) included
                 model.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
                 var trace = model.Run(g.State);
                 var dv = model.View(trace);

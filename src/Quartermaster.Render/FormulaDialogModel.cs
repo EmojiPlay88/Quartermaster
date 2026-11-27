@@ -85,9 +85,36 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         get => _hidden;
         set
         {
-            _hidden = value == null || value.Count == 0 ? NoneHidden : new HashSet<string>(value, StringComparer.Ordinal);
-            foreach (var v in _hidden) { if (!IsPick(v)) _typed.Remove(v); _overrides.Remove(v); }   // a pick is the viewer's own: kept
+            _baseHidden = value == null || value.Count == 0 ? NoneHidden : new HashSet<string>(value, StringComparer.Ordinal);
+            ApplyHidden();
         }
+    }
+
+    private IReadOnlySet<string> _baseHidden = NoneHidden;
+    private bool _chainMasked;
+
+    /// <summary>
+    /// B9 #55: a batch row after a row of the same chain that draws (<see cref="FormulaMasking.ChainHidden"/>): it runs on a state that may
+    /// carry the earlier row's split, so before Apply it is masked as the B7 one rule masks (no k, values, result, "(negative)" mark, error
+    /// text or dice). <see cref="Hidden"/> then holds the masking set's entries plus <see cref="FormulaMasking.DrawInput"/>, every Draw
+    /// variable and what reads them. Set by the batch chains (hot-seat menu batch and the host's guest batch); false for a single run.
+    /// </summary>
+    public bool ChainMasked
+    {
+        get => _chainMasked;
+        set
+        {
+            if (_chainMasked == value) return;
+            _chainMasked = value;
+            ApplyHidden();
+        }
+    }
+
+    private void ApplyHidden()
+    {
+        var effective = _chainMasked ? FormulaMasking.ChainHidden(formula, _baseHidden) : _baseHidden;
+        _hidden = effective.Count == 0 ? NoneHidden : effective;
+        foreach (var v in _hidden) { if (!IsPick(v)) _typed.Remove(v); _overrides.Remove(v); }   // a pick is the viewer's own: kept
     }
 
     /// <summary>
@@ -506,7 +533,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var negative = !hostDecides && t.Error == null && t.Outputs.Any(o => o.Draw == null && o.After < 0 && (OutputVisible == null || OutputVisible(o)));
         var status = wrong.Count > 0 ? "Doesn't match: " + string.Join(", ", wrong)
             : hostDecides ? (missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing) : HostWaitText)
-            : t.Error != null ? (masked ? FormulaMasking.ErrorHiddenText : t.Error)
+            : t.Error != null ? (masked || FormulaMasking.DrawErrorsHidden(formula) ? FormulaMasking.ErrorHiddenText : t.Error)
             : missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing)
             : masked && t.Result == null ? (HostCalculates ? HostWaitText : HiddenWaitText)
             : t.Result == null && vars.Any(IsUndecided) ? "Waiting for the other inputs"

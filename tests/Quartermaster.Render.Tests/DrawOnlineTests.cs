@@ -138,15 +138,9 @@ public class DrawOnlineTests : DrawTestBase
         var (host, c) = Open();
         var x = new IntentExecutor(host, c);
         var forged = new Dictionary<string, string> { ["draw:Hits#1"] = "1", ["draw:Hits#2"] = "1", ["draw:Hits#3"] = "1", ["Hits"] = "0" };
-        var r = x.Execute("p1", North, Shoot(extra: forged));
-        var v = r.Verdict;
-        if (v is { Applied: true })
-            Assert.Equal(new double?[] { 3, 0, 0, 0 }, AllBoats(host));   // ignored: the host drew (the highest faces), not the typed dice
-        else
-        {
-            Assert.Equal(IntentExecutor.NotUnderstoodText, v?.Message ?? r.Message);
-            Assert.Equal(new double?[] { 3, 1, 0, 2 }, AllBoats(host));
-        }
+        var v = x.Execute("p1", North, Shoot(extra: forged)).Verdict!;
+        Assert.True(v.Applied, v.Message);   // ignored: the host draws (the highest faces), never the typed dice
+        Assert.Equal(new double?[] { 3, 0, 0, 0 }, AllBoats(host));
         Assert.Equal(3, RollerCalls);
     }
 

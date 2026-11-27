@@ -92,6 +92,46 @@ public static class FormulaMasking
     /// <summary>B9 #55: the one line every output on drawn counters previews as before Apply, whoever views it ({0} = the property's name).</summary>
     public const string DrawnCountersText = "{0} of the drawn counters changes";
 
+    /// <summary>
+    /// B9 #55: true when an output on a draw's counters reads the Draw variable in its own expressions (there it is that counter's count), so
+    /// whether the run fails, and its error, may follow the split: such a formula's errors are never shown before Apply, to any viewer
+    /// (<see cref="ErrorHiddenText"/>). Static.
+    /// </summary>
+    public static bool DrawErrorsHidden(FormulaDef? f)
+    {
+        var draws = new HashSet<string>((f?.Bindings ?? new List<VariableBinding>()).Where(b => b is { Kind: BindingKind.Draw, Variable: not null })
+            .Select(b => b.Variable), StringComparer.Ordinal);
+        if (draws.Count == 0) return false;
+        foreach (var o in f!.Outputs ?? new List<FormulaOutput>())
+        {
+            if (o is not { Target: OutputTarget.Piece, PieceVariable: { } v } || !draws.Contains(v)) continue;
+            foreach (var src in new[] { o.Expr, o.Key })
+            {
+                if (string.IsNullOrWhiteSpace(src)) continue;
+                if (Parse(src) is not { } e || Parser.Variables(e).Contains(v)) return true;   // reads the count; does not parse: fail closed
+            }
+        }
+        return false;
+    }
+
+    /// <summary>B9 #55: true when the formula draws (has a Draw binding): in a batch chain every row after the first evaluated one is
+    /// masked (<see cref="ChainHidden"/>), since it runs on a state that may carry an earlier row's split. Static, so host and guest agree.</summary>
+    public static bool DrawsInChain(FormulaDef? f) => (f?.Bindings ?? new List<VariableBinding>()).Any(b => b is { Kind: BindingKind.Draw });
+
+    /// <summary>
+    /// B9 #55: the hidden set of a batch row after a row that draws: <paramref name="hidden"/> plus <see cref="DrawInput"/> and every Draw
+    /// variable, and (the B7 fixpoint) every binding whose own expressions read a hidden one. Masked by the B7 one rule, the row then shows
+    /// nothing that follows the earlier row's split; the host (or the live Apply) decides.
+    /// </summary>
+    public static HashSet<string> ChainHidden(FormulaDef f, IReadOnlySet<string> hidden)
+    {
+        var set = new HashSet<string>(hidden ?? new HashSet<string>(), StringComparer.Ordinal) { DrawInput };
+        foreach (var b in f?.Bindings ?? new List<VariableBinding>())
+            if (b is { Kind: BindingKind.Draw, Variable: not null }) set.Add(b.Variable);
+        if (f != null) AddDerivedHidden(f, set);
+        return set;
+    }
+
     /// <summary>B9 #55: true for a draw key (<c>draw:{Var}#{i}</c>): pinned on the host or in the dialog, never sent, shown or re-rolled.</summary>
     public static bool IsDrawKey(string? key) => key != null && key.StartsWith("draw:", StringComparison.Ordinal);
 

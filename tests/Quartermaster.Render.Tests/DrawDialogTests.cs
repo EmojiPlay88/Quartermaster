@@ -44,7 +44,8 @@ public abstract class DrawTestBase : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    protected static FormulaDef Battery(bool groupRoll = false) => new()
+    /// <param name="remove">The output removes the drawn barges instead of subtracting Boats.</param>
+    protected static FormulaDef Battery(bool groupRoll = false, bool remove = false) => new()
     {
         Id = "f", Name = "Shore battery", Text = "Hits", GroupRoll = groupRoll,
         Bindings = new()
@@ -56,10 +57,20 @@ public abstract class DrawTestBase : IDisposable
                 PieceFilter = "side() == \"Southern Compact\"", DrawCount = "Shots",
             },
         },
-        Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Property = "p-boats", Op = OutputOp.Subtract, Expr = "Hits" } },
+        Outputs = new()
+        {
+            remove ? new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Action = OutputAction.Remove }
+                : new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Property = "p-boats", Op = OutputOp.Subtract, Expr = "Hits" },
+        },
     };
 
-    protected static RulesPack Pack(string sha, Visibility boats, FormulaDef formula) => new()
+    /// <summary>One Northern League phase whose start runs Shore battery for each of its batteries.</summary>
+    protected static PhaseDef[] NorthGuns() => new[]
+    {
+        new PhaseDef { Id = "ph-n", Name = "Northern guns", SideId = "north", OnStart = new() { new StartEntry { FormulaId = "f", ForEach = ForEachMode.Units } } },
+    };
+
+    protected static RulesPack Pack(string sha, Visibility boats, FormulaDef formula, IEnumerable<PhaseDef>? phases = null) => new()
     {
         Format = 4,
         Id = "riverland",
@@ -69,9 +80,11 @@ public abstract class DrawTestBase : IDisposable
         {
             new SideDef { Id = "north", Name = "Northern League", UnitFilter = "startsWith(name(), \"NL\")" },
             new SideDef { Id = "south", Name = "Southern Compact", UnitFilter = "startsWith(name(), \"SC\")" },
+            new SideDef { Id = "hills", Name = "Hill Clans", UnitFilter = "startsWith(name(), \"HC\")" },   // a third side: neither acts nor owns a barge
         },
         Properties = new() { new PropertyDef { Id = "p-boats", Name = "Boats", Scope = PropertyScope.Pieces, Default = 0, Visibility = boats } },
         Formulas = new() { formula },
+        Phases = phases?.ToList() ?? new(),
     };
 
     private static FixtureModule Module() => PhaseFixture.Module(numbered: true);
@@ -84,7 +97,8 @@ public abstract class DrawTestBase : IDisposable
     }
 
     protected (ModuleSession S, PhaseController C) Open(Visibility boats = Visibility.Private, bool split = false, bool groupRoll = false,
-        Difficulty d = Difficulty.FullyAuto, IReadOnlyList<PlayerDef>? players = null)
+        Difficulty d = Difficulty.FullyAuto, IReadOnlyList<PlayerDef>? players = null, bool remove = false, bool twoBatteries = false,
+        IEnumerable<PhaseDef>? phases = null)
     {
         var fx = Module();
         _fixtures.Add(fx);
@@ -104,9 +118,9 @@ public abstract class DrawTestBase : IDisposable
         Add(g, "sc3", "SC 3 Barge", east, 0);
         Add(g, "sc4", "SC 4 Barge", east, 2);
         Add(g, "nl1", "NL Battery", 30, null);
-        if (split) Add(g, "nl2", "NL 2 Battery", 130, null);
+        if (split || twoBatteries) Add(g, "nl2", "NL 2 Battery", split ? 130 : 30, null);
         s.NewRules("t");
-        s.UpdateRules(_ => Pack(s.Archive.Sha256, boats, Battery(groupRoll)));
+        s.UpdateRules(_ => Pack(s.Archive.Sha256, boats, Battery(groupRoll, remove), phases));
         g.Rebase();
         RollerCalls = 0;
         return (s, new PhaseController(s, (cmd, st) => CommandLog.Prepare(cmd, st, s)));

@@ -1,0 +1,136 @@
+using Quartermaster.Core;
+using Quartermaster.Render;
+using Quartermaster.Rules;
+
+namespace Quartermaster.Render.Tests;
+
+/// <summary>
+/// B9 #55, fix round 1: a batch's later rows never show anything that follows an earlier row's split before Apply (hot-seat menu batch,
+/// the guest's batch preview verdict, the per-unit batch grid), and the logged working after Apply is not read by a third side. The
+/// "remove the drawn barges" variant makes the weight left in the hex depend on which barges went.
+/// </summary>
+[Collection(AppDataRootEnv.Name)]
+public class DrawBatchChainTests : DrawTestBase
+{
+    // Shots 2 on SC 1 Barge's hex. Faces 1, 1: SC 1 Barge twice (Boats left 1 + 2 = 3). Faces 6, 5: SC 4 Barge twice (Boats left 3 + 1 = 4).
+    private static readonly int[] SplitA = { 1, 1 };
+    private static readonly int[] SplitB = { 6, 5 };
+
+    private string MenuLaterRow(int[] firstRow, out ModuleSession session)
+    {
+        var (s, c) = Open(Visibility.Public, remove: true);
+        session = s;
+        s.SetViewSides(North);
+        var b = new MenuBatchModel(s, c, "f", new[] { "nl1", "nl1" });
+        b.SetCell(0, "Shots", "2");
+        b.SetCell(1, "Shots", "4");
+        foreach (var face in firstRow) Next.Enqueue(face);
+        b.CalculateAll();
+        var first = b.Row(0);
+        Assert.True(first.Result == "2", Json(first));   // the first row is the viewer's own run on the live state: k shown
+        var later = b.Row(1);
+        Assert.Equal(FormulaMasking.HiddenText, later.Result);
+        Assert.False(NamesBarge(Json(later)), Json(later));
+        var json = Json(later);
+        Assert.Equal(2, b.ApplyAll());
+        return json;
+    }
+
+    [Fact]
+    public void Menu_batch_later_row_same_for_any_earlier_split()
+    {
+        var a = MenuLaterRow(SplitA, out var sa);
+        Assert.False(sa.Game!.State.Pieces.ContainsKey("sc1"));   // the live apply used the first row's pins
+        var b = MenuLaterRow(SplitB, out var sb);
+        Assert.False(sb.Game!.State.Pieces.ContainsKey("sc4"));
+        Assert.Equal(a, b);
+    }
+
+    private string GuestLaterRow(int[] firstRow)
+    {
+        var (host, c) = Open(Visibility.Public, remove: true);
+        var x = new IntentExecutor(host, c);
+        foreach (var face in firstRow) Next.Enqueue(face);
+        var rows = new[] { "2", "4" }.Select(n => new FormulaBatchRow("nl1", new Dictionary<string, string> { ["Shots"] = n }, null)).ToList();
+        var v = x.Execute("p1", North, new FormulaBatchIntent("f", rows, true, true)).BatchVerdict!;
+        Assert.Equal(2, v.Rows.Count);
+        Assert.Equal("2", v.Rows[0].Values!["Hits"]);
+        Assert.False(v.Rows[1].Values?.ContainsKey("Hits") ?? false);
+        Assert.Null(v.Rows[1].Rolls);
+        var apply = x.Execute("p1", North, new FormulaBatchIntent("f", rows, false, false)).BatchVerdict!;
+        Assert.True(apply.Applied, apply.Message);
+        return Json(v.Rows[1]);
+    }
+
+    [Fact]
+    public void Guest_batch_later_row_verdict_same_for_any_earlier_split()
+    {
+        Assert.Equal(GuestLaterRow(SplitA), GuestLaterRow(SplitB));
+    }
+
+    /// <summary>The per-unit grid evaluates every row on the live state (no chain), so a later row never sees an earlier row's split.</summary>
+    private string PendingLaterRow(int[] firstRow)
+    {
+        var (s, c) = Open(Visibility.Public, remove: true, twoBatteries: true, phases: NorthGuns());
+        s.SetViewSides(North);
+        c.Start();
+        var run = Assert.Single(s.Game!.State.Pending, r => r.FormulaId == "f");
+        var b = new BatchModel(s, c, run.Id);
+        Assert.Equal(2, b.RowCount);
+        b.SetCell(0, "Shots", "2");
+        b.SetCell(1, "Shots", "4");
+        foreach (var face in firstRow) Next.Enqueue(face);
+        Assert.Equal("2", b.Row(0).Result);
+        var later = b.Row(1);
+        Assert.False(NamesBarge(Json(later)), Json(later));
+        return Json(later);
+    }
+
+    [Fact]
+    public void Pending_batch_later_row_same_for_any_earlier_split()
+    {
+        Assert.Equal(PendingLaterRow(SplitA), PendingLaterRow(SplitB));
+    }
+
+    [Fact]
+    public void Third_side_does_not_read_k_after_apply()
+    {
+        var (s, c) = Open(Visibility.Private);
+        s.SetViewSides(North);
+        var m = Dialog(s);
+        m.SetBoxText("Shots", "3");
+        var t = m.Evaluate(s.Game!.State).Trace;
+        Assert.True(c.ApplyFormula(null, "nl1", t, false));
+        var st = s.Game.State;
+        var working = Assert.Single(st.Log, l => l.AppliedRun == "f");
+        Assert.Contains("Hits = 3", working.Text);
+        var hills = new HashSet<string> { "hills" };
+        var third = PlayerView.For(st, s.Rules, s.Model, hills);
+        Assert.DoesNotContain(third.Log, l => l.Text.Contains("Hits = 3", StringComparison.Ordinal));
+        Assert.DoesNotContain(third.Log, l => l.Text.StartsWith("Shore battery: Hits:", StringComparison.Ordinal));
+        // The acting side learns k (decision 6); the barges' side reads its own lines.
+        Assert.Contains(PlayerView.For(st, s.Rules, s.Model, North).Log, l => l.Text.Contains("Hits = 3", StringComparison.Ordinal));
+        Assert.Contains(PlayerView.For(st, s.Rules, s.Model, South).Log, l => l.Text == "Shore battery: Hits: 2 on SC 4 Barge");
+    }
+
+    [Fact]
+    public void Per_counter_output_error_never_shown()
+    {
+        var (s, c) = Open(Visibility.Public);
+        // Inside the output, Hits reads that counter's count: the expression fails only for a counter that gave one boat.
+        s.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Select(f => f with { Outputs = f.Outputs.Select(o => o with { Expr = "10 / (Hits - 1)" }).ToList() }).ToList(),
+        });
+        s.SetViewSides(North);
+        var m = Dialog(s);
+        m.SetBoxText("Shots", "3");   // the highest faces: SC 2 Barge gives 1, SC 4 Barge 2
+        var dv = m.Evaluate(s.Game!.State);
+        Assert.NotNull(dv.Trace.Error);
+        Assert.Equal(FormulaMasking.ErrorHiddenText, dv.Status);
+        var x = new IntentExecutor(s, c);
+        var v = x.Execute("p1", North, new FormulaIntent("f", "nl1", null, new Dictionary<string, string> { ["Shots"] = "3" }, false)).Verdict!;
+        Assert.False(v.Applied);
+        Assert.Equal(FormulaMasking.ErrorHiddenText, v.Message);
+    }
+}
