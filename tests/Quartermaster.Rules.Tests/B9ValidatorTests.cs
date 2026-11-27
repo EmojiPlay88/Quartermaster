@@ -256,6 +256,46 @@ public class B9ValidatorTests
         FormulaHas(Warnings(p), warning);
     }
 
+    // ---- B9 #55: a draw's filter warning (not "picks"), the masking rule and the caption ----
+
+    [Fact]
+    public void Draw_filter_warning_says_draw_not_pick()
+    {
+        const string warning = "variable \"Hits\": its draw filter reads values another side may not see; the draw is made from every matching counter, and players who cannot see those values see it masked";
+        FormulaHas(Warnings(WithBinding(Draw(filter: "Boats > 0"), HitOut())), warning);
+        var plain = Warnings(WithBinding(Draw(filter: "Strength > 0"), HitOut()));
+        Assert.DoesNotContain(plain, m => m.Contains("its draw filter", StringComparison.Ordinal));
+        Assert.DoesNotContain(Warnings(WithBinding(Draw(filter: "Boats > 0"), HitOut())), m => m.Contains("each player picks", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Draw_bindings_hidden_by_weight_filter_or_masking()
+    {
+        FormulaDef F(VariableBinding b) => Bid() with { Bindings = new() { b } };
+        var p = Base();
+        Assert.Equal(new[] { "Hits" }, FormulaVariables.DrawBindingsHidden(p, F(Draw()), false));                          // Private weight
+        Assert.Empty(FormulaVariables.DrawBindingsHidden(p, F(Draw(property: "p-strength")), false));                      // Public weight
+        Assert.Empty(FormulaVariables.DrawBindingsHidden(p, F(Draw(property: null)), false));                              // one each
+        Assert.Equal(new[] { "Hits" }, FormulaVariables.DrawBindingsHidden(p, F(Draw(property: "p-gone")), false));         // unknown: closed
+        Assert.Equal(new[] { "Hits" }, FormulaVariables.DrawBindingsHidden(p, F(Draw(property: null, filter: "Boats > 0")), false));
+        Assert.Equal(new[] { "Hits" }, FormulaVariables.DrawBindingsHidden(p, F(Draw(property: null)), true));             // pieces may hide
+        Assert.Empty(FormulaVariables.DrawBindingsHidden(p, F(Picker("h-ford")), true));                                   // not a draw
+        Assert.Empty(FormulaVariables.PieceBindingsHidden(p, F(Draw()), true));                                            // Piece-only, as before
+    }
+
+    [Fact]
+    public void Draw_caption_names_weight()
+    {
+        static string Caption(VariableBinding b)
+        {
+            var f = Bid() with { Text = "Hits", Bindings = new() { b } };
+            var layout = FormulaLayout.Build(f, Base());
+            return layout.Main.Concat(layout.SubRows.SelectMany(r => r.Items)).OfType<BoxItem>().Single(x => x.Variable == "Hits").Caption;
+        }
+        Assert.Equal("Boats (drawn)", Caption(Draw()));
+        Assert.Equal("Hits (drawn)", Caption(Draw(property: null)));
+    }
+
     // ---- whole pack ----
 
     [Fact]

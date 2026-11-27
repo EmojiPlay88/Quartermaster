@@ -1207,6 +1207,10 @@ public static class RulesValidator
             }
             if (b.Kind == BindingKind.Piece && !string.IsNullOrWhiteSpace(b.PieceFilter) && FilterMayReadHidden(pack, b.PieceFilter!))
                 Warn($"variable \"{b.Variable}\": its piece filter reads values another side may not see; each player picks from what they can see");
+            // B9 #55: a draw is not a pick; its pool is read on the whole game and masked by the same filter test the masking uses.
+            if (b.Kind == BindingKind.Draw && !string.IsNullOrWhiteSpace(b.PieceFilter) && SideFacts.Groups(pack) >= 2
+                && ParseProblem(b.PieceFilter!) is null && FormulaVariables.FilterMayHide(pack, b.PieceFilter))
+                Warn($"variable \"{b.Variable}\": its draw filter reads values another side may not see; the draw is made from every matching counter, and players who cannot see those values see it masked");
             if (b.SameHex && b.Kind is not (BindingKind.Piece or BindingKind.Draw)) Warn($"variable \"{b.Variable}\" has \"same hex\" but is not a Piece binding");
             CheckHolderChoices(pack, b, Err, Warn);
             if (!string.IsNullOrWhiteSpace(b.DrawCount) && b.Kind != BindingKind.Draw) Err($"variable \"{b.Variable}\" has a draw count but is not a Draw binding");

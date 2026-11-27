@@ -280,7 +280,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         {
             var dv = ModelFor(row).Evaluate(s.Game.State);
             return dv.ShownTrace.Error != null || dv.ShownTrace.Result == null ? Array.Empty<(string, string)>()
-                : dv.ShownTrace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+                : dv.ShownTrace.Outputs.Where(o => o.Draw == null).Select(o => (o.Key, o.PropertyId)).ToList();   // B9 #55: never a drawn counter
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return Array.Empty<(string, string)>(); }
     }

@@ -80,6 +80,21 @@ public static class FormulaMasking
     /// </summary>
     public const string PlaceOutputInput = "place output";
 
+    /// <summary>
+    /// B9 #55: the entry <see cref="HiddenVariables"/> adds when a Draw binding's pool may hold data the viewer cannot see
+    /// (<see cref="FormulaVariables.DrawBindingsHidden"/>: its weight is not Public, its pool filter may read hidden values by the B7 filter
+    /// test, or the viewer's view may lack pieces or values). Like <see cref="PieceOutputInput"/> it is a marker: it hides no box of its own
+    /// beyond the Draw box (the Draw variable is added too, so k and what reads it are masked), and masks the formula's working and errors.
+    /// Static (pack and module), so the host and a guest agree.
+    /// </summary>
+    public const string DrawInput = "draw";
+
+    /// <summary>B9 #55: the one line every output on drawn counters previews as before Apply, whoever views it ({0} = the property's name).</summary>
+    public const string DrawnCountersText = "{0} of the drawn counters changes";
+
+    /// <summary>B9 #55: true for a draw key (<c>draw:{Var}#{i}</c>): pinned on the host or in the dialog, never sent, shown or re-rolled.</summary>
+    public static bool IsDrawKey(string? key) => key != null && key.StartsWith("draw:", StringComparison.Ordinal);
+
     private static readonly IReadOnlySet<string> NoSides = new HashSet<string>();
 
     /// <summary>
@@ -195,6 +210,8 @@ public static class FormulaMasking
         // A masked pick (any property) once the viewer's view may lack pieces or values: the same static rule as the aggregates.
         var mayHide = PieceAccess.PiecesMayHide(pack, model, sides);
         hidden.UnionWith(FormulaVariables.PieceBindingsHidden(pack, f, mayHide));
+        // B9 #55: a draw over a pool the viewer may not fully see masks its Draw box (k follows the hidden weights) and the formula.
+        foreach (var v in FormulaVariables.DrawBindingsHidden(pack, f, mayHide)) { hidden.Add(v); hidden.Add(DrawInput); }
         if (FormulaVariables.ComputedHolderCallHidden(pack, f)) hidden.Add(HolderCallInput);
         // An output acting on a picked piece (B3): its working and errors show the target's values, name and layer levels. Hidden when an
         // output writes a non-Public property, or (the viewer's view may lack pieces or values) the formula has any Piece output, write or effect.
@@ -317,12 +334,35 @@ public static class FormulaMasking
     /// </summary>
     public static string LedgerPreview(ModuleSession s, DialogView dv)
     {
-        var t = dv.ShownTrace;
-        if (t.Error != null || t.Result == null) return "";
         var sides = ViewerSides(s);
-        return string.Join("; ", t.Outputs.Select(o => !dv.Masked && OutputShown(s, sides, o)
-            ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
-            : $"{o.PropertyName} changes ({ModuleSession.HiddenText})"));
+        return string.Join("; ", OutputLines(dv.ShownTrace, dv.Masked, o => OutputShown(s, sides, o)));
+    }
+
+    /// <summary>
+    /// The writes of a run as a viewer is shown them before Apply (<see cref="LedgerPreview"/>, <see cref="DialogView.OutputLines"/>): each
+    /// output the viewer may see (<paramref name="shown"/>) of an unmasked run as <c>{Prop} {before} → {after}</c>, any other as
+    /// <c>{Prop} changes (hidden)</c>. B9 #55: the outputs on a draw's counters (<see cref="OutputPreview.Draw"/>), masked or not, become one
+    /// line per Draw variable and property, <see cref="DrawnCountersText"/>, so nothing shows which counters were drawn. Empty for a run with
+    /// an error or no result.
+    /// </summary>
+    public static IReadOnlyList<string> OutputLines(FormulaTrace t, bool masked, Func<OutputPreview, bool> shown)
+    {
+        if (t == null || t.Error != null || t.Result == null) return Array.Empty<string>();
+        var lines = new List<string>();
+        var drawn = new HashSet<(string, string?)>();
+        foreach (var o in t.Outputs)
+        {
+            if (o == null) continue;
+            if (o.Draw != null)
+            {
+                if (drawn.Add((o.Draw, o.PropertyId))) lines.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, DrawnCountersText, o.PropertyName));
+                continue;
+            }
+            lines.Add(!masked && shown(o)
+                ? $"{o.PropertyName} {Num(o.Before)} → {Num(o.After)}"
+                : $"{o.PropertyName} changes ({ModuleSession.HiddenText})");
+        }
+        return lines;
     }
 
     /// <summary>B7: whether a batch grid row says "goes negative" before Apply: only for an unmasked run whose visible write goes below zero
@@ -332,7 +372,7 @@ public static class FormulaMasking
         if (dv.Masked) return false;
         var t = dv.ShownTrace;
         var sides = ViewerSides(s);
-        return t.Error == null && t.Outputs.Any(o => o.After < 0 && OutputShown(s, sides, o));
+        return t.Error == null && t.Outputs.Any(o => o.Draw == null && o.After < 0 && OutputShown(s, sides, o));   // B9 #55: never a drawn counter
     }
 
     /// <summary>B7: the run a batch chain applies to its clone for the rows after this one, and draws a roll group's dice from, before Apply:
@@ -343,8 +383,10 @@ public static class FormulaMasking
 
     /// <summary>B7: the dice a preview verdict sends a guest: none for a masked run (<paramref name="hidden"/> not empty); they stay pinned on the
     /// host, so the Apply uses them and asking again rolls nothing new.</summary>
+    /// <remarks>B9 #55: never a draw key (<see cref="IsDrawKey"/>): the draw dice stay on the host, for every sender.</remarks>
     public static Dictionary<string, IReadOnlyList<int>>? PreviewRolls(FormulaDialogModel m, IReadOnlySet<string> hidden) =>
-        hidden.Count > 0 ? null : m.PinnedRolls.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal);
+        hidden.Count > 0 ? null : m.PinnedRolls.Where(kv => !IsDrawKey(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => (IReadOnlyList<int>)kv.Value.ToList(), StringComparer.Ordinal);
 
     /// <summary>
     /// B7: the values a preview verdict sends back, read from the run the sender is shown (<see cref="DialogView.ShownTrace"/>, or the

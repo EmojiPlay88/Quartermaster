@@ -839,14 +839,14 @@ internal sealed class FormulaPins
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// True when the formula may roll dice: a Roll binding, or a dice( call in its text, a table key expression or a binding's AutoValue
+    /// True when the formula may roll dice: a Roll or (B9 #55) Draw binding, or a dice( call in its text, a table key expression or a binding's AutoValue
     /// (an Input's pre-fill). Only those take a pinned scope.
     /// </summary>
     public static bool MayRoll(FormulaDef f)
     {
         var bindings = f.Bindings ?? new List<VariableBinding>();
         bool Calls(string? expr) => !string.IsNullOrEmpty(expr) && DiceCall.IsMatch(expr);
-        return bindings.Any(b => b is { Kind: BindingKind.Roll })
+        return bindings.Any(b => b is { Kind: BindingKind.Roll or BindingKind.Draw })   // B9 #55: a draw's dice are pinned per sender too
             || Calls(f.Text)
             || bindings.Any(b => b != null && (Calls(b.RowExpr) || Calls(b.ColExpr) || Calls(b.AutoValue)));
     }

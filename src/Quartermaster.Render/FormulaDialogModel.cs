@@ -32,6 +32,13 @@ public sealed record DialogView(IReadOnlyList<BoxView> Boxes, IReadOnlyList<Inli
     /// <summary>B7: the viewer lacks data the formula reads (its hidden inputs are not empty): before Apply nothing of the run's values, result,
     /// "(negative)" mark or dice is shown or sent (<see cref="FormulaMasking.LedgerPreview"/> and the related rules read this).</summary>
     public bool Masked { get; init; }
+
+    /// <summary>
+    /// The run's writes as the viewer is shown them before Apply (<see cref="FormulaMasking.OutputLines"/> of <see cref="ShownTrace"/>):
+    /// <c>{Prop} {before} → {after}</c> for a visible write of an unmasked run, <c>{Prop} changes (hidden)</c> otherwise, and (B9 #55) one
+    /// line <c>{Prop} of the drawn counters changes</c> for the outputs on a draw's counters. Empty while no result is shown.
+    /// </summary>
+    public IReadOnlyList<string> OutputLines { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>UI-free state of the formula dialog: typed values, overrides, pinned dice, and the mapping from a run to what the controls show.</summary>
@@ -254,6 +261,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         var b = Binding(variable);
         if (b == null || (IsHidden(variable) && !IsPickBinding(b))) return;   // a hidden pick is still the viewer's to make
+        if (b.Kind == BindingKind.Draw) return;   // B9 #55: the engine draws (also with physical dice); its box is never typed or overridden
         _verdict.Remove(variable);
         _verdictMessage = null;
         if (IsPickBinding(b)) { _typed[variable] = text; RecordPick(variable, text); return; }
@@ -268,6 +276,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     {
         if (HostCalculates) return;   // a guest's dice are the host's: no re-rolling
         if (IsShared(key)) return;    // a group's dice are rolled once for the group
+        if (FormulaMasking.IsDrawKey(key)) return;   // B9 #55: a draw is drawn once; asking again never draws other counters
         _fixedRolls.Remove(key);
     }
 
@@ -306,6 +315,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <summary>A guest's dice box before the host rolled it.</summary>
     public const string HostRollsText = "rolled by the host";
 
+    /// <summary>B9 #55: the tooltip of a Draw box.</summary>
+    public const string DrawTooltip = "Drawn at random when you apply; the log names the counters.";
+
     /// <summary>Shown after the caption of an input that always asks (<see cref="VariableBinding.AlwaysAsk"/>).</summary>
     public const string AlwaysAskedSuffix = " (always asked)";
 
@@ -341,6 +353,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             if (HostCalculates && _hostDice.ContainsKey(kv.Key)) continue;
             merged[kv.Key] = kv.Value;
         }
+        // B9 #55: the draw dice (draw:{Var}#{i}) are pinned like any roll, so a preview and its Apply draw the same counters.
+        foreach (var kv in trace.DrawRolls) merged[kv.Key] = kv.Value;
         _fixedRolls = merged;
     }
 
@@ -488,7 +502,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var hostDecides = (hostGuards.Contains(FormulaMasking.PreconditionGuard) && (t.Refused || vars.Any(IsUndecided)))
             || vars.Any(v => (v.Skipped || IsUndecided(v)) && hostGuards.Contains(v.Variable));
         if (hostDecides) canApply = false;
-        var negative = !hostDecides && t.Error == null && t.Outputs.Any(o => o.After < 0 && (OutputVisible == null || OutputVisible(o)));
+        // B9 #55: a drawn counter going negative is never marked (it would tell which counters were drawn).
+        var negative = !hostDecides && t.Error == null && t.Outputs.Any(o => o.Draw == null && o.After < 0 && (OutputVisible == null || OutputVisible(o)));
         var status = wrong.Count > 0 ? "Doesn't match: " + string.Join(", ", wrong)
             : hostDecides ? (missing.Count > 0 ? "Waiting for: " + string.Join(", ", missing) : HostWaitText)
             : t.Error != null ? (masked ? FormulaMasking.ErrorHiddenText : t.Error)
@@ -506,9 +521,11 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         if (vars.Any(v => IsGuardBox(v.Variable) && Raw(v.Variable).Trim().Length == 0)) { working = ""; result = ""; negative = false; }
         // B7: a masked formula never previews its result or its "(negative)" mark before Apply: either could be the hidden value, or change
         // with it as the viewer retypes a value compared with it. After Apply the ledger shows what the viewer may see.
+        var outputs = localDice || hostDecides || (result.Length == 0 && !masked) ? Array.Empty<string>()
+            : FormulaMasking.OutputLines(t, masked, o => OutputVisible == null || OutputVisible(o));
         if (masked) { result = HiddenBoxText; negative = false; }
         return new DialogView(boxes, inline, result, working + (negative ? " (negative)" : ""), negative, status,
-            canApply, real) { Shown = ReferenceEquals(t, real) ? null : t, Masked = masked };
+            canApply, real) { Shown = ReferenceEquals(t, real) ? null : t, Masked = masked, OutputLines = outputs };
     }
 
     private static readonly IReadOnlySet<string> NoHostGuards = new HashSet<string>();
@@ -635,6 +652,9 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             return new BoxView(v.Variable, Raw(v.Variable), BoxBackground.Typed, "", true,
                 Raw(v.Variable).Trim().Length == 0 ? "Waiting for input" : IsPickReason(v.MissingReason) ? v.MissingReason : HiddenBoxText, null,
                 false, picks.GetValueOrDefault(v.Variable) ?? Array.Empty<string>());
+        // B9 #55: a Draw box is read-only: k (or hidden when its pool is masked), never a re-roll, the counters drawn never named.
+        if (binding?.Kind == BindingKind.Draw && IsHidden(v.Variable))
+            return new BoxView(v.Variable, HiddenBoxText, BoxBackground.Auto, "", false, DrawTooltip, null);
         if (IsHidden(v.Variable)) return new BoxView(v.Variable, HiddenBoxText, BoxBackground.Auto, "", false, null, null);
         // B7: the dice of a masked formula are not shown before Apply (dice the viewer types itself are its own).
         if (binding?.Kind == BindingKind.Roll && _hidden.Count > 0 && !IsPhysicalRoll(v.Variable))
@@ -644,6 +664,8 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         var hostGuard = hostGuards.Contains(v.Variable);
         if (v.Skipped && !hostGuard) return new BoxView(v.Variable, NotUsedText, BoxBackground.Auto, "", false, null, null);
         if (IsUndecided(v) && !hostGuard && !IsCheckedBox(v.Variable)) return new BoxView(v.Variable, "", BoxBackground.Auto, "", false, null, null);
+        if (binding?.Kind == BindingKind.Draw)
+            return new BoxView(v.Variable, v.Value?.Display() ?? "", BoxBackground.Auto, "", false, v.MissingReason ?? DrawTooltip, null);
         if (IsCheckedBox(v.Variable)) return CheckedBox(v);
         // A group's dice (B4): shown, never typed, overridden or re-rolled. A guest shows them once they are the host's.
         if (binding?.Kind == BindingKind.Roll && t.SharedRollKeys.Contains(v.Variable) && t.RollsByKey.TryGetValue(v.Variable, out var groupDice)

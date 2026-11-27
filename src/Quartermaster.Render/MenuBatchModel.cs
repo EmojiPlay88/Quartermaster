@@ -331,7 +331,7 @@ public sealed class MenuBatchModel : IBatchRows
         var links = Chain();
         if (row < 0 || row >= links.Length || links[row].View is not { } dv || !s.CanAct(_rows[row].PieceId)) return Array.Empty<(string, string)>();
         return dv.ShownTrace.Error != null || dv.ShownTrace.Result == null ? Array.Empty<(string, string)>()
-            : dv.ShownTrace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+            : dv.ShownTrace.Outputs.Where(o => o.Draw == null).Select(o => (o.Key, o.PropertyId)).ToList();   // B9 #55: never a drawn counter
     }
 
     /// <summary>The rows not skipped (removed by an earlier row, gone, or another side's).</summary>

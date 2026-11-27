@@ -188,6 +188,26 @@ public static class FormulaVariables
     }
 
     /// <summary>
+    /// B9 #55: the variables of the formula's Draw bindings whose pool may hold data a viewer who does not hold every side cannot see: the
+    /// weight property is not Public (an unknown one counts as not public; no weight, one each, is public), the pool filter may read hidden
+    /// values (<see cref="FilterMayHide"/>, the B7 filter test), or <paramref name="piecesMayHide"/> (the viewer's view may lack pieces or
+    /// values: <c>PieceAccess.PiecesMayHide</c>). Not part of <see cref="PieceBindingsHidden(RulesPack, FormulaDef, bool)"/>: a draw's pool is
+    /// read on the full state and only its count k is shown after Apply (the acting side learns k), so the logged working keeps it; the
+    /// formula masking masks the Draw box before Apply. Depends on the pack (and the flag) alone, so the host and a guest agree.
+    /// </summary>
+    public static IEnumerable<string> DrawBindingsHidden(RulesPack pack, FormulaDef f, bool piecesMayHide)
+    {
+        var props = pack.Properties ?? new List<PropertyDef>();
+        foreach (var b in f?.Bindings ?? new List<VariableBinding>())
+        {
+            if (b is not { Kind: BindingKind.Draw, Variable: not null }) continue;
+            if (piecesMayHide || FilterMayHide(pack, b.PieceFilter)
+                || (b.Property != null && !PropertyFacts.IsPublic(pack, props.FirstOrDefault(p => p != null && p.Id == b.Property))))
+                yield return b.Variable;
+        }
+    }
+
+    /// <summary>
     /// True when the formula reads a computed property built from hidden data: through a binding or variable (<see cref="ComputedHiddenVariables"/>)
     /// or through holder(H, P) of one anywhere in its expressions. Such a formula's working may show that data to any viewer who does not
     /// hold every side.
