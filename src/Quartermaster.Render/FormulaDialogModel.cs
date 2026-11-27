@@ -117,6 +117,10 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
     /// <summary>True on an online guest's screen: hidden boxes say the host calculates them, and the host's verdict is shown.</summary>
     public bool HostCalculates { get; set; }
 
+    /// <summary>B7: the side answering the pending run this dialog is for (its <see cref="PendingRun.AskSideId"/>), passed to every run as
+    /// <see cref="RunRequest.AskSideId"/> so <c>askside()</c> names it. Null for a menu run or a run no side is asked.</summary>
+    public string? AskSideId { get; set; }
+
     /// <summary>The text of a hidden box.</summary>
     public string HiddenBoxText => HostCalculates ? FormulaMasking.HostCalculatesText : FormulaMasking.HiddenText;
 
@@ -340,7 +344,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         {
             // (The runner call only gives the view its variable list; its dice are not pinned and nothing is applied.)
             // Outside the formula's phases nothing is run: the trace carries no result, so nothing can be applied.
-            var idle = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), new Dictionary<string, string>(StringComparer.Ordinal), _fixedRolls, Moved, false, DiceSource, PickSides) { SharedRolls = SharedRolls, AutoInputs = HiddenAutoInputs() });
+            var idle = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed), new Dictionary<string, string>(StringComparer.Ordinal), _fixedRolls, Moved, false, DiceSource, PickSides) { SharedRolls = SharedRolls, AutoInputs = HiddenAutoInputs(), AskSideId = AskSideId });
             return idle with { Result = null, Working = "", Outputs = Array.Empty<OutputPreview>() };
         }
         var typed = new Dictionary<string, string>(_typed);
@@ -356,7 +360,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             ov.TryAdd(b.Variable, "");
         // A hidden Input cannot be typed: the engine reads its auto value (B7), as it reads every other hidden value.
         var request = new RunRequest(formula.Id, pieceId, typed, ov, _fixedRolls, Moved, false, DiceSource, PickSides)
-            { SharedRolls = SharedRolls, AutoInputs = HiddenAutoInputs() };
+            { SharedRolls = SharedRolls, AutoInputs = HiddenAutoInputs(), AskSideId = AskSideId };
         var trace = runner.Run(state, request);
         MergePins(trace);
         // B7: a precondition or guard over hidden data is the host's to decide at Apply; the viewer is shown a run that does not depend on it.
@@ -414,7 +418,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
         SyncPicks();
         if (PhaseReasonFor(state) != null) return;
         var trace = runner.Run(state, new RunRequest(formula.Id, pieceId, new Dictionary<string, string>(_typed),
-            PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource, PickSides) { SharedRolls = SharedRolls });
+            PhysicalRollOverrides(), _fixedRolls, Moved, true, DiceSource, PickSides) { SharedRolls = SharedRolls, AskSideId = AskSideId });
         MergePins(trace);
         foreach (var v in trace.Variables)
         {

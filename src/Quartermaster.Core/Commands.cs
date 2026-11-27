@@ -32,6 +32,7 @@ namespace Quartermaster.Core;
 [JsonDerivedType(typeof(DropPastTurns), "dropPastTurns")]
 [JsonDerivedType(typeof(EndGame), "endGame")]
 [JsonDerivedType(typeof(MarkScheduled), "markScheduled")]
+[JsonDerivedType(typeof(SealAnswer), "sealAnswer")]
 public abstract record GameCommand;
 
 /// <summary>CloneOf: the piece this one is a copy of (the Clone command); its stored ledger values are copied (<see cref="LedgerSeeder.BuildCloneSeeds"/>). Omitted when null.</summary>
@@ -165,3 +166,10 @@ public sealed record MarkScheduled(string RowId, string Text, DateTimeOffset? At
 /// <summary>Removes every value key below <paramref name="Turn"/> of the listed turn-keyed properties, in every ledger (B6, spec #60); a ledger
 /// left empty goes. Logs nothing; ledger history is kept.</summary>
 public sealed record DropPastTurns(IReadOnlyList<string> PropertyIds, int Turn) : GameCommand;
+
+/// <summary>
+/// B7 #53: stores a side's sealed answer on its pending run (<see cref="PendingRun.SealedAnswer"/>; the run stays open until the group is
+/// released) and logs a public Turn line <paramref name="LogText"/> (<c>{Side} has answered {formula} (sealed)</c>: no value). An unknown run
+/// is ignored. <paramref name="Typed"/> holds the answer's Input values only.
+/// </summary>
+public sealed record SealAnswer(string RunId, IReadOnlyDictionary<string, string> Typed, string LogText, DateTimeOffset? At = null, string? Who = null) : GameCommand;

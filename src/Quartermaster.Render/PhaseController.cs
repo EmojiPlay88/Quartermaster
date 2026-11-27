@@ -265,17 +265,39 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         return pos == null ? null : AskAt(pack, st, pack.Phases[pos.PhaseIndex], pos);
     }
 
-    /// <summary>The side asked by the first pending ask run with a unit still open (spec #72), else null.</summary>
-    public static string? OpenAskSide(GameState st) =>
-        st.Pending.FirstOrDefault(r => !string.IsNullOrEmpty(r.AskSideId) && r.Units.Any(u => !u.Applied))?.AskSideId;
+    /// <summary>
+    /// The one test of an open ask run (spec #72, B7): a pending run asking a side, with a unit still open and no sealed answer yet (an answered
+    /// sealed run waits for the other sides; it is not answered again). <paramref name="held"/> null: any side; else the asked side must be in
+    /// it (<paramref name="inHeld"/> true) or not in it (false).
+    /// </summary>
+    private static bool IsOpenAsk(PendingRun? r, IReadOnlySet<string>? held = null, bool inHeld = true) =>
+        r != null && !string.IsNullOrEmpty(r.AskSideId) && r.SealedAnswer == null
+        && (held == null || held.Contains(r.AskSideId) == inHeld)
+        && (r.Units ?? Array.Empty<PendingUnit>()).Any(u => u is { Applied: false });
 
-    /// <summary>The first pending ask run, with a unit still open, of a side not in <paramref name="sides"/> (B7): what another side is
+    /// <summary>The side asked by the first open ask run (<see cref="IsOpenAsk"/>), else null.</summary>
+    public static string? OpenAskSide(GameState st) => (st.Pending ?? new()).FirstOrDefault(r => IsOpenAsk(r))?.AskSideId;
+
+    /// <summary>The first open ask run (<see cref="IsOpenAsk"/>) of a side not in <paramref name="sides"/> (B7): what another side is
     /// answering while the holder of <paramref name="sides"/> waits; null when there is none.</summary>
     public static PendingRun? OpenAskFor(GameState st, IReadOnlySet<string> sides) =>
-        st.Pending.FirstOrDefault(r => !string.IsNullOrEmpty(r.AskSideId) && !sides.Contains(r.AskSideId) && r.Units.Any(u => !u.Applied));
+        (st.Pending ?? new()).FirstOrDefault(r => IsOpenAsk(r, sides, inHeld: false));
 
-    private static bool HasOpenAsk(GameState st, IReadOnlySet<string> sides) =>
-        st.Pending.Any(r => !string.IsNullOrEmpty(r.AskSideId) && sides.Contains(r.AskSideId) && r.Units.Any(u => !u.Applied));
+    private static bool HasOpenAsk(GameState st, IReadOnlySet<string> sides) => (st.Pending ?? new()).Any(r => IsOpenAsk(r, sides));
+
+    // ---- sealed answers (B7 #53) ----
+
+    /// <summary>The phase notice after a sealed answer that does not complete its group.</summary>
+    public const string SealedNoticeText = "Answer sealed; it is applied when every side has answered.";
+
+    /// <summary>The refusal of a second answer to a sealed run.</summary>
+    public const string SealedAlreadyInText = "Your sealed answer is already in.";
+
+    /// <summary>The refusal, known before anything is run, of an answer to the pending run <paramref name="runId"/>: a sealed run already
+    /// answered (<see cref="SealedAlreadyInText"/>). Null otherwise (also for no run). The host dialog and a guest's intent check it.</summary>
+    public static string? AnswerRefusal(GameState st, string? runId) =>
+        runId != null && (st.Pending ?? new()).FirstOrDefault(r => r != null && r.Id == runId) is { Seal: not null, SealedAnswer: not null }
+            ? SealedAlreadyInText : null;
 
     private const string SkippedTip = "Skipped this pass (condition false)";
     private const int MaxWalk = 10_000;   // a bound for the preview walks; a turn of a real pack is far shorter
@@ -439,6 +461,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
                 if (step == null) return null;
                 SetNotice(relocated);
                 LogNotRun(from, cur);
+                LogDiscarded(from);
                 if (Decides && GameEnd.Reached(pack, cur, step.To))
                 {
                     // The last turn (or stage) has been played: the game ends in this press's action, every victory condition checked
@@ -582,6 +605,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         if (!s.CanActFor(pieceId, ActorSides)) return false;   // hot-seat: only the units of the sides held (or of no side)
         var ask = runId == null ? null : s.Game.State.Pending.FirstOrDefault(r => r.Id == runId)?.AskSideId;
         if (!string.IsNullOrEmpty(ask) && ActorSides is { } held && !held.Contains(ask)) return false;   // an ask run is the asked side's (solo: anyone's)
+        if (runId != null && s.Game.State.Pending.FirstOrDefault(r => r.Id == runId) is { Seal: not null } sealedRun) return SealRun(sealedRun, trace);
         var name = UnitName(pieceId);
         var unit = name ?? trace.Formula.Name;
         var tag = calculated ? "auto-calculated" : null;
@@ -604,6 +628,79 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         }
         RaiseQueued(queued);
         return true;
+    }
+
+    /// <summary>
+    /// B7 #53: the answer to a sealed run is stored, not applied (<see cref="SealAnswer"/>: its Input values only, and a public line naming no
+    /// value). The answer that completes the group releases it in the same action (<see cref="Release"/>), then the next start entries run.
+    /// A second answer is refused (<see cref="AnswerRefusal"/>).
+    /// </summary>
+    private bool SealRun(PendingRun run, FormulaTrace trace)
+    {
+        if (s.Game is not { } g || AnswerRefusal(g.State, run.Id) != null) return false;
+        var typed = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var b in trace.Formula.Bindings ?? new List<VariableBinding>())
+        {
+            if (b is not { Kind: BindingKind.Input, Variable: { } v }) continue;
+            if (trace.Variables.FirstOrDefault(x => x != null && x.Variable == v)?.Value is { } val) typed[v] = FormulaDialogModel.ExactText(val);
+        }
+        List<PendingRun> queued = new();
+        var complete = false;
+        using (g.BeginAction(trace.Formula.Name))
+        {
+            Exec(new SealAnswer(run.Id, typed, $"{AskedName(run.AskSideId)} has answered {run.FormulaName} (sealed)"));
+            var group = g.State.Pending.Where(r => r != null && r.Seal == run.Seal).ToList();
+            if (group.All(r => r.SealedAnswer != null))
+            {
+                complete = true;
+                Release(group);
+                queued = ContinueEntries();   // inside the answer's action: one undo takes back the answer and the release
+            }
+        }
+        SetNotice(complete ? null : SealedNoticeText);
+        RaiseQueued(queued);
+        return true;
+    }
+
+    /// <summary>The name of an asked side (its id when the name is blank or the side is unknown).</summary>
+    private string AskedName(string? sideId) =>
+        s.Rules?.Sides.FirstOrDefault(x => x != null && x.Id == sideId) is { } sd ? SideName(sd) : sideId ?? "";
+
+    /// <summary>
+    /// Releases a complete sealed group (B7 #53): <c>{formula}: every side has answered</c>, then each run in pack side order, stamped with its
+    /// side and run on the current state with its sealed answer (later runs see earlier runs' writes); a run that cannot apply logs
+    /// <c>{formula}: {Side}: {error}</c> (an error line of the formula, stamped with the side). Every run is then resolved.
+    /// </summary>
+    private void Release(List<PendingRun> group)
+    {
+        if (s.Game is not { } g || s.Runner is not { } runner || s.Rules is not { } pack || group.Count == 0) return;
+        var order = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < pack.Sides.Count; i++)
+            if (pack.Sides[i]?.Id is { } id) order.TryAdd(id, i);
+        var runs = group.OrderBy(r => r.AskSideId != null && order.TryGetValue(r.AskSideId, out var i) ? i : int.MaxValue).ToList();
+        Calc($"{runs[0].FormulaName}: every side has answered", formulaId: LogKind.NoWorking);
+        var none = new Dictionary<string, string>();
+        var noRolls = new Dictionary<string, IReadOnlyList<int>>();
+        foreach (var r in runs)
+        {
+            _askStamp = string.IsNullOrEmpty(r.AskSideId) ? null : r.AskSideId;   // its working follows the asked side's privacy
+            try
+            {
+                var f = pack.ById<FormulaDef>(r.FormulaId);
+                var trace = f == null ? null
+                    : runner.Run(g.State, new RunRequest(f.Id, null, r.SealedAnswer ?? none, none, noRolls, null, UseAutoValues: true) { AskSideId = r.AskSideId });
+                var error = trace == null ? $"formula \"{r.FormulaId}\" not found"
+                    : trace.Error ?? (trace.Result == null || WritesComputed(pack, trace) ? FormulaMasking.ErrorHiddenText : null);
+                if (error != null || trace == null) Calc($"{r.FormulaName}: {AskedName(r.AskSideId)}: {error}", formulaId: f?.Id ?? r.FormulaId, error: true);
+                else
+                {
+                    FormulaApply.Execute(s, runner.Commands(trace, null, null, trace.Formula.Name, Stamp()), Exec);
+                    LogWorking(trace, trace.Formula.Name, null);
+                }
+            }
+            finally { _askStamp = null; }
+            Exec(new ResolveRun(r.Id, new string?[] { null }));
+        }
     }
 
     /// <summary>
@@ -662,6 +759,21 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             .Select(e => s.Rules!.ById<FormulaDef>(e.FormulaId)?.Name ?? e.FormulaId).ToList();
         if (left.Count == 0) return;   // a cursor past the end (a rules edit) counts as done
         AsTrigger(phase, () => { Calc("not run: " + string.Join(", ", left), formulaId: LogKind.NoWorking); return 0; });
+    }
+
+    /// <summary>B7 #53: before leaving a phase while a sealed group has any answer, one line per such group (Calc, no working, trigger stamp);
+    /// the pending runs then go as every pending run goes.</summary>
+    private void LogDiscarded(PhaseDef phase)
+    {
+        if (s.Game?.State is not { } st) return;
+        var names = (st.Pending ?? new()).Where(r => r?.Seal != null).GroupBy(r => r.Seal!, StringComparer.Ordinal)
+            .Where(grp => grp.Any(r => r.SealedAnswer != null)).Select(grp => grp.First().FormulaName).ToList();
+        if (names.Count == 0) return;
+        AsTrigger(phase, () =>
+        {
+            foreach (var name in names) Calc($"{name}: not every side answered; the sealed answers were discarded", formulaId: LogKind.NoWorking);
+            return 0;
+        });
     }
 
     /// <summary>True when an output of the trace writes a computed property (a trace built elsewhere, or from a pack edited by hand).</summary>
@@ -775,6 +887,16 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             var f = FindFormula(phase, e.FormulaId);
             if (f == null) continue;
             if (BadFilter(phase, f, e.UnitFilter)) continue;
+            if (start && e.Sealed)
+            {
+                // B7 #53: every side answers in secret; the entry counts as one, done once every run of its group is resolved.
+                if (ApplySealed(f, queued) && i + 1 < list.Count)
+                {
+                    Exec(new SetStartCursor(new StartCursor(s.Game.State.Position!, i + 1)));
+                    return queued;
+                }
+                continue;
+            }
             var units = e.ForEach == ForEachMode.Once
                 ? new List<Unit> { new(null, f.Name, null) }
                 : Sequencer.UnitsFor(pack, s.Game.State, phase, f, e.UnitFilter, s.Model).Select(p => new Unit(p.Id, PieceInfo.Name(p), null)).ToList();
@@ -918,6 +1040,28 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     /// <summary>Each unit's roll group (<see cref="RollGroups.Assign"/>) for a <see cref="FormulaDef.GroupRoll"/> formula; null otherwise.</summary>
     private IReadOnlyList<string?>? Groups(FormulaDef f, List<Unit> units) =>
         f.GroupRoll && s.Game is { } g && s.Rules is { } pack ? RollGroups.Assign(g.State, pack, s.Model, units.Select(u => u.PieceId).ToList()) : null;
+
+    /// <summary>
+    /// A sealed start entry (B7 #53): in one <see cref="QueueRuns"/>, one ask run per side of the pack (pack order), each with
+    /// <see cref="PendingRun.Seal"/> = the first run's id, in every difficulty. In the manual modes a precondition decided false leaves the
+    /// entry out, as for any start entry. It runs once (the validator refuses another For each).
+    /// </summary>
+    /// <returns>True when the runs were queued.</returns>
+    private bool ApplySealed(FormulaDef f, List<PendingRun> queued)
+    {
+        if (s.Game == null || s.Rules is not { } pack) return false;
+        var units = new List<Unit> { new(null, f.Name, null) };
+        if (s.Game.State.Difficulty != Difficulty.FullyAuto) units = Applicable(f, units);
+        if (units.Count == 0) return false;
+        var sides = pack.Sides.Where(x => x != null && !string.IsNullOrWhiteSpace(x.Id)).Select(x => x.Id).Distinct(StringComparer.Ordinal).ToList();
+        if (sides.Count == 0) return false;
+        var seal = Guid.NewGuid().ToString("N");
+        var runs = sides.Select((side, i) => new PendingRun(i == 0 ? seal : Guid.NewGuid().ToString("N"), f.Id, f.Name, "start",
+            new[] { new PendingUnit(null, f.Name, null, false) }, false) { AskSideId = side, Seal = seal }).ToList();
+        Exec(new QueueRuns(runs));
+        queued.AddRange(runs);
+        return true;
+    }
 
     /// <param name="askSideId">An entry that asks a side (spec #72): its run is always queued, for that side, in every difficulty.</param>
     /// <returns>True when a run was queued.</returns>

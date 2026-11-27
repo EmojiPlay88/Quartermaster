@@ -59,7 +59,11 @@ public sealed class FormulaWindow : Window
         var rules = s.Rules ?? throw new InvalidOperationException("No rules pack is loaded.");
         var runner = s.Runner ?? throw new InvalidOperationException("No rules pack is loaded.");
         var formula = rules.ById<FormulaDef>(formulaId) ?? new FormulaDef { Id = formulaId, Name = "(missing formula)" };
-        _model = new FormulaDialogModel(runner, formula, pieceId) { Moved = link?.Moved, EnforcePhaseLimit = FormulaWindowRules.EnforcesPhaseLimit(link?.RunId, false) };
+        _model = new FormulaDialogModel(runner, formula, pieceId)
+        {
+            Moved = link?.Moved, EnforcePhaseLimit = FormulaWindowRules.EnforcesPhaseLimit(link?.RunId, false),
+            AskSideId = FormulaWindowRules.AskSideOf(s, link?.RunId),   // askside() names the asked side of a pending run (B7)
+        };
         // Hardcore and semi-automatic: the user types the values and the window only checks them. Fully automatic keeps the prefilled boxes.
         if (s.Game?.State.Difficulty is { } mode)
         {
@@ -392,6 +396,8 @@ public sealed class FormulaWindow : Window
         if (!_s.CanAct(_pieceId)) { _status.Text = "This unit " + ModuleSession.OtherSideText + "."; _apply.IsEnabled = false; return; }
         // B7: a precondition or guard over hidden data decided against the run: the generic text, never which condition failed.
         if (FormulaDialogModel.ApplyRefusal(v) is { } refusal) { _status.Text = refusal; return; }
+        // B7 #53: a sealed run takes one answer.
+        if (PhaseController.AnswerRefusal(game.State, _link?.RunId) is { } answered) { _status.Text = answered; _apply.IsEnabled = false; return; }
         // v.Trace is the engine's own (expected) run: typed values only gate Apply, so a wrong formula can never reach the ledger.
         if (_host.Actions is { } port)
         {

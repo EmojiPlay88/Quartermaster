@@ -166,6 +166,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
             {
                 Checked = s.Game!.State.Difficulty != Difficulty.FullyAuto,
                 Moved = u.Moved,
+                AskSideId = Run?.AskSideId,   // askside() names the asked side (B7)
             };
             FormulaMasking.Configure(model, s);
             _models[row] = model;

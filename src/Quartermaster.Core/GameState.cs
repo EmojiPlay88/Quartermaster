@@ -219,6 +219,14 @@ public sealed class GameState
                 GameOver = new GameOverState(eg.Text ?? "", eg.Winners?.Where(w => w != null).ToList(), eg.VictoryId, Position);
                 Log.Add(LogBuilder.Line(this, LogKind.Turn, "Game over: " + GameOver.Text, eg.Who, eg.At));
                 break;
+            case SealAnswer sa:
+            {
+                var at = (Pending ?? new()).FindIndex(r => r != null && r.Id == sa.RunId);
+                if (at < 0) break;
+                Pending![at] = Pending[at] with { SealedAnswer = new Dictionary<string, string>(sa.Typed ?? new Dictionary<string, string>(), StringComparer.Ordinal) };
+                Log.Add(LogBuilder.Line(this, LogKind.Turn, sa.LogText ?? "", sa.Who, sa.At));
+                break;
+            }
             case MarkScheduled ms:
                 if (string.IsNullOrWhiteSpace(ms.RowId) || ScheduleDone?.Contains(ms.RowId, StringComparer.Ordinal) == true) break;
                 (ScheduleDone ??= new()).Add(ms.RowId);

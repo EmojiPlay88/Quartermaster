@@ -45,6 +45,7 @@ public static class CommandLog
             ResetProperties rp => rp with { At = rp.At ?? at, Who = rp.Who ?? w },
             MarkScheduled ms => ms with { At = ms.At ?? at, Who = ms.Who ?? w },
             EndGame eg => eg with { At = eg.At ?? at, Who = eg.Who ?? w },
+            SealAnswer sa => sa with { At = sa.At ?? at, Who = sa.Who ?? w },
             _ => c,
         };
     }

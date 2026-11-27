@@ -481,15 +481,19 @@ internal static class FormulaIntentRunner
         if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides) is { } why) return (null, why);
         double? moved = null;
         string? group = null;
+        string? askSide = null;
         if (i.RunId != null)
         {
             if (!c.IsPending(i.RunId, i.PieceId, f.Id)) return (null, NotWaitingText);
             // An ask run (spec #72) is the asked side's: a sender without it is refused.
             if (full.Pending.First(r => r.Id == i.RunId).AskSideId is { Length: > 0 } ask && sides != null && !sides.Contains(ask))
                 return (null, "That calculation " + ModuleSession.OtherSideText + ".");
+            // B7 #53: a sealed run takes one answer.
+            if (PhaseController.AnswerRefusal(full, i.RunId) is { } answered) return (null, answered);
             var unit = full.Pending.First(r => r.Id == i.RunId).Units.First(u => u.PieceId == i.PieceId && !u.Applied);
             moved = unit.Moved;
             group = f.GroupRoll ? unit.Group : null;
+            askSide = full.Pending.First(r => r.Id == i.RunId).AskSideId;
         }
         else if (piece != null && !PieceFilter.FormulasFor(pack, piece, full, s.Model).Any(x => x.Id == f.Id))
             return (null, "That formula does not apply to this unit.");
@@ -500,7 +504,7 @@ internal static class FormulaIntentRunner
         var hidden = FormulaMasking.HiddenVariables(pack, s.Model, full, f, i.PieceId, sides);
         // A Piece binding's label is resolved among the candidates the sender sees (its sides' view of the full state).
         var model = new FormulaDialogModel(runner, f, i.PieceId)
-            { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden, PickSides = sides };
+            { Checked = full.Difficulty != Difficulty.FullyAuto, Moved = moved, Hidden = hidden, PickSides = sides, AskSideId = askSide };
         // A grouped unit (B4) reuses the dice its roll group already drew on the run: read from the full state (a view never carries them).
         if (i.RunId != null) model.SharedRolls = RollGroups.SharedFor(full, i.RunId, i.PieceId);
         foreach (var (variable, text) in i.Typed ?? new Dictionary<string, string>())

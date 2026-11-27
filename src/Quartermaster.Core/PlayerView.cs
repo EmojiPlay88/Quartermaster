@@ -35,7 +35,9 @@ namespace Quartermaster.Core;
 /// <item>A Turn line with a side stamp (a checklist tick or an acknowledged warning of that side's phase, B7) is kept only for a viewer
 /// holding that side and dropped for any other; an unstamped one (a phase with no side, an older save) is public.</item>
 /// <item>Pending runs lose units of other sides (and removed pieces); runs left empty are dropped. Unit-less runs follow the current phase's side.
-/// Every run loses its group dice (<see cref="PendingRun.GroupRolls"/>); an ask run's units of other sides lose their group.</item>
+/// Every run loses its group dice (<see cref="PendingRun.GroupRolls"/>); an ask run's units of other sides lose their group. A sealed answer
+/// (<see cref="PendingRun.SealedAnswer"/>, B7 #53) follows the ask-run rule: it stays only on the asked side's run, so another side never
+/// holds it before release (once the game is over every view is the full state).</item>
 /// <item>Keyed values (<see cref="GameState.Keyed"/>, B6) are filtered exactly as Ledgers (a whole ledger key hidden, else per property). A place
 /// property (keyed by hex, kept by the Global holder) has no side: a Public one is shown to every player, any other only in a full view, so a
 /// player view drops its values and history entries and redacts its log lines. A formula whose keyed() reads may be hidden (a place that is

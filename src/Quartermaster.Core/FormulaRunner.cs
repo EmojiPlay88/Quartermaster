@@ -95,6 +95,10 @@ public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDict
     /// <summary>B7: variables resolved as if their "Only when" held (host guards over hidden data: their typed value is validated the same
     /// way whatever the guard says). For a shown run only, never applied. Null = none.</summary>
     public IReadOnlySet<string>? ForceWhen { get; init; }
+
+    /// <summary>B7: the side answering this run (an ask run's or a sealed run's <see cref="PendingRun.AskSideId"/>): <c>askside()</c> reads
+    /// its name (the id when the name is blank). Null = no side answers (<c>askside()</c> is <c>""</c>).</summary>
+    public string? AskSideId { get; init; }
 }
 
 /// <summary>Binds a formula's variables to game data, evaluates it and previews/produces the ledger commands. Run never throws.</summary>
@@ -794,6 +798,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public Lazy<Func<PieceInstance, string?>> Sides => _sides ??= _pass?.Sides ?? PieceFilter.SideMap(s, owner._pack);
         private Lazy<Func<PieceInstance, string?>>? _sides;
         public ModuleModel Model => owner._model;
+        /// <summary>The side answering this run (<see cref="RunRequest.AskSideId"/>); null = none.</summary>
+        public string? AskSideId => r.AskSideId;
         /// <summary>The compiled filters of this run's aggregate calls, each filter text compiled once per run (or per pass), sharing <see cref="Sides"/>.</summary>
         public AggregateFilters Filters => _filters ??= _pass?.Filters ?? new(s, owner._pack, owner._model) { SharedSides = Sides };
         private AggregateFilters? _filters;
@@ -1211,6 +1217,11 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
     }
 
+    /// <summary>The name of the side answering a run (the id when its name is blank, or when the pack has no such side); "" for none.</summary>
+    internal static string AskSideName(RulesPack pack, string? sideId) =>
+        string.IsNullOrWhiteSpace(sideId) ? ""
+        : pack.Sides?.FirstOrDefault(x => x != null && x.Id == sideId) is { } side && !string.IsNullOrWhiteSpace(side.Name) ? side.Name : sideId;
+
     private sealed class RunContext(RunScope run) : IEvalContext
     {
         public Value GetVariable(string name) => run.ValueOf(name);
@@ -1228,6 +1239,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         public double Segment() => run.State.Position?.Inner ?? 0;
         public Value Side() => PieceFilter.SideValue(run.Piece, run.Pack, run.Sides);
         public Value PhaseSide() => PieceFilter.PhaseSideValue(run.Pack, Sequencer.Current(run.Pack, run.State));
+        public Value AskSide() => Value.Of(AskSideName(run.Pack, run.AskSideId));
         public Value MapName() => PieceFilter.MapValue(run.Piece);
         public Value HolderValue(string holder, string property)
         {

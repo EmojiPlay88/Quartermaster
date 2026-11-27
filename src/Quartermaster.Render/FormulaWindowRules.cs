@@ -43,6 +43,11 @@ public static class FormulaWindowRules
     public static IReadOnlyDictionary<string, IReadOnlyList<int>>? SharedRolls(ModuleSession s, string? runId, string? pieceId) =>
         runId == null || s?.Game?.State is not { } st ? null : RollGroups.SharedFor(st, runId, pieceId);
 
+    /// <summary>The side a dialog linked to a pending run answers for (<see cref="FormulaDialogModel.AskSideId"/>, B7): the run's
+    /// <see cref="PendingRun.AskSideId"/>; null for a menu run or a run no side is asked.</summary>
+    public static string? AskSideOf(ModuleSession s, string? runId) =>
+        runId == null ? null : s?.Game?.State.Pending.FirstOrDefault(r => r != null && r.Id == runId)?.AskSideId;
+
     /// <summary>True when a dialog is a player-started run, so the formula's phase limit applies (not a waiting run, not a Workbench preview).</summary>
     public static bool EnforcesPhaseLimit(string? runId, bool previewOnly) => runId == null && !previewOnly;
 
