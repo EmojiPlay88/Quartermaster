@@ -483,7 +483,7 @@ internal static class FormulaIntentRunner
                 return (null, GoneUnitText);
         }
         if (!s.CanActFor(i.PieceId, sides)) return (null, $"That unit {ModuleSession.OtherSideText}.");
-        if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides) is { } why) return (null, why);
+        if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides, at) is { } why) return (null, why);
         double? moved = null;
         string? group = null;
         string? askSide = null;
@@ -568,9 +568,10 @@ internal static class FormulaIntentRunner
     /// <summary>
     /// A guest may write holders of held sides or of no side; the global holder only during a phase of a side it holds; and may run a
     /// unit-less formula only during a phase of a side it holds (or reacts in, B5 #7). A Reveal output writes nothing and is not checked
-    /// (B7 #47). Null when allowed.
+    /// (B7 #47). A fixed holder's owner is judged on <paramref name="at"/>, the state the run is evaluated on (a batch chain's clone after an
+    /// earlier row), as Prepare's holder-pick check is. Null when allowed.
     /// </summary>
-    private static string? GuestRule(ModuleSession s, RulesPack pack, FormulaDef f, string? pieceId, IReadOnlySet<string> sides)
+    private static string? GuestRule(ModuleSession s, RulesPack pack, FormulaDef f, string? pieceId, IReadOnlySet<string> sides, GameState at)
     {
         if (pieceId == null && !ActingSideHeld(s, pack, sides)) return NotYourPhaseText;
         foreach (var o in f.Outputs ?? new List<FormulaOutput>())
@@ -588,7 +589,7 @@ internal static class FormulaIntentRunner
             if (o.Target == OutputTarget.Holder)
             {
                 if (o.HolderId == null) return IntentExecutor.NotUnderstoodText;
-                if (Ownership.SideOfHolder(o.HolderId, pack, s.Game?.State) is { } owner && !sides.Contains(owner))   // the current owner (B9)
+                if (Ownership.SideOfHolder(o.HolderId, pack, at) is { } owner && !sides.Contains(owner))   // the current owner (B9)
                     return $"That formula writes to a holder that {ModuleSession.OtherSideText}.";
             }
         }

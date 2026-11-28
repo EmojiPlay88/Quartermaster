@@ -13,7 +13,7 @@ public class B9ModelTests
         return r.ReadToEnd();
     }
 
-    // Format-4 literal written by the pre-B9 code (the B8 merge head): a holder with a side, a fixed Holder binding, a Piece binding with a filter and same hex, a Piece output, a Holder output.
+    // A format-4 pack with none of the B9 members; its bytes and SHA pin that the B9 code writes none of them: a holder with a side, a fixed Holder binding, a Piece binding with a filter and same hex, a Piece output, a Holder output.
     private const string OldPackJson = """
         {
           "format": 4,

@@ -591,6 +591,7 @@ public sealed class FormulaDialogModel(FormulaRunner initialRunner, FormulaDef i
             if (b is { Kind: BindingKind.Piece, Variable: not null })
                 choices[b.Variable] = PieceCandidates.For(_state, runner.Pack, runner.Model, b, PickSides, pieceId);   // the run piece's hex first
             else if (b is { Variable: not null } && HolderChoices.IsPicker(b))
+                // B9 #13b: a holder picker reuses PieceChoice for its labels; its PieceId holds the holder id, not a piece id
                 choices[b.Variable] = HolderChoices.For(_state, runner.Pack, b, PickSides).Select(c => new PieceChoice(c.Label, c.HolderId)).ToList();
         _labelsKey = key;
         _labels = choices.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value.Select(c => c.Label).ToList(), StringComparer.Ordinal);

@@ -19,8 +19,10 @@ public class FormulaMaskingTests : IDisposable
     private readonly List<FixtureModule> _fixtures = new();
     private readonly List<ModuleSession> _sessions = new();
 
-    private const double RedSecret = 61616;
-    private const double BlueSecret = 73737;
+    // Fractional secrets (final review M9): a whole number such as 61616 can turn up by chance in a serialized timestamp's fraction or a
+    // GUID; "61616.25" cannot (a timestamp's dot follows two digits, a GUID has none).
+    private const double RedSecret = 61616.25;
+    private const double BlueSecret = 73737.25;
     private static readonly string RedText = RedSecret.ToString(CultureInfo.InvariantCulture);
     private static readonly string BlueText = BlueSecret.ToString(CultureInfo.InvariantCulture);
     private static readonly IReadOnlySet<string> Red = new HashSet<string> { "red" };

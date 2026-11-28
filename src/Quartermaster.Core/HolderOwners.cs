@@ -7,8 +7,9 @@ namespace Quartermaster.Core;
 
 /// <summary>
 /// A holder's owner as play goes on (B9 #13a): its <see cref="HolderDef.OwnerExpr"/> evaluated against a game state. The expression reads
-/// only Public values (the validator checks it), straight from the state; this class never calls <see cref="HiddenValues"/>, so the full
-/// state and every player view give the same owner and owner resolution never recurses into visibility. A text names the side whose name
+/// only Public values (the validator checks it), straight from the state. A keyed() or computed read may pass through
+/// <see cref="HiddenValues"/> on a player view, but a Public value returns before any owner is asked for, so those checks never hide anything:
+/// the full state and every player view give the same owner and owner resolution never recurses into visibility. A text names the side whose name
 /// or id equals it (trimmed, case-insensitive; a former id reads as its listing side), "" no owner; a whole number N from 1 to the number
 /// of sides the Nth side, 0 no owner. Anything else (an evaluation error, a text naming no side, a number out of range or not whole) falls
 /// back to the fixed owner (<see cref="HolderDef.SideId"/>, a dangling id = no owner), as does a holder without an expression or no state.
@@ -90,7 +91,8 @@ public static class HolderOwners
 
     /// <summary>
     /// The phase-condition context at the state's position, with two changes: a bare property name reads this holder's value when the holder
-    /// keeps the property (its Default when unset), else the global holder's; piece aggregates are refused.
+    /// keeps the property (its Default when unset), else the global holder's (an error when Global does not keep it either, so the owner is
+    /// the fixed one); piece aggregates are refused.
     /// </summary>
     private sealed class OwnerContext : PhaseConditions.PhaseContext
     {
@@ -107,6 +109,10 @@ public static class HolderOwners
         public override Value GetVariable(string name)
         {
             var def = pack.PropertyByName(name) ?? throw new EvalError($"Unknown property '{name}'");
+            // B9 final review I2: a holder property kept by neither this holder nor Global has no value to read here (not its Default):
+            // the owner falls back to the fixed one
+            if (def.Scope != PropertyScope.Pieces && !PropertyFacts.KeptBy(def, holder.Id) && !PropertyFacts.KeptBy(def, HolderDef.GlobalId))
+                throw new EvalError($"{name} is kept by neither this holder nor the global holder");
             if (def.Scope == PropertyScope.Pieces || !PropertyFacts.KeptBy(def, holder.Id)) return base.GetVariable(name);
             if (def.KeyedBy != null && KeyedFacts.IsKeyed(def)) throw KeyedValues.BareRead(def);
             return Value.Of(PropertyValues.GetOrDefault(s, pack, null, LedgerKey.Holder(holder.Id), def,

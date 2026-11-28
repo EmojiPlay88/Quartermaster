@@ -112,6 +112,36 @@ public class HolderOwnerOnlineTests : HolderOwnerTestBase
         Assert.Equal(FordStores + 2, Stores(s.Game.State));
     }
 
+    /// <summary>
+    /// Final review M1: a guest batch of "Hand over", which hands Ford Dump to the Southern Compact and adds 1 to its Stores. The first row
+    /// runs while the north owns the dump; the second runs on the chain state, where the south does, and is refused as a single run there.
+    /// </summary>
+    [Fact]
+    public void Guest_batch_later_row_holder_output_judged_on_chain_owner()
+    {
+        var (s, _, x) = Host();
+        s.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Append(new FormulaDef
+            {
+                Id = "f-hand", Name = "Hand over", Text = "1",
+                Outputs = new()
+                {
+                    new FormulaOutput { Target = OutputTarget.Global, Property = "p-dumpowner", Key = "\"Ford Dump\"", Op = OutputOp.Set, Expr = "2" },
+                    new FormulaOutput { Target = OutputTarget.Holder, HolderId = Ford, Property = "p-stores", Op = OutputOp.Add, Expr = "1" },
+                },
+            }).ToList(),
+        });
+        var one = new FormulaBatchRow(null, None, null);
+        var v = x.Execute("p1", North, new FormulaBatchIntent("f-hand", new[] { one, one }, true, false)).BatchVerdict!;
+        Assert.False(v.Applied);
+        Assert.Equal(FormulaWindowRules.RowMessage(2, OtherSideHolder), v.Message);
+        Assert.Equal("north", Owner(s));
+        Assert.Equal(FordStores, Stores(s.Game!.State));   // nothing applied
+        var single = x.Execute("p1", North, new FormulaIntent("f-hand", null, null, None, true));
+        Assert.True(single.Ok, single.Message ?? single.Verdict?.Message);   // one row alone is the north's
+    }
+
     [Fact]
     public void Host_preview_verdict_masked_by_current_owner()
     {

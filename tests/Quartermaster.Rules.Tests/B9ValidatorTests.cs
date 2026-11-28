@@ -116,6 +116,16 @@ public class B9ValidatorTests
         Assert.Empty(Run(WithHolder("0")));
     }
 
+    /// <summary>Final review I2: FordPub is kept by Ford Dump only, so North Depot's expression would read its Default.</summary>
+    [Fact]
+    public void Owner_expr_reading_property_kept_by_neither_holder_error()
+    {
+        var p = Base();
+        p = p with { Holders = p.Holders.Select(h => h.Id == "h-north" ? h with { OwnerExpr = "FordPub" } : h).ToList() };
+        Has(Errors(p), "Holder \"North Depot\": owner expression reads \"FordPub\", which neither this holder nor the global holder keeps");
+        Assert.Empty(Run(WithHolder("FordPub")));   // Ford Dump keeps it
+    }
+
     [Fact]
     public void Owner_expr_without_sides_warns()
     {
@@ -283,18 +293,24 @@ public class B9ValidatorTests
         Assert.Empty(FormulaVariables.PieceBindingsHidden(p, F(Draw()), true));                                            // Piece-only, as before
     }
 
+    private static string Caption(VariableBinding b)
+    {
+        var f = Bid() with { Text = b.Variable, Bindings = new() { b } };
+        var layout = FormulaLayout.Build(f, Base());
+        return layout.Main.Concat(layout.SubRows.SelectMany(r => r.Items)).OfType<BoxItem>().Single(x => x.Variable == b.Variable).Caption;
+    }
+
     [Fact]
     public void Draw_caption_names_weight()
     {
-        static string Caption(VariableBinding b)
-        {
-            var f = Bid() with { Text = "Hits", Bindings = new() { b } };
-            var layout = FormulaLayout.Build(f, Base());
-            return layout.Main.Concat(layout.SubRows.SelectMany(r => r.Items)).OfType<BoxItem>().Single(x => x.Variable == "Hits").Caption;
-        }
         Assert.Equal("Boats (drawn)", Caption(Draw()));
         Assert.Equal("Hits (drawn)", Caption(Draw(property: null)));
     }
+
+    /// <summary>Final review M2: a holder picker has no fixed holder, so its default caption does not read "Stores (?)".</summary>
+    [Fact]
+    public void Holder_picker_caption_reads_chosen_holder() =>
+        Assert.Equal("Stores (chosen holder)", Caption(Picker("h-ford", "h-mill")));
 
     // ---- whole pack ----
 
@@ -327,9 +343,9 @@ public class B9ValidatorTests
     }
 
     [Fact]
-    public void Old_fixture_issue_list_unchanged()
+    public void Pack_without_b9_members_gets_no_b9_issues()
     {
-        // The pre-B9 issue list of an old pack: one unknown holder on a fixed Holder output, one unused binding, nothing else.
+        // A pack using none of the B9 members: only its own problems (one unknown holder on a fixed Holder output, one unused binding).
         var f = new FormulaDef
         {
             Id = "f-old", Name = "Old", Text = "A",
@@ -356,6 +372,8 @@ public class B9ValidatorTests
         const string tail = "output 1: an output on the drawn counters cannot roll dice()";
         FormulaHas(Errors(WithBinding(Draw(), HitOut() with { Expr = "Hits + dice(1, 6)" })), tail);
         FormulaHas(Errors(WithBinding(Draw(), HitOut() with { Expr = "Hits", Key = "dice(1, 2)" })), tail);
+        FormulaHas(Errors(WithBinding(Draw(), HitOut() with { Margin = "dice(1, 2)" })), tail);   // final review: margin and pick-by too
+        FormulaHas(Errors(WithBinding(Draw(), HitOut() with { PropertyChoice = new() { "p-boats", "p-strength" }, PropertySelect = "dice(1, 2)" })), tail);
         Assert.DoesNotContain(Errors(WithBinding(Draw(), HitOut())), m => m.Contains("cannot roll dice()", StringComparison.Ordinal));
         // dice() in another output (not on the drawn counters) is fine
         var global = new FormulaOutput { Target = OutputTarget.Global, Property = "p-pool", Op = OutputOp.Add, Expr = "dice(1, 6)" };
@@ -374,6 +392,9 @@ public class B9ValidatorTests
         Has(Warnings(WithBinding(Draw(filter: "Strength > 0 or layer(\"Damage\") >= 0"), SetLayer())), layer);   // an "or" may skip it
         Has(Warnings(WithBinding(Draw(filter: "layer(\"Other\") >= 0"), SetLayer())), layer);                 // another layer
         Has(Warnings(WithBinding(Draw(filter: "not (layer(\"Damage\") >= 0 and Strength > 0)"), SetLayer())), layer);
+        // final review M3: a layer read inside an aggregate's filter tests other counters, not the drawn one
+        Has(Warnings(WithBinding(Draw(filter: "hexcount(\"layer('Damage') >= 0\") > 0"), SetLayer())), layer);
+        Has(Warnings(WithBinding(Draw(filter: "Strength > 0 and hexsum(Strength, \"layer('Damage') >= 0\") > 0"), SetLayer())), layer);
         // a filter that always reads the layer leaves out every counter without it (a missing value does not match)
         Assert.DoesNotContain(Warnings(WithBinding(Draw(filter: "layer(\"damage\") >= 0"), SetLayer())), m => m.Contains("may have no", StringComparison.Ordinal));
         Assert.DoesNotContain(Warnings(WithBinding(Draw(filter: "Strength > 0 and layer(\"Damage\") < 3"), SetLayer())), m => m.Contains("may have no", StringComparison.Ordinal));

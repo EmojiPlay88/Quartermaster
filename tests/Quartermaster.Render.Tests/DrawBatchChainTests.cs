@@ -178,4 +178,31 @@ public class DrawBatchChainTests : DrawTestBase
         Assert.Equal(FormulaMasking.ErrorHiddenText, FormulaDialogModel.ApplyRefusal(dv));
         Assert.False(c.ApplyFormula(null, "nl1", dv.Trace, false));
     }
+
+    /// <summary>
+    /// Final review I1: a Fully automatic start entry draws 4 of hex 0101's 6 boats, so at least one drawn barge lacks the layer (only SC 1
+    /// Barge has it, with 3 boats). The run is refused, and the acting side's log names no drawn counter: the error is the neutral text.
+    /// </summary>
+    [Theory]
+    [InlineData("mask")]
+    [InlineData("layer")]
+    public void Automatic_run_error_on_drawn_counter_names_no_counter(string effect)
+    {
+        var (s, c) = Open(Visibility.Private, effect: effect, traited: new HashSet<string> { "sc1" }, phases: NorthGuns());
+        s.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Select(f => f with
+            {
+                Bindings = f.Bindings.Where(b => b.Kind != BindingKind.Input).Select(b => b with { DrawCount = "4" }).ToList(),
+            }).ToList(),
+        });
+        s.SetViewSides(North);
+        var before = s.Game!.State.Log.Count == 0 ? 0 : s.Game.State.Log.Max(l => l.Seq);   // the setup's own "sc1 placed" lines name ids
+        c.Start();
+        var st = s.Game.State;
+        var north = PlayerView.For(st, s.Rules, s.Model, North).Log.Where(l => l.Seq > before).ToList();
+        Assert.DoesNotContain(north, l => NamesBarge(l.Text));
+        Assert.Contains(north, l => l.Error && l.Text == "Shore battery: NL Battery: Formula \"Shore battery\": output 1 cannot act on one of the drawn counters");
+        Assert.All(new[] { 3.0, 1.0, 0.0, 2.0 }.Zip(AllBoats(s)), p => Assert.Equal(p.First, p.Second));   // nothing applied
+    }
 }

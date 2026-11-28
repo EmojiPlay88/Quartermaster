@@ -822,6 +822,8 @@ public static class RulesValidator
                     if (q is null) problems.Add($"owner expression reads unknown property \"{n}\"");
                     else if (!PropertyFacts.IsPublic(pack, q)) problems.Add($"owner expression reads \"{n}\", which is not Public; every player must be able to tell who owns the holder");
                     else if (q.Scope == PropertyScope.Pieces) problems.Add($"owner expression reads \"{n}\", which is not a holder property");
+                    else if (!PropertyFacts.KeptBy(q, holder.Id) && !PropertyFacts.KeptBy(q, HolderDef.GlobalId))
+                        problems.Add($"owner expression reads \"{n}\", which neither this holder nor the global holder keeps");
                 }
                 void Walk(AstExpr e)
                 {
@@ -1488,6 +1490,7 @@ public static class RulesValidator
             Unary u => Always(u.Operand),
             Call { Function: "layer" } c => c.Args.Count == 1 && c.Args[0] is TextLit t && string.Equals(t.Value.Trim(), layer, StringComparison.OrdinalIgnoreCase),
             Call { Function: "if" } c => c.Args.Count > 0 && Always(c.Args[0]),
+            Call c when ExprFacts.IsAggregate(c.Function) => false,   // its filter reads other counters, never the drawn one
             Call c => c.Args.Any(Always),
             _ => false,
         };

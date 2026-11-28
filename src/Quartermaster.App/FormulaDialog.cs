@@ -359,13 +359,14 @@ sealed class FormulaDialog : Form
         _debounce.Start();
     }
 
-    /// <summary>Re-runs the formula and pushes the result onto the controls. Never throws.</summary>
+    /// <summary>The output lines below the working (B9: a draw's collapsed line); hidden when there are none.</summary>
     void ShowOutputs(IReadOnlyList<string> lines)
     {
         _outputs.Text = string.Join(Environment.NewLine, lines);
         _outputs.Visible = lines.Count > 0;
     }
 
+    /// <summary>Re-runs the formula and pushes the result onto the controls. Never throws.</summary>
     void Recalc()
     {
         try

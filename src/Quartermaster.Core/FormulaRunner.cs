@@ -191,6 +191,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// <see cref="AfterApply(IReadOnlyList{GameCommand})"/>, which drops the side map and aggregate state when any of them adds, removes or
     /// moves a piece or changes a trait state (a Place, Remove, SetLayer or SetMask output), so later units see the change. Ledger writes,
     /// rolls and log lines keep them. A nested call on the same state joins the open pass; on another state, or another thread, it opens nothing.
+    /// B9: the aggregate state's <c>AggregateFilters.HolderSides</c> is a memo of the holders' owners for that one state, kept across ledger
+    /// writes; it is read only on a player view, and every pass today is opened on the full state.
     /// </summary>
     public IDisposable BeginPass(GameState s)
     {
@@ -485,200 +487,209 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var o = formula.Outputs[oi];
             run.Share = share;
             if (share == null && SkippedTarget(o)) continue;
-            switch (o.Action)
+            // B9 final review I1: an error while acting on one drawn counter would name it (an automatic or ask run logs the error as is),
+            // so it becomes the neutral text: which counter failed is part of the split, never shown.
+            try
             {
-                case OutputAction.Write: break;
-                case OutputAction.Place: continue;
-                case OutputAction.Reveal:
+                switch (o.Action)
                 {
-                    // B7 #47: read now, in output order (after this run's earlier writes); shown only when the commands are built.
-                    var (rv, rp) = RevealOf(s, o, oi, run, piece, targets, holderTargets, outputs, OutputError);
-                    reveals.Add(rv);
-                    parts.Add($"reveal {rp.Name}");
-                    continue;
-                }
-                case OutputAction.Remove:
-                {
-                    if (o.Target == OutputTarget.Placed) throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
-                    var tg = EffectTarget(o, oi);
-                    if (string.IsNullOrWhiteSpace(o.ToMapId))
+                    case OutputAction.Write: break;
+                    case OutputAction.Place: continue;
+                    case OutputAction.Reveal:
                     {
-                        removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"removed {tg.Shown}")
-                            { LogText = $"{formula.Name}: removed {tg.Real}", Name = tg.Real, SideId = tg.Side, Draw = tg.Draw });
+                        // B7 #47: read now, in output order (after this run's earlier writes); shown only when the commands are built.
+                        var (rv, rp) = RevealOf(s, o, oi, run, piece, targets, holderTargets, outputs, OutputError);
+                        reveals.Add(rv);
+                        parts.Add($"reveal {rp.Name}");
                         continue;
                     }
-                    // the one resolver of a To map, as the validator's (B6): trimmed, id then name
-                    var map = MapRefs.Find(_model.Maps, o.ToMapId) ?? throw new EvalError($"Map \"{o.ToMapId.Trim()}\" was not found in the module");
-                    if (map.Boards.Count == 0) throw new EvalError($"Map \"{map.Name}\" has no board");
-                    var board = map.Boards[0];
-                    var centre = new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0);
-                    removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"moved {tg.Shown} to {map.Name}")
+                    case OutputAction.Remove:
                     {
-                        LogText = $"{formula.Name}: moved {tg.Real} to {map.Name}", Name = tg.Real, ToMapId = map.Id, Pos = centre, SideId = tg.Side,
-                        Draw = tg.Draw,
-                    });
-                    continue;
-                }
-                case OutputAction.SetLayer:
-                case OutputAction.SetMask:
-                {
-                    var tg = EffectTarget(o, oi);
-                    var traits = PieceInfo.TypeOf(tg.Piece).Traits;
-                    string Current(int i) => pending.TryGetValue((tg.Piece.Id, i), out var st) ? st
-                        : i < tg.Piece.TraitStates.Count ? tg.Piece.TraitStates[i] ?? "" : "";
-                    var setTo = EffectValue(o);
-                    var whole = setTo.Kind == ValueKind.Number && double.IsFinite(setTo.Number) && setTo.Number == Math.Floor(setTo.Number);
-                    int index;
-                    string newState, shown, logged;
-                    if (o.Action == OutputAction.SetLayer)
-                    {
-                        var (li, def) = PieceInfo.FindLayer(PieceInfo.TypeOf(tg.Piece), o.Layer ?? "")
-                            ?? throw new EvalError($"{tg.Shown} has no layer \"{(o.Layer ?? "").Trim()}\"");
-                        var layer = def.Name.Trim();
-                        if (def.FollowProperty) throw new EvalError($"Layer \"{layer}\" follows a property, so it cannot be set");
-                        var levels = Math.Max(Math.Max(def.Images.Count, def.LevelNames.Count), 1);
-                        if (!whole || setTo.Number < (def.AlwaysActive ? 1 : 0) || setTo.Number > levels)
-                            throw new EvalError($"Layer \"{layer}\" has no level {setTo.Display()}");
-                        var n = (int)setTo.Number;
-                        var cur = Current(li);
-                        newState = n > 0 ? TraitState.LayerSetLevel(def, cur, n, true)
-                            : TraitState.LayerSetLevel(def, cur, TraitState.LayerLevel(def, cur).Level, false);   // 0: off, the level kept
-                        var level = n >= 1 && n <= def.LevelNames.Count && def.LevelNames[n - 1]?.Trim() is { Length: > 0 } ln
-                            ? ln : n.ToString(CultureInfo.InvariantCulture);
-                        index = li;
-                        // A piece the requester sees masked (its name differs from the real one) shows the level as its number: a level's
-                        // name would tell what the piece is.
-                        var maskedToViewer = !string.Equals(tg.Shown, tg.Real, StringComparison.Ordinal);
-                        shown = $"{layer} of {tg.Shown} = {(maskedToViewer ? n.ToString(CultureInfo.InvariantCulture) : level)}";
-                        logged = $"{layer} of {tg.Real} = {level}";
+                        if (o.Target == OutputTarget.Placed) throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
+                        var tg = EffectTarget(o, oi);
+                        if (string.IsNullOrWhiteSpace(o.ToMapId))
+                        {
+                            removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"removed {tg.Shown}")
+                                { LogText = $"{formula.Name}: removed {tg.Real}", Name = tg.Real, SideId = tg.Side, Draw = tg.Draw });
+                            continue;
+                        }
+                        // the one resolver of a To map, as the validator's (B6): trimmed, id then name
+                        var map = MapRefs.Find(_model.Maps, o.ToMapId) ?? throw new EvalError($"Map \"{o.ToMapId.Trim()}\" was not found in the module");
+                        if (map.Boards.Count == 0) throw new EvalError($"Map \"{map.Name}\" has no board");
+                        var board = map.Boards[0];
+                        var centre = new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0);
+                        removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"moved {tg.Shown} to {map.Name}")
+                        {
+                            LogText = $"{formula.Name}: moved {tg.Real} to {map.Name}", Name = tg.Real, ToMapId = map.Id, Pos = centre, SideId = tg.Side,
+                            Draw = tg.Draw,
+                        });
+                        continue;
                     }
-                    else
+                    case OutputAction.SetLayer:
+                    case OutputAction.SetMask:
                     {
-                        index = -1;
-                        for (var i = 0; i < traits.Count && index < 0; i++) if (traits[i] is ObscurableDef) index = i;
-                        if (index < 0) throw new EvalError($"{tg.Shown} has no mask");
-                        if (!whole || setTo.Number is not (0 or 1)) throw new EvalError("The mask value must be 0 or 1");
-                        var on = setTo.Number == 1;
-                        newState = TraitState.ObscuredSet((ObscurableDef)traits[index], Current(index), on, MaskObscurer);
-                        var verb = on ? "masked" : "unmasked";
-                        shown = $"{tg.Shown} {verb}";
-                        logged = $"{tg.Real} {verb}";
+                        var tg = EffectTarget(o, oi);
+                        var traits = PieceInfo.TypeOf(tg.Piece).Traits;
+                        string Current(int i) => pending.TryGetValue((tg.Piece.Id, i), out var st) ? st
+                            : i < tg.Piece.TraitStates.Count ? tg.Piece.TraitStates[i] ?? "" : "";
+                        var setTo = EffectValue(o);
+                        var whole = setTo.Kind == ValueKind.Number && double.IsFinite(setTo.Number) && setTo.Number == Math.Floor(setTo.Number);
+                        int index;
+                        string newState, shown, logged;
+                        if (o.Action == OutputAction.SetLayer)
+                        {
+                            var (li, def) = PieceInfo.FindLayer(PieceInfo.TypeOf(tg.Piece), o.Layer ?? "")
+                                ?? throw new EvalError($"{tg.Shown} has no layer \"{(o.Layer ?? "").Trim()}\"");
+                            var layer = def.Name.Trim();
+                            if (def.FollowProperty) throw new EvalError($"Layer \"{layer}\" follows a property, so it cannot be set");
+                            var levels = Math.Max(Math.Max(def.Images.Count, def.LevelNames.Count), 1);
+                            if (!whole || setTo.Number < (def.AlwaysActive ? 1 : 0) || setTo.Number > levels)
+                                throw new EvalError($"Layer \"{layer}\" has no level {setTo.Display()}");
+                            var n = (int)setTo.Number;
+                            var cur = Current(li);
+                            newState = n > 0 ? TraitState.LayerSetLevel(def, cur, n, true)
+                                : TraitState.LayerSetLevel(def, cur, TraitState.LayerLevel(def, cur).Level, false);   // 0: off, the level kept
+                            var level = n >= 1 && n <= def.LevelNames.Count && def.LevelNames[n - 1]?.Trim() is { Length: > 0 } ln
+                                ? ln : n.ToString(CultureInfo.InvariantCulture);
+                            index = li;
+                            // A piece the requester sees masked (its name differs from the real one) shows the level as its number: a level's
+                            // name would tell what the piece is.
+                            var maskedToViewer = !string.Equals(tg.Shown, tg.Real, StringComparison.Ordinal);
+                            shown = $"{layer} of {tg.Shown} = {(maskedToViewer ? n.ToString(CultureInfo.InvariantCulture) : level)}";
+                            logged = $"{layer} of {tg.Real} = {level}";
+                        }
+                        else
+                        {
+                            index = -1;
+                            for (var i = 0; i < traits.Count && index < 0; i++) if (traits[i] is ObscurableDef) index = i;
+                            if (index < 0) throw new EvalError($"{tg.Shown} has no mask");
+                            if (!whole || setTo.Number is not (0 or 1)) throw new EvalError("The mask value must be 0 or 1");
+                            var on = setTo.Number == 1;
+                            newState = TraitState.ObscuredSet((ObscurableDef)traits[index], Current(index), on, MaskObscurer);
+                            var verb = on ? "masked" : "unmasked";
+                            shown = $"{tg.Shown} {verb}";
+                            logged = $"{tg.Real} {verb}";
+                        }
+                        pending[(tg.Piece.Id, index)] = newState;
+                        traitEffects.Add(new PieceEffect(o.Action == OutputAction.SetLayer ? PieceEffectKind.SetLayer : PieceEffectKind.SetMask, tg.Piece.Id, shown)
+                            { LogText = $"{formula.Name}: {logged}", Name = tg.Real, TraitIndex = index, NewState = newState, SideId = tg.Side, Draw = tg.Draw });
+                        continue;
                     }
-                    pending[(tg.Piece.Id, index)] = newState;
-                    traitEffects.Add(new PieceEffect(o.Action == OutputAction.SetLayer ? PieceEffectKind.SetLayer : PieceEffectKind.SetMask, tg.Piece.Id, shown)
-                        { LogText = $"{formula.Name}: {logged}", Name = tg.Real, TraitIndex = index, NewState = newState, SideId = tg.Side, Draw = tg.Draw });
-                    continue;
+                    default:
+                        throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
                 }
-                default:
-                    throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
-            }
-            if (o.Target == OutputTarget.Placed && placed == null) throw new EvalError(NothingPlaced);
-            var prop = OutputProperty(o, run);
-            // an old pack edited by hand (the validator not run): a computed value is never written
-            if (PropertyFacts.IsComputed(prop))
-                throw new EvalError($"Formula \"{formula.Name}\": output {oi + 1} writes computed property \"{prop.Name}\"");
-            string key;
-            (string Real, string Shown, string? Side)? target = null;
-            string? chosen = null;   // a Holder-variable output: the chosen holder's name
-            double? before = null;
-            switch (o.Target)
-            {
-                case OutputTarget.Unit: key = LedgerKey.Piece(piece!.Id); break;
-                case OutputTarget.Global: key = LedgerKey.Holder(HolderDef.GlobalId); EnsureKept(_pack, HolderDef.GlobalId, prop); break;
-                case OutputTarget.Piece:
-                case OutputTarget.Placed:
+                if (o.Target == OutputTarget.Placed && placed == null) throw new EvalError(NothingPlaced);
+                var prop = OutputProperty(o, run);
+                // an old pack edited by hand (the validator not run): a computed value is never written
+                if (PropertyFacts.IsComputed(prop))
+                    throw new EvalError($"Formula \"{formula.Name}\": output {oi + 1} writes computed property \"{prop.Name}\"");
+                string key;
+                (string Real, string Shown, string? Side)? target = null;
+                string? chosen = null;   // a Holder-variable output: the chosen holder's name
+                double? before = null;
+                switch (o.Target)
                 {
-                    // the scope rule of a Unit output (the validator's text): a holder-only property is never written to a piece
-                    if (prop.Scope == PropertyScope.Holders)
-                        throw new EvalError($"Formula \"{formula.Name}\": output property \"{prop.Name}\" cannot be written to a piece (its scope is {prop.Scope})");
-                    if (o.Target == OutputTarget.Placed)
+                    case OutputTarget.Unit: key = LedgerKey.Piece(piece!.Id); break;
+                    case OutputTarget.Global: key = LedgerKey.Holder(HolderDef.GlobalId); EnsureKept(_pack, HolderDef.GlobalId, prop); break;
+                    case OutputTarget.Piece:
+                    case OutputTarget.Placed:
                     {
-                        // the new piece has no ledger yet: Before is the property's Default (its seeds run after it is added, before this write)
-                        target = (placed!.Name, placed.Name, placed.Side);
-                        key = LedgerKey.Piece(placed.Piece.Id);
-                        before = prop.Default;
+                        // the scope rule of a Unit output (the validator's text): a holder-only property is never written to a piece
+                        if (prop.Scope == PropertyScope.Holders)
+                            throw new EvalError($"Formula \"{formula.Name}\": output property \"{prop.Name}\" cannot be written to a piece (its scope is {prop.Scope})");
+                        if (o.Target == OutputTarget.Placed)
+                        {
+                            // the new piece has no ledger yet: Before is the property's Default (its seeds run after it is added, before this write)
+                            target = (placed!.Name, placed.Name, placed.Side);
+                            key = LedgerKey.Piece(placed.Piece.Id);
+                            before = prop.Default;
+                            break;
+                        }
+                        var tp = share is { } sp ? (Piece: sp.Piece, Name: RealName(sp.Piece)) : targets[o.PieceVariable!];
+                        // on a player view, a non-Public value of a side the view was not made for is hidden (as the binding reads it)
+                        if (s.IsPlayerView && HiddenValues.PieceValueHidden(_pack, prop, tp.Piece, run.Sides, HiddenValues.HeldBy(s)))
+                            return Unresolved(o.PieceVariable!, HiddenText);
+                        target = (RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece));
+                        key = LedgerKey.Piece(tp.Piece.Id);
                         break;
                     }
-                    var tp = share is { } sp ? (Piece: sp.Piece, Name: RealName(sp.Piece)) : targets[o.PieceVariable!];
-                    // on a player view, a non-Public value of a side the view was not made for is hidden (as the binding reads it)
-                    if (s.IsPlayerView && HiddenValues.PieceValueHidden(_pack, prop, tp.Piece, run.Sides, HiddenValues.HeldBy(s)))
-                        return Unresolved(o.PieceVariable!, HiddenText);
-                    target = (RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece));
-                    key = LedgerKey.Piece(tp.Piece.Id);
-                    break;
+                    case OutputTarget.Holder when !string.IsNullOrWhiteSpace(o.HolderVariable):
+                    {
+                        // B9 #13b: the holder the picker chose (always the chooser's or no side's, so never hidden from it)
+                        var hid = holderTargets[o.HolderVariable!].HolderId;
+                        EnsureKept(_pack, hid, prop);
+                        key = LedgerKey.Holder(hid);
+                        chosen = HolderText(_pack, hid);
+                        break;
+                    }
+                    case OutputTarget.Holder:
+                    default:
+                        if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
+                            throw new EvalError("An output refers to a deleted holder");
+                        EnsureKept(_pack, o.HolderId, prop);
+                        key = LedgerKey.Holder(o.HolderId);
+                        break;
                 }
-                case OutputTarget.Holder when !string.IsNullOrWhiteSpace(o.HolderVariable):
+                Value value;
+                if (string.IsNullOrWhiteSpace(o.Expr))
                 {
-                    // B9 #13b: the holder the picker chose (always the chooser's or no side's, so never hidden from it)
-                    var hid = holderTargets[o.HolderVariable!].HolderId;
-                    EnsureKept(_pack, hid, prop);
-                    key = LedgerKey.Holder(hid);
-                    chosen = HolderText(_pack, hid);
-                    break;
+                    if (result.Kind != ValueKind.Number) throw new EvalError("The result is not a number, so it cannot change " + prop.Name);
+                    value = result;
                 }
-                case OutputTarget.Holder:
-                default:
-                    if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
-                        throw new EvalError("An output refers to a deleted holder");
-                    EnsureKept(_pack, o.HolderId, prop);
-                    key = LedgerKey.Holder(o.HolderId);
-                    break;
+                else
+                {
+                    value = Evaluator.Evaluate(Parse(formula, o.Expr), new RunContext(run));
+                    if (value.Kind != ValueKind.Number) throw new EvalError($"The value for {prop.Name} is not a number");
+                }
+                // A keyed property (B6) writes one key: the output's key, evaluated after its value and normalised. Unkeyed and keyed never mix.
+                string? valueKey = null;
+                if (KeyedFacts.IsKeyed(prop))
+                {
+                    if (string.IsNullOrWhiteSpace(o.Key)) throw new EvalError(OutputError(oi, $" writes keyed property \"{prop.Name}\" but has no key"));
+                    if (KeyedFacts.IsPlace(prop) && key != LedgerKey.Holder(HolderDef.GlobalId))
+                        throw new EvalError(OutputError(oi, $" writes place property \"{prop.Name}\" to a holder other than Global"));
+                    var keyValue = Evaluator.Evaluate(Parse(formula, o.Key), new RunContext(run));
+                    try { valueKey = KeyedValues.NormaliseKey(_pack, _model, prop, keyValue); }
+                    catch (EvalError ex) { throw new EvalError($"The key for {prop.Name}: {ex.Message}"); }
+                    // a player view lacks a Private place's values: a change of one is not previewed (the host decides), as a hidden binding waits
+                    if (s.IsPlayerView && o.Op != OutputOp.Set && KeyedFacts.IsPlace(prop) && !PropertyFacts.IsPublic(_pack, prop))
+                        return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls, run.RollsByKey);
+                }
+                else if (!string.IsNullOrWhiteSpace(o.Key))
+                    throw new EvalError(OutputError(oi, $" has a key but writes property \"{prop.Name}\", which is not keyed"));
+                var x = value.Number;
+                var was = before ?? (valueKey != null ? KeyedValues.GetOrDefault(s, key, prop, valueKey) : Ledger.GetOrDefault(s, key, prop));
+                var after = o.Op switch { OutputOp.Subtract => was - x, OutputOp.Add => was + x, _ => x };
+                if (double.IsNaN(after) || double.IsInfinity(after)) throw new EvalError("Result is not a finite number");
+                var b = Value.Of(was).Display();
+                var xs = value.Display();
+                var a = Value.Of(after).Display();
+                string Part(string what) => o.Op switch
+                {
+                    OutputOp.Subtract => $"{what} {b} − {xs} = {a}",
+                    OutputOp.Add => $"{what} {b} + {xs} = {a}",
+                    _ => $"{what} = {PropertyLabels.Text(_pack, prop, after)}",
+                };
+                var shownName = valueKey == null ? prop.Name : $"{prop.Name}[{valueKey}]";   // a keyed write names its key: "Ford depth[0412] = 3"
+                // a chosen holder is named in its own part, the acting side's line ("Stores of Ford Dump 10 - 3 = 7")
+                var part = chosen == null ? Part(shownName) : Part($"{shownName} of {chosen}");
+                outputs.Add(new OutputPreview(key, prop.Id, prop.Name, was, after)
+                {
+                    Target = o.Target,
+                    Part = part,
+                    SideId = target?.Side,
+                    Subject = target?.Shown ?? chosen,
+                    TargetName = target?.Real,
+                    ValueKey = valueKey,
+                    Draw = share?.Var,
+                });
+                // the dialog's working names the target as its binding does ("Fuel of Blue Barge 4 + 2 = 6"); a drawn counter is never named
+                if (share == null) parts.Add(target is { } named ? Part($"{shownName} of {named.Shown}") : part);
             }
-            Value value;
-            if (string.IsNullOrWhiteSpace(o.Expr))
+            catch (EvalError ex) when (share != null)
             {
-                if (result.Kind != ValueKind.Number) throw new EvalError("The result is not a number, so it cannot change " + prop.Name);
-                value = result;
+                throw new EvalError(OutputError(oi, " cannot act on one of the drawn counters")) { HiddenData = ex.HiddenData, MissingValue = ex.MissingValue };
             }
-            else
-            {
-                value = Evaluator.Evaluate(Parse(formula, o.Expr), new RunContext(run));
-                if (value.Kind != ValueKind.Number) throw new EvalError($"The value for {prop.Name} is not a number");
-            }
-            // A keyed property (B6) writes one key: the output's key, evaluated after its value and normalised. Unkeyed and keyed never mix.
-            string? valueKey = null;
-            if (KeyedFacts.IsKeyed(prop))
-            {
-                if (string.IsNullOrWhiteSpace(o.Key)) throw new EvalError(OutputError(oi, $" writes keyed property \"{prop.Name}\" but has no key"));
-                if (KeyedFacts.IsPlace(prop) && key != LedgerKey.Holder(HolderDef.GlobalId))
-                    throw new EvalError(OutputError(oi, $" writes place property \"{prop.Name}\" to a holder other than Global"));
-                var keyValue = Evaluator.Evaluate(Parse(formula, o.Key), new RunContext(run));
-                try { valueKey = KeyedValues.NormaliseKey(_pack, _model, prop, keyValue); }
-                catch (EvalError ex) { throw new EvalError($"The key for {prop.Name}: {ex.Message}"); }
-                // a player view lacks a Private place's values: a change of one is not previewed (the host decides), as a hidden binding waits
-                if (s.IsPlayerView && o.Op != OutputOp.Set && KeyedFacts.IsPlace(prop) && !PropertyFacts.IsPublic(_pack, prop))
-                    return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls, run.RollsByKey);
-            }
-            else if (!string.IsNullOrWhiteSpace(o.Key))
-                throw new EvalError(OutputError(oi, $" has a key but writes property \"{prop.Name}\", which is not keyed"));
-            var x = value.Number;
-            var was = before ?? (valueKey != null ? KeyedValues.GetOrDefault(s, key, prop, valueKey) : Ledger.GetOrDefault(s, key, prop));
-            var after = o.Op switch { OutputOp.Subtract => was - x, OutputOp.Add => was + x, _ => x };
-            if (double.IsNaN(after) || double.IsInfinity(after)) throw new EvalError("Result is not a finite number");
-            var b = Value.Of(was).Display();
-            var xs = value.Display();
-            var a = Value.Of(after).Display();
-            string Part(string what) => o.Op switch
-            {
-                OutputOp.Subtract => $"{what} {b} − {xs} = {a}",
-                OutputOp.Add => $"{what} {b} + {xs} = {a}",
-                _ => $"{what} = {PropertyLabels.Text(_pack, prop, after)}",
-            };
-            var shownName = valueKey == null ? prop.Name : $"{prop.Name}[{valueKey}]";   // a keyed write names its key: "Ford depth[0412] = 3"
-            // a chosen holder is named in its own part, the acting side's line ("Stores of Ford Dump 10 - 3 = 7")
-            var part = chosen == null ? Part(shownName) : Part($"{shownName} of {chosen}");
-            outputs.Add(new OutputPreview(key, prop.Id, prop.Name, was, after)
-            {
-                Target = o.Target,
-                Part = part,
-                SideId = target?.Side,
-                Subject = target?.Shown ?? chosen,
-                TargetName = target?.Real,
-                ValueKey = valueKey,
-                Draw = share?.Var,
-            });
-            // the dialog's working names the target as its binding does ("Fuel of Blue Barge 4 + 2 = 6"); a drawn counter is never named
-            if (share == null) parts.Add(target is { } named ? Part($"{shownName} of {named.Shown}") : part);
         }
         run.Share = null;
         // B9 #55: what each Draw binding drew (binding order); its working part is "{Var} = {k}" (the split goes only to the log).

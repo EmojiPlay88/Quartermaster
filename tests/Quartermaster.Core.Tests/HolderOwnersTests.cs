@@ -129,6 +129,25 @@ public class HolderOwnersTests
         Assert.Equal("north", Owner(s, pk, Mill));
     }
 
+    /// <summary>Final review I2: Controller is kept by Mill Dump only; North Depot's expression reading it falls back to the fixed owner
+    /// (north), not to the Default 0 (no owner), which would make its Private Stores public.</summary>
+    [Fact]
+    public void Owner_reading_property_kept_by_neither_holder_falls_back_to_fixed_side()
+    {
+        var pk = Pack();
+        pk = pk with
+        {
+            Properties = pk.Properties.Append(new PropertyDef
+                { Id = "p-controller", Name = "Controller", Scope = PropertyScope.Holders, Holders = new() { Mill }, Visibility = Visibility.Public, Default = 0 }).ToList(),
+            Holders = pk.Holders.Select(h => h.Id == "h-north" ? h with { OwnerExpr = "Controller" } : h).ToList(),
+        };
+        var s = NewState();
+        Assert.Equal("north", Owner(s, pk, "h-north"));
+        s.Apply(Set(HolderDef.GlobalId, "p-controller", 2));   // a global ledger value of a property Global does not keep is not read either
+        Assert.Equal("north", Owner(s, pk, "h-north"));
+        Assert.True(HiddenValues.HolderValueHidden(s, pk, "h-north", pk.ById<PropertyDef>("p-stores"), id => id == "south"));
+    }
+
     [Fact]
     public void Owner_same_on_full_state_and_view()
     {
