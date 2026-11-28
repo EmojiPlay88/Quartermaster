@@ -32,8 +32,12 @@ public sealed partial class FormulasTab
             new EditColumn("Same hex", EditColumnKind.Check, Weight: 50),
             new EditColumn("Choices table", EditColumnKind.Combo, Weight: 80),
             new EditColumn("Choices filter", Weight: 100),
+            new EditColumn("Holder choices", Weight: 110),
+            new EditColumn("Draw count", Weight: 80),
         ]);
         _bind.SetHeaderToolTip(7, SameHexHint);
+        _bind.SetHeaderToolTip(10, HolderChoicesHint);
+        _bind.SetHeaderToolTip(11, DrawCountHint);
         _bind.SetHeaderToolTip(8, ChoicesTableHint);
         _bind.SetHeaderToolTip(9, ChoicesFilterHint);
         _bind.CellCommitted += (r, c, text) => Run(() => OnBindingCell(r, c, text));
@@ -49,11 +53,15 @@ public sealed partial class FormulasTab
         BindingKind.Roll => "Dice, such as 2d6.",
         BindingKind.Table => "row: expression | col: expression (the expressions may use other variables).",
         BindingKind.Piece => FormulaEdit.PieceDetailsHint,
+        BindingKind.Draw => FormulaEdit.DrawDetailsHint,
         _ => "",
     };
 
     const string DiceCountHint = "Blank = the fixed number.";
     const string SameHexHint = "Piece binding: list only the other counters in this unit's hex.";
+    internal const string HolderChoicesHint = "Holder binding: the holders the player chooses from when the formula runs, separated by commas; only those the player may act on are offered. Blank = the fixed holder.";
+    internal const string DrawCountHint = "Draw binding: how many members to draw at random, a whole number from 0 to 1000; it may use earlier variables.";
+    internal const string HolderVariableHint = "Target Holder: the Holder variable whose chosen holder this output writes.";
     const string ChoicesTableHint = "Input: offer this table's row keys as the choices.";
     const string ChoicesFilterHint = "Input with a choices table: list only the rows for which this is true; row() is the row key, and the counter's own values can be read.";
     const string ActionHint = "Write a value (default), place a palette counter, remove the counter, or set its layer or mask.";
@@ -83,8 +91,10 @@ public sealed partial class FormulasTab
             new EditColumn("To map", EditColumnKind.Combo, Weight: 80),
             new EditColumn("Key", Weight: 90),
             new EditColumn("Margin", Weight: 70),
+            new EditColumn("Holder variable", EditColumnKind.Combo, Weight: 80),
         ]);
         _out.SetHeaderToolTip(13, MarginHint);
+        _out.SetHeaderToolTip(14, HolderVariableHint);
         _out.SetHeaderToolTip(7, ActionHint);
         _out.SetHeaderToolTip(8, PieceHint);
         _out.SetHeaderToolTip(9, PaletteHint);
@@ -120,12 +130,13 @@ public sealed partial class FormulasTab
         var rows = new List<IReadOnlyList<string>>();
         foreach (var b in f.Bindings)
             rows.Add([unused.Contains(b.Variable) ? b.Variable + " (unused)" : b.Variable, b.Kind.ToString(), FormulaEdit.TargetDisplay(pack, b), FormulaEdit.FormatDetails(b), b.Caption ?? "", b.When ?? "", b.DiceCountExpr ?? "", b.SameHex ? "True" : "False",
-                b.ChoicesTable == null ? "" : pack.ById<TableDef>(b.ChoicesTable)?.Name ?? FormulaEdit.Missing, b.ChoicesFilter ?? ""]);
+                b.ChoicesTable == null ? "" : pack.ById<TableDef>(b.ChoicesTable)?.Name ?? FormulaEdit.Missing, b.ChoicesFilter ?? "",
+                FormulaEdit.FormatHolderChoices(pack, b), b.DrawCount ?? ""]);
         _bind.SetRows(rows);   // resets per-cell items, read-only state and hints: they go on afterwards
         for (var r = 0; r < f.Bindings.Count; r++)
         {
             var b = f.Bindings[r];
-            var opts = KeptOptions(pack, b.Kind, FormulaEdit.TargetOptions(pack, b.Kind));
+            var opts = KeptOptions(pack, b.Kind, FormulaEdit.TargetOptions(pack, b));
             _targets.Add(opts);
             _bind.SetCellItems(r, 2, opts.Select(o => o.Display).ToList());
             if (opts.Count == 0 && b.Kind is not (BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Table or BindingKind.Piece))
@@ -135,14 +146,19 @@ public sealed partial class FormulasTab
             _bind.SetCellToolTip(r, 3, DetailsHint(b.Kind));
             _bind.SetCellReadOnly(r, 6, b.Kind != BindingKind.Roll);
             _bind.SetCellToolTip(r, 6, b.Kind == BindingKind.Roll ? DiceCountHint : "");
-            _bind.SetCellReadOnly(r, 7, b.Kind != BindingKind.Piece);
-            _bind.SetCellToolTip(r, 7, b.Kind == BindingKind.Piece ? SameHexHint : "");
+            var pool = b.Kind is BindingKind.Piece or BindingKind.Draw;   // B9: a draw's pool may be just the run piece's hex too
+            _bind.SetCellReadOnly(r, 7, !pool);
+            _bind.SetCellToolTip(r, 7, pool ? SameHexHint : "");
             var input = b.Kind == BindingKind.Input;
             _bind.SetCellItems(r, 8, new[] { "" }.Concat(pack.Tables.Select(t => t.Name)).ToList());
             _bind.SetCellReadOnly(r, 8, !input);
             _bind.SetCellToolTip(r, 8, input ? ChoicesTableHint : "");
             _bind.SetCellReadOnly(r, 9, !input || b.ChoicesTable == null);
             _bind.SetCellToolTip(r, 9, input ? ChoicesFilterHint : "");
+            _bind.SetCellReadOnly(r, 10, b.Kind != BindingKind.Holder);
+            _bind.SetCellToolTip(r, 10, b.Kind == BindingKind.Holder ? HolderChoicesHint : "");
+            _bind.SetCellReadOnly(r, 11, b.Kind != BindingKind.Draw);
+            _bind.SetCellToolTip(r, 11, b.Kind == BindingKind.Draw ? DrawCountHint : "");
         }
     }
 
@@ -195,7 +211,7 @@ public sealed partial class FormulasTab
                 if (TryExpression(text, "Dice count", out var count)) Commit(x => SyncAfter(FormulaEdit.SetBinding(x, v, z => z with { DiceCountExpr = count })));
                 break;
             case 7:
-                if (b.Kind != BindingKind.Piece) return;
+                if (b.Kind is not (BindingKind.Piece or BindingKind.Draw)) return;
                 var on = string.Equals(text, "True", StringComparison.OrdinalIgnoreCase);
                 Commit(x => FormulaEdit.SetBinding(x, v, z => FormulaEdit.WithSameHex(z, on)));
                 break;
@@ -210,6 +226,18 @@ public sealed partial class FormulasTab
                 if (b.Kind != BindingKind.Input || b.ChoicesTable == null) return;
                 again = true;
                 if (TryExpression(text, "Choices filter", out var filter)) Commit(x => SyncAfter(FormulaEdit.SetBinding(x, v, z => FormulaEdit.WithChoicesFilter(z, filter))));
+                break;
+            case 10:
+                if (b.Kind != BindingKind.Holder || _s.Rules is not { } rules) return;
+                again = true;   // the Target choices follow the listed holders
+                var (picked, pickErr) = FormulaEdit.WithHolderChoices(rules, b, text);
+                if (pickErr != null) { _err.Text = pickErr; _goto.IsVisible = false; break; }   // refused: the binding stays as it was
+                Commit(x => FormulaEdit.SetBinding(x, v, _ => picked));
+                break;
+            case 11:
+                if (b.Kind != BindingKind.Draw) return;
+                again = true;
+                if (TryExpression(text, "Draw count", out var drawCount)) Commit(x => SyncAfter(FormulaEdit.SetBinding(x, v, z => FormulaEdit.WithDrawCount(z, drawCount))));
                 break;
             case 5:
                 again = true;
@@ -250,7 +278,9 @@ public sealed partial class FormulasTab
         if (Current is not { } f || _s.Rules is not { } pack) { _out.SetRows([]); return; }
         var holders = pack.Holders.Select(h => h.Name).ToList();
         var props = pack.Properties.Select(p => p.Name).ToList();
-        var pieceVars = f.Bindings.Where(b => b.Kind == BindingKind.Piece).Select(b => b.Variable).ToList();
+        var pieceVars = f.Bindings.Where(b => b.Kind is BindingKind.Piece or BindingKind.Draw).Select(b => b.Variable).ToList();
+        var holderVars = new List<string> { "" };
+        holderVars.AddRange(f.Bindings.Where(b => b.Kind == BindingKind.Holder && b.HolderChoices is { Count: > 0 }).Select(b => b.Variable));
         var mapNames = new List<string> { DeleteText };
         mapNames.AddRange(_s.Model.Maps.Select(m => m.Name));
         var slots = WorkbenchRules.SlotPaths(_s.Model);
@@ -264,7 +294,7 @@ public sealed partial class FormulasTab
             var choice = FormulaEdit.FormatNameList((o.PropertyChoice ?? new()).Select(id => pack.ById<PropertyDef>(id)?.Name ?? FormulaEdit.Missing));
             var toMap = o.ToMapId == null ? DeleteText : MapRefs.Find(_s.Model.Maps, o.ToMapId)?.Name ?? FormulaEdit.Missing;
             rows.Add([o.Target.ToString(), holder, prop, o.Op.ToString(), o.Expr ?? "", choice, o.PropertySelect ?? "",
-                o.Action.ToString(), o.PieceVariable ?? "", o.Slot ?? "", o.Layer ?? "", toMap, o.Key ?? "", o.Margin ?? ""]);
+                o.Action.ToString(), o.PieceVariable ?? "", o.Slot ?? "", o.Layer ?? "", toMap, o.Key ?? "", o.Margin ?? "", o.HolderVariable ?? ""]);
         }
         _out.SetRows(rows);
         for (var r = 0; r < f.Outputs.Count; r++)
@@ -274,7 +304,12 @@ public sealed partial class FormulasTab
             else _out.SetCellReadOnly(r, 1, true);
             // A holder or global output offers only the properties that holder keeps.
             var keeper = o.Target == OutputTarget.Global ? HolderDef.GlobalId : o.Target == OutputTarget.Holder ? o.HolderId : null;
-            _out.SetCellItems(r, 2, keeper == null ? props : pack.Properties.Where(p => PropertyFacts.KeptBy(p, keeper)).Select(p => p.Name).ToList());
+            // B9: a Holder variable's output offers only what every holder it may choose keeps.
+            var chosen = o.Target == OutputTarget.Holder && o.HolderVariable != null
+                ? f.Bindings.FirstOrDefault(b => b.Variable == o.HolderVariable && b.Kind == BindingKind.Holder)?.HolderChoices : null;
+            _out.SetCellItems(r, 2, chosen is { Count: > 0 }
+                ? pack.Properties.Where(p => p.Scope != PropertyScope.Pieces && chosen.All(id => PropertyFacts.KeptBy(p, id))).Select(p => p.Name).ToList()
+                : keeper == null ? props : pack.Properties.Where(p => PropertyFacts.KeptBy(p, keeper)).Select(p => p.Name).ToList());
             _out.SetCellReadOnly(r, 2, f.Outputs[r].PropertyChoice is { Count: > 0 });   // the fixed Property is not used while a list is set
             _out.SetCellToolTip(r, 4, OutputValueHint);
             _out.SetCellToolTip(r, 5, ChooseFromHint);
@@ -296,6 +331,9 @@ public sealed partial class FormulasTab
             _out.SetCellReadOnly(r, 12, o.Action != OutputAction.Write);
             _out.SetCellToolTip(r, 13, MarginHint);
             _out.SetCellReadOnly(r, 13, o.Action != OutputAction.Reveal);
+            _out.SetCellItems(r, 14, holderVars);
+            _out.SetCellReadOnly(r, 14, o.Target != OutputTarget.Holder);
+            _out.SetCellToolTip(r, 14, o.Target == OutputTarget.Holder ? HolderVariableHint : "");
         }
     }
 
@@ -374,6 +412,11 @@ public sealed partial class FormulasTab
             case 13:
                 again = true;
                 if (TryExpression(text, "Margin", out var margin)) Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithMargin(o, margin)));
+                break;
+            case 14:
+                if (f.Outputs[row].Target != OutputTarget.Holder) return;
+                Commit(x => FormulaEdit.SetOutput(x, row, o => FormulaEdit.WithHolderVariable(o, text)));
+                again = true;   // the Property picker follows the chosen holders
                 break;
         }
         if (again) Dispatcher.UIThread.Post(() => Run(RebuildOutputs));

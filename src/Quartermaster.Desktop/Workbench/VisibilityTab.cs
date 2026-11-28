@@ -16,6 +16,7 @@ public sealed class VisibilityTab : UserControl
 {
     const string NoOwner = "(none)";
     const string MissingText = "(missing)";
+    internal const string OwnerExprHint = "The holder's owner as play goes on: a side's name or id, or a number N for the Nth side (0 = no owner). It may read this holder's and the global holder's Public values. Blank = the owner side.";
 
     readonly ModuleSession _s;
     readonly EditGrid _props = new();
@@ -31,7 +32,8 @@ public sealed class VisibilityTab : UserControl
     {
         _s = s;
         _props.SetColumns([new EditColumn("Property", ReadOnly: true), new EditColumn("Visibility", EditColumnKind.Combo, Width: 110, Items: [nameof(Visibility.Private), nameof(Visibility.Public)])]);
-        _holders.SetColumns([new EditColumn("Holder", ReadOnly: true), new EditColumn("Owner side", EditColumnKind.Combo, Width: 160)]);
+        _holders.SetColumns([new EditColumn("Holder", ReadOnly: true), new EditColumn("Owner side", EditColumnKind.Combo, Width: 160), new EditColumn("Owner expression", Width: 200)]);
+        _holders.SetHeaderToolTip(2, OwnerExprHint);
         _maps.SetColumns([new EditColumn("Map or org display", ReadOnly: true), new EditColumn("Owner side", EditColumnKind.Combo, Width: 160)]);
 
         var table = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), RowDefinitions = new RowDefinitions("*,*"), Margin = new Thickness(4) };
@@ -47,7 +49,11 @@ public sealed class VisibilityTab : UserControl
         Content = root;
 
         _props.CellCommitted += (r, c, t) => Run(() => OnPropChanged(r, c, t));
-        _holders.CellCommitted += (r, c, t) => Run(() => OnOwnerChanged(_holderIds, _holderNames, r, c, t, VisibilityEdit.SetHolderOwner));
+        _holders.CellCommitted += (r, c, t) => Run(() =>
+        {
+            if (c == 2) OnOwnerExprChanged(r, t);
+            else OnOwnerChanged(_holderIds, _holderNames, r, c, t, VisibilityEdit.SetHolderOwner);
+        });
         _maps.CellCommitted += (r, c, t) => Run(() => OnOwnerChanged(_mapIds, _mapNames, r, c, t, VisibilityEdit.SetMapOwner));
 
         AttachedToVisualTree += (_, _) =>
@@ -132,7 +138,9 @@ public sealed class VisibilityTab : UserControl
             _props.SetRows(props.Select(p => (IReadOnlyList<string>)new[] { VisibilityEdit.PropertyLabel(pack!, p), p.Visibility.ToString() }).ToList());
             foreach (var p in props) _propIds.Add(p.Id);
 
-            FillOwnerGrid(_holders, _holderIds, _holderNames, (pack?.Holders ?? new()).Select(h => (h.Id, h.Name, h.SideId)), sideNames);
+            var holders = pack?.Holders ?? new();
+            FillOwnerGrid(_holders, _holderIds, _holderNames, holders.Select(h => (h.Id, h.Name, h.SideId)), sideNames, i => holders[i].OwnerExpr ?? "");
+            for (var i = 0; i < holders.Count; i++) _holders.SetCellToolTip(i, 2, OwnerExprHint);
 
             var maps = _s.Model.Maps.Select(m => (m.Id, m.IsOrgDisplay ? m.Name + " (org display)" : m.Name, pack == null ? null : VisibilityEdit.MapOwnerOf(pack, m.Id)));
             // owners naming a map the module lacks stay visible so the user can clear them
@@ -154,7 +162,8 @@ public sealed class VisibilityTab : UserControl
         ShowIssues();
     }
 
-    void FillOwnerGrid(EditGrid grid, List<string> ids, List<List<string>> choices, IEnumerable<(string Id, string Name, string? SideId)> rows, List<string> sideNames)
+    void FillOwnerGrid(EditGrid grid, List<string> ids, List<List<string>> choices, IEnumerable<(string Id, string Name, string? SideId)> rows, List<string> sideNames,
+        Func<int, string>? extra = null)
     {
         ids.Clear();
         choices.Clear();
@@ -172,7 +181,7 @@ public sealed class VisibilityTab : UserControl
             }
             ids.Add(id);
             choices.Add(names);
-            shownRows.Add(new[] { name, shown });
+            shownRows.Add(extra == null ? new[] { name, shown } : new[] { name, shown, extra(ids.Count - 1) });
         }
         grid.SetRows(shownRows);
         for (var i = 0; i < choices.Count; i++) grid.SetCellItems(i, 1, choices[i]);
@@ -184,7 +193,7 @@ public sealed class VisibilityTab : UserControl
         try
         {
             var ids = _s.Model.Maps.Select(m => m.Id).ToList();
-            var mine = RulesValidator.Validate(pack, ids).Where(i => i.Message.StartsWith("Map owner", StringComparison.Ordinal) || (i.Message.StartsWith("Holder", StringComparison.Ordinal) && i.Message.Contains("side", StringComparison.Ordinal))).Select(i => i.Message);
+            var mine = RulesValidator.Validate(pack, ids).Where(i => i.Message.StartsWith("Map owner", StringComparison.Ordinal) || (i.Message.StartsWith("Holder", StringComparison.Ordinal) && (i.Message.Contains("side", StringComparison.Ordinal) || i.Message.Contains("owner expression", StringComparison.Ordinal)))).Select(i => i.Message);
             _issues.Text = string.Join("  |  ", mine);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -215,6 +224,15 @@ public sealed class VisibilityTab : UserControl
         string? side = null;
         if (shown != NoOwner && k > 0 && k - 1 < _sideIds.Count) side = _sideIds[k - 1];
         Commit(p => set(p, id, side));
+    }
+
+    /// <summary>B9: the owner expression cell; blank clears it (the owner side is used). The validator's verdict shows in the problem line.</summary>
+    void OnOwnerExprChanged(int row, string text)
+    {
+        if (_loading || row < 0 || row >= _holderIds.Count) return;
+        var id = _holderIds[row];
+        Commit(p => VisibilityEdit.SetHolderOwnerExpr(p, id, text));
+        Dispatcher.UIThread.Post(() => Run(Reload));   // the cell shows the stored (trimmed) text; not inside the grid's own commit
     }
 
     void OnFormulaCheck(string id, bool on)
