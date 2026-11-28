@@ -114,6 +114,14 @@ The formula dialog has a **Several runs…** button (tooltip `Open a batch grid 
 
 A **Piece** variable shows as a list of the counters you can see. The counters in the same hex as the counter the formula runs on are listed first, then the rest, each part sorted by name. A variable marked **Same hex** lists only the other counters in that hex. A masked enemy counter shows as `Unknown piece`. See [Reading another counter](Formula-Reference#where-names-get-their-values).
 
+## Choosing a holder
+
+A Holder binding with **Holder choices** shows as a drop-down of holder names, such as `Ford Dump`, `Mill Dump`, `North Depot`. It lists only the holders you may act on now (no owner, or owned by a side you hold or an ally of one), in the order the pack lists them. The box is always asked: Fully automatic stops for it, and the working line names the holder, `Stores of Ford Dump`. With none to offer, the status line says `No holder to choose`. In a batch grid the column is a list too, and the **All rows** line fills it. See [Choosing a holder when the formula runs](Making-a-Rules-Pack#choosing-a-holder-when-the-formula-runs).
+
+## Drawing at random
+
+A **Draw** variable shows a box holding k, the number of members that will be drawn (or `hidden` when you may not see the pool). Its tooltip reads `Drawn at random when you apply; the log names the counters.` Nothing says which counters were drawn before **Apply to ledger**: each output on the drawn counters shows as one line in the formula's results, `Boats of the drawn counters changes`, and the split is fixed when you apply. Previewing again draws nothing new. After Apply the log names the counters, one line each, to the side that owns each counter. In a batch grid, once a row draws, the rows after it show masked until you Apply all. See [Random draws among counters](Making-a-Rules-Pack#random-draws-among-counters).
+
 ## Missing values
 
 In **Fully automatic** mode the game calculates everything itself. When a formula needs a value it cannot work out (an input such as Riverland's "Hexes from this unit to its depot"), a small dialog named after the formula asks for it once, with one box per missing value. The answer is used for every unit of that run. Inputs marked "(always asked)" open this dialog every time, even though they have an automatic value.

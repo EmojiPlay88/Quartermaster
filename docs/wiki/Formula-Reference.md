@@ -567,13 +567,14 @@ A bare name in a formula (`Fuel`, `Hexes`, `Weather`) is a **variable**. How it 
 |---|---|---|
 | Unit | a property of the counter the formula is run on | Fuel |
 | Global | a property kept on the global holder | Weather |
-| Holder | a property of a named holder, such as a depot | Stores of North Depot |
+| Holder | a property of a named holder, such as a depot, or, with **Holder choices**, of the holder the player chooses | Stores of North Depot |
 | Table | a cell of a table, chosen by a row (and column) expression | Gain, row Hexes |
 | Location | the name of the hex or zone the counter stands on (text) | 0302 |
 | Input | a value the player types in the Formula dialog, with limits, choices and an automatic value for hands-off play | Hexes |
 | Roll | a dice roll such as 1d6 | Die |
 | Moved | the distance the counter just moved, in hexes (known only when it is moved) | Moved |
 | Piece | a property of another counter, which the player picks from a list when the formula runs | Speed of the target |
+| Draw | members drawn at random from a group of counters (the value is how many were drawn) | Hits |
 
 Every name used in the formula needs a binding, and every binding should be used. A name that appears in another binding's automatic value (for example `Hexes` in `auto: Hexes + 1`) counts as used when that other binding is itself used, but a binding's own name does not count as using itself; the Workbench's Problems list tells you when they do not match. The longer explanation, with pictures of each case, is in [Making a Rules Pack](Making-a-Rules-Pack#step-4-formulas). How the answers are shown and applied is in the [Formula dialog](Window-Formula-Dialog).
 
@@ -596,6 +597,10 @@ An invented Riverland example: a raider slips past a defender when it is faster.
 ```formula
 Speed - Target
 ```
+
+**Choosing a holder (Holder choices).** A Holder binding with **Holder choices** (holder names separated by commas) is a picker: the player chooses one of the listed holders each time the formula runs, and the value is the binding's property on the chosen holder. Only holders the player may act on now are offered (no owner, or owned by a side the player holds or an ally of one), so the chosen holder's values are always visible to the chooser. The binding is always asked, and its working reads `Stores of Ford Dump`. An output with Target Holder and a **Holder variable** writes the chosen holder. The global holder cannot be listed. See [Choosing a holder when the formula runs](Making-a-Rules-Pack#choosing-a-holder-when-the-formula-runs).
+
+**Drawing at random (Draw bindings).** A **Draw** binding draws members at random from a group of counters, without the player choosing. Its Target is the property giving each counter's number of members (the weight, a whole number from 0 to 1000; `(one each)` = one member each), its Details are the pool filter (a unit filter; blank = every counter), **Same hex** limits the pool to the hex of the counter the formula runs on (that counter included), and **Draw count** is an expression giving how many to draw (a whole number from 0 to 1000, which may read earlier variables but not this one). The variable's value is k = the count, or fewer when the pool has fewer members. Each step is one die with as many faces as members remain, drawn by the engine without replacement. An output with Target Piece and Piece set to the Draw variable acts once on each counter that gave members; inside its Value the variable reads that counter's share. Place and Reveal cannot act on a draw. See [Random draws among counters](Making-a-Rules-Pack#random-draws-among-counters).
 
 **In a filter** (a formula's Applies to, a property's AppliesTo, a side's unit filter, an alert's condition, or a Ledger tab's filter), there are no bindings. A bare name means the **property of that name on the unit being tested**. If the unit has no value for it yet, the property's **default** is used, as long as the property applies to that unit (its scope includes units, and its own Applies to, if it has one, matches). `has(Readiness)` still means "this unit has a value in the ledger", so it stays false until a value is set. If the property does not apply to the unit, that is an error, so guard with `has(...)`. In a player's view of the game (hot-seat view or an online guest), a value may be hidden rather than unset, so private values, and every value of another side's masked unit, do not fall back to their default there. The functions `name()`, `marker("...")`, `side()` and `map()` read the unit too. `lookup` and `holder()` work in filters; `dice` does not.
 
@@ -643,6 +648,8 @@ How a run with these outputs behaves:
 - **Only one placement.** A formula may have one Place output. Outputs that write the placed counter come from the same formula and must be **Set**: a new counter starts from the property's default.
 - **The placed counter's own values.** It is seeded as any new counter is (its sheet values and starting values), and then the Placed outputs run, so a Set overrides the seed.
 - **The picked counter is asked for.** A Piece output uses the counter the player picked in the Piece binding, so it is always asked (Fully automatic stops for it). A Piece output may act on a counter of any side, including one you do not hold; an online guest's formula that has a Piece output is worked out by the host.
+- **A drawn counter.** An output whose Piece is a Draw variable runs once on each drawn counter, in the order of the counters' ids, each write its own ledger line stamped with that counter's side; the log first gives one `{formula}: {Var}: {n} on {name}` line for each drawn counter. Before Apply nothing says which counters were drawn: each such output previews as `{Prop} of the drawn counters changes`. See [Random draws among counters](Making-a-Rules-Pack#random-draws-among-counters).
+- **A chosen holder.** An output with Target Holder and a Holder variable writes the holder the player chose (the property must be kept by every listed holder).
 - **The log.** A write to a picked counter is logged on that counter's side: its owner sees `{counter}: {formula}: Strength 7 - 2 = 5`, the side that ran the formula sees `{Side} ledger changed`, and a counter of no side is public. The effects read `{formula}: placed {name}`, `{formula}: removed {name}`, `{formula}: moved {name} to {map}`, `{formula}: {layer} of {name} = {level}` and `{formula}: {name} masked` or `{formula}: {name} unmasked`. A line is dropped for a player who cannot see that counter.
 - **The working** on the formula's own lines leaves out the parts about a picked counter (the owner sees them on their line), and names an effect's counter as the player sees it: `Unknown piece` for a masked counter.
 
@@ -778,14 +785,18 @@ These come from the bindings and outputs rather than the formula text.
 |---|---|---|
 | Unknown property: x | A Ledger tab filter names a property that is not in the rules pack. | Fix the name when you edit the tabs. |
 | Waiting for input | An Input variable has no value yet. | Type one in the Formula dialog, or give the binding an automatic value. |
-| Needs a unit | A Unit or Location variable, or a **Same hex** Piece binding, has no counter to read. | Run the formula on a counter. |
+| Needs a unit | A Unit or Location variable, or a **Same hex** Piece or Draw binding, has no counter to read. | Run the formula on a counter. |
 | Only known when a unit is moved | A Moved variable was used where nothing has moved. | Use the formula as an on-move step of a phase, or type a distance. |
 | Choose one of the listed pieces | A Piece binding's pick is not on the list (the counter moved, was deleted or was hidden after the list was shown). | Pick again from the list. |
 | No piece matches "Speed > 3" | A Piece binding's which-pieces filter matches no counter the player can see (with a blank filter, `No piece to choose`). | Widen the filter, or run the formula when a counter matches. |
 | Upgraded Speed of Raft A reads data this player cannot see | A table read on a player's own view would use the piece's non-Public override (see "A piece's own value for a table rating"), and the piece is of a side that player does not hold. A Table binding is left without a value; an inline `lookup` stops the run. | Nothing to fix: the host (or a player holding every side) works it out. |
-| Hidden from this player | A Piece binding reads a non-Public property of another side's counter on a player's own view, or a Piece output's target is another side's masked counter there. | Nothing to fix: the host (or a player holding every side) works it out. |
+| Hidden from this player | A Piece or Draw binding reads a non-Public property of another side's counter on a player's own view, or a Piece output's target is another side's masked counter there. | Nothing to fix: the host (or a player holding every side) works it out. |
 | No piece in this hex | A **Same hex** Piece binding found no other counter in the hex of the counter the formula runs on. | Run the formula when another counter is there, or untick **Same hex**. |
-| An output refers to a deleted Piece variable | A Piece output names a variable that is no longer a Piece binding. | Pick the variable again in the output's **Piece** column. |
+| An output refers to a deleted Piece variable | A Piece output names a variable that is no longer a Piece or Draw binding. | Pick the variable again in the output's **Piece** column. |
+| Choose one of the listed holders | A Holder binding with Holder choices got a holder that is not on the player's list (its owner changed, or the label was wrong). | Pick again from the list. |
+| No holder to choose | None of the listed holders is one the player may act on now. | Run the formula when the player's side holds one, or list another holder. |
+| The draw count for Hits must be a whole number from 0 to 1000 | A Draw binding's **Draw count** gave a number that is negative, over 1000, not whole or not a number. | Fix the expression. |
+| Boats of SC 3 Barge must be a whole number from 0 to 1000 to draw from | A counter in a Draw's pool has a weight outside 0 to 1000 or not whole. | Fix the counter's value or the filter. |
 | An output writes the placed piece, but nothing was placed | A Placed output ran but the formula's Place output did not place a counter. | Give the formula one Place output. |
 | Palette entry "Markers/Wreck" was not found in the module | A Place output names a palette entry the module does not have. | Pick a name from the **Palette entry** list. |
 | Fort has no layer "Levels" | A Set layer output, or `layer()`, names a layer the counter lacks. | Check the layer's name in the module (the Set layer output's **Layer** column). |
