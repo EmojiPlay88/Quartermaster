@@ -974,7 +974,7 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
             var f = FindFormula(phase, e.FormulaId);
             if (f == null) continue;
             if (BadFilter(phase, f, e.UnitFilter)) continue;
-            var moved = (allied ? Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model, owner) : Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model))
+            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model, owner)
                 .Where(p => records.ContainsKey(p.Id)).ToList();
             if (!bySide || e.FiresFor == MoveSide.Acting)
             {

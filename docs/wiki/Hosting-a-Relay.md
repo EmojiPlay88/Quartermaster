@@ -323,7 +323,7 @@ The fingerprint is printed in the relay log (`Relay certificate fingerprint: C08
   - 32 connections at once per address and 2000 in total (`MaxConnections`);
   - 20 lobbies per address. At the limit, the oldest lobby from that address whose host has gone is
     closed to make space; if every one still has its host, a new lobby is refused;
-  - 7 places per game, the host's place included (it stays reserved while the host is away). A full game
+  - 13 places per game, enough for the 12 players a game allows, the host's place included (it stays reserved while the host is away). A relay must be updated to this version to seat more than 7 players online; an older one refuses the 8th with "This game is full." A full game
     and the lobby limit are answered with a message; the connection stays open;
   - lobby names longer than 40 characters are cut to 40.
 - A lobby disappears from the list 90 seconds after its host stopped refreshing it, or when the host

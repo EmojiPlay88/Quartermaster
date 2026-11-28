@@ -779,7 +779,8 @@ An invented example: the Northern League and the Hill Clans both have the allian
 - moves the Clans' barges, runs formulas on their counters and changes their holders' values;
 - acts in the Clans' phase: runs its formulas, ticks its checklist, acknowledges its warnings and presses Next Phase. This also holds the other way round.
 - has the phase formulas of either side reach both sides' counters: a start or end row with **For each** set to units, a phase warning about units, and an **On move** row set to **Acting side** run for the League's and the Clans' counters alike in a League or Clans phase; **Other side** means counters outside the alliance (and counters of no side).
-- A victory condition of a side in an alliance makes the whole alliance win; a blank message reads "{alliance} wins".
+
+A victory condition of a side in an alliance makes the whole alliance win; a blank message reads "{alliance} wins" (when another side shares the alliance).
 
 The Southern Compact sees and does exactly what it did before: it sees neither side's private values and cannot act for either.
 

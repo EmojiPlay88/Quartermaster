@@ -78,6 +78,8 @@ An **On move** entry has a **Fires for** setting that says whose moves it reacts
 | **Other side** | Counters that belong neither to the phase's side nor to an ally (and counters of no side) |
 | **Any side** | Every moved counter |
 
+Who a counter belongs to is the first side, in pack order, whose units filter matches it; the phase side's own filter always counts.
+
 A phase with no side treats all three alike: every moved counter fires the entry. The run is made for the counter's owner: it is logged under that player's side, and a run that waits for input is offered to that player, as if they had started it by hand.
 
 Dragging a counter on the map is a move too. To limit an entry to moves on one map (for example, to ignore drags into an off-board box), filter on `map()`: `map() == "Main Map"` (see [Formula Reference](Formula-Reference)).

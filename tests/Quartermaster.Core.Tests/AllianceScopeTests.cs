@@ -165,7 +165,7 @@ public class AllianceScopeTests
         {
             var before = Ownership.SideMapBuilds;
             Moved(pk, s, Foot(pk), mode);
-            Assert.InRange(Ownership.SideMapBuilds - before, 0, 1);
+            Assert.Equal(1, Ownership.SideMapBuilds - before);
         }
     }
 
