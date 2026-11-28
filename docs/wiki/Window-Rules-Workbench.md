@@ -105,7 +105,7 @@ On the left:
 
 - **Phases, in order**: **Add**, **Duplicate**, **Remove**, **Move Up**, **Move Down**. **Make block from selection…** groups the selected phases into a block that repeats (it asks for a **Repeat count** and a **Label**, or **Until a player stops**, which makes the block repeat until the acting player chooses Continue; a block may lie inside one other block); **Remove block** undoes that. The list marks each phase of a block with the block's label and its count, for example `┃ Day ×2`, or `(until stopped)` for a block that repeats until a player stops.
 - **Sides**: **Add…**, **Rename…**, **Remove**, and **Units of this side:**, a filter such as `marker("Side") == "Northern League"`.
-  - **Alliance:** a name; sides with the same alliance see what each other sees and may act on each other's units and in each other's phases. Blank = no alliance. See [Alliances](Making-a-Rules-Pack#alliances).
+  - **Alliance:** a name; sides with the same alliance see what each other sees, may act on each other's units and in each other's phases, and a phase's formulas for each unit and on move reach every allied side's counters. Blank = no alliance. See [Alliances](Making-a-Rules-Pack#alliances).
   - **Former ids:** ids this side had in older versions of the pack, separated by commas; saved games that use them read as this side. See [Former side ids](Making-a-Rules-Pack#former-side-ids).
   - **Merge into…** (after **Remove**): asks `Name of the side to merge "{from}" into:`, then confirms `Merge "{from}" into "{into}"? Its phases, holders, maps and alerts move to "{into}", and saved games that used it read as "{into}".` The side's id becomes a former id of the target. Errors: `No side is named "{n}"` and `A side cannot be merged into itself`.
 
