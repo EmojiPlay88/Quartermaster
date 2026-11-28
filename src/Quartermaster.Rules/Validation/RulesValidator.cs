@@ -1296,6 +1296,7 @@ public static class RulesValidator
             if (o.Action == OutputAction.Place) placeSeen = true;
             CheckOutput(pack, f, o, outputNo, Err, knownMapIds, knownSlots, secondPlace, hasPlace);
             CheckHolderVariableOutput(pack, f, o, outputNo, Err, Warn);
+            CheckDrawOutput(f, o, outputNo, Err, Warn);
             ParseGuard(o.Expr, $"output {outputNo} value");
             ParseGuard(o.Key, $"output {outputNo} key");
             ParseGuard(o.Margin, $"output {outputNo} margin");
@@ -1447,6 +1448,50 @@ public static class RulesValidator
             if (pack.ById<PropertyDef>(b.Property ?? "") is { } p && !PropertyFacts.KeptBy(p, id))
                 err($"{v}: holder \"{h.Name}\" does not keep property \"{p.Name}\"");
         }
+    }
+
+    /// <summary>
+    /// B9: an output on a draw's counters runs once per drawn counter, so it may not roll dice() (its value, key, margin or pick-by); and a
+    /// SetLayer or SetMask needs the trait on every counter the draw can pick, else a run that draws one is refused. Only a filter that always
+    /// reads <c>layer("name")</c> of the output's layer (a missing layer does not match) is known to leave such counters out; no filter can
+    /// test for a mask, so a SetMask always warns.
+    /// </summary>
+    private static void CheckDrawOutput(FormulaDef f, FormulaOutput o, int outputNo, Action<string> err, Action<string> warn)
+    {
+        if (o.Target != OutputTarget.Piece || string.IsNullOrWhiteSpace(o.PieceVariable)) return;
+        if (f.Bindings.FirstOrDefault(b => b.Variable == o.PieceVariable && b.Kind == BindingKind.Draw) is not { } draw) return;
+        var own = new List<string?> { o.Expr, o.Key, o.Margin };
+        if (o.PropertyChoice is { Count: > 0 }) own.Add(o.PropertySelect);
+        if (own.Any(src => !string.IsNullOrWhiteSpace(src) && ParseProblem(src!) is null && ExprFacts.CallsFunction(Parser.Parse(src!), "dice")))
+            err($"output {outputNo}: an output on the drawn counters cannot roll dice()");
+        const string tail = "; a run that draws one is refused";
+        if (o.Action == OutputAction.SetLayer && !string.IsNullOrWhiteSpace(o.Layer) && !FilterNeedsLayer(draw.PieceFilter, o.Layer!.Trim()))
+            warn($"output {outputNo}: some counters the draw can pick may have no layer \"{o.Layer!.Trim()}\"{tail}");
+        else if (o.Action == OutputAction.SetMask)
+            warn($"output {outputNo}: some counters the draw can pick may have no mask{tail}");
+    }
+
+    /// <summary>
+    /// True when the filter is sure to leave out a counter without the named layer: one of its top-level "and" terms reads
+    /// <c>layer("name")</c> (trimmed, case-insensitive) on every evaluation, i.e. not under an "and", "or" or the branches of if(). Conservative:
+    /// anything else (blank, unparsable, a short-circuit) is false.
+    /// </summary>
+    private static bool FilterNeedsLayer(string? filter, string layer)
+    {
+        if (string.IsNullOrWhiteSpace(filter) || ParseProblem(filter!) is not null) return false;
+        static IEnumerable<AstExpr> Terms(AstExpr e) =>
+            e is Binary { Op: "and" } b ? Terms(b.Left).Concat(Terms(b.Right)) : new[] { e };
+        bool Always(AstExpr e) => e switch
+        {
+            Binary { Op: "and" or "or" } => false,
+            Binary b => Always(b.Left) || Always(b.Right),
+            Unary u => Always(u.Operand),
+            Call { Function: "layer" } c => c.Args.Count == 1 && c.Args[0] is TextLit t && string.Equals(t.Value.Trim(), layer, StringComparison.OrdinalIgnoreCase),
+            Call { Function: "if" } c => c.Args.Count > 0 && Always(c.Args[0]),
+            Call c => c.Args.Any(Always),
+            _ => false,
+        };
+        return Terms(Parser.Parse(filter!)).Any(Always);
     }
 
     /// <summary>B9: an output's Holder variable names a Holder binding with holder choices, needs a Holder target, and every listed holder keeps the written property.</summary>

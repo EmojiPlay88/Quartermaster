@@ -33,6 +33,8 @@ public sealed class FormulaWindow : Window
         FontFamily = new FontFamily("Consolas, Menlo, DejaVu Sans Mono, monospace"), MaxWidth = 540, TextWrapping = TextWrapping.Wrap,
         Margin = new Thickness(0, 2, 0, 2),
     };
+    /// <summary>The run's writes as this viewer is shown them before Apply (<see cref="DialogView.OutputLines"/>), one per line; hidden when there are none.</summary>
+    readonly TextBlock _outputs = new() { MaxWidth = 540, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2), IsVisible = false };
     readonly WrapPanel _inline = new() { Orientation = Orientation.Horizontal, MaxWidth = 540 };
     readonly Button _apply = Btn("&Apply to ledger", 110);
     readonly Button _calc = Btn("&Calculate", 85);
@@ -86,6 +88,7 @@ public sealed class FormulaWindow : Window
         SetNotesTip(formula.Notes);
         var wf = new StackPanel { Orientation = Orientation.Vertical };
         wf.Children.Add(_working);
+        wf.Children.Add(_outputs);
         wf.Children.Add(_inline);
         var workingFrame = new Border { BorderThickness = new Thickness(1), Padding = new Thickness(8, 4, 8, 8), Child = wf };
 
@@ -133,6 +136,8 @@ public sealed class FormulaWindow : Window
     internal string ResultText => _view.ResultBox.Text ?? "";
     internal string StatusText => _status.Text ?? "";
     internal string WorkingText => _working.Text ?? "";
+    internal string OutputsText => _outputs.Text ?? "";
+    internal bool OutputsVisible => _outputs.IsVisible;
     internal string? BoxText(string variable) => _view.BoxText(variable);
     internal bool BoxEnabled(string variable) => _view.BoxEnabled(variable);
     internal bool BoxWrong(string variable) => _view.BoxWrong(variable);
@@ -331,6 +336,12 @@ public sealed class FormulaWindow : Window
         Recalc();
     }
 
+    void ShowOutputs(IReadOnlyList<string> lines)
+    {
+        _outputs.Text = string.Join("\n", lines);
+        _outputs.IsVisible = lines.Count > 0;
+    }
+
     /// <summary>Re-runs the formula and pushes the result onto the controls. Never throws.</summary>
     void Recalc()
     {
@@ -344,6 +355,7 @@ public sealed class FormulaWindow : Window
             _view.Apply(v);
             _working.Text = v.WorkingText;
             if (v.WorkingNegative) _working.Foreground = Brushes.Red; else _working.ClearValue(TextBlock.ForegroundProperty);
+            ShowOutputs(v.OutputLines);
             _status.Text = v.Status;
             if (v.ShownTrace.Error != null) _status.Foreground = Brushes.Firebrick; else _status.ClearValue(TextBlock.ForegroundProperty);
             // A guest's Apply asks the host, which checks the boxes with the full game; the local check can't (hidden values are absent).
@@ -355,6 +367,7 @@ public sealed class FormulaWindow : Window
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _last = null;   // never leave the previous (applicable) view behind
+            ShowOutputs(Array.Empty<string>());
             _status.Text = "Could not update: " + ex.Message;
             _apply.IsEnabled = false;
             _s.Log.Add(DiagnosticSeverity.Error, "formula", "Formula dialog failed: " + ex.Message);

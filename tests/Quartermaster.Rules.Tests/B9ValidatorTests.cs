@@ -347,4 +347,40 @@ public class B9ValidatorTests
             "Error: Formula \"Old\": output refers to unknown holder \"h-gone\"",
         }, issues);
     }
+
+    // ---- task 6: outputs on the drawn counters ----
+
+    [Fact]
+    public void Draw_output_rolling_dice_refused()
+    {
+        const string tail = "output 1: an output on the drawn counters cannot roll dice()";
+        FormulaHas(Errors(WithBinding(Draw(), HitOut() with { Expr = "Hits + dice(1, 6)" })), tail);
+        FormulaHas(Errors(WithBinding(Draw(), HitOut() with { Expr = "Hits", Key = "dice(1, 2)" })), tail);
+        Assert.DoesNotContain(Errors(WithBinding(Draw(), HitOut())), m => m.Contains("cannot roll dice()", StringComparison.Ordinal));
+        // dice() in another output (not on the drawn counters) is fine
+        var global = new FormulaOutput { Target = OutputTarget.Global, Property = "p-pool", Op = OutputOp.Add, Expr = "dice(1, 6)" };
+        Assert.DoesNotContain(Errors(WithBinding(Draw(), HitOut(), global)), m => m.Contains("cannot roll dice()", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Draw_trait_output_on_pool_that_may_lack_it_warns()
+    {
+        const string layer = "Formula \"Bid\": output 1: some counters the draw can pick may have no layer \"Damage\"; a run that draws one is refused";
+        const string mask = "Formula \"Bid\": output 1: some counters the draw can pick may have no mask; a run that draws one is refused";
+        FormulaOutput SetLayer(string name = "Damage") => new() { Target = OutputTarget.Piece, PieceVariable = "Hits", Action = OutputAction.SetLayer, Layer = name, Expr = "1" };
+        FormulaOutput SetMask() => new() { Target = OutputTarget.Piece, PieceVariable = "Hits", Action = OutputAction.SetMask, Expr = "1" };
+        Has(Warnings(WithBinding(Draw(), SetLayer())), layer);                                                 // every counter
+        Has(Warnings(WithBinding(Draw(filter: "Strength > 0"), SetLayer())), layer);                           // filter does not test the layer
+        Has(Warnings(WithBinding(Draw(filter: "Strength > 0 or layer(\"Damage\") >= 0"), SetLayer())), layer);   // an "or" may skip it
+        Has(Warnings(WithBinding(Draw(filter: "layer(\"Other\") >= 0"), SetLayer())), layer);                 // another layer
+        Has(Warnings(WithBinding(Draw(filter: "not (layer(\"Damage\") >= 0 and Strength > 0)"), SetLayer())), layer);
+        // a filter that always reads the layer leaves out every counter without it (a missing value does not match)
+        Assert.DoesNotContain(Warnings(WithBinding(Draw(filter: "layer(\"damage\") >= 0"), SetLayer())), m => m.Contains("may have no", StringComparison.Ordinal));
+        Assert.DoesNotContain(Warnings(WithBinding(Draw(filter: "Strength > 0 and layer(\"Damage\") < 3"), SetLayer())), m => m.Contains("may have no", StringComparison.Ordinal));
+        // no filter can test for a mask, so a SetMask on drawn counters always warns
+        Has(Warnings(WithBinding(Draw(filter: "Strength > 0"), SetMask())), mask);
+        // writes and Remove need no trait; a Piece binding (one counter the player picks) is not a draw
+        Assert.DoesNotContain(Warnings(WithBinding(Draw(), HitOut())), m => m.Contains("may have no", StringComparison.Ordinal));
+        Assert.DoesNotContain(Warnings(WithBinding(Draw() with { Kind = BindingKind.Piece, DrawCount = null }, SetLayer())), m => m.Contains("may have no", StringComparison.Ordinal));
+    }
 }

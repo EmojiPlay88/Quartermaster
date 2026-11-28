@@ -200,6 +200,37 @@ public sealed class FormulaWindowTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Output_lines_shown_under_working()
+    {
+        var w = Game(Difficulty.FullyAuto);
+        var win = Open(w, "f-water", PhaseFixture.RedOne);
+        Assert.Equal("Water 10 → 9", win.OutputsText);
+        Assert.True(win.OutputsVisible);
+        var add = Open(w, "f-add", PhaseFixture.RedOne);
+        Assert.Equal("", add.OutputsText);   // no result yet: no output lines
+        Assert.False(add.OutputsVisible);
+    }
+
+    [AvaloniaFact]
+    public void Output_lines_of_a_draw_never_name_the_counters()
+    {
+        var w = Game(Difficulty.FullyAuto);
+        var s = w.Session!;
+        s.UpdateRules(p => p with
+        {
+            Formulas = p.Formulas.Append(new FormulaDef
+            {
+                Id = "f-draw", Name = "Shore battery", Text = "Hits",
+                Bindings = new() { new VariableBinding { Variable = "Hits", Kind = BindingKind.Draw, DrawCount = "2" } },
+                Outputs = new() { new FormulaOutput { Target = OutputTarget.Piece, PieceVariable = "Hits", Property = "water", Op = OutputOp.Subtract, Expr = "Hits" } },
+            }).ToList(),
+        });
+        Pump();
+        var win = Open(w, "f-draw", PhaseFixture.RedOne);
+        Assert.Equal("Water of the drawn counters changes", win.OutputsText);
+    }
+
+    [AvaloniaFact]
     public void Same_formula_piece_run_focuses_existing()
     {
         var w = Game(Difficulty.FullyAuto);
