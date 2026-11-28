@@ -108,3 +108,8 @@ on the same pieces with `AllianceId` cleared, and `Ownership.SideMapBuilds == 0`
 
 Changing ownership, stamps, seats or handover; alliance-aware `phaseside()`; an opt-in flag; sharing the B2 pass side map with unit
 selection; the WinForms App's tooltip.
+
+## Addendum (Task 3), decided 2026-11-28 by the controller
+
+- A met victory condition whose side has allies records the whole alliance as winners (condition side first, then allies in pack order); a blank message defaults to `{alliance} wins`. Without alliances: unchanged (one winner, `{side name} wins`).
+- `Players.MaxPlayers` 6 → 12, so a pack with many allied sides can seat one player per side. Protocol unchanged.

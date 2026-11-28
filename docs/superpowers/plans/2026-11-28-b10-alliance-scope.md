@@ -92,3 +92,15 @@ Read `.superpowers/sdd/2026-11-28-b10-alliance-scope/global-constraints.md` (git
 - [ ] **Step 3: Run** Step 1 → PASS; `dotnet test tests/Quartermaster.Docs.Tests -c Release --filter "FullyQualifiedName~WikiLint"` → PASS; `grep -n "does not fire for it" docs/wiki/*.md` → nothing.
 - [ ] **Step 4: Full runs**, one at a time: Rules, Vassal, Core, Render, Desktop, Docs, Net → PASS (flaky: re-run once, report both). Build `src/Quartermaster.App -c Release`.
 - [ ] **Step 5: Commit** `docs: B10 phase entries reach allies' counters`
+
+### Task 3: Alliance victory winners and seat cap — model: opus
+
+Added 2026-11-28 by the controller (downstream need found while planning a pack that splits each team into five allied sides; spec section "Addendum (Task 3)").
+
+**Files:**
+- Modify: where `EndGame`/`GameOverState.Winners` is built from a met `VictoryCondition` (find the call site of `GameEnd.Check` that issues `EndGame`): winners = the condition's side, then its allies from `SideFacts.Allies(pack, v.SideId)` in pack side order (condition side first); no alliance → exactly `[v.SideId]` as today.
+- Modify: `GameEnd.ResultText` blank-message default: with allies `{alliance} wins` (the alliance name as typed on the condition side's `AllianceId`, trimmed); without, unchanged `{side name} wins`.
+- Modify: `src/Quartermaster.Core/Players.cs` `MaxPlayers` 6 → 12. Check every use (PlayersEditor, PlayersEditModel, HostSession clamp, OnlineLobbyModel, Relay `Rooms` clamp 99) still holds; protocol unchanged (MaxPlayers already an int on the wire). Tests asserting the text use the constant.
+- Test: `tests/Quartermaster.Core.Tests/AllianceVictoryTests.cs` (invented Northern Pact fixture from the constraints file): `Victory_winners_include_allies_in_pack_order` (condition side `north-supply` → `north-supply`, `north-land`, `north-air` ... pack order after the condition side); `Victory_without_alliance_single_winner` (byte-equal command to before: Winners `["south"]`); `Result_text_default_names_alliance`; `Result_text_default_without_alliance_unchanged`; `Former_ids_still_map_winners` (FormerSides on an EndGame naming a former id). Render: `Twelve_players_allowed` (`Players.Validate` with 12 players, 12 sides OK; 13 → `At most 12 players are allowed.`); existing PlayersEditModel `Add_disabled_at_MaxPlayers` passes unchanged.
+- Wiki: `docs/wiki/Making-a-Rules-Pack.md` Alliances: one bullet `A victory condition of a side in an alliance makes the whole alliance win; a blank message reads "{alliance} wins".`; every "at most 6 players" text → 12 (grep `6 players` / `six players` in docs/wiki).
+- [ ] Step 1: failing tests → RED. Step 2: implement. Step 3: focused GREEN, then full Core, Render, Desktop, Docs one at a time; build App. Step 4: commit `feat: alliance victory winners; up to 12 players`.
