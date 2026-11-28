@@ -179,6 +179,23 @@ public class GameEndControllerTests : IDisposable
     }
 
     [Fact]
+    public void Victory_of_an_alliance_records_every_ally()
+    {
+        // B10 Task 3: Red and Blue share the invented "Tide Pact"; Blue's condition makes both win, Blue first; a blank message names the pact.
+        var (s, c) = Make(Difficulty.FullyAuto, p => Ends(null, V("v-river", "River >= 1", "blue"))(p with
+        {
+            Sides = p.Sides.Select(x => x with { AllianceId = x.Id == "red" ? "Tide Pact" : " tide pact " }).ToList(),
+        }));
+        c.Start();
+        SetRiver(s, 1);
+        Assert.Null(c.Advance());
+        var over = s.Game!.State.GameOver!;
+        Assert.Equal(new[] { "blue", "red" }, over.Winners);
+        Assert.Equal("tide pact wins", over.Text);
+        Assert.Equal("Game over: tide pact wins", s.Game.State.Log[^1].Text);
+    }
+
+    [Fact]
     public void Victory_on_start_ends_game()
     {
         var (s, c) = Make(Difficulty.FullyAuto, Ends(null, V("v-any", "turn() >= 1")));

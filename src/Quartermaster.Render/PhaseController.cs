@@ -852,9 +852,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         return true;
     }
 
-    /// <summary>Ends the game with <paramref name="won"/>'s result (null: the last turn was played, no winner).</summary>
+    /// <summary>Ends the game with <paramref name="won"/>'s result (null: the last turn was played, no winner); an alliance wins together
+    /// (<see cref="GameEnd.Winners"/>, B10).</summary>
     private void EndGameBy(RulesPack pack, VictoryCondition? won) =>
-        Exec(new EndGame(GameEnd.ResultText(pack, won), string.IsNullOrWhiteSpace(won?.SideId) ? null : new[] { won!.SideId! }, won?.Id));
+        Exec(new EndGame(GameEnd.ResultText(pack, won), GameEnd.Winners(pack, won), won?.Id));
 
     private static readonly System.Text.RegularExpressions.Regex VictoryNumber = new(@"^Victory condition (\d+) ");
 

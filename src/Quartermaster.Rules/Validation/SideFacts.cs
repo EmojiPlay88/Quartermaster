@@ -4,7 +4,8 @@ namespace Quartermaster.Rules;
 /// What the pack says about renamed sides (former ids) and alliances. <see cref="Held"/> is the one place a player's held side set is formed:
 /// it is called only by ModuleSession.SetViewSides (and its recompute on Commit/UpdateRules/LoadGuestRules), ModuleSession.ApplySnapshot,
 /// IntentExecutor.Execute, HostSession.SendSnapshot and PackHarness.ViewFor. No rule reads an alliance itself; <see cref="Allies"/> (B10) is
-/// read only by Sequencer.Covers (the units of a phase) and PhaseController.OnMoveCore (whether to build its side map).
+/// read only by Sequencer.Covers (the units of a phase), PhaseController.OnMoveCore (whether to build its side map) and
+/// GameEnd.Winners / GameEnd.ResultText (an alliance wins together).
 /// </summary>
 public static class SideFacts
 {

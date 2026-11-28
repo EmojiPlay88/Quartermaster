@@ -26,7 +26,7 @@ This tab needs an open game. Without one it says "Open a game first".
 ![The Game tab](images/settings-game.png)
 
 - **Difficulty**: Hardcore, Semi-automatic or Fully automatic (see [Formula dialog](Window-Formula-Dialog)). A change takes effect from the next calculation; open formula dialogs and batch grids close, and waiting calculations stay in the phase panel.
-- **Players**: the same player list as in the [new game dialog](Window-Launcher#new-game-dialog). Each row has a name, a tick box for each side and **Remove**; **Add player** adds a row. Each side is held by exactly one player, with at most 6 players. With two or more players the game is played hot-seat (see [Multiplayer](Window-Multiplayer#hot-seat-hand-over)).
+- **Players**: the same player list as in the [new game dialog](Window-Launcher#new-game-dialog). Each row has a name, a tick box for each side and **Remove**; **Add player** adds a row. Each side is held by exactly one player, with at most 12 players. With two or more players the game is played hot-seat (see [Multiplayer](Window-Multiplayer#hot-seat-hand-over)).
 
 ## Display
 
