@@ -15,7 +15,7 @@ public static class Limits
     public const int MaxSides = 16;
     public const int LobbiesPerIp = 20;
     public const int ReservationsPerIp = 20;
-    public const int MembersPerRoom = 7; // the host's slot always counts, present or not
+    public const int MembersPerRoom = 13; // host + 12 guests; the host's slot always counts, present or not. Core's Players.MaxPlayers (12) + 1 spare; Relay does not reference Core, keep in step
     public const int ConnectionsPerIp = 32;
     /// <summary>Largest frame accepted before Hello.</summary>
     public const int PreHelloMaxFrame = 4 * 1024;

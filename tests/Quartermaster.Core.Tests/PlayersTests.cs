@@ -75,8 +75,8 @@ public class PlayersTests
         Assert.Contains("Red", Players.Validate([P("p1", "Ann", "red", "blue"), P("p2", "Bob", "red")], pack)); // double-held
         Assert.Contains("unique", Players.Validate([P("p1", "Ann", "red"), P("p2", "ann", "blue")], pack));  // duplicate names
         Assert.NotNull(Players.Validate([P("p1", "", "red"), P("p2", "Bob", "blue")], pack));              // empty name
-        var seven = Enumerable.Range(1, 7).Select(i => P("p" + i, "N" + i, i == 1 ? "red" : i == 2 ? "blue" : "x")).ToList();
-        Assert.Contains("6", Players.Validate(seven, pack));
+        var tooMany = Enumerable.Range(1, Players.MaxPlayers + 1).Select(i => P("p" + i, "N" + i, i == 1 ? "red" : i == 2 ? "blue" : "x")).ToList();
+        Assert.Equal($"At most {Players.MaxPlayers} players are allowed.", Players.Validate(tooMany, pack));
     }
 
     [Fact]

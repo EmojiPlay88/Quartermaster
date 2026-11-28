@@ -852,9 +852,10 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
         return true;
     }
 
-    /// <summary>Ends the game with <paramref name="won"/>'s result (null: the last turn was played, no winner).</summary>
+    /// <summary>Ends the game with <paramref name="won"/>'s result (null: the last turn was played, no winner); an alliance wins together
+    /// (<see cref="GameEnd.Winners"/>, B10).</summary>
     private void EndGameBy(RulesPack pack, VictoryCondition? won) =>
-        Exec(new EndGame(GameEnd.ResultText(pack, won), string.IsNullOrWhiteSpace(won?.SideId) ? null : new[] { won!.SideId! }, won?.Id));
+        Exec(new EndGame(GameEnd.ResultText(pack, won), GameEnd.Winners(pack, won), won?.Id));
 
     private static readonly System.Text.RegularExpressions.Regex VictoryNumber = new(@"^Victory condition (\d+) ");
 
@@ -963,14 +964,18 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         var distances = new Dictionary<string, double>();
         var bySide = Sequencer.ActingSide(pack, phase) != null;
-        Func<PieceInstance, string?>? owner = null;   // built once per call, only when an Other / Any entry needs it
+        // Built once per call: before the loop when the phase side has allies (B10: every entry's selection shares it), else only when an
+        // Other / Any entry groups its runs by owner.
+        var allied = SideFacts.Allies(pack, phase.SideId) != null;
+        Func<PieceInstance, string?>? owner = allied ? Ownership.PieceSides(g.State, pack) : null;
         foreach (var e in phase.OnMove)
         {
             if (e == null) continue;
             var f = FindFormula(phase, e.FormulaId);
             if (f == null) continue;
             if (BadFilter(phase, f, e.UnitFilter)) continue;
-            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model).Where(p => records.ContainsKey(p.Id)).ToList();
+            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model, owner)
+                .Where(p => records.ContainsKey(p.Id)).ToList();
             if (!bySide || e.FiresFor == MoveSide.Acting)
             {
                 Apply(f, "move", MovedUnits(moved, records, distances), queued);

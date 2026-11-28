@@ -234,22 +234,40 @@ public class RelayTests
         await g4.Send(new JoinRoom(openCode, Verifier("", openCode)));
         await g4.Receive<Joined>();
 
-        // Seven members per room (host + 6).
-        for (int i = 0; i < 5; i++)
+        // Thirteen places per room (host + 12 guests): see Limits.MembersPerRoom.
+        for (int i = 0; i < 11; i++)
         {
             var g = await relay.Connect("guest", "198.51.100.1");
             await g.Send(new JoinRoom(openCode, Verifier("", openCode)));
             await g.Receive<Joined>();
         }
-        var eighth = await relay.Connect("guest", "198.51.100.1");
-        await eighth.Send(new JoinRoom(openCode, Verifier("", openCode)));
-        Assert.Contains("full", Assert.IsType<Refused>(await eighth.Receive()).Reason);
+        var fourteenth = await relay.Connect("guest", "198.51.100.1");
+        await fourteenth.Send(new JoinRoom(openCode, Verifier("", openCode)));
+        Assert.Contains("full", Assert.IsType<Refused>(await fourteenth.Receive()).Reason);
 
         // The host's slot stays reserved while the host is away.
         await openHost.DisposeAsync();
         await g4.Receive<HostLeft>();
-        await eighth.Send(new JoinRoom(openCode, Verifier("", openCode)));
-        Assert.Contains("full", Assert.IsType<Refused>(await eighth.Receive()).Reason);
+        await fourteenth.Send(new JoinRoom(openCode, Verifier("", openCode)));
+        Assert.Contains("full", Assert.IsType<Refused>(await fourteenth.Receive()).Reason);
+    }
+
+    [Fact]
+    public async Task Room_SeatsTwelvePlayers_ThenRefusesWithFullText()
+    {
+        await using var relay = await Start();
+        var host = await relay.Connect("host");
+        var code = await CreateRoom(host, "");
+        // Host + 11 guests = Players.MaxPlayers (12) players, plus one spare place.
+        for (int i = 0; i < 12; i++)
+        {
+            var g = await relay.Connect("guest", "198.51.100.1");
+            await g.Send(new JoinRoom(code, Verifier("", code)));
+            await g.Receive<Joined>();
+        }
+        var next = await relay.Connect("guest", "198.51.100.1");
+        await next.Send(new JoinRoom(code, Verifier("", code)));
+        Assert.Equal("This game is full.", Assert.IsType<Refused>(await next.Receive()).Reason);
     }
 
     [Fact]

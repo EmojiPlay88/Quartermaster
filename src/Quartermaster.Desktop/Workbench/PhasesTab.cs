@@ -24,7 +24,7 @@ public sealed class PhasesTab : UserControl, IRuleRefEditor
     const string PhasesTitle = "Phases";
     internal const string SealedTip = "Every side answers this row in secret; the answers are applied together, in side order, once every side has answered.";
     internal const string AsksSideTip = "The side whose player answers this run, in every difficulty. Only in a phase without a side, with For each = Once. (none) = no one is asked.";
-    internal const string AllianceTip = "Sides with the same alliance see what each other sees and may act on each other's units and in each other's phases. Blank = no alliance.";
+    internal const string AllianceTip = "Sides with the same alliance see what each other sees, may act on each other's units and in each other's phases, and a phase's formulas for each unit and on move reach every allied side's counters. Blank = no alliance.";
     internal const string FormerIdsTip = "Ids this side had in older versions of the pack, separated by commas. Saved games that use them read as this side.";
     const string NoSide = "(none)";
     static readonly string[] FiresForNames = ["Acting side", "Other side", "Any side"];   // in MoveSide order

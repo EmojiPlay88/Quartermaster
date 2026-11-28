@@ -7,7 +7,7 @@ public sealed record PlayerDef(string Id, string Name, IReadOnlyList<string> Sid
 /// <summary>Who plays which side. Empty player list = solo: one implicit player holding every side.</summary>
 public static class Players
 {
-    public const int MaxPlayers = 6;
+    public const int MaxPlayers = 12;
 
     /// <summary>Copy without null players, null side lists or null side entries (never throws).</summary>
     public static List<PlayerDef> Clean(IEnumerable<PlayerDef?>? players) =>

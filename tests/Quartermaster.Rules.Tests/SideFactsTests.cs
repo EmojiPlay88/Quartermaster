@@ -79,4 +79,28 @@ public class SideFactsTests
         Assert.Equal(1, SideFacts.Groups(P(S("a", "X"), S("b", " x "))));
         Assert.Equal(3, SideFacts.Groups(P(S("a", "X"), S("b", "x"), S("c"), S("d", "Y"))));
     }
+
+    [Fact]
+    public void Allies_lists_alliance_members_case_insensitive()
+    {
+        var p = P(S("north-land", "Northern Pact"), S("south"), S("north-supply", " northern pact "), S("north-air", "Northern Pact"));
+        var allies = SideFacts.Allies(p, "north-land")!;
+        Assert.Equal(new[] { "north-air", "north-land", "north-supply" }, allies.OrderBy(x => x, StringComparer.Ordinal));
+        Assert.True(allies.Contains("north-supply"));
+        Assert.False(allies.Contains("North-Supply"));   // ordinal ids
+        Assert.Equal(new[] { "north-air", "north-land", "north-supply" }, SideFacts.Allies(p, "north-supply")!.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Allies_null_without_alliance_unknown_side_or_lone_alliance()
+    {
+        var p = P(S("north-land", "Northern Pact"), S("south"), S("north-supply", " northern pact "), S("east", "Lone League"), S("west", "  "));
+        Assert.Null(SideFacts.Allies(p, "south"));      // no alliance
+        Assert.Null(SideFacts.Allies(p, "west"));       // blank alliance
+        Assert.Null(SideFacts.Allies(p, "gone"));       // unknown side
+        Assert.Null(SideFacts.Allies(p, null));
+        Assert.Null(SideFacts.Allies(null, "north-land"));
+        Assert.Null(SideFacts.Allies(p, "east"));       // a lone alliance
+        Assert.Null(SideFacts.Allies(P(S("north-air", "Northern Pact"), S("south")), "north-air"));
+    }
 }

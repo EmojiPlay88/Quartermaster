@@ -68,15 +68,34 @@ public static class GameEnd
     }
 
     /// <summary>
-    /// The result text of a game ended by <paramref name="v"/>: its <see cref="VictoryCondition.Message"/>; blank → <c>{side name} wins</c>;
-    /// blank and no side → <c>the game has ended</c>. Null (the last turn played, no victory) → <see cref="LastTurnText"/>.
+    /// The winning side ids of a game ended by <paramref name="v"/> (B10): null when it has no side (or <paramref name="v"/> is null);
+    /// without allies (<see cref="SideFacts.Allies"/> null) exactly <c>[v.SideId]</c>; else the condition's side first, then its allies in
+    /// pack side order.
+    /// </summary>
+    public static IReadOnlyList<string>? Winners(RulesPack pack, VictoryCondition? v)
+    {
+        if (string.IsNullOrWhiteSpace(v?.SideId)) return null;
+        var side = v.SideId;
+        if (SideFacts.Allies(pack, side) is not { } allies) return new[] { side };
+        var list = new List<string> { side };
+        foreach (var s in pack.Sides)
+            if (s != null && s.Id != side && allies.Contains(s.Id) && !list.Contains(s.Id)) list.Add(s.Id);
+        return list;
+    }
+
+    /// <summary>
+    /// The result text of a game ended by <paramref name="v"/>: its <see cref="VictoryCondition.Message"/>; blank → <c>{alliance} wins</c>
+    /// when its side has allies (the alliance as typed on that side, trimmed; B10), else <c>{side name} wins</c>; blank and no side →
+    /// <c>the game has ended</c>. Null (the last turn played, no victory) → <see cref="LastTurnText"/>.
     /// </summary>
     public static string ResultText(RulesPack pack, VictoryCondition? v)
     {
         if (v == null) return LastTurnText;
         if (!string.IsNullOrWhiteSpace(v.Message)) return v.Message.Trim();
         if (string.IsNullOrWhiteSpace(v.SideId)) return "the game has ended";
-        var name = pack.Sides?.FirstOrDefault(x => x != null && x.Id == v.SideId)?.Name;
+        var sideDef = pack.Sides?.FirstOrDefault(x => x != null && x.Id == v.SideId);
+        if (SideFacts.Allies(pack, v.SideId) != null && SideFacts.Alliance(sideDef) is { } alliance) return $"{alliance} wins";
+        var name = sideDef?.Name;
         return $"{(string.IsNullOrWhiteSpace(name) ? v.SideId : name)} wins";
     }
 }

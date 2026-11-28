@@ -62,6 +62,18 @@ public class PlayersEditModelTests
     }
 
     [Fact]
+    public void Twelve_players_allowed()
+    {
+        // B10 Task 3: a pack with many allied sides seats one player per side, up to 12.
+        var names = Enumerable.Range(1, 13).Select(i => "Side" + i).ToArray();
+        var players = Enumerable.Range(1, 12).Select(i => new PlayerDef("p" + i, "Player " + i, new[] { "side" + i })).ToList();
+        Assert.Equal(12, Players.MaxPlayers);
+        Assert.Null(Players.Validate(players, Pack(names.Take(12).ToArray())));
+        players.Add(new PlayerDef("p13", "Player 13", new[] { "side13" }));
+        Assert.Equal("At most 12 players are allowed.", Players.Validate(players, Pack(names)));
+    }
+
+    [Fact]
     public void Removed_id_not_reused()
     {
         var m = new PlayersEditModel(Three(), Array.Empty<PlayerDef>());

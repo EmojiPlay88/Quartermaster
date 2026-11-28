@@ -178,7 +178,7 @@ public sealed class B8WorkbenchTests : IDisposable
     public void Tooltips_text()
     {
         var tab = Phases(Session());
-        Assert.Equal("Sides with the same alliance see what each other sees and may act on each other's units and in each other's phases. Blank = no alliance.", ToolTip.GetTip(tab.AllianceBox));
+        Assert.Equal("Sides with the same alliance see what each other sees, may act on each other's units and in each other's phases, and a phase's formulas for each unit and on move reach every allied side's counters. Blank = no alliance.", ToolTip.GetTip(tab.AllianceBox));
         Assert.Equal("Ids this side had in older versions of the pack, separated by commas. Saved games that use them read as this side.", ToolTip.GetTip(tab.FormerIdsBox));
         Assert.Equal("Merge into…", tab.SideMergeButton.Content);
     }

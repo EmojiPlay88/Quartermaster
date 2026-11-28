@@ -297,7 +297,7 @@ Some work belongs at the end of a phase. In **On end: run formulas**, add rows j
 
 ### Moves by the other side
 
-On **North Movement**, give an **On move** row **Fires for** **Other side**, and the formula runs when a Southern Compact counter moves during the Northern League's phase (a reaction move). **Acting side** is the default; **Any side** reacts to every move. To limit an entry to moves on one map (for example, to ignore drags into an off-board box), filter on `map()`: `map() == "Main Map"`. See [Phases](Window-Phases#moves-by-the-other-side).
+On **North Movement**, give an **On move** row **Fires for** **Other side**, and the formula runs when a Southern Compact counter moves during the Northern League's phase (a reaction move). **Acting side** is the default; **Any side** reacts to every move. To limit an entry to moves on one map (for example, to ignore drags into an off-board box), filter on `map()`: `map() == "Main Map"`. See [Phases](Window-Phases#moves-by-the-other-side). With alliances, **Other side** means counters outside the phase side's alliance; see [Alliances](#alliances).
 
 ### Formulas limited to phases
 
@@ -778,10 +778,13 @@ An invented example: the Northern League and the Hill Clans both have the allian
 - sees what a Clans player sees: the Clans' Private `Supply` values, their holders, their lines, dice rolls and asked runs, their checklists, their maps and their side alerts;
 - moves the Clans' barges, runs formulas on their counters and changes their holders' values;
 - acts in the Clans' phase: runs its formulas, ticks its checklist, acknowledges its warnings and presses Next Phase. This also holds the other way round.
+- has the phase formulas of either side reach both sides' counters: a start or end row with **For each** set to units, a phase warning about units, and an **On move** row set to **Acting side** run for the League's and the Clans' counters alike in a League or Clans phase; **Other side** means counters outside the alliance (and counters of no side).
+
+A victory condition of a side in an alliance makes the whole alliance win; a blank message reads "{alliance} wins" (when another side shares the alliance).
 
 The Southern Compact sees and does exactly what it did before: it sees neither side's private values and cannot act for either.
 
-What does not change: a counter, holder or map still belongs to one side (`side()`, `phaseside()` and a side's units filter name that side only); each side is still held by one seat; victory winners; and a move by an ally is a move by another side, so an On move row set to **Acting side** does not fire for it. In hot-seat the hand-over still goes to the player holding the phase's side; an ally at the screen may act meanwhile. In an ally's phase a run is stamped with the ally's side, so both allies see it and nobody else does. A sealed phase still asks one run per side, and a side's window opens by itself only for that side's own player (in hot-seat the screen is still passed to each side's player in turn). Any player of the alliance may open a side's run from the phase panel and answer it, [`askside()`](Formula-Reference#askside) is that run's side, and allies see each other's answers before release; other sides never do.
+What does not change: a counter, holder or map still belongs to one side (`side()`, `phaseside()` and a side's units filter name that side only) and each side is still held by one seat. In hot-seat the hand-over still goes to the player holding the phase's side; an ally at the screen may act meanwhile. In an ally's phase a run is stamped with the ally's side, so both allies see it and nobody else does. A sealed phase still asks one run per side, and a side's window opens by itself only for that side's own player (in hot-seat the screen is still passed to each side's player in turn). Any player of the alliance may open a side's run from the phase panel and answer it, [`askside()`](Formula-Reference#askside) is that run's side, and allies see each other's answers before release; other sides never do.
 
 Allies are worked out where a player's sides become what that player may see and do, so every window follows at once, including a changed alliance in the Workbench. Online, the host checks every guest action with the allies included.
 

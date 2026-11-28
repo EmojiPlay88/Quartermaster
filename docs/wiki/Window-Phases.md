@@ -74,9 +74,11 @@ An **On move** entry has a **Fires for** setting that says whose moves it reacts
 
 | Fires for | Reacts to |
 |---|---|
-| **Acting side** | Counters of the phase's side (what older packs always did) |
-| **Other side** | Counters that do not belong to the phase's side |
+| **Acting side** | Counters of the phase's side and its allies (what older packs always did, when no side has an alliance) |
+| **Other side** | Counters that belong neither to the phase's side nor to an ally (and counters of no side) |
 | **Any side** | Every moved counter |
+
+Who a counter belongs to is the first side, in pack order, whose units filter matches it; the phase side's own filter always counts.
 
 A phase with no side treats all three alike: every moved counter fires the entry. The run is made for the counter's owner: it is logged under that player's side, and a run that waits for input is offered to that player, as if they had started it by hand.
 
@@ -137,7 +139,7 @@ When a phase lists sides that also act in it, the phase panel shows `Reacting: {
 
 ### Phases of an ally
 
-A player may act in a phase whose side is an ally's (same alliance in the rules pack): run its formulas, tick its checklist, acknowledge its warnings and press Next Phase. The hand-over in hot-seat still goes to the player holding the phase's side. A run made there is stamped with the ally's side. See [Alliances](Making-a-Rules-Pack#alliances).
+A player may act in a phase whose side is an ally's (same alliance in the rules pack): run its formulas, tick its checklist, acknowledge its warnings and press Next Phase. The hand-over in hot-seat still goes to the player holding the phase's side. A run made there is stamped with the ally's side. A phase's formulas for each unit, its warnings about units and its On move rows also reach the counters of every side allied to the phase's side. See [Alliances](Making-a-Rules-Pack#alliances).
 
 ### Due list
 
