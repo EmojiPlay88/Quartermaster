@@ -181,6 +181,11 @@ Owner expression:
 - error `Holder "{name}": owner expression cannot use {fn}()` (each forbidden function and aggregate once)
 - warning `Holder "{name}": owner expression gives "{v}", which names no side` (a constant that folds, `ConstantContext`)
 - warning `Holder "{name}": the pack has no sides, so the owner expression is not used`
+- error `Holder "{name}": owner expression reads "{p}", which is not a holder property` (a Pieces property)
+- error `Holder "{name}": owner expression reads "{p}", which neither this holder nor the global holder keeps` (at run time the owner
+  falls back to the fixed one)
+- error `Holder "{name}": owner expression refers to unknown table "{t}"`
+- error `Holder "{name}": owner expression keyed() cannot name a holder`, and the keyed() check tails prefixed `owner expression `
 Holder choices:
 - error `variable "{v}" has holder choices but is not a Holder binding`
 - error `variable "{v}" offers unknown holder "{id}"`
@@ -201,6 +206,12 @@ Draws:
 - error `output {n}: {action} cannot act on the counters of draw "{v}"` (Place, Reveal)
 - warning `variable "{v}" draws at random but no output acts on the drawn counters`
 - error `start entry {n} is sealed, but formula "{f}" draws at random` (prefix `Phase "{name}": `, as B7's sealed texts)
+- error `output {n}: an output on the drawn counters cannot roll dice()` (its value, key, margin or pick-by)
+- warning `output {n}: some counters the draw can pick may have no layer "{L}"; a run that draws one is refused` (unless a top-level
+  "and" term of the pool filter always reads `layer("{L}")`; a read inside an aggregate's filter does not count)
+- warning `output {n}: some counters the draw can pick may have no mask; a run that draws one is refused`
+- warning `variable "{v}": its draw filter reads values another side may not see; the draw is made from every matching counter, and
+  players who cannot see those values see it masked` (two or more groups)
 - A Draw variable is accepted wherever B3 accepts a Piece variable on an output (the existing message `output {n} names variable "{v}",
   which is not a Piece binding` is unchanged and not shown for a Draw variable).
 `FormulaVariables.Sources` includes `DrawCount` (so the reference, cycle and masking checks see it).
@@ -208,7 +219,8 @@ Draws:
 ### Runtime messages (exact)
 `Choose one of the listed holders`; `No holder to choose`; `The draw count for {Var} must be a whole number from 0 to 1000`;
 `{Prop} of {name} must be a whole number from 0 to 1000 to draw from`; on a player view a Draw whose pool reads data the view lacks is
-missing `Hidden from this player` (the host decides).
+missing `Hidden from this player` (the host decides); an output error on one drawn counter is
+`Formula "{f}": output {n} cannot act on one of the drawn counters` (it names no counter, also in automatic and ask-run logs).
 
 ### Workbench (Avalonia Desktop; the WinForms App builds only)
 - Visibility tab, holders grid: column `Owner expression` (text, weight 160) after `Owner side`; tooltip `The holder's owner as play goes
@@ -249,7 +261,11 @@ All additive: `HolderDef.OwnerExpr`; `BindingKind.Draw` (appended); `VariableBin
 `FormulaOutput.HolderVariable`; `HolderOwners`; `Ownership.SideOfHolder(string, RulesPack, GameState?)`, `Ownership.HolderSides`;
 `HiddenValues.HolderValueHidden(GameState?, RulesPack, string, PropertyDef?, Func<string, bool>)`; `HolderChoices`, `HolderChoice`;
 `FormulaTrace.DrawRolls`, `FormulaTrace.Draws`, `DrawPreview`, `OutputPreview.Draw`; `FormulaMasking.DrawInput`;
-`VisibilityEdit.SetHolderOwnerExpr`; `FormulaEdit.WithHolderChoices/WithDrawCount/WithHolderVariable`. No signature changes.
+`VisibilityEdit.SetHolderOwnerExpr`; `FormulaEdit.WithHolderChoices/WithDrawCount/WithHolderVariable`. Added while building (also
+additive): `FormulaMasking.DrawErrorsHidden/DrawsInChain/ChainHidden/IsDrawKey/OutputLines/DrawnCountersText`;
+`FormulaDialogModel.ChainMasked/DrawTooltip`; `DialogView.OutputLines`; `RunRequest.SkipDrawOutputs`; `PieceEffect.Draw`;
+`FormulaVariables.DrawBindingsHidden/FilterMayHide`; `FormulaEdit.WithKind/FormatHolderChoices/TargetOptions(RulesPack, VariableBinding)/
+OneEach/ChosenHolderTarget/DrawDetailsHint`. No signature changes.
 Behavioural: none for packs without the new fields. A downstream `switch` over `BindingKind` with a `_` arm silently maps `Draw`; worth a
 grep downstream.
 

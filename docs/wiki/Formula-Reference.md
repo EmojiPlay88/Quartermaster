@@ -796,6 +796,7 @@ These come from the bindings and outputs rather than the formula text.
 | Choose one of the listed holders | A Holder binding with Holder choices got a holder that is not on the player's list (its owner changed, or the label was wrong). | Pick again from the list. |
 | No holder to choose | None of the listed holders is one the player may act on now. | Run the formula when the player's side holds one, or list another holder. |
 | The draw count for Hits must be a whole number from 0 to 1000 | A Draw binding's **Draw count** gave a number that is negative, over 1000, not whole or not a number. | Fix the expression. |
+| Formula "Shore battery": output 1 cannot act on one of the drawn counters | An output on a Draw variable failed on one of the drawn counters (for example a Set layer on a counter without the layer). The text never says which counter. | Narrow the Draw's filter to counters the output can act on, or fix the output. |
 | Boats of SC 3 Barge must be a whole number from 0 to 1000 to draw from | A counter in a Draw's pool has a weight outside 0 to 1000 or not whole. | Fix the counter's value or the filter. |
 | An output writes the placed piece, but nothing was placed | A Placed output ran but the formula's Place output did not place a counter. | Give the formula one Place output. |
 | Palette entry "Markers/Wreck" was not found in the module | A Place output names a palette entry the module does not have. | Pick a name from the **Palette entry** list. |
