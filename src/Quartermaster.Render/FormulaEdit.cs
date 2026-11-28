@@ -46,7 +46,8 @@ public static class FormulaEdit
     /// <summary>True when the binding holds anything beyond a default, unconfigured Input.</summary>
     public static bool IsConfigured(VariableBinding b) =>
         b.Kind != BindingKind.Input || b.PieceFilter != null || b.Property != null || b.HolderId != null || b.TableId != null || b.RowExpr != null || b.ColExpr != null
-        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null || b.AlwaysAsk || b.When != null || b.DiceCountExpr != null || b.ChoicesTable != null || b.ChoicesFilter != null;
+        || b.Min != null || b.Max != null || b.Choices != null || b.DiceCount != null || b.DiceSides != null || b.Caption != null || b.AutoValue != null || b.AlwaysAsk || b.When != null || b.DiceCountExpr != null || b.ChoicesTable != null || b.ChoicesFilter != null
+        || b.HolderChoices != null || b.DrawCount != null || b.SameHex;
 
     /// <summary>Bindings whose variable no longer appears in the text.</summary>
     public static IReadOnlyList<VariableBinding> Stale(FormulaDef f, IReadOnlyList<string> variables) =>
@@ -84,9 +85,55 @@ public static class FormulaEdit
     public static FormulaDef SetBinding(FormulaDef f, string variable, Func<VariableBinding, VariableBinding> edit) =>
         f with { Bindings = f.Bindings.Select(b => b.Variable == variable ? edit(b) : b).ToList() };
 
-    /// <summary>Changes the kind and clears everything specific to the old kind; the caption and the "Only when" condition are kept.</summary>
+    /// <summary>
+    /// Changes the kind and clears everything specific to the old kind; the caption and the "Only when" condition are kept. B9: Piece and Draw
+    /// share the pool (which counters, the property and "same hex"), so a change between them keeps it (<see cref="WithKind"/>).
+    /// </summary>
     public static FormulaDef SetKind(FormulaDef f, string variable, BindingKind kind) =>
-        SetBinding(f, variable, b => b.Kind == kind ? b : new VariableBinding { Variable = b.Variable, Kind = kind, Caption = b.Caption, When = b.When });
+        SetBinding(f, variable, b => b.Kind == kind ? b
+            : IsPool(b.Kind) && IsPool(kind) ? WithKind(b, kind)
+            : new VariableBinding { Variable = b.Variable, Kind = kind, Caption = b.Caption, When = b.When });
+
+    private static bool IsPool(BindingKind k) => k is BindingKind.Piece or BindingKind.Draw;
+
+    /// <summary>B9: sets the kind and clears the fields that kind does not use: holder choices off Holder, the draw count off Draw, "same hex" off Piece and Draw.</summary>
+    public static VariableBinding WithKind(VariableBinding b, BindingKind kind) =>
+        b with
+        {
+            Kind = kind,
+            HolderChoices = kind == BindingKind.Holder ? b.HolderChoices : null,
+            DrawCount = kind == BindingKind.Draw ? b.DrawCount : null,
+            SameHex = IsPool(kind) && b.SameHex,
+        };
+
+    /// <summary>B9: a Draw binding's draw count expression; blank is null, never "".</summary>
+    public static VariableBinding WithDrawCount(VariableBinding b, string? count) => b with { DrawCount = Blank(count) };
+
+    /// <summary>
+    /// B9: a Holder binding's holder choices from the cell text: holder names (any case) separated by commas, a name holding a comma in
+    /// "double quotes" (the Properties tab's Holders format). Blank = null (the fixed holder, never an empty list); a list clears the fixed
+    /// holder, which a picker does not use. An unknown name is left out and reported; a quoting problem returns the binding unchanged.
+    /// </summary>
+    public static (VariableBinding Binding, string? Error) WithHolderChoices(RulesPack pack, VariableBinding b, string? names)
+    {
+        var (list, err) = ParseNameList(names ?? "");
+        if (err != null) return (b, err);
+        var ids = new List<string>();
+        string? unknown = null;
+        foreach (var raw in list!)
+        {
+            var name = raw.Trim();
+            if (name.Length == 0) continue;
+            if (pack.HolderByName(name) is not { } h) { unknown ??= $"No holder is named \"{name}\""; continue; }
+            if (!ids.Contains(h.Id)) ids.Add(h.Id);
+        }
+        var nb = ids.Count == 0 ? b with { HolderChoices = null } : b with { HolderChoices = ids, HolderId = null };
+        return (nb, unknown);
+    }
+
+    /// <summary>B9: the Holder choices cell text (an id that no longer resolves shows as it is).</summary>
+    public static string FormatHolderChoices(RulesPack pack, VariableBinding b) =>
+        b.HolderChoices is not { Count: > 0 } ids ? "" : FormatNameList(ids.Select(id => pack.ById<HolderDef>(id)?.Name ?? id));
 
     public static FormulaDef SetCaption(FormulaDef f, string variable, string? caption) =>
         SetBinding(f, variable, b => b with { Caption = string.IsNullOrWhiteSpace(caption) ? null : caption.Trim() });
@@ -96,6 +143,16 @@ public static class FormulaEdit
     /// <summary>The Details hint of a Piece binding (both Workbenches).</summary>
     public const string PieceDetailsHint =
         "Which pieces: a unit filter such as startsWith(name(), \"Blue\"); blank = every piece. The player picks one of the pieces they can see when the formula runs.";
+
+    /// <summary>B9: the Details hint of a Draw binding (both Workbenches).</summary>
+    public const string DrawDetailsHint =
+        "Which counters to draw from (a unit filter; blank = every counter). Target: the property giving each counter's number of members (one each when none).";
+
+    /// <summary>B9: the Target choice of a Draw binding with no weight property (each counter is one member).</summary>
+    public const string OneEach = "(one each)";
+
+    /// <summary>B9: the Target text of a holder picker's property.</summary>
+    public static string ChosenHolderTarget(string propertyName) => $"{propertyName} of (chosen holder)";
 
     private static string Num(double d) => d.ToString("R", CultureInfo.InvariantCulture);
 
@@ -121,7 +178,7 @@ public static class FormulaEdit
                 if (!string.IsNullOrWhiteSpace(b.RowExpr)) parts.Add("row: " + b.RowExpr);
                 if (!string.IsNullOrWhiteSpace(b.ColExpr)) parts.Add("col: " + b.ColExpr);
                 return string.Join(" | ", parts);
-            case BindingKind.Piece:
+            case BindingKind.Piece or BindingKind.Draw:
                 return b.PieceFilter ?? "";
             default:
                 return "";
@@ -184,7 +241,7 @@ public static class FormulaEdit
                     else return (b, "Use \"row: expression | col: expression\".");
                 }
                 return (b with { RowExpr = string.IsNullOrEmpty(row) ? null : row, ColExpr = string.IsNullOrEmpty(col) ? null : col }, null);
-            case BindingKind.Piece:
+            case BindingKind.Piece or BindingKind.Draw:
                 // The "which pieces" filter: blank = every piece (stored as null, never ""); it must parse.
                 if (text.Length == 0) return (b with { PieceFilter = null }, null);
                 if (SyntaxProblem(text) is { } filterErr) return (b, "Which pieces: " + filterErr);
@@ -382,6 +439,21 @@ public static class FormulaEdit
         }
     }
 
+    /// <summary>
+    /// The Target choices for this binding: as <see cref="TargetOptions(RulesPack, BindingKind)"/>, except (B9) a Draw binding offers
+    /// <see cref="OneEach"/> first and then the properties a counter holds, and a holder picker offers "{Prop} of (chosen holder)" for each
+    /// property every listed holder keeps.
+    /// </summary>
+    public static IReadOnlyList<TargetOption> TargetOptions(RulesPack pack, VariableBinding b)
+    {
+        if (b.Kind == BindingKind.Draw)
+            return new[] { new TargetOption(OneEach, null, null, null) }.Concat(TargetOptions(pack, BindingKind.Piece)).ToList();
+        if (b.Kind == BindingKind.Holder && b.HolderChoices is { Count: > 0 } ids)
+            return pack.Properties.Where(p => p.Scope != PropertyScope.Pieces && ids.All(id => PropertyFacts.KeptBy(p, id)))
+                .Select(p => new TargetOption(ChosenHolderTarget(p.Name), p.Id, null, null)).ToList();
+        return TargetOptions(pack, b.Kind);
+    }
+
     public static VariableBinding ApplyTarget(VariableBinding b, TargetOption o) =>
         b with { Property = o.Property, HolderId = o.HolderId, TableId = o.TableId };
 
@@ -392,6 +464,10 @@ public static class FormulaEdit
         {
             case BindingKind.Unit or BindingKind.Global or BindingKind.Piece:
                 return b.Property == null ? "" : pack.ById<PropertyDef>(b.Property)?.Name ?? Missing;
+            case BindingKind.Draw:
+                return b.Property == null ? OneEach : pack.ById<PropertyDef>(b.Property)?.Name ?? Missing;
+            case BindingKind.Holder when b.HolderChoices is { Count: > 0 }:
+                return b.Property == null ? "" : pack.ById<PropertyDef>(b.Property) is { } chosen ? ChosenHolderTarget(chosen.Name) : Missing;
             case BindingKind.Holder:
                 if (b.Property == null && b.HolderId == null) return "";
                 var h = b.HolderId == null ? null : pack.ById<HolderDef>(b.HolderId);
@@ -415,14 +491,18 @@ public static class FormulaEdit
     public static FormulaDef RemoveOutput(FormulaDef f, int index) =>
         f with { Outputs = f.Outputs.Where((_, i) => i != index).ToList() };
 
-    /// <summary>Changing the target drops a holder that no longer applies, and a Piece variable unless the target is Piece.</summary>
+    /// <summary>Changing the target drops a holder and a Holder variable that no longer apply, and a Piece variable unless the target is Piece.</summary>
     public static FormulaOutput WithOutputTarget(FormulaOutput o, OutputTarget t) =>
         o with
         {
             Target = t,
             HolderId = t == OutputTarget.Holder ? o.HolderId : null,
             PieceVariable = t == OutputTarget.Piece ? o.PieceVariable : null,
+            HolderVariable = t == OutputTarget.Holder ? o.HolderVariable : null,
         };
+
+    /// <summary>B9: the Holder variable (a holder picker) whose chosen holder a Holder output writes; blank is null (the fixed holder).</summary>
+    public static FormulaOutput WithHolderVariable(FormulaOutput o, string? variable) => o with { HolderVariable = Blank(variable) };
 
     /// <summary>Changing the action drops the fields only another action uses: palette entry unless Place, layer unless SetLayer, map unless
     /// Remove, the property unless Write or Reveal, the property list and key unless Write, the margin unless Reveal (B7).</summary>
@@ -492,7 +572,7 @@ public static class FormulaEdit
         pack.Formulas.Where(f => f.Bindings.Any(b => b.Property == propertyId) || f.Outputs.Any(o => o.Property == propertyId || o.PropertyChoice?.Contains(propertyId) == true)).ToList();
 
     public static IReadOnlyList<FormulaDef> FormulasUsingHolder(RulesPack pack, string holderId) =>
-        pack.Formulas.Where(f => f.Bindings.Any(b => b.HolderId == holderId) || f.Outputs.Any(o => o.HolderId == holderId)).ToList();
+        pack.Formulas.Where(f => f.Bindings.Any(b => b.HolderId == holderId || b.HolderChoices?.Contains(holderId) == true) || f.Outputs.Any(o => o.HolderId == holderId)).ToList();
 }
 
 /// <summary>Property-sheet row names found in the module's pieces: they are field names from the module's own piece definitions.</summary>

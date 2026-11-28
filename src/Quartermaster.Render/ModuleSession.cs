@@ -240,7 +240,7 @@ public sealed class ModuleSession : IDisposable
         if (isPiece) return CanActFor(id, sides);
         if (id == HolderDef.GlobalId) return true;
         if ((Rules?.Holders ?? new List<HolderDef>()).FirstOrDefault(h => h != null && h.Id == id) is not { } holder) return false;
-        return Ownership.SideOfHolder(holder.Id, Rules!) is not { } side || sides.Contains(side);
+        return Ownership.SideOfHolder(holder.Id, Rules!, _game?.State) is not { } side || sides.Contains(side);   // the current owner (B9)
     }
 
     /// <summary>Tooltip suffix of totals that cover only what the viewer may see.</summary>

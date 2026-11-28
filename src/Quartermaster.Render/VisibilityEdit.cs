@@ -31,6 +31,17 @@ public static class VisibilityEdit
         return p with { Holders = list };
     }
 
+    /// <summary>B9: the holder's owner expression (worked out from the game state); blank is null (the fixed owner side), text is trimmed.</summary>
+    public static RulesPack SetHolderOwnerExpr(RulesPack p, string holderId, string? text)
+    {
+        var expr = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        var i = p.Holders.FindIndex(x => x.Id == holderId);
+        if (i < 0 || p.Holders[i].OwnerExpr == expr) return p;
+        var list = p.Holders.ToList();
+        list[i] = list[i] with { OwnerExpr = expr };
+        return p with { Holders = list };
+    }
+
     public static string? MapOwnerOf(RulesPack p, string mapId) => p.MapOwners.FirstOrDefault(m => m.MapId == mapId)?.SideId;
 
     public static RulesPack SetMapOwner(RulesPack p, string mapId, string? sideId)

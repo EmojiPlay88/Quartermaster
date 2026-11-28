@@ -70,6 +70,7 @@ public static class RulesValidator
             CheckSchedule(pack, issues, knownMapIds);
             CheckAlerts(pack, issues);
             CheckOwners(pack, knownMapIds, issues);
+            CheckOwnerExprs(pack, issues);
             CheckRuleRefPaths(pack, issues);
         }
         catch (Exception ex)
@@ -114,7 +115,7 @@ public static class RulesValidator
     /// <summary>A variable bound to a keyed property reads no single value: it must be read with keyed().</summary>
     private static void CheckKeyedBinding(RulesPack pack, VariableBinding b, string v, Action<string> err)
     {
-        if (b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Piece
+        if (b.Kind is BindingKind.Unit or BindingKind.Global or BindingKind.Holder or BindingKind.Piece or BindingKind.Draw
             && !string.IsNullOrWhiteSpace(b.Property) && pack.ById<PropertyDef>(b.Property!) is { } kp && KeyedFacts.IsKeyed(kp))
             err($"{v} reads keyed property \"{kp.Name}\"; use keyed() in the formula");
     }
@@ -665,6 +666,7 @@ public static class RulesValidator
         {
             if (f.Bindings.Any(b => b.Kind == BindingKind.Roll) || FormulaCallsDice(f)) Err($"start entry {n} is sealed, but formula \"{f.Name}\" rolls dice");
             if (f.Bindings.Any(b => b.Kind == BindingKind.Piece)) Err($"start entry {n} is sealed, but formula \"{f.Name}\" picks a piece");
+            if (f.Bindings.Any(b => b.Kind == BindingKind.Draw)) Err($"start entry {n} is sealed, but formula \"{f.Name}\" draws at random");
             if (!f.Bindings.Any(b => b.Kind == BindingKind.Input)) Warn($"start entry {n} is sealed, but formula \"{f.Name}\" asks for nothing");
         }
         if (pack.Sides.Count < 2) Warn($"start entry {n} is sealed, but the pack has fewer than two sides");
@@ -791,6 +793,90 @@ public static class RulesValidator
         public double Turn() => throw new EvalError("No turn here");     // a key such as turn() - 5 has no constant value
         public double Stage() => throw new EvalError("No stage here");
         public Value AskSide() => throw new EvalError("No side here");   // a key such as askside() has no constant value
+    }
+
+    /// <summary>B9: a holder's owner expression parses, reads only Public values of this holder or the global holder, uses no piece function, and a constant result names a side.</summary>
+    private static void CheckOwnerExprs(RulesPack pack, List<RulesIssue> issues)
+    {
+        foreach (var h in pack.Holders)
+        {
+            if (string.IsNullOrWhiteSpace(h.OwnerExpr)) continue;
+            var holder = h;
+            Guarded(issues, holder.Id, holder.Name, () =>
+            {
+                string who = $"Holder \"{holder.Name}\"";
+                void Err(string m) => Add(issues, RulesIssueSeverity.Error, holder.Id, holder.Name, $"{who}: {m}");
+                void Warn(string m) => Add(issues, RulesIssueSeverity.Warning, holder.Id, holder.Name, $"{who}: {m}");
+                if (pack.Sides.Count == 0) Warn("the pack has no sides, so the owner expression is not used");
+                AstExpr ast;
+                try { ast = Parser.Parse(holder.OwnerExpr!); }
+                catch (ParseError e) { Err($"owner expression {e.Message}"); return; }
+
+                var forbidden = new List<string>();
+                var problems = new List<string>();
+                bool reads = false;   // reads a property, a table or turn()/stage()/segment(): not a constant
+                void Prop(string n)
+                {
+                    reads = true;
+                    var q = pack.PropertyByName(n);
+                    if (q is null) problems.Add($"owner expression reads unknown property \"{n}\"");
+                    else if (!PropertyFacts.IsPublic(pack, q)) problems.Add($"owner expression reads \"{n}\", which is not Public; every player must be able to tell who owns the holder");
+                    else if (q.Scope == PropertyScope.Pieces) problems.Add($"owner expression reads \"{n}\", which is not a holder property");
+                    else if (!PropertyFacts.KeptBy(q, holder.Id) && !PropertyFacts.KeptBy(q, HolderDef.GlobalId))
+                        problems.Add($"owner expression reads \"{n}\", which neither this holder nor the global holder keeps");
+                }
+                void Walk(AstExpr e)
+                {
+                    switch (e)
+                    {
+                        case VarRef v: Prop(v.Name); break;
+                        case Unary u: Walk(u.Operand); break;
+                        case Binary b: Walk(b.Left); Walk(b.Right); break;
+                        case Call c:
+                            if (ForbiddenConditionFunctions.Contains(c.Function) || ExprFacts.IsAggregate(c.Function)) { forbidden.Add(c.Function); break; }
+                            if (c.Function == "keyed")
+                            {
+                                reads = true;
+                                if (c.Args.Count > 0 && c.Args[0] is VarRef kv) Prop(kv.Name);
+                                if (c.Args.Count is 2 && c.Args[0] is VarRef kn && pack.PropertyByName(kn.Name) is not null)
+                                    foreach (var tail in KeyedProblems(c, pack)) problems.Add($"owner expression {tail}");
+                                if (c.Args.Count > 2) problems.Add("owner expression keyed() cannot name a holder");
+                                if (c.Args.Count > 1) Walk(c.Args[1]);
+                                break;
+                            }
+                            if (c.Function is "turn" or "stage" or "segment") reads = true;
+                            if (c.Function is "lookup" or "lookuprange" && c.Args.Count > 0 && c.Args[0] is VarRef tv)
+                            {
+                                reads = true;
+                                if (pack.TableByName(tv.Name) is null) problems.Add($"owner expression refers to unknown table \"{tv.Name}\"");
+                                foreach (var a in c.Args.Skip(1)) Walk(a);
+                            }
+                            else foreach (var a in c.Args) Walk(a);
+                            break;
+                    }
+                }
+                Walk(ast);
+                foreach (var fn in forbidden.Distinct(StringComparer.Ordinal)) Err($"owner expression cannot use {fn}()");
+                foreach (var m in problems.Distinct(StringComparer.Ordinal)) Err(m);
+                if (reads || forbidden.Count > 0 || problems.Count > 0 || pack.Sides.Count == 0) return;
+                Value r;
+                try { r = Evaluator.Evaluate(ast, new ConstantContext()); }
+                catch (EvalError) { return; }
+                if (r.Kind == ValueKind.Text)
+                {
+                    var t = r.Text.Trim();
+                    if (t.Length > 0 && !pack.Sides.Any(sd => string.Equals(sd.Name?.Trim(), t, StringComparison.OrdinalIgnoreCase) || string.Equals(sd.Id, t, StringComparison.OrdinalIgnoreCase)
+                            || (sd.FormerIds?.Contains(t, StringComparer.OrdinalIgnoreCase) ?? false)))
+                        Warn($"owner expression gives \"{r.Text}\", which names no side");
+                }
+                else if (r.Kind == ValueKind.Number)
+                {
+                    if (r.Number != Math.Floor(r.Number) || r.Number < 0 || r.Number > pack.Sides.Count)
+                        Warn($"owner expression gives \"{r.Display()}\", which names no side");
+                }
+                else Warn($"owner expression gives \"{r.Display()}\", which names no side");
+            });
+        }
     }
 
     private static void CheckOwners(RulesPack pack, IReadOnlyCollection<string>? knownMapIds, List<RulesIssue> issues)
@@ -1123,7 +1209,26 @@ public static class RulesValidator
             }
             if (b.Kind == BindingKind.Piece && !string.IsNullOrWhiteSpace(b.PieceFilter) && FilterMayReadHidden(pack, b.PieceFilter!))
                 Warn($"variable \"{b.Variable}\": its piece filter reads values another side may not see; each player picks from what they can see");
-            if (b.SameHex && b.Kind != BindingKind.Piece) Warn($"variable \"{b.Variable}\" has \"same hex\" but is not a Piece binding");
+            // B9 #55: a draw is not a pick; its pool is read on the whole game and masked by the same filter test the masking uses.
+            if (b.Kind == BindingKind.Draw && !string.IsNullOrWhiteSpace(b.PieceFilter) && SideFacts.Groups(pack) >= 2
+                && ParseProblem(b.PieceFilter!) is null && FormulaVariables.FilterMayHide(pack, b.PieceFilter))
+                Warn($"variable \"{b.Variable}\": its draw filter reads values another side may not see; the draw is made from every matching counter, and players who cannot see those values see it masked");
+            if (b.SameHex && b.Kind is not (BindingKind.Piece or BindingKind.Draw)) Warn($"variable \"{b.Variable}\" has \"same hex\" but is not a Piece binding");
+            CheckHolderChoices(pack, b, Err, Warn);
+            if (!string.IsNullOrWhiteSpace(b.DrawCount) && b.Kind != BindingKind.Draw) Err($"variable \"{b.Variable}\" has a draw count but is not a Draw binding");
+            if (b.Kind == BindingKind.Draw)
+            {
+                string dv = $"variable \"{b.Variable}\"";
+                if (string.IsNullOrWhiteSpace(b.DrawCount)) Err($"{dv} draws at random but has no draw count");
+                else if (ParseProblem(b.DrawCount!) is null)
+                {
+                    foreach (var u in FilterRefProblems(b.DrawCount!, pack))
+                        if (!f.Bindings.Any(o => u == UnknownPropertyTail(o.Variable) || u.StartsWith($"reads keyed property \"{o.Variable}\"", StringComparison.Ordinal))) Err($"{dv} draw count {u}");
+                    if (Parser.Variables(Parser.Parse(b.DrawCount!)).Contains(b.Variable)) Err($"{dv} draw count may not read \"{b.Variable}\"");
+                }
+                if (!f.Outputs.Any(o => o.Target == OutputTarget.Piece && o.PieceVariable == b.Variable))
+                    Warn($"{dv} draws at random but no output acts on the drawn counters");
+            }
             if (!string.IsNullOrWhiteSpace(b.AutoValue))
             {
                 if (ParseProblem(b.AutoValue!) is { } ae) Err($"variable \"{b.Variable}\" auto value {ae}");
@@ -1152,6 +1257,7 @@ public static class RulesValidator
         }
         var pre = ParseGuard(f.Precondition, "precondition");
         foreach (var b in f.Bindings) ParseGuard(b.When, $"variable \"{b.Variable}\" only-when");
+        foreach (var b in f.Bindings.Where(b => b.Kind == BindingKind.Draw)) ParseGuard(b.DrawCount, $"variable \"{b.Variable}\" draw count");
         foreach (var b in f.Bindings.Where(b => b.Kind != BindingKind.Roll && !string.IsNullOrWhiteSpace(b.DiceCountExpr)))
             Warn($"variable \"{b.Variable}\" has a dice count but is not a roll");
         foreach (var b in f.Bindings)
@@ -1191,6 +1297,8 @@ public static class RulesValidator
             var secondPlace = o.Action == OutputAction.Place && placeSeen;
             if (o.Action == OutputAction.Place) placeSeen = true;
             CheckOutput(pack, f, o, outputNo, Err, knownMapIds, knownSlots, secondPlace, hasPlace);
+            CheckHolderVariableOutput(pack, f, o, outputNo, Err, Warn);
+            CheckDrawOutput(f, o, outputNo, Err, Warn);
             ParseGuard(o.Expr, $"output {outputNo} value");
             ParseGuard(o.Key, $"output {outputNo} key");
             ParseGuard(o.Margin, $"output {outputNo} margin");
@@ -1214,7 +1322,7 @@ public static class RulesValidator
         try { e = Parser.Parse(filter); }
         catch (ParseError) { return false; }
         bool Sided(string? holderName) =>
-            holderName != null && pack.HolderByName(holderName) is { } h && !string.IsNullOrWhiteSpace(h.SideId) && pack.Sides.Any(s => s.Id == h.SideId);
+            holderName != null && pack.HolderByName(holderName) is { } h && ((!string.IsNullOrWhiteSpace(h.SideId) && pack.Sides.Any(s => s.Id == h.SideId)) || !string.IsNullOrWhiteSpace(h.OwnerExpr));
         return Parser.Variables(e).Any(v => pack.PropertyByName(v) is { } p && !PropertyFacts.IsPublic(pack, p))
             || ExprFacts.HolderReads(e).Any(r => Sided(r.Holder) && !PropertyFacts.IsPublic(pack, pack.PropertyByName(r.Property ?? "")))
             // keyed(): an unknown property is reported by FilterRefProblems; a Public value is seen by every side, a sided holder's too (#74a).
@@ -1287,7 +1395,8 @@ public static class RulesValidator
                 break;
             case BindingKind.Holder:
                 CheckProperty(pack, b.Property, v, err);
-                if (b.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(b.HolderId ?? "") is null)
+                if (b.HolderChoices is { Count: > 0 }) { }   // a holder picker: its listed holders are checked by CheckHolderChoices
+                else if (b.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(b.HolderId ?? "") is null)
                     err($"{v} refers to unknown holder \"{b.HolderId}\"");
                 else CheckKept(pack, b.Property, b.HolderId!, $"{v} reads", err);
                 break;
@@ -1304,8 +1413,9 @@ public static class RulesValidator
                 break;
             }
             case BindingKind.Piece:
+            case BindingKind.Draw:
             {
-                if (string.IsNullOrWhiteSpace(b.Property)) err($"{v} has no property chosen");
+                if (string.IsNullOrWhiteSpace(b.Property)) { if (b.Kind == BindingKind.Piece) err($"{v} has no property chosen"); }   // a Draw's weight is optional
                 else if (pack.ById<PropertyDef>(b.Property!) is not { } pp) err($"{v} reads unknown property \"{b.Property}\"");
                 else if (pp.Scope == PropertyScope.Holders) err($"{v} reads holder property \"{pp.Name}\"");
                 if (!string.IsNullOrWhiteSpace(b.PieceFilter))
@@ -1323,6 +1433,85 @@ public static class RulesValidator
                 if (b.DiceCount is not { } n || n < 1) err($"{v} needs a dice count of at least 1");
                 if (b.DiceSides is not { } s || s < 2) err($"{v} needs dice with at least 2 sides");
                 break;
+        }
+    }
+
+    /// <summary>B9: the holder choices of a binding: Holder bindings only; each listed holder exists, is not Global and keeps the property.</summary>
+    private static void CheckHolderChoices(RulesPack pack, VariableBinding b, Action<string> err, Action<string> warn)
+    {
+        if (b.HolderChoices is not { Count: > 0 } list) return;
+        string v = $"variable \"{b.Variable}\"";
+        if (b.Kind != BindingKind.Holder) { err($"{v} has holder choices but is not a Holder binding"); return; }
+        if (!string.IsNullOrWhiteSpace(b.HolderId)) warn($"{v} has holder choices and a fixed holder; the fixed holder is not used");
+        foreach (var id in list.Distinct(StringComparer.Ordinal))
+        {
+            if (id == HolderDef.GlobalId) { err($"{v} offers the global holder; use a Global binding"); continue; }
+            if (pack.ById<HolderDef>(id) is not { } h) { err($"{v} offers unknown holder \"{id}\""); continue; }
+            if (pack.ById<PropertyDef>(b.Property ?? "") is { } p && !PropertyFacts.KeptBy(p, id))
+                err($"{v}: holder \"{h.Name}\" does not keep property \"{p.Name}\"");
+        }
+    }
+
+    /// <summary>
+    /// B9: an output on a draw's counters runs once per drawn counter, so it may not roll dice() (its value, key, margin or pick-by); and a
+    /// SetLayer or SetMask needs the trait on every counter the draw can pick, else a run that draws one is refused. Only a filter that always
+    /// reads <c>layer("name")</c> of the output's layer (a missing layer does not match) is known to leave such counters out; no filter can
+    /// test for a mask, so a SetMask always warns.
+    /// </summary>
+    private static void CheckDrawOutput(FormulaDef f, FormulaOutput o, int outputNo, Action<string> err, Action<string> warn)
+    {
+        if (o.Target != OutputTarget.Piece || string.IsNullOrWhiteSpace(o.PieceVariable)) return;
+        if (f.Bindings.FirstOrDefault(b => b.Variable == o.PieceVariable && b.Kind == BindingKind.Draw) is not { } draw) return;
+        var own = new List<string?> { o.Expr, o.Key, o.Margin };
+        if (o.PropertyChoice is { Count: > 0 }) own.Add(o.PropertySelect);
+        if (own.Any(src => !string.IsNullOrWhiteSpace(src) && ParseProblem(src!) is null && ExprFacts.CallsFunction(Parser.Parse(src!), "dice")))
+            err($"output {outputNo}: an output on the drawn counters cannot roll dice()");
+        const string tail = "; a run that draws one is refused";
+        if (o.Action == OutputAction.SetLayer && !string.IsNullOrWhiteSpace(o.Layer) && !FilterNeedsLayer(draw.PieceFilter, o.Layer!.Trim()))
+            warn($"output {outputNo}: some counters the draw can pick may have no layer \"{o.Layer!.Trim()}\"{tail}");
+        else if (o.Action == OutputAction.SetMask)
+            warn($"output {outputNo}: some counters the draw can pick may have no mask{tail}");
+    }
+
+    /// <summary>
+    /// True when the filter is sure to leave out a counter without the named layer: one of its top-level "and" terms reads
+    /// <c>layer("name")</c> (trimmed, case-insensitive) on every evaluation, i.e. not under an "and", "or" or the branches of if(). Conservative:
+    /// anything else (blank, unparsable, a short-circuit) is false.
+    /// </summary>
+    private static bool FilterNeedsLayer(string? filter, string layer)
+    {
+        if (string.IsNullOrWhiteSpace(filter) || ParseProblem(filter!) is not null) return false;
+        static IEnumerable<AstExpr> Terms(AstExpr e) =>
+            e is Binary { Op: "and" } b ? Terms(b.Left).Concat(Terms(b.Right)) : new[] { e };
+        bool Always(AstExpr e) => e switch
+        {
+            Binary { Op: "and" or "or" } => false,
+            Binary b => Always(b.Left) || Always(b.Right),
+            Unary u => Always(u.Operand),
+            Call { Function: "layer" } c => c.Args.Count == 1 && c.Args[0] is TextLit t && string.Equals(t.Value.Trim(), layer, StringComparison.OrdinalIgnoreCase),
+            Call { Function: "if" } c => c.Args.Count > 0 && Always(c.Args[0]),
+            Call c when ExprFacts.IsAggregate(c.Function) => false,   // its filter reads other counters, never the drawn one
+            Call c => c.Args.Any(Always),
+            _ => false,
+        };
+        return Terms(Parser.Parse(filter!)).Any(Always);
+    }
+
+    /// <summary>B9: an output's Holder variable names a Holder binding with holder choices, needs a Holder target, and every listed holder keeps the written property.</summary>
+    private static void CheckHolderVariableOutput(RulesPack pack, FormulaDef f, FormulaOutput o, int outputNo, Action<string> err, Action<string> warn)
+    {
+        if (string.IsNullOrWhiteSpace(o.HolderVariable)) return;
+        if (o.Target != OutputTarget.Holder) { err($"output {outputNo} names a Holder variable but its target is not Holder"); return; }
+        var b = f.Bindings.FirstOrDefault(x => x.Variable == o.HolderVariable && x.Kind == BindingKind.Holder && x.HolderChoices is { Count: > 0 });
+        if (b is null) { err($"output {outputNo} names variable \"{o.HolderVariable}\", which is not a Holder binding with holder choices"); return; }
+        if (!string.IsNullOrWhiteSpace(o.HolderId)) warn($"output {outputNo} names both a holder and a Holder variable; the holder is not used");
+        var props = o.PropertyChoice is { Count: > 0 } ids ? ids : new List<string> { o.Property };
+        foreach (var pid in props.Distinct(StringComparer.Ordinal))
+        {
+            if (pack.ById<PropertyDef>(pid ?? "") is not { } p) continue;
+            foreach (var hid in b.HolderChoices!.Distinct(StringComparer.Ordinal))
+                if (pack.ById<HolderDef>(hid) is { } h && !PropertyFacts.KeptBy(p, hid))
+                    err($"output {outputNo}: holder \"{h.Name}\" chosen by \"{o.HolderVariable}\" does not keep property \"{p.Name}\"");
         }
     }
 
@@ -1356,15 +1545,17 @@ public static class RulesValidator
         IReadOnlyCollection<string>? knownMapIds, IReadOnlyCollection<string>? knownSlots, bool secondPlace, bool formulaPlaces)
     {
         var gone = Once(err);   // one "no longer exists" per output, however many of its ids are gone
-        if (o.Target == OutputTarget.Holder && o.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(o.HolderId ?? "") is null)
+        if (o.Target == OutputTarget.Holder && string.IsNullOrWhiteSpace(o.HolderVariable) && o.HolderId != HolderDef.GlobalId && pack.ById<HolderDef>(o.HolderId ?? "") is null)
             err($"output refers to unknown holder \"{o.HolderId}\"");
 
         if (!TargetAllowed(o.Action, o.Target)) err($"output {outputNo}: {o.Action} cannot target {o.Target}");
         if (o.Target == OutputTarget.Piece)
         {
             if (string.IsNullOrWhiteSpace(o.PieceVariable)) err($"output {outputNo} acts on another piece but names no Piece variable");
-            else if (!f.Bindings.Any(b => b.Variable == o.PieceVariable && b.Kind == BindingKind.Piece))
+            else if (!f.Bindings.Any(b => b.Variable == o.PieceVariable && b.Kind is BindingKind.Piece or BindingKind.Draw))
                 err($"output {outputNo} names variable \"{o.PieceVariable}\", which is not a Piece binding");
+            else if (o.Action is OutputAction.Place or OutputAction.Reveal && f.Bindings.Any(b => b.Variable == o.PieceVariable && b.Kind == BindingKind.Draw))
+                err($"output {outputNo}: {o.Action} cannot act on the counters of draw \"{o.PieceVariable}\"");
         }
         else if (!string.IsNullOrWhiteSpace(o.PieceVariable)) err($"output {outputNo} names a Piece variable but its target is not Piece");
 
@@ -1434,7 +1625,7 @@ public static class RulesValidator
             : p.Scope is PropertyScope.Holders or PropertyScope.Both;
         if (!reveal && PropertyFacts.IsComputed(p)) { err($"output {outputNo} writes computed property \"{p.Name}\""); return; }
         if (o.Target == OutputTarget.Global) CheckKept(pack, id, HolderDef.GlobalId, $"output {outputNo} writes", err);
-        else if (o.Target == OutputTarget.Holder && (o.HolderId == HolderDef.GlobalId || pack.ById<HolderDef>(o.HolderId ?? "") is not null))
+        else if (o.Target == OutputTarget.Holder && string.IsNullOrWhiteSpace(o.HolderVariable) && (o.HolderId == HolderDef.GlobalId || pack.ById<HolderDef>(o.HolderId ?? "") is not null))
             CheckKept(pack, id, o.HolderId!, $"output {outputNo} writes", err);
         if (!ok)
             err($"output property \"{p.Name}\" cannot be written to {(o.Target == OutputTarget.Unit ? "a unit" : onPiece ? "a piece" : "a holder")} (its scope is {p.Scope})");

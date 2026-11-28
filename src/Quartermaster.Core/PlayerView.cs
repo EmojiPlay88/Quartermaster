@@ -34,6 +34,8 @@ namespace Quartermaster.Core;
 /// longer has is private; only a roll without an id (an older log) follows the formula-name prefix.</item>
 /// <item>A Turn line with a side stamp (a checklist tick or an acknowledged warning of that side's phase, B7) is kept only for a viewer
 /// holding that side and dropped for any other; an unstamped one (a phase with no side, an older save) is public.</item>
+/// <item>A System line of a formula (with a formula id) stamped with a side (B9 #55: a draw's line naming a drawn counter and its share) is
+/// kept only for a viewer holding that side and dropped for any other; one without a stamp (a counter of no side) is public.</item>
 /// <item>Pending runs lose units of other sides (and removed pieces); runs left empty are dropped. Unit-less runs follow the current phase's side.
 /// Every run loses its group dice (<see cref="PendingRun.GroupRolls"/>); an ask run's units of other sides lose their group. A sealed answer
 /// (<see cref="PendingRun.SealedAnswer"/>, B7 #53) follows the ask-run rule: it stays only on the asked side's run, so another side never
@@ -143,6 +145,8 @@ public static class PlayerView
         /// <see cref="HiddenValues"/> takes them (made once per view, so a value costs no allocation).</summary>
         private readonly Func<string, bool> _holds;
         private readonly Func<PropertyDef, bool> _isPublic;
+        /// <summary>Each holder's owner in the full state, worked out once per view (B9: <see cref="Ownership.HolderSides"/>).</summary>
+        private readonly Func<string, string?> _holderSide;
         /// <summary>Phase name -> the side ids of every phase with that name ("" for a phase with no side).</summary>
         private readonly Dictionary<string, HashSet<string>> _phaseSides = new(StringComparer.Ordinal);
         /// <summary>Piece name -> first side not held among pieces with that name (null when all are held or public).</summary>
@@ -165,6 +169,7 @@ public static class PlayerView
             _pack = pack; _held = held;
             _holds = held.Contains;
             _isPublic = p => !PropPrivate(p.Id);
+            _holderSide = Ownership.HolderSides(full, pack);
             _access = new PieceAccess(full, pack, model, held);
             foreach (var p in pack.Properties ?? new())   // a computed property reading hidden data counts as Private
                 if (p != null)
@@ -278,8 +283,8 @@ public static class PlayerView
                 if (NotHeld(ps)) side = ps;
                 return HiddenValues.PieceValueHidden(_pack, def, ps, _holds, _isPublic);
             }
-            if (!HiddenValues.HolderValueHidden(_pack, id, def, _holds, _isPublic)) return false;
-            if (id != HolderDef.GlobalId) side = Ownership.SideOfHolder(id, _pack);   // null: public, or owned by a deleted side (ignored, spec 8a.10)
+            if (!HiddenValues.HolderValueHidden(_pack, id, def, _holds, _isPublic, _holderSide)) return false;
+            if (id != HolderDef.GlobalId) side = _holderSide(id);   // null: public, or owned by a deleted side (ignored, spec 8a.10)
             return true;
         }
 
@@ -345,6 +350,8 @@ public static class PlayerView
                 return HeldOrRedact(l.Kind, PhaseSide(l.Phase));
             }
             if (l.Kind == LogKind.Turn && stamp != null && !_held.Contains(stamp)) return (Outcome.Drop, null);   // another side's tick or acknowledge
+            // B9 #55: a formula's System line stamped with a side (a draw's "{formula}: {Var}: {n} on {name}") is that side's own line
+            if (l.Kind == LogKind.System && stamp != null && !string.IsNullOrEmpty(l.FormulaId) && !_held.Contains(stamp)) return (Outcome.Drop, null);
             if (!IsLedgerKind(l.Kind)) return (Outcome.Keep, null);
 
             if (e != null && ValueHidden(e.Key, e.PropertyId, out var vs)) return Redact(l.Kind, vs ?? owner);

@@ -28,7 +28,7 @@ public static class MissingInputs
         if (guards.Count == 0) return req;
         HashSet<string>? force = null;
         foreach (var b in f.Bindings)
-            if (b is { Kind: BindingKind.Input or BindingKind.Piece, Variable: { } v } && !hidden.Contains(v) && guards.Contains(v))
+            if ((b is { Kind: BindingKind.Input or BindingKind.Piece } || HolderChoices.IsPicker(b)) && b.Variable is { } v && !hidden.Contains(v) && guards.Contains(v))
                 (force ??= new HashSet<string>(StringComparer.Ordinal)).Add(v);
         return req with { IgnorePrecondition = guards.Contains(FormulaMasking.PreconditionGuard), ForceWhen = force };
     }
@@ -61,7 +61,8 @@ public static class MissingInputs
         return false;
     }
 
-    /// <summary>The Input variables that stay empty for the run's unfinished units even with the pack's auto values. Never throws.</summary>
+    /// <summary>The Input variables (and holder picks, always asked) that stay empty for the run's unfinished units even with the pack's
+    /// auto values. Never throws.</summary>
     public static IReadOnlyList<MissingInput> For(ModuleSession s, PendingRun run)
     {
         var result = new List<MissingInput>();
@@ -76,6 +77,13 @@ public static class MissingInputs
                 {
                     if (v.Value != null || v.MissingReason != "Waiting for input" || !seen.Add(v.Variable)) continue;
                     var b = f.Bindings.FirstOrDefault(x => x.Variable == v.Variable);
+                    // B9 #13b: a holder pick is always asked, once for the run: the player's own dumps (the same list for every unit).
+                    if (HolderChoices.IsPicker(b))
+                    {
+                        result.Add(new MissingInput(v.Variable,
+                            HolderChoices.For(game.State, s.Rules, b!, FormulaMasking.PickSides(s)).Select(c => c.Label).ToList(), null, null));
+                        continue;
+                    }
                     if (b is not { Kind: BindingKind.Input }) continue;
                     // One answer for every unit: a choices table offers all its keys (each unit's run checks its own), as the player's view has them.
                     result.Add(new MissingInput(v.Variable, InputChoices.For(s.View ?? game.State, s.Rules, s.Model, f, v.Variable, null), b.Min, b.Max));

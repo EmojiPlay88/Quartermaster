@@ -791,6 +791,87 @@ Allies are worked out where a player's sides become what that player may see and
 - Warnings: `Side "{name}": alliance "{a}" has no other side`; `Every side is in alliance "{a}", so nothing is hidden from any player` (two or more sides, all in one alliance); `Phase "{name}": reacting side "{s}" is an ally of the phase's side, so it already acts in this phase`.
 - The two visibility warnings about a choices or piece filter reading values another side may not see now appear only when the pack has at least two groups, where a side without an alliance is a group of its own and each alliance is one group.
 
+## Holders at run time and random draws
+
+Three things that used to need one formula per case: a holder that changes hands during play, a result that falls on whichever holder the player chooses, and losses that fall at random on the members of a group spread over several counters. All three are optional. A pack that uses none of them behaves exactly as before and its file does not change.
+
+### Dumps that change hands
+
+A holder's **Owner side** is fixed in the pack. Give the holder an **Owner expression** (Visibility tab, Holders box) and its owner is worked out from the game as play goes on. The expression gives:
+
+- **text**: the side whose name or id it equals (capitals and spaces at the ends do not matter; an older id of a side reads as that side). Empty text means no owner, so the holder is public;
+- **a number** N: the Nth side in the pack's order (1 = the first side); 0 = no owner;
+- anything else (an error, a name that is no side, a number that is out of range or not whole): the holder keeps its **Owner side**, which may be none. A broken expression never locks every player out of a ledger.
+
+The expression may read this holder's **Public** values and the global holder's **Public** values, `keyed()` of a global property, `turn()`, `stage()`, `segment()`, `phaseside()`, tables and constants, as a phase condition does. A bare property name reads this holder's value when the holder keeps the property, else the global holder's; a property that neither keeps is refused by the Problems list, and in play the holder keeps its **Owner side**. It may not read a counter or a Private value, and may not use a function that looks at counters (`sum`, `countof`, `holder()` and the like). Write names in it without spaces (letters, digits and `_`).
+
+An invented example. The global Public property `DumpOwner` is keyed by the table `Dumps`, whose rows are `Ford Dump` and `Mill Dump`. The holder `Ford Dump` has the Owner expression `keyed(DumpOwner, "Ford Dump")`: 1 means the Northern League owns it, 2 the Southern Compact, 0 nobody. The formula `Take dump` has one output, Target Global, Property `DumpOwner`, Op Set, Value `2`, Key `"Ford Dump"`. Before it runs, only the League sees the dump's Private `Stores`, and only the League may change them; after it, the Compact sees them and the League no longer does. Both sides still see the dump's Public values, as for any holder owned by a side.
+
+Good to know:
+
+- Everything that asked who owns a holder follows the current owner: what a player sees, who may edit the holder in the Ledger window, a guest's output to the holder, the below-zero chip.
+- The owner changes when the values it reads change, through an ordinary write (a formula output, a manual edit, a phase row). Undo, redo, replay and turn files bring it back with those values. The log has no `now belongs to` line; the write that changed it is logged as usual.
+- Every player works out the same owner, from Public values only, so nothing is sent between players and a guest cannot be told a different owner.
+
+### Choosing a holder when the formula runs
+
+A **Holder** binding normally names one holder. Fill its **Holder choices** (Formulas tab, bindings grid) with holder names separated by commas, and the player chooses among those holders each time the formula runs. The binding's value is its property on the chosen holder (Target `{Prop} of (chosen holder)`); the working line reads `Stores of Ford Dump`. An output with Target **Holder** and a **Holder variable** writes the chosen holder in place of a fixed one.
+
+An invented example, `Draw stores`: a Holder binding `Dump` with Holder choices `Ford Dump, Mill Dump, North Depot` and Target `Stores of (chosen holder)`; an Input `Need`; the text `Need`; one output with Target Holder, Holder variable `Dump`, Property `Stores`, Op Subtract. The player picks the dump from a list and the formula takes `Need` from it.
+
+How the list is built:
+
+- Only holders the chooser may act on **now** are offered: those with no owner and those owned by a side the chooser holds (or an ally of one). With the owner expressions above, each player is offered only the dumps their side holds at that moment, so a picked holder's values are always visible to the chooser and every write to it is allowed.
+- The list keeps the order of **Holder choices**. A holder with no name is shown by its id; two holders with the same label get ` #2`, ` #3`.
+- The global holder cannot be listed (use a Global binding). Every listed holder must keep the binding's property, and every property an output writes. A Reveal output may name a Holder variable too.
+- The binding is always asked: Fully automatic stops for it, as for a Piece binding. With no holder to offer the message is `No holder to choose`; a choice that is not on the list is `Choose one of the listed holders`.
+- Online, the host checks the label against the list the sending player is offered.
+
+### Random draws among counters
+
+A **Draw** binding picks members at random from a group of counters, without the player choosing them. Its parts:
+
+- **Target** (the weight): the property that gives each counter's number of members, for example `Boats`. `(one each)`: every counter counts as one member. A weight must be a whole number from 0 to 1000; a computed property that does not apply to a counter counts as 0.
+- **Details** (the pool filter): a unit filter, such as `side() == "Southern Compact"` (blank = every counter).
+- **Same hex**: only the counters in the hex of the counter the formula runs on, **including that counter** (unlike a Piece binding). Run from nowhere it is `Needs a unit`; a counter that is not on a grid has no hex, so its pool is empty and k = 0.
+- **Draw count**: an expression, a whole number from 0 to 1000, that may read earlier variables but not the Draw variable itself.
+
+The Draw variable's value is k, the number actually drawn: the count, or fewer when the pool holds fewer members. Every output on the drawn counters is a Target **Piece** output whose **Piece** is the Draw variable; it runs once on each counter that gave members, in the order of their ids, and inside its **Value** the Draw variable reads **that counter's number of members drawn**. Elsewhere (the text, other outputs, conditions) the variable reads k. Write, Remove, SetLayer and SetMask work on drawn counters; Place and Reveal cannot.
+
+An invented example, `Shore battery`: an Input `Shots`; a Draw binding `Hits` with weight `Boats`, Same hex, filter `side() == "Southern Compact"` and Draw count `Shots`; one output with Target Piece, Piece `Hits`, Property `Boats`, Op Subtract, Value `Hits`. The Compact's barges `SC 1 Barge` to `SC 4 Barge` stand in the hex with 3, 2, 4 and 1 boats and the battery fires 3 shots: the engine draws three of the ten boats, one at a time, and each barge loses what fell on it. For the Compact the log reads `Shore battery: Hits: 2 on SC 3 Barge` and so on, one line for each barge that lost boats.
+
+How a draw behaves:
+
+- **Dice.** Each step is one die with as many faces as members remain, always rolled by the engine with the session's roller (also with **Physical dice** on) and never shared by a group roll. The dice are not in the dice log, and `count()` and `dice()` never see them. They are pinned like other dice, so previewing again, a batch and its Apply, and a host check all draw the same members; replay uses the commands the run made, so nothing is drawn again; one run is one undo step.
+- **Who learns what.** The pool is built on the whole game, never on what the acting player sees. The acting side learns k (its working line reads `Hits = 3`), not which counters. Each drawn counter's side (and its allies) sees its own line; other sides see only the usual `{Side} ledger changed`. A counter of no side gives a public line.
+- **Before Apply.** The Draw box shows k (or `hidden` when masked) and nothing says which counters were drawn. Each output on drawn counters previews as one line, `Boats of the drawn counters changes`. The split is fixed when you Apply and is shown only after it.
+- **In a batch.** Each row draws on the state the earlier rows left, with its own pinned dice. Once a row draws, the rows after it preview masked (what they would do depends on the split); Apply all shows the real results. An output on drawn counters previews from a run that skips those outputs, so no error of theirs shows before Apply.
+- **Hidden values.** The draw is masked for a player view when the weight is not Public, the pool filter may read a value another side may not see, or counters may be hidden from that player. The host works it out.
+- **Sealed answers.** A formula that draws cannot be a sealed start entry.
+- **Errors on a drawn counter.** When an output fails on one drawn counter (it lacks the layer, a value is out of range), the run is refused with `Formula "{f}": output {n} cannot act on one of the drawn counters`, which names no counter. A Fully automatic or asked run logs only that text, for example `Shore battery: NL Battery: Formula "Shore battery": output 1 cannot act on one of the drawn counters`.
+
+Cautions for the author:
+
+- An owner expression reads only Public values. The Problems list refuses a Private one, because every player must be able to tell who owns the holder. Put the facts that decide ownership in a Public global property.
+- k shows when the pool held fewer members than the count: three shots at two members is k = 2. If that matters to the rules, say so in the formula's message or a precondition.
+- The log lines of a SetLayer or SetMask output name the drawn counters: every player sees these lines (as for any layer or mask change), so they show which counters were drawn. A layer or mask the draw can find missing on a counter refuses the run that draws it (see the warnings below); narrow the filter, for example to counters with `layer("Wrecked")`, or use another output.
+- An output on drawn counters runs once for each counter, so it may not roll `dice()`; roll in a Roll binding instead.
+- Dice counts and writes that read a hidden value still give it away after Apply, as in [Revealing a value](#revealing-a-value).
+
+### What the Problems list says for holders and draws
+
+Each holder message begins `Holder "{name}": ` and each formula message `Formula "{name}": `.
+
+- Owner expression, errors: `owner expression {problem}` (the expression does not parse; the problem says why); `owner expression reads "{p}", which is not Public; every player must be able to tell who owns the holder`; `owner expression reads unknown property "{p}"`; `owner expression reads "{p}", which is not a holder property` (a Pieces property); `owner expression reads "{p}", which neither this holder nor the global holder keeps`; `owner expression refers to unknown table "{t}"`; `owner expression keyed() cannot name a holder`; `owner expression ` followed by a keyed() check's text, for example `owner expression keyed() reads "{p}", which is not keyed`; `owner expression cannot use {fn}()` (once for each such function).
+- Owner expression, warnings: `owner expression gives "{v}", which names no side` (an expression that always gives the same value); `the pack has no sides, so the owner expression is not used`.
+- Holder choices, errors: `variable "{v}" has holder choices but is not a Holder binding`; `variable "{v}" offers unknown holder "{id}"`; `variable "{v}" offers the global holder; use a Global binding`; `variable "{v}": holder "{name}" does not keep property "{p}"`.
+- Holder choices, warning: `variable "{v}" has holder choices and a fixed holder; the fixed holder is not used`.
+- Holder variable outputs, errors: `output {n} names variable "{v}", which is not a Holder binding with holder choices`; `output {n} names a Holder variable but its target is not Holder`; `output {n}: holder "{name}" chosen by "{v}" does not keep property "{p}"`.
+- Holder variable outputs, warning: `output {n} names both a holder and a Holder variable; the holder is not used`.
+- Draws, errors: `variable "{v}" draws at random but has no draw count`; `variable "{v}" draw count {problem}` (the count does not parse, or reads an unknown or keyed property); `variable "{v}" draw count may not read "{v}"`; `variable "{v}" has a draw count but is not a Draw binding`; `output {n}: {action} cannot act on the counters of draw "{v}"` (Place or Reveal); `output {n}: an output on the drawn counters cannot roll dice()`; `start entry {n} is sealed, but formula "{f}" draws at random` (with the phase prefix).
+- Draws, warnings: `variable "{v}" draws at random but no output acts on the drawn counters`; `output {n}: some counters the draw can pick may have no layer "{L}"; a run that draws one is refused`; `output {n}: some counters the draw can pick may have no mask; a run that draws one is refused`; and, in a pack with two or more groups, `variable "{v}": its draw filter reads values another side may not see; the draw is made from every matching counter, and players who cannot see those values see it masked`.
+- The Piece binding's property and filter messages apply to a Draw's weight (which may be blank) and pool. A Draw variable is accepted on a Piece output; `output {n} names variable "{v}", which is not a Piece binding` is not raised for it.
+
 ## Testing a pack outside the engine (stable)
 
 `PackHarness` (in `Quartermaster.Render`) runs a pack without any window, so you can keep automated tests for your own pack. Its members keep their names and meaning across releases (except `Session`, which is there for tests that need more and may change).

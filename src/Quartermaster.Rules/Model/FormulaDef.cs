@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Quartermaster.Rules;
 
-public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll, Moved, Piece }
+public enum BindingKind { Unit, Global, Holder, Table, Location, Input, Roll, Moved, Piece, Draw }
 /// <summary>What an output does. Write (the default, omitted from the pack) changes a property; the others act on a counter: Place adds a palette counter, Remove deletes or moves it, SetLayer sets a layer's level, SetMask masks or reveals it, Reveal shows every player one property value of a target in the log, exactly or as a range (see Margin), and writes nothing.</summary>
 public enum OutputAction { Write, Place, Remove, SetLayer, SetMask, Reveal }
 /// <summary>Where an output acts. Piece = the counter a Piece variable picked; Placed = the counter this formula's Place output added.</summary>
@@ -47,6 +47,12 @@ public sealed record VariableBinding
     /// <summary>Input with a <see cref="ChoicesTable"/>: expression that must be true for a row key to be offered; row() is the key, and the counter's own values can be read. Null = every key (never "").</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ChoicesFilter { get; init; }
+    /// <summary>Holder only: the ids of the holders the player chooses from when the formula runs (a holder picker); the fixed HolderId is then not used. Null = the fixed holder (never an empty list).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? HolderChoices { get; init; }
+    /// <summary>Draw only: expression giving how many members to draw at random (a whole number from 0 to 1000); it may read earlier bindings, not this one. Null = none (never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DrawCount { get; init; }
 }
 
 public sealed record FormulaOutput
@@ -85,6 +91,9 @@ public sealed record FormulaOutput
     /// <summary>Reveal only: expression giving how wide the revealed range is (a whole number from 0 to 1000); 0 or null shows the exact value. Null = 0 (the Workbench stores null, never ""). Omitted from the pack JSON when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Margin { get; init; }
+    /// <summary>Target Holder: the name of the Holder variable (with holder choices) whose chosen holder this output writes, in place of HolderId. Null = the fixed holder (never "").</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HolderVariable { get; init; }
 }
 
 public sealed record FormulaDef

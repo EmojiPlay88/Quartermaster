@@ -263,7 +263,7 @@ public static class RulesPackIo
                 Holders = x.Holders?.Select(h => h?.Trim()).Where(h => !string.IsNullOrEmpty(h)).Select(h => h!).Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } hs ? hs : null }).ToList(),
         MapOwners = (p.MapOwners ?? new()).Where(x => x != null)
             .Select(x => x with { MapId = x.MapId ?? "", SideId = x.SideId ?? "" }).ToList(),
-        Holders = (p.Holders ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "", RuleRefId = Blank(x.RuleRefId) }).ToList(),
+        Holders = (p.Holders ?? new()).Where(x => x != null).Select(x => x with { Name = x.Name ?? "", RuleRefId = Blank(x.RuleRefId), OwnerExpr = Blank(x.OwnerExpr) }).ToList(),
         RuleRefs = (p.RuleRefs ?? new()).Where(x => x != null)
             .Select(x => x with { Label = x.Label ?? "", DocumentEntry = x.DocumentEntry ?? "" }).ToList(),
         Alerts = (p.Alerts ?? new()).Where(x => x != null)
@@ -300,13 +300,13 @@ public static class RulesPackIo
             Precondition = string.IsNullOrWhiteSpace(f.Precondition) ? null : f.Precondition,
             RefusalMessage = string.IsNullOrWhiteSpace(f.RefusalMessage) ? null : f.RefusalMessage,
             Bindings = (f.Bindings ?? new()).Where(b => b != null)
-                .Select(b => b with { Variable = b.Variable ?? "", When = string.IsNullOrWhiteSpace(b.When) ? null : b.When, DiceCountExpr = string.IsNullOrWhiteSpace(b.DiceCountExpr) ? null : b.DiceCountExpr, PieceFilter = string.IsNullOrWhiteSpace(b.PieceFilter) ? null : b.PieceFilter, ChoicesTable = string.IsNullOrWhiteSpace(b.ChoicesTable) ? null : b.ChoicesTable, ChoicesFilter = string.IsNullOrWhiteSpace(b.ChoicesFilter) ? null : b.ChoicesFilter }).ToList(),
+                .Select(b => b with { Variable = b.Variable ?? "", When = string.IsNullOrWhiteSpace(b.When) ? null : b.When, DiceCountExpr = string.IsNullOrWhiteSpace(b.DiceCountExpr) ? null : b.DiceCountExpr, PieceFilter = string.IsNullOrWhiteSpace(b.PieceFilter) ? null : b.PieceFilter, ChoicesTable = string.IsNullOrWhiteSpace(b.ChoicesTable) ? null : b.ChoicesTable, ChoicesFilter = string.IsNullOrWhiteSpace(b.ChoicesFilter) ? null : b.ChoicesFilter, DrawCount = Blank(b.DrawCount), HolderChoices = CleanIds(b.HolderChoices) }).ToList(),
             Outputs = (f.Outputs ?? new()).Where(o => o != null).Select(o => o with
             {
                 Property = o.Property ?? "",
                 Expr = string.IsNullOrWhiteSpace(o.Expr) ? null : o.Expr,
                 PropertySelect = string.IsNullOrWhiteSpace(o.PropertySelect) ? null : o.PropertySelect,
-                PieceVariable = Blank(o.PieceVariable), Slot = Blank(o.Slot), Layer = Blank(o.Layer), ToMapId = Blank(o.ToMapId), Key = Blank(o.Key), Margin = Blank(o.Margin),
+                PieceVariable = Blank(o.PieceVariable), Slot = Blank(o.Slot), Layer = Blank(o.Layer), ToMapId = Blank(o.ToMapId), Key = Blank(o.Key), Margin = Blank(o.Margin), HolderVariable = Blank(o.HolderVariable),
                 PropertyChoice = o.PropertyChoice?.Where(i => i != null).ToList() is { Count: > 0 } ids ? ids : null,
             }).ToList(),
         }).ToList(),

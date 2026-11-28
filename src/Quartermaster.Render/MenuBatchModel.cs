@@ -144,8 +144,11 @@ public sealed class MenuBatchModel : IBatchRows
 
     private VariableBinding? Binding(string variable) => Formula?.Bindings.FirstOrDefault(b => b?.Variable == variable);
 
-    /// <summary>True for a column the <see cref="AllRows"/> line may fill: an Input or a Piece binding.</summary>
-    public bool IsAllRowsColumn(string variable) => Binding(variable) is { Kind: BindingKind.Input or BindingKind.Piece };
+    /// <summary>True for a column the <see cref="AllRows"/> line may fill: an Input, a Piece binding or a holder picker (B9 #13b).</summary>
+    public bool IsAllRowsColumn(string variable) => IsTypedColumn(Binding(variable));
+
+    /// <summary>An Input, a Piece binding or a holder picker: the cell is what the player types or picks.</summary>
+    private static bool IsTypedColumn(VariableBinding? b) => b is { Kind: BindingKind.Input or BindingKind.Piece } || HolderChoices.IsPicker(b);
 
     /// <summary>The All rows line: its Input and Piece cells (the others blank).</summary>
     public BatchRowView AllRows
@@ -169,7 +172,7 @@ public sealed class MenuBatchModel : IBatchRows
     public void SetCell(int row, string variable, string text)
     {
         if (SlotAt(row) is not { } slot || Binding(variable) is not { } b) return;
-        if (b.Kind is BindingKind.Input or BindingKind.Piece) slot.Own[variable] = text ?? "";
+        if (IsTypedColumn(b)) slot.Own[variable] = text ?? "";
         else Model(row).SetBoxText(variable, text ?? "");
         Invalidate();
     }
@@ -180,7 +183,7 @@ public sealed class MenuBatchModel : IBatchRows
         var slot = _rows[row];
         foreach (var b in Formula?.Bindings ?? new List<VariableBinding>())
         {
-            if (b is not { Kind: BindingKind.Input or BindingKind.Piece, Variable: { } v }) continue;
+            if (b?.Variable is not { } v || !IsTypedColumn(b)) continue;
             var own = slot.Own.GetValueOrDefault(v);
             var text = !string.IsNullOrWhiteSpace(own) ? own : _all.GetValueOrDefault(v) ?? "";
             if (string.Equals(slot.Pushed.GetValueOrDefault(v) ?? "", text, StringComparison.Ordinal)) continue;
@@ -265,6 +268,8 @@ public sealed class MenuBatchModel : IBatchRows
         var at = live;
         var cloned = false;
         var group = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
+        var draws = FormulaMasking.DrawsInChain(f);
+        var evaluated = false;
         for (var i = 0; i < _rows.Count; i++)
         {
             var id = _rows[i].PieceId;
@@ -273,6 +278,9 @@ public sealed class MenuBatchModel : IBatchRows
             if (!live.Pieces.ContainsKey(id)) { links[i] = new Link(true, FormulaIntentRunner.GoneUnitText, null); continue; }
             if (!at.Pieces.ContainsKey(id)) { links[i] = new Link(true, FormulaWindowRules.RemovedByEarlierRowText, null); continue; }
             var m = Model(i);
+            // B9 #55: a row after one that draws runs on a state that may carry its split: masked before Apply (B7 one rule).
+            if (m.ChainMasked != (draws && evaluated)) { m.ChainMasked = draws && evaluated; _rows[i].Pushed.Clear(); }
+            evaluated = true;
             Sync(i, m);
             m.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
             if (calculate && !HostCalculates) m.Calculate(at);
@@ -328,7 +336,7 @@ public sealed class MenuBatchModel : IBatchRows
         var links = Chain();
         if (row < 0 || row >= links.Length || links[row].View is not { } dv || !s.CanAct(_rows[row].PieceId)) return Array.Empty<(string, string)>();
         return dv.ShownTrace.Error != null || dv.ShownTrace.Result == null ? Array.Empty<(string, string)>()
-            : dv.ShownTrace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+            : dv.ShownTrace.Outputs.Where(o => o.Draw == null).Select(o => (o.Key, o.PropertyId)).ToList();   // B9 #55: never a drawn counter
     }
 
     /// <summary>The rows not skipped (removed by an earlier row, gone, or another side's).</summary>
@@ -359,6 +367,8 @@ public sealed class MenuBatchModel : IBatchRows
         IReadOnlyList<string>? list;
         if (b.Kind == BindingKind.Piece)
             list = Quartermaster.Core.PieceChoices.For(st, pack, s.Model, b, sides, piece).Select(c => c.Label).ToList();
+        else if (HolderChoices.IsPicker(b))
+            list = HolderChoices.For(st, pack, b, sides).Select(c => c.Label).ToList();   // B9 #13b: the seat's own dumps (every row alike)
         else if (b.Kind == BindingKind.Input && !string.IsNullOrWhiteSpace(b.ChoicesTable))
         {
             // The seat's own view, built once per (state, viewer) for every row and column.
@@ -371,7 +381,7 @@ public sealed class MenuBatchModel : IBatchRows
     }
 
     public bool IsChoiceColumn(string variable) =>
-        Binding(variable) is { } b && (b.Kind == BindingKind.Piece || ChoicesFor(variable, -1) is { Count: > 0 });
+        Binding(variable) is { } b && (b.Kind == BindingKind.Piece || HolderChoices.IsPicker(b) || ChoicesFor(variable, -1) is { Count: > 0 });
 
     // ---- actions ----
 
@@ -466,8 +476,17 @@ internal static class BatchChain
     /// lines, effects and removals, and the working line that stamps a run with no outputs (so <c>runs()</c> counts it). A placed piece
     /// is not seeded (that needs the session; the live apply does).
     /// </summary>
+    /// <remarks>B9 #55: the writes and effects on a draw's counters (and its log lines) are left out: a later row's pool never depends on
+    /// which counters were drawn (that row is masked anyway, <see cref="FormulaMasking.ChainHidden"/>; the live Apply decides).</remarks>
     public static void Apply(GameState state, FormulaRunner runner, FormulaTrace t)
     {
+        if (t.Draws.Count > 0)
+            t = t with
+            {
+                Outputs = t.Outputs.Where(o => o?.Draw == null).ToList(),
+                Effects = (t.Effects ?? Array.Empty<PieceEffect>()).Where(e => e?.Draw == null).ToList(),
+                Draws = Array.Empty<DrawPreview>(),
+            };
         foreach (var cmd in runner.Commands(t, null)) state.Apply(cmd);
         if (t.Outputs.Count == 0 && (t.Effects?.Count ?? 0) == 0 && !string.IsNullOrWhiteSpace(t.Working))
             state.Apply(new AddLogLine(LogKind.Calc, t.Working, t.PieceId, FormulaId: t.Formula.Id) { AppliedRun = t.Formula.Id });

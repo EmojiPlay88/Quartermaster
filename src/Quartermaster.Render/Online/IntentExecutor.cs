@@ -483,7 +483,7 @@ internal static class FormulaIntentRunner
                 return (null, GoneUnitText);
         }
         if (!s.CanActFor(i.PieceId, sides)) return (null, $"That unit {ModuleSession.OtherSideText}.");
-        if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides) is { } why) return (null, why);
+        if (guest && sides != null && GuestRule(s, pack, f, i.PieceId, sides, at) is { } why) return (null, why);
         double? moved = null;
         string? group = null;
         string? askSide = null;
@@ -517,9 +517,10 @@ internal static class FormulaIntentRunner
             if (variable == null) continue;
             var b = f.Bindings.FirstOrDefault(x => x != null && x.Variable == variable);
             // A pick is a label from the sender's own list, so it is taken even when the value it reads is hidden; nothing else hidden is.
-            if (hidden.Contains(variable) && b is not { Kind: BindingKind.Piece }) continue;
+            var pick = b is { Kind: BindingKind.Piece } || HolderChoices.IsPicker(b);
+            if (hidden.Contains(variable) && !pick) continue;
             // Input boxes and picks always; checked boxes only in the manual modes (they gate Apply and never feed the run); never dice or overrides.
-            var accept = b != null && (b.Kind is BindingKind.Input or BindingKind.Piece || (model.Checked && IsCheckedKind(b.Kind)));
+            var accept = b != null && (b.Kind is BindingKind.Input || pick || (model.Checked && IsCheckedKind(b.Kind)));
             if (accept) model.SetBoxText(variable, text ?? "");
         }
         // One unit, one set of dice: while the unit has this formula's run waiting, a guest uses that run (an ad-hoc run would be another roll).
@@ -537,6 +538,17 @@ internal static class FormulaIntentRunner
                 .FirstOrDefault(x => string.Equals(x.Label, label.Trim(), StringComparison.OrdinalIgnoreCase));
             if (hit == null || id == null || !string.Equals(hit.PieceId, id, StringComparison.Ordinal))
                 return (null, Quartermaster.Core.PieceChoices.Unknown);
+        }
+        // B9 #13b: a holder label must be one of the sender's own (the listed holders its held set may act on now, on the state the run is
+        // evaluated on). A holder of another side and a name that is no holder get the same neutral refusal; nothing is run or written.
+        foreach (var hb in f.Bindings)
+        {
+            if (!HolderChoices.IsPicker(hb) || hb.Variable == null) continue;
+            if (i.Typed?.GetValueOrDefault(hb.Variable) is not { } label || string.IsNullOrWhiteSpace(label)) continue;   // nothing picked: waits
+            // Sent with the holder it was picked as (FormulaIntent.Picks): the label must still name that holder in the sender's own list.
+            if (HolderChoices.Find(HolderChoices.For(at, pack, hb, sides), label) is not { } hit
+                || (i.Picks?.TryGetValue(hb.Variable, out var hid) == true && !string.Equals(hit.HolderId, hid, StringComparison.Ordinal)))
+                return (null, HolderChoices.Unknown);
         }
         return (new Prepared(f, model, hidden, group), null);
     }
@@ -556,15 +568,18 @@ internal static class FormulaIntentRunner
     /// <summary>
     /// A guest may write holders of held sides or of no side; the global holder only during a phase of a side it holds; and may run a
     /// unit-less formula only during a phase of a side it holds (or reacts in, B5 #7). A Reveal output writes nothing and is not checked
-    /// (B7 #47). Null when allowed.
+    /// (B7 #47). A fixed holder's owner is judged on <paramref name="at"/>, the state the run is evaluated on (a batch chain's clone after an
+    /// earlier row), as Prepare's holder-pick check is. Null when allowed.
     /// </summary>
-    private static string? GuestRule(ModuleSession s, RulesPack pack, FormulaDef f, string? pieceId, IReadOnlySet<string> sides)
+    private static string? GuestRule(ModuleSession s, RulesPack pack, FormulaDef f, string? pieceId, IReadOnlySet<string> sides, GameState at)
     {
         if (pieceId == null && !ActingSideHeld(s, pack, sides)) return NotYourPhaseText;
         foreach (var o in f.Outputs ?? new List<FormulaOutput>())
         {
             // B7 #47: a Reveal writes nothing, so another side's holder or counter may be named; the host decides the value.
             if (o == null || o.Action == OutputAction.Reveal) continue;
+            // B9 #13b: a Holder-variable output writes the holder the sender picked, checked against its own list (Prepare's pick check).
+            if (o.Target == OutputTarget.Holder && !string.IsNullOrWhiteSpace(o.HolderVariable)) continue;
             var global = o.Target == OutputTarget.Global || (o.Target == OutputTarget.Holder && o.HolderId == HolderDef.GlobalId);
             if (global)
             {
@@ -574,7 +589,7 @@ internal static class FormulaIntentRunner
             if (o.Target == OutputTarget.Holder)
             {
                 if (o.HolderId == null) return IntentExecutor.NotUnderstoodText;
-                if (Ownership.SideOfHolder(o.HolderId, pack) is { } owner && !sides.Contains(owner))
+                if (Ownership.SideOfHolder(o.HolderId, pack, at) is { } owner && !sides.Contains(owner))   // the current owner (B9)
                     return $"That formula writes to a holder that {ModuleSession.OtherSideText}.";
             }
         }
@@ -594,7 +609,7 @@ internal static class FormulaIntentRunner
             return choice.MissingReason!;
         if (dv.Status.StartsWith("Doesn't match: ", StringComparison.Ordinal) || dv.Status.StartsWith("Waiting for: ", StringComparison.Ordinal))
             return dv.Status;
-        if (hidden.Count == 0 && dv.ShownTrace.Error is { Length: > 0 } err) return err;
+        if (hidden.Count == 0 && dv.ShownTrace.Error is { Length: > 0 } err && !FormulaMasking.DrawErrorsHidden(dv.ShownTrace.Formula)) return err;
         return "The formula could not be calculated.";
     }
 }
@@ -646,6 +661,10 @@ internal static class FormulaBatchRunner
         if (pins != null && f.GroupRoll && (groupScope = pins.Open(groupKey, g, pack, pins.MayRollHint(f))) == null)
             return FormulaBatchVerdict.Refused(FormulaPins.FullText);
         FormulaBatchVerdict Refuse(int row, string message) => new(false, verdicts, FormulaWindowRules.RowMessage(row + 1, message));
+        // B9 #55: a row after one that draws runs on a chain state that may carry that row's split: masked (B7 one rule), no k, values,
+        // dice or error text in its verdict, before Apply or when the live Apply stops on it.
+        var draws = FormulaMasking.DrawsInChain(f);
+        var evaluated = false;
 
         for (var k = 0; k < intents.Count; k++)
         {
@@ -673,6 +692,8 @@ internal static class FormulaBatchRunner
             }
             rows.Add(new Row(i, prepared, pinKey, scope, false));
             var (_, model, hidden, _) = prepared;
+            if (draws && evaluated) { model.ChainMasked = true; hidden = new HashSet<string>(model.Hidden, StringComparer.Ordinal); }
+            evaluated = true;
             model.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
             if (i.Calculate) model.Calculate(at);
             var dv = model.Evaluate(at);
@@ -721,14 +742,16 @@ internal static class FormulaBatchRunner
                 var row = rows[k];
                 var pid = row.Intent.PieceId;
                 if (row.Removed || (pid != null && !g.State.Pieces.ContainsKey(pid))) continue;   // removed by an earlier row
-                var (_, model, hidden, _) = row.Prepared!;
+                var (_, model, _, _) = row.Prepared!;
+                var hidden = new HashSet<string>(model.Hidden, StringComparer.Ordinal);   // the chain's masking (B9 #55) included
                 model.SharedRolls = f.GroupRoll && group.Count > 0 ? new Dictionary<string, IReadOnlyList<int>>(group, StringComparer.Ordinal) : null;
                 var trace = model.Run(g.State);
                 var dv = model.View(trace);
                 if (!dv.CanApply || PhaseController.WritesComputed(pack, trace)
                     || !c.ApplyFormula(null, pid, trace, model.AutoCalculated || row.Scope?.Previewed == true))
                 {
-                    // Only a placed piece's seeds can differ from the chain: the rows applied stay (still one undo step).
+                    // The live run can differ from the chain: a placed piece's seeds, and (B9 #55) whatever follows an earlier row's draw,
+                    // which the chain leaves out (another pool, k, a row whose counter a draw removed). The rows applied stay (one undo step).
                     // The guest is told how many earlier rows stay applied (counts only, as the local grid says it).
                     message = FormulaWindowRules.StoppedText(applied, k + 1);
                     verdicts[k] = new FormulaVerdict(false, verdicts[k].Boxes,
@@ -825,14 +848,14 @@ internal sealed class FormulaPins
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// True when the formula may roll dice: a Roll binding, or a dice( call in its text, a table key expression or a binding's AutoValue
+    /// True when the formula may roll dice: a Roll or (B9 #55) Draw binding, or a dice( call in its text, a table key expression or a binding's AutoValue
     /// (an Input's pre-fill). Only those take a pinned scope.
     /// </summary>
     public static bool MayRoll(FormulaDef f)
     {
         var bindings = f.Bindings ?? new List<VariableBinding>();
         bool Calls(string? expr) => !string.IsNullOrEmpty(expr) && DiceCall.IsMatch(expr);
-        return bindings.Any(b => b is { Kind: BindingKind.Roll })
+        return bindings.Any(b => b is { Kind: BindingKind.Roll or BindingKind.Draw })   // B9 #55: a draw's dice are pinned per sender too
             || Calls(f.Text)
             || bindings.Any(b => b != null && (Calls(b.RowExpr) || Calls(b.ColExpr) || Calls(b.AutoValue)));
     }

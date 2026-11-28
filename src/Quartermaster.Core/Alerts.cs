@@ -87,6 +87,7 @@ public static class AlertEngine
     private static void Negative(GameState s, RulesPack? pack, List<AlertHit> hits, List<string> hidden, IReadOnlySet<string>? ownSides)
     {
         var pieceSides = ownSides != null && pack != null ? Ownership.PieceSides(s, pack) : null;
+        var holderSides = ownSides != null && pack != null ? Ownership.HolderSides(s, pack) : null;   // the current owners (B9)
         var byProp = new Dictionary<string, List<AlertMatch>>(StringComparer.Ordinal);
         var order = new List<string>();
         foreach (var (key, inner) in s.Ledgers)
@@ -111,7 +112,7 @@ public static class AlertEngine
                         var h = pack?.ById<HolderDef>(id);
                         if (h == null && id != HolderDef.GlobalId) break;
                         if (ownSides != null && pack != null && id != HolderDef.GlobalId
-                            && Ownership.SideOfHolder(id, pack) is { } hs && !ownSides.Contains(hs)) break;
+                            && holderSides!(id) is { } hs && !ownSides.Contains(hs)) break;
                         who = new AlertMatch(null, id, h?.Name is { Length: > 0 } hn ? hn : id == HolderDef.GlobalId ? "Global" : id);
                     }
                 }

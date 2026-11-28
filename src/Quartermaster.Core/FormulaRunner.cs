@@ -30,6 +30,18 @@ public sealed record OutputPreview(string Key, string PropertyId, string Propert
     internal string? TargetName { get; init; }
     /// <summary>The value key a keyed property's write goes to (B6: the output's key, normalised); null for an unkeyed property.</summary>
     public string? ValueKey { get; init; }
+    /// <summary>B9 #55: the Draw variable whose drawn counter this output acts on (one preview per drawn counter); null otherwise.</summary>
+    public string? Draw { get; init; }
+}
+
+/// <summary>
+/// B9 #55: what a Draw binding drew in a run: the counters with at least one member drawn, in pool order (piece id), and how many of each.
+/// Never shown before Apply; the commands log one line per counter, stamped with its side.
+/// </summary>
+public sealed record DrawPreview(string Variable, IReadOnlyList<(string PieceId, int Count)> Drawn)
+{
+    /// <summary>The drawn counters' real names and sides (same order as <see cref="Drawn"/>), for their log lines.</summary>
+    internal IReadOnlyList<(string Name, string? SideId)> Lines { get; init; } = Array.Empty<(string, string?)>();
 }
 
 /// <summary>
@@ -67,14 +79,24 @@ public sealed record FormulaTrace(FormulaDef Formula, IReadOnlyList<VariableStat
     /// <summary>B7 #47: the run's Reveal outputs in output order. Their values are logged only by <see cref="FormulaRunner.Commands"/>, never
     /// previewed (a Reveal adds no <see cref="OutputPreview"/>; its working part is "reveal {Prop}"). Empty for a run with none.</summary>
     public IReadOnlyList<RevealPreview> Reveals { get; init; } = Array.Empty<RevealPreview>();
+
+    /// <summary>B9 #55: the draw dice of this run (key "draw:{Var}#{i}" → one die): drawn, pinned or given by <see cref="RunRequest.Dice"/>.
+    /// Not in <see cref="Rolls"/>, <see cref="RollsByKey"/> or <see cref="RollSides"/>, so count(), dice() and the dice log never see them.
+    /// Kept on a failed or waiting run too, so pinning them draws the same counters again. Empty when none.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<int>> DrawRolls { get; init; } = new Dictionary<string, IReadOnlyList<int>>();
+
+    /// <summary>B9 #55: what each Draw binding of the run drew (binding order). Empty for a run with none.</summary>
+    public IReadOnlyList<DrawPreview> Draws { get; init; } = Array.Empty<DrawPreview>();
 }
 
 /// <param name="Dice">Rolls a key's dice when no matching pin is in <paramref name="FixedRolls"/> (key, count, sides); null = the runner's
 /// roller. The online host uses it so every die of a guest's run is pinned per dice configuration.</param>
 /// <param name="PickSides">The chooser's sides: a Piece binding's typed label is resolved among the candidates of their view
 /// (<see cref="PieceChoices"/>) and an Input's choices filter is judged on that view (B7), so the accepted values are exactly the chooser's
-/// listed ones. The requesting guest's sides on the host, the viewer's sides in hot-seat; null = the run's own state (solo, hook runs, the
-/// host's own full-state runs, a run on a player view state). The view is built at most once per run, and only when it is needed.</param>
+/// listed ones. A holder picker's typed label (B9 #13b, <see cref="HolderChoices"/>) is resolved among the listed holders whose current
+/// owner is no side or one of these sides (no view is built for it). The requesting guest's held set on the host, the viewer's in hot-seat;
+/// null = the run's own state (solo, hook runs, the host's own full-state runs, a run on a player view state, whose own sides choose a
+/// holder). The view is built at most once per run, and only when it is needed.</param>
 public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDictionary<string, string> Typed,
     IReadOnlyDictionary<string, string> Overrides, IReadOnlyDictionary<string, IReadOnlyList<int>> FixedRolls, double? Moved = null, bool UseAutoValues = false,
     Func<string, int, int, IReadOnlyList<int>>? Dice = null, IReadOnlySet<string>? PickSides = null)
@@ -95,6 +117,11 @@ public sealed record RunRequest(string FormulaId, string? PieceId, IReadOnlyDict
     /// <summary>B7: variables resolved as if their "Only when" held (host guards over hidden data: their typed value is validated the same
     /// way whatever the guard says). For a shown run only, never applied. Null = none.</summary>
     public IReadOnlySet<string>? ForceWhen { get; init; }
+
+    /// <summary>B9 #55: a run for what a viewer is shown before Apply, never applied: the Draw bindings draw as usual (their dice are kept in
+    /// <see cref="FormulaTrace.DrawRolls"/>), but no output on the drawn counters is evaluated, so nothing of the run (its values, errors,
+    /// Apply state) follows which counters were drawn.</summary>
+    public bool SkipDrawOutputs { get; init; }
 
     /// <summary>B7: the side answering this run (an ask run's or a sealed run's <see cref="PendingRun.AskSideId"/>): <c>askside()</c> reads
     /// its name (the id when the name is blank). Null = no side answers (<c>askside()</c> is <c>""</c>).</summary>
@@ -164,6 +191,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// <see cref="AfterApply(IReadOnlyList{GameCommand})"/>, which drops the side map and aggregate state when any of them adds, removes or
     /// moves a piece or changes a trait state (a Place, Remove, SetLayer or SetMask output), so later units see the change. Ledger writes,
     /// rolls and log lines keep them. A nested call on the same state joins the open pass; on another state, or another thread, it opens nothing.
+    /// B9: the aggregate state's <c>AggregateFilters.HolderSides</c> is a memo of the holders' owners for that one state, kept across ledger
+    /// writes; it is read only on a player view, and every pass today is opened on the full state.
     /// </summary>
     public IDisposable BeginPass(GameState s)
     {
@@ -235,10 +264,11 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var produced = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
         var shared = new List<string>();
         var sides = new Dictionary<string, int>(StringComparer.Ordinal);
+        var drawn = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
         FormulaTrace t;
         try
         {
-            t = RunCore(s, r, formula, produced, shared, sides);
+            t = RunCore(s, r, formula, produced, shared, sides, drawn);
             if (r.PieceId != null && s.Pieces.ContainsKey(r.PieceId)) t = t with { PieceId = r.PieceId };
         }
         catch (Exception ex)
@@ -246,6 +276,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             t = Fail(formula, ex is EvalError or ParseError ? ex.Message : "Could not run formula: " + ex.Message, produced);
         }
         if (sides.Count > 0) t = t with { RollSides = new Dictionary<string, int>(sides, StringComparer.Ordinal) };
+        if (drawn.Count > 0) t = t with { DrawRolls = new Dictionary<string, IReadOnlyList<int>>(drawn, StringComparer.Ordinal) };
         return shared.Count == 0 ? t : t with { SharedRollKeys = shared.ToArray() };
     }
 
@@ -254,23 +285,42 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             produced == null ? new Dictionary<string, IReadOnlyList<int>>() : new Dictionary<string, IReadOnlyList<int>>(produced));
 
     private FormulaTrace RunCore(GameState s, RunRequest r, FormulaDef formula, Dictionary<string, IReadOnlyList<int>> produced, List<string> shared,
-        Dictionary<string, int> sides)
+        Dictionary<string, int> sides, Dictionary<string, IReadOnlyList<int>> drawRolls)
     {
         AstExpr expr;
         try { expr = Parse(formula, formula.Text ?? ""); }
         catch (ParseError pe) { return Fail(formula, pe.Message, produced); }
 
         var piece = r.PieceId != null && s.Pieces.TryGetValue(r.PieceId, out var pi) ? pi : null;
-        var run = new RunScope(this, s, r, formula, piece, produced, shared, sides);
+        var run = new RunScope(this, s, r, formula, piece, produced, shared, sides, drawRolls);
 
-        // A Piece-target output names the Piece binding whose pick it acts on; without one it can never run.
+        // A Piece-target output names the Piece binding whose pick it acts on (or, B9 #55, the Draw binding whose drawn counters it acts on
+        // one by one); without one it can never run.
         var pieceVars = new List<string>();
+        var drawVars = new List<string>();
+        for (var oi = 0; oi < formula.Outputs.Count; oi++)
+        {
+            var o = formula.Outputs[oi];
+            if (o.Target != OutputTarget.Piece) continue;
+            var pb = string.IsNullOrWhiteSpace(o.PieceVariable) ? null : formula.Bindings.FirstOrDefault(x => x.Variable == o.PieceVariable);
+            if (pb is not { Kind: BindingKind.Piece or BindingKind.Draw }) throw new EvalError("An output refers to a deleted Piece variable");
+            if (pb.Kind == BindingKind.Draw)
+            {
+                // an old pack edited by hand (the validator not run): the validator's text
+                if (o.Action is OutputAction.Place or OutputAction.Reveal)
+                    throw new EvalError($"Formula \"{formula.Name}\": output {oi + 1}: {o.Action} cannot act on the counters of draw \"{pb.Variable}\"");
+                if (!drawVars.Contains(pb.Variable)) drawVars.Add(pb.Variable);
+            }
+            else if (!pieceVars.Contains(pb.Variable)) pieceVars.Add(pb.Variable);
+        }
+        // B9 #13b: a Holder output may name the holder picker whose chosen holder it writes (or reveals), in place of a fixed holder.
+        var holderVars = new List<string>();
         foreach (var o in formula.Outputs)
         {
-            if (o.Target != OutputTarget.Piece) continue;
-            if (string.IsNullOrWhiteSpace(o.PieceVariable) || formula.Bindings.FirstOrDefault(x => x.Variable == o.PieceVariable) is not { Kind: BindingKind.Piece })
-                throw new EvalError("An output refers to a deleted Piece variable");
-            if (!pieceVars.Contains(o.PieceVariable)) pieceVars.Add(o.PieceVariable);
+            if (string.IsNullOrWhiteSpace(o.HolderVariable)) continue;
+            if (o.Target != OutputTarget.Holder || !HolderChoices.IsPicker(formula.Bindings.FirstOrDefault(x => x.Variable == o.HolderVariable)))
+                throw new EvalError("An output refers to a deleted Holder variable");
+            if (!holderVars.Contains(o.HolderVariable)) holderVars.Add(o.HolderVariable);
         }
 
         AstExpr? pre = string.IsNullOrWhiteSpace(formula.Precondition) ? null : Parse(formula, formula.Precondition);
@@ -282,6 +332,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         foreach (var src in FormulaVariables.OutputSources(formula))
             foreach (var v in Parser.Variables(Parse(formula, src))) if (!names.Contains(v)) names.Add(v);
         foreach (var v in pieceVars) if (!names.Contains(v)) names.Add(v);   // an output's target is asked even when nothing reads its value
+        foreach (var v in drawVars) if (!names.Contains(v)) names.Add(v);    // a draw an output acts on is drawn even when nothing reads k
+        foreach (var v in holderVars) if (!names.Contains(v)) names.Add(v);
         for (var i = 0; i < names.Count; i++)
         {
             var b = formula.Bindings.FirstOrDefault(x => x.Variable == names[i]);
@@ -290,6 +342,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             {
                 BindingKind.Table => new[] { b.RowExpr, b.ColExpr, b.When },
                 BindingKind.Roll => new[] { b.When, b.DiceCountExpr },
+                BindingKind.Draw => new[] { b.When, b.DrawCount },
                 _ => new[] { b.When },
             };
             foreach (var src in srcs)
@@ -341,6 +394,19 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             catch (Missing m) { return Unresolved(v, m.Message); }
             if (s.IsPlayerView && PlayerView.IsPlaceholder(targets[v].Piece)) return Unresolved(v, HiddenText);
         }
+        // The holders the Holder-variable outputs act on (the picker's own pick, shared with its binding: one list per run).
+        var holderTargets = new Dictionary<string, HolderChoice>(StringComparer.Ordinal);
+        foreach (var v in holderVars)
+        {
+            if (states.First(x => x.Variable == v).Skipped) continue;   // "Only when" false: the outputs naming it do nothing
+            try { holderTargets[v] = run.PickHolder(formula.Bindings.First(x => x.Variable == v)); }
+            catch (Missing m) { return Unresolved(v, m.Message); }
+        }
+        // B9 #55: the counters each Draw binding drew (pool order), each with its share; a skipped draw's outputs do nothing.
+        var drawTargets = new Dictionary<string, IReadOnlyList<(PieceInstance Piece, int Count)>>(StringComparer.Ordinal);
+        foreach (var v in drawVars)
+            if (!states.First(x => x.Variable == v).Skipped && run.DrawnOf(v) is { } dl) drawTargets[v] = dl;
+        bool IsDraw(FormulaOutput o) => o.Target == OutputTarget.Piece && o.PieceVariable != null && drawVars.Contains(o.PieceVariable);
 
         var result = Evaluator.Evaluate(expr, new RunContext(run));
         var working = WorkingLine.Render(expr, formula.Text ?? "", n => run.Cached(n)?.Value, run.Label) + " = " + result.Display();
@@ -353,7 +419,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         // An output acting on a Piece binding skipped by its "Only when" condition does nothing (no write, no effect, no part); so do the
         // Placed outputs of a Place skipped that way.
         var placeSkipped = false;
-        bool SkippedTarget(FormulaOutput o) => (o.Target == OutputTarget.Piece && o.PieceVariable != null && !targets.ContainsKey(o.PieceVariable))
+        bool SkippedTarget(FormulaOutput o) => (o.Target == OutputTarget.Piece && o.PieceVariable != null && !targets.ContainsKey(o.PieceVariable) && !IsDraw(o))
+            || (o.Target == OutputTarget.Holder && !string.IsNullOrWhiteSpace(o.HolderVariable) && !holderTargets.ContainsKey(o.HolderVariable))
             || (o.Target == OutputTarget.Placed && placeSkipped);
 
         // The placed piece first, so a Placed output listed before its Place still acts on it. At most one Place per formula.
@@ -387,14 +454,15 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         }
 
         // The piece an effect acts on: its instance (the placed piece's is not in the state yet), its real name, the name the requester sees.
-        (PieceInstance Piece, string Real, string Shown, string? Side) EffectTarget(FormulaOutput o, int oi)
+        (PieceInstance Piece, string Real, string Shown, string? Side, string? Draw) EffectTarget(FormulaOutput o, int oi)
         {
+            if (run.Share is { } share) { var dp = share.Piece; var dr = RealName(dp); return (dp, dr, dr, run.Sides.Value(dp), share.Var); }
             switch (o.Target)
             {
-                case OutputTarget.Unit: { var real = RealName(piece!); return (piece!, real, real, run.Sides.Value(piece!)); }
-                case OutputTarget.Piece: { var tp = targets[o.PieceVariable!]; return (tp.Piece, RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece)); }
+                case OutputTarget.Unit: { var real = RealName(piece!); return (piece!, real, real, run.Sides.Value(piece!), null); }
+                case OutputTarget.Piece: { var tp = targets[o.PieceVariable!]; return (tp.Piece, RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece), null); }
                 case OutputTarget.Placed when o.Action is OutputAction.SetLayer or OutputAction.SetMask:
-                    return placed is { } pl ? (pl.Piece, pl.Name, pl.Name, pl.Side) : throw new EvalError(NothingPlaced);
+                    return placed is { } pl ? (pl.Piece, pl.Name, pl.Name, pl.Side, null) : throw new EvalError(NothingPlaced);
                 default: throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
             }
         }
@@ -404,202 +472,247 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         var removals = new List<PieceEffect>();
         var reveals = new List<RevealPreview>();
         var pending = new Dictionary<(string, int), string>();   // trait states this run already set (a second change reads the first)
-        // Every output is computed (value and property) before the trace is returned, so a failing output writes nothing.
+        // Every output is computed (value and property) before the trace is returned, so a failing output writes nothing. An output on a
+        // Draw variable acts once per drawn counter (pool order), its value expression reading that counter's share of the draw.
+        var steps = new List<(int Index, (string Var, PieceInstance Piece, int Count)? Share)>();
         for (var oi = 0; oi < formula.Outputs.Count; oi++)
         {
+            if (!IsDraw(formula.Outputs[oi])) { steps.Add((oi, null)); continue; }
+            if (r.SkipDrawOutputs) continue;   // B9 #55: a shown run never acts on the drawn counters
+            var dv = formula.Outputs[oi].PieceVariable!;
+            if (drawTargets.TryGetValue(dv, out var dl)) foreach (var (dp, n) in dl) steps.Add((oi, (dv, dp, n)));
+        }
+        foreach (var (oi, share) in steps)
+        {
             var o = formula.Outputs[oi];
-            if (SkippedTarget(o)) continue;
-            switch (o.Action)
+            run.Share = share;
+            if (share == null && SkippedTarget(o)) continue;
+            // B9 final review I1: an error while acting on one drawn counter would name it (an automatic or ask run logs the error as is),
+            // so it becomes the neutral text: which counter failed is part of the split, never shown.
+            try
             {
-                case OutputAction.Write: break;
-                case OutputAction.Place: continue;
-                case OutputAction.Reveal:
+                switch (o.Action)
                 {
-                    // B7 #47: read now, in output order (after this run's earlier writes); shown only when the commands are built.
-                    var (rv, rp) = RevealOf(s, o, oi, run, piece, targets, outputs, OutputError);
-                    reveals.Add(rv);
-                    parts.Add($"reveal {rp.Name}");
-                    continue;
-                }
-                case OutputAction.Remove:
-                {
-                    if (o.Target == OutputTarget.Placed) throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
-                    var tg = EffectTarget(o, oi);
-                    if (string.IsNullOrWhiteSpace(o.ToMapId))
+                    case OutputAction.Write: break;
+                    case OutputAction.Place: continue;
+                    case OutputAction.Reveal:
                     {
-                        removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"removed {tg.Shown}")
-                            { LogText = $"{formula.Name}: removed {tg.Real}", Name = tg.Real, SideId = tg.Side });
+                        // B7 #47: read now, in output order (after this run's earlier writes); shown only when the commands are built.
+                        var (rv, rp) = RevealOf(s, o, oi, run, piece, targets, holderTargets, outputs, OutputError);
+                        reveals.Add(rv);
+                        parts.Add($"reveal {rp.Name}");
                         continue;
                     }
-                    // the one resolver of a To map, as the validator's (B6): trimmed, id then name
-                    var map = MapRefs.Find(_model.Maps, o.ToMapId) ?? throw new EvalError($"Map \"{o.ToMapId.Trim()}\" was not found in the module");
-                    if (map.Boards.Count == 0) throw new EvalError($"Map \"{map.Name}\" has no board");
-                    var board = map.Boards[0];
-                    var centre = new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0);
-                    removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"moved {tg.Shown} to {map.Name}")
+                    case OutputAction.Remove:
                     {
-                        LogText = $"{formula.Name}: moved {tg.Real} to {map.Name}", Name = tg.Real, ToMapId = map.Id, Pos = centre, SideId = tg.Side,
-                    });
-                    continue;
-                }
-                case OutputAction.SetLayer:
-                case OutputAction.SetMask:
-                {
-                    var tg = EffectTarget(o, oi);
-                    var traits = PieceInfo.TypeOf(tg.Piece).Traits;
-                    string Current(int i) => pending.TryGetValue((tg.Piece.Id, i), out var st) ? st
-                        : i < tg.Piece.TraitStates.Count ? tg.Piece.TraitStates[i] ?? "" : "";
-                    var setTo = EffectValue(o);
-                    var whole = setTo.Kind == ValueKind.Number && double.IsFinite(setTo.Number) && setTo.Number == Math.Floor(setTo.Number);
-                    int index;
-                    string newState, shown, logged;
-                    if (o.Action == OutputAction.SetLayer)
-                    {
-                        var (li, def) = PieceInfo.FindLayer(PieceInfo.TypeOf(tg.Piece), o.Layer ?? "")
-                            ?? throw new EvalError($"{tg.Shown} has no layer \"{(o.Layer ?? "").Trim()}\"");
-                        var layer = def.Name.Trim();
-                        if (def.FollowProperty) throw new EvalError($"Layer \"{layer}\" follows a property, so it cannot be set");
-                        var levels = Math.Max(Math.Max(def.Images.Count, def.LevelNames.Count), 1);
-                        if (!whole || setTo.Number < (def.AlwaysActive ? 1 : 0) || setTo.Number > levels)
-                            throw new EvalError($"Layer \"{layer}\" has no level {setTo.Display()}");
-                        var n = (int)setTo.Number;
-                        var cur = Current(li);
-                        newState = n > 0 ? TraitState.LayerSetLevel(def, cur, n, true)
-                            : TraitState.LayerSetLevel(def, cur, TraitState.LayerLevel(def, cur).Level, false);   // 0: off, the level kept
-                        var level = n >= 1 && n <= def.LevelNames.Count && def.LevelNames[n - 1]?.Trim() is { Length: > 0 } ln
-                            ? ln : n.ToString(CultureInfo.InvariantCulture);
-                        index = li;
-                        // A piece the requester sees masked (its name differs from the real one) shows the level as its number: a level's
-                        // name would tell what the piece is.
-                        var maskedToViewer = !string.Equals(tg.Shown, tg.Real, StringComparison.Ordinal);
-                        shown = $"{layer} of {tg.Shown} = {(maskedToViewer ? n.ToString(CultureInfo.InvariantCulture) : level)}";
-                        logged = $"{layer} of {tg.Real} = {level}";
+                        if (o.Target == OutputTarget.Placed) throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
+                        var tg = EffectTarget(o, oi);
+                        if (string.IsNullOrWhiteSpace(o.ToMapId))
+                        {
+                            removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"removed {tg.Shown}")
+                                { LogText = $"{formula.Name}: removed {tg.Real}", Name = tg.Real, SideId = tg.Side, Draw = tg.Draw });
+                            continue;
+                        }
+                        // the one resolver of a To map, as the validator's (B6): trimmed, id then name
+                        var map = MapRefs.Find(_model.Maps, o.ToMapId) ?? throw new EvalError($"Map \"{o.ToMapId.Trim()}\" was not found in the module");
+                        if (map.Boards.Count == 0) throw new EvalError($"Map \"{map.Name}\" has no board");
+                        var board = map.Boards[0];
+                        var centre = new PointD(board.Offset.X + board.Width / 2.0, board.Offset.Y + board.Height / 2.0);
+                        removals.Add(new PieceEffect(PieceEffectKind.Remove, tg.Piece.Id, $"moved {tg.Shown} to {map.Name}")
+                        {
+                            LogText = $"{formula.Name}: moved {tg.Real} to {map.Name}", Name = tg.Real, ToMapId = map.Id, Pos = centre, SideId = tg.Side,
+                            Draw = tg.Draw,
+                        });
+                        continue;
                     }
-                    else
+                    case OutputAction.SetLayer:
+                    case OutputAction.SetMask:
                     {
-                        index = -1;
-                        for (var i = 0; i < traits.Count && index < 0; i++) if (traits[i] is ObscurableDef) index = i;
-                        if (index < 0) throw new EvalError($"{tg.Shown} has no mask");
-                        if (!whole || setTo.Number is not (0 or 1)) throw new EvalError("The mask value must be 0 or 1");
-                        var on = setTo.Number == 1;
-                        newState = TraitState.ObscuredSet((ObscurableDef)traits[index], Current(index), on, MaskObscurer);
-                        var verb = on ? "masked" : "unmasked";
-                        shown = $"{tg.Shown} {verb}";
-                        logged = $"{tg.Real} {verb}";
+                        var tg = EffectTarget(o, oi);
+                        var traits = PieceInfo.TypeOf(tg.Piece).Traits;
+                        string Current(int i) => pending.TryGetValue((tg.Piece.Id, i), out var st) ? st
+                            : i < tg.Piece.TraitStates.Count ? tg.Piece.TraitStates[i] ?? "" : "";
+                        var setTo = EffectValue(o);
+                        var whole = setTo.Kind == ValueKind.Number && double.IsFinite(setTo.Number) && setTo.Number == Math.Floor(setTo.Number);
+                        int index;
+                        string newState, shown, logged;
+                        if (o.Action == OutputAction.SetLayer)
+                        {
+                            var (li, def) = PieceInfo.FindLayer(PieceInfo.TypeOf(tg.Piece), o.Layer ?? "")
+                                ?? throw new EvalError($"{tg.Shown} has no layer \"{(o.Layer ?? "").Trim()}\"");
+                            var layer = def.Name.Trim();
+                            if (def.FollowProperty) throw new EvalError($"Layer \"{layer}\" follows a property, so it cannot be set");
+                            var levels = Math.Max(Math.Max(def.Images.Count, def.LevelNames.Count), 1);
+                            if (!whole || setTo.Number < (def.AlwaysActive ? 1 : 0) || setTo.Number > levels)
+                                throw new EvalError($"Layer \"{layer}\" has no level {setTo.Display()}");
+                            var n = (int)setTo.Number;
+                            var cur = Current(li);
+                            newState = n > 0 ? TraitState.LayerSetLevel(def, cur, n, true)
+                                : TraitState.LayerSetLevel(def, cur, TraitState.LayerLevel(def, cur).Level, false);   // 0: off, the level kept
+                            var level = n >= 1 && n <= def.LevelNames.Count && def.LevelNames[n - 1]?.Trim() is { Length: > 0 } ln
+                                ? ln : n.ToString(CultureInfo.InvariantCulture);
+                            index = li;
+                            // A piece the requester sees masked (its name differs from the real one) shows the level as its number: a level's
+                            // name would tell what the piece is.
+                            var maskedToViewer = !string.Equals(tg.Shown, tg.Real, StringComparison.Ordinal);
+                            shown = $"{layer} of {tg.Shown} = {(maskedToViewer ? n.ToString(CultureInfo.InvariantCulture) : level)}";
+                            logged = $"{layer} of {tg.Real} = {level}";
+                        }
+                        else
+                        {
+                            index = -1;
+                            for (var i = 0; i < traits.Count && index < 0; i++) if (traits[i] is ObscurableDef) index = i;
+                            if (index < 0) throw new EvalError($"{tg.Shown} has no mask");
+                            if (!whole || setTo.Number is not (0 or 1)) throw new EvalError("The mask value must be 0 or 1");
+                            var on = setTo.Number == 1;
+                            newState = TraitState.ObscuredSet((ObscurableDef)traits[index], Current(index), on, MaskObscurer);
+                            var verb = on ? "masked" : "unmasked";
+                            shown = $"{tg.Shown} {verb}";
+                            logged = $"{tg.Real} {verb}";
+                        }
+                        pending[(tg.Piece.Id, index)] = newState;
+                        traitEffects.Add(new PieceEffect(o.Action == OutputAction.SetLayer ? PieceEffectKind.SetLayer : PieceEffectKind.SetMask, tg.Piece.Id, shown)
+                            { LogText = $"{formula.Name}: {logged}", Name = tg.Real, TraitIndex = index, NewState = newState, SideId = tg.Side, Draw = tg.Draw });
+                        continue;
                     }
-                    pending[(tg.Piece.Id, index)] = newState;
-                    traitEffects.Add(new PieceEffect(o.Action == OutputAction.SetLayer ? PieceEffectKind.SetLayer : PieceEffectKind.SetMask, tg.Piece.Id, shown)
-                        { LogText = $"{formula.Name}: {logged}", Name = tg.Real, TraitIndex = index, NewState = newState, SideId = tg.Side });
-                    continue;
+                    default:
+                        throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
                 }
-                default:
-                    throw new EvalError(OutputError(oi, $": {o.Action} cannot target {o.Target}"));
-            }
-            if (o.Target == OutputTarget.Placed && placed == null) throw new EvalError(NothingPlaced);
-            var prop = OutputProperty(o, run);
-            // an old pack edited by hand (the validator not run): a computed value is never written
-            if (PropertyFacts.IsComputed(prop))
-                throw new EvalError($"Formula \"{formula.Name}\": output {oi + 1} writes computed property \"{prop.Name}\"");
-            string key;
-            (string Real, string Shown, string? Side)? target = null;
-            double? before = null;
-            switch (o.Target)
-            {
-                case OutputTarget.Unit: key = LedgerKey.Piece(piece!.Id); break;
-                case OutputTarget.Global: key = LedgerKey.Holder(HolderDef.GlobalId); EnsureKept(_pack, HolderDef.GlobalId, prop); break;
-                case OutputTarget.Piece:
-                case OutputTarget.Placed:
+                if (o.Target == OutputTarget.Placed && placed == null) throw new EvalError(NothingPlaced);
+                var prop = OutputProperty(o, run);
+                // an old pack edited by hand (the validator not run): a computed value is never written
+                if (PropertyFacts.IsComputed(prop))
+                    throw new EvalError($"Formula \"{formula.Name}\": output {oi + 1} writes computed property \"{prop.Name}\"");
+                string key;
+                (string Real, string Shown, string? Side)? target = null;
+                string? chosen = null;   // a Holder-variable output: the chosen holder's name
+                double? before = null;
+                switch (o.Target)
                 {
-                    // the scope rule of a Unit output (the validator's text): a holder-only property is never written to a piece
-                    if (prop.Scope == PropertyScope.Holders)
-                        throw new EvalError($"Formula \"{formula.Name}\": output property \"{prop.Name}\" cannot be written to a piece (its scope is {prop.Scope})");
-                    if (o.Target == OutputTarget.Placed)
+                    case OutputTarget.Unit: key = LedgerKey.Piece(piece!.Id); break;
+                    case OutputTarget.Global: key = LedgerKey.Holder(HolderDef.GlobalId); EnsureKept(_pack, HolderDef.GlobalId, prop); break;
+                    case OutputTarget.Piece:
+                    case OutputTarget.Placed:
                     {
-                        // the new piece has no ledger yet: Before is the property's Default (its seeds run after it is added, before this write)
-                        target = (placed!.Name, placed.Name, placed.Side);
-                        key = LedgerKey.Piece(placed.Piece.Id);
-                        before = prop.Default;
+                        // the scope rule of a Unit output (the validator's text): a holder-only property is never written to a piece
+                        if (prop.Scope == PropertyScope.Holders)
+                            throw new EvalError($"Formula \"{formula.Name}\": output property \"{prop.Name}\" cannot be written to a piece (its scope is {prop.Scope})");
+                        if (o.Target == OutputTarget.Placed)
+                        {
+                            // the new piece has no ledger yet: Before is the property's Default (its seeds run after it is added, before this write)
+                            target = (placed!.Name, placed.Name, placed.Side);
+                            key = LedgerKey.Piece(placed.Piece.Id);
+                            before = prop.Default;
+                            break;
+                        }
+                        var tp = share is { } sp ? (Piece: sp.Piece, Name: RealName(sp.Piece)) : targets[o.PieceVariable!];
+                        // on a player view, a non-Public value of a side the view was not made for is hidden (as the binding reads it)
+                        if (s.IsPlayerView && HiddenValues.PieceValueHidden(_pack, prop, tp.Piece, run.Sides, HiddenValues.HeldBy(s)))
+                            return Unresolved(o.PieceVariable!, HiddenText);
+                        target = (RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece));
+                        key = LedgerKey.Piece(tp.Piece.Id);
                         break;
                     }
-                    var tp = targets[o.PieceVariable!];
-                    // on a player view, a non-Public value of a side the view was not made for is hidden (as the binding reads it)
-                    if (s.IsPlayerView && HiddenValues.PieceValueHidden(_pack, prop, tp.Piece, run.Sides, HiddenValues.HeldBy(s)))
-                        return Unresolved(o.PieceVariable!, HiddenText);
-                    target = (RealName(tp.Piece), tp.Name, run.Sides.Value(tp.Piece));
-                    key = LedgerKey.Piece(tp.Piece.Id);
-                    break;
+                    case OutputTarget.Holder when !string.IsNullOrWhiteSpace(o.HolderVariable):
+                    {
+                        // B9 #13b: the holder the picker chose (always the chooser's or no side's, so never hidden from it)
+                        var hid = holderTargets[o.HolderVariable!].HolderId;
+                        EnsureKept(_pack, hid, prop);
+                        key = LedgerKey.Holder(hid);
+                        chosen = HolderText(_pack, hid);
+                        break;
+                    }
+                    case OutputTarget.Holder:
+                    default:
+                        if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
+                            throw new EvalError("An output refers to a deleted holder");
+                        EnsureKept(_pack, o.HolderId, prop);
+                        key = LedgerKey.Holder(o.HolderId);
+                        break;
                 }
-                case OutputTarget.Holder:
-                default:
-                    if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
-                        throw new EvalError("An output refers to a deleted holder");
-                    EnsureKept(_pack, o.HolderId, prop);
-                    key = LedgerKey.Holder(o.HolderId);
-                    break;
+                Value value;
+                if (string.IsNullOrWhiteSpace(o.Expr))
+                {
+                    if (result.Kind != ValueKind.Number) throw new EvalError("The result is not a number, so it cannot change " + prop.Name);
+                    value = result;
+                }
+                else
+                {
+                    value = Evaluator.Evaluate(Parse(formula, o.Expr), new RunContext(run));
+                    if (value.Kind != ValueKind.Number) throw new EvalError($"The value for {prop.Name} is not a number");
+                }
+                // A keyed property (B6) writes one key: the output's key, evaluated after its value and normalised. Unkeyed and keyed never mix.
+                string? valueKey = null;
+                if (KeyedFacts.IsKeyed(prop))
+                {
+                    if (string.IsNullOrWhiteSpace(o.Key)) throw new EvalError(OutputError(oi, $" writes keyed property \"{prop.Name}\" but has no key"));
+                    if (KeyedFacts.IsPlace(prop) && key != LedgerKey.Holder(HolderDef.GlobalId))
+                        throw new EvalError(OutputError(oi, $" writes place property \"{prop.Name}\" to a holder other than Global"));
+                    var keyValue = Evaluator.Evaluate(Parse(formula, o.Key), new RunContext(run));
+                    try { valueKey = KeyedValues.NormaliseKey(_pack, _model, prop, keyValue); }
+                    catch (EvalError ex) { throw new EvalError($"The key for {prop.Name}: {ex.Message}"); }
+                    // a player view lacks a Private place's values: a change of one is not previewed (the host decides), as a hidden binding waits
+                    if (s.IsPlayerView && o.Op != OutputOp.Set && KeyedFacts.IsPlace(prop) && !PropertyFacts.IsPublic(_pack, prop))
+                        return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls, run.RollsByKey);
+                }
+                else if (!string.IsNullOrWhiteSpace(o.Key))
+                    throw new EvalError(OutputError(oi, $" has a key but writes property \"{prop.Name}\", which is not keyed"));
+                var x = value.Number;
+                var was = before ?? (valueKey != null ? KeyedValues.GetOrDefault(s, key, prop, valueKey) : Ledger.GetOrDefault(s, key, prop));
+                var after = o.Op switch { OutputOp.Subtract => was - x, OutputOp.Add => was + x, _ => x };
+                if (double.IsNaN(after) || double.IsInfinity(after)) throw new EvalError("Result is not a finite number");
+                var b = Value.Of(was).Display();
+                var xs = value.Display();
+                var a = Value.Of(after).Display();
+                string Part(string what) => o.Op switch
+                {
+                    OutputOp.Subtract => $"{what} {b} − {xs} = {a}",
+                    OutputOp.Add => $"{what} {b} + {xs} = {a}",
+                    _ => $"{what} = {PropertyLabels.Text(_pack, prop, after)}",
+                };
+                var shownName = valueKey == null ? prop.Name : $"{prop.Name}[{valueKey}]";   // a keyed write names its key: "Ford depth[0412] = 3"
+                // a chosen holder is named in its own part, the acting side's line ("Stores of Ford Dump 10 - 3 = 7")
+                var part = chosen == null ? Part(shownName) : Part($"{shownName} of {chosen}");
+                outputs.Add(new OutputPreview(key, prop.Id, prop.Name, was, after)
+                {
+                    Target = o.Target,
+                    Part = part,
+                    SideId = target?.Side,
+                    Subject = target?.Shown ?? chosen,
+                    TargetName = target?.Real,
+                    ValueKey = valueKey,
+                    Draw = share?.Var,
+                });
+                // the dialog's working names the target as its binding does ("Fuel of Blue Barge 4 + 2 = 6"); a drawn counter is never named
+                if (share == null) parts.Add(target is { } named ? Part($"{shownName} of {named.Shown}") : part);
             }
-            Value value;
-            if (string.IsNullOrWhiteSpace(o.Expr))
+            catch (EvalError ex) when (share != null)
             {
-                if (result.Kind != ValueKind.Number) throw new EvalError("The result is not a number, so it cannot change " + prop.Name);
-                value = result;
+                throw new EvalError(OutputError(oi, " cannot act on one of the drawn counters")) { HiddenData = ex.HiddenData, MissingValue = ex.MissingValue };
             }
-            else
-            {
-                value = Evaluator.Evaluate(Parse(formula, o.Expr), new RunContext(run));
-                if (value.Kind != ValueKind.Number) throw new EvalError($"The value for {prop.Name} is not a number");
-            }
-            // A keyed property (B6) writes one key: the output's key, evaluated after its value and normalised. Unkeyed and keyed never mix.
-            string? valueKey = null;
-            if (KeyedFacts.IsKeyed(prop))
-            {
-                if (string.IsNullOrWhiteSpace(o.Key)) throw new EvalError(OutputError(oi, $" writes keyed property \"{prop.Name}\" but has no key"));
-                if (KeyedFacts.IsPlace(prop) && key != LedgerKey.Holder(HolderDef.GlobalId))
-                    throw new EvalError(OutputError(oi, $" writes place property \"{prop.Name}\" to a holder other than Global"));
-                var keyValue = Evaluator.Evaluate(Parse(formula, o.Key), new RunContext(run));
-                try { valueKey = KeyedValues.NormaliseKey(_pack, _model, prop, keyValue); }
-                catch (EvalError ex) { throw new EvalError($"The key for {prop.Name}: {ex.Message}"); }
-                // a player view lacks a Private place's values: a change of one is not previewed (the host decides), as a hidden binding waits
-                if (s.IsPlayerView && o.Op != OutputOp.Set && KeyedFacts.IsPlace(prop) && !PropertyFacts.IsPublic(_pack, prop))
-                    return new(formula, states, null, "", Array.Empty<OutputPreview>(), null, rolls, run.RollsByKey);
-            }
-            else if (!string.IsNullOrWhiteSpace(o.Key))
-                throw new EvalError(OutputError(oi, $" has a key but writes property \"{prop.Name}\", which is not keyed"));
-            var x = value.Number;
-            var was = before ?? (valueKey != null ? KeyedValues.GetOrDefault(s, key, prop, valueKey) : Ledger.GetOrDefault(s, key, prop));
-            var after = o.Op switch { OutputOp.Subtract => was - x, OutputOp.Add => was + x, _ => x };
-            if (double.IsNaN(after) || double.IsInfinity(after)) throw new EvalError("Result is not a finite number");
-            var b = Value.Of(was).Display();
-            var xs = value.Display();
-            var a = Value.Of(after).Display();
-            string Part(string what) => o.Op switch
-            {
-                OutputOp.Subtract => $"{what} {b} − {xs} = {a}",
-                OutputOp.Add => $"{what} {b} + {xs} = {a}",
-                _ => $"{what} = {PropertyLabels.Text(_pack, prop, after)}",
-            };
-            var shownName = valueKey == null ? prop.Name : $"{prop.Name}[{valueKey}]";   // a keyed write names its key: "Ford depth[0412] = 3"
-            var part = Part(shownName);
-            outputs.Add(new OutputPreview(key, prop.Id, prop.Name, was, after)
-            {
-                Target = o.Target,
-                Part = part,
-                SideId = target?.Side,
-                Subject = target?.Shown,
-                TargetName = target?.Real,
-                ValueKey = valueKey,
-            });
-            // the dialog's working names the target as its binding does ("Fuel of Blue Barge 4 + 2 = 6")
-            parts.Add(target is { } named ? Part($"{shownName} of {named.Shown}") : part);
         }
+        run.Share = null;
+        // B9 #55: what each Draw binding drew (binding order); its working part is "{Var} = {k}" (the split goes only to the log).
+        var draws = new List<DrawPreview>();
+        foreach (var db in formula.Bindings)
+        {
+            if (db.Kind != BindingKind.Draw || run.DrawnOf(db.Variable) is not { } got) continue;
+            draws.Add(new DrawPreview(db.Variable, got.Select(x => (x.Piece.Id, x.Count)).ToArray())
+                { Lines = got.Select(x => (RealName(x.Piece), run.Sides.Value(x.Piece))).ToArray() });
+        }
+        parts.AddRange(draws.Select(DrawPart));
         // Effects in command order: the Place, the layer and mask changes (output order), then the removals (output order).
         var effects = new List<PieceEffect>();
         if (place != null) effects.Add(place);
         effects.AddRange(traitEffects);
         effects.AddRange(removals);
-        parts.AddRange(effects.Select(e => e.Text));
+        parts.AddRange(effects.Where(e => e.Draw == null).Select(e => e.Text));
         if (parts.Count > 0) working += " → " + string.Join("; ", parts);
-        return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey) { Calc = calc, Effects = effects, Reveals = reveals };
+        return new(formula, states, result, working, outputs, null, rolls, run.RollsByKey) { Calc = calc, Effects = effects, Reveals = reveals, Draws = draws };
     }
+
+    /// <summary>B9 #55: a draw's part of the acting side's working: "{Var} = {k}".</summary>
+    private static string DrawPart(DrawPreview d) => $"{d.Variable} = {Value.Of(d.Drawn.Sum(x => x.Count)).Display()}";
 
     /// <summary>
     /// A Reveal output's subject, value and margin (B7 #47), with its property. The value is the property's as a binding of the target reads
@@ -608,7 +721,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// the full state. The margin (blank = 0) must be a whole number from 0 to 1000, else the run fails.
     /// </summary>
     private (RevealPreview Reveal, PropertyDef Property) RevealOf(GameState s, FormulaOutput o, int oi, RunScope run, PieceInstance? piece,
-        Dictionary<string, (PieceInstance Piece, string Name)> targets, List<OutputPreview> earlier, Func<int, string, string> outputError)
+        Dictionary<string, (PieceInstance Piece, string Name)> targets, Dictionary<string, HolderChoice> holderTargets, List<OutputPreview> earlier,
+        Func<int, string, string> outputError)
     {
         var prop = OutputProperty(o, run);
         if (KeyedFacts.IsKeyed(prop)) throw new EvalError(outputError(oi, $" reveals keyed property \"{prop.Name}\"; a reveal shows one value"));
@@ -643,15 +757,25 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
                 EnsureKept(_pack, HolderDef.GlobalId, prop);
                 key = LedgerKey.Holder(HolderDef.GlobalId);
                 subject = "Global";
-                hidden = view && HiddenValues.HolderValueHidden(_pack, HolderDef.GlobalId, prop, held!);
+                hidden = view && HiddenValues.HolderValueHidden(s, _pack, HolderDef.GlobalId, prop, held!);
                 break;
+            case OutputTarget.Holder when !string.IsNullOrWhiteSpace(o.HolderVariable):
+            {
+                // B9 #13b: the holder the picker chose; hidden as any holder's value on a view (its current owner, B9 #13a)
+                var hid = holderTargets[o.HolderVariable!].HolderId;
+                EnsureKept(_pack, hid, prop);
+                key = LedgerKey.Holder(hid);
+                subject = HolderText(_pack, hid);
+                hidden = view && HiddenValues.HolderValueHidden(s, _pack, hid, prop, held!);
+                break;
+            }
             case OutputTarget.Holder:
                 if (o.HolderId == null || (o.HolderId != HolderDef.GlobalId && _pack.ById<HolderDef>(o.HolderId) == null))
                     throw new EvalError("An output refers to a deleted holder");
                 EnsureKept(_pack, o.HolderId, prop);
                 key = LedgerKey.Holder(o.HolderId);
                 subject = HolderText(_pack, o.HolderId);
-                hidden = view && HiddenValues.HolderValueHidden(_pack, o.HolderId, prop, held!);
+                hidden = view && HiddenValues.HolderValueHidden(s, _pack, o.HolderId, prop, held!);
                 break;
             default:
                 throw new EvalError(outputError(oi, $": {o.Action} cannot target {o.Target}"));
@@ -721,7 +845,8 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
     /// <summary>
     /// The commands applying a trace. Each carries the unit the formula ran on (<see cref="FormulaTrace.PieceId"/>) and, when given, the side
     /// it was run for, so PlayerView can attribute rolls and working explicitly. Whatever the listed output order, the order is fixed: rolls;
-    /// the Place (<see cref="AddPiece"/>); own writes (Unit, Global, Holder); Piece writes; Placed writes; each layer or mask change with its
+    /// the Place (<see cref="AddPiece"/>); own writes (Unit, Global, Holder); Piece writes (one per drawn counter for a draw); Placed writes;
+    /// one System line per drawn counter (B9 #55, stamped with its side); each layer or mask change with its
     /// System line (output order); one System line per reveal with a known value (output order, B7 #47; a window is drawn now with the
     /// runner's roller, no dice line); the working line when no own write carries it; then removals and moves (output order), so every line
     /// before a removal is logged against a piece that still exists. The caller seeds the placed piece right after its AddPiece executes.
@@ -739,9 +864,12 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         // and lists the effects by the names the acting player sees.
         var reveals = t.Reveals ?? Array.Empty<RevealPreview>();
         var revealParts = reveals.Select(r => $"reveal {_pack.ById<PropertyDef>(r.PropertyId)?.Name ?? r.PropertyId}");
+        // B9 #55: a draw shows the acting side k ("{Var} = {k}"), never which counters gave how many (those go on the counters' own lines).
+        var draws = t.Draws ?? Array.Empty<DrawPreview>();
+        var shownEffects = effects.Where(e => e.Draw == null).ToList();
         var working = t.Calc == null ? t.Working
-            : t.Calc + (own.Count + effects.Count + reveals.Count == 0 ? ""
-                : " → " + string.Join("; ", own.Select(o => o.Part).Concat(revealParts).Concat(effects.Select(e => e.Text))));
+            : t.Calc + (own.Count + shownEffects.Count + reveals.Count + draws.Count == 0 ? ""
+                : " → " + string.Join("; ", own.Select(o => o.Part).Concat(draws.Select(DrawPart)).Concat(revealParts).Concat(shownEffects.Select(e => e.Text))));
         foreach (var e in effects.Where(e => e.Kind == PieceEffectKind.Place))
             list.Add(new AddPiece(e.PieceId, e.TypeString!, e.StateString ?? "", e.MapId!, e.Pos, e.StackOnto, e.LogText));
         var first = true;
@@ -759,6 +887,16 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             list.Add(new LedgerDelta(o.Key, o.PropertyId, o.Before, o.After, "formula", t.Formula.Id, t.Formula.RuleRefId, note,
                 $"{t.Formula.Name}: {o.Part}", Tag: tag, Subject: o.TargetName ?? o.Subject, PieceId: targetId, SideId: o.SideId) { ValueKey = o.ValueKey });
         }
+        // B9 #55: one System line per drawn counter, "{formula}: {Var}: {n} on {name}", on the counter and stamped with its side (no side: public);
+        // its formula id marks it as the counter's side's own line (PlayerView drops it for other sides).
+        // A preview without the counters' names and sides (not made by the runner) logs no line: an unstamped line would be public (fail closed).
+        foreach (var d in draws)
+            for (var i = 0; i < d.Drawn.Count && d.Lines.Count == d.Drawn.Count; i++)
+            {
+                var (name, side) = d.Lines[i];
+                list.Add(new AddLogLine(LogKind.System, $"{t.Formula.Name}: {d.Variable}: {d.Drawn[i].Count} on {name}", d.Drawn[i].PieceId, SideId: side,
+                    FormulaId: t.Formula.Id));
+            }
         // A layer or mask change: the trait state, then a System line by the piece's real name, stamped with its side.
         foreach (var e in effects.Where(e => e.Kind is PieceEffectKind.SetLayer or PieceEffectKind.SetMask))
         {
@@ -783,7 +921,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
 
     /// <summary>Per-run resolution of bindings to values.</summary>
     private sealed class RunScope(FormulaRunner owner, GameState s, RunRequest r, FormulaDef formula, PieceInstance? piece, Dictionary<string, IReadOnlyList<int>> byKey,
-        List<string> sharedKeys, Dictionary<string, int> rollSides)
+        List<string> sharedKeys, Dictionary<string, int> rollSides, Dictionary<string, IReadOnlyList<int>> drawRolls)
     {
         private readonly Dictionary<string, VariableState> _done = new(StringComparer.Ordinal);
         private readonly HashSet<string> _active = new(StringComparer.Ordinal);
@@ -912,6 +1050,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         /// <see cref="EvalError"/> when its "Only when" condition is false.</summary>
         public Value ValueOf(string name)
         {
+            if (Share is { } sh && sh.Var == name) return Value.Of(sh.Count);   // B9 #55: a drawn counter's own output reads its share
             var st = Resolve(name);
             if (st.Skipped) throw new EvalError($"{name} is not used here: its \"Only when\" condition is false");
             if (st.Waiting) throw new Waits();
@@ -940,7 +1079,7 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             try
             {
                 var b = formula.Bindings.FirstOrDefault(x => x.Variable == name);
-                var auto = b is { Kind: not (BindingKind.Input or BindingKind.Piece) };
+                var auto = b is { Kind: not (BindingKind.Input or BindingKind.Piece) } && !HolderChoices.IsPicker(b);   // a pick is always asked
                 try
                 {
                     var use = b == null || string.IsNullOrWhiteSpace(b.When) || r.ForceWhen?.Contains(name) == true ? true : Condition(Parse(formula, b.When));
@@ -970,7 +1109,11 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
         private VariableState Bind(VariableBinding b)
         {
             var name = b.Variable;
-            var auto = b.Kind is not (BindingKind.Input or BindingKind.Piece);
+            var auto = b.Kind is not (BindingKind.Input or BindingKind.Piece) && !HolderChoices.IsPicker(b);
+            // B9 #13b: a holder picker's value is always read from its pick (never an override, never filled automatically)
+            if (HolderChoices.IsPicker(b)) return PickedHolder(b);
+            // B9 #55: a draw is always made by the engine (never typed, never an override, also with physical dice)
+            if (b.Kind == BindingKind.Draw) return Drawn(b);
             if (r.Overrides.TryGetValue(name, out var ov) && ov != null)
             {
                 if (b.Kind == BindingKind.Roll) return TypedRoll(b, ov);
@@ -1140,6 +1283,141 @@ public sealed class FormulaRunner(RulesPack pack, ModuleModel model, Func<int, i
             var hit = list.FirstOrDefault(c => string.Equals(c.Label, typed, StringComparison.OrdinalIgnoreCase));
             if (hit.PieceId == null || !s.Pieces.TryGetValue(hit.PieceId, out var picked) || picked == null) throw new Missing(PieceChoices.Unknown);
             return (picked, hit.Name.Length > 0 ? hit.Name : hit.Label);
+        }
+
+        /// <summary>
+        /// B9 #13b: a holder picker (<see cref="HolderChoices"/>): the typed label (trimmed, case-insensitive) resolved among the listed holders
+        /// the chooser may act on (<see cref="RunRequest.PickSides"/>), then the binding's property on that holder as a fixed Holder binding
+        /// reads it (Default when unset). Working: "{Prop} of {holder name}". Never filled automatically.
+        /// </summary>
+        private VariableState PickedHolder(VariableBinding b)
+        {
+            var prop = Unkeyed(Prop(b));
+            var hid = PickHolder(b).HolderId;
+            EnsureKept(owner._pack, hid, prop);
+            return new(b.Variable, Value.Of(Read(LedgerKey.Holder(hid), prop)), false, false, null, $"{prop.Name} of {HolderText(owner._pack, hid)}");
+        }
+
+        /// <summary>
+        /// The holder a picker's typed label picks among <see cref="HolderChoices.For"/> of this run's state for <see cref="RunRequest.PickSides"/>;
+        /// throws <see cref="Missing"/> ("No holder to choose", "Waiting for input", "Choose one of the listed holders") when it cannot be picked.
+        /// Once per variable per run: the binding and the outputs naming it share one list.
+        /// </summary>
+        public HolderChoice PickHolder(VariableBinding b)
+        {
+            if (_holderPicks.TryGetValue(b.Variable, out var known)) return known ?? throw new Missing(_holderMissing[b.Variable]);
+            try { return _holderPicks[b.Variable] = PickHolderOnce(b); }
+            catch (Missing m)
+            {
+                _holderPicks[b.Variable] = null;
+                _holderMissing[b.Variable] = m.Message;
+                throw;
+            }
+        }
+
+        private readonly Dictionary<string, HolderChoice?> _holderPicks = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _holderMissing = new(StringComparer.Ordinal);
+
+        private HolderChoice PickHolderOnce(VariableBinding b)
+        {
+            var list = HolderChoices.For(s, owner._pack, b, r.PickSides);
+            if (list.Count == 0) throw new Missing(HolderChoices.None);
+            if (!r.Typed.TryGetValue(b.Variable, out var raw) || string.IsNullOrWhiteSpace(raw)) throw new Missing("Waiting for input");
+            return HolderChoices.Find(list, raw) ?? throw new Missing(HolderChoices.Unknown);
+        }
+
+        /// <summary>B9 #55: while an output acts on one drawn counter, the Draw variable and that counter's share (its value expression reads
+        /// the share); null otherwise (the variable reads k).</summary>
+        public (string Var, PieceInstance Piece, int Count)? Share { get; set; }
+
+        private readonly Dictionary<string, IReadOnlyList<(PieceInstance Piece, int Count)>> _draws = new(StringComparer.Ordinal);
+
+        /// <summary>B9 #55: the counters a resolved Draw binding drew (count ≥ 1, pool order), or null when it was not drawn in this run.</summary>
+        public IReadOnlyList<(PieceInstance Piece, int Count)>? DrawnOf(string name) => _draws.TryGetValue(name, out var d) ? d : null;
+
+        private const string DrawCountText = "The draw count for {0} must be a whole number from 0 to 1000";
+
+        /// <summary>
+        /// B9 #55: a Draw binding. The pool is every counter of this run's state matching the binding's filter (with "same hex", only those in
+        /// the run piece's hex, the run piece included), in piece id order, each with its weight (the property as a binding reads it, Default
+        /// when unset, a computed property that does not apply 0; no property: 1), a whole number from 0 to 1000. k = min(count, members); for
+        /// i = 1..k one die of the remaining members' number of faces under "draw:{Var}#{i}" (a pin in range, else <see cref="RunRequest.Dice"/>,
+        /// else the roller) takes that member. On a player view a pool reading data the view lacks is missing (hidden).
+        /// </summary>
+        private VariableState Drawn(VariableBinding b)
+        {
+            var name = b.Variable;
+            if (b.SameHex && piece == null) throw new Missing("Needs a unit");
+            var weight = b.Property == null ? null : Unkeyed(Prop(b));
+            var countText = string.Format(CultureInfo.InvariantCulture, DrawCountText, name);
+            if (string.IsNullOrWhiteSpace(b.DrawCount)) throw new EvalError(countText);
+            var cv = Evaluator.Evaluate(Parse(formula, b.DrawCount!), new RunContext(this));
+            if (cv.Kind != ValueKind.Number || !double.IsFinite(cv.Number) || cv.Number != Math.Floor(cv.Number) || cv.Number < 0 || cv.Number > 1000)
+                throw new EvalError(countText);
+            var count = (int)cv.Number;
+
+            var view = s.IsPlayerView;
+            Func<string, bool>? held = view ? HiddenValues.HeldBy(s) : null;
+            if (view && (PieceAccess.PiecesMayHide(owner._pack, owner._model, s.ViewSides?.ToHashSet(StringComparer.Ordinal)) || FormulaVariables.FilterMayHide(owner._pack, b.PieceFilter)))
+                throw new Missing(HiddenText);
+            var pool = new List<(PieceInstance Piece, int Count)>();
+            string? hexLoc = null;
+            if (b.SameHex) hexLoc = PieceInfo.Location(piece!, owner._model);
+            if (!b.SameHex || hexLoc != null)
+            {
+                var match = PieceFilter.Compile(b.PieceFilter, s, owner._pack, owner._model);
+                foreach (var p in s.Pieces.Values.Where(p => p?.Id != null).OrderBy(p => p.Id, StringComparer.Ordinal))
+                {
+                    if (b.SameHex && (!string.Equals(p.MapId, piece!.MapId, StringComparison.Ordinal)
+                            || !string.Equals(PieceInfo.Location(p, owner._model), hexLoc, StringComparison.Ordinal))) continue;
+                    if (!match(p)) continue;
+                    if (view && (PlayerView.IsPlaceholder(p) || (weight != null && HiddenValues.PieceValueHidden(owner._pack, weight, p, Sides, held!))))
+                        throw new Missing(HiddenText);
+                    var w = weight == null ? 1 : Weight(p, weight);
+                    if (!double.IsFinite(w) || w != Math.Floor(w) || w < 0 || w > 1000)
+                        throw new EvalError($"{weight!.Name} of {RealName(p)} must be a whole number from 0 to 1000 to draw from");
+                    if (w > 0) pool.Add((p, (int)w));
+                }
+            }
+            var total = pool.Sum(x => x.Count);
+            var k = Math.Min(count, total);
+            var left = pool.Select(x => x.Count).ToArray();
+            var got = new int[pool.Count];
+            for (var i = 1; i <= k; i++)
+            {
+                if (_noRolls) throw new RollsForbidden();
+                var key = $"draw:{name}#{i.ToString(CultureInfo.InvariantCulture)}";
+                var faces = total - (i - 1);
+                var face = DrawDie(key, faces);
+                drawRolls[key] = new[] { face };
+                var j = 0;
+                for (var seen = left[0]; seen < face; seen += left[++j]) { }
+                left[j]--;
+                got[j]++;
+            }
+            _draws[name] = pool.Select((x, j) => (x.Piece, got[j])).Where(x => x.Item2 > 0).ToArray();
+            return new(name, Value.Of(k), true, false, null);
+        }
+
+        /// <summary>A draw die of <paramref name="faces"/> faces: the pin (one die, 1 to faces), else the Dice function's (the same check),
+        /// else the roller's. Never logged, never in RollsByKey, never shared by a group.</summary>
+        private int DrawDie(string key, int faces)
+        {
+            static bool Ok(IReadOnlyList<int>? d, int faces) => d is { Count: 1 } && d[0] >= 1 && d[0] <= faces;
+            if (r.FixedRolls.TryGetValue(key, out var pin) && Ok(pin, faces)) return pin![0];
+            var given = r.Dice?.Invoke(key, 1, faces);
+            if (Ok(given, faces)) return given![0];
+            var rolled = owner._roller(1, faces);
+            return rolled is { Count: > 0 } ? Math.Clamp(rolled[0], 1, faces) : 1;
+        }
+
+        /// <summary>A pool member's weight: its stored value (Default when unset), or a computed value (0 when it does not apply to the counter).</summary>
+        private double Weight(PieceInstance p, PropertyDef weight)
+        {
+            if (!PropertyFacts.IsComputed(weight)) return Ledger.GetOrDefault(s, LedgerKey.Piece(p.Id), weight);
+            try { return PropertyValues.Get(s, owner._pack, owner._model, LedgerKey.Piece(p.Id), weight, Filters) ?? 0; }
+            catch (EvalError ex) when (ex.HiddenData) { throw new Missing(HiddenText); }
+            catch (EvalError ex) when (ex.MissingValue) { return 0; }
         }
 
         private PropertyDef Prop(VariableBinding b) =>

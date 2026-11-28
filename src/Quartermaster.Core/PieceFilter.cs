@@ -116,10 +116,10 @@ public static class PieceFilter
         catch (Exception) { return null; }
     }
 
-    /// <summary>Formulas that need a unit (a Unit binding or output, or a Piece binding limited to the unit's hex) and apply to this piece, ordered by name.</summary>
+    /// <summary>Formulas that need a unit (a Unit binding or output, or a Piece or Draw binding limited to the unit's hex) and apply to this piece, ordered by name.</summary>
     public static IReadOnlyList<FormulaDef> FormulasFor(RulesPack pack, PieceInstance p, GameState s, ModuleModel model) =>
         pack.Formulas
-            .Where(f => f.Bindings.Any(b => b.Kind == BindingKind.Unit || (b.Kind == BindingKind.Piece && b.SameHex)) || f.Outputs.Any(o => o.Target == OutputTarget.Unit))
+            .Where(f => f.Bindings.Any(b => b.Kind == BindingKind.Unit || (b.Kind is BindingKind.Piece or BindingKind.Draw && b.SameHex)) || f.Outputs.Any(o => o.Target == OutputTarget.Unit))
             .Where(f => Matches(f.AppliesTo, p, s, model, pack))
             .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(f => f.Id, StringComparer.Ordinal)
@@ -187,7 +187,7 @@ public static class PieceFilter
 
     /// <summary>
     /// holder(Holder, Property): the holder's value, else the property's Default. A player's view removes the values the viewer may not
-    /// see (<see cref="HiddenValues.HolderValueHidden(RulesPack, string, PropertyDef?, Func{string, bool})"/>: a non-Public value of a holder
+    /// see (<see cref="HiddenValues.HolderValueHidden(GameState?, RulesPack, string, PropertyDef?, Func{string, bool})"/>: a non-Public value of a holder
     /// owned by a side the viewer does not hold), so in a view such a missing value is hidden, not unset, and does not fall back to the
     /// Default, even when the holder's Public values are in the view (B7 #74a). A value the viewer may see that is missing reads the Default.
     /// </summary>
@@ -209,7 +209,9 @@ public static class PieceFilter
         var key = LedgerKey.Holder(holderId);
         var v = PropertyValues.Get(s, pack, filters?.Model ?? model, key, def, filters);
         if (v != null) return Value.Of(v.Value);
-        if (s.IsPlayerView && HiddenValues.HolderValueHidden(pack, holderId, def, HiddenValues.HeldBy(s)))
+        if (s.IsPlayerView && (filters != null
+                ? HiddenValues.HolderValueHidden(pack, holderId, def, HiddenValues.HeldBy(s), null, filters.HolderSides)
+                : HiddenValues.HolderValueHidden(s, pack, holderId, def, HiddenValues.HeldBy(s))))
             throw new EvalError($"{def.Name} has no value on {holderName}") { MissingValue = true };
         return Value.Of(def.Default);
     }

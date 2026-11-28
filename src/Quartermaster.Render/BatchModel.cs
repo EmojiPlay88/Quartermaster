@@ -85,6 +85,10 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         if (Formula is not { } f || s.Rules is not { } pack) return null;
         var binding = f.Bindings.FirstOrDefault(b => b?.Variable == variable);
         if (binding is { Kind: BindingKind.Piece } pick) return PieceLabels(pack, f, pick, runPieceId);
+        // B9 #13b: a holder picker lists the dumps the seat may act on now (the same list for every row: it does not depend on the unit)
+        if (HolderChoices.IsPicker(binding) && s.Game?.State is { } hs)
+            return Cached(pack, f, variable, null,
+                () => HolderChoices.For(hs, pack, binding!, FormulaMasking.PickSides(s)).Select(c => c.Label).ToList());
         // A choices table (B4): the keys left by its filter for this row's counter (every key without a row), listed on the seat's own view
         // (as Piece candidates are), so the list never reflects data that seat cannot see.
         if (binding is { Kind: BindingKind.Input } input && !string.IsNullOrWhiteSpace(input.ChoicesTable) && s.Game?.State is { } st)
@@ -97,9 +101,10 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         return KeyChoices.For(pack, f, variable);
     }
 
-    /// <summary>True for a column whose cell is a dropdown: an Input with keys, or a Piece binding (even while it has no candidate).</summary>
+    /// <summary>True for a column whose cell is a dropdown: an Input with keys, or a Piece binding or holder picker (even while it has no candidate).</summary>
     public bool IsChoiceColumn(string variable) =>
-        Formula is { } f && (f.Bindings.Any(b => b is { Kind: BindingKind.Piece } && b.Variable == variable) || ChoicesFor(variable) is { Count: > 0 });
+        Formula is { } f && (f.Bindings.Any(b => (b is { Kind: BindingKind.Piece } || HolderChoices.IsPicker(b)) && b.Variable == variable)
+            || ChoicesFor(variable) is { Count: > 0 });
 
     private readonly Dictionary<(string Variable, string? RunPiece), IReadOnlyList<string>?> _pieceLabels = new();
     private object? _pieceLabelsKey;
@@ -275,7 +280,7 @@ public sealed class BatchModel(ModuleSession s, Func<string?, string?, FormulaTr
         {
             var dv = ModelFor(row).Evaluate(s.Game.State);
             return dv.ShownTrace.Error != null || dv.ShownTrace.Result == null ? Array.Empty<(string, string)>()
-                : dv.ShownTrace.Outputs.Select(o => (o.Key, o.PropertyId)).ToList();
+                : dv.ShownTrace.Outputs.Where(o => o.Draw == null).Select(o => (o.Key, o.PropertyId)).ToList();   // B9 #55: never a drawn counter
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { return Array.Empty<(string, string)>(); }
     }

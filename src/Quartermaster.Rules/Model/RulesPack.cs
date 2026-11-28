@@ -98,6 +98,9 @@ public sealed record HolderDef
     public string? Notes { get; init; }
     /// <summary>Side that owns this holder's ledger; null = public.</summary>
     public string? SideId { get; init; }
+    /// <summary>The holder's owner as play goes on: an expression giving a side's name or id, or a number N for the Nth side (0 = no owner). It may read this holder's and the global holder's Public values. Null = the fixed <see cref="SideId"/> (never ""). Omitted from the pack JSON when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OwnerExpr { get; init; }
     /// <summary>Id of the rule reference this holder cites. Omitted from the pack JSON when null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RuleRefId { get; init; }

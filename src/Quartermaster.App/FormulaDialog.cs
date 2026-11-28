@@ -16,6 +16,8 @@ sealed class FormulaDialog : Form
     readonly bool _previewOnly;
     FormulaFormView _view;
     readonly Label _working = new() { AutoSize = true, Font = new Font("Consolas", 9f), MaximumSize = new Size(540, 0), Margin = new Padding(0, 2, 0, 2) };
+    /// <summary>The run's writes as this viewer is shown them before Apply (<see cref="DialogView.OutputLines"/>), one per line; hidden when there are none.</summary>
+    readonly Label _outputs = new() { AutoSize = true, MaximumSize = new Size(540, 0), Margin = new Padding(0, 2, 0, 2), Visible = false };
     readonly FlowLayoutPanel _inline = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, MaximumSize = new Size(540, 0), Margin = Padding.Empty };
     readonly Button _apply = new() { Text = "&Apply to ledger", Width = 110, Height = 25, Enabled = false };
     readonly Button _calc = new() { Text = "&Calculate", Width = 85, Height = 25 };
@@ -118,6 +120,7 @@ sealed class FormulaDialog : Form
         SetNotesTip(formula.Notes);
         var wf = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
         wf.Controls.Add(_working);
+        wf.Controls.Add(_outputs);
         wf.Controls.Add(_inline);
         _body.Controls.Add(Group("Working", wf));
         _body.Controls.Add(Buttons());
@@ -356,6 +359,13 @@ sealed class FormulaDialog : Form
         _debounce.Start();
     }
 
+    /// <summary>The output lines below the working (B9: a draw's collapsed line); hidden when there are none.</summary>
+    void ShowOutputs(IReadOnlyList<string> lines)
+    {
+        _outputs.Text = string.Join(Environment.NewLine, lines);
+        _outputs.Visible = lines.Count > 0;
+    }
+
     /// <summary>Re-runs the formula and pushes the result onto the controls. Never throws.</summary>
     void Recalc()
     {
@@ -369,6 +379,7 @@ sealed class FormulaDialog : Form
             _view.Apply(v);
             _working.Text = v.WorkingText;
             _working.ForeColor = v.WorkingNegative ? Color.Red : SystemColors.ControlText;
+            ShowOutputs(v.OutputLines);
             _status.Text = v.Status;
             _status.ForeColor = v.ShownTrace.Error != null ? Color.Firebrick : SystemColors.ControlText;
             // A guest's Apply asks the host, which checks the boxes with the full game; the local check can't (hidden values are absent).
@@ -380,6 +391,7 @@ sealed class FormulaDialog : Form
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _last = null;   // never leave the previous (applicable) view behind
+            ShowOutputs(Array.Empty<string>());
             _status.Text = "Could not update: " + ex.Message;
             _apply.Enabled = false;
             _s.Log.Add(DiagnosticSeverity.Error, "formula", "Formula dialog failed: " + ex.Message);

@@ -54,6 +54,7 @@ public static class FormulaLayout
             case BindingKind.Global: return $"{PropName(b, pack)} (global)";
             case BindingKind.Holder:
             {
+                if (b.HolderChoices is { Count: > 0 }) return $"{PropName(b, pack)} (chosen holder)";   // B9 #13b: a picker has no fixed holder
                 var h = pack.ById<HolderDef>(b.HolderId ?? "");
                 var name = h?.Name ?? (b.HolderId == HolderDef.GlobalId ? "global" : b.HolderId ?? "?");
                 return $"{PropName(b, pack)} ({name})";
@@ -61,6 +62,7 @@ public static class FormulaLayout
             case BindingKind.Table: return pack.ById<TableDef>(b.TableId ?? "")?.Name ?? b.TableId ?? b.Variable;
             case BindingKind.Location: return "location";
             case BindingKind.Piece: return $"{PropName(b, pack)} (piece)";
+            case BindingKind.Draw: return b.Property == null ? $"{b.Variable} (drawn)" : $"{PropName(b, pack)} (drawn)";   // B9 #55
             case BindingKind.Input:
                 return b.Min is { } lo && b.Max is { } hi
                     ? $"{b.Variable} {Value.FormatNumber(lo)}–{Value.FormatNumber(hi)}"

@@ -23,7 +23,7 @@ public static class FormulaVariables
     {
         foreach (var o in f?.Outputs ?? new List<FormulaOutput>())
             if (o is { Target: OutputTarget.Piece } && !string.IsNullOrWhiteSpace(o.PieceVariable)
-                && f!.Bindings.Any(b => b != null && b.Variable == o.PieceVariable && b.Kind == BindingKind.Piece))
+                && f!.Bindings.Any(b => b != null && b.Variable == o.PieceVariable && b.Kind is BindingKind.Piece or BindingKind.Draw))
                 yield return o.PieceVariable!;
     }
 
@@ -60,7 +60,8 @@ public static class FormulaVariables
     public static IEnumerable<string> Sources(VariableBinding b)
     {
         var count = b.Kind == BindingKind.Roll ? b.DiceCountExpr : null;   // only a Roll expands its dice count expression
-        var all = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue, b.When, count } : new[] { b.AutoValue, b.When, count };
+        var draw = b.Kind == BindingKind.Draw ? b.DrawCount : null;        // only a Draw evaluates its draw count
+        var all = b.Kind == BindingKind.Table ? new[] { b.RowExpr, b.ColExpr, b.AutoValue, b.When, count, draw } : new[] { b.AutoValue, b.When, count, draw };
         return all.Where(x => !string.IsNullOrWhiteSpace(x))!;
     }
 
@@ -93,6 +94,7 @@ public static class FormulaVariables
             yield return b.AutoValue;
             yield return b.When;
             yield return b.DiceCountExpr;
+            yield return b.DrawCount;
             if (b.Kind == BindingKind.Table) { yield return b.RowExpr; yield return b.ColExpr; }
         }
     }
@@ -186,6 +188,26 @@ public static class FormulaVariables
     }
 
     /// <summary>
+    /// B9 #55: the variables of the formula's Draw bindings whose pool may hold data a viewer who does not hold every side cannot see: the
+    /// weight property is not Public (an unknown one counts as not public; no weight, one each, is public), the pool filter may read hidden
+    /// values (<see cref="FilterMayHide"/>, the B7 filter test), or <paramref name="piecesMayHide"/> (the viewer's view may lack pieces or
+    /// values: <c>PieceAccess.PiecesMayHide</c>). Not part of <see cref="PieceBindingsHidden(RulesPack, FormulaDef, bool)"/>: a draw's pool is
+    /// read on the full state and only its count k is shown after Apply (the acting side learns k), so the logged working keeps it; the
+    /// formula masking masks the Draw box before Apply. Depends on the pack (and the flag) alone, so the host and a guest agree.
+    /// </summary>
+    public static IEnumerable<string> DrawBindingsHidden(RulesPack pack, FormulaDef f, bool piecesMayHide)
+    {
+        var props = pack.Properties ?? new List<PropertyDef>();
+        foreach (var b in f?.Bindings ?? new List<VariableBinding>())
+        {
+            if (b is not { Kind: BindingKind.Draw, Variable: not null }) continue;
+            if (piecesMayHide || FilterMayHide(pack, b.PieceFilter)
+                || (b.Property != null && !PropertyFacts.IsPublic(pack, props.FirstOrDefault(p => p != null && p.Id == b.Property))))
+                yield return b.Variable;
+        }
+    }
+
+    /// <summary>
     /// True when the formula reads a computed property built from hidden data: through a binding or variable (<see cref="ComputedHiddenVariables"/>)
     /// or through holder(H, P) of one anywhere in its expressions. Such a formula's working may show that data to any viewer who does not
     /// hold every side.
@@ -216,6 +238,18 @@ public static class FormulaVariables
     {
         if (piecesMayHide || ExprFacts.IsCountAggregate(function)) return true;
         if (property == null || !PropertyFacts.IsPublic(pack, pack.PropertyByName(property))) return true;
+        return FilterMayHide(pack, filter);
+    }
+
+    /// <summary>
+    /// The B7 filter test, shared by the piece aggregates, a Draw binding's pool (B9 #55: the runner on a player view and the formula masking)
+    /// so host and guest agree: true when a unit filter read on every piece may read data a viewer who does not hold every side cannot see:
+    /// it reads a property that is not Public, calls holder() or an aggregate, looks up a table a non-Public property overrides
+    /// (<see cref="LookupHidden"/>), reads a keyed() value that is not Public or names a holder (B6), or does not parse (fail closed). Null,
+    /// blank or a filter over Public properties and piece facts: false. Depends on the pack alone.
+    /// </summary>
+    public static bool FilterMayHide(RulesPack pack, string? filter)
+    {
         if (string.IsNullOrWhiteSpace(filter)) return false;   // "" matches every piece
         Quartermaster.Rules.Expr.Expr e;
         try { e = Parser.Parse(filter); }
