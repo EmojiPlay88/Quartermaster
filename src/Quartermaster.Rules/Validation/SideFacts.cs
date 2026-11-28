@@ -3,7 +3,8 @@ namespace Quartermaster.Rules;
 /// <summary>
 /// What the pack says about renamed sides (former ids) and alliances. <see cref="Held"/> is the one place a player's held side set is formed:
 /// it is called only by ModuleSession.SetViewSides (and its recompute on Commit/UpdateRules/LoadGuestRules), ModuleSession.ApplySnapshot,
-/// IntentExecutor.Execute, HostSession.SendSnapshot and PackHarness.ViewFor. No rule reads an alliance itself.
+/// IntentExecutor.Execute, HostSession.SendSnapshot and PackHarness.ViewFor. No rule reads an alliance itself; <see cref="Allies"/> (B10) is
+/// read only by Sequencer.Covers (the units of a phase) and PhaseController.OnMoveCore (whether to build its side map).
 /// </summary>
 public static class SideFacts
 {
@@ -61,6 +62,20 @@ public static class SideFacts
                 foreach (var s in pack.Sides)
                     if (Alliance(s) is { } a && held.Contains(a)) set.Add(s.Id);
         }
+        return set;
+    }
+
+    /// <summary>B10: the side and every other side with the same alliance (trimmed, case-insensitive), ordinal; null when the side is
+    /// unknown, has no alliance, or no other side shares it.</summary>
+    public static IReadOnlySet<string>? Allies(RulesPack? pack, string? sideId)
+    {
+        if (pack is null || sideId is null) return null;
+        var side = pack.Sides.FirstOrDefault(s => s != null && s.Id == sideId);
+        if (Alliance(side) is not { } alliance) return null;
+        HashSet<string>? set = null;
+        foreach (var s in pack.Sides)
+            if (s != null && s.Id != sideId && !string.IsNullOrEmpty(s.Id) && Alliance(s) is { } a && string.Equals(a, alliance, StringComparison.OrdinalIgnoreCase))
+                (set ??= new HashSet<string>(StringComparer.Ordinal) { sideId }).Add(s.Id);
         return set;
     }
 

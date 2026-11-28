@@ -185,12 +185,32 @@ public static class Sequencer
         return phase.Reactors?.Any(r => sides.Contains(r) && pack.Sides.Any(x => x.Id == r)) == true;
     }
 
+    /// <summary>B10: the pieces a phase's per-unit entries cover (spec "The scope rule"). No known side: every piece. No allies
+    /// (SideFacts.Allies null): the phase side's unit filter, exactly as before. Else: that filter, or a first-match owner
+    /// (Ownership.PieceSides) among the allies; the side map is built at most once, lazily, unless <paramref name="owners"/> is given.</summary>
+    /// <param name="model">For grid locations, so the phase side's filter can use the hex aggregates; the side map (as everywhere) does not.</param>
+    /// <param name="owners">A side map of <paramref name="s"/> the caller already has (one move gesture shares one); ignored without allies.</param>
+    public static Func<PieceInstance, bool> Covers(RulesPack pack, GameState s, PhaseDef phase, ModuleModel? model = null,
+        Func<PieceInstance, string?>? owners = null)
+    {
+        if (ActingSide(pack, phase) is not { } side) return _ => true;
+        var own = PieceFilter.Compile(side.UnitFilter, s, pack, model);
+        if (SideFacts.Allies(pack, side.Id) is not { } allies) return own;
+        var map = owners;
+        return p => own(p) || ((map ??= Ownership.PieceSides(s, pack))(p) is { } owner && allies.Contains(owner));
+    }
+
+    /// <summary>The pieces of the phase (<see cref="Covers"/>: the phase side and its allies) that the formula applies to and the entry filter
+    /// matches, in the state's piece order.</summary>
     /// <param name="model">For grid locations, so the filters can use the hex aggregates (hexsum() ...); without it they are not available.</param>
     public static IReadOnlyList<PieceInstance> UnitsFor(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, string? entryFilter,
-        ModuleModel? model = null)
+        ModuleModel? model = null) =>
+        Units(pack, s, phase, formula, entryFilter, model, null);
+
+    private static List<PieceInstance> Units(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, string? entryFilter,
+        ModuleModel? model, Func<PieceInstance, string?>? owners)
     {
-        var side = ActingSide(pack, phase);
-        var fs = PieceFilter.Compile(side?.UnitFilter, s, pack, model);
+        var fs = Covers(pack, s, phase, model, owners);
         var ff = PieceFilter.Compile(formula?.AppliesTo, s, pack, model);
         var ef = PieceFilter.Compile(entryFilter, s, pack, model);
         return s.Pieces.Values.Where(p => fs(p) && ff(p) && ef(p)).ToList();
@@ -198,22 +218,29 @@ public static class Sequencer
 
     /// <summary>
     /// The pieces an OnMove entry fires for, by its <see cref="MoveEntry.FiresFor"/> (callers keep those that moved, as with
-    /// <see cref="UnitsFor"/>). Acting: <see cref="UnitsFor"/>. Other: the complement of Acting, the pieces the phase side's unit filter does not match
-    /// (a piece of no side counts as other; Acting and Other never overlap). Any: every piece. Formula applies-to and the entry filter apply in all modes; a phase
-    /// without a (known) side behaves as Acting in every mode.
+    /// <see cref="UnitsFor"/>). Acting: <see cref="UnitsFor"/>, the pieces covered by the phase (the phase side and its allies,
+    /// <see cref="Covers"/>). Other: not covered (pieces of sides outside the alliance; a piece of no side counts as other; Acting and Other
+    /// never overlap). Any: every piece. Formula applies-to and the entry filter apply in all modes; a phase without a (known) side behaves
+    /// as Acting in every mode.
     /// </summary>
     public static IReadOnlyList<PieceInstance> MovedUnitsFor(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, MoveEntry e,
-        ModuleModel? model = null)
+        ModuleModel? model = null) =>
+        MovedUnitsFor(pack, s, phase, formula, e, model, owners: null);
+
+    /// <summary><see cref="MovedUnitsFor(RulesPack, GameState, PhaseDef, FormulaDef?, MoveEntry, ModuleModel?)"/> with the caller's side
+    /// map of <paramref name="s"/> (<see cref="Ownership.PieceSides"/>), so one move gesture builds one; null builds one only when needed.</summary>
+    public static IReadOnlyList<PieceInstance> MovedUnitsFor(RulesPack pack, GameState s, PhaseDef phase, FormulaDef? formula, MoveEntry e,
+        ModuleModel? model, Func<PieceInstance, string?>? owners)
     {
         var side = ActingSide(pack, phase);
-        if (side == null || e.FiresFor == MoveSide.Acting) return UnitsFor(pack, s, phase, formula, e.UnitFilter, model);
+        if (side == null || e.FiresFor == MoveSide.Acting) return Units(pack, s, phase, formula, e.UnitFilter, model, owners);
         var ff = PieceFilter.Compile(formula?.AppliesTo, s, pack, model);
         var ef = PieceFilter.Compile(e.UnitFilter, s, pack, model);
         var units = s.Pieces.Values.Where(p => ff(p) && ef(p));
         if (e.FiresFor == MoveSide.Other)
         {
-            var acting = PieceFilter.Compile(side.UnitFilter, s, pack, model);
-            units = units.Where(p => !acting(p));
+            var covered = Covers(pack, s, phase, model, owners);
+            units = units.Where(p => !covered(p));
         }
         return units.ToList();
     }

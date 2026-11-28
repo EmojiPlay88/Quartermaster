@@ -963,14 +963,18 @@ public sealed class PhaseController(ModuleSession s, Func<GameCommand, GameState
     {
         var distances = new Dictionary<string, double>();
         var bySide = Sequencer.ActingSide(pack, phase) != null;
-        Func<PieceInstance, string?>? owner = null;   // built once per call, only when an Other / Any entry needs it
+        // Built once per call: before the loop when the phase side has allies (B10: every entry's selection shares it), else only when an
+        // Other / Any entry groups its runs by owner.
+        var allied = SideFacts.Allies(pack, phase.SideId) != null;
+        Func<PieceInstance, string?>? owner = allied ? Ownership.PieceSides(g.State, pack) : null;
         foreach (var e in phase.OnMove)
         {
             if (e == null) continue;
             var f = FindFormula(phase, e.FormulaId);
             if (f == null) continue;
             if (BadFilter(phase, f, e.UnitFilter)) continue;
-            var moved = Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model).Where(p => records.ContainsKey(p.Id)).ToList();
+            var moved = (allied ? Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model, owner) : Sequencer.MovedUnitsFor(pack, g.State, phase, f, e, s.Model))
+                .Where(p => records.ContainsKey(p.Id)).ToList();
             if (!bySide || e.FiresFor == MoveSide.Acting)
             {
                 Apply(f, "move", MovedUnits(moved, records, distances), queued);
